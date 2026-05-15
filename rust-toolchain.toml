@@ -1,5 +1,9 @@
 [toolchain]
-channel = "1.85"
+# Pinned to 1.90 because wasm-bindgen-cli 0.2.120 (matched to the workspace
+# wasm-bindgen pin) requires rustc 1.86+, and several transitive deps in its
+# install dep tree (time 0.3.47, idna_adapter 1.2.2) require 1.86–1.88. 1.90
+# is current stable as of 2025-09-14. Bump deliberately and update CI in tandem.
+channel = "1.90"
 components = ["rustfmt", "clippy", "rust-src"]
 targets = ["wasm32-unknown-unknown"]
 profile = "minimal"
