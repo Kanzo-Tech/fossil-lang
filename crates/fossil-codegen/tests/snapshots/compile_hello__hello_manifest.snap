@@ -1,0 +1,17 @@
+---
+source: crates/fossil-codegen/tests/compile_hello.rs
+assertion_line: 55
+expression: plan.manifest_yaml(&db)
+---
+# GraphAr manifest — Phase 1 skeletal form.
+graphar_version: 1.0.0
+prefix: https://example.org/
+vertex_types:
+  - name: Person
+    chunk_size: 1024
+    properties:
+      - name: name
+        data_type: string
+        nullable: false
+    parquet_path: output.parquet
+edge_types: []
