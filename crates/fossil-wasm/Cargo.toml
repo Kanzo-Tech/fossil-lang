@@ -1,0 +1,39 @@
+[package]
+name = "fossil-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WASM shim for the Fossil compiler — exposes FossilPlayground to JS"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+test = false
+
+[lints]
+workspace = true
+
+[dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+serde-wasm-bindgen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["console"] }
+console_log.workspace = true
+console_error_panic_hook = { workspace = true, optional = true }
+
+# Transitive WASM enablers — keep as direct deps so feature resolution sticks
+getrandom.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+wasm-bindgen-test.workspace = true
+
+[features]
+default = ["console_error_panic_hook"]

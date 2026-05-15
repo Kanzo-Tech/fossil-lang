@@ -1,0 +1,15 @@
+[package]
+name = "fossil-ide-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Symbol indexes and analysis primitives shared between IDE and LSP"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.

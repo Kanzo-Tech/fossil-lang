@@ -1,0 +1,15 @@
+[package]
+name = "fossil-mir"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Mid-level IR: typed operator algebra (Source, Project, Filter, Join, ...)"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.

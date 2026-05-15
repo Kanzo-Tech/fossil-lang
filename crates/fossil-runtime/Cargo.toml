@@ -1,0 +1,15 @@
+[package]
+name = "fossil-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Native execution runtime via DuckDB (bundled C++); WASM-host execution lives in fossil-wasm"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
