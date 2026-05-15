@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>fossil-wasm Phase 0 smoke test</title>
+<script type="module">
+  import init, { hello } from './pkg/fossil_wasm.js';
+  await init();
+  document.body.textContent = hello();
+</script>
