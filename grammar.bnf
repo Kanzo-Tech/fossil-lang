@@ -1,0 +1,302 @@
+(* ═══════════════════════════════════════════════════════════════ *)
+(*  FOSSIL — Grammar (EBNF) — v0.1                                   *)
+(*                                                                    *)
+(*  This is the formal grammar of the Fossil language.               *)
+(*  See: type-system.md (semantic rules), architecture.md (compiler) *)
+(* ═══════════════════════════════════════════════════════════════ *)
+
+
+(* ═══ LEXICAL LAYER ═══ *)
+(* Tokens produced by the lexer. Whitespace is significant            *)
+(* (indentation tokens INDENT/DEDENT). Comments are discarded.        *)
+
+LETTER         := [a-zA-Z]
+DIGIT          := [0-9]
+SPACE          := ' '
+TAB            := '\t'
+WHITESPACE     := SPACE | TAB
+NEWLINE        := '\n'
+
+(* INDENT and DEDENT are virtual tokens emitted by the lexer        *)
+(* based on column tracking. Spaces or tabs but consistent per block. *)
+INDENT, DEDENT := computed
+
+(* Identifiers and keywords *)
+IDENT          := (LETTER | '_') (LETTER | DIGIT | '_')*
+KEYWORD        := 'in' | 'from' | 'use' | 'as'
+                | 'and' | 'or' | 'not' | 'iri'
+
+(* Numeric literals — decimal only, optional underscores as separators *)
+INTEGER        := DIGIT (DIGIT | '_')*
+FLOAT          := INTEGER '.' INTEGER
+
+(* String literals *)
+STRING         := '"' STRING_CONTENT* '"'
+STRING_CONTENT := REGULAR_CHAR | ESCAPE
+ESCAPE         := '\n' | '\t' | '\r' | '\\' | '\"'
+
+(* Template literals — strings with interpolation *)
+TEMPLATE       := '`' TPL_CONTENT* '`'
+TPL_CONTENT    := REGULAR_CHAR | TPL_ESCAPE | INTERPOLATION
+TPL_ESCAPE     := ESCAPE | '\`' | '\$' | '\${'
+INTERPOLATION  := '${' Expression '}'
+
+(* IRI literals *)
+ABS_IRI        := '<' IRI_CHARS '>'           (* RFC 3986 chars *)
+
+(* Environment variable reference *)
+ENV_VAR        := '$' IDENT
+
+(* Comments — discarded by lexer *)
+COMMENT        := '//' (any char except NEWLINE)*
+
+(* Operators *)
+DEFINE         := ':='
+TYPE_ANNOT     := '::'
+ASSIGN         := '='
+SHAPE_SEP      := ':'
+SHAPE_AND      := '&'
+ARROW          := '->'
+PIPE           := '|>'
+T_QUESTION     := '?'
+T_COLON        := ':'                          (* contextual with T_QUESTION *)
+PARTIAL        := '_'
+TRIPLE_OPEN    := '<<'
+TRIPLE_CLOSE   := '>>'
+
+EQ             := '=='
+NEQ            := '!='
+LT             := '<'
+LE             := '<='
+GT             := '>'
+GE             := '>='
+
+PLUS           := '+'
+MINUS          := '-'
+STAR           := '*'
+SLASH          := '/'
+PERCENT        := '%'
+
+DOT            := '.'
+COMMA          := ','
+LPAREN, RPAREN := '(' ')'
+LBRACE, RBRACE := '{' '}'
+
+(* Attributes *)
+AT_EXPORT      := '@export'
+AT_ATTR        := '@' IDENT
+
+
+(* ═══ GRAMMAR ═══ *)
+
+(* ─── Top level ─── *)
+
+Program             := TopLevel* EOF
+
+TopLevel            := Import
+                     | Definition
+                     | ExportedDefinition
+                     | Mapping
+
+
+(* ─── Imports ─── *)
+
+Import              := 'use' Path SelectiveImport? Alias?
+
+Path                := PathSegment ('/' PathSegment)*
+PathSegment         := IDENT | STRING
+
+SelectiveImport     := LBRACE IDENT (COMMA IDENT)* RBRACE
+
+Alias               := 'as' IDENT
+
+
+(* ─── Definitions ─── *)
+
+Definition          := IDENT DEFINE Expression
+
+ExportedDefinition  := AT_EXPORT TypeAnnotation? Definition
+
+TypeAnnotation      := IDENT TYPE_ANNOT TypeExpr
+
+TypeExpr            := TypeAtom (ARROW TypeExpr)?    (* right-associative *)
+TypeAtom            := IDENT
+                     | LPAREN TypeExpr (COMMA TypeExpr)* RPAREN
+
+
+(* ─── Mappings ─── *)
+
+Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
+
+MappingHeader       := IDENT SHAPE_SEP ShapeExpr InClause? 'from' Expression
+
+ShapeExpr           := IRIExpr (SHAPE_AND IRIExpr)*    (* intersection *)
+
+InClause            := 'in' IRIExpr
+
+MappingBody         := Property+
+
+Property            := PropertyLhs ASSIGN Expression AnnotationBlock?
+
+PropertyLhs         := 'iri'
+                     | IRIExpr
+
+AnnotationBlock     := LBRACE AnnotationBody RBRACE
+
+AnnotationBody      := AnnotationList                              (* single-line *)
+                     | NEWLINE INDENT (AnnotationItem NEWLINE)+ DEDENT   (* multi-line *)
+
+AnnotationList      := AnnotationItem (AnnotationSep AnnotationItem)*
+
+AnnotationSep       := COMMA | NEWLINE
+
+AnnotationItem      := IRIExpr ASSIGN Expression AnnotationBlock?
+                       (* recursive — supports nested annotations *)
+
+
+(* ─── Expressions (precedence-ordered, low binding → high) ─── *)
+
+Expression          := PipelineExpr
+
+(* L1 — Pipeline, lowest precedence, left-assoc *)
+PipelineExpr        := TernaryExpr (PIPE PipelineTarget)*
+PipelineTarget      := PostfixExpr
+
+(* L2 — Ternary, right-assoc *)
+TernaryExpr         := OrExpr (T_QUESTION OrExpr T_COLON TernaryExpr)?
+
+(* L3 — Or *)
+OrExpr              := AndExpr ('or' AndExpr)*
+
+(* L4 — And *)
+AndExpr             := CompExpr ('and' CompExpr)*
+
+(* L5 — Comparison, non-associative *)
+CompExpr            := AdditiveExpr (CompOp AdditiveExpr)?
+CompOp              := EQ | NEQ | LT | LE | GT | GE
+
+(* L6 — Additive *)
+AdditiveExpr        := MulExpr ((PLUS | MINUS) MulExpr)*
+
+(* L7 — Multiplicative *)
+MulExpr             := UnaryExpr ((STAR | SLASH | PERCENT) UnaryExpr)*
+
+(* L8 — Unary *)
+UnaryExpr           := MINUS UnaryExpr
+                     | 'not' UnaryExpr
+                     | PostfixExpr
+
+(* L9 — Postfix (member access, function call), tightest *)
+PostfixExpr         := PrimaryExpr (PostfixOp)*
+PostfixOp           := DOT IDENT
+                     | LPAREN ArgList? RPAREN
+
+ArgList             := Arg (COMMA Arg)*
+Arg                 := NamedArg | Expression
+NamedArg            := IDENT ASSIGN Expression
+
+(* Primary expressions *)
+PrimaryExpr         := Literal
+                     | FieldRef
+                     | ENV_VAR
+                     | IDENT
+                     | IRIExpr
+                     | LPAREN Expression RPAREN
+                     | RecordLiteral
+                     | TripleTerm
+                     | PartialPlaceholder
+
+FieldRef            := DOT IDENT (DOT IDENT)*
+
+PartialPlaceholder  := PARTIAL
+
+
+(* ─── Literals ─── *)
+
+Literal             := INTEGER | FLOAT | STRING | TEMPLATE
+
+
+(* ─── IRI expressions ─── *)
+
+IRIExpr             := ABS_IRI
+                     | PrefixedName
+                     | TEMPLATE                  (* yielding IRI per context type *)
+
+PrefixedName        := IDENT SHAPE_SEP LocalName
+                       (* lexer-level: no whitespace between IDENT and ':' *)
+LocalName           := IDENT
+
+
+(* ─── Record literals (blank node value position) ─── *)
+
+RecordLiteral       := LBRACE RecordBody RBRACE
+RecordBody          := RecordField (RecordSep RecordField)*
+                     | (* empty *)
+RecordSep           := COMMA | NEWLINE
+RecordField         := (IDENT | IRIExpr) ASSIGN Expression
+
+
+(* ─── Triple terms (RDF 1.2 quoted triple) ─── *)
+
+TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
+
+
+(* ═══ DISAMBIGUATION RULES (parser context) ═══ *)
+
+(*  1. RecordLiteral vs AnnotationBlock                                   *)
+(*     - `prop = { ... }`     → RecordLiteral  (LBRACE immediately after  *)
+(*                                              ASSIGN)                   *)
+(*     - `prop = expr { ... }` → AnnotationBlock (LBRACE after an         *)
+(*                                                Expression)             *)
+(*                                                                         *)
+(*  2. DOT IDENT vs FieldRef                                              *)
+(*     - `namespace.ident`    → PostfixOp on `namespace`                   *)
+(*     - `.ident` (no preceding expression) → FieldRef (current row)      *)
+(*                                                                         *)
+(*  3. SHAPE_SEP `:` vs T_COLON `:`                                       *)
+(*     - `Name : Shape`       → SHAPE_SEP in MappingHeader                 *)
+(*     - `cond ? a : b`       → T_COLON in TernaryExpr (paired with `?`)  *)
+(*                                                                         *)
+(*  4. Triple-term `<<` vs comparison `<`                                  *)
+(*     - Lexer-level: `<<` is single token TRIPLE_OPEN                     *)
+(*     - Single `<` is LT                                                  *)
+
+
+(* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
+
+(*  in       from     use      as                                         *)
+(*  and      or       not      iri                                        *)
+(*                                                                         *)
+(*  Plus the attribute marker:                                            *)
+(*  @export                                                                *)
+(*                                                                         *)
+(*  Future attributes (@dcat, @prov, @chunked, etc.) use AT_ATTR form.    *)
+
+
+(* ═══ OPERATOR PRECEDENCE TABLE ═══ *)
+
+(*  Level   Operators                    Associativity                   *)
+(*  ─────   ─────────────────────────    ─────────────                   *)
+(*   L1     |>                            left-assoc                      *)
+(*   L2     ? :                           right-assoc                     *)
+(*   L3     or                            left-assoc                      *)
+(*   L4     and                           left-assoc                      *)
+(*   L5     == != < <= > >=               non-assoc                       *)
+(*   L6     + -                           left-assoc                      *)
+(*   L7     * / %                         left-assoc                      *)
+(*   L8     - (unary), not                right-assoc                     *)
+(*   L9     . (member), ( ) (call)        left-assoc                      *)
+
+
+(* ═══ NOT IN MVP (productions intentionally absent) ═══ *)
+
+(*  LambdaExpr        — no user-defined multi-arg lambdas                 *)
+(*  MatchExpr         — no pattern matching (use multiple mappings)       *)
+(*  IfThenElseExpr    — only via ternary `?:`                              *)
+(*  ExternDecl        — no `extern` declarations in MVP                    *)
+(*  WhileLoop/ForLoop — no imperative control flow                         *)
+(*  MutableBinding    — no mutation                                        *)
+(*  Type parameters   — no generics in TypeExpr                            *)
+(*                                                                         *)
+(*  Additions are backward-compatible. Future versions may introduce these *)
+(*  without breaking existing programs.                                   *)
