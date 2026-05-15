@@ -72,9 +72,8 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release -p fossil-wasm
 
   deny:
-    name: cargo-deny (advisories + licenses)
+    name: cargo-deny (advisories + licenses + bans)
     runs-on: ubuntu-latest
-    continue-on-error: true   # TEMPORARY: removed when Plan 05 adds deny.toml (Phase 0 wave 3)
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2

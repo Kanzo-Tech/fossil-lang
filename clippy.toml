@@ -1,0 +1,4 @@
+# Tunable thresholds — start lenient, tighten as the codebase matures.
+cognitive-complexity-threshold = 30
+type-complexity-threshold = 250
+too-many-arguments-threshold = 8
