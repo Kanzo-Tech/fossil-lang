@@ -1,22 +1,39 @@
-//! Phase 0 stub — replaced incrementally starting in Phase 1.
+//! `fossil-base` — Salsa `Db` trait + `System` abstraction (per ADR-0003).
 //!
-//! See `.planning/ROADMAP.md` for the walking-skeleton plan.
+//! This crate is the substrate every downstream compiler crate
+//! (`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-codegen`,
+//! `fossil-runtime`, `fossil-cli`, `fossil-lsp`, `fossil-wasm`) consumes.
+//!
+//! **Public-API commitment** to Phase 2-9: the signatures here are stable.
+//! Changes require an ADR superseding ADR-0003.
 
-#![allow(unused)]
+pub mod db;
+pub mod diagnostic;
+pub mod error;
+pub mod files;
+pub mod system;
 
-/// Phase 0 placeholder. Returns the crate name so the stub is non-empty
-/// and the linker actually emits a symbol on every target.
-#[must_use]
-pub fn phase_zero_marker() -> &'static str {
-    env!("CARGO_PKG_NAME")
-}
+pub use db::{Db, FossilDb};
+pub use diagnostic::{Diagnostic, Severity, Span};
+pub use error::ErrorGuaranteed;
+pub use files::{Files, SourceFile};
+pub use system::{FsError, System};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use system::NativeSystem;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn marker_returns_crate_name() {
-        assert_eq!(phase_zero_marker(), env!("CARGO_PKG_NAME"));
+    fn db_can_be_constructed_and_query_sourcefile() {
+        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let db = FossilDb::new(system);
+        let file = SourceFile::new(&db, "hello".to_string(), "test.fossil".to_string());
+        assert_eq!(file.text(&db), "hello");
+        assert_eq!(file.path(&db), "test.fossil");
     }
 }
