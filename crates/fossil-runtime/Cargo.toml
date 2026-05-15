@@ -12,4 +12,9 @@ description = "Native execution runtime via DuckDB (bundled C++); WASM-host exec
 workspace = true
 
 [dependencies]
-# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
+# NATIVE-ONLY (per ADR-0002 + CLAUDE.md Project Layout). The cfg-tripwire in
+# src/lib.rs enforces the workspace contract that this crate is never built
+# for wasm32. The `bundled` feature is inherited from the workspace pin
+# `duckdb = { version = "1.10502", features = ["bundled"] }` (~80MB C++,
+# 3-5 min cold-cache compile per RESEARCH.md Risk 6).
+duckdb = { workspace = true }
