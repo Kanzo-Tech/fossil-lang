@@ -260,6 +260,13 @@ version = "0.1.0"
 [[package]]
 name = "fossil-mir"
 version = "0.1.0"
+dependencies = [
+ "fossil-base",
+ "fossil-hir",
+ "fossil-syntax",
+ "salsa",
+ "smol_str",
+]
 
 [[package]]
 name = "fossil-registry"

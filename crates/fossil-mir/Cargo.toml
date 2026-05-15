@@ -12,4 +12,8 @@ description = "Mid-level IR: typed operator algebra (Source, Project, Filter, Jo
 workspace = true
 
 [dependencies]
-# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
+fossil-base   = { path = "../fossil-base" }
+fossil-syntax = { path = "../fossil-syntax" }
+fossil-hir    = { path = "../fossil-hir" }
+salsa         = { workspace = true }
+smol_str      = { workspace = true }
