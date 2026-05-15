@@ -28,3 +28,11 @@ CLAUDE.local.md
 
 # GSD planning artifacts (commit_docs=false per .planning/config.json)
 .planning/
+
+# Walking-skeleton local-run artefacts (per Phase 1 plan 01-07).
+# `fossil compile examples/hello.fossil` writes these to cwd; ignore them at
+# repo root so casual smoke tests don't dirty the tree.
+/output.parquet
+/manifest.yaml
+/.scratch-walking-skel/
+

@@ -1,27 +1,10 @@
-//! Phase 0 stub — native-only crate. WASM build is intentionally NOT gated
-//! in CI for this crate; see `decisions/0002-fifteen-crate-workspace-layout.md`
-//! (written in Plan 05) for rationale.
-
-#![allow(unused)]
-
-#[cfg(not(target_arch = "wasm32"))]
-#[must_use]
-pub fn phase_zero_marker() -> &'static str {
-    env!("CARGO_PKG_NAME")
-}
+//! `fossil-cli` is a binary-only crate; this `lib.rs` exists only to host the
+//! native-only `compile_error!` cfg-tripwire so accidental WASM CI inclusion
+//! fails at compile time rather than at link/runtime. The real CLI surface
+//! lives in `src/main.rs`.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
-    "fossil-runtime / fossil-cli / fossil-lsp are native-only; \
-     do not add them to the WASM CI gate"
+    "fossil-cli is native-only (depends on fossil-runtime which uses bundled DuckDB); \
+     do not add it to the WASM CI gate"
 );
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn marker_returns_crate_name() {
-        assert_eq!(phase_zero_marker(), env!("CARGO_PKG_NAME"));
-    }
-}

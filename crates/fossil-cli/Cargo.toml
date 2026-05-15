@@ -12,4 +12,26 @@ description = "`fossil compile/check/run` command-line interface"
 workspace = true
 
 [dependencies]
-# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
+fossil-base    = { path = "../fossil-base" }
+fossil-hir     = { path = "../fossil-hir" }
+fossil-codegen = { path = "../fossil-codegen" }
+fossil-runtime = { path = "../fossil-runtime" }
+
+clap = { workspace = true }
+# `fancy` ONLY in this crate (not workspace-level): pulls native-only
+# `terminal_size` + `supports-color` which would break the WASM gate per
+# RESEARCH.md Pitfall 3. fossil-cli is NATIVE-ONLY (cfg-tripwire below), so
+# the leak is contained.
+miette = { workspace = true, features = ["fancy"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+# Integration test reads the produced parquet to assert 5-row count.
+# Cargo dedupes against fossil-runtime's bundled DuckDB (~80MB C++) so the
+# build cost is incurred once across both crates — acceptable for native CI.
+duckdb = { workspace = true }
+
+[[bin]]
+name = "fossil"
+path = "src/main.rs"
