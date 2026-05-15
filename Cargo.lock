@@ -279,6 +279,11 @@ dependencies = [
 [[package]]
 name = "fossil-descriptors-input"
 version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "smol_str",
+ "thiserror",
+]
 
 [[package]]
 name = "fossil-descriptors-output"
@@ -299,6 +304,9 @@ dependencies = [
 [[package]]
 name = "fossil-ide"
 version = "0.1.0"
+dependencies = [
+ "fossil-base",
+]
 
 [[package]]
 name = "fossil-ide-db"
@@ -322,6 +330,9 @@ dependencies = [
 [[package]]
 name = "fossil-registry"
 version = "0.1.0"
+dependencies = [
+ "smol_str",
+]
 
 [[package]]
 name = "fossil-runtime"

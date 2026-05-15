@@ -12,4 +12,5 @@ description = "Symbol indexes and analysis primitives shared between IDE and LSP
 workspace = true
 
 [dependencies]
-# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
+# Phase 1: empty placeholder. Phase 6 LSP-01 wires symbol indexes
+# (rust-analyzer ide-db pattern) and adds salsa + fossil-base + fossil-syntax + fossil-hir.

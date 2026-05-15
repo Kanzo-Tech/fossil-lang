@@ -1,22 +1,16 @@
-//! Phase 0 stub — replaced incrementally starting in Phase 1.
+//! `fossil-ide-db` — symbol indexes + search infrastructure for IDE features.
 //!
-//! See `.planning/ROADMAP.md` for the walking-skeleton plan.
+//! Phase 1: empty placeholder. The crate exists so Phase 6 LSP-01 has a slot
+//! to fill in without churning the workspace member list.
+//!
+//! Phase 6 LSP-01 adds:
+//!   - `SymbolIndex` (per file, query: "find all references to symbol X")
+//!   - `PrefixIndex` (cross-file prefix completion for the gleam-lsp
+//!     auto-import pattern)
+//!   - `ShapeIndex` (cross-file shape resolution for goto-def on shape refs)
+//!
+//! Pattern: rust-analyzer's `ide-db` split from `ide` (search infrastructure
+//! reusable across consumers — both `fossil-ide` for in-process feature
+//! dispatch and `fossil-lsp` for the LSP server).
 
 #![allow(unused)]
-
-/// Phase 0 placeholder. Returns the crate name so the stub is non-empty
-/// and the linker actually emits a symbol on every target.
-#[must_use]
-pub fn phase_zero_marker() -> &'static str {
-    env!("CARGO_PKG_NAME")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn marker_returns_crate_name() {
-        assert_eq!(phase_zero_marker(), env!("CARGO_PKG_NAME"));
-    }
-}
