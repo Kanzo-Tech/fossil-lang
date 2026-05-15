@@ -1,5 +1,30 @@
-.planning/
-target/
-Cargo.lock
+# Rust
+/target/
 **/*.rs.bk
+Cargo.lock.bak
+
+# WASM build outputs (Phase 0 throwaway)
+/playground-poc/pkg/
+
+# Future playground (Phase 7+)
+/playground/node_modules/
+/playground/dist/
+/playground/.vite/
+
+# Future VS Code extension (Phase 9)
+/extension/node_modules/
+/extension/out/
+/extension/*.vsix
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 .DS_Store
+
+# Claude Code local files
+CLAUDE.local.md
+
+# GSD planning artifacts (commit_docs=false per .planning/config.json)
+.planning/

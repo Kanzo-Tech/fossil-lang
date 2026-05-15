@@ -1,0 +1,17 @@
+# .cargo/config.toml
+# Enables getrandom's wasm_js backend for transitive deps that don't pin features.
+# Belt-and-suspenders: the wasm_js feature in Cargo.toml is the primary mechanism;
+# this rustflag is the fallback for unconditioned getrandom call sites.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
+# Cargo aliases — type less, do more
+[alias]
+# WASM check shortcut: matches CI exactly
+wasm-check = "check --target wasm32-unknown-unknown -p fossil-base -p fossil-syntax -p fossil-hir -p fossil-mir -p fossil-codegen -p fossil-wasm"
+# WASM build for the playground shim
+wasm-build = "build --target wasm32-unknown-unknown --release -p fossil-wasm"
+# Lint everything the way CI does
+lint = "clippy --workspace --all-targets -- -D warnings"
+# Run tests via nextest if installed
+xtest = "nextest run --workspace"

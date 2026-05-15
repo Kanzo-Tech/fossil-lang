@@ -1,0 +1,101 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0 OR MIT"
+authors = ["Angel Iglesias <angel.iglesias@kanzo.tech>"]
+repository = "https://github.com/<org>/fossil"
+homepage = "https://github.com/<org>/fossil"
+description = "Fossil — a typed compiler for RDF graph construction"
+
+[workspace.dependencies]
+# === Compiler core ===
+salsa = { version = "0.26", features = ["accumulator"] }
+rowan = "0.16"
+logos = "0.16"
+text-size = "1"
+
+# === Diagnostics ===
+miette = { version = "7.6", default-features = false }
+thiserror = "1"
+
+# === IR / codegen ===
+sqlparser = "0.59"
+indexmap = "2"
+smol_str = "0.3"
+
+# === Serialization ===
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+
+# === Input descriptors (Phase 5+, declared here for inheritance) ===
+csv = "1.3"
+jsonschema = { version = "0.42", default-features = false }
+roxmltree = "0.20"
+
+# === Output descriptor (Phase 3+; do NOT use until rudof spike resolves) ===
+# shex_ast = "0.3"
+# shex_validation = "0.3"
+# rudof_iri = "0.3"
+# prefixmap = "0.3"
+
+# === Sinks (Phase 5+) ===
+arrow = "59"
+parquet = "59"
+
+# === Runtime — NATIVE ONLY ===
+duckdb = { version = "1.10502", features = ["bundled"] }
+
+# === LSP — NATIVE ONLY ===
+lsp-server = "0.7"
+lsp-types = "0.97"
+crossbeam-channel = "0.5"
+
+# === CLI — NATIVE ONLY ===
+clap = { version = "4", features = ["derive"] }
+
+# === WASM ===
+wasm-bindgen = "=0.2.120"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = "0.3"
+console_log = "1"
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+uuid = { version = "1", features = ["js"] }
+
+# === Dev / testing ===
+insta = { version = "1", features = ["yaml"] }
+expect-test = "1"
+wasm-bindgen-test = "0.3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+elided_lifetimes_in_paths = "warn"
+
+[workspace.lints.clippy]
+# Start permissive; tighten as the codebase matures
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow these — they're noisy in compiler code
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
