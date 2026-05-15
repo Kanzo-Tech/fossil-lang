@@ -70,6 +70,12 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
+# === Logging (CLI + LSP — NATIVE ONLY in Phase 1) ===
+# default-features=false to avoid pulling mio (which breaks the WASM gate per RESEARCH.md Pitfall 3).
+# Only the env-filter and fmt features are needed for Phase 1.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
+
 # === Dev / testing ===
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
