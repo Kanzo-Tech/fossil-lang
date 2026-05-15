@@ -12,4 +12,12 @@ description = "Lossless concrete syntax tree for the Fossil DSL (rowan + logos)"
 workspace = true
 
 [dependencies]
-# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
+fossil-base = { path = "../fossil-base" }
+salsa = { workspace = true }
+rowan = { workspace = true }
+logos = { workspace = true }
+text-size = { workspace = true }
+smol_str = { workspace = true }
+
+[dev-dependencies]
+expect-test = { workspace = true }

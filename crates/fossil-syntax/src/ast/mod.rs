@@ -1,0 +1,99 @@
+//! Typed AST views over the lossless CST.
+//!
+//! Phase 1 ships only the wrappers downstream `fossil-hir` needs to walk
+//! the program: `PrefixDecl`, `SourceDef`, `Mapping`, `MappingHeader`,
+//! `MappingBody`, `Property`. Each is a thin newtype around `SyntaxNode`
+//! with `cast` (kind-checking constructor) + `syntax` (back-edge accessor)
+//! and a few convenience accessors for child tokens.
+//!
+//! All AST nodes deliberately keep the underlying [`SyntaxNode`] public via
+//! `syntax()` so consumers can drop down to the lossless tree when needed
+//! (offsets, trivia, error recovery in later phases).
+
+use crate::kind::{SyntaxKind, SyntaxNode};
+
+macro_rules! ast_node {
+    ($name:ident, $kind:ident) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub struct $name(SyntaxNode);
+
+        impl $name {
+            #[must_use]
+            pub fn cast(node: SyntaxNode) -> Option<Self> {
+                if node.kind() == SyntaxKind::$kind {
+                    Some(Self(node))
+                } else {
+                    None
+                }
+            }
+
+            #[must_use]
+            pub const fn syntax(&self) -> &SyntaxNode {
+                &self.0
+            }
+        }
+    };
+}
+
+ast_node!(PrefixDecl, PREFIX_DECL);
+ast_node!(SourceDef, SOURCE_DEF);
+ast_node!(Mapping, MAPPING);
+ast_node!(MappingHeader, MAPPING_HEADER);
+ast_node!(MappingBody, MAPPING_BODY);
+ast_node!(Property, PROPERTY);
+
+impl PrefixDecl {
+    /// The local name of the prefix (e.g. `ex` in `prefix ex: <...>`).
+    #[must_use]
+    pub fn name(&self) -> Option<smol_str::SmolStr> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::IDENT)
+            .map(|t| smol_str::SmolStr::from(t.text()))
+    }
+
+    /// The IRI text with the surrounding `<>` stripped.
+    #[must_use]
+    pub fn iri(&self) -> Option<smol_str::SmolStr> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::ABS_IRI)
+            .map(|t| {
+                smol_str::SmolStr::from(t.text().trim_start_matches('<').trim_end_matches('>'))
+            })
+    }
+}
+
+impl SourceDef {
+    /// The bound name on the LHS of `:=` (e.g. `users` in `users := io.csv(...)`).
+    #[must_use]
+    pub fn name(&self) -> Option<smol_str::SmolStr> {
+        // The first IDENT child token is the binding name; the call expression
+        // contributes its own IDENT tokens nested inside CALL_EXPR.
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::IDENT)
+            .map(|t| smol_str::SmolStr::from(t.text()))
+    }
+}
+
+impl Mapping {
+    #[must_use]
+    pub fn header(&self) -> Option<MappingHeader> {
+        self.0.children().find_map(MappingHeader::cast)
+    }
+
+    #[must_use]
+    pub fn body(&self) -> Option<MappingBody> {
+        self.0.children().find_map(MappingBody::cast)
+    }
+}
+
+impl MappingBody {
+    pub fn properties(&self) -> impl Iterator<Item = Property> {
+        self.0.children().filter_map(Property::cast)
+    }
+}
