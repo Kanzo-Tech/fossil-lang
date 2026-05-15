@@ -236,6 +236,14 @@ version = "0.1.0"
 [[package]]
 name = "fossil-hir"
 version = "0.1.0"
+dependencies = [
+ "fossil-base",
+ "fossil-syntax",
+ "indexmap",
+ "salsa",
+ "smol_str",
+ "thiserror",
+]
 
 [[package]]
 name = "fossil-ide"

@@ -12,4 +12,11 @@ description = "High-level IR: name resolution, item tree, type ADT, bidirectiona
 workspace = true
 
 [dependencies]
-# Phase 0: no real deps yet. Phase 1+ adds salsa.workspace = true etc.
+# Per ADR-0002, fossil-hir collapses what was three crates
+# (fossil-types + fossil-resolve + fossil-typeck) into one.
+fossil-base = { path = "../fossil-base" }
+fossil-syntax = { path = "../fossil-syntax" }
+salsa = { workspace = true }
+indexmap = { workspace = true }
+smol_str = { workspace = true }
+thiserror = { workspace = true }
