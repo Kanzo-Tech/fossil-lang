@@ -42,6 +42,7 @@ Use [`template.md`](template.md) as the starting point. Copy, fill in, commit.
 | 0001 | Use lsp-server, not tower-lsp | accepted | 2026-05-15 |
 | 0002 | Adopt the 15-crate workspace layout | accepted | 2026-05-15 |
 | 0003 | Db trait is thin; descriptors and registry live behind System | accepted | 2026-05-15 |
+| 0004 | Workspace lint `unsafe_code = "deny"`, not `"forbid"` | accepted | 2026-05-15 |
 
 (ADRs 0001-0003 are written in Plan 05; this README is updated as new ADRs land.)
 

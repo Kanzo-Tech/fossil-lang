@@ -76,7 +76,7 @@ expect-test = "1"
 wasm-bindgen-test = "0.3"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"   # per ADR-0004 — per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 elided_lifetimes_in_paths = "warn"

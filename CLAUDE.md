@@ -43,7 +43,7 @@ check — run it before any commit that touches a compiler-core crate.
 - **No `tokio` outside `fossil-lsp`.** And `fossil-lsp` is native-only with a `compile_error!` cfg-tripwire.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
-- **`unsafe_code = "forbid"`** at workspace level. No exceptions in v0.1.
+- **`unsafe_code = "deny"`** at workspace level (per ADR-0004). Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
 - **ADR ritual:** any decision between alternatives that took >15 minutes gets an ADR within 24h.
   Use `decisions/template.md`, file naming `NNNN-verb-noun-phrase.md`. See ADR-0001/0002/0003 as examples.
 - **`RETURNING.md` ritual:** before stepping away from the project for >1 week, write/update
