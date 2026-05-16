@@ -124,6 +124,9 @@ mod tests {
         let s1 = d.parse(b"").unwrap();
         let s2 = d.parse(b"completely different content").unwrap();
         assert_eq!(s1.fields.len(), s2.fields.len());
-        assert_eq!(s1.fields.keys().collect::<Vec<_>>(), s2.fields.keys().collect::<Vec<_>>());
+        assert_eq!(
+            s1.fields.keys().collect::<Vec<_>>(),
+            s2.fields.keys().collect::<Vec<_>>()
+        );
     }
 }

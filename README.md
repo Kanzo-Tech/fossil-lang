@@ -25,6 +25,54 @@ cargo check --target wasm32-unknown-unknown \
     -p fossil-mir -p fossil-codegen -p fossil-wasm
 ```
 
+## Quick example
+
+The Phase 1 walking skeleton — a minimum end-to-end mapping exercising every
+one of the 15 workspace crates (parser → HIR → MIR → DuckDB SQL → native
+execution → GraphAr Parquet).
+
+The mapping (`examples/hello.fossil`):
+
+```fossil
+prefix ex: <https://example.org/>
+
+users := io.csv("examples/users.csv")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:name = .name
+```
+
+Compile it:
+
+```bash
+cargo run --bin fossil -- compile examples/hello.fossil
+# → output.parquet (5 triples) + manifest.yaml in cwd
+```
+
+Inspect with DuckDB:
+
+```bash
+duckdb -c "SELECT * FROM read_parquet('output.parquet')"
+# ┌────────────────────────────┬───────────────────────────┬────────┐
+# │          subject           │         predicate         │ object │
+# ├────────────────────────────┼───────────────────────────┼────────┤
+# │ https://example.org/user/1 │ https://example.org/name  │ Alice  │
+# │ https://example.org/user/2 │ https://example.org/name  │ Bob    │
+# │ https://example.org/user/3 │ https://example.org/name  │ Carol  │
+# │ https://example.org/user/4 │ https://example.org/name  │ Dave   │
+# │ https://example.org/user/5 │ https://example.org/name  │ Eve    │
+# └────────────────────────────┴───────────────────────────┴────────┘
+```
+
+`playground.kanzo.dev` (Phase 9 deliverable, not yet live) will run the same
+`compile` call entirely in-browser via WASM — same compiler crates, same
+DuckDB engine (DuckDB-WASM), no server round-trip — so the example above
+behaves identically whether you run it locally or in the playground.
+
+The full grammar, type checker, stdlib, GraphAr-spec sink, LSP features, and
+WASM playground arrive in Phase 2–9 — see [`.planning/ROADMAP.md`](.planning/ROADMAP.md).
+
 ## Foundations
 
 - **Operator algebra**: typed extension of [Min Oo & Hartig — *An Algebraic
