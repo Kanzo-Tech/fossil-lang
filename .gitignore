@@ -36,3 +36,4 @@ CLAUDE.local.md
 /manifest.yaml
 /.scratch-walking-skel/
 
+/crates/fossil-wasm/pkg/

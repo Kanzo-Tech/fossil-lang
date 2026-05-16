@@ -18,22 +18,33 @@ test = false
 workspace = true
 
 [dependencies]
-wasm-bindgen.workspace = true
-wasm-bindgen-futures.workspace = true
-serde-wasm-bindgen.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-js-sys.workspace = true
-web-sys = { workspace = true, features = ["console"] }
-console_log.workspace = true
-console_error_panic_hook = { workspace = true, optional = true }
+# Compiler-core crates wired into FossilPlayground::compile per RESEARCH.md
+# Pattern 5 (lines 466-484): the Phase 1 wasm dep tree is exactly the 5
+# compiler crates plus WASM glue. NO fossil-runtime (native DuckDB), NO
+# fossil-cli/fossil-lsp (binaries), NO fossil-sinks (heavy arrow/parquet —
+# Phase 1 manifest is hand-templated in fossil-codegen).
+fossil-base    = { path = "../fossil-base" }
+fossil-syntax  = { path = "../fossil-syntax" }
+fossil-hir     = { path = "../fossil-hir" }
+fossil-mir     = { path = "../fossil-mir" }
+fossil-codegen = { path = "../fossil-codegen" }
 
-# Transitive WASM enablers — keep as direct deps so feature resolution sticks
-getrandom.workspace = true
-uuid.workspace = true
+# WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
+# RESEARCH.md Pitfall 5: the lib version MUST match the wasm-bindgen-cli
+# version installed locally / in CI.
+wasm-bindgen             = { workspace = true }
+serde-wasm-bindgen       = { workspace = true }
+serde                    = { workspace = true }
+serde_json               = { workspace = true }
+js-sys                   = { workspace = true }
+console_error_panic_hook = { workspace = true }
+
+# Transitive WASM enablers — keep as direct deps so feature resolution sticks.
+# The `wasm_js` feature on getrandom is required by salsa→hashbrown→ahash on
+# wasm32; the `.cargo/config.toml` rustflag is the belt-and-suspenders fallback
+# for unconditioned getrandom call sites.
+getrandom = { workspace = true }
+uuid      = { workspace = true }
 
 [dev-dependencies]
 wasm-bindgen-test.workspace = true
-
-[features]
-default = ["console_error_panic_hook"]
