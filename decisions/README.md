@@ -43,6 +43,7 @@ Use [`template.md`](template.md) as the starting point. Copy, fill in, commit.
 | 0002 | Adopt the 15-crate workspace layout | accepted | 2026-05-15 |
 | 0003 | Db trait is thin; descriptors and registry live behind System | accepted | 2026-05-15 |
 | 0004 | Workspace lint `unsafe_code = "deny"`, not `"forbid"` | accepted | 2026-05-15 |
+| [0005](0005-item-tree-body-separation.md) | ItemTree carries signatures only; bodies live behind per-mapping `body()` query | accepted | 2026-05-18 |
 
 (ADRs 0001-0003 are written in Plan 05; this README is updated as new ADRs land.)
 
