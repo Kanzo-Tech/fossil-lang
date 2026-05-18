@@ -15,7 +15,7 @@ pub mod system;
 
 pub use db::{Db, FossilDb};
 pub use diagnostic::{Diagnostic, Severity, Span};
-pub use error::ErrorGuaranteed;
+pub use error::{ErrorGuaranteed, bug, delay_span_bug};
 pub use files::{Files, SourceFile};
 pub use system::{FsError, System};
 

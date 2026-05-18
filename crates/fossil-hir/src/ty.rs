@@ -39,7 +39,7 @@ pub enum TyKind<'db> {
     Iri,
     /// An IRI template — backtick string with `${...}` placeholders.
     IriTemplate,
-    /// Satisfies ShEx shape S. [`ShapeId`] is a stub in Phase 2; Phase 3
+    /// Satisfies `ShEx` shape S. [`ShapeId`] is a stub in Phase 2; Phase 3
     /// resolves it via `fossil-descriptors-output`.
     Shape(ShapeId),
     /// Function signature — interned separately for fast equality.
@@ -47,7 +47,7 @@ pub enum TyKind<'db> {
     /// RDF 1.2 quoted triple-as-term, type-system.md §2 + §4.10.
     TripleTerm,
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
-    /// promotion of Phase 1's `ErrorMarker` newtype — see ADR-0004 +
+    /// promotion of Phase 1's local taint-wrapper newtype — see ADR-0004 +
     /// RESEARCH.md §Q6).
     Error(ErrorGuaranteed),
     /// Internal inference-state placeholder. Used by bidirectional checker
@@ -106,14 +106,14 @@ pub struct FnSig<'db> {
 }
 
 /// Shape identifier — newtype around a raw `u32`. Resolved by
-/// `fossil-descriptors-output` in Phase 3 (ShEx integration); Phase 2 ships
+/// `fossil-descriptors-output` in Phase 3 (`ShEx` integration); Phase 2 ships
 /// the variant + a `placeholder` constructor for test fixtures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ShapeId(pub u32);
 
 impl ShapeId {
     /// Placeholder shape id used by Phase 2 tests; Phase 3 will replace with
-    /// real ShEx resolution via the `OutputDescriptor` trait.
+    /// real `ShEx` resolution via the `OutputDescriptor` trait.
     #[must_use]
     pub const fn placeholder(raw: u32) -> Self {
         Self(raw)
@@ -136,6 +136,16 @@ mod tests {
         fossil_base::FossilDb::new(system)
     }
 
+    /// Type-level proof that `TyKind::Error(ErrorGuaranteed)` exists as a
+    /// variant. `ErrorGuaranteed` cannot be constructed outside `fossil-base`
+    /// (only via `delay_span_bug` / `bug` from inside a tracked query that
+    /// has a `Diagnostic` sink), so we cannot build one here; the function
+    /// body merely needs to match the variant. If `Ty::Error` is renamed or
+    /// dropped this function stops compiling.
+    const fn _ty_error_variant_exists(t: &TyKind<'_>) {
+        if let TyKind::Error(_) = t { /* OK */ }
+    }
+
     #[test]
     fn all_eleven_ty_kinds_exist() {
         let db = db();
@@ -151,16 +161,8 @@ mod tests {
         let sig = FnSig::new(&db, vec![int_ty], int_ty);
         let _: TyKind<'_> = TyKind::Fn(sig);
         let _: TyKind<'_> = TyKind::TripleTerm;
-        // ErrorGuaranteed cannot be constructed outside fossil-base (only via
-        // delay_span_bug / bug from inside a tracked query that has a Diagnostic
-        // sink). The variant's existence is proven structurally by the match
-        // arm below — if Ty::Error is renamed or dropped the test won't compile.
-        fn _shape_only(t: TyKind<'_>) {
-            match t {
-                TyKind::Error(_) => {}
-                _ => {}
-            }
-        }
+        // Reference the helper so the dead-code lint doesn't flag it.
+        let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
         let _: TyKind<'_> = TyKind::Unknown(InferenceId(0));
     }
 
@@ -231,7 +233,7 @@ mod tests {
     fn all_nine_primitive_variants_exist() {
         // Compile-time enumeration check: every variant per
         // type-system.md §2 line 41-42 must be present.
-        let _vs = [
+        let vs = [
             Primitive::String,
             Primitive::Integer,
             Primitive::Float,
@@ -242,6 +244,6 @@ mod tests {
             Primitive::GYear,
             Primitive::AnyURI,
         ];
-        assert_eq!(_vs.len(), 9);
+        assert_eq!(vs.len(), 9);
     }
 }

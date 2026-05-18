@@ -1,23 +1,100 @@
 //! `ErrorGuaranteed` taint marker — borrowed from rustc.
 //!
-//! When a typeck query fails it returns `ErrorGuaranteed`. Downstream queries
-//! that receive this taint short-circuit without emitting cascading errors.
-//! N independent type errors produce N diagnostics, not N².
+//! When a typeck query fails it emits a [`Diagnostic`] AND returns
+//! [`ErrorGuaranteed`]. Downstream queries that receive this taint short-
+//! circuit without emitting cascading errors. N independent type errors
+//! produce N diagnostics, not N².
 //!
 //! `PhantomData<()>` (NOT `PhantomData<*const ()>`) preserves `Send + Sync`
-//! so this taint can flow through the Salsa accumulator across threads.
+//! so this taint can flow through the Salsa accumulator across threads. Per
+//! RESEARCH.md §Q6 — the raw-pointer variant would un-impl `Send`/`Sync` and
+//! break the `Diagnostic` accumulator's cross-thread flow.
+//!
+//! # Construction invariant
+//!
+//! `ErrorGuaranteed` cannot be constructed outside this module. The two
+//! public construction paths are [`delay_span_bug`] and [`bug`], both of
+//! which push at least one [`Diagnostic`] to the Salsa accumulator before
+//! returning the taint. There is no public path from external code to
+//! `ErrorGuaranteed::new()`. The invariant is structurally enforced — a
+//! `Default` impl would defeat it and is intentionally omitted.
 
+use crate::diagnostic::{Diagnostic, Severity, Span};
+use salsa::Accumulator;
+
+/// Type-check failure taint.
+///
+/// Construct via [`delay_span_bug`] or [`bug`] — both push a [`Diagnostic`]
+/// to the accumulator before returning, so any `ErrorGuaranteed` value
+/// implies "at least one diagnostic was emitted".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ErrorGuaranteed(std::marker::PhantomData<()>);
 
 impl ErrorGuaranteed {
-    /// Constructible only from inside `fossil-base` so callers cannot fabricate
-    /// a taint without going through a diagnostic-emitting path. Phase 1 has
-    /// no emitter yet; future plans extend this with `delay_span_bug`-style
-    /// constructors after a real Diagnostic accumulation.
+    /// Module-private constructor — only [`delay_span_bug`] / [`bug`] call
+    /// this. Keeping it private is what enforces the "at least one diagnostic
+    /// per `ErrorGuaranteed`" construction invariant.
     #[must_use]
-    #[allow(dead_code)] // emitted in HIR/typeck phases (1.3+); kept here as the substrate.
-    pub(crate) const fn new() -> Self {
+    const fn new() -> Self {
         Self(std::marker::PhantomData)
     }
+}
+
+// SAFETY: third-party-trait integration boundary per ADR-0004. ErrorGuaranteed
+// is Copy + Eq + Hash with no nested invariants (PhantomData<()> is zero-sized),
+// so the trivial-replace pattern is sound. No safe alternative exists because
+// salsa::Update requires `unsafe impl` even for trivially-safe bodies.
+#[allow(unsafe_code)]
+unsafe impl salsa::Update for ErrorGuaranteed {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        // SAFETY: caller (Salsa) guarantees `old_pointer` is a valid, aligned
+        // pointer to an initialised `ErrorGuaranteed` owned by Salsa storage.
+        let old = unsafe { &mut *old_pointer };
+        if *old == new_value {
+            false
+        } else {
+            *old = new_value;
+            true
+        }
+    }
+}
+
+/// Emit a deferred bug diagnostic and return the taint.
+///
+/// Use this when a type-checker invariant is violated but recovery is still
+/// possible (the caller can continue with a poisoned `Ty::Error`). Mirrors
+/// rustc's `tcx.dcx().delayed_bug(...)` API.
+///
+/// **Invariant:** every call to `delay_span_bug` pushes EXACTLY ONE
+/// [`Diagnostic`] to the accumulator and returns a fresh [`ErrorGuaranteed`].
+/// The Salsa accumulator's per-query collection semantics ensure the
+/// diagnostic flows to the LSP / CLI host via
+/// `query::accumulated::<Diagnostic>(db, ...)`.
+#[must_use = "ErrorGuaranteed must be propagated to the caller to taint downstream queries"]
+pub fn delay_span_bug(
+    db: &dyn crate::Db,
+    span: Span,
+    message: impl Into<String>,
+) -> ErrorGuaranteed {
+    Diagnostic {
+        severity: Severity::Error,
+        message: message.into(),
+        span,
+    }
+    .accumulate(db);
+    ErrorGuaranteed::new()
+}
+
+/// Same as [`delay_span_bug`] but for compiler-internal bugs.
+///
+/// Severity stays `Error` but the message is prefixed
+/// `"internal compiler error: "`. Phase 3+ uses this for "this code path
+/// should be unreachable" cases.
+#[must_use = "ErrorGuaranteed must be propagated to the caller to taint downstream queries"]
+pub fn bug(db: &dyn crate::Db, span: Span, message: impl Into<String>) -> ErrorGuaranteed {
+    delay_span_bug(
+        db,
+        span,
+        format!("internal compiler error: {}", message.into()),
+    )
 }
