@@ -1,3 +1,9 @@
+// See `parser::expr` for the rationale on the redundant_pub_crate allow.
+// `parser::recover::recover_to` / `expect_or_recover` / the ANCHOR consts
+// are called from sibling submodules (`parser::items`, `parser::expr`), so
+// they need `pub(crate)` visibility.
+#![allow(clippy::redundant_pub_crate)]
+
 //! Error recovery per RESEARCH.md §Q2: anchor-based "bump until we see a known
 //! start-of-the-next-thing" recovery. Anchors are kept tiny — Fossil's INDENT/
 //! DEDENT layer + the small set of item-leading keywords makes this trivial.
@@ -119,7 +125,7 @@ pub(crate) fn expect_or_recover(p: &mut Parser, want: SyntaxKind, anchors: &[Syn
 /// `true` iff the current non-trivia token is in `anchors`, OR the stream is
 /// at EOF (`None`). EOF is an implicit anchor of every recovery context.
 fn at_anchor(p: &Parser, anchors: &[SyntaxKind]) -> bool {
-    p.current().map_or(true, |k| anchors.contains(&k))
+    p.current().is_none_or(|k| anchors.contains(&k))
 }
 
 #[cfg(test)]

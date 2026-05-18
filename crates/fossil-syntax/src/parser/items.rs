@@ -1,3 +1,8 @@
+// See `parser::expr` for the rationale on the redundant_pub_crate allow.
+// `parser::items::parse_program` is called from `parser::Parser::parse_program`
+// (the sibling), so the item needs `pub(crate)` visibility.
+#![allow(clippy::redundant_pub_crate)]
+
 //! Item-level recursive-descent parser.
 //!
 //! Items are LL(1) on the leading token, so no backtracking is needed.

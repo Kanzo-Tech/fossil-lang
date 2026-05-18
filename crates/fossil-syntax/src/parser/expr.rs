@@ -1,3 +1,12 @@
+// The parent `parser` module declares this submodule `pub(crate) mod expr;`
+// (private to the crate). Items inside that need to be reachable from sibling
+// submodules (e.g. `parser::items` calls `parse_expression`) must be
+// `pub(crate)` to satisfy the `unreachable_pub` lint; that combo trips the
+// inverse `redundant_pub_crate` lint, which we silence here. The visibility
+// IS correct — both lints can't be satisfied simultaneously for a sibling-
+// callable item in a `pub(crate)` submodule.
+#![allow(clippy::redundant_pub_crate)]
+
 //! Pratt expression sub-parser implementing grammar.bnf §"OPERATOR
 //! PRECEDENCE TABLE" verbatim.
 //!
@@ -141,7 +150,7 @@ fn peek_infix(p: &Parser) -> Option<(Bp, Bp, Assoc, SyntaxKind)> {
 fn parse_unary_or_primary(p: &mut Parser) {
     p.skip_trivia();
     match p.current() {
-        Some(SyntaxKind::MINUS) | Some(SyntaxKind::KW_NOT) => {
+        Some(SyntaxKind::MINUS | SyntaxKind::KW_NOT) => {
             p.start(SyntaxKind::UNARY_EXPR);
             p.bump(); // unary op
             parse_unary_or_primary(p); // right-associative recurse
@@ -219,20 +228,23 @@ fn parse_arg(p: &mut Parser) {
         p.bump(); // IDENT
         p.skip_trivia();
         p.bump(); // ASSIGN
-        parse_expression(p, 0);
-        p.finish();
     } else {
         p.start(SyntaxKind::ARG);
-        parse_expression(p, 0);
-        p.finish();
     }
+    parse_expression(p, 0);
+    p.finish();
 }
 
-/// PrimaryExpr per grammar.bnf line 199-211.
+/// `PrimaryExpr` per grammar.bnf line 199-211.
 fn parse_primary(p: &mut Parser) {
     p.skip_trivia();
     match p.current() {
-        Some(SyntaxKind::INTEGER) | Some(SyntaxKind::FLOAT) | Some(SyntaxKind::STRING) => {
+        // Literal-like primary tokens: numeric literals, strings, and
+        // environment-variable references (`$VAR`). All wrap as
+        // LITERAL_EXPR with a single token payload.
+        Some(
+            SyntaxKind::INTEGER | SyntaxKind::FLOAT | SyntaxKind::STRING | SyntaxKind::ENV_VAR,
+        ) => {
             p.start(SyntaxKind::LITERAL_EXPR);
             p.bump();
             p.finish();
@@ -264,11 +276,6 @@ fn parse_primary(p: &mut Parser) {
             }
             p.finish();
         }
-        Some(SyntaxKind::ENV_VAR) => {
-            p.start(SyntaxKind::LITERAL_EXPR);
-            p.bump();
-            p.finish();
-        }
         Some(SyntaxKind::IDENT) => {
             // Disambig: `IDENT SHAPE_SEP IDENT` (no whitespace) = PrefixedName.
             // Per grammar.bnf line 226 the colon MUST be lexer-adjacent — no
@@ -280,15 +287,13 @@ fn parse_primary(p: &mut Parser) {
                 && p.peek_kind(2) == Some(SyntaxKind::IDENT)
             {
                 p.start(SyntaxKind::IRI_EXPR);
-                p.bump();
-                p.bump();
-                p.bump();
-                p.finish();
+                p.bump(); // IDENT
+                p.bump(); // SHAPE_SEP
             } else {
                 p.start(SyntaxKind::LITERAL_EXPR);
-                p.bump();
-                p.finish();
             }
+            p.bump();
+            p.finish();
         }
         Some(SyntaxKind::ABS_IRI) => {
             p.start(SyntaxKind::IRI_EXPR);
@@ -327,7 +332,7 @@ fn parse_record_literal(p: &mut Parser) {
             None | Some(SyntaxKind::RBRACE) => break,
             // A field starts with IDENT (possibly followed by SHAPE_SEP IDENT
             // for a prefixed-name LHS) or an absolute IRI.
-            Some(SyntaxKind::IDENT) | Some(SyntaxKind::ABS_IRI) => {
+            Some(SyntaxKind::IDENT | SyntaxKind::ABS_IRI) => {
                 p.start(SyntaxKind::RECORD_FIELD);
                 // LHS — bare IDENT, prefixed name (lexer-contiguous), or ABS_IRI.
                 if p.current() == Some(SyntaxKind::IDENT)

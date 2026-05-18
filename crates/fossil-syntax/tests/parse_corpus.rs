@@ -26,9 +26,10 @@ fn parse_to_cst_text(src: &str) -> String {
 /// dropping trivia (WHITESPACE / NEWLINE / COMMENT / INDENT / DEDENT) for
 /// snapshot stability — incidental whitespace would make snapshots brittle.
 fn render_node(node: &SyntaxNode, depth: usize) -> String {
+    use std::fmt::Write;
     let mut out = String::new();
     let pad = "  ".repeat(depth);
-    out.push_str(&format!("{pad}{:?}\n", node.kind()));
+    writeln!(out, "{pad}{:?}", node.kind()).expect("writing to String never fails");
     for child in node.children_with_tokens() {
         match child {
             rowan::NodeOrToken::Node(n) => {
@@ -46,7 +47,8 @@ fn render_node(node: &SyntaxNode, depth: usize) -> String {
                     continue;
                 }
                 let pad = "  ".repeat(depth + 1);
-                out.push_str(&format!("{pad}{:?} {:?}\n", t.kind(), t.text()));
+                writeln!(out, "{pad}{:?} {:?}", t.kind(), t.text())
+                    .expect("writing to String never fails");
             }
         }
     }
@@ -256,11 +258,11 @@ fixture_test!(
 //     `06_malformed_field_ref_recovers` as a fixture that might not
 //     emit, but on inspection that one DOES emit 1 ERROR + 1 diagnostic.)
 
+use fossil_base::Diagnostic;
+use salsa::Accumulator;
+
 #[test]
 fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
-    use fossil_base::Diagnostic;
-    use salsa::Accumulator;
-
     // 13 fixtures expected to emit ≥1 diagnostic. See module-level
     // comment above for why fixtures 12 + 22 are excluded.
     let recovery_fixtures: &[(&str, &str)] = &[
@@ -269,7 +271,10 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
         ("01_pipeline_postfix", "06_malformed_field_ref_recovers"),
         ("02_ternary_arithmetic", "10_unbalanced_ternary_recovers"),
         ("02_ternary_arithmetic", "11_lone_question_mark_recovers"),
-        ("03_mappings_annotations", "16_mapping_missing_from_recovers"),
+        (
+            "03_mappings_annotations",
+            "16_mapping_missing_from_recovers",
+        ),
         (
             "03_mappings_annotations",
             "17_annotation_unclosed_brace_recovers",
@@ -307,7 +312,14 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
 
     // Cross-check that the Accumulator trait is what we expect (compiles
     // even when no diagnostic exists — paranoia about a future Salsa
-    // version renaming the trait surface).
-    fn _assert_accumulator<A: Accumulator>() {}
-    _assert_accumulator::<Diagnostic>();
+    // version renaming the trait surface). The helper is defined at module
+    // scope (`assert_accumulator_bound` below) to keep clippy's
+    // `items_after_statements` lint happy.
+    assert_accumulator_bound::<Diagnostic>();
 }
+
+/// Compile-time witness that `Diagnostic` (and any other type we may want
+/// to accumulate in tests) implements [`Accumulator`]. Used by the
+/// recovery-fixture test as a paranoia check against a future Salsa version
+/// renaming the trait surface.
+const fn assert_accumulator_bound<A: Accumulator>() {}

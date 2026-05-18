@@ -189,7 +189,7 @@ impl Parser {
 
     /// True iff the next `n` non-trivia tokens are contiguous in the source
     /// (no WHITESPACE / NEWLINE / COMMENT between them). Used by the
-    /// PrefixedName disambiguator (grammar.bnf line 226: `IDENT SHAPE_SEP
+    /// `PrefixedName` disambiguator (grammar.bnf line 226: `IDENT SHAPE_SEP
     /// LocalName` requires NO whitespace between `IDENT` and `:`).
     pub(crate) fn peek_contiguous(&self, n: usize) -> bool {
         let mut found = 0;
