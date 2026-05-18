@@ -236,13 +236,32 @@ impl Parser {
     }
 
     /// Eat the current token if it matches `kind`; otherwise emit it under an
-    /// ERROR node. Phase 1 has no diagnostic emission yet — the ERROR node
-    /// is the recovery signal for downstream and a TODO marker for Phase 2.
+    /// `ERROR` node AND push an [`diag::ParseDiagnostic::ExpectedToken`] into
+    /// the parser's queue. The diagnostic is drained into the public
+    /// `Diagnostic` accumulator by the wrapping [`parse`] Salsa query.
+    ///
+    /// Phase 1 versions of this helper consumed the offending token without
+    /// emitting a diagnostic, leaving downstream tools (LSP, CLI) blind to the
+    /// parse error. Plan 02-03 fixes this — the ERROR node is no longer the
+    /// only signal. New code should still prefer
+    /// [`recover::expect_or_recover`] with an explicit anchor set, because the
+    /// recovery cascade is local to the caller; this `expect` consumes the
+    /// offending token (which may eat an anchor the caller expected to see).
     pub(crate) fn expect(&mut self, kind: SyntaxKind) {
         self.skip_trivia();
         if self.current() == Some(kind) {
             self.bump();
         } else {
+            let got = self.current().unwrap_or(SyntaxKind::EOF);
+            let span_start = self.current_token_span_start();
+            self.push_diagnostic(ParseDiagnostic::ExpectedToken {
+                want: kind,
+                got,
+                span: fossil_base::Span::new(
+                    u32::try_from(span_start).unwrap_or(u32::MAX),
+                    u32::try_from(span_start).unwrap_or(u32::MAX),
+                ),
+            });
             self.start(SyntaxKind::ERROR);
             if self.pos < self.tokens.len() {
                 self.bump();
@@ -251,7 +270,22 @@ impl Parser {
         }
     }
 
+    /// Consume the current token into a fresh `ERROR` node and push an
+    /// [`diag::ParseDiagnostic::UnexpectedToken`] into the parser's queue.
+    /// Used as the catch-all fallback in Pratt primary dispatch and in the
+    /// item parser's malformed-LHS branches.
     pub(crate) fn bump_as_error(&mut self) {
+        let span_start = self.current_token_span_start();
+        let span_end = self
+            .tokens
+            .get(self.pos)
+            .map_or(span_start, |t| t.range.end);
+        self.push_diagnostic(ParseDiagnostic::UnexpectedToken {
+            span: fossil_base::Span::new(
+                u32::try_from(span_start).unwrap_or(u32::MAX),
+                u32::try_from(span_end).unwrap_or(u32::MAX),
+            ),
+        });
         self.start(SyntaxKind::ERROR);
         if self.pos < self.tokens.len() {
             self.bump();

@@ -8,15 +8,18 @@ PROGRAM
     MAPPING_HEADER
       IDENT "User"
       SHAPE_SEP ":"
-      IDENT "ex"
-      SHAPE_SEP ":"
-      IDENT "Person"
+      SHAPE_EXPR
+        IRI_EXPR
+          IDENT "ex"
+          SHAPE_SEP ":"
+          IDENT "Person"
       ERROR
-      ERROR
-        KW_IRI "iri"
-  ERROR
-    ASSIGN "="
-  ERROR
-    DOT "."
-  ERROR
-    IDENT "id"
+    MAPPING_BODY
+      PROPERTY
+        PROPERTY_LHS
+          KW_IRI "iri"
+        ASSIGN "="
+        EXPR
+          FIELD_REF_EXPR
+            DOT "."
+            IDENT "id"

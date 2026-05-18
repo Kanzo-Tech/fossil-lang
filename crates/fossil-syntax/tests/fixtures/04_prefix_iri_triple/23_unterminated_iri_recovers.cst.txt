@@ -4,13 +4,12 @@ PROGRAM
     IDENT "ex"
     SHAPE_SEP ":"
     ERROR
+    ERROR
       LT "<"
   MAPPING
     MAPPING_HEADER
       IDENT "https"
       SHAPE_SEP ":"
-      ERROR
-      ERROR
-      ERROR
-      ERROR
+      SHAPE_EXPR
+        IRI_EXPR
       ERROR

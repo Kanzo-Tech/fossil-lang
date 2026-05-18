@@ -8,32 +8,36 @@ PROGRAM
     MAPPING_HEADER
       IDENT "User"
       SHAPE_SEP ":"
-      IDENT "ex"
-      SHAPE_SEP ":"
-      IDENT "Person"
+      SHAPE_EXPR
+        IRI_EXPR
+          IDENT "ex"
+          SHAPE_SEP ":"
+          IDENT "Person"
       KW_FROM "from"
-      IDENT "users"
+      EXPR
+        LITERAL_EXPR
+          IDENT "users"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "name"
+          IRI_EXPR
+            IDENT "ex"
+            SHAPE_SEP ":"
+            IDENT "name"
         ASSIGN "="
         EXPR
           FIELD_REF_EXPR
             DOT "."
             IDENT "name"
-  ERROR
-    LBRACE "{"
-  MAPPING
-    MAPPING_HEADER
-      IDENT "ex"
-      SHAPE_SEP ":"
-      IDENT "lang"
-      ERROR
-        ASSIGN "="
-      ERROR
-        STRING "\"en\""
-      ERROR
-      ERROR
+        ANNOTATION_BLOCK
+          LBRACE "{"
+          ANNOTATION_ITEM
+            IRI_EXPR
+              IDENT "ex"
+              SHAPE_SEP ":"
+              IDENT "lang"
+            ASSIGN "="
+            EXPR
+              LITERAL_EXPR
+                STRING "\"en\""
+          ERROR

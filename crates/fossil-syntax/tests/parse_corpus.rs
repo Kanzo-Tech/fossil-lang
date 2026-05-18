@@ -219,3 +219,95 @@ fixture_test!(
     "05_toplevel_indent",
     "30_two_top_level_items_one_broken_other_fine"
 );
+
+// =====================================================================
+// Diagnostic-accumulator coverage for recovery fixtures (plan 02-03 Task 3)
+// =====================================================================
+//
+// The 30 `fixture_test!`s above verify the SHAPE of the resulting CST
+// (snapshot tests). This test verifies the BLAME PATH — that every
+// recovery fixture actually pushes a `Diagnostic` into the public
+// accumulator via the wrapping `parse()` Salsa query (RESEARCH.md §Q11
+// wiring). The LSP (Phase 6) consumes diagnostics through exactly this
+// accumulator, so the recovery + diagnostic plumbing must be exercised
+// independently of CST shape.
+//
+// Coverage: 15 of the 18 corpus recovery fixtures emit ≥1 diagnostic.
+// The remaining 3 are documented exceptions (see plan 02-03 SUMMARY):
+//
+//   - `12_double_minus_unary_recovers.fossil` (`iri = - - x`) parses
+//     cleanly under the grammar: unary `-` is right-associative L8
+//     (grammar.bnf §OPERATOR PRECEDENCE TABLE), so `- - x` is the valid
+//     `UNARY(MINUS, UNARY(MINUS, x))` tree. The fixture name reflects
+//     a Wave 0 (plan 02-01) over-eager labeling; the parser correctly
+//     does NOT emit an error here.
+//
+//   - `22_broken_template_interpolation_recovers.fossil`
+//     (`iri = \`prefix${.id\``): the unterminated `${...}` is INSIDE
+//     the TEMPLATE token, which the lexer matches atomically per
+//     grammar.bnf line 42 (`INTERPOLATION := '${' Expression '}'` is
+//     deferred to Phase 4 per plan 02-02 expr.rs comment). The parser
+//     sees a complete TEMPLATE token and parses cleanly. Phase 4 will
+//     lift interpolation parsing and add the diagnostic.
+//
+//   - (the third "happy-path-with-recovery edge case" enumerated in the
+//     plan's note is fixture 12 itself; only 2 fixtures actually skip
+//     the diagnostic gate. The plan's "remaining 3" comment counted
+//     `06_malformed_field_ref_recovers` as a fixture that might not
+//     emit, but on inspection that one DOES emit 1 ERROR + 1 diagnostic.)
+
+#[test]
+fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
+    use fossil_base::Diagnostic;
+    use salsa::Accumulator;
+
+    // 13 fixtures expected to emit ≥1 diagnostic. See module-level
+    // comment above for why fixtures 12 + 22 are excluded.
+    let recovery_fixtures: &[(&str, &str)] = &[
+        ("01_pipeline_postfix", "04_missing_arg_recovers"),
+        ("01_pipeline_postfix", "05_trailing_pipe_recovers"),
+        ("01_pipeline_postfix", "06_malformed_field_ref_recovers"),
+        ("02_ternary_arithmetic", "10_unbalanced_ternary_recovers"),
+        ("02_ternary_arithmetic", "11_lone_question_mark_recovers"),
+        ("03_mappings_annotations", "16_mapping_missing_from_recovers"),
+        (
+            "03_mappings_annotations",
+            "17_annotation_unclosed_brace_recovers",
+        ),
+        (
+            "03_mappings_annotations",
+            "18_malformed_property_lhs_recovers",
+        ),
+        ("04_prefix_iri_triple", "23_unterminated_iri_recovers"),
+        ("04_prefix_iri_triple", "24_half_triple_term_recovers"),
+        ("05_toplevel_indent", "28_inconsistent_dedent_recovers"),
+        ("05_toplevel_indent", "29_mapping_body_de_indented_recovers"),
+        (
+            "05_toplevel_indent",
+            "30_two_top_level_items_one_broken_other_fine",
+        ),
+    ];
+
+    let crate_dir = env!("CARGO_MANIFEST_DIR");
+    for (bucket, stem) in recovery_fixtures {
+        let path = format!("{crate_dir}/tests/fixtures/{bucket}/{stem}.fossil");
+        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let db = FossilDb::new(system);
+        let file = SourceFile::new(&db, src, path.clone());
+
+        // Pull diagnostics accumulated by the Salsa `parse()` query.
+        // Salsa 0.26's `accumulated::<A>(db, input)` returns `Vec<&A>`.
+        let diags: Vec<&Diagnostic> = parse::accumulated::<Diagnostic>(&db, file);
+        assert!(
+            !diags.is_empty(),
+            "recovery fixture {bucket}/{stem}: expected ≥1 Diagnostic in the accumulator, got 0",
+        );
+    }
+
+    // Cross-check that the Accumulator trait is what we expect (compiles
+    // even when no diagnostic exists — paranoia about a future Salsa
+    // version renaming the trait surface).
+    fn _assert_accumulator<A: Accumulator>() {}
+    _assert_accumulator::<Diagnostic>();
+}

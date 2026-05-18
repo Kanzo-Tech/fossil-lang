@@ -1,12 +1,10 @@
 PROGRAM
-  ERROR
+  IMPORT
     KW_USE "use"
-  ERROR
-    IDENT "stdlib"
-  ERROR
-    SLASH "/"
-  ERROR
-    IDENT "core"
+    IMPORT_PATH
+      IDENT "stdlib"
+      SLASH "/"
+      IDENT "core"
   PREFIX_DECL
     KW_PREFIX "prefix"
     IDENT "ex"
@@ -16,11 +14,15 @@ PROGRAM
     MAPPING_HEADER
       IDENT "User"
       SHAPE_SEP ":"
-      IDENT "ex"
-      SHAPE_SEP ":"
-      IDENT "Person"
+      SHAPE_EXPR
+        IRI_EXPR
+          IDENT "ex"
+          SHAPE_SEP ":"
+          IDENT "Person"
       KW_FROM "from"
-      IDENT "users"
+      EXPR
+        LITERAL_EXPR
+          IDENT "users"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS

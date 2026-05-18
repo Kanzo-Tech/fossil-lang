@@ -1,23 +1,26 @@
 PROGRAM
-  ERROR
+  EXPORTED_DEFINITION
     AT_EXPORT "@export"
-  ERROR
-    IDENT "f"
-  ERROR
-    TYPE_ANNOT "::"
-  ERROR
-    IDENT "String"
-  ERROR
-    ARROW "->"
-  ERROR
-    IDENT "Iri"
-  SOURCE_DEF
-    IDENT "f"
-    DEFINE ":="
-    CALL_EXPR
-      ERROR
-        KW_IRI "iri"
-      LPAREN "("
-      ERROR
-        PARTIAL "_"
-      RPAREN ")"
+    TYPE_ANNOTATION
+      IDENT "f"
+      TYPE_ANNOT "::"
+      TYPE_EXPR
+        TYPE_ATOM
+          IDENT "String"
+        ARROW "->"
+        TYPE_EXPR
+          TYPE_ATOM
+            IDENT "Iri"
+    DEFINITION
+      IDENT "f"
+      DEFINE ":="
+      EXPR
+        POSTFIX_EXPR
+          ERROR
+            KW_IRI "iri"
+          LPAREN "("
+          ARG_LIST
+            ARG
+              PARTIAL_EXPR
+                PARTIAL "_"
+          RPAREN ")"

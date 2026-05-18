@@ -8,11 +8,15 @@ PROGRAM
     MAPPING_HEADER
       IDENT "User"
       SHAPE_SEP ":"
-      IDENT "ex"
-      SHAPE_SEP ":"
-      IDENT "Person"
+      SHAPE_EXPR
+        IRI_EXPR
+          IDENT "ex"
+          SHAPE_SEP ":"
+          IDENT "Person"
       KW_FROM "from"
-      IDENT "users"
+      EXPR
+        LITERAL_EXPR
+          IDENT "users"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS

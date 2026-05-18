@@ -1,19 +1,13 @@
 PROGRAM
-  ERROR
+  IMPORT
     KW_USE "use"
-  ERROR
-    IDENT "stdlib"
-  ERROR
-    SLASH "/"
-  ERROR
-    IDENT "seq"
-  ERROR
-    LBRACE "{"
-  ERROR
-    IDENT "filter"
-  ERROR
-    COMMA ","
-  ERROR
-    IDENT "map"
-  ERROR
-    RBRACE "}"
+    IMPORT_PATH
+      IDENT "stdlib"
+      SLASH "/"
+      IDENT "seq"
+    SELECTIVE_IMPORT
+      LBRACE "{"
+      IDENT "filter"
+      COMMA ","
+      IDENT "map"
+      RBRACE "}"
