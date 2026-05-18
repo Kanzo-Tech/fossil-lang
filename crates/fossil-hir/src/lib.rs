@@ -26,6 +26,8 @@
 //! (CORE-03). Phase 3 wires bidirectional checking + `ErrorGuaranteed`
 //! propagation (CORE-04..07).
 
+pub mod ast_id;
+pub mod body;
 pub mod check;
 pub mod def_map;
 pub mod item_tree;
@@ -34,10 +36,12 @@ pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their
 // module paths (`fossil_hir::def_map::def_map`, `fossil_hir::lower::lower_to_hir`,
-// etc.) to mirror the rust-analyzer convention and avoid name shadowing with
-// the modules themselves.
+// `fossil_hir::body::body`, etc.) to mirror the rust-analyzer convention and
+// avoid name shadowing with the modules themselves.
+pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
+pub use body::{ExprId, HirBody};
 pub use check::ErrorMarker;
 pub use def_map::{DefMap, MappingLoc, SourceLoc};
-pub use item_tree::ItemTree;
+pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
 pub use lower::{HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
 pub use ty::{Primitive, Record, Ty, TyKind};

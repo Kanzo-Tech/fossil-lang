@@ -91,15 +91,24 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
     let mut sources: Vec<SourceEntry<'db>> = Vec::new();
     let mut mappings: Vec<MappingLoc<'db>> = Vec::new();
 
-    // Per-kind dense indices. Plan 02-03 §"def_map.rs" requires mapping
-    // indexing among MAPPING-kind children only — Plan 02-04 keys its
-    // `body(mapping)` Salsa query on `MappingLoc`, and the Salsa-invalidation
-    // story is cleanest when adding an unrelated `prefix` or `source_def` to
-    // the file does NOT shift every downstream mapping's `index` (and hence
-    // its interned `MappingLoc`). The mir lowering (`fossil-mir::lower`) used
-    // to recover the dense index from `def_map.mappings()`; with dense
-    // indexing the recovery step becomes trivial (`loc.index(db)` is the
-    // dense index directly).
+    // Per-kind dense indices.
+    //
+    // CONTRACT (Plan 02-04 — ADR-0005): `MappingLoc.index` is the position
+    // of the mapping among MAPPING-kind CST children only, NOT among all
+    // top-level children (which would include PREFIX_DECL / SOURCE_DEF /
+    // IMPORT / DEFINITION / EXPORTED_DEFINITION). This MUST match the
+    // ordering convention used by `crate::body::body`, which resolves a
+    // mapping's body via
+    //   cst.root(db).syntax().children()
+    //      .filter(|n| n.kind() == SyntaxKind::MAPPING)
+    //      .nth(loc.index(db))
+    // i.e. filter-then-nth over MAPPING-kind nodes. If THIS loop were
+    // ever changed to use the all-children index (e.g. via `.enumerate()`
+    // on the unfiltered `.children()` iterator), `body()` would silently
+    // resolve to the wrong CST subtree for any file with non-MAPPING
+    // top-level siblings before the target mapping. The
+    // `body_filters_to_mapping_kind_before_indexing` regression test in
+    // `body.rs` enforces this contract end-to-end.
     //
     // SOURCE_DEF indexing follows the same per-kind dense scheme for
     // symmetry; no current downstream consumer depends on the all-children

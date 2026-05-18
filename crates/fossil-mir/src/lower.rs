@@ -1,6 +1,8 @@
 //! HIR → MIR lowering for the Phase 1 canonical example.
 //!
-//! Consumes [`fossil_hir::HirMapping`] and emits a 4-node [`MirGraph`]:
+//! Consumes the per-mapping HEADER from [`fossil_hir::HirMapping`] plus the
+//! per-mapping BODY from [`fossil_hir::body::body`] (separated per ADR-0005,
+//! Plan 02-04) and emits a 4-node [`MirGraph`]:
 //! `Source → Extend(iri = ...) → TripleEmit → Sink(GraphAr)`.
 //!
 //! # Phase 1 hardcoded paths (deferred work flagged inline)
@@ -24,6 +26,7 @@
 //! ) -> MirGraph<'db>;
 //! ```
 
+use fossil_hir::body::{HirBody, body};
 use fossil_hir::def_map::def_map;
 use fossil_hir::lower::lower_to_hir;
 use fossil_hir::ty::RecordField;
@@ -45,14 +48,13 @@ use crate::op::{ExprLowered, Op, SinkRef, SourceFormat};
 pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> MirGraph<'db> {
     let file = mapping.file(db);
 
-    // `MappingLoc::index` is the position among ALL top-level CST children
-    // (PREFIX_DECL, SOURCE_DEF, MAPPING all share the index space — see
-    // `fossil_hir::def_map::def_map`). The `lower_to_hir` mappings list, by
-    // contrast, is filtered to MAPPING-only and is densely indexed 0..N. Both
-    // lists are produced by walking CST children in the same CST order, so
-    // we recover the dense index by finding `mapping`'s position in
-    // `def_map(file).mappings()` (the same MappingLoc identity is interned
-    // across queries).
+    // Per ADR-0005, signatures and bodies live in separate Salsa queries.
+    // We need the HEADER (mapping name + shape IRI + source binding) from
+    // `lower_to_hir` and the BODY (property list) from `body(db, mapping)`.
+    //
+    // The `MappingLoc.index` is per-kind dense (audited in `def_map.rs`'s
+    // contract block, matching `body()`'s filter-then-nth convention), so
+    // it's also the dense index into `lower_to_hir(file).mappings`.
     let dm = def_map(db, file);
     let mapping_locs = dm.mappings(db);
     let Some(dense_idx) = mapping_locs.iter().position(|loc| *loc == mapping) else {
@@ -65,6 +67,7 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     let Some(m) = mappings.get(dense_idx) else {
         return MirGraph::new(db, Vec::new());
     };
+    let body = body(db, mapping);
 
     let row_type = phase1_row_type(db);
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(4);
@@ -77,7 +80,7 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     });
 
     // 1: Extend — attach the IRI template result as a column named "iri"
-    let iri_expr = lower_iri_property(m).unwrap_or_else(|| {
+    let iri_expr = lower_iri_property(m, body, db).unwrap_or_else(|| {
         // No `iri = ...` property in the mapping; emit an empty literal to
         // keep the op-count invariant. Phase 3 (CORE-04..07) reports this as
         // a type error against the ShEx output descriptor.
@@ -90,7 +93,7 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     });
 
     // 2: TripleEmit — for the single (PrefixedName, FieldRef) property pair.
-    let (predicate, object_col) = lower_first_predicate_property(m)
+    let (predicate, object_col) = lower_first_predicate_property(body, db)
         .unwrap_or_else(|| (SmolStr::default(), SmolStr::default()));
     ops.push(Op::TripleEmit {
         input: 1,
@@ -130,11 +133,20 @@ fn phase1_row_type(db: &dyn fossil_base::Db) -> Ty<'_> {
     Ty::new(db, TyKind::Record(record))
 }
 
-/// Find the `iri = ...` property in a mapping and lower its template value
-/// to a concat-chain of [`ExprLowered`].
-fn lower_iri_property(m: &HirMapping) -> Option<ExprLowered> {
-    let prop = m
-        .properties
+/// Find the `iri = ...` property in a mapping's body and lower its template
+/// value to a concat-chain of [`ExprLowered`].
+///
+/// Per ADR-0005, the property list lives in [`HirBody`] (reached via the
+/// `body()` Salsa query), not on [`HirMapping`]. The mapping HEADER is still
+/// needed for the `source_binding` (used to scope `${.field}` placeholders
+/// in the IRI template).
+fn lower_iri_property<'db>(
+    m: &HirMapping,
+    body: HirBody<'db>,
+    db: &'db dyn fossil_base::Db,
+) -> Option<ExprLowered> {
+    let prop = body
+        .properties(db)
         .iter()
         .find(|p| matches!(p.key, PropertyKey::Iri))?;
     let HirExpr::Template(raw) = &prop.value else {
@@ -143,10 +155,13 @@ fn lower_iri_property(m: &HirMapping) -> Option<ExprLowered> {
     Some(lower_iri_template_phase1(raw, &m.source_binding))
 }
 
-/// Find the first `<prefix>:<local> = <field-ref>` property and return
-/// `(predicate_iri, object_col)` for the `TripleEmit`.
-fn lower_first_predicate_property(m: &HirMapping) -> Option<(SmolStr, SmolStr)> {
-    for prop in &m.properties {
+/// Find the first `<prefix>:<local> = <field-ref>` property in a mapping's
+/// body and return `(predicate_iri, object_col)` for the `TripleEmit`.
+fn lower_first_predicate_property<'db>(
+    body: HirBody<'db>,
+    db: &'db dyn fossil_base::Db,
+) -> Option<(SmolStr, SmolStr)> {
+    for prop in body.properties(db) {
         if let PropertyKey::PrefixedName { iri } = &prop.key
             && let HirExpr::FieldRef(field) = &prop.value
         {

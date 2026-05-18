@@ -1,12 +1,15 @@
 //! CST → HIR lowering.
 //!
-//! Phase 1 ships the lowering for the canonical `examples/hello.fossil`: one
-//! [`HirMapping`] per `MAPPING` CST node, with header-level fields (name,
-//! resolved shape IRI, source binding) and a flat list of [`HirProperty`]
-//! values whose right-hand side is a [`HirExpr`].
+//! Phase 2 (plan 02-04, per ADR-0005) splits Phase 1's flat `HirMapping`
+//! shape: header signature fields (name, shape IRI, source binding) live
+//! here; the per-mapping property list moved into [`crate::body::HirBody`],
+//! reached via the [`crate::body::body`] Salsa query keyed by
+//! [`crate::def_map::MappingLoc`]. The split is the precondition for
+//! CORE-02 SC#2: editing one property's right-hand side invalidates only
+//! `body(M_k)` + its downstream queries, never the file-level
+//! `item_tree(file)` or `lower_to_hir(file)` queries' structural inputs.
 //!
-//! The lowered shape is what `fossil-mir` (Plan 04) consumes to build the
-//! typed operator algebra. The expression encoding is intentionally minimal:
+//! The expression encoding remains intentionally minimal:
 //! - [`HirExpr::Template`] keeps the raw backtick text including `${...}`
 //!   placeholders. Codegen parses the template at SQL-emission time. Phase 4
 //!   lifts template parsing into a real expression tree.
@@ -25,6 +28,9 @@ pub struct HirFile<'db> {
     pub mappings: Vec<HirMapping>,
 }
 
+/// Per-mapping HEADER data. Per ADR-0005, the previous `properties` field
+/// is REMOVED — body content lives in [`crate::body::HirBody`], reached via
+/// [`crate::body::body`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct HirMapping {
     /// Mapping name, e.g. `"User"`.
@@ -33,7 +39,6 @@ pub struct HirMapping {
     pub shape_iri: SmolStr,
     /// Name of the source binding referenced by `from`, e.g. `"users"`.
     pub source_binding: SmolStr,
-    pub properties: Vec<HirProperty>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -99,9 +104,10 @@ fn lower_mapping_node(
     let header = node
         .children()
         .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)?;
-    let body = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?;
+    // Per ADR-0005, properties are NOT collected here — the body() Salsa
+    // query owns them. The MAPPING_BODY's presence is no longer required for
+    // a successful header lowering; an empty-bodied mapping is still a valid
+    // HirMapping signature.
 
     // Phase 2 plan 02-03 wraps the header's shape and source in composite
     // sub-nodes:
@@ -166,19 +172,23 @@ fn lower_mapping_node(
         })
         .map(|t| SmolStr::from(t.text()))?;
 
-    let mut properties = Vec::new();
-    for prop_node in body.children().filter(|c| c.kind() == SyntaxKind::PROPERTY) {
-        if let Some(p) = lower_property(&prop_node, prefixes) {
-            properties.push(p);
-        }
-    }
-
     Some(HirMapping {
         name,
         shape_iri,
         source_binding,
-        properties,
     })
+}
+
+/// Public-to-the-crate adapter so [`crate::body::body`] can re-use the same
+/// `PROPERTY` lowering logic without duplicating it. Per ADR-0005, body
+/// content is owned by the `body()` Salsa query, but the per-property
+/// shape-and-prefix-aware lowering rules live here next to their natural
+/// home (`HirProperty` / `HirExpr`).
+pub(crate) fn lower_property_public(
+    node: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirProperty> {
+    lower_property(node, prefixes)
 }
 
 fn lower_property(
@@ -332,7 +342,7 @@ User : ex:Person from users
     }
 
     #[test]
-    fn lower_hello_produces_one_mapping_with_two_properties() {
+    fn lower_hello_produces_one_mapping_header() {
         let (db, file) = db_with_hello();
         let hir = lower_to_hir(&db, file);
         let mappings = hir.mappings(&db);
@@ -341,15 +351,28 @@ User : ex:Person from users
         assert_eq!(m.name.as_str(), "User");
         assert_eq!(m.shape_iri.as_str(), "https://example.org/Person");
         assert_eq!(m.source_binding.as_str(), "users");
-        assert_eq!(m.properties.len(), 2);
+    }
+
+    /// Per ADR-0005, body content (the property list) now lives behind the
+    /// `body(db, MappingLoc)` Salsa query. Phase 1's `mappings[0].properties`
+    /// access is replaced by `body(db, def_map.mappings()[0]).properties(db)`.
+    #[test]
+    fn lower_hello_body_has_two_properties() {
+        let (db, file) = db_with_hello();
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("hello has one mapping");
+        let body = crate::body::body(&db, mloc);
+        let props = body.properties(&db);
+        assert_eq!(props.len(), 2);
     }
 
     #[test]
     fn lower_hello_property_zero_is_iri_template() {
         let (db, file) = db_with_hello();
-        let hir = lower_to_hir(&db, file);
-        let mappings = hir.mappings(&db);
-        let p0 = &mappings[0].properties[0];
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("hello has one mapping");
+        let body = crate::body::body(&db, mloc);
+        let p0 = &body.properties(&db)[0];
         assert!(matches!(p0.key, PropertyKey::Iri));
         match &p0.value {
             HirExpr::Template(t) => assert!(t.contains("${.id}"), "template text was {t:?}"),
@@ -360,9 +383,10 @@ User : ex:Person from users
     #[test]
     fn lower_hello_property_one_is_prefixed_name_field_ref() {
         let (db, file) = db_with_hello();
-        let hir = lower_to_hir(&db, file);
-        let mappings = hir.mappings(&db);
-        let p1 = &mappings[0].properties[1];
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("hello has one mapping");
+        let body = crate::body::body(&db, mloc);
+        let p1 = &body.properties(&db)[1];
         match &p1.key {
             PropertyKey::PrefixedName { iri } => {
                 assert_eq!(iri.as_str(), "https://example.org/name");
