@@ -302,7 +302,9 @@ impl Parser {
         loop {
             self.skip_trivia();
             match self.current() {
-                Some(SyntaxKind::IDENT) => self.parse_property(),
+                // `iri` keyword OR a bare/prefixed IDENT starts a Property
+                // (grammar.bnf line 141: `PropertyLhs := 'iri' | IRIExpr`).
+                Some(SyntaxKind::IDENT | SyntaxKind::KW_IRI) => self.parse_property(),
                 _ => break,
             }
         }
@@ -320,12 +322,23 @@ impl Parser {
 
     fn parse_property_lhs(&mut self) {
         self.start(SyntaxKind::PROPERTY_LHS);
-        self.expect(SyntaxKind::IDENT);
-        // Optional `: IDENT` for prefixed names like `ex:name`.
         self.skip_trivia();
-        if self.current() == Some(SyntaxKind::SHAPE_SEP) {
-            self.bump();
-            self.expect(SyntaxKind::IDENT);
+        match self.current() {
+            // `iri = ...` — the `iri` keyword as the PropertyLhs literal.
+            Some(SyntaxKind::KW_IRI) => self.bump(),
+            // Bare IDENT, optionally followed by `: IDENT` for a prefixed name.
+            Some(SyntaxKind::IDENT) => {
+                self.bump();
+                self.skip_trivia();
+                if self.current() == Some(SyntaxKind::SHAPE_SEP) {
+                    self.bump();
+                    self.expect(SyntaxKind::IDENT);
+                }
+            }
+            _ => {
+                // Wrong shape entirely — emit ERROR so the body loop can break.
+                self.bump_as_error();
+            }
         }
         self.finish();
     }

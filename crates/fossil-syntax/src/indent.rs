@@ -168,17 +168,43 @@ fn push_simple(
 
 const fn token_to_kind(t: Token) -> SyntaxKind {
     match t {
+        // Trivia
         Token::Whitespace => SyntaxKind::WHITESPACE,
         Token::Newline => SyntaxKind::NEWLINE,
         Token::Comment => SyntaxKind::COMMENT,
+        // Keywords
         Token::KwPrefix => SyntaxKind::KW_PREFIX,
         Token::KwFrom => SyntaxKind::KW_FROM,
+        Token::KwIn => SyntaxKind::KW_IN,
+        Token::KwUse => SyntaxKind::KW_USE,
+        Token::KwAs => SyntaxKind::KW_AS,
+        Token::KwAnd => SyntaxKind::KW_AND,
+        Token::KwOr => SyntaxKind::KW_OR,
+        Token::KwNot => SyntaxKind::KW_NOT,
+        Token::KwIri => SyntaxKind::KW_IRI,
+        // Lexical
         Token::Ident => SyntaxKind::IDENT,
         Token::Integer => SyntaxKind::INTEGER,
+        Token::Float => SyntaxKind::FLOAT,
         Token::String => SyntaxKind::STRING,
         Token::Template => SyntaxKind::TEMPLATE,
         Token::AbsIri => SyntaxKind::ABS_IRI,
+        Token::EnvVar => SyntaxKind::ENV_VAR,
+        Token::Partial => SyntaxKind::PARTIAL,
+        Token::AtExport => SyntaxKind::AT_EXPORT,
+        Token::AtAttr => SyntaxKind::AT_ATTR,
+        // Multi-char operators
         Token::Define => SyntaxKind::DEFINE,
+        Token::TypeAnnot => SyntaxKind::TYPE_ANNOT,
+        Token::Arrow => SyntaxKind::ARROW,
+        Token::Pipe => SyntaxKind::PIPE,
+        Token::TripleOpen => SyntaxKind::TRIPLE_OPEN,
+        Token::TripleClose => SyntaxKind::TRIPLE_CLOSE,
+        Token::Eq => SyntaxKind::EQ,
+        Token::Neq => SyntaxKind::NEQ,
+        Token::Le => SyntaxKind::LE,
+        Token::Ge => SyntaxKind::GE,
+        // Single-char operators / punctuation
         Token::Assign => SyntaxKind::ASSIGN,
         Token::Colon => SyntaxKind::SHAPE_SEP,
         Token::Dot => SyntaxKind::DOT,
@@ -187,6 +213,15 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
         Token::RParen => SyntaxKind::RPAREN,
         Token::LBrace => SyntaxKind::LBRACE,
         Token::RBrace => SyntaxKind::RBRACE,
+        Token::Lt => SyntaxKind::LT,
+        Token::Gt => SyntaxKind::GT,
+        Token::Plus => SyntaxKind::PLUS,
+        Token::Minus => SyntaxKind::MINUS,
+        Token::Star => SyntaxKind::STAR,
+        Token::Slash => SyntaxKind::SLASH,
+        Token::Percent => SyntaxKind::PERCENT,
+        Token::Question => SyntaxKind::T_QUESTION,
+        Token::ShapeAnd => SyntaxKind::SHAPE_AND,
     }
 }
 
@@ -194,8 +229,8 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
 mod tests {
     use super::*;
     use crate::kind::SyntaxKind::{
-        ABS_IRI, ASSIGN, COMMENT, DEDENT, DOT, IDENT, INDENT, KW_PREFIX, NEWLINE, SHAPE_SEP,
-        WHITESPACE,
+        ABS_IRI, ASSIGN, COMMENT, DEDENT, DOT, IDENT, INDENT, KW_IRI, KW_PREFIX, NEWLINE,
+        SHAPE_SEP, WHITESPACE,
     };
 
     /// Filter trivia (whitespace / newlines / comments) from the token stream
@@ -216,10 +251,11 @@ mod tests {
 
     #[test]
     fn one_indent_one_dedent() {
+        // Phase 2: `iri` is now a reserved keyword (grammar.bnf KEYWORD list).
         let input = "User\n    iri = .id\n";
         assert_eq!(
             kinds(input),
-            vec![IDENT, INDENT, IDENT, ASSIGN, DOT, IDENT, DEDENT]
+            vec![IDENT, INDENT, KW_IRI, ASSIGN, DOT, IDENT, DEDENT]
         );
     }
 
@@ -234,11 +270,12 @@ mod tests {
 
     #[test]
     fn blank_line_does_not_affect_stack() {
+        // Phase 2: `iri` is now a reserved keyword (grammar.bnf KEYWORD list).
         let input = "User\n    iri = .id\n\n    name = .n\n";
         assert_eq!(
             kinds(input),
             vec![
-                IDENT, INDENT, IDENT, ASSIGN, DOT, IDENT, IDENT, ASSIGN, DOT, IDENT, DEDENT
+                IDENT, INDENT, KW_IRI, ASSIGN, DOT, IDENT, IDENT, ASSIGN, DOT, IDENT, DEDENT
             ]
         );
     }
