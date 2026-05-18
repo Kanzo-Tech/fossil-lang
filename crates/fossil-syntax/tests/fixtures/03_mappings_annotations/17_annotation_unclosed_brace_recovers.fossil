@@ -1,0 +1,3 @@
+prefix ex: <https://example.org/>
+User : ex:Person from users
+    ex:name = .name { ex:lang = "en"

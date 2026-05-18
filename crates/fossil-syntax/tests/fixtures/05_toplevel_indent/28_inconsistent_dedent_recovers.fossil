@@ -1,0 +1,3 @@
+User : ex:Person from users
+    iri = .id
+      ex:name = .name

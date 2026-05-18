@@ -1,0 +1,5 @@
+prefix ex: <https://example.org/>
+User : ex:Person from users
+    ex:name = .name { ex:lang = "en"
+Item : ex:Item from items
+    iri = .id
