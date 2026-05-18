@@ -20,6 +20,14 @@
 //! - [`check::typecheck_mapping`] no-op stub returning
 //!   `Result<(), ErrorGuaranteed>` (plan 02-05 migrated from the deleted
 //!   Phase 1 local taint-wrapper newtype).
+//! - [`check::compatible`] stub demonstrating Phase 3's two-span blame
+//!   pattern (plan 02-06) — pointer-equality only for Phase 2; Phase 3
+//!   wires real subtyping + facets.
+//! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`
+//!   per RESEARCH.md §Q5; [`provenance::expr_types`] populates the Phase 2
+//!   literal subset (`StringLit` / `Template` / `PrefixedName`); [`provenance::ty_origin`]
+//!   is the user-facing lookup returning `Option<ExprTypeEntry>` (per
+//!   planner checker Blocker 5 — tuples don't auto-impl `salsa::Update`).
 //!
 //! # Phase 2-9 contract (locked)
 //!
@@ -35,6 +43,7 @@ pub mod check;
 pub mod def_map;
 pub mod item_tree;
 pub mod lower;
+pub mod provenance;
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their
@@ -46,4 +55,7 @@ pub use body::{ExprId, HirBody};
 pub use def_map::{DefMap, MappingLoc, SourceLoc};
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
 pub use lower::{HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
+pub use provenance::{
+    ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
+};
 pub use ty::{FnSig, InferenceId, Primitive, Record, RecordField, ShapeId, Ty, TyKind};
