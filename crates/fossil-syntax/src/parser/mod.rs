@@ -25,6 +25,8 @@ use rowan::{GreenNode, GreenNodeBuilder, Language};
 use crate::indent::{LexedToken, lex_with_indents};
 use crate::kind::{FossilLang, SyntaxKind, SyntaxNode};
 
+pub mod diag;
+
 /// Salsa-storable handle to a parsed CST.
 ///
 /// Wraps a [`rowan::GreenNode`] (which is `Send + Sync` thanks to its internal

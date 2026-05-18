@@ -41,6 +41,29 @@ impl FossilDb {
             files: Files::default(),
         }
     }
+
+    /// Construct a `FossilDb` whose Salsa runtime invokes `callback` for
+    /// every `salsa::Event` emitted during query execution.
+    ///
+    /// Used by the invalidation regression test
+    /// (`crates/fossil-hir/tests/invalidation_regression.rs`, added in Wave 4
+    /// plan 02-07) to count `EventKind::WillExecute` events across an
+    /// edit-trigger boundary — see RESEARCH.md §Q8 and Phase 2 SC#2 (the
+    /// `≤4 re-executed queries after a body-only edit in 1-of-10 mappings`
+    /// gate).
+    ///
+    /// `FossilDb::new` remains the no-callback variant for everyday use.
+    #[must_use]
+    pub fn with_event_callback(
+        system: Arc<dyn System>,
+        callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static>,
+    ) -> Self {
+        Self {
+            storage: salsa::Storage::new(Some(callback)),
+            system,
+            files: Files::default(),
+        }
+    }
 }
 
 #[salsa::db]
@@ -54,5 +77,48 @@ impl Db for FossilDb {
 
     fn files(&self) -> &Files {
         &self.files
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::files::SourceFile;
+    use crate::system::NativeSystem;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Tracked helper that DOES fire a `WillExecute` event so the smoke test
+    /// can prove the registered callback is actually wired into the runtime.
+    /// Salsa input creation by itself does not emit a `WillExecute`; only
+    /// `#[salsa::tracked]` functions do. This helper is the minimum surface
+    /// that proves end-to-end wiring; Wave 4 (plan 02-07) builds the full
+    /// invalidation regression test atop the same constructor.
+    #[salsa::tracked]
+    fn _read_text(db: &dyn Db, file: SourceFile) -> String {
+        file.text(db).to_string()
+    }
+
+    #[test]
+    fn with_event_callback_constructs_a_db_and_fires_at_least_one_event() {
+        // Counter captured by the callback — the test asserts the Salsa
+        // runtime invoked the callback at least once during query execution.
+        let counter: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        let callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static> =
+            Box::new(move |_evt| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            });
+
+        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let db = FossilDb::with_event_callback(system, callback);
+        let file = SourceFile::new(&db, "x".to_string(), "x.fossil".to_string());
+        // Executing a tracked function flushes a `WillExecute` event through
+        // the registered callback.
+        let _ = _read_text(&db, file);
+
+        assert!(
+            counter.load(Ordering::SeqCst) > 0,
+            "no Salsa events fired through the registered callback"
+        );
     }
 }
