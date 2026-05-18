@@ -254,8 +254,7 @@ fn parse_primary(p: &mut Parser) {
             p.bump(); // DOT
             p.expect(SyntaxKind::IDENT);
             loop {
-                if p.current() == Some(SyntaxKind::DOT)
-                    && p.peek_kind(1) == Some(SyntaxKind::IDENT)
+                if p.current() == Some(SyntaxKind::DOT) && p.peek_kind(1) == Some(SyntaxKind::IDENT)
                 {
                     p.bump();
                     p.bump();
@@ -423,10 +422,7 @@ mod tests {
         let outer = node.first_child().expect("an expression child");
         assert_eq!(outer.kind(), SyntaxKind::TERNARY_EXPR);
         // The third child (else-branch) should itself be a TERNARY_EXPR.
-        let inner_else = outer
-            .children()
-            .nth(2)
-            .expect("an else-branch child node");
+        let inner_else = outer.children().nth(2).expect("an else-branch child node");
         assert_eq!(inner_else.kind(), SyntaxKind::TERNARY_EXPR);
     }
 

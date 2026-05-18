@@ -27,6 +27,11 @@ use crate::kind::{FossilLang, SyntaxKind, SyntaxNode};
 
 pub mod diag;
 pub(crate) mod expr;
+pub(crate) mod items;
+pub(crate) mod recover;
+
+use diag::ParseDiagnostic;
+use salsa::Accumulator;
 
 /// Salsa-storable handle to a parsed CST.
 ///
@@ -102,6 +107,13 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
     let tokens = lex_with_indents(text);
     let mut parser = Parser::new(tokens);
     parser.parse_program();
+    // RESEARCH.md §Q11: parser is pure (not Salsa-tracked), so it cannot
+    // call `.accumulate(db)` itself. Drain its internal `Vec<ParseDiagnostic>`
+    // here, inside the wrapping Salsa query, so each parse error reaches
+    // the host (CLI / LSP / WASM) via the `Diagnostic` accumulator.
+    for d in std::mem::take(&mut parser.diagnostics) {
+        d.to_diagnostic().accumulate(db);
+    }
     let green = parser.builder.finish();
     Cst::new(db, CstRoot::new(green))
 }
@@ -113,7 +125,13 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
 pub(crate) struct Parser {
     tokens: Vec<LexedToken>,
     pos: usize,
-    builder: GreenNodeBuilder<'static>,
+    pub(crate) builder: GreenNodeBuilder<'static>,
+    /// Parser-internal diagnostic queue. Drained by the wrapping `parse()`
+    /// Salsa query (RESEARCH.md §Q11) into the public `Diagnostic`
+    /// accumulator after CST construction. Public to `super::recover` and
+    /// `super::items` so the recovery helpers can push diagnostics without
+    /// going through a `impl Parser { … }` shim per call site.
+    pub(crate) diagnostics: Vec<ParseDiagnostic>,
 }
 
 impl Parser {
@@ -122,6 +140,7 @@ impl Parser {
             tokens,
             pos: 0,
             builder: GreenNodeBuilder::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -240,150 +259,43 @@ impl Parser {
         self.finish();
     }
 
+    /// Byte-offset start of the current non-trivia token, or end-of-input
+    /// span at EOF. Used by `recover::recover_to` and
+    /// `recover::expect_or_recover` to attach precise spans to
+    /// [`diag::ParseDiagnostic`]s.
+    pub(crate) fn current_token_span_start(&self) -> usize {
+        // Walk forward over trivia to find the current real token, mirroring
+        // `current()` / `peek_kind(0)` semantics. If nothing remains, fall
+        // back to the end of the input (well-defined for EOF diagnostics).
+        let mut i = self.pos;
+        while let Some(t) = self.tokens.get(i) {
+            if !matches!(
+                t.kind,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            ) {
+                return t.range.start;
+            }
+            i += 1;
+        }
+        self.tokens.last().map_or(0, |t| t.range.end)
+    }
+
+    /// Append a `ParseDiagnostic` to the parser's internal queue. Drained
+    /// by the wrapping Salsa `parse()` query (see `parse` above) into the
+    /// public `Diagnostic` accumulator after CST construction.
+    pub(crate) fn push_diagnostic(&mut self, d: ParseDiagnostic) {
+        self.diagnostics.push(d);
+    }
+
     // --- top-level -------------------------------------------------------
+    //
+    // Phase 2 plan 02-03 moved every per-item recursive-descent rule out of
+    // this file into `super::items`. `Parser::parse_program` stays as a
+    // thin shim so the unit tests inside this module (and the legacy
+    // `parse_text` helper) keep their original API surface.
 
     fn parse_program(&mut self) {
-        self.start(SyntaxKind::PROGRAM);
-        loop {
-            self.skip_trivia();
-            // Drop stray virtual tokens at the top level (DEDENTs after the
-            // last mapping reach here).
-            if matches!(
-                self.current(),
-                Some(SyntaxKind::INDENT | SyntaxKind::DEDENT)
-            ) {
-                self.bump();
-                continue;
-            }
-            match self.current() {
-                None => break,
-                Some(SyntaxKind::KW_PREFIX) => self.parse_prefix_decl(),
-                Some(SyntaxKind::IDENT) => match self.peek_kind(1) {
-                    Some(SyntaxKind::DEFINE) => self.parse_source_def(),
-                    Some(SyntaxKind::SHAPE_SEP) => self.parse_mapping(),
-                    _ => self.bump_as_error(),
-                },
-                _ => self.bump_as_error(),
-            }
-        }
-        self.finish();
-    }
-
-    // --- prefix decl -----------------------------------------------------
-
-    fn parse_prefix_decl(&mut self) {
-        self.start(SyntaxKind::PREFIX_DECL);
-        self.expect(SyntaxKind::KW_PREFIX);
-        self.expect(SyntaxKind::IDENT);
-        self.expect(SyntaxKind::SHAPE_SEP);
-        self.expect(SyntaxKind::ABS_IRI);
-        self.finish();
-    }
-
-    // --- source def ------------------------------------------------------
-
-    fn parse_source_def(&mut self) {
-        self.start(SyntaxKind::SOURCE_DEF);
-        self.expect(SyntaxKind::IDENT);
-        self.expect(SyntaxKind::DEFINE);
-        self.parse_call_expr();
-        self.finish();
-    }
-
-    fn parse_call_expr(&mut self) {
-        self.start(SyntaxKind::CALL_EXPR);
-        // Callee: IDENT (SHAPE_SEP IDENT)?  e.g. `io.csv` is parsed as
-        // IDENT DOT IDENT, but `io:csv` would be IDENT SHAPE_SEP IDENT.
-        // hello.fossil uses `io.csv("...")`, so accept the dotted form too.
-        self.expect(SyntaxKind::IDENT);
-        self.skip_trivia();
-        if matches!(
-            self.current(),
-            Some(SyntaxKind::DOT | SyntaxKind::SHAPE_SEP)
-        ) {
-            self.bump();
-            self.expect(SyntaxKind::IDENT);
-        }
-        self.expect(SyntaxKind::LPAREN);
-        self.expect(SyntaxKind::STRING);
-        self.expect(SyntaxKind::RPAREN);
-        self.finish();
-    }
-
-    // --- mapping ---------------------------------------------------------
-
-    fn parse_mapping(&mut self) {
-        self.start(SyntaxKind::MAPPING);
-        self.parse_mapping_header();
-        self.skip_trivia();
-        if self.current() == Some(SyntaxKind::INDENT) {
-            self.bump();
-            self.parse_mapping_body();
-            self.skip_trivia();
-            if self.current() == Some(SyntaxKind::DEDENT) {
-                self.bump();
-            }
-        }
-        self.finish();
-    }
-
-    fn parse_mapping_header(&mut self) {
-        // `User : ex:Person from users`
-        self.start(SyntaxKind::MAPPING_HEADER);
-        self.expect(SyntaxKind::IDENT); // User
-        self.expect(SyntaxKind::SHAPE_SEP); // :
-        self.expect(SyntaxKind::IDENT); // ex
-        self.expect(SyntaxKind::SHAPE_SEP); // :
-        self.expect(SyntaxKind::IDENT); // Person
-        self.expect(SyntaxKind::KW_FROM); // from
-        self.expect(SyntaxKind::IDENT); // users
-        self.finish();
-    }
-
-    fn parse_mapping_body(&mut self) {
-        self.start(SyntaxKind::MAPPING_BODY);
-        loop {
-            self.skip_trivia();
-            match self.current() {
-                // `iri` keyword OR a bare/prefixed IDENT starts a Property
-                // (grammar.bnf line 141: `PropertyLhs := 'iri' | IRIExpr`).
-                Some(SyntaxKind::IDENT | SyntaxKind::KW_IRI) => self.parse_property(),
-                _ => break,
-            }
-        }
-        self.finish();
-    }
-
-    fn parse_property(&mut self) {
-        self.start(SyntaxKind::PROPERTY);
-        self.parse_property_lhs();
-        self.skip_trivia();
-        self.expect(SyntaxKind::ASSIGN);
-        self.parse_expr();
-        self.finish();
-    }
-
-    fn parse_property_lhs(&mut self) {
-        self.start(SyntaxKind::PROPERTY_LHS);
-        self.skip_trivia();
-        match self.current() {
-            // `iri = ...` — the `iri` keyword as the PropertyLhs literal.
-            Some(SyntaxKind::KW_IRI) => self.bump(),
-            // Bare IDENT, optionally followed by `: IDENT` for a prefixed name.
-            Some(SyntaxKind::IDENT) => {
-                self.bump();
-                self.skip_trivia();
-                if self.current() == Some(SyntaxKind::SHAPE_SEP) {
-                    self.bump();
-                    self.expect(SyntaxKind::IDENT);
-                }
-            }
-            _ => {
-                // Wrong shape entirely — emit ERROR so the body loop can break.
-                self.bump_as_error();
-            }
-        }
-        self.finish();
+        items::parse_program(self);
     }
 
     // --- expressions -----------------------------------------------------

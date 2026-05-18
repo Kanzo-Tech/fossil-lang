@@ -103,22 +103,68 @@ fn lower_mapping_node(
         .children()
         .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?;
 
-    // Header tokens: `IDENT SHAPE_SEP IDENT SHAPE_SEP IDENT KW_FROM IDENT`
-    // (= 4 IDENTs in order: name, shape-prefix, shape-local, source-binding).
-    let header_idents: Vec<_> = header
+    // Phase 2 plan 02-03 wraps the header's shape and source in composite
+    // sub-nodes:
+    //
+    //   MAPPING_HEADER
+    //     IDENT "User"                      -- direct token: mapping name
+    //     SHAPE_SEP ":"
+    //     SHAPE_EXPR
+    //       IRI_EXPR
+    //         IDENT "ex" SHAPE_SEP ":" IDENT "Person"
+    //     (optional) IN_CLAUSE
+    //     KW_FROM "from"
+    //     EXPR
+    //       LITERAL_EXPR
+    //         IDENT "users"                 -- the from-source expression
+    //
+    // Phase 1's flat "first four IDENTs" shortcut no longer matches; walk the
+    // sub-nodes by kind to extract each header field cleanly.
+    let name = header
+        .children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .find(|t| t.kind() == SyntaxKind::IDENT)
+        .map(|t| SmolStr::from(t.text()))?;
+
+    // ShapeExpr → first IRI_EXPR → its (prefix-name, local-name) tokens. For
+    // the Phase 1 hello.fossil + Wave 1 fixtures this is the lexer-contiguous
+    // `IDENT SHAPE_SEP IDENT` shape; degenerate single-IDENT IRIExprs (from
+    // the recovery path) cause us to bail with `None` (Phase 3 promotes to
+    // a real diagnostic).
+    let shape_expr = header
+        .children()
+        .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)?;
+    let first_iri = shape_expr
+        .children()
+        .find(|c| c.kind() == SyntaxKind::IRI_EXPR)?;
+    let iri_idents: Vec<_> = first_iri
         .children_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
         .filter(|t| t.kind() == SyntaxKind::IDENT)
         .collect();
-    if header_idents.len() < 4 {
+    if iri_idents.len() < 2 {
         return None;
     }
-    let name = SmolStr::from(header_idents[0].text());
-    let shape_prefix_name = header_idents[1].text();
-    let shape_local = header_idents[2].text();
-    let source_binding = SmolStr::from(header_idents[3].text());
+    let shape_prefix_name = iri_idents[0].text();
+    let shape_local = iri_idents[1].text();
     let shape_prefix_iri = lookup_prefix(prefixes, shape_prefix_name)?;
     let shape_iri = SmolStr::from(format!("{shape_prefix_iri}{shape_local}"));
+
+    // Source binding: the EXPR after `from`. For Phase 1's hello.fossil the
+    // expression is a bare IDENT primary (`users`), surfacing as
+    // `EXPR > LITERAL_EXPR > IDENT`. Recover from the EXPR's first IDENT
+    // descendant; falls back to the legacy direct-IDENT shape so any other
+    // header form keeps working.
+    let source_binding = header
+        .children()
+        .find(|c| c.kind() == SyntaxKind::EXPR)
+        .and_then(|expr_node| {
+            expr_node
+                .descendants_with_tokens()
+                .filter_map(fossil_syntax::SyntaxElement::into_token)
+                .find(|t| t.kind() == SyntaxKind::IDENT)
+        })
+        .map(|t| SmolStr::from(t.text()))?;
 
     let mut properties = Vec::new();
     for prop_node in body.children().filter(|c| c.kind() == SyntaxKind::PROPERTY) {
@@ -141,13 +187,17 @@ fn lower_property(
 ) -> Option<HirProperty> {
     use fossil_syntax::SyntaxKind;
 
-    // PropertyLhs: either bare IDENT (e.g. `iri`) or
-    // `IDENT SHAPE_SEP IDENT` (e.g. `ex:name`).
+    // PropertyLhs: per Phase 2 grammar.bnf line 141, `PropertyLhs := 'iri' | IRIExpr`.
+    // The KW_IRI literal is a direct token child of PROPERTY_LHS; a prefixed
+    // name is wrapped in an `IRI_EXPR` sub-node (parser plan 02-03). Walk both
+    // forms by collecting all IDENT-or-KW_IRI tokens from descendants.
     let lhs_node = node
         .children()
         .find(|c| c.kind() == SyntaxKind::PROPERTY_LHS)?;
+    // Use `descendants_with_tokens` so IRI_EXPR-wrapped IDENT/SHAPE_SEP tokens
+    // are still discoverable. Skip trivia.
     let lhs_toks: Vec<_> = lhs_node
-        .children_with_tokens()
+        .descendants_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
         .filter(|t| {
             !matches!(
@@ -157,7 +207,9 @@ fn lower_property(
         })
         .collect();
 
-    let key = if lhs_toks.len() == 1 && lhs_toks[0].text() == "iri" {
+    let key = if lhs_toks.len() == 1
+        && (lhs_toks[0].kind() == SyntaxKind::KW_IRI || lhs_toks[0].text() == "iri")
+    {
         PropertyKey::Iri
     } else if lhs_toks.len() == 3 && lhs_toks[1].kind() == SyntaxKind::SHAPE_SEP {
         let prefix = lhs_toks[0].text();

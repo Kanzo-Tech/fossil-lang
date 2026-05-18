@@ -10,6 +10,12 @@
 //! `syntax()` so consumers can drop down to the lossless tree when needed
 //! (offsets, trivia, error recovery in later phases).
 
+pub mod items;
+pub use items::{
+    AnnotationBlock, Definition, ExportedDefinition, Import, InClause, IriExpr, RecordLiteral,
+    ShapeExpr,
+};
+
 use crate::kind::{SyntaxKind, SyntaxNode};
 
 macro_rules! ast_node {
@@ -95,5 +101,40 @@ impl Mapping {
 impl MappingBody {
     pub fn properties(&self) -> impl Iterator<Item = Property> {
         self.0.children().filter_map(Property::cast)
+    }
+}
+
+impl MappingHeader {
+    /// The header's mapping name (the `IDENT` immediately before the
+    /// `SHAPE_SEP` — `User` in `User : ex:Person from users`).
+    #[must_use]
+    pub fn name(&self) -> Option<smol_str::SmolStr> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::IDENT)
+            .map(|t| smol_str::SmolStr::from(t.text()))
+    }
+
+    /// The header's `ShapeExpr` (`ex:Person` or `ex:Person & ex:Employee`).
+    /// Plan 02-04's `ItemTree` consumes this to build `Mapping.shape_id`.
+    #[must_use]
+    pub fn shape_expr(&self) -> Option<items::ShapeExpr> {
+        self.0.children().find_map(items::ShapeExpr::cast)
+    }
+
+    /// The optional `in <IriExpr>` clause (`in ex:Graph`).
+    #[must_use]
+    pub fn in_clause(&self) -> Option<items::InClause> {
+        self.0.children().find_map(items::InClause::cast)
+    }
+
+    /// The expression on the right of `from` — the source-binding
+    /// reference (`users` in the Phase 1 hello.fossil case). Returned as a
+    /// raw [`SyntaxNode`] kept at `EXPR` kind because the upstream Pratt
+    /// parser already wraps every right-hand side in an EXPR composite.
+    #[must_use]
+    pub fn source_expr(&self) -> Option<SyntaxNode> {
+        self.0.children().find(|c| c.kind() == SyntaxKind::EXPR)
     }
 }

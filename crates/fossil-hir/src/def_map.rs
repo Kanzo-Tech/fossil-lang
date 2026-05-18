@@ -91,7 +91,22 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
     let mut sources: Vec<SourceEntry<'db>> = Vec::new();
     let mut mappings: Vec<MappingLoc<'db>> = Vec::new();
 
-    for (idx, item) in cst.root(db).syntax().children().enumerate() {
+    // Per-kind dense indices. Plan 02-03 §"def_map.rs" requires mapping
+    // indexing among MAPPING-kind children only — Plan 02-04 keys its
+    // `body(mapping)` Salsa query on `MappingLoc`, and the Salsa-invalidation
+    // story is cleanest when adding an unrelated `prefix` or `source_def` to
+    // the file does NOT shift every downstream mapping's `index` (and hence
+    // its interned `MappingLoc`). The mir lowering (`fossil-mir::lower`) used
+    // to recover the dense index from `def_map.mappings()`; with dense
+    // indexing the recovery step becomes trivial (`loc.index(db)` is the
+    // dense index directly).
+    //
+    // SOURCE_DEF indexing follows the same per-kind dense scheme for
+    // symmetry; no current downstream consumer depends on the all-children
+    // index space for SOURCE_DEF either.
+    let mut mapping_idx = 0usize;
+    let mut source_idx = 0usize;
+    for item in cst.root(db).syntax().children() {
         use fossil_syntax::SyntaxKind;
         match item.kind() {
             SyntaxKind::PREFIX_DECL => {
@@ -103,12 +118,14 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 if let Some(name) = parse_source_name(&item) {
                     sources.push(SourceEntry {
                         name,
-                        loc: SourceLoc::new(db, file, idx),
+                        loc: SourceLoc::new(db, file, source_idx),
                     });
+                    source_idx += 1;
                 }
             }
             SyntaxKind::MAPPING => {
-                mappings.push(MappingLoc::new(db, file, idx));
+                mappings.push(MappingLoc::new(db, file, mapping_idx));
+                mapping_idx += 1;
             }
             _ => {}
         }
@@ -191,9 +208,9 @@ User : ex:Person from users
         let (db, file) = db_with_hello();
         let dm = def_map(&db, file);
         let src = dm.lookup_source(&db, "users").unwrap();
-        // `index` maps back to the SOURCE_DEF position among top-level
-        // CST children: PREFIX_DECL=0, SOURCE_DEF=1, MAPPING=2.
-        assert_eq!(src.index(&db), 1);
+        // Plan 02-03: per-kind dense indexing. `users` is the only
+        // SOURCE_DEF in hello.fossil, so its dense index is 0.
+        assert_eq!(src.index(&db), 0);
         assert_eq!(src.file(&db), file);
     }
 
@@ -203,7 +220,10 @@ User : ex:Person from users
         let dm = def_map(&db, file);
         let mappings = dm.mappings(&db);
         assert_eq!(mappings.len(), 1);
-        assert_eq!(mappings[0].index(&db), 2);
+        // Plan 02-03: per-kind dense indexing. `User` is the only MAPPING
+        // in hello.fossil, so its dense index is 0 (was 2 under the
+        // legacy all-children index space).
+        assert_eq!(mappings[0].index(&db), 0);
         assert_eq!(mappings[0].file(&db), file);
     }
 
