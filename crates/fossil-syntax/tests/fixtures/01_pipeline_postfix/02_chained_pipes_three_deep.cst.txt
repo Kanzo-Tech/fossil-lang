@@ -1,1 +1,57 @@
-PLACEHOLDER — Wave 1 wires fossil_syntax::parse
+PROGRAM
+  MAPPING
+    MAPPING_HEADER
+      IDENT "User"
+      SHAPE_SEP ":"
+      IDENT "ex"
+      SHAPE_SEP ":"
+      IDENT "Person"
+      KW_FROM "from"
+      IDENT "users"
+    MAPPING_BODY
+      PROPERTY
+        PROPERTY_LHS
+          KW_IRI "iri"
+        ASSIGN "="
+        EXPR
+          PIPELINE_EXPR
+            PIPELINE_EXPR
+              PIPELINE_EXPR
+                LITERAL_EXPR
+                  IDENT "users"
+                PIPE "|>"
+                POSTFIX_EXPR
+                  LITERAL_EXPR
+                    IDENT "filter"
+                  LPAREN "("
+                  ARG_LIST
+                    ARG
+                      BINARY_EXPR
+                        FIELD_REF_EXPR
+                          DOT "."
+                          IDENT "age"
+                        GE ">="
+                        LITERAL_EXPR
+                          INTEGER "18"
+                  RPAREN ")"
+              PIPE "|>"
+              POSTFIX_EXPR
+                LITERAL_EXPR
+                  IDENT "map"
+                LPAREN "("
+                ARG_LIST
+                  ARG
+                    FIELD_REF_EXPR
+                      DOT "."
+                      IDENT "name"
+                RPAREN ")"
+            PIPE "|>"
+            POSTFIX_EXPR
+              LITERAL_EXPR
+                IDENT "sort"
+              LPAREN "("
+              ARG_LIST
+                ARG
+                  PARTIAL_EXPR
+                    PARTIAL "_"
+              RPAREN ")"

@@ -36,10 +36,16 @@ use super::Parser;
 /// outer level wants control back).
 type Bp = u8;
 
+/// Associativity tag returned alongside binding-power. Left- and
+/// right-associativity are encoded structurally in the `(lbp, rbp)` pair
+/// (`rbp = lbp+1` for left, `rbp = lbp-1` for right) so the enum only
+/// needs to distinguish "non-assoc" from "associative" for the chain-
+/// rejection latch.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Assoc {
-    Left,
-    Right,
+    /// Left- or right-associative — distinguished by the `rbp` relation.
+    Assoc,
+    /// Non-associative (the L5 comparison operators in grammar.bnf).
     Non,
 }
 
@@ -109,11 +115,11 @@ fn peek_infix(p: &Parser) -> Option<(Bp, Bp, Assoc, SyntaxKind)> {
     let k = p.current()?;
     Some(match k {
         // L1
-        SyntaxKind::PIPE => (1, 2, Assoc::Left, SyntaxKind::PIPELINE_EXPR),
+        SyntaxKind::PIPE => (1, 2, Assoc::Assoc, SyntaxKind::PIPELINE_EXPR),
         // L3
-        SyntaxKind::KW_OR => (5, 6, Assoc::Left, SyntaxKind::BINARY_EXPR),
+        SyntaxKind::KW_OR => (5, 6, Assoc::Assoc, SyntaxKind::BINARY_EXPR),
         // L4
-        SyntaxKind::KW_AND => (7, 8, Assoc::Left, SyntaxKind::BINARY_EXPR),
+        SyntaxKind::KW_AND => (7, 8, Assoc::Assoc, SyntaxKind::BINARY_EXPR),
         // L5 (non-associative)
         SyntaxKind::EQ
         | SyntaxKind::NEQ
@@ -122,10 +128,10 @@ fn peek_infix(p: &Parser) -> Option<(Bp, Bp, Assoc, SyntaxKind)> {
         | SyntaxKind::GT
         | SyntaxKind::GE => (9, 10, Assoc::Non, SyntaxKind::BINARY_EXPR),
         // L6
-        SyntaxKind::PLUS | SyntaxKind::MINUS => (11, 12, Assoc::Left, SyntaxKind::BINARY_EXPR),
+        SyntaxKind::PLUS | SyntaxKind::MINUS => (11, 12, Assoc::Assoc, SyntaxKind::BINARY_EXPR),
         // L7
         SyntaxKind::STAR | SyntaxKind::SLASH | SyntaxKind::PERCENT => {
-            (13, 14, Assoc::Left, SyntaxKind::BINARY_EXPR)
+            (13, 14, Assoc::Assoc, SyntaxKind::BINARY_EXPR)
         }
         _ => return None,
     })

@@ -1,1 +1,22 @@
-PLACEHOLDER — Wave 1 wires fossil_syntax::parse
+PROGRAM
+  PREFIX_DECL
+    KW_PREFIX "prefix"
+    IDENT "ex"
+    SHAPE_SEP ":"
+    ABS_IRI "<https://example.org/>"
+  MAPPING
+    MAPPING_HEADER
+      IDENT "User"
+      SHAPE_SEP ":"
+      IDENT "ex"
+      SHAPE_SEP ":"
+      IDENT "Person"
+      ERROR
+      ERROR
+        KW_IRI "iri"
+  ERROR
+    ASSIGN "="
+  ERROR
+    DOT "."
+  ERROR
+    IDENT "id"

@@ -1,1 +1,23 @@
-PLACEHOLDER — Wave 1 wires fossil_syntax::parse
+PROGRAM
+  ERROR
+    AT_EXPORT "@export"
+  ERROR
+    IDENT "f"
+  ERROR
+    TYPE_ANNOT "::"
+  ERROR
+    IDENT "String"
+  ERROR
+    ARROW "->"
+  ERROR
+    IDENT "Iri"
+  SOURCE_DEF
+    IDENT "f"
+    DEFINE ":="
+    CALL_EXPR
+      ERROR
+        KW_IRI "iri"
+      LPAREN "("
+      ERROR
+        PARTIAL "_"
+      RPAREN ")"

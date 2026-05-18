@@ -1,30 +1,56 @@
 //! 30-fixture parser corpus driver — per RESEARCH.md §Q10.
 //!
 //! Each fixture pairs a `.fossil` source file with a `.cst.txt` snapshot.
-//! Wave 0 ships placeholder snapshots; Waves 1-3 fill them in via
-//! `UPDATE_EXPECT=1 cargo test -p fossil-syntax --test parse_corpus`.
+//! Wave 0 (plan 02-01) shipped placeholder snapshots that Wave 1 plans
+//! (02-02 + 02-03) regenerate via `UPDATE_EXPECT=1`.
 //!
 //! Per CLAUDE.md Style: parser CSTs use `expect-test` (NOT `insta`).
-//!
-//! ## How `parse_to_cst_text` will evolve
-//!
-//! Wave 0: returns the placeholder string. Tests are "string identity" gates
-//! that prove the macro table, the bucket layout, and the snapshot pairing
-//! are all wired correctly.
-//!
-//! Wave 1 (plan 02-02 + 02-03): builds a minimal `FossilDb`, calls
-//! `fossil_syntax::parse`, then walks the `SyntaxNode` emitting a debug-format
-//! tree. The snapshot files are regenerated via `UPDATE_EXPECT=1`.
+
+use std::sync::Arc;
 
 use expect_test::expect_file;
+use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_syntax::{SyntaxKind, SyntaxNode, parse};
 
-/// Render the parse result as a debug-format tree the snapshot files can
-/// compare against. Placeholder pending Wave 1.
-fn parse_to_cst_text(_src: &str) -> String {
-    // Wave 1 (plan 02-02): build a FossilDb + SourceFile, call parse,
-    // walk the SyntaxNode emitting `format!("{kind:?}")` per node with
-    // 2-space indent; return the rendered tree as a String.
-    "PLACEHOLDER — Wave 1 wires fossil_syntax::parse".to_string()
+/// Build a minimal Salsa db, run the parser, render the resulting CST as
+/// a debug-format tree the snapshot files can compare against.
+fn parse_to_cst_text(src: &str) -> String {
+    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
+    let cst = parse(&db, file);
+    render_node(&cst.root(&db).syntax(), 0)
+}
+
+/// Recursively render a `SyntaxNode` with 2-space indentation per depth,
+/// dropping trivia (WHITESPACE / NEWLINE / COMMENT / INDENT / DEDENT) for
+/// snapshot stability — incidental whitespace would make snapshots brittle.
+fn render_node(node: &SyntaxNode, depth: usize) -> String {
+    let mut out = String::new();
+    let pad = "  ".repeat(depth);
+    out.push_str(&format!("{pad}{:?}\n", node.kind()));
+    for child in node.children_with_tokens() {
+        match child {
+            rowan::NodeOrToken::Node(n) => {
+                out.push_str(&render_node(&n, depth + 1));
+            }
+            rowan::NodeOrToken::Token(t) => {
+                if matches!(
+                    t.kind(),
+                    SyntaxKind::WHITESPACE
+                        | SyntaxKind::NEWLINE
+                        | SyntaxKind::COMMENT
+                        | SyntaxKind::INDENT
+                        | SyntaxKind::DEDENT
+                ) {
+                    continue;
+                }
+                let pad = "  ".repeat(depth + 1);
+                out.push_str(&format!("{pad}{:?} {:?}\n", t.kind(), t.text()));
+            }
+        }
+    }
+    out
 }
 
 macro_rules! fixture_test {

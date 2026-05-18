@@ -1,1 +1,19 @@
-PLACEHOLDER — Wave 1 wires fossil_syntax::parse
+PROGRAM
+  ERROR
+    KW_USE "use"
+  ERROR
+    IDENT "stdlib"
+  ERROR
+    SLASH "/"
+  ERROR
+    IDENT "seq"
+  ERROR
+    LBRACE "{"
+  ERROR
+    IDENT "filter"
+  ERROR
+    COMMA ","
+  ERROR
+    IDENT "map"
+  ERROR
+    RBRACE "}"

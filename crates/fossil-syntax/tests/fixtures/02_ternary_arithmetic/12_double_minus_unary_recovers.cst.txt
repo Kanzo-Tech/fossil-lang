@@ -1,1 +1,22 @@
-PLACEHOLDER — Wave 1 wires fossil_syntax::parse
+PROGRAM
+  MAPPING
+    MAPPING_HEADER
+      IDENT "User"
+      SHAPE_SEP ":"
+      IDENT "ex"
+      SHAPE_SEP ":"
+      IDENT "Person"
+      KW_FROM "from"
+      IDENT "users"
+    MAPPING_BODY
+      PROPERTY
+        PROPERTY_LHS
+          KW_IRI "iri"
+        ASSIGN "="
+        EXPR
+          UNARY_EXPR
+            MINUS "-"
+            UNARY_EXPR
+              MINUS "-"
+              LITERAL_EXPR
+                IDENT "x"
