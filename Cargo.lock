@@ -916,6 +916,10 @@ name = "fossil-ide"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
+ "fossil-hir",
+ "fossil-syntax",
+ "rowan",
+ "salsa",
 ]
 
 [[package]]
@@ -927,6 +931,8 @@ name = "fossil-lsp"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "fossil-base",
+ "fossil-ide",
  "lsp-server",
  "lsp-types",
  "serde",

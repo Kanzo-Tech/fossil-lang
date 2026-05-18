@@ -16,10 +16,12 @@ name = "fossil-lsp"
 path = "src/main.rs"
 
 [dependencies]
-# Phase 1 LSP scope (per ADR-0001, NOT tower-lsp): wires the LSP transport from
-# day 1 (no fase-4 trap) but ships zero compiler features. Phase 6 LSP-01 adds
-# fossil-base/fossil-syntax/fossil-hir deps when real diagnostics replace the
-# empty-array stub.
+# Phase 1 LSP scope (per ADR-0001, NOT tower-lsp): wired the LSP transport from
+# day 1 (no fase-4 trap) but shipped zero compiler features. Phase 2 plan 02-06
+# adds fossil-base + fossil-ide for the minimum hover delta. Phase 6 LSP-01
+# grows the full provider surface.
+fossil-base        = { path = "../fossil-base" }
+fossil-ide         = { path = "../fossil-ide" }
 lsp-server         = { workspace = true }
 lsp-types          = { workspace = true }
 crossbeam-channel  = { workspace = true }

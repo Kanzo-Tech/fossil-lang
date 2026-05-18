@@ -77,7 +77,10 @@ pub struct Provenance {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum ProvenanceKind {
     /// Type came from an input source descriptor (e.g. a CSVW column).
-    InputDescriptor { source_name: SmolStr, column: SmolStr },
+    InputDescriptor {
+        source_name: SmolStr,
+        column: SmolStr,
+    },
     /// Type came from an output shape descriptor (e.g. a `ShEx` property
     /// shape).
     OutputDescriptor {
@@ -134,10 +137,7 @@ pub struct ExprTypeEntry<'db> {
 /// `expr_count` advancement in [`crate::body::body`].
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
-pub fn expr_types<'db>(
-    db: &'db dyn fossil_base::Db,
-    mapping: MappingLoc<'db>,
-) -> ExprTypes<'db> {
+pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
     let hir_body = body(db, mapping);
     let properties = hir_body.properties(db);
     let mut entries: Vec<ExprTypeEntry<'db>> = Vec::new();
@@ -320,4 +320,3 @@ User : ex:Person from users
         assert_eq!(a, b);
     }
 }
-

@@ -5,8 +5,18 @@
 //! can `use fossil_ide::Analysis;` without a churn commit when feature work
 //! lands.
 //!
-//! Phase 6 LSP-01 wires:
-//!   - hover (bidirectional: source-side + target-side types)
+//! Phase 2 plan 02-06 (this plan) lands the minimum hover bridge:
+//!
+//! - [`position`]: LSP `(line, character)` → byte offset → `SyntaxToken` /
+//!   `SyntaxNode`. Memoised line-offset table via Salsa-tracked
+//!   [`position::line_offsets`].
+//! - [`hover`]: walks position → enclosing PROPERTY → enclosing MAPPING →
+//!   `MappingLoc` (per ADR-0005 filter-then-nth) → `ExprId` →
+//!   [`fossil_hir::provenance::ty_origin`] → Markdown. Destructures
+//!   `ExprTypeEntry` (not a tuple) per planner checker Blocker 5.
+//!
+//! Phase 6 LSP-01 grows the rest of the surface:
+//!   - bidirectional hover (source-side + target-side types)
 //!   - goto-def (prefixes, mappings, functions, shape refs cross-file)
 //!   - completion (stdlib + prefixes + shape properties; gleam-lsp
 //!     auto-import pattern)
@@ -15,9 +25,21 @@
 //!   - semantic tokens (Monaco depends on this)
 //!   - document outline (textDocument/documentSymbol)
 
-/// IDE analysis entry point. Phase 1 ships only [`Self::diagnostics`].
-/// Phase 6 LSP-01 grows the surface with `hover`, `completion`, `goto_def`,
-/// `code_actions`, `semantic_tokens`, `document_symbols`.
+pub mod hover;
+pub mod position;
+
+pub use hover::{HoverInfo, hover};
+pub use position::{
+    LineOffsets, line_offsets, node_at_position, position_to_offset, token_at_position,
+};
+
+/// IDE analysis entry point.
+///
+/// Phase 1 shipped only [`Self::diagnostics`]; Phase 2 plan 02-06 adds the
+/// free-function [`hover`] surface (not a method on `Analysis` because the
+/// Salsa db is passed in directly — rust-analyzer pattern). Phase 6 LSP-01
+/// grows `completion`, `goto_def`, `code_actions`, `semantic_tokens`,
+/// `document_symbols`.
 #[derive(Debug, Default)]
 pub struct Analysis;
 

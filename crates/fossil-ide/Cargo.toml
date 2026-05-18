@@ -12,4 +12,11 @@ description = "Analysis API: hover, goto-def, completion, code actions"
 workspace = true
 
 [dependencies]
+# Plan 02-06 (Phase 2 plan-06): hover handler needs Salsa db (fossil-base),
+# CST + SyntaxNode/SyntaxToken (fossil-syntax), Ty + ty_origin Salsa query
+# (fossil-hir), and rowan::TextSize for byte-offset lookups.
 fossil-base = { path = "../fossil-base" }
+fossil-syntax = { path = "../fossil-syntax" }
+fossil-hir = { path = "../fossil-hir" }
+rowan = { workspace = true }
+salsa = { workspace = true }

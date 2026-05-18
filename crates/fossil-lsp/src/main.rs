@@ -1,14 +1,18 @@
-//! `fossil-lsp` — Phase 1 stub Language Server.
+//! `fossil-lsp` — Phase 1 stub + Phase 2 plan 02-06 hover delta.
 //!
 //! Wires the LSP transport from day 1 (per ROADMAP.md Phase 1 success
 //! criterion #4 + RESEARCH.md commit #9 of 10) so Fossil avoids the fase-4
 //! trap that killed the predecessor project. The dispatch loop responds to:
 //!
-//! - `initialize` → [`ServerCapabilities`] advertising `TextDocumentSync::FULL`.
-//! - `textDocument/didOpen` → emits an empty
-//!   `textDocument/publishDiagnostics`.
-//! - `textDocument/didChange` → emits an empty
-//!   `textDocument/publishDiagnostics`.
+//! - `initialize` → [`ServerCapabilities`] advertising `TextDocumentSync::FULL`
+//!   AND `hover_provider: Simple(true)` (Phase 2 plan 02-06 delta).
+//! - `textDocument/didOpen` → records `(uri, SourceFile)` in the per-process
+//!   state map AND emits an empty `textDocument/publishDiagnostics`.
+//! - `textDocument/didChange` → re-records the buffer (full-sync model)
+//!   AND emits an empty `publishDiagnostics`.
+//! - `textDocument/hover` → routes to [`fossil_ide::hover`]; renders the
+//!   returned [`fossil_ide::HoverInfo`] as `Hover { contents: Markdown,
+//!   range: Some(...) }` (Phase 2 plan 02-06).
 //! - `shutdown` (request) → handled by `Connection::handle_shutdown`.
 //! - `exit` (notification) → `Connection::handle_shutdown` returns the
 //!   request side; the matching `exit` notification is what closes the
@@ -17,9 +21,8 @@
 //!
 //! Phase 6 LSP-01 replaces the empty-diagnostics stub with the real
 //! `parse → def_map → typecheck → diagnostics` pipeline, wires Salsa
-//! cancellation on every `didChange`, and adds the hover/goto-def/completion
-//! providers. Phase 1 deliberately ships zero compiler features so the LSP
-//! transport itself is exercised before any real workload lands on it.
+//! cancellation on every `didChange`, and adds the goto-def + completion
+//! providers (hover already lives here as of plan 02-06).
 //!
 //! Per ADR-0001 (`lsp-server`, NOT `tower-lsp`) and CLAUDE.md "Hard Rules"
 //! (`fossil-lsp` is native-only). The dispatch loop pattern is derived from
@@ -32,15 +35,61 @@ compile_error!(
      the playground exposes LSP features via fossil-wasm directly, not through this binary"
 );
 
+use std::collections::HashMap;
+use std::error::Error;
+use std::sync::Arc;
+
+use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use lsp_server::{Connection, ErrorCode, ExtractError, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidOpenTextDocument, Notification as _, PublishDiagnostics,
 };
+use lsp_types::request::{HoverRequest, Request as _};
 use lsp_types::{
-    PublishDiagnosticsParams, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
-    Uri,
+    Hover, HoverContents, HoverProviderCapability, MarkupContent, MarkupKind, Position,
+    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Uri,
 };
-use std::error::Error;
+
+/// Per-process server state. Holds the Salsa db + the open-file table
+/// (URI → `SourceFile` interned id) needed by hover to look up the file's
+/// CST / `MappingLoc`s.
+///
+/// Phase 1 had no state because the only handlers were stateless ack-with-
+/// empty-diagnostics. Phase 2 plan 02-06's hover handler needs both the db
+/// (to run the `ty_origin` Salsa query) and the URI→SourceFile mapping
+/// (populated by didOpen / refreshed by didChange).
+struct LspState {
+    db: FossilDb,
+    /// Open-document table. URIs are owned by `lsp_types::Uri` so we can
+    /// hash by the wrapped string representation.
+    files: HashMap<String, SourceFile>,
+}
+
+impl LspState {
+    fn new() -> Self {
+        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        Self {
+            db: FossilDb::new(system),
+            files: HashMap::new(),
+        }
+    }
+
+    /// Record a file's text content; subsequent invocations on the same URI
+    /// re-intern a fresh `SourceFile` (full-sync model — Phase 6 LSP-01
+    /// switches to incremental sync with text edits).
+    fn upsert(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
+        let file = SourceFile::new(&self.db, text, path);
+        self.files.insert(uri.as_str().to_string(), file);
+        file
+    }
+
+    /// Look up a previously-opened file. Returns `None` if the client
+    /// hovers before sending `didOpen` (Phase 2 hover then silently no-ops).
+    fn get(&self, uri: &Uri) -> Option<SourceFile> {
+        self.files.get(uri.as_str()).copied()
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     init_tracing();
@@ -50,8 +99,10 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     let capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
-        // Phase 6 LSP-01 adds: hover_provider, definition_provider,
-        // completion_provider, semantic_tokens_provider, …
+        // Phase 2 plan 02-06 delta: advertise hover.
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        // Phase 6 LSP-01 adds: definition_provider, completion_provider,
+        // semantic_tokens_provider, …
         ..ServerCapabilities::default()
     };
     let server_capabilities = serde_json::to_value(&capabilities)?;
@@ -117,16 +168,17 @@ fn main_loop(
     connection: Connection,
     _initialization_params: &serde_json::Value,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
+    let mut state = LspState::new();
     for msg in &connection.receiver {
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                respond_method_not_found(&connection, req)?;
+                handle_request(&connection, &state, req)?;
             }
             Message::Notification(notif) => {
-                handle_notification(&connection, notif)?;
+                handle_notification(&connection, &mut state, notif)?;
             }
             Message::Response(_) => {
                 // Phase 1: server doesn't initiate any request, so an
@@ -139,8 +191,68 @@ fn main_loop(
     Ok(())
 }
 
-/// Respond with `MethodNotFound` to any request the Phase 1 stub doesn't
-/// implement. Phase 6 LSP-01 replaces individual arms (hover, definition,
+/// Dispatch a request. Phase 2 plan 02-06 implements `textDocument/hover`
+/// via [`fossil_ide::hover`]; everything else falls through to
+/// [`respond_method_not_found`].
+fn handle_request(
+    connection: &Connection,
+    state: &LspState,
+    req: Request,
+) -> Result<(), Box<dyn Error + Sync + Send>> {
+    if req.method == HoverRequest::METHOD {
+        let req_id = req.id.clone();
+        let params: lsp_types::HoverParams =
+            match req.extract::<lsp_types::HoverParams>(HoverRequest::METHOD) {
+                Ok((_, p)) => p,
+                Err(e) => {
+                    tracing::warn!("hover params decode failed: {e:?}");
+                    send_null_response(connection, req_id)?;
+                    return Ok(());
+                }
+            };
+        let uri = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let Some(file) = state.get(uri) else {
+            tracing::debug!("hover on unknown uri {}; responding null", uri.as_str());
+            send_null_response(connection, req_id)?;
+            return Ok(());
+        };
+        let info = fossil_ide::hover(&state.db, file, pos.line, pos.character);
+        let response_payload = info.map(|hi| Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: hi.markdown,
+            }),
+            range: Some(byte_range_to_lsp_range(&state.db, file, hi.range)),
+        });
+        let resp = Response {
+            id: req_id,
+            result: Some(serde_json::to_value(&response_payload)?),
+            error: None,
+        };
+        connection.sender.send(Message::Response(resp))?;
+        return Ok(());
+    }
+    respond_method_not_found(connection, req)
+}
+
+/// Send `Response { result: null }` for a Request we couldn't fulfil but
+/// don't want to error on (per LSP spec — hover MAY return null).
+fn send_null_response(
+    connection: &Connection,
+    req_id: lsp_server::RequestId,
+) -> Result<(), Box<dyn Error + Sync + Send>> {
+    let resp = Response {
+        id: req_id,
+        result: Some(serde_json::Value::Null),
+        error: None,
+    };
+    connection.sender.send(Message::Response(resp))?;
+    Ok(())
+}
+
+/// Respond with `MethodNotFound` to any request the Phase 1/2 stub doesn't
+/// implement. Phase 6 LSP-01 replaces individual arms (definition,
 /// completion, …) before falling back here.
 fn respond_method_not_found(
     connection: &Connection,
@@ -152,7 +264,7 @@ fn respond_method_not_found(
         result: None,
         error: Some(lsp_server::ResponseError {
             code: ErrorCode::MethodNotFound as i32,
-            message: format!("not implemented in Phase 1: {}", req.method),
+            message: format!("not implemented yet: {}", req.method),
             data: None,
         }),
     };
@@ -161,8 +273,9 @@ fn respond_method_not_found(
 }
 
 /// Dispatch a notification. Handles `textDocument/didOpen` and
-/// `textDocument/didChange` by acknowledging with an **empty diagnostics**
-/// publish; ignores everything else (logged at `debug`).
+/// `textDocument/didChange` by recording the buffer in state + acknowledging
+/// with an **empty diagnostics** publish; ignores everything else (logged
+/// at `debug`).
 ///
 /// The `exit` notification is NOT handled here — `Connection::handle_shutdown`
 /// owns the shutdown request, and `exit` is what the client sends to close
@@ -171,18 +284,28 @@ fn respond_method_not_found(
 /// `Connection::stdio` IO-thread shutdown semantics.)
 fn handle_notification(
     connection: &Connection,
+    state: &mut LspState,
     notif: Notification,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
     match notif.method.as_str() {
         DidOpenTextDocument::METHOD => {
             let params = cast_notif::<DidOpenTextDocument>(notif)?;
-            let uri = params.text_document.uri;
+            let uri = params.text_document.uri.clone();
+            let text = params.text_document.text;
             tracing::debug!("didOpen: {}", uri.as_str());
+            let path = uri.as_str().to_string();
+            state.upsert(&uri, text, path);
             send_empty_diagnostics(connection, uri)?;
         }
         DidChangeTextDocument::METHOD => {
             let params = cast_notif::<DidChangeTextDocument>(notif)?;
-            let uri = params.text_document.uri;
+            let uri = params.text_document.uri.clone();
+            // Full-sync model (TextDocumentSyncKind::FULL): the last change
+            // contains the entire new document text.
+            if let Some(last) = params.content_changes.into_iter().last() {
+                let path = uri.as_str().to_string();
+                state.upsert(&uri, last.text, path);
+            }
             tracing::debug!("didChange: {}", uri.as_str());
             send_empty_diagnostics(connection, uri)?;
         }
@@ -209,6 +332,36 @@ fn send_empty_diagnostics(
     };
     connection.sender.send(Message::Notification(notif))?;
     Ok(())
+}
+
+/// Translate a byte-offset range (from [`fossil_ide::HoverInfo::range`]) to
+/// an LSP `Range` using the file's text. Walks the text up to each
+/// endpoint to count newlines + intra-line bytes. ASCII-only for Phase 2
+/// (Phase 6 LSP-01 will use a UTF-16 conversion table).
+fn byte_range_to_lsp_range(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    range: std::ops::Range<u32>,
+) -> Range {
+    let text = file.text(db);
+    Range {
+        start: offset_to_position(text, range.start),
+        end: offset_to_position(text, range.end),
+    }
+}
+
+fn offset_to_position(text: &str, offset: u32) -> Position {
+    let offset_usize = offset as usize;
+    let prefix = if offset_usize > text.len() {
+        text
+    } else {
+        &text[..offset_usize]
+    };
+    let line = u32::try_from(prefix.matches('\n').count()).unwrap_or(u32::MAX);
+    let character = prefix.rfind('\n').map_or(offset, |n| {
+        offset - u32::try_from(n).unwrap_or(u32::MAX) - 1
+    });
+    Position { line, character }
 }
 
 /// Thin wrapper around [`Notification::extract`] — typed by `N`'s associated
