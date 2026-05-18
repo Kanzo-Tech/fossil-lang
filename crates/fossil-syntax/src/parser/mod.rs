@@ -26,6 +26,7 @@ use crate::indent::{LexedToken, lex_with_indents};
 use crate::kind::{FossilLang, SyntaxKind, SyntaxNode};
 
 pub mod diag;
+pub(crate) mod expr;
 
 /// Salsa-storable handle to a parsed CST.
 ///
@@ -109,14 +110,14 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
 // Internal recursive-descent parser
 // =====================================================================
 
-struct Parser {
+pub(crate) struct Parser {
     tokens: Vec<LexedToken>,
     pos: usize,
     builder: GreenNodeBuilder<'static>,
 }
 
 impl Parser {
-    fn new(tokens: Vec<LexedToken>) -> Self {
+    pub(crate) fn new(tokens: Vec<LexedToken>) -> Self {
         Self {
             tokens,
             pos: 0,
@@ -125,12 +126,12 @@ impl Parser {
     }
 
     /// Kind of the token at `pos`, or `None` at EOF. Does NOT skip trivia.
-    fn current(&self) -> Option<SyntaxKind> {
+    pub(crate) fn current(&self) -> Option<SyntaxKind> {
         self.tokens.get(self.pos).map(|t| t.kind)
     }
 
     /// Emit the current token into the green-tree builder and advance.
-    fn bump(&mut self) {
+    pub(crate) fn bump(&mut self) {
         if let Some(t) = self.tokens.get(self.pos) {
             self.builder.token(FossilLang::kind_to_raw(t.kind), &t.text);
             self.pos += 1;
@@ -139,7 +140,7 @@ impl Parser {
 
     /// Skip over WHITESPACE/NEWLINE/COMMENT/ERROR tokens (emitting them as
     /// trivia into the green tree to keep the CST lossless).
-    fn skip_trivia(&mut self) {
+    pub(crate) fn skip_trivia(&mut self) {
         while matches!(
             self.current(),
             Some(SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT)
@@ -149,7 +150,7 @@ impl Parser {
     }
 
     /// Lookahead at `offset` non-trivia tokens past `pos`. Returns `None` at EOF.
-    fn peek_kind(&self, offset: usize) -> Option<SyntaxKind> {
+    pub(crate) fn peek_kind(&self, offset: usize) -> Option<SyntaxKind> {
         let mut depth = 0;
         let mut i = self.pos;
         while let Some(t) = self.tokens.get(i) {
@@ -167,18 +168,58 @@ impl Parser {
         None
     }
 
-    fn start(&mut self, kind: SyntaxKind) {
+    /// True iff the next `n` non-trivia tokens are contiguous in the source
+    /// (no WHITESPACE / NEWLINE / COMMENT between them). Used by the
+    /// PrefixedName disambiguator (grammar.bnf line 226: `IDENT SHAPE_SEP
+    /// LocalName` requires NO whitespace between `IDENT` and `:`).
+    pub(crate) fn peek_contiguous(&self, n: usize) -> bool {
+        let mut found = 0;
+        let mut i = self.pos;
+        while let Some(t) = self.tokens.get(i) {
+            if matches!(
+                t.kind,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            ) {
+                if found < n {
+                    return false;
+                }
+                return true;
+            }
+            found += 1;
+            if found >= n {
+                return true;
+            }
+            i += 1;
+        }
+        found >= n
+    }
+
+    pub(crate) fn start(&mut self, kind: SyntaxKind) {
         self.builder.start_node(FossilLang::kind_to_raw(kind));
     }
 
-    fn finish(&mut self) {
+    pub(crate) fn finish(&mut self) {
         self.builder.finish_node();
+    }
+
+    /// Record a checkpoint into the green-tree builder. Used by the Pratt
+    /// expression sub-parser (`parser::expr`) to wrap an already-emitted
+    /// sub-tree (the LHS atom) inside an infix/postfix composite node.
+    pub(crate) fn checkpoint(&self) -> rowan::Checkpoint {
+        self.builder.checkpoint()
+    }
+
+    /// Start a node retroactively at `cp`, wrapping every token / node
+    /// emitted between the checkpoint and now.
+    pub(crate) fn start_at(&mut self, cp: rowan::Checkpoint, kind: SyntaxKind) {
+        self.builder
+            .start_node_at(cp, FossilLang::kind_to_raw(kind));
     }
 
     /// Eat the current token if it matches `kind`; otherwise emit it under an
     /// ERROR node. Phase 1 has no diagnostic emission yet — the ERROR node
     /// is the recovery signal for downstream and a TODO marker for Phase 2.
-    fn expect(&mut self, kind: SyntaxKind) {
+    pub(crate) fn expect(&mut self, kind: SyntaxKind) {
         self.skip_trivia();
         if self.current() == Some(kind) {
             self.bump();
@@ -191,7 +232,7 @@ impl Parser {
         }
     }
 
-    fn bump_as_error(&mut self) {
+    pub(crate) fn bump_as_error(&mut self) {
         self.start(SyntaxKind::ERROR);
         if self.pos < self.tokens.len() {
             self.bump();
@@ -345,46 +386,18 @@ impl Parser {
         self.finish();
     }
 
-    // --- expressions (Phase 1: tiny) -------------------------------------
+    // --- expressions -----------------------------------------------------
+    //
+    // Phase 2: expression parsing is delegated to the Pratt sub-parser in
+    // `parser::expr` (per RESEARCH.md §Q1 + Crafting Interpreters Ch. 17).
+    // The item parser keeps a thin `parse_expr` wrapper that wraps the
+    // expression in an `EXPR` node for back-compat with Phase 1 callers
+    // (`parse_property`, etc.) that expect the outer node kind.
 
-    fn parse_expr(&mut self) {
+    pub(crate) fn parse_expr(&mut self) {
         self.start(SyntaxKind::EXPR);
         self.skip_trivia();
-        match self.current() {
-            Some(SyntaxKind::TEMPLATE) => {
-                self.start(SyntaxKind::TEMPLATE_EXPR);
-                self.bump();
-                self.finish();
-            }
-            Some(SyntaxKind::STRING) => {
-                self.start(SyntaxKind::LITERAL_EXPR);
-                self.bump();
-                self.finish();
-            }
-            Some(SyntaxKind::ABS_IRI) => {
-                self.start(SyntaxKind::IRI_EXPR);
-                self.bump();
-                self.finish();
-            }
-            Some(SyntaxKind::DOT) => {
-                self.start(SyntaxKind::FIELD_REF_EXPR);
-                self.bump();
-                self.expect(SyntaxKind::IDENT);
-                self.finish();
-            }
-            Some(SyntaxKind::IDENT) => {
-                // Could be a bare IDENT or a prefixed name `ex:foo`.
-                self.start(SyntaxKind::LITERAL_EXPR);
-                self.bump();
-                self.skip_trivia();
-                if self.current() == Some(SyntaxKind::SHAPE_SEP) {
-                    self.bump();
-                    self.expect(SyntaxKind::IDENT);
-                }
-                self.finish();
-            }
-            _ => self.bump_as_error(),
-        }
+        expr::parse_expression(self, 0);
         self.finish();
     }
 }
