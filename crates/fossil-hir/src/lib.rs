@@ -44,4 +44,4 @@ pub use check::ErrorMarker;
 pub use def_map::{DefMap, MappingLoc, SourceLoc};
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
 pub use lower::{HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
-pub use ty::{Primitive, Record, Ty, TyKind};
+pub use ty::{FnSig, InferenceId, Primitive, Record, RecordField, ShapeId, Ty, TyKind};
