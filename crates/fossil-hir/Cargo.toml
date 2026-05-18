@@ -18,5 +18,6 @@ fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
 salsa = { workspace = true }
 indexmap = { workspace = true }
+rowan = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }

@@ -104,10 +104,9 @@ mod tests {
         // runtime invoked the callback at least once during query execution.
         let counter: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
         let counter_clone = counter.clone();
-        let callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static> =
-            Box::new(move |_evt| {
-                counter_clone.fetch_add(1, Ordering::SeqCst);
-            });
+        let callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static> = Box::new(move |_evt| {
+            counter_clone.fetch_add(1, Ordering::SeqCst);
+        });
 
         let system: Arc<dyn System> = Arc::new(NativeSystem);
         let db = FossilDb::with_event_callback(system, callback);

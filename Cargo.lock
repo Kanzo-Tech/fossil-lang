@@ -906,6 +906,7 @@ dependencies = [
  "fossil-base",
  "fossil-syntax",
  "indexmap",
+ "rowan",
  "salsa",
  "smol_str",
  "thiserror 1.0.69",
