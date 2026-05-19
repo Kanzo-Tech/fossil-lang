@@ -16,8 +16,20 @@ workspace = true
 # (fossil-types + fossil-resolve + fossil-typeck) into one.
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
+# Phase 3: checker (plan 03-05) consumes CsvwDescriptor / OutputDescriptorKind via
+# these path deps. NOTE: the pre-existing cargo-deny wildcard warnings on path deps
+# are PRE-EXISTING from plans 02-01..02-07 (deferred chore — see
+# .planning/phases/02-full-grammar-hir-foundation/deferred-items.md).
+# Cycle-avoidance: do NOT add a reverse `fossil-hir` dep on
+# `fossil-descriptors-input` (the bridge is one-way — `datatype_to_primitive_name`
+# returns `Option<&'static str>` to avoid importing `fossil-hir::ty::Primitive`).
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 salsa = { workspace = true }
 indexmap = { workspace = true }
 rowan = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }
+# Phase 3 plan 03-05 did-you-mean diagnostics; declared in Wave 0 to avoid
+# re-touching this Cargo.toml mid-wave.
+strsim = { workspace = true }

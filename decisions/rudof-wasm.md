@@ -68,9 +68,27 @@ breakage but is not the required path for v0.1.
 
 - [ ] Email to Labra Gayo: see `rudof-wasm-email-draft.md`. Sent on YYYY-MM-DD <to be filled>. **Even though the spike passed, the email is still worth sending** to open the WESO collab relationship (per RESEARCH.md "A reply may save 3 weeks" — applies forward too: known-good signal from upstream prevents future-Angel from re-spiking on a regression).
 - [ ] Reply received: <awaiting>
-- [ ] Phase 3 task: add `shex_ast`, `shex_validation`, `rudof_iri`, `prefixmap` at version `0.3` to workspace `[workspace.dependencies]` (not pinned to `=0.3.1` because rudof publishes patches; track minor bumps with care). Pin **major** version, allow **patch** drift.
+- [x] Phase 3 task: add `shex_ast`, `rudof_iri`, `prefixmap` at version `0.3` to workspace `[workspace.dependencies]` (not pinned to `=0.3.1` because rudof publishes patches; track minor bumps with care). Pin **major** version, allow **patch** drift. **Done 2026-05-19 in plan 03-01 Task 1** — `shex_validation` is intentionally NOT added: Phase 3 walks the AST only (no runtime ShEx validation), per `03-RESEARCH.md §"Standard Stack"`.
 - [ ] Phase 3 task: design `OutputDescriptor` trait with the plug-in shape from `.planning/PROJECT.md` Key Decisions, even though path (a) means we can use rudof directly in the WASM playground. The trait abstraction is insurance and also enables future SHACL impl as v2 add-on.
-- [ ] Re-run this spike at Phase 3 start against whatever rudof version is then current — confirm no regression. If a future rudof release breaks WASM, file an upstream issue and consider pinning to last-known-good while it's resolved.
+- [x] Re-run this spike at Phase 3 start against whatever rudof version is then current — confirm no regression. If a future rudof release breaks WASM, file an upstream issue and consider pinning to last-known-good while it's resolved.
+
+### Phase 3 re-spike outcome (2026-05-19)
+
+**Result:** **PASS** — no regression.
+
+**rudof workspace version resolved:** 0.3.1 (same minor/patch as Phase 0 spike, per current `Cargo.lock`: `shex_ast v0.3.1`, `rudof_iri v0.3.1`, `prefixmap v0.3.1`).
+**Toolchain:** rustc 1.90 (rust-toolchain.toml pin).
+**Spike command:** `cargo check --target wasm32-unknown-unknown -p fossil-base -p fossil-syntax -p fossil-hir -p fossil-mir -p fossil-codegen -p fossil-wasm` (the 6-crate WASM gate, with `fossil-descriptors-output` transitively pulled in via the new `fossil-hir` path dep on `fossil-descriptors-output` added in plan 03-01 Task 1 step 2). All 6 crates compile clean.
+
+**Transitive offender check (the WASM-incompat triad from RESEARCH.md P-CRIT-2):**
+
+| Dep | `cargo tree -i <dep> --target wasm32-unknown-unknown -p fossil-descriptors-output` | Verdict |
+|-----|------------------------------------------------------------------------------------|---------|
+| `tokio` | `warning: nothing to print` (not present in WASM build path) | OK |
+| `reqwest` | `warning: nothing to print` | OK |
+| `mio` | `warning: nothing to print` | OK |
+
+**Conclusion:** Path (a) Clean WASM holds. `shex_ast` 0.3.1 + `rudof_iri` 0.3.1 + `prefixmap` 0.3.1 compile to `wasm32-unknown-unknown` from the unmodified upstream workspace, with no `tokio` / `reqwest` / `mio` leak through `fossil-descriptors-output`. The WASM-incompat fallback design path (b)-(d) sketched at the top of this file remains unused for v0.1; the `OutputDescriptor` trait abstraction stays as insurance + SHACL extensibility.
 
 ## Spike artifacts (local logs, not committed)
 

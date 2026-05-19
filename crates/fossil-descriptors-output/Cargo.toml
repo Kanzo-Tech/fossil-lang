@@ -12,5 +12,17 @@ description = "Output descriptors (ShEx via rudof, future SHACL) for backward sh
 workspace = true
 
 [dependencies]
-# Phase 1: no deps. Phase 3 CORE-06 adds rudof crates per workspace-level
-# inheritance + decisions/rudof-wasm.md.
+# Phase 3 CORE-06: rudof crates per workspace-level inheritance + the
+# Phase 0 spike outcome in `decisions/rudof-wasm.md` (Path (a) Clean WASM).
+# shex_validation is intentionally NOT included — Phase 3 walks the AST only
+# (no runtime ShEx validation), per 03-RESEARCH.md §"Standard Stack".
+#
+# Note: do NOT add a `fossil-hir` path dep here. `ShapeId` mapping lives in
+# fossil-hir's `shapes.rs` (plan 03-05); the kind enum here carries only
+# `shex_ast::Schema` + lightweight resolved-table structs local to this crate.
+# Plan 03-03 Task 2 step 3 adds `fossil-base = { path = "../fossil-base" }`
+# (for the `SystemWithDescriptors` extension trait) — that addition is
+# owned by plan 03-03, not this plan.
+shex_ast = { workspace = true }
+rudof_iri = { workspace = true }
+prefixmap = { workspace = true }
