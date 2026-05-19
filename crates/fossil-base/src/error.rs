@@ -80,6 +80,11 @@ pub fn delay_span_bug(
         severity: Severity::Error,
         message: message.into(),
         span,
+        // Phase 3 plan 03-03: structured suggestion carrier — None here
+        // because `delay_span_bug` is the generic taint emitter.
+        // Suggestion-emitting call sites (e.g. the OneOf rejection in plan
+        // 03-05) populate this directly when building their Diagnostic.
+        suggestion_source: None,
     }
     .accumulate(db);
     ErrorGuaranteed::new()

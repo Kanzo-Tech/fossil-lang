@@ -39,16 +39,24 @@ impl ParseDiagnostic {
                 severity: Severity::Error,
                 message: format!("expected {want:?}, found {got:?}"),
                 span,
+                // Phase 3 plan 03-03: parse diagnostics carry no
+                // code-suggestion source (Markdown-only hints today). The
+                // structured field is reserved for the OneOf-rejection
+                // emitter (plan 03-05) and similar future suggestion-
+                // emitting diagnostics.
+                suggestion_source: None,
             },
             Self::UnexpectedToken { span } => Diagnostic {
                 severity: Severity::Error,
                 message: "unexpected token".to_string(),
                 span,
+                suggestion_source: None,
             },
             Self::InconsistentDedent { span } => Diagnostic {
                 severity: Severity::Error,
                 message: "inconsistent indentation".to_string(),
                 span,
+                suggestion_source: None,
             },
         }
     }

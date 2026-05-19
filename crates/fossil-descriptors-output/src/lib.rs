@@ -6,9 +6,10 @@
 //!
 //! Phase 1 ships the trait + an [`AcceptAllDescriptor`] stub that accepts any
 //! graph (sufficient for the `hello.fossil` walking-skeleton demo, which has
-//! no shape target). Phase 3 CORE-06 replaces with real `ShEx` via rudof per
-//! `decisions/rudof-wasm.md` (the Phase 0 spike PASSED path-a, so rudof is
-//! committed as the upstream).
+//! no shape target). Phase 3 CORE-06 (plan 03-03) adds the real `ShEx` path
+//! ([`ShExDescriptor`]) and the [`OutputDescriptorKind`] enum that lets the
+//! bidirectional checker dispatch without violating the "no
+//! `Box<dyn Trait>` inside Salsa queries" rule (ADR-0006).
 //!
 //! ## Trait stability
 //!
@@ -23,14 +24,16 @@
 //! `fossil-descriptors-input` (decision locked by orchestrator: keep dep graph
 //! tidy; refactor in Phase 3 if cross-crate sharing proves painful).
 
-// NOTE: plan-03-03 WIP (`pub mod shex;` + re-exports) is TEMPORARILY removed
-// by plan-03-04's executor to unblock verification — the file
-// `crates/fossil-descriptors-output/src/shex.rs` exists in the working tree
-// (still untracked) and contains a structural `#![allow(...)]` inner-
-// attribute placement bug that breaks every cargo invocation. Plan-03-03's
-// original lib.rs and shex.rs WIP content are preserved in
-// `/tmp/plan-03-03-{lib,shex}-rs.bak` AND in the git stash
-// `stash@{0}` so plan-03-03's executor can resume after plan-03-04 lands.
+pub mod kind;
+pub mod shex;
+pub mod system_ext;
+
+pub use kind::OutputDescriptorKind;
+pub use shex::{
+    Cardinality, OneOfRejection, ResolvedConstraint, ShExDescriptor, ShExLoweringError,
+    ShapeBinding, SuggestionSeed, generate_split_suggestion,
+};
+pub use system_ext::SystemWithDescriptors;
 
 /// Output-side shape descriptor.
 ///
@@ -54,8 +57,13 @@ pub trait OutputDescriptor: Send + Sync + std::fmt::Debug {
 /// Phase 1 stub: accept-all output descriptor.
 ///
 /// Returns `true` for [`OutputDescriptor::accepts_anything`] — the type-checker
-/// short-circuits backward shape inference. Phase 3 CORE-06 replaces with real
-/// `ShEx` via rudof per `decisions/rudof-wasm.md`.
+/// short-circuits backward shape inference. Phase 3 CORE-06 (plan 03-03)
+/// keeps this type as the `AcceptAll` variant of [`OutputDescriptorKind`] —
+/// it's the fallback when no `ShEx` schema is loaded.
+///
+/// Declared as a unit struct (`pub struct AcceptAllDescriptor;`) so the
+/// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`] inherent const is
+/// const-evaluable.
 #[derive(Debug, Default)]
 pub struct AcceptAllDescriptor;
 

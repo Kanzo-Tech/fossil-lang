@@ -24,6 +24,7 @@ use std::sync::RwLock;
 use std::time::SystemTime;
 
 use fossil_base::{FsError, System};
+use fossil_descriptors_output::SystemWithDescriptors;
 
 // `pub(crate)` is the deliberate visibility: `WasmSystem` is an
 // implementation detail of the `fossil-wasm` crate. The clippy
@@ -57,6 +58,13 @@ impl System for WasmSystem {
         SystemTime::UNIX_EPOCH
     }
 }
+
+/// Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` impl
+/// on its concrete `WasmSystem` struct. Default `output_descriptor_kind()`
+/// returns `AcceptAll` for Phase 3 v0.1 — plan 03-05's tests construct
+/// `ShExDescriptor` directly. Phase 7+ playground wires user-supplied
+/// `ShEx` text via a future `FossilPlayground::load_shex(...)` method.
+impl SystemWithDescriptors for WasmSystem {}
 
 impl WasmSystem {
     /// Programmatic file write — used by hosts (Phase 7 PLAY-01 calls this

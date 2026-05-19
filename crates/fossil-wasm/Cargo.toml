@@ -28,6 +28,10 @@ fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
 fossil-codegen = { path = "../fossil-codegen" }
+# Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` on its
+# `WasmSystem` struct. Default `output_descriptor_kind()` returns AcceptAll
+# for Phase 3 v0.1 — Phase 7+ playground wires user-supplied ShEx text.
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
 # RESEARCH.md Pitfall 5: the lib version MUST match the wasm-bindgen-cli

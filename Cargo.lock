@@ -1041,6 +1041,7 @@ dependencies = [
  "duckdb",
  "fossil-base",
  "fossil-codegen",
+ "fossil-descriptors-output",
  "fossil-hir",
  "fossil-runtime",
  "miette",
@@ -1076,6 +1077,7 @@ dependencies = [
 name = "fossil-descriptors-output"
 version = "0.1.0"
 dependencies = [
+ "fossil-base",
  "prefixmap",
  "rudof_iri",
  "shex_ast",
@@ -1176,6 +1178,7 @@ dependencies = [
  "console_error_panic_hook",
  "fossil-base",
  "fossil-codegen",
+ "fossil-descriptors-output",
  "fossil-hir",
  "fossil-mir",
  "fossil-syntax",

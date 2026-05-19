@@ -25,9 +25,41 @@ compile_error!(
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use clap::{Parser, Subcommand};
+use fossil_base::{FsError, System};
+use fossil_descriptors_output::SystemWithDescriptors;
 use tracing_subscriber::EnvFilter;
+
+/// CLI host's [`System`] impl — a thin `NativeSystem`-style wrapper that
+/// ALSO implements [`SystemWithDescriptors`] so the bidirectional checker
+/// (plan 03-05) can reach the output-descriptor accessor via the extension
+/// trait (Option B from plan 03-03 Task 2 step 3; see ADR-0006).
+///
+/// Phase 3 v0.1: `output_descriptor_kind()` returns the default
+/// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`]. Phase 6 LSP-01 / future CLI
+/// flags override this to load a `ShEx` schema from a side file.
+#[derive(Debug, Default)]
+struct CliSystem;
+
+impl System for CliSystem {
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => FsError::NotFound(path.display().to_string()),
+            _ => FsError::Io(e.to_string()),
+        })
+    }
+
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+}
+
+impl SystemWithDescriptors for CliSystem {
+    // Default impl returns AcceptAll — see SystemWithDescriptors. Phase 6
+    // LSP-01 will override here to load a `ShEx` schema from a side file.
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -104,7 +136,7 @@ fn cmd_compile(path: &Path) -> miette::Result<()> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
-    let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+    let system: Arc<dyn fossil_base::System> = Arc::new(CliSystem);
     let db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
 
@@ -140,7 +172,7 @@ fn cmd_check(path: &Path) -> miette::Result<()> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
-    let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+    let system: Arc<dyn fossil_base::System> = Arc::new(CliSystem);
     let db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
 

@@ -16,6 +16,10 @@ fossil-base    = { path = "../fossil-base" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-codegen = { path = "../fossil-codegen" }
 fossil-runtime = { path = "../fossil-runtime" }
+# Plan 03-03 Task 2 step 5: CLI host wires `SystemWithDescriptors` impl on
+# its concrete `CliSystem` struct. Default `output_descriptor_kind()`
+# returns AcceptAll for Phase 3 v0.1; Phase 6 LSP-01 will override here.
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 
 clap = { workspace = true }
 # `fancy` ONLY in this crate (not workspace-level): pulls native-only
