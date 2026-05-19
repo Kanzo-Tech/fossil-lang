@@ -6,8 +6,10 @@
 //!
 //! Phase 1 ships the trait + a [`CsvDescriptor`] stub returning a hardcoded
 //! `{id: String, name: String}` schema (sufficient for the `hello.fossil`
-//! walking-skeleton demo). Phase 3 CORE-05 replaces the stub with a real
-//! CSVW thin parser (~500 LOC per RESEARCH.md §"Standard Stack").
+//! walking-skeleton demo). Phase 3 CORE-05 (plan 03-02) ADDS a real CSVW
+//! thin parser at [`csvw`] over the W3C "Metadata Vocabulary for Tabular
+//! Data" minimum subset (see ADR-0007). The Phase 1 [`CsvDescriptor`] stub
+//! is preserved for walking-skeleton compatibility.
 //!
 //! Phase 5 STDL-06 may add JSON Schema / XSD / Parquet implementations.
 //!
@@ -16,6 +18,10 @@
 //! The Phase 1 trait surface (`name`, `parse`, `type_for_field`) is the
 //! public-API commitment to Phase 3-9. Additive growth (e.g. `parse_async`
 //! for streaming descriptors) is allowed; method removal requires an ADR.
+
+pub mod csvw;
+
+pub use csvw::{CsvwDescriptor, CsvwMetadata, datatype_to_primitive_name};
 
 /// Input-side schema descriptor.
 ///
@@ -61,12 +67,49 @@ pub enum FieldType {
 
 /// Error produced by descriptor parsing.
 ///
-/// Phase 1 ships only `Invalid`; Phase 3 CORE-05 expands with parser-specific
-/// variants (`MalformedJson`, `UnknownDatatype`, `MissingField`, etc.).
+/// Phase 1 shipped only `Invalid`; Phase 3 CORE-05 (plan 03-02) widens with
+/// structured variants used by the CSVW thin parser. Future phases (XSD,
+/// JSON Schema) extend further as needed.
 #[derive(Debug, thiserror::Error)]
 pub enum DescriptorError {
+    /// Phase 1: catch-all variant retained for back-compat with the
+    /// [`CsvDescriptor`] stub and any external callers that pattern-matched
+    /// on it. New code should prefer the structured variants below.
     #[error("invalid descriptor: {0}")]
     Invalid(String),
+
+    /// The descriptor source is not valid JSON, or does not match the
+    /// expected v0.1 shape. Carries the underlying `serde_json` error
+    /// message as a string (we deliberately do NOT keep the
+    /// `serde_json::Error` value to keep `DescriptorError` `Send`/`Sync` and
+    /// trivially cloneable in future).
+    #[error("malformed JSON: {0}")]
+    MalformedJson(String),
+
+    /// `@context` was anything other than the canonical literal IRI
+    /// `"http://www.w3.org/ns/csvw"`. Carries a human-readable message
+    /// suggesting the fix.
+    #[error("unsupported JSON-LD context: {0}")]
+    JsonLdContextNotSupported(String),
+
+    /// A column declared a datatype that is not in the v0.1 catalog (see
+    /// [`csvw::datatype_to_primitive_name`]). Emitted by the bidirectional
+    /// checker (plan 03-05) after [`CsvwDescriptor::type_for_column`]
+    /// returns `None` AND the column actually carried a `datatype` field.
+    #[error("unknown CSVW datatype `{datatype}` on column `{column}`")]
+    UnknownDatatype {
+        /// The column name whose datatype was unrecognised.
+        column: String,
+        /// The unrecognised datatype string (with `xsd:` prefix already
+        /// stripped, if present).
+        datatype: String,
+    },
+
+    /// The descriptor parsed successfully but did not declare a
+    /// `tableSchema`, and the consumer (plan 03-05) requires one for forward
+    /// type propagation.
+    #[error("CSVW descriptor lacks tableSchema; cannot drive forward type propagation")]
+    MissingTableSchema,
 }
 
 /// Phase 1 stub: hardcoded CSV inference returning `{id: String, name: String}`.

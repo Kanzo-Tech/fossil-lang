@@ -12,9 +12,15 @@ description = "Input descriptors (CSVW, JSON Schema, Parquet, XSD) for forward t
 workspace = true
 
 [dependencies]
-# Phase 1: trait + minimal CSV stub. csv / serde_json / roxmltree / jsonschema
-# stay deferred to Phase 3 CORE-05 + Phase 5 STDL-06 (already declared at
-# workspace level for inheritance).
+# Phase 1: trait + minimal CSV stub. csv / roxmltree / jsonschema stay deferred
+# to Phase 5 STDL-06 (already declared at workspace level for inheritance).
+#
+# Phase 3 plan 03-02 (CORE-05): consumes serde + serde_json for the CSVW thin
+# parser at `src/csvw.rs`. Per the Serious N2 fix to the Wave-1 plan layout,
+# the consumer crate owns its dep declarations; plan 03-01 owns the
+# workspace-level `serde` + `serde_json` entries in the root Cargo.toml.
 indexmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }
