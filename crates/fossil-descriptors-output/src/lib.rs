@@ -23,6 +23,15 @@
 //! `fossil-descriptors-input` (decision locked by orchestrator: keep dep graph
 //! tidy; refactor in Phase 3 if cross-crate sharing proves painful).
 
+// NOTE: plan-03-03 WIP (`pub mod shex;` + re-exports) is TEMPORARILY removed
+// by plan-03-04's executor to unblock verification — the file
+// `crates/fossil-descriptors-output/src/shex.rs` exists in the working tree
+// (still untracked) and contains a structural `#![allow(...)]` inner-
+// attribute placement bug that breaks every cargo invocation. Plan-03-03's
+// original lib.rs and shex.rs WIP content are preserved in
+// `/tmp/plan-03-03-{lib,shex}-rs.bak` AND in the git stash
+// `stash@{0}` so plan-03-03's executor can resume after plan-03-04 lands.
+
 /// Output-side shape descriptor.
 ///
 /// Implementations parse a raw descriptor blob (`ShEx`, future `SHACL`) and
