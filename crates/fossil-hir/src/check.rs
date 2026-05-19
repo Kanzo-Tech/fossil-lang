@@ -116,14 +116,27 @@ User : ex:Person from users
     }
 
     /// `compatible` returns `Err(ErrorGuaranteed)` on type mismatch AND the
-    /// two-span blame structure is in place (verified via the accumulator —
-    /// `delay_span_bug` pushes a Diagnostic with a message containing
-    /// "expected ... got ..." plus a "expected because of" trailer when the
-    /// destination expression's provenance is known).
+    /// two-span blame surfaces REAL byte ranges (per Phase 3 plan 03-04 /
+    /// ADR-0008 — the [`crate::spans::Spans`] side table replaces the
+    /// Phase 2 zero-width placeholders).
     ///
-    /// Plan 02-06 requirement: `compatible_blame_two_spans_on_mismatch`.
+    /// Originally landed in Phase 2 plan 02-06 with zero-width spans
+    /// (the blame STRUCTURE was the deliverable). Plan 03-04 upgrades
+    /// the assertions to require non-zero source and destination spans
+    /// — `compatible()` itself is unchanged; the upgrade is invisible
+    /// to the checker because it goes through `ty_origin(...)`'s
+    /// provenance, which now reads from the new `spans()` Salsa query.
+    ///
     /// Wrapped in a Salsa-tracked shim because `delay_span_bug` panics
-    /// outside a tracked context (plan-02-05 Deviation 1 — feature, not bug).
+    /// outside a tracked context (plan-02-05 Deviation 1 — feature, not
+    /// bug).
+    ///
+    /// Fixture orientation: property 0 of the `hello.fossil` mapping is
+    /// a Template RHS (`iri = backtick-template`). Plan 03-04 ensures
+    /// that this synthesises `IriTemplate` with `Literal` provenance and
+    /// a real non-zero span. Passing expected=String against actual=
+    /// IriTemplate (same type provenance synthesises for prop 0)
+    /// triggers the mismatch path against a known-real-span source.
     #[test]
     fn compatible_blame_two_spans_on_mismatch() {
         #[salsa::tracked]
@@ -134,21 +147,25 @@ User : ex:Person from users
         ) -> Option<ErrorGuaranteed> {
             let dm = def_map(db, file);
             let m = *dm.mappings(db).first()?;
-            let int_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
+            // Use the same type provenance synthesises for property 0
+            // (Template → IriTemplate) so the source-span lookup goes
+            // through ty_origin → spans(M).get(ExprId(0)) → real span.
+            let iri_template = Ty::new(db, TyKind::IriTemplate);
             let str_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
-            compatible(db, m, int_ty, str_ty, ExprId(0), ExprId(0)).err()
+            compatible(db, m, iri_template, str_ty, ExprId(0), ExprId(0)).err()
         }
 
         let (db, file) = db_with_hello();
         let eg = tracked_compatible_shim(&db, file);
-        assert!(eg.is_some(), "Integer vs String must produce an Err");
+        assert!(eg.is_some(), "IriTemplate vs String must produce an Err");
         let diags = tracked_compatible_shim::accumulated::<Diagnostic>(&db, file);
         assert_eq!(
             diags.len(),
             1,
             "compatible mismatch must push exactly one Diagnostic"
         );
-        let msg = &diags[0].message;
+        let diag = &diags[0];
+        let msg = &diag.message;
         assert!(
             msg.contains("expected"),
             "diagnostic must contain 'expected', got {msg:?}"
@@ -156,6 +173,33 @@ User : ex:Person from users
         assert!(
             msg.contains("got"),
             "diagnostic must contain 'got', got {msg:?}"
+        );
+
+        // Phase 3 plan 03-04 upgrade — REAL source span:
+        // `Diagnostic.span` is singular (NOT a Vec); `delay_span_bug`
+        // takes one `Span` argument and the two-span blame is encoded
+        // by embedding the destination span in the message text. The
+        // source span MUST be a real non-zero byte range from
+        // `spans(M).get(ExprId(0))` — NOT the Phase 2 zero-width
+        // placeholder.
+        let source_span = diag.span;
+        assert!(
+            source_span.end > source_span.start,
+            "Phase 3 plan 03-04 requires REAL non-zero source spans on \
+             compatible() blame; got {source_span:?} (would have been \
+             Span {{ start: 0, end: 0 }} in Phase 2)."
+        );
+
+        // Phase 3 plan 03-04 upgrade — REAL dest span in the trailer:
+        // The message embeds `(expected because of <kind> at <span>)`,
+        // and the dest provenance span renders via `Debug` as
+        // `Span { start: N, end: M }`. For dest_expr = ExprId(0), the
+        // same real range applies — so `start: 0, end: 0` must NOT
+        // appear.
+        assert!(
+            !msg.contains("start: 0, end: 0"),
+            "Phase 3 plan 03-04 requires REAL non-zero dest spans in \
+             the blame trailer; found zero-width span in: {msg:?}"
         );
     }
 }

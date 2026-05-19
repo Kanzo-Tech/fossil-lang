@@ -39,14 +39,15 @@
 //! and avoids threading `'db` through [`crate::body::HirBody`] →
 //! [`ExprTypes`] → [`Provenance`].
 //!
-//! # Phase 2 limitation: zero-width spans
+//! # Phase 3 plan 03-04: real spans land (ADR-0008)
 //!
-//! [`Provenance::span`] is currently `Span { start: 0, end: 0 }` for every
-//! literal-subset entry. Phase 3's lowering arena will plumb real source spans
-//! through to the expression nodes. The LSP hover still works (Markdown body
-//! shows the rendered `Ty` + a best-effort provenance description); the
-//! [`crate::check::compatible`] two-span blame currently surfaces both spans
-//! as zero-width but the blame STRUCTURE is in place for Phase 3 to populate.
+//! Phase 2 shipped zero-width `Span { start: 0, end: 0 }` placeholders for
+//! every literal-subset entry — the blame STRUCTURE was in place but the
+//! byte ranges weren't useful for diagnostics. Phase 3 plan 03-04 lands
+//! the [`crate::spans::Spans`] side table (ADR-0008) and this module now
+//! populates [`Provenance::span`] from real `rowan::TextRange`s read via
+//! [`crate::spans::spans`]. The Phase 2 limitation comment that previously
+//! lived here is discharged.
 
 use fossil_base::Span;
 use smol_str::SmolStr;
@@ -54,6 +55,7 @@ use smol_str::SmolStr;
 use crate::body::{ExprId, body};
 use crate::def_map::{MappingLoc, def_map};
 use crate::lower::HirExpr;
+use crate::spans::spans;
 use crate::ty::{Primitive, Ty, TyKind};
 
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
@@ -138,16 +140,34 @@ pub struct ExprTypeEntry<'db> {
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
+    // Phase 3 plan 03-04 (ADR-0008): read real per-mapping spans from the
+    // side table. The `spans()` query depends on `mapping_cst_node`, so
+    // it inherits the per-mapping invalidation barrier — sibling mappings
+    // stay cached on body edits (verified by tests/invalidation_regression).
     let hir_body = body(db, mapping);
     let properties = hir_body.properties(db);
+    let spans_table = spans(db, mapping);
     let mut entries: Vec<ExprTypeEntry<'db>> = Vec::new();
     for (i, prop) in properties.iter().enumerate() {
         let expr_id = ExprId(u32::try_from(i).unwrap_or(u32::MAX));
-        if let Some((ty, provenance)) = infer_literal_type(db, &prop.value) {
+        if let Some((ty, kind)) = infer_literal_type_kind(db, &prop.value) {
+            // Real span from spans() side table. Fallback to zero-width
+            // only if body() and spans() disagree — defensive; never
+            // triggers in practice because both walk the same CST with
+            // the same PROPERTY filter.
+            let span = spans_table.get(db, expr_id).unwrap_or_else(|| {
+                debug_assert!(
+                    false,
+                    "spans({mapping:?}) missing entry for {expr_id:?} \
+                     even though body has property {i}; body() and \
+                     spans() are out of sync."
+                );
+                Span { start: 0, end: 0 }
+            });
             entries.push(ExprTypeEntry {
                 expr_id,
                 ty,
-                provenance,
+                provenance: Provenance { span, kind },
             });
         }
     }
@@ -174,36 +194,44 @@ pub fn ty_origin<'db>(
         .cloned()
 }
 
-/// Phase 2 literal-subset type synthesis.
-///
-/// - `StringLit` → `Primitive(String)` with [`ProvenanceKind::Literal`].
-/// - `Template` → `IriTemplate` with [`ProvenanceKind::Literal`] (Phase 2
-///   tags every template as iri-context; Phase 4 lifts template parsing into
-///   a real expression tree and can distinguish iri vs. string-template
-///   contexts).
-/// - `PrefixedName` → `Iri` with [`ProvenanceKind::Literal`].
-/// - `FieldRef` → `None` — needs source-row type from `InputDescriptor`
-///   (Phase 3 / RESEARCH.md §Q5).
-///
-/// Spans are zero-width pending Phase 3's lowering arena.
+/// Phase 2 literal-subset type synthesis — span-free form (plan 03-04
+/// split: the [`Provenance::span`] is populated by the caller from
+/// [`crate::spans::spans`] per ADR-0008).
+fn infer_literal_type_kind<'db>(
+    db: &'db dyn fossil_base::Db,
+    expr: &HirExpr,
+) -> Option<(Ty<'db>, ProvenanceKind)> {
+    match expr {
+        HirExpr::StringLit(_) => Some((
+            Ty::new(db, TyKind::Primitive(Primitive::String)),
+            ProvenanceKind::Literal,
+        )),
+        HirExpr::Template(_) => Some((Ty::new(db, TyKind::IriTemplate), ProvenanceKind::Literal)),
+        HirExpr::PrefixedName { .. } => Some((Ty::new(db, TyKind::Iri), ProvenanceKind::Literal)),
+        HirExpr::FieldRef(_) => None,
+    }
+}
+
+/// Test-only wrapper retained for Phase 2 plan-02-06's
+/// `ty_origin_returns_iri_for_iri_literal_in_property` test, which
+/// constructs a synthetic `HirExpr::PrefixedName` and calls this helper
+/// directly (sidestepping `lower_expr`). New callers should use
+/// [`infer_literal_type_kind`] and read the real span from
+/// [`crate::spans::spans`].
+#[cfg(test)]
 fn infer_literal_type<'db>(
     db: &'db dyn fossil_base::Db,
     expr: &HirExpr,
 ) -> Option<(Ty<'db>, Provenance)> {
-    let zero_span = Span { start: 0, end: 0 };
-    let lit_provenance = Provenance {
-        span: zero_span,
-        kind: ProvenanceKind::Literal,
-    };
-    match expr {
-        HirExpr::StringLit(_) => Some((
-            Ty::new(db, TyKind::Primitive(Primitive::String)),
-            lit_provenance,
-        )),
-        HirExpr::Template(_) => Some((Ty::new(db, TyKind::IriTemplate), lit_provenance)),
-        HirExpr::PrefixedName { .. } => Some((Ty::new(db, TyKind::Iri), lit_provenance)),
-        HirExpr::FieldRef(_) => None,
-    }
+    infer_literal_type_kind(db, expr).map(|(ty, kind)| {
+        (
+            ty,
+            Provenance {
+                span: Span { start: 0, end: 0 },
+                kind,
+            },
+        )
+    })
 }
 
 /// Look up the [`MappingLoc`] for the `n`th MAPPING in a file.

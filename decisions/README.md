@@ -44,8 +44,9 @@ Use [`template.md`](template.md) as the starting point. Copy, fill in, commit.
 | 0003 | Db trait is thin; descriptors and registry live behind System | accepted | 2026-05-15 |
 | 0004 | Workspace lint `unsafe_code = "deny"`, not `"forbid"` | accepted | 2026-05-15 |
 | [0005](0005-item-tree-body-separation.md) | ItemTree carries signatures only; bodies live behind per-mapping `body()` query | accepted | 2026-05-18 |
-| 0006 | _(reserved — plan 03-03 `OutputDescriptorKind` enum dispatch)_ | reserved | — |
+| [0006](0006-output-descriptor-kind-enum-dispatch.md) | `OutputDescriptorKind` enum dispatch + `SystemWithDescriptors` extension trait + structured `Diagnostic.suggestion_source` | accepted | 2026-05-19 |
 | [0007](0007-csvw-jsonld-subset-cutoff.md) | Cap CSVW Metadata Vocabulary support at a literal-`@context` JSON-LD subset | accepted | 2026-05-19 |
+| [0008](0008-real-spans-via-side-table.md) | Real per-mapping spans via a `Spans<'db>` side table (NOT a field on `HirExpr`) | accepted | 2026-05-19 |
 
 (ADRs 0001-0003 are written in Plan 05; this README is updated as new ADRs land.)
 
