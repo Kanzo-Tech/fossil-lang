@@ -198,7 +198,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
             .children()
             .filter(|c| c.kind() == SyntaxKind::PROPERTY)
         {
-            if let Some(prop) = lower_property_public(&prop_node, prefixes) {
+            if let Some(prop) = lower_property_public(db, &prop_node, prefixes) {
                 properties.push(prop);
                 expr_count = expr_count.saturating_add(1);
             }

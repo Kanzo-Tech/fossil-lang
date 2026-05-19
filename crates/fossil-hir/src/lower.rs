@@ -17,7 +17,7 @@
 //! - [`HirExpr::PrefixedName`] carries the already-resolved full IRI.
 //! - [`HirExpr::StringLit`] holds the literal text without surrounding quotes.
 
-use fossil_base::SourceFile;
+use fossil_base::{SourceFile, Span, delay_span_bug};
 use smol_str::SmolStr;
 
 use crate::def_map::{PrefixEntry, def_map};
@@ -184,14 +184,21 @@ fn lower_mapping_node(
 /// content is owned by the `body()` Salsa query, but the per-property
 /// shape-and-prefix-aware lowering rules live here next to their natural
 /// home (`HirProperty` / `HirExpr`).
+///
+/// Plan 03-01 Task 2 threads `db` through so the `IRI_EXPR` prefixed-name
+/// arm can emit a diagnostic via the Salsa accumulator when the prefix is
+/// undeclared (otherwise the property would still be silently dropped — the
+/// pre-Phase-3 behaviour the `deferred-items.md` flagged as a bug).
 pub(crate) fn lower_property_public(
+    db: &dyn fossil_base::Db,
     node: &fossil_syntax::SyntaxNode,
     prefixes: &[PrefixEntry],
 ) -> Option<HirProperty> {
-    lower_property(node, prefixes)
+    lower_property(db, node, prefixes)
 }
 
 fn lower_property(
+    db: &dyn fossil_base::Db,
     node: &fossil_syntax::SyntaxNode,
     prefixes: &[PrefixEntry],
 ) -> Option<HirProperty> {
@@ -233,7 +240,7 @@ fn lower_property(
     };
 
     let expr_node = node.children().find(|c| c.kind() == SyntaxKind::EXPR)?;
-    let value = lower_expr(&expr_node, prefixes)?;
+    let value = lower_expr(db, &expr_node, prefixes)?;
 
     Some(HirProperty { key, value })
 }
@@ -243,7 +250,17 @@ fn lower_property(
 /// The Phase 1 parser wraps every right-hand side in an `EXPR` whose single
 /// child is one of: `TEMPLATE_EXPR`, `LITERAL_EXPR`, `IRI_EXPR`,
 /// `FIELD_REF_EXPR`. We dispatch on that inner kind.
-fn lower_expr(expr_node: &fossil_syntax::SyntaxNode, prefixes: &[PrefixEntry]) -> Option<HirExpr> {
+///
+/// Plan 03-01 Task 2 fix: the `IRI_EXPR` arm now handles BOTH the `ABS_IRI`
+/// (`<https://...>`) form AND the `IDENT SHAPE_SEP IDENT` prefixed-name
+/// form (e.g. `ex:Foo`). Before this fix, the prefixed-name RHS was silently
+/// dropped from `HirBody.properties` (see the `deferred-items.md` from
+/// plan 02-06).
+fn lower_expr(
+    db: &dyn fossil_base::Db,
+    expr_node: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirExpr> {
     use fossil_syntax::SyntaxKind;
 
     let inner = expr_node.children().next()?;
@@ -302,14 +319,63 @@ fn lower_expr(expr_node: &fossil_syntax::SyntaxNode, prefixes: &[PrefixEntry]) -
             }
         }
         SyntaxKind::IRI_EXPR => {
-            let abs = inner
+            // First, try the ABS_IRI form (`<https://...>`).
+            if let Some(abs) = inner
                 .children_with_tokens()
                 .filter_map(fossil_syntax::SyntaxElement::into_token)
-                .find(|t| t.kind() == SyntaxKind::ABS_IRI)?;
-            let iri = abs.text().trim_start_matches('<').trim_end_matches('>');
-            Some(HirExpr::PrefixedName {
-                iri: SmolStr::from(iri),
-            })
+                .find(|t| t.kind() == SyntaxKind::ABS_IRI)
+            {
+                let iri = abs.text().trim_start_matches('<').trim_end_matches('>');
+                return Some(HirExpr::PrefixedName {
+                    iri: SmolStr::from(iri),
+                });
+            }
+
+            // Plan 03-01 Task 2 fix: prefixed-name form (`IDENT SHAPE_SEP
+            // IDENT`, e.g. `ex:Foo`). Per the parser in
+            // `crates/fossil-syntax/src/parser/expr.rs` (lines 285-295), an
+            // IRI_EXPR for a prefixed name has exactly three direct token
+            // children: IDENT, SHAPE_SEP, IDENT (lexer-contiguous). Reuse
+            // the same prefix-table lookup pattern as `lower_property` (LHS).
+            let toks: Vec<_> = inner
+                .children_with_tokens()
+                .filter_map(fossil_syntax::SyntaxElement::into_token)
+                .filter(|t| {
+                    !matches!(
+                        t.kind(),
+                        SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+                    )
+                })
+                .collect();
+            if toks.len() == 3
+                && toks[0].kind() == SyntaxKind::IDENT
+                && toks[1].kind() == SyntaxKind::SHAPE_SEP
+                && toks[2].kind() == SyntaxKind::IDENT
+            {
+                let prefix = toks[0].text();
+                let local = toks[2].text();
+                if let Some(prefix_iri) = lookup_prefix(prefixes, prefix) {
+                    return Some(HirExpr::PrefixedName {
+                        iri: SmolStr::from(format!("{prefix_iri}{local}")),
+                    });
+                }
+                // Unknown prefix: emit a diagnostic via the Salsa accumulator
+                // (rather than the legacy LITERAL_EXPR branch's silent-drop
+                // behaviour). The full property still drops via the outer
+                // `?`, but at least the user sees WHY. `body()` is a tracked
+                // Salsa query so `delay_span_bug`'s accumulator-emit contract
+                // holds; the returned `ErrorGuaranteed` is intentionally
+                // discarded here (we already convey "drop" via `None`).
+                let range = inner.text_range();
+                let span = Span::new(range.start().into(), range.end().into());
+                let _eg = delay_span_bug(
+                    db,
+                    span,
+                    format!("undeclared prefix `{prefix}:` in IRI expression `{prefix}:{local}`"),
+                );
+                return None;
+            }
+            None
         }
         _ => None,
     }
@@ -405,5 +471,139 @@ User : ex:Person from users
         let a = lower_to_hir(&db, file);
         let b = lower_to_hir(&db, file);
         assert_eq!(a, b);
+    }
+
+    // ===== Plan 03-01 Task 2: `IRI_EXPR` prefixed-name arm =====
+
+    /// Fixture that exercises the `IRI_EXPR` prefixed-name RHS form
+    /// (`ex:link = ex:Foo`). Pre-plan-03-01 this property was silently
+    /// dropped from `HirBody.properties` — see the `deferred-items.md`
+    /// under `.planning/phases/02-full-grammar-hir-foundation/`.
+    const HELLO_WITH_IRI_RHS: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:link = ex:Foo
+";
+
+    /// Same source as [`HELLO_WITH_IRI_RHS`] but with prefix `ex:` REPLACED
+    /// by `nope:` on the RHS — so the prefix `nope:` is undeclared. The
+    /// LHS keeps `ex:` so the property's key still parses; only the value
+    /// fails prefix resolution. Validates the undeclared-prefix diagnostic
+    /// path without confounding the test by also breaking the LHS.
+    const HELLO_WITH_UNKNOWN_PREFIX_RHS: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:link = nope:Foo
+";
+
+    /// Plan 03-01 Task 2 — happy path: `ex:link = ex:Foo` no longer
+    /// silently drops. The property appears in `body.properties()` with
+    /// a `HirExpr::PrefixedName { iri: "https://example.org/Foo" }` value.
+    /// This is the structural fix the deferred-items.md flagged.
+    #[test]
+    fn iri_expr_lowers_prefixed_name_form() {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(
+            &db,
+            HELLO_WITH_IRI_RHS.to_string(),
+            "iri_rhs.fossil".to_string(),
+        );
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+        let body = crate::body::body(&db, mloc);
+        let props = body.properties(&db);
+
+        assert_eq!(
+            props.len(),
+            2,
+            "ex:link = ex:Foo must NOT be silently dropped — \
+             expected 2 properties (iri + ex:link), got {}: {:?}",
+            props.len(),
+            props
+        );
+
+        // The second property is `ex:link = ex:Foo`.
+        let p1 = &props[1];
+        match &p1.key {
+            PropertyKey::PrefixedName { iri } => {
+                assert_eq!(
+                    iri.as_str(),
+                    "https://example.org/link",
+                    "LHS key must resolve via prefix table"
+                );
+            }
+            PropertyKey::Iri => panic!("expected PrefixedName LHS, got Iri"),
+        }
+        match &p1.value {
+            HirExpr::PrefixedName { iri } => {
+                assert_eq!(
+                    iri.as_str(),
+                    "https://example.org/Foo",
+                    "RHS prefixed-name must resolve to full IRI via prefix table"
+                );
+            }
+            other => panic!("expected HirExpr::PrefixedName for RHS `ex:Foo`, got {other:?}"),
+        }
+    }
+
+    /// Plan 03-01 Task 2 — error path: an undeclared prefix on the RHS
+    /// (`ex:link = nope:Foo`) emits a diagnostic via the Salsa accumulator
+    /// AND still drops the property (matches the rest of `lower_expr`'s
+    /// silent-None convention; the `IRI_EXPR` branch is the only one that
+    /// adds the diagnostic emit on top).
+    #[test]
+    fn iri_expr_unknown_prefix_emits_diagnostic() {
+        use fossil_base::Diagnostic;
+
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(
+            &db,
+            HELLO_WITH_UNKNOWN_PREFIX_RHS.to_string(),
+            "unknown_prefix_rhs.fossil".to_string(),
+        );
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+
+        // Drive the body() Salsa query so the accumulator fires.
+        let body = crate::body::body(&db, mloc);
+        let props = body.properties(&db);
+        // `ex:link = nope:Foo` is still dropped (the diagnostic does not
+        // prevent the outer property's `?` from short-circuiting). Only
+        // the `iri = template` property remains.
+        assert_eq!(
+            props.len(),
+            1,
+            "undeclared-prefix RHS still drops the property (silent-None \
+             convention), got {} properties",
+            props.len()
+        );
+
+        // The diagnostic IS emitted via the accumulator, keyed on the
+        // body() query that triggered the lowering.
+        let diags = crate::body::body::accumulated::<Diagnostic>(&db, mloc);
+        assert!(
+            !diags.is_empty(),
+            "undeclared RHS prefix `nope:` MUST emit at least one Diagnostic \
+             (not silent drop)"
+        );
+        let msg = &diags[0].message;
+        assert!(
+            msg.contains("nope"),
+            "diagnostic must name the offending prefix `nope`, got {msg:?}"
+        );
+        assert!(
+            msg.contains("undeclared") || msg.contains("undefined") || msg.contains("unknown"),
+            "diagnostic must say the prefix is undeclared, got {msg:?}"
+        );
     }
 }
