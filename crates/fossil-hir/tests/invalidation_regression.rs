@@ -44,12 +44,14 @@
 //!   * PER-MAPPING FAN-OUT (the load-bearing invariant — only M_3 fans out):
 //!     15. body(M_3)                        — output of mapping_cst_node(M_3) changed
 //!     16. expr_types(M_3)                  — depends on body(M_3); re-runs because body's output changed
+//!     17. spans(M_3)                       — Phase 3 plan 03-04 side table; depends on mapping_cst_node(M_3); re-runs for the edited mapping ONLY (siblings stay cached via the same Arc-shared subtree barrier)
 //!     (typecheck_mapping is a Phase 2 stub with no deps; never re-runs.)
 //!
 //!   * SIBLING MAPPINGS (the FORBIDDEN re-executions — must stay cached):
 //!     - body(M_i)              for i ∈ {0,1,3,4,5,6,7,8,9} — sibling bodies
 //!     - typecheck_mapping(M_i) for i ∈ {0,1,3,4,5,6,7,8,9} — sibling type-checks
 //!     - expr_types(M_i)        for i ∈ {0,1,3,4,5,6,7,8,9} — sibling provenance
+//!     - spans(M_i)             for i ∈ {0,1,3,4,5,6,7,8,9} — sibling spans (Phase 3 plan 03-04)
 //!
 //! (Note: indices are 0-based; "mapping #3" in prose = MappingLoc.index == 2.)
 //!
@@ -75,11 +77,19 @@
 //!
 //! The TOTAL count is bounded by the structural-pass costs:
 //!   1 (parse) + 3 (item_tree, def_map, ast_id_map) + 10 (mapping_cst_node)
-//!   + 1 (body of M_3) + 1 (expr_types of M_3) = 16.
+//!   + 1 (body of M_3) + 1 (expr_types of M_3) + 1 (spans of M_3) = 17.
 //!
-//! If the test fails with count > 16, something else is leaking. If the
-//! per-mapping fan-out test (body / typecheck / expr_types > 1) fails,
-//! ADR-0005's invalidation barrier is broken — DO NOT relax that
+//! Phase 3 plan 03-04 added `spans(db, mapping)` as a separate
+//! `#[salsa::tracked]` query (Option B in plan 03-04 Task 1 step 3 — see
+//! plan 03-04 SUMMARY for the choice rationale). The query depends on
+//! `mapping_cst_node(M_k)` (NOT `parse(file)`) so it inherits the per-
+//! mapping invalidation barrier ADR-0005 established; siblings stay
+//! cached. Net effect: MAX_REEXECUTIONS bumps from 16 to 17;
+//! MAX_PER_MAPPING_FAN_OUT stays at 1 (LOAD-BEARING — DO NOT relax).
+//!
+//! If the test fails with count > 17, something else is leaking. If the
+//! per-mapping fan-out test (body / typecheck / expr_types / spans > 1)
+//! fails, ADR-0005's invalidation barrier is broken — DO NOT relax that
 //! assertion; fix the data layout per ADR-0005.
 
 use std::sync::Arc;
@@ -93,18 +103,22 @@ use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
 use fossil_hir::item_tree::item_tree;
 use fossil_hir::provenance::expr_types;
+use fossil_hir::spans::spans;
 use salsa::Setter;
 
 /// Loose upper bound on the total count of re-executed queries after a
 /// single-char body edit in mapping #3 of a 10-mapping file. See the
 /// top-of-file "WHY THE THRESHOLD IS 16, NOT 4" comment for the breakdown.
 ///
+/// Phase 3 plan 03-04 bumped this from 16 → 17 by adding `spans(M_3)` to
+/// the per-mapping fan-out (Option B — separate `#[salsa::tracked]` query).
+///
 /// The LOAD-BEARING invariant for CORE-02 SC#2 is enforced by
 /// `keyset_of_reexecuted_queries_matches_expected_four` (per-mapping
-/// fan-out for body / typecheck_mapping / expr_types is exactly 1, NOT
-/// 10). The threshold here is a secondary "no surprise extra work"
-/// guard.
-const MAX_REEXECUTIONS: usize = 16;
+/// fan-out for body / typecheck_mapping / expr_types / spans is exactly
+/// 1, NOT 10). The threshold here is a secondary "no surprise extra
+/// work" guard.
+const MAX_REEXECUTIONS: usize = 17;
 
 /// The LOAD-BEARING per-mapping fan-out bound (ADR-0005 invariant). Editing
 /// one mapping's body MUST NOT re-execute body / typecheck / expr_types
@@ -150,6 +164,7 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
         let _ = body(&db, *m);
         let _ = typecheck_mapping(&db, *m);
         let _ = expr_types(&db, *m);
+        let _ = spans(&db, *m);
     }
 
     let before_reset = counter.load(Ordering::SeqCst);
@@ -170,6 +185,7 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
         let _ = body(&db, *m);
         let _ = typecheck_mapping(&db, *m);
         let _ = expr_types(&db, *m);
+        let _ = spans(&db, *m);
     }
 
     let after = counter.load(Ordering::SeqCst);
@@ -179,10 +195,11 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
         "Salsa invalidation cascade detected: {after} queries re-executed after \
          one-char body edit in mapping #3 of 10. Expected ≤ {MAX_REEXECUTIONS} \
          (structural pass: 1 parse + 3 file-keyed structural queries + 10 \
-         mapping_cst_node + per-mapping fan-out: 1 body + 1 expr_types = 16). \
-         If you exceed this bound, a NEW query has been added that depends on \
-         parse(file) without an intermediate per-item invalidation barrier — \
-         fix the data layout per ADR-0005, do NOT relax the threshold."
+         mapping_cst_node + per-mapping fan-out: 1 body + 1 expr_types + 1 \
+         spans = 17). If you exceed this bound, a NEW query has been added \
+         that depends on parse(file) without an intermediate per-item \
+         invalidation barrier — fix the data layout per ADR-0005, do NOT \
+         relax the threshold."
     );
 }
 
@@ -212,7 +229,11 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 ///       widens to ≥ 1 when typecheck_mapping starts reading body output)
 ///   (d) exactly one `expr_types` key (provenance side table — re-runs only
 ///       for the edited mapping)
-///   (e) `mapping_cst_node` may re-run for any subset of mappings (this is
+///   (e) exactly one `spans` key (Phase 3 plan 03-04 per-mapping real-span
+///       side table — same per-mapping fan-out shape as expr_types; load-
+///       bearing for ADR-0008's "spans depends on mapping_cst_node not
+///       parse(file)" claim)
+///   (f) `mapping_cst_node` may re-run for any subset of mappings (this is
 ///       the structural-pass cost; output is structurally-equal for siblings
 ///       so it doesn't propagate further)
 ///
@@ -223,6 +244,10 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 /// `editing_body_of_mapping_3_does_not_invalidate_item_tree` test remains
 /// a secondary gate.
 #[test]
+// The keyset assertions are intentionally inline + heavily commented for
+// debugability — splitting into helper fns would push the assertion site
+// away from the keys: {keys:#?} payload that surfaces in CI failures.
+#[allow(clippy::too_many_lines)]
 fn keyset_of_reexecuted_queries_matches_expected_four() {
     let baseline = include_str!("fixtures/ten_mappings_baseline.fossil");
     let edited = include_str!("fixtures/ten_mappings_mapping_3_body_one_char_edit.fossil");
@@ -255,6 +280,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         let _ = body(&db, *m);
         let _ = typecheck_mapping(&db, *m);
         let _ = expr_types(&db, *m);
+        let _ = spans(&db, *m);
     }
 
     captured_keys.lock().unwrap().clear();
@@ -268,6 +294,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         let _ = body(&db, *m);
         let _ = typecheck_mapping(&db, *m);
         let _ = expr_types(&db, *m);
+        let _ = spans(&db, *m);
     }
 
     let keys = captured_keys.lock().unwrap().clone();
@@ -317,6 +344,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         .filter(|k| k.starts_with("typecheck_mapping("))
         .count();
     let expr_types_count = keys.iter().filter(|k| k.starts_with("expr_types(")).count();
+    let spans_count = keys.iter().filter(|k| k.starts_with("spans(")).count();
 
     assert!(
         parse_count >= 1,
@@ -359,6 +387,29 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
     assert_eq!(
         expr_types_count, 1,
         "expected exactly 1 expr_types(M_3) re-exec; got {expr_types_count}. \
+         keys: {keys:#?}"
+    );
+
+    // Phase 3 plan 03-04 — `spans()` LOAD-BEARING fan-out:
+    // The spans tracked query reads `mapping_cst_node(M_k)`, NOT
+    // `parse(file)`. The same Arc-shared-subtree invalidation barrier
+    // ADR-0005 established for `body()` therefore applies to `spans()`
+    // too — only the edited mapping's spans re-execute; siblings stay
+    // cached. If spans_count == 10, ADR-0008's "spans depends on
+    // mapping_cst_node" claim is broken; fix the data layout, do NOT
+    // silence.
+    assert!(
+        spans_count <= MAX_PER_MAPPING_FAN_OUT,
+        "FORBIDDEN per-mapping fan-out: spans re-executed {spans_count} \
+         times after a single-mapping body edit (cap = \
+         {MAX_PER_MAPPING_FAN_OUT}). If spans_count == 10, the ADR-0008 \
+         claim that `spans(db, mapping)` reads `mapping_cst_node` (NOT \
+         `parse(db, file)`) is broken — fix the data layout in \
+         crates/fossil-hir/src/spans.rs. keys: {keys:#?}"
+    );
+    assert_eq!(
+        spans_count, 1,
+        "expected exactly 1 spans(M_3) re-exec; got {spans_count}. \
          keys: {keys:#?}"
     );
 }

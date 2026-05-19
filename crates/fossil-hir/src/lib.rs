@@ -28,6 +28,15 @@
 //!   literal subset (`StringLit` / `Template` / `PrefixedName`); [`provenance::ty_origin`]
 //!   is the user-facing lookup returning `Option<ExprTypeEntry>` (per
 //!   planner checker Blocker 5 — tuples don't auto-impl `salsa::Update`).
+//! - [`spans`] side table: per-mapping real-span lookup
+//!   (`(MappingLoc, ExprId) -> Span`) populated from `rowan::TextRange`s at
+//!   query time. Replaces Phase 2's zero-width `Span { start: 0, end: 0 }`
+//!   placeholders for the literal-subset provenance entries. The
+//!   [`spans::spans`] tracked query reads `mapping_cst_node` (NOT
+//!   `parse(file)`) to preserve the Phase 2 plan 02-07
+//!   `MAX_PER_MAPPING_FAN_OUT = 1` invariant. ADR-0008 records the
+//!   side-table-over-`HirExpr`-field choice (same rationale as Phase 2
+//!   RESEARCH §Q5 for provenance).
 //!
 //! # Phase 2-9 contract (locked)
 //!
@@ -44,6 +53,7 @@ pub mod def_map;
 pub mod item_tree;
 pub mod lower;
 pub mod provenance;
+pub mod spans;
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their
@@ -58,4 +68,9 @@ pub use lower::{HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
 };
+// The `spans()` query function is reachable as `fossil_hir::spans::spans`
+// (the module path is intentional — the bare `spans` name would shadow the
+// module). Mirrors the rust-analyzer convention of keeping Salsa query
+// functions under their module paths.
+pub use spans::Spans;
 pub use ty::{FnSig, InferenceId, Primitive, Record, RecordField, ShapeId, Ty, TyKind};
