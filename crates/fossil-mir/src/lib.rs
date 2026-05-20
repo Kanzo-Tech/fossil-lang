@@ -23,6 +23,7 @@
 pub mod graph;
 pub mod lower;
 pub mod op;
+pub mod schema;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
 // types at the crate root, query functions stay under their module path
@@ -30,3 +31,4 @@ pub mod op;
 pub use graph::MirGraph;
 pub use lower::lower_to_mir;
 pub use op::{AggFn, AggSpec, CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat};
+pub use schema::{free_cols, schema_of};
