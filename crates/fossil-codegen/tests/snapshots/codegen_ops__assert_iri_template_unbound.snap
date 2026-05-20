@@ -1,0 +1,13 @@
+---
+source: crates/fossil-codegen/tests/codegen_ops.rs
+expression: sql_for(13)
+---
+CREATE VIEW users AS
+SELECT * FROM read_csv_auto('examples/users.csv', sample_size=-1);
+COPY (
+    SELECT
+        'https://example.org/user/' || CASE WHEN users.id IS NOT NULL THEN users.id ELSE error('fossil_assertion_iri_template_unbound:line=42') END AS subject,
+        'https://example.org/name' AS predicate,
+        users.name AS object
+    FROM users
+) TO 'output.parquet' (FORMAT PARQUET);

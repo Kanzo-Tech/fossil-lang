@@ -63,6 +63,7 @@ fn codegen_case<'db>(db: &'db dyn fossil_base::Db, case: Case) -> fossil_codegen
         10 => group_by_count_ops(db),
         11 => aggregate_sum_ops(db),
         12 => multi_triple_emit_sink_ops(db),
+        13 => assert_iri_template_unbound_ops(db),
         other => panic!("unknown case {other}"),
     };
     codegen_graph(db, MirGraph::new(db, ops))
@@ -385,6 +386,54 @@ fn multi_triple_emit_sink_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>>
     ]
 }
 
+/// `Source(users) Extend("iri", "p/" || Assert(users.id)) TripleEmit Sink`.
+///
+/// The `iri` template's `${.id}` field ref is wrapped in
+/// `Expr::Assert { name: "iri_template_unbound", span_line: 42, .. }` (the SC#4
+/// / P-CRIT-4 carrier — lower_to_mir populates this in practice; here we
+/// construct it directly with a fixed line so the snapshot is stable). Codegen
+/// must render the named runtime assertion `CASE WHEN <id> IS NOT NULL THEN
+/// <id> ELSE error('fossil_assertion_iri_template_unbound:line=42') END`.
+fn assert_iri_template_unbound_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    vec![
+        source(db, "examples/users.csv", &["id", "name"]),
+        Op::Extend {
+            input: 0,
+            field: SmolStr::new_static("iri"),
+            expr: Expr::Concat(
+                Box::new(Expr::LitString(SmolStr::new_static(
+                    "https://example.org/user/",
+                ))),
+                Box::new(Expr::Assert {
+                    name: SmolStr::new_static("iri_template_unbound"),
+                    span_line: 42,
+                    inner: Box::new(Expr::ColRef {
+                        source: SmolStr::new_static("users"),
+                        column: SmolStr::new_static("id"),
+                    }),
+                }),
+            ),
+        },
+        Op::TripleEmit {
+            input: 1,
+            subject: Expr::ColRef {
+                source: SmolStr::default(),
+                column: SmolStr::new_static("iri"),
+            },
+            predicate: SmolStr::new_static("https://example.org/name"),
+            object: Expr::ColRef {
+                source: SmolStr::new_static("users"),
+                column: SmolStr::new_static("name"),
+            },
+            graph: None,
+        },
+        Op::Sink {
+            input: 2,
+            sink: SinkRef::GraphAr,
+        },
+    ]
+}
+
 // --------------------------------------------------------------------------
 // Snapshots — one per single-input operator (ADR-0009 reachability gap).
 // --------------------------------------------------------------------------
@@ -456,4 +505,42 @@ fn aggregate_sum() {
 #[test]
 fn multi_triple_emit_sink() {
     insta::assert_snapshot!("multi_triple_emit_sink", sql_for(12));
+}
+
+// --------------------------------------------------------------------------
+// Snapshot — SC#4 named runtime assertion (P-CRIT-4 / CORE-10, plan 04-06).
+// --------------------------------------------------------------------------
+
+/// Locks the `CASE WHEN <id> IS NOT NULL THEN <id> ELSE
+/// error('fossil_assertion_iri_template_unbound:line=42') END` shape verbatim,
+/// and guards (below) that NO `TyKind::Unknown` / `InferenceId` text leaked
+/// into the SQL (RESEARCH Pitfall 5).
+#[test]
+fn assert_iri_template_unbound() {
+    insta::assert_snapshot!("assert_iri_template_unbound", sql_for(13));
+}
+
+/// SC#4 no-leak guard (RESEARCH Pitfall 5): the rendered assertion SQL must
+/// contain the named, line-located message but NEVER any `TyKind::Unknown(` or
+/// `InferenceId` debug text. The assertion name is a fixed snake_case
+/// identifier; the only number embedded is the resolved `line=<N>`.
+#[test]
+fn assert_sql_never_leaks_unknown_or_inference_id() {
+    let sql = sql_for(13);
+    assert!(
+        sql.contains("error('fossil_assertion_iri_template_unbound:line=42')"),
+        "expected the named runtime assertion in the SQL, got:\n{sql}"
+    );
+    assert!(
+        sql.contains("CASE WHEN users.id IS NOT NULL THEN users.id ELSE"),
+        "expected the CASE WHEN ... guard shape, got:\n{sql}"
+    );
+    assert!(
+        !sql.contains("Unknown("),
+        "TyKind::Unknown leaked into the assertion SQL:\n{sql}"
+    );
+    assert!(
+        !sql.contains("InferenceId"),
+        "InferenceId leaked into the assertion SQL:\n{sql}"
+    );
 }
