@@ -7,6 +7,7 @@
 #![allow(
     clippy::doc_markdown,
     clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
     clippy::similar_names
 )]
 
@@ -41,11 +42,19 @@
 //!     4. def_map(file)                     — re-runs, returns structurally-equal DefMap; downstream validates
 //!     5-14. mapping_cst_node(M_0..M_9)     — re-runs for ALL 10 mappings; output is structurally-equal for 9 siblings (rowan Arc-shared subtrees); only M_3's output differs
 //!
+//!   * STRUCTURAL PASS (Phase 3 plan 03-05 addition):
+//!     - lower_to_hir(file)                 — re-runs, returns structurally-equal HirFile (header-only signatures unchanged by a body edit); downstream validates. typecheck_mapping reads it (via resolve_source_row + mapping/source name lookups) so it joins the file-keyed structural pass. File-keyed, NOT a per-mapping fan-out.
+//!
 //!   * PER-MAPPING FAN-OUT (the load-bearing invariant — only M_3 fans out):
 //!     15. body(M_3)                        — output of mapping_cst_node(M_3) changed
-//!     16. expr_types(M_3)                  — depends on body(M_3); re-runs because body's output changed
+//!     16. typecheck_mapping(M_3)           — Phase 3 plan 03-05: NOW reads body(M_3) + spans(M_3) + resolve_source_row + resolve_target_shape; re-runs for the edited mapping ONLY
 //!     17. spans(M_3)                       — Phase 3 plan 03-04 side table; depends on mapping_cst_node(M_3); re-runs for the edited mapping ONLY (siblings stay cached via the same Arc-shared subtree barrier)
-//!     (typecheck_mapping is a Phase 2 stub with no deps; never re-runs.)
+//!     (expr_types(M_3) is NOW a thin accessor over typecheck_mapping(M_3);
+//!      after the edit its input output is structurally-equal — the
+//!      ten-mappings fixture's FieldRef bodies have no CSVW schema so the type
+//!      table is unchanged — so it VALIDATES instead of re-executing. Hence
+//!      expr_types_count == 0 in Phase 3 plan 03-05, and typecheck_count == 1
+//!      takes its place in the fan-out. Net total is unchanged at 18.)
 //!
 //!   * SIBLING MAPPINGS (the FORBIDDEN re-executions — must stay cached):
 //!     - body(M_i)              for i ∈ {0,1,3,4,5,6,7,8,9} — sibling bodies
@@ -76,18 +85,32 @@
 //! which counts body / typecheck / expr_types re-executions separately.
 //!
 //! The TOTAL count is bounded by the structural-pass costs:
-//!   1 (parse) + 3 (item_tree, def_map, ast_id_map) + 10 (mapping_cst_node)
-//!   + 1 (body of M_3) + 1 (expr_types of M_3) + 1 (spans of M_3) = 17.
+//!   1 (parse) + 4 (item_tree, def_map, ast_id_map, lower_to_hir)
+//!   + 10 (mapping_cst_node) + 1 (body of M_3) + 1 (typecheck_mapping of M_3)
+//!   + 1 (spans of M_3) = 18.
 //!
 //! Phase 3 plan 03-04 added `spans(db, mapping)` as a separate
-//! `#[salsa::tracked]` query (Option B in plan 03-04 Task 1 step 3 — see
-//! plan 03-04 SUMMARY for the choice rationale). The query depends on
-//! `mapping_cst_node(M_k)` (NOT `parse(file)`) so it inherits the per-
-//! mapping invalidation barrier ADR-0005 established; siblings stay
-//! cached. Net effect: MAX_REEXECUTIONS bumps from 16 to 17;
-//! MAX_PER_MAPPING_FAN_OUT stays at 1 (LOAD-BEARING — DO NOT relax).
+//! `#[salsa::tracked]` query (Option B in plan 03-04 Task 1 step 3); that
+//! brought the total to 17.
 //!
-//! If the test fails with count > 17, something else is leaking. If the
+//! Phase 3 plan 03-05 wired the REAL bidirectional checker:
+//! `typecheck_mapping(M_k)` graduated from a Phase 2 no-op stub (0 deps) to a
+//! query that reads `body(M_k)` + `spans(M_k)` + `resolve_source_row` +
+//! `resolve_target_shape`. Two bookkeeping shifts result, netting to 18:
+//!   (a) `typecheck_mapping(M_3)` now re-executes (+1 → was 0); the
+//!       `resolve_source_row` / mapping-name lookups add a file-keyed
+//!       `lower_to_hir(file)` to the structural pass (+1).
+//!   (b) `expr_types(M_3)` became a THIN ACCESSOR over `typecheck_mapping`;
+//!       its input output is structurally-equal after a body-only edit of a
+//!       schema-less mapping, so it VALIDATES instead of re-executing (−1 → was 1).
+//! Net: 17 − 1 (expr_types) + 1 (typecheck_mapping) + 1 (lower_to_hir) = 18.
+//!
+//! `resolve_source_row` reads `def_map(file)` + `lower_to_hir(file)`
+//! (signatures-only, file-keyed, structurally stable across body edits) —
+//! NEVER walks up from `mapping_cst_node` to the FILE CST (Serious #6). The
+//! per-mapping fan-out stays at 1 (verified below).
+//!
+//! If the test fails with count > 18, something else is leaking. If the
 //! per-mapping fan-out test (body / typecheck / expr_types / spans > 1)
 //! fails, ADR-0005's invalidation barrier is broken — DO NOT relax that
 //! assertion; fix the data layout per ADR-0005.
@@ -110,15 +133,18 @@ use salsa::Setter;
 /// single-char body edit in mapping #3 of a 10-mapping file. See the
 /// top-of-file "WHY THE THRESHOLD IS 16, NOT 4" comment for the breakdown.
 ///
-/// Phase 3 plan 03-04 bumped this from 16 → 17 by adding `spans(M_3)` to
-/// the per-mapping fan-out (Option B — separate `#[salsa::tracked]` query).
+/// Phase 3 plan 03-04 bumped this from 16 → 17 by adding `spans(M_3)`.
+/// Phase 3 plan 03-05 bumped it 17 → 18: the real `typecheck_mapping`
+/// re-executes (+1) and pulls `lower_to_hir(file)` into the structural pass
+/// (+1), while `expr_types` (now a thin accessor) validates instead of
+/// re-executing (−1). Observed value: 18 (see top-of-file breakdown).
 ///
 /// The LOAD-BEARING invariant for CORE-02 SC#2 is enforced by
 /// `keyset_of_reexecuted_queries_matches_expected_four` (per-mapping
 /// fan-out for body / typecheck_mapping / expr_types / spans is exactly
-/// 1, NOT 10). The threshold here is a secondary "no surprise extra
+/// 1 each, NOT 10). The threshold here is a secondary "no surprise extra
 /// work" guard.
-const MAX_REEXECUTIONS: usize = 17;
+const MAX_REEXECUTIONS: usize = 18;
 
 /// The LOAD-BEARING per-mapping fan-out bound (ADR-0005 invariant). Editing
 /// one mapping's body MUST NOT re-execute body / typecheck / expr_types
@@ -224,11 +250,13 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 ///   (a) at least one `parse` key
 ///   (b) exactly one `body` key (mapping_3 — would be 10 if sibling bodies
 ///       were invalidated by the body edit; THIS is the load-bearing check)
-///   (c) at most one `typecheck_mapping` key (Phase 2's typecheck_mapping
-///       is a no-op stub with no dependencies, so 0 is also valid — Phase 3
-///       widens to ≥ 1 when typecheck_mapping starts reading body output)
-///   (d) exactly one `expr_types` key (provenance side table — re-runs only
-///       for the edited mapping)
+///   (c) exactly one `typecheck_mapping` key (Phase 3 plan 03-05 wired the
+///       real checker — it reads body(M_3) + spans(M_3) + the descriptors,
+///       so it re-executes once for the edited mapping; was 0 in Phase 2)
+///   (d) at most one `expr_types` key (Phase 3 plan 03-05 made expr_types a
+///       thin accessor over typecheck_mapping; it VALIDATES — count 0 — when
+///       the typecheck output is structurally-equal after a schema-less body
+///       edit, else re-runs — count 1)
 ///   (e) exactly one `spans` key (Phase 3 plan 03-04 per-mapping real-span
 ///       side table — same per-mapping fan-out shape as expr_types; load-
 ///       bearing for ADR-0008's "spans depends on mapping_cst_node not
@@ -368,25 +396,39 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
          invariant); got {body_count}. keys: {keys:#?}"
     );
 
-    // typecheck_mapping is a Phase 2 stub with no dependencies, so Salsa
-    // never re-runs it; 0 expected. Phase 3 will make it depend on body()
-    // and the expected count becomes 1.
+    // Phase 3 plan 03-05: typecheck_mapping is no longer a no-op stub — it
+    // reads body(M_3) + spans(M_3) + resolve_source_row + resolve_target_shape,
+    // so it re-executes exactly ONCE for the edited mapping (the load-bearing
+    // per-mapping fan-out invariant). Was 0 in Phase 2.
     assert!(
         typecheck_count <= MAX_PER_MAPPING_FAN_OUT,
         "FORBIDDEN per-mapping fan-out: typecheck_mapping re-executed \
          {typecheck_count} times after a single-mapping body edit (cap = \
-         {MAX_PER_MAPPING_FAN_OUT}). keys: {keys:#?}"
+         {MAX_PER_MAPPING_FAN_OUT}). If typecheck_count == 10, the \
+         resolve_source_row / typecheck_mapping path is depending on \
+         parse(file) without a barrier (Serious #6 regression) — fix the \
+         data layout, do NOT relax. keys: {keys:#?}"
+    );
+    assert_eq!(
+        typecheck_count, 1,
+        "expected exactly 1 typecheck_mapping(M_3) re-exec (Phase 3 plan \
+         03-05 wired the real checker); got {typecheck_count}. keys: {keys:#?}"
     );
 
+    // Phase 3 plan 03-05: expr_types is NOW a thin accessor over
+    // typecheck_mapping. After a body-only edit to a schema-less mapping, the
+    // typecheck output is structurally-equal, so expr_types VALIDATES instead
+    // of re-executing — observed count is 0. The fan-out cap still applies.
     assert!(
         expr_types_count <= MAX_PER_MAPPING_FAN_OUT,
         "FORBIDDEN per-mapping fan-out: expr_types re-executed \
          {expr_types_count} times after a single-mapping body edit (cap = \
          {MAX_PER_MAPPING_FAN_OUT}). keys: {keys:#?}"
     );
-    assert_eq!(
-        expr_types_count, 1,
-        "expected exactly 1 expr_types(M_3) re-exec; got {expr_types_count}. \
+    assert!(
+        expr_types_count <= 1,
+        "expected 0 or 1 expr_types(M_3) re-exec (thin accessor — validates \
+         when typecheck output is structurally-equal); got {expr_types_count}. \
          keys: {keys:#?}"
     );
 
