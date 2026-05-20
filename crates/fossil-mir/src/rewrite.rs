@@ -1,9 +1,11 @@
 //! The MIR rewriting engine — a **plain-Rust fixpoint** over the `Op` vec.
 //!
 //! [`rewrite`] applies the structural rules R1–R6 (`operator-algebra.md` §4.1,
-//! Min Oo & Hartig) to a [`MirGraph`] until no rule fires (a fixpoint) or an
-//! iteration cap is hit. R7–R10 (the typed Fossil-specific rules) land in plan
-//! 04-03 and slot into the same `try_rN` rule list.
+//! Min Oo & Hartig) and the typed Fossil-specific rules R7–R10
+//! (`operator-algebra.md` §4.2) to a [`MirGraph`] until no rule fires (a
+//! fixpoint) or an iteration cap is hit. R7–R10 share the same `try_rN` rule
+//! list and lean on the plain-Rust constant folder in [`crate::eval`]
+//! (`partial_eval` / `static_truth`) so they add ZERO new tracked queries.
 //!
 //! # Why plain-Rust and NOT `#[salsa::tracked]` (ADR-0010)
 //!
@@ -37,6 +39,7 @@
 
 use smol_str::SmolStr;
 
+use crate::eval::{partial_eval, static_truth};
 use crate::graph::MirGraph;
 use crate::op::{CmpOp, Expr, Op};
 use crate::schema::{free_cols, schema_of};
@@ -65,7 +68,11 @@ pub fn rewrite<'db>(db: &'db dyn fossil_base::Db, graph: MirGraph<'db>) -> MirGr
             | try_r3(db, &mut ops)
             | try_r4(db, &mut ops)
             | try_r5(db, &mut ops)
-            | try_r6(db, &mut ops);
+            | try_r6(db, &mut ops)
+            | try_r7(db, &mut ops)
+            | try_r8(db, &mut ops)
+            | try_r9(db, &mut ops)
+            | try_r10(db, &mut ops);
 
         if !changed {
             break; // fixpoint reached
@@ -508,6 +515,145 @@ fn try_r6<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
                 column: a,
             },
         };
+        return true;
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// R7–R10 — Fossil-specific typed rules (operator-algebra.md §4.2).
+//
+// These lean on the plain-Rust constant folder ([`crate::eval`]): R7 folds an
+// `Extend` expression in place; R8 / R9 ask `static_truth` whether a `Filter`
+// predicate is statically decidable; R10 fuses nested `GroupBy` keys. Like
+// R1–R6 they fire on the FIRST match per call and are idempotent (their output
+// no longer matches their own trigger).
+// ---------------------------------------------------------------------------
+
+/// R7 — partial-eval an `Extend` expression:
+/// `extend(s, f, e)` → `extend(s, f, partial_eval(e))` when folding *changed*
+/// the expression.
+///
+/// Fires only when `partial_eval(e) != e` (otherwise nothing to do — this is
+/// the firing guard that prevents infinite re-fire). Idempotent because
+/// `partial_eval` is a normal form (`crate::eval`): the folded expression is
+/// stable, so a second pass leaves it alone and R7 does not re-trigger.
+fn try_r7<'db>(db: &'db dyn fossil_base::Db, ops: &mut [Op<'db>]) -> bool {
+    let _ = db;
+    for op in ops.iter_mut() {
+        let Op::Extend { expr, .. } = op else {
+            continue;
+        };
+        let folded = partial_eval(expr);
+        if &folded == expr {
+            continue; // nothing to fold — leave untouched (idempotency guard)
+        }
+        *expr = folded;
+        return true;
+    }
+    false
+}
+
+/// R8 — drop a statically-true `Filter`:
+/// `filter(s, p)` where `static_truth(p) == Some(true)` → remove the `Filter`,
+/// rewiring its consumers onto its input `s`.
+///
+/// Idempotent: the `Filter` is gone, so there is no statically-true predicate
+/// left to re-trigger.
+fn try_r8<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    let _ = db;
+    for filt in 0..ops.len() {
+        let Op::Filter { input: s, pred } = &ops[filt] else {
+            continue;
+        };
+        if static_truth(pred) != Some(true) {
+            continue;
+        }
+        let s = *s;
+        // Rewire consumers of the filter onto `s`, then drop the filter node.
+        // `reindex_after_removal` remaps indices pointing AT `filt` to `s` and
+        // shifts the tail down, so the consumer rewiring is implicit.
+        reindex_after_removal(ops, filt, s);
+        return true;
+    }
+    false
+}
+
+/// R9 — replace a statically-false `Filter` with `Op::Empty`:
+/// `filter(s, p)` where `static_truth(p) == Some(false)` →
+/// `Op::Empty { schema: schema(s) }`.
+///
+/// The `Empty` node carries the schema the filtered relation would have had so
+/// codegen (plan 04-04) emits a `SELECT … WHERE false` shell of the right
+/// shape (ADR-0011). Replaced IN PLACE (index `filt` unchanged), so consumers
+/// need no rewiring. Idempotent: `Empty` has no predicate, so R9 cannot
+/// re-fire.
+fn try_r9<'db>(db: &'db dyn fossil_base::Db, ops: &mut [Op<'db>]) -> bool {
+    for filt in 0..ops.len() {
+        let Op::Filter { input: s, pred } = &ops[filt] else {
+            continue;
+        };
+        if static_truth(pred) != Some(false) {
+            continue;
+        }
+        let s = *s;
+        let schema = schema_of(db, ops, s);
+        ops[filt] = Op::Empty { schema };
+        return true;
+    }
+    false
+}
+
+/// R10 — group-by fusion:
+/// `group_by(group_by(s, k₁), k₂)` → `group_by(s, k₁ ∪ k₂)` when
+/// `k₁ ⊆ schema(s)` and the aggregations compose.
+///
+/// For v0.1 we fuse the key sets (union, preserving k₁ order then the new
+/// keys from k₂). We DO NOT fire when an `Aggregate` sits between the two
+/// `GroupBy`s — an intervening aggregation breaks key composition. The inner
+/// `GroupBy` is removed and indices renumbered. Idempotent: a single `GroupBy`
+/// remains, so the nested pattern is gone.
+fn try_r10<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    for outer in 0..ops.len() {
+        let Op::GroupBy {
+            input: inner,
+            keys: k2,
+        } = &ops[outer]
+        else {
+            continue;
+        };
+        let inner = *inner;
+        let k2 = k2.clone();
+        let Some(Op::GroupBy { input: s, keys: k1 }) = ops.get(inner) else {
+            continue;
+        };
+        // Only fuse when the inner group-by feeds the outer exclusively (no
+        // intervening Aggregate could sit on this edge under fan-out=1, but
+        // guard defensively).
+        if consumer_count(ops, inner) != 1 {
+            continue;
+        }
+        let s = *s;
+        let k1 = k1.clone();
+        // Guard: k₁ ⊆ schema(s) (the keys the inner group-by grouped by must be
+        // columns of its own input — i.e. the composition is well-formed).
+        let s_schema: std::collections::BTreeSet<SmolStr> =
+            schema_of(db, ops, s).into_iter().collect();
+        if !k1.iter().all(|k| s_schema.contains(k)) {
+            continue;
+        }
+        // k₁ ∪ k₂, preserving k₁ order then appending the new k₂ keys.
+        let mut fused = k1;
+        for k in &k2 {
+            if !fused.contains(k) {
+                fused.push(k.clone());
+            }
+        }
+        ops[outer] = Op::GroupBy {
+            input: s,
+            keys: fused,
+        };
+        reindex_after_removal(ops, inner, s);
         return true;
     }
     false
