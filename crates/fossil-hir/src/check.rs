@@ -135,7 +135,7 @@ User : ex:Person from users
     /// a Template RHS (`iri = backtick-template`). Plan 03-04 ensures
     /// that this synthesises `IriTemplate` with `Literal` provenance and
     /// a real non-zero span. Passing expected=String against actual=
-    /// IriTemplate (same type provenance synthesises for prop 0)
+    /// `IriTemplate` (same type provenance synthesises for prop 0)
     /// triggers the mismatch path against a known-real-span source.
     #[test]
     fn compatible_blame_two_spans_on_mismatch() {
