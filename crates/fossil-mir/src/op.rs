@@ -1,96 +1,231 @@
-//! Typed operator algebra — Phase 1 ships 3 of 11 operators + a Sink terminal.
+//! Typed operator algebra — the complete 11-operator typed set.
 //!
-//! Phase 4 (CORE-08..10) extends to all 11 operators (`Project`, `Rename`,
-//! `Filter`, `Join`, `Union`, `GroupBy`, `Aggregate`, `Distinct`) and wires
-//! the R1-R10 rewriting pass on this `Op<'db>` enum. The variant set
-//! documented here is locked for Phase 1; Phase 4 only ADDS variants.
+//! Phase 4 (CORE-08..10) extends the Phase 1 4-variant `Op<'db>` to all 11
+//! operators of `operator-algebra.md` §2 (`Source`, `Project`, `Extend`,
+//! `Rename`, `Filter`, `Join`, `Union`, `GroupBy`, `Aggregate`, `Distinct`,
+//! `TripleEmit`, `Sink`) plus an [`Op::Empty`] node (the R9 empty-source
+//! representation — see ADR-0009), and replaces the thin untyped `ExprLowered`
+//! with a typed [`Expr`] ADT carrying [`Ty`] on the synthesised nodes.
 //!
-//! See `operator-algebra.md` for the full algebra spec.
+//! See `operator-algebra.md` for the full algebra spec and ADR-0009 for the
+//! reachability decision (all 11 defined; only `Source` / `Extend` /
+//! `TripleEmit` / `Sink` are lowered from `.fossil` source this phase, the
+//! other 7 are exercised via direct `MirGraph` construction in plans
+//! 04-04/04-05).
 //!
-//! # Design notes (Phase 1)
+//! # Design notes
 //!
-//! - `ExprLowered::Concat` wraps recursion via `Box<ExprLowered>`. The
-//!   `salsa::Update` derive handles `Box<T>` transparently when `T: Update`,
-//!   so no interned-newtype escape hatch is needed (cf. the `Record<'db>`
-//!   pattern from `fossil-hir`). Phase 4 generalises `ExprLowered` to a full
-//!   typed `Expr` ADT.
-//! - `Op<'db>` carries `'db` because the `Source` variant references
-//!   `Ty<'db>` (an interned handle). `Extend` / `TripleEmit` / `Sink` are
-//!   `'db`-free in their data, but the enum-level lifetime is required by the
-//!   `Record(Record<'db>)` reference inside `Source.row_type`.
+//! - **Enum dispatch ONLY** (CLAUDE.md hard rule). `Op` / `Expr` use enum
+//!   variants, never `Box<dyn Trait>`. Recursion *inside* an `Expr` variant via
+//!   `Box<Expr>` is data, not a trait object — `salsa::Update` lifts through
+//!   `Box<T>` transparently when `T: Update`, so no interned-newtype escape
+//!   hatch is needed.
+//! - `Op<'db>` / `Expr<'db>` carry `'db` because they reference [`Ty<'db>`]
+//!   (interned handles). They are NOT themselves interned — they live inside
+//!   the tracked [`crate::graph::MirGraph`] — so carrying `Ty` in `Hash`/`Eq`
+//!   is fine and makes the "erase types ≡ untyped algebra" property (SC#3,
+//!   plan 04-07) testable.
+//! - `input` / `left` / `right` are `usize` indices into
+//!   [`crate::graph::MirGraph::ops`] in topological order. Two-input ops carry
+//!   two indices.
 
 use fossil_hir::Ty;
 use smol_str::SmolStr;
 
-/// One node of the MIR DAG. Phase 1 ships 3 typed operators (`Source`,
-/// `Extend`, `TripleEmit`) and the `Sink` terminal; Phase 4 (CORE-08..10)
-/// adds the remaining 8.
+/// One node of the MIR DAG. The complete typed operator algebra:
+/// `operator-algebra.md` §2's 9 operators + the two typed-sink refinements
+/// (`TripleEmit`, `Sink`) + [`Op::Empty`] (R9 target).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum Op<'db> {
-    /// `SourceOp(uri, format, row_type)`.
+    /// `SourceOp(uri, format, row_type)` — origin of all row data
+    /// (operator-algebra.md §2.1).
     ///
-    /// Phase 1: `format` is always `Csv`; `row_type` is hardcoded
-    /// `Record({id: String, name: String})` (Phase 3 CORE-05 derives it from
-    /// the CSVW descriptor).
+    /// `row_type` is the `Record` row type derived from the descriptor (CSVW)
+    /// or the typed source row (Phase 3 `TypeckOutput.source_row`).
     Source {
         uri: SmolStr,
         format: SourceFormat,
         row_type: Ty<'db>,
     },
 
-    /// `ExtendOp(input_idx, field, expr)`.
-    ///
-    /// Phase 1 uses this to attach the IRI-template result as a column on the
-    /// upstream stream. `input` indexes into [`crate::graph::MirGraph::ops`]
-    /// in topological order.
+    /// `ProjectOp(input, cols)` — restrict the row to the selected columns
+    /// (operator-algebra.md §2.2).
+    Project { input: usize, cols: Vec<SmolStr> },
+
+    /// `ExtendOp(input, field, expr)` — add a computed field whose type is the
+    /// expression's type (operator-algebra.md §2.3). `input` indexes into
+    /// [`crate::graph::MirGraph::ops`] in topological order.
     Extend {
-        /// Index of the upstream op in the [`crate::graph::MirGraph`] ops list.
         input: usize,
-        /// Output column name.
         field: SmolStr,
-        /// Lowered expression producing the new column's values.
-        expr: ExprLowered,
+        expr: Expr<'db>,
     },
 
-    /// `TripleEmitOp(input_idx, subject_col, predicate_iri, object_col)`.
+    /// `RenameOp(input, old, new)` — rename a column (operator-algebra.md §2.4).
+    Rename {
+        input: usize,
+        old: SmolStr,
+        new: SmolStr,
+    },
+
+    /// `FilterOp(input, pred)` — keep rows satisfying the boolean predicate
+    /// (operator-algebra.md §2.5).
+    Filter { input: usize, pred: Expr<'db> },
+
+    /// `JoinOp(left, right, on, kind)` — relational join
+    /// (operator-algebra.md §2.6). `left_name` / `right_name` qualify the two
+    /// input streams for collision-safe schema union.
+    Join {
+        left: usize,
+        right: usize,
+        on: Expr<'db>,
+        kind: JoinKind,
+        left_name: SmolStr,
+        right_name: SmolStr,
+    },
+
+    /// `UnionOp(left, right)` — multiset union of two same-schema streams
+    /// (operator-algebra.md §2.7).
+    Union { left: usize, right: usize },
+
+    /// `GroupByOp(input, keys)` — group rows by the key columns
+    /// (operator-algebra.md §2.8).
+    GroupBy { input: usize, keys: Vec<SmolStr> },
+
+    /// `AggregateOp(input, aggs)` — aggregate grouped rows
+    /// (operator-algebra.md §2.9).
+    Aggregate {
+        input: usize,
+        aggs: Vec<AggSpec<'db>>,
+    },
+
+    /// `DistinctOp(input, by?)` — deduplicate rows, optionally by a subset of
+    /// columns (operator-algebra.md §2.10).
+    Distinct {
+        input: usize,
+        by: Option<Vec<SmolStr>>,
+    },
+
+    /// `TripleEmitOp(input, subject, predicate, object, graph?)` — emit one RDF
+    /// triple per row (operator-algebra.md §2.11, typed-sink refinement).
     ///
-    /// Phase 1: `predicate` is a static IRI; `subject_col` references a
-    /// column produced upstream (typically by an `Extend`); `object_col`
-    /// references a column from the `Source` row type.
+    /// Phase 1 used `subject_col` / `object_col: SmolStr`; Phase 4 generalises
+    /// both to [`Expr`] (a bare `ColRef` / `Concat` renders byte-identically).
+    /// `graph` is the optional named-graph IRI (RDF 1.2 quad).
     TripleEmit {
         input: usize,
-        subject_col: SmolStr,
+        subject: Expr<'db>,
         predicate: SmolStr,
-        object_col: SmolStr,
+        object: Expr<'db>,
+        graph: Option<SmolStr>,
     },
 
-    /// `SinkOp(input_idx, sink)`. Terminal node; no operator may consume a
-    /// `Sink` output.
+    /// `SinkOp(input, sink)` — terminal node; no operator may consume a `Sink`
+    /// output (operator-algebra.md §2.12, typed-sink refinement).
     Sink { input: usize, sink: SinkRef },
+
+    /// `Empty(schema)` — the R9 empty-source target. Carries the column schema
+    /// it would have produced so codegen can emit a `SELECT ... WHERE false`
+    /// (or `LIMIT 0`) shell of the right shape. See ADR-0009 for why this is a
+    /// distinct variant rather than a `Source` with an empty marker.
+    Empty { schema: Vec<SmolStr> },
 }
 
-/// Phase 1 source formats. Phase 5 adds `Json`, `Parquet`.
+/// Relational join flavour (operator-algebra.md §2.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub enum JoinKind {
+    Inner,
+    LeftOuter,
+    RightOuter,
+    Full,
+}
+
+/// One aggregation in an [`Op::Aggregate`] — `agg_fn(in_field) AS out_field`,
+/// the result typed `ty` (operator-algebra.md §2.9).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct AggSpec<'db> {
+    pub out_field: SmolStr,
+    pub agg_fn: AggFn,
+    pub in_field: SmolStr,
+    pub ty: Ty<'db>,
+}
+
+/// Aggregation function (operator-algebra.md §2.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub enum AggFn {
+    Count,
+    Sum,
+    Min,
+    Max,
+    Avg,
+}
+
+/// Source formats. Phase 1 ships `Csv`; Phase 5 adds `Json`, `Parquet`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub enum SourceFormat {
     Csv,
 }
 
-/// Phase 1 sink references. Phase 9+ adds `Turtle`, `JsonLd`, `NQuads`.
+/// Sink references. Phase 1 ships `GraphAr`; Phase 9+ adds `Turtle`, `JsonLd`,
+/// `NQuads`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub enum SinkRef {
     GraphAr,
 }
 
-/// Phase 1 lowered expression — supports concatenation of literal strings
-/// and column references. Phase 4 generalises to a full typed `Expr` ADT.
+/// Typed MIR expression — the Phase 4 generalisation of the Phase 1
+/// `ExprLowered`. `LitString` / `ColRef` / `Concat` are the
+/// rendering-compatible subset (hello.fossil SQL is byte-identical); `Call` /
+/// `BinOp` / `Assert` / `LitBool` are the Phase 4..6 additions.
+///
+/// The `ty: Ty<'db>` carriage on `Call` / `BinOp` is intentional — it makes
+/// the "erase types ≡ untyped property" check (SC#3, plan 04-07) testable.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub enum ExprLowered {
+pub enum Expr<'db> {
     /// Literal string (e.g. `"https://example.org/user/"`).
     LitString(SmolStr),
+    /// Literal boolean. Renders `TRUE` / `FALSE`.
+    LitBool(bool),
     /// Column reference (e.g. `users.id`).
     ColRef { source: SmolStr, column: SmolStr },
     /// String concatenation: `lhs || rhs`. Recursive via `Box` so the variant
     /// has a finite size; `salsa::Update` lifts through `Box<T>` when
-    /// `T: Update`, so no interned-newtype escape hatch is required.
-    Concat(Box<ExprLowered>, Box<ExprLowered>),
+    /// `T: Update`.
+    Concat(Box<Expr<'db>>, Box<Expr<'db>>),
+    /// Function application: `func(args...)`, result typed `ty`. The stdlib
+    /// function → SQL mapping lands in Phase 5; Phase 4 renders a passthrough
+    /// `func(arg, ...)` call.
+    Call {
+        func: SmolStr,
+        args: Vec<Expr<'db>>,
+        ty: Ty<'db>,
+    },
+    /// Binary operator: `lhs <op> rhs`, result typed `ty`.
+    BinOp {
+        op: CmpOp,
+        lhs: Box<Expr<'db>>,
+        rhs: Box<Expr<'db>>,
+        ty: Ty<'db>,
+    },
+    /// Named runtime assertion (R7-R10). `span_line` carries the source line for
+    /// the diagnostic. Populated by plan 04-06; until then codegen renders the
+    /// `inner` expression (no-op wrapper).
+    Assert {
+        name: SmolStr,
+        span_line: u32,
+        inner: Box<Expr<'db>>,
+    },
+}
+
+/// Comparison / boolean operator for [`Expr::BinOp`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
 }
