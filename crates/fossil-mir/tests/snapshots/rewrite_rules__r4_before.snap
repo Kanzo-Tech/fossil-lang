@@ -1,0 +1,44 @@
+---
+source: crates/fossil-mir/tests/rewrite_rules.rs
+expression: "format!(\"{:#?}\", graph.ops(&db))"
+---
+[
+    Source {
+        uri: "a.csv",
+        format: Csv,
+        row_type: Ty(
+            Id(401),
+        ),
+    },
+    Source {
+        uri: "b.csv",
+        format: Csv,
+        row_type: Ty(
+            Id(401),
+        ),
+    },
+    Union {
+        left: 0,
+        right: 1,
+    },
+    Filter {
+        input: 2,
+        pred: BinOp {
+            op: Eq,
+            lhs: ColRef {
+                source: "",
+                column: "status",
+            },
+            rhs: LitString(
+                "active",
+            ),
+            ty: Ty(
+                Id(402),
+            ),
+        },
+    },
+    Sink {
+        input: 3,
+        sink: GraphAr,
+    },
+]

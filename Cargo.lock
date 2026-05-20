@@ -1143,6 +1143,7 @@ dependencies = [
  "fossil-base",
  "fossil-hir",
  "fossil-syntax",
+ "insta",
  "salsa",
  "smol_str",
 ]

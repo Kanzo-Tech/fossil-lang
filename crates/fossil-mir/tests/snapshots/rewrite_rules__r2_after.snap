@@ -1,0 +1,24 @@
+---
+source: crates/fossil-mir/tests/rewrite_rules.rs
+expression: "format!(\"{:#?}\", rewritten.ops(&db))"
+---
+[
+    Source {
+        uri: "users.csv",
+        format: Csv,
+        row_type: Ty(
+            Id(401),
+        ),
+    },
+    Project {
+        input: 0,
+        cols: [
+            "name",
+            "id",
+        ],
+    },
+    Sink {
+        input: 1,
+        sink: GraphAr,
+    },
+]

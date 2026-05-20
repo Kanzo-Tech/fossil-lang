@@ -17,3 +17,6 @@ fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir    = { path = "../fossil-hir" }
 salsa         = { workspace = true }
 smol_str      = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
