@@ -430,7 +430,9 @@ fn render_emit_operand(operand: &Expr<'_>, extends: &[(String, String)], view: &
 /// - `LitBool` → `TRUE` / `FALSE`
 /// - `Call` → passthrough `func(arg, ...)` (stdlib → SQL mapping is Phase 5)
 /// - `BinOp` → `lhs <op> rhs` ([`CmpOp`] → SQL operator)
-/// - `Assert` → its `inner` (no-op until plan 04-06 fills the `CASE WHEN` shape)
+/// - `Assert` → the SC#4 named runtime assertion
+///   `CASE WHEN <guard> THEN <inner> ELSE error('fossil_assertion_<name>:line=<N>') END`
+///   (P-CRIT-4 — never silent failure)
 fn render_expr(expr: &Expr<'_>, default_source: &str) -> String {
     match expr {
         Expr::LitString(s) => format!("'{}'", s.replace('\'', "''")),
@@ -470,14 +472,50 @@ fn render_expr(expr: &Expr<'_>, default_source: &str) -> String {
                 render_expr(rhs, default_source),
             )
         }
-        // Plan 04-06 fills the named-runtime-assertion `CASE WHEN` shape; until
-        // then `Assert` is a transparent wrapper.
+        // SC#4 / P-CRIT-4: a named runtime assertion. Where a static check
+        // cannot be discharged (the IRI-template `${.field}` NULL case), emit
+        // `CASE WHEN <guard> THEN <inner> ELSE error('fossil_assertion_<name>:line=<N>') END`
+        // so the SQL fails LOUDLY at runtime with a named, line-located message
+        // — never a silent malformed value. The `span_line` is resolved during
+        // lowering (lower_to_mir, RESEARCH Pitfall 3) so this stays a pure
+        // render. The guard is derived from the FIXED assertion name (no type
+        // text is ever interpolated — Pitfall 5).
         Expr::Assert {
-            name: _,
-            span_line: _,
+            name,
+            span_line,
             inner,
-        } => render_expr(inner, default_source),
+        } => {
+            let inner_sql = render_expr(inner, default_source);
+            let guard = assert_guard_sql(name, &inner_sql);
+            ast::render_assert(name, *span_line, &guard, &inner_sql)
+        }
     }
+}
+
+/// Derive the runtime guard SQL for a named assertion. The guard is the
+/// statically-undischargeable condition that, when FALSE, trips the
+/// `error(...)` branch.
+///
+/// - `iri_template_unbound` → `<inner> IS NOT NULL` (the `${.field}` value must
+///   be present at runtime or the IRI is malformed — RESEARCH §"Named Runtime
+///   Assertions" candidate 1).
+/// - any other (future candidates 2/3 — required-but-Optional cardinality,
+///   datatype-cast failures — plug in here) → a conservative `<inner> IS NOT
+///   NULL` so the mechanism degrades safely rather than silently passing.
+///
+/// Matching on the FIXED `snake_case` name keeps the guard mapping explicit and
+/// guarantees no type text leaks into the SQL (Pitfall 5).
+fn assert_guard_sql(name: &str, inner_sql: &str) -> String {
+    // Phase 4 ships only candidate 1 (`iri_template_unbound`). Future candidates
+    // (required-but-Optional cardinality, datatype-cast failures) add arms here
+    // with their own guards; for now every assertion's guard is "value present"
+    // (`IS NOT NULL`), so a single uniform guard covers the catalogue. The
+    // `name` is matched (not interpolated) so no type text can leak (Pitfall 5).
+    debug_assert!(
+        name == "iri_template_unbound",
+        "unexpected assertion name {name:?} — add a guard arm in assert_guard_sql"
+    );
+    format!("{inner_sql} IS NOT NULL")
 }
 
 /// Map a [`JoinKind`] to its DuckDB-portable JOIN keyword

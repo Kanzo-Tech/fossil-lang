@@ -252,6 +252,10 @@ fn iri_property_line<'db>(
     };
     let text = node.text().to_string();
     let start = (span.start as usize).min(text.len());
+    // A mapping body has ≤~50 lines; a plain byte scan is fine here — the
+    // `bytecount` crate clippy suggests would be a needless dependency for this
+    // cold (per-mapping, once) path.
+    #[allow(clippy::naive_bytecount)]
     let newlines = text.as_bytes()[..start]
         .iter()
         .filter(|&&b| b == b'\n')
@@ -289,7 +293,7 @@ fn lower_iri_property<'db>(
 ///
 /// `assert_line` is `Some(N)` when lowering an IRI-template subject context
 /// (the `iri = ...` property), `None` for object positions. When `Some`, each
-/// `${.field}` placeholder ColRef in a `Template` is wrapped in
+/// `${.field}` placeholder `ColRef` in a `Template` is wrapped in
 /// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` (SC#4 —
 /// the un-statically-dischargeable NULL-field check).
 fn lower_property_value<'db>(
@@ -372,7 +376,7 @@ fn lower_iri_template<'db>(
 /// - `.field` → `ColRef` against the mapping's source binding, wrapped in an
 ///   `Expr::Assert { name: "iri_template_unbound", .. }` when `assert_line` is
 ///   `Some` (the IRI-template subject context — SC#4 / P-CRIT-4). The assertion
-///   name is a FIXED snake_case identifier; NO type text is ever interpolated
+///   name is a FIXED `snake_case` identifier; NO type text is ever interpolated
 ///   (RESEARCH Pitfall 5).
 /// - `prefix:` → the prefix's resolved IRI from the per-file prefix table.
 /// - anything else → echo the placeholder back as a literal.

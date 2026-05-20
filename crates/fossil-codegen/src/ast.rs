@@ -339,6 +339,35 @@ pub(crate) fn select_group_by(input_sql: &str, keys: &[SmolStr], agg_exprs: &[St
     }
 }
 
+/// `Assert(name, line, guard, inner)` — the SC#4 / P-CRIT-4 named runtime
+/// assertion: `CASE WHEN <guard> THEN <inner> ELSE
+/// error('fossil_assertion_<name>:line=<line>') END`.
+///
+/// Where a static check cannot be discharged, codegen emits this CASE so the
+/// generated SQL FAILS LOUDLY at runtime with a NAMED, line-located message
+/// rather than silently producing a malformed value (a NULL field in an IRI
+/// template → a broken IRI). `DuckDB`'s `error(VARCHAR)` scalar raises with the
+/// message text; verified available on native `DuckDB` 1.10502 (the message
+/// surfaces as `Invalid Input Error: <msg>` — see the `fossil-runtime`
+/// negative test).
+///
+/// `name` is a FIXED `snake_case` identifier (e.g. `iri_template_unbound`) — the
+/// caller must NEVER pass type text or a `TyKind::Unknown` rendering here
+/// (RESEARCH Pitfall 5). `guard_sql` / `inner_sql` are pre-rendered fragments
+/// from [`crate::sql::render_expr`].
+///
+/// The CASE shape is hand-formatted (not built via the sqlparser AST) for the
+/// same reason the COPY is (Pitfall 1) — `error(...)` as a raise construct +
+/// the exact `fossil_assertion_<name>:line=<N>` message text are clearer and
+/// more snapshot-stable as a verbatim template than round-tripped through the
+/// AST. The fragment is spliced into the structured projection via
+/// [`parse_expr_fragment`] by the callers that need it.
+pub(crate) fn render_assert(name: &str, line: u32, guard_sql: &str, inner_sql: &str) -> String {
+    format!(
+        "CASE WHEN {guard_sql} THEN {inner_sql} ELSE error('fossil_assertion_{name}:line={line}') END"
+    )
+}
+
 /// `Empty(schema)` — `SELECT <cols> FROM <view> WHERE false` (ADR-0011 R9
 /// target). Carries the would-be schema so downstream ops see the right column
 /// shape even though the relation is empty.
