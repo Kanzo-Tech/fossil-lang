@@ -1,0 +1,8 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_accept_all_fixture(\"accept_all\", \"descriptor_skips_backward_check\")"
+---
+# mode: SC#5 AcceptAll degraded fallback (Blocker #4)
+# shape.shex PRESENT but ignored — resolve_target_shape == None == AcceptAll
+backward-check diagnostics: 0
+(no diagnostics emitted — compiles equivalently to walking-skeleton)

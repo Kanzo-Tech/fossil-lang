@@ -38,3 +38,11 @@ thiserror = { workspace = true }
 # Phase 3 plan 03-05 did-you-mean diagnostics; declared in Wave 0 to avoid
 # re-touching this Cargo.toml mid-wave.
 strsim = { workspace = true }
+
+[dev-dependencies]
+# Plan 03-08 diagnostic golden-file corpus: insta snapshots + IriS for the
+# helper-proven ShEx descriptor path (resolve_target_shape is None in the
+# production Db path until Phase 6, so the corpus drives ShExDescriptor +
+# ResolvedShape directly — see tests/diagnostic_corpus.rs module docs).
+insta = { workspace = true }
+rudof_iri = { workspace = true }

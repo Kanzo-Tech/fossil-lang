@@ -1,0 +1,8 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_csvw_fixture(\"implicit_closure_synthesis\", \"field_typo\")"
+---
+# mode: Db-wired (production typecheck_mapping query)
+# bucket: implicit_closure_synthesis
+Error: unknown column `aeg` — did you mean `age`?
+  at 68..72

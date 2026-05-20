@@ -1,0 +1,18 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_shex_fixture(\"shex_one_of_rejection\", \"two_disjuncts\")"
+---
+# mode: helper-proven (ShExDescriptor + ResolvedShape; resolve_target_shape
+#       returns None in the production Db path until Phase 6 — see module docs)
+# bucket: shex_one_of_rejection
+resolved constraints: (none — OneOf body, see rejection below)
+OneOf rejection: 2 disjuncts in shape `http://example.org/Contact`
+  disjunct predicates: http://example.org/email, http://example.org/phone
+  suggestion:
+    Contact1 : ex:Contact from users
+        iri = `${ex:}u/${.id}`
+        <http://example.org/email> = .email
+    
+    Contact2 : ex:Contact from users
+        iri = `${ex:}u/${.id}`
+        <http://example.org/phone> = .phone

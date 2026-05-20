@@ -1,0 +1,8 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_csvw_fixture(\"csvw_forward_propagation\", \"unknown_datatype\")"
+---
+# mode: Db-wired (production typecheck_mapping query)
+# bucket: csvw_forward_propagation
+Error: CSVW column `duration` in source `events` has an unknown or missing datatype; defaulting to String
+  at 0..0

@@ -1,0 +1,5 @@
+prefix ex: <https://example.org/>
+users := io.csv("users.csv", schema = "descriptor.csvw.json")
+Contact : ex:Contact from users
+    iri = `${ex:}u/${.id}`
+    ex:email = .email

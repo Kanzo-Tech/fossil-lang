@@ -1,0 +1,38 @@
+{
+  "@context": "http://www.w3.org/ns/shex.jsonld",
+  "type": "Schema",
+  "shapes": [
+    {
+      "type": "ShapeDecl",
+      "id": "https://example.org/Person",
+      "shapeExpr": {
+        "type": "Shape",
+        "expression": {
+          "type": "EachOf",
+          "expressions": [
+            {
+              "type": "TripleConstraint",
+              "predicate": "https://example.org/name",
+              "valueExpr": {
+                "type": "NodeConstraint",
+                "datatype": "http://www.w3.org/2001/XMLSchema#string"
+              },
+              "min": 1,
+              "max": -1
+            },
+            {
+              "type": "TripleConstraint",
+              "predicate": "https://example.org/age",
+              "valueExpr": {
+                "type": "NodeConstraint",
+                "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+              },
+              "min": 1,
+              "max": -1
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

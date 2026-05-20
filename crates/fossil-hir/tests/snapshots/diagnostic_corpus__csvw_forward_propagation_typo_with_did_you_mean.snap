@@ -1,0 +1,8 @@
+---
+source: crates/fossil-hir/tests/diagnostic_corpus.rs
+expression: "run_csvw_fixture(\"csvw_forward_propagation\", \"typo_with_did_you_mean\")"
+---
+# mode: Db-wired (production typecheck_mapping query)
+# bucket: csvw_forward_propagation
+Error: unknown column `naem` — did you mean `name`?
+  at 69..74

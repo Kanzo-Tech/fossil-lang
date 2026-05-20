@@ -1,0 +1,21 @@
+{
+  "@context": "http://www.w3.org/ns/shex.jsonld",
+  "type": "Schema",
+  "shapes": [
+    {
+      "type": "ShapeDecl",
+      "id": "https://example.org/Person",
+      "shapeExpr": {
+        "type": "Shape",
+        "expression": {
+          "type": "TripleConstraint",
+          "predicate": "https://example.org/age",
+          "valueExpr": {
+            "type": "NodeConstraint",
+            "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+          }
+        }
+      }
+    }
+  ]
+}

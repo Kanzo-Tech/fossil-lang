@@ -1,0 +1,34 @@
+{
+  "@context": "http://www.w3.org/ns/shex.jsonld",
+  "type": "Schema",
+  "shapes": [
+    {
+      "type": "ShapeDecl",
+      "id": "http://example.org/Contact",
+      "shapeExpr": {
+        "type": "Shape",
+        "expression": {
+          "type": "OneOf",
+          "expressions": [
+            {
+              "type": "TripleConstraint",
+              "predicate": "http://example.org/email",
+              "valueExpr": {
+                "type": "NodeConstraint",
+                "datatype": "http://www.w3.org/2001/XMLSchema#string"
+              }
+            },
+            {
+              "type": "TripleConstraint",
+              "predicate": "http://example.org/phone",
+              "valueExpr": {
+                "type": "NodeConstraint",
+                "datatype": "http://www.w3.org/2001/XMLSchema#string"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

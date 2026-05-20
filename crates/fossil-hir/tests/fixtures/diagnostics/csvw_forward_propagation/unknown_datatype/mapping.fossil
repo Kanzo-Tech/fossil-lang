@@ -1,0 +1,5 @@
+prefix ex: <https://example.org/>
+events := io.csv("events.csv", schema = "descriptor.csvw.json")
+Event : ex:Event from events
+    iri = `${ex:}e/${.id}`
+    ex:name = .name

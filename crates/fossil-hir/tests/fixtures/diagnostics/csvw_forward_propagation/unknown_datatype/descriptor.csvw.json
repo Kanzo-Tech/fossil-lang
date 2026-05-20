@@ -1,0 +1,11 @@
+{
+  "@context": "http://www.w3.org/ns/csvw",
+  "url": "events.csv",
+  "tableSchema": {
+    "columns": [
+      { "name": "id", "datatype": "integer" },
+      { "name": "name", "datatype": "string" },
+      { "name": "duration", "datatype": "duration" }
+    ]
+  }
+}
