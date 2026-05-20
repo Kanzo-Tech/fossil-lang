@@ -35,8 +35,11 @@
 //! unchanged) and use [`insert_op`] (append a new op and hand back its index)
 //! so renumbering is localised; deletions go through [`reindex_after_removal`].
 
+use smol_str::SmolStr;
+
 use crate::graph::MirGraph;
-use crate::op::Op;
+use crate::op::{CmpOp, Expr, Op};
+use crate::schema::{free_cols, schema_of};
 
 /// Fixpoint iteration cap. A well-formed R1–R6 pass converges in far fewer
 /// passes than this (each rule strictly reduces a structural measure); the cap
@@ -96,7 +99,6 @@ pub fn rewrite<'db>(db: &'db dyn fossil_base::Db, graph: MirGraph<'db>) -> MirGr
 /// Rewrite every `input` / `left` / `right` index in `ops` with `f`, skipping
 /// indices for which `f` returns `None` (used by callers that delete an op and
 /// shift the tail down). `Source` / `Empty` have no inputs and are untouched.
-#[allow(dead_code)] // wired by R1–R6 in Task 2
 fn map_indices(ops: &mut [Op<'_>], f: impl Fn(usize) -> usize) {
     for op in ops.iter_mut() {
         match op {
@@ -123,7 +125,6 @@ fn map_indices(ops: &mut [Op<'_>], f: impl Fn(usize) -> usize) {
 /// i.e. the op that now occupies that slot in the data-flow).
 ///
 /// This is the deletion primitive R1 (drop the inner Filter) builds on.
-#[allow(dead_code)] // wired by R1–R6 in Task 2
 fn reindex_after_removal(ops: &mut Vec<Op<'_>>, removed: usize, redirect_to: usize) {
     ops.remove(removed);
     // After the `remove`, every original index `i` maps to:
@@ -146,76 +147,376 @@ fn reindex_after_removal(ops: &mut Vec<Op<'_>>, removed: usize, redirect_to: usi
 /// Append `op` to the vec and return its index. New ops always go at the end so
 /// existing indices stay valid; topo order is preserved because a newly
 /// inserted op only references ops already present (lower indices).
-#[allow(dead_code)] // wired by R1–R6 in Task 2
 fn insert_op<'db>(ops: &mut Vec<Op<'db>>, op: Op<'db>) -> usize {
     ops.push(op);
     ops.len() - 1
 }
 
+/// Redirect every op whose input/left/right is `from` to point at `to`,
+/// EXCEPT the op at `except` (the rule's own freshly-rewired node, which must
+/// keep its new wiring). Used by the node-count-changing rules (R3/R4/R5/R6)
+/// to rewire the consumers of the old top node onto the new top node.
+fn redirect_consumers(ops: &mut [Op<'_>], from: usize, to: usize, except: usize) {
+    for (idx, op) in ops.iter_mut().enumerate() {
+        if idx == except {
+            continue;
+        }
+        match op {
+            Op::Project { input, .. }
+            | Op::Extend { input, .. }
+            | Op::Rename { input, .. }
+            | Op::Filter { input, .. }
+            | Op::GroupBy { input, .. }
+            | Op::Aggregate { input, .. }
+            | Op::Distinct { input, .. }
+            | Op::TripleEmit { input, .. }
+            | Op::Sink { input, .. } => {
+                if *input == from {
+                    *input = to;
+                }
+            }
+            Op::Join { left, right, .. } | Op::Union { left, right } => {
+                if *left == from {
+                    *left = to;
+                }
+                if *right == from {
+                    *right = to;
+                }
+            }
+            Op::Source { .. } | Op::Empty { .. } => {}
+        }
+    }
+}
+
+/// `true` iff `op` references `node` as one of its inputs.
+///
+/// The fan-out=1 MIR shape means a node has at most one consumer; rules that
+/// swap node roles in place rely on this so a rewrite cannot strand a second
+/// consumer with a stale view (see [`consumer_count`]).
+const fn references(op: &Op<'_>, node: usize) -> bool {
+    match op {
+        Op::Project { input, .. }
+        | Op::Extend { input, .. }
+        | Op::Rename { input, .. }
+        | Op::Filter { input, .. }
+        | Op::GroupBy { input, .. }
+        | Op::Aggregate { input, .. }
+        | Op::Distinct { input, .. }
+        | Op::TripleEmit { input, .. }
+        | Op::Sink { input, .. } => *input == node,
+        Op::Join { left, right, .. } | Op::Union { left, right } => *left == node || *right == node,
+        Op::Source { .. } | Op::Empty { .. } => false,
+    }
+}
+
+/// Count how many ops (other than `node` itself) reference `node` as an input.
+fn consumer_count(ops: &[Op<'_>], node: usize) -> usize {
+    ops.iter()
+        .enumerate()
+        .filter(|(idx, op)| *idx != node && references(op, node))
+        .count()
+}
+
 // ---------------------------------------------------------------------------
 // R1–R6 — structural rules (Min Oo & Hartig, operator-algebra.md §4.1).
-// Implemented in Task 2.
+//
+// Each `try_rN` scans the op vec for its trigger pattern, applies the rewrite
+// to the FIRST match (returning `true`), and otherwise returns `false`. The
+// fixpoint loop re-runs the whole rule list, so applying to the first match per
+// call is sufficient. Rules push in ONE canonical direction (R3/R5 push DOWN)
+// so they cannot oscillate, and each rule's output no longer matches its own
+// trigger (idempotency, SC#2).
 // ---------------------------------------------------------------------------
 
-// Transitional: the rule bodies are filled in Task 2. The stubs neither read
-// nor mutate their args, which trips several clippy lints that vanish once the
-// real bodies land — suppress them on the stub block only.
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_ref_mut,
-    clippy::ptr_arg,
-    dead_code
-)]
+/// R1 — filter fusion: `filter(filter(s, p), q)` → `filter(s, p ∧ q)`.
+///
+/// Fuses an outer `Filter` whose input is itself a `Filter` into one whose
+/// pred is `BinOp(And, p, q)` over the inner filter's input `s`. The inner
+/// `Filter` op is removed and indices renumbered. Idempotent: one `Filter`
+/// remains; no nested-filter pattern survives.
 fn try_r1<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    for outer in 0..ops.len() {
+        let Op::Filter {
+            input: inner,
+            pred: q,
+        } = &ops[outer]
+        else {
+            continue;
+        };
+        let inner = *inner;
+        let q = q.clone();
+        let Some(Op::Filter { input: s, pred: p }) = ops.get(inner) else {
+            continue;
+        };
+        // Only fuse when the inner filter feeds the outer exclusively (the
+        // fan-out=1 MIR shape guarantees this; guard defensively).
+        if consumer_count(ops, inner) != 1 {
+            continue;
+        }
+        let s = *s;
+        let p = p.clone();
+        let fused = Expr::BinOp {
+            op: CmpOp::And,
+            lhs: Box::new(p),
+            rhs: Box::new(q),
+            ty: bool_ty(db),
+        };
+        ops[outer] = Op::Filter {
+            input: s,
+            pred: fused,
+        };
+        // Remove the now-orphaned inner filter; consumers of `inner` (only the
+        // outer, already rewired to `s`) are redirected to `s`.
+        reindex_after_removal(ops, inner, s);
+        return true;
+    }
     false
 }
 
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_ref_mut,
-    clippy::ptr_arg,
-    dead_code
-)]
+/// R2 — project fusion: `project(project(s, c₁), c₂)` → `project(s, c₁ ∩ c₂)`.
+///
+/// Intersects the column sets, preserving the OUTER (`c₂`) order. The inner
+/// `Project` is removed. Idempotent: one `Project` remains.
 fn try_r2<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    let _ = db;
+    for outer in 0..ops.len() {
+        let Op::Project {
+            input: inner,
+            cols: c2,
+        } = &ops[outer]
+        else {
+            continue;
+        };
+        let inner = *inner;
+        let c2 = c2.clone();
+        let Some(Op::Project { input: s, cols: c1 }) = ops.get(inner) else {
+            continue;
+        };
+        if consumer_count(ops, inner) != 1 {
+            continue;
+        }
+        let s = *s;
+        let c1 = c1.clone();
+        // c₁ ∩ c₂, preserving c₂ order (the outer projection wins on order).
+        let intersected: Vec<SmolStr> = c2.iter().filter(|c| c1.contains(c)).cloned().collect();
+        ops[outer] = Op::Project {
+            input: s,
+            cols: intersected,
+        };
+        reindex_after_removal(ops, inner, s);
+        return true;
+    }
     false
 }
 
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_ref_mut,
-    clippy::ptr_arg,
-    dead_code
-)]
+/// R3 — project-below-filter pushdown:
+/// `project(filter(s, p), c)` → `filter(project(s, c), p)` **if `free(p) ⊆ c`**.
+///
+/// Pushes the projection DOWN below the filter (canonical direction → cannot
+/// oscillate). The guard `free(p) ⊆ c` ensures the predicate's columns survive
+/// the projection. After the swap the top node is the `Filter`, so consumers of
+/// the old top `Project` are redirected onto it. Idempotent: the canonical form
+/// (`filter` above `project`) never re-triggers R3 (R3 only fires on
+/// `project(filter(...))`).
 fn try_r3<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    for proj in 0..ops.len() {
+        let Op::Project {
+            input: filt,
+            cols: c,
+        } = &ops[proj]
+        else {
+            continue;
+        };
+        let filt = *filt;
+        let c = c.clone();
+        let Some(Op::Filter { input: s, pred: p }) = ops.get(filt) else {
+            continue;
+        };
+        if consumer_count(ops, filt) != 1 {
+            continue;
+        }
+        let s = *s;
+        let p = p.clone();
+        // Guard: free(p) ⊆ c.
+        let free = free_cols(&p);
+        let c_set: std::collections::BTreeSet<SmolStr> = c.iter().cloned().collect();
+        if !free.is_subset(&c_set) {
+            continue;
+        }
+        // Rewrite IN PLACE swapping roles:
+        //   ops[filt]  becomes the Project(s, c)   (was Filter)
+        //   ops[proj]  becomes the Filter(filt, p) (was Project)
+        ops[filt] = Op::Project { input: s, cols: c };
+        ops[proj] = Op::Filter {
+            input: filt,
+            pred: p,
+        };
+        // `proj` was the top node; it stays the top (now a Filter) and still
+        // occupies index `proj`, so external consumers need no redirect.
+        let _ = db;
+        return true;
+    }
     false
 }
 
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_ref_mut,
-    clippy::ptr_arg,
-    dead_code
-)]
+/// R4 — filter-over-union distribution:
+/// `filter(union(s₁, s₂), p)` → `union(filter(s₁, p), filter(s₂, p))`.
+///
+/// Pushes the filter into BOTH union arms. Two new `Filter` ops are appended;
+/// the `Union`'s inputs are rewired to them; the old top `Filter` is replaced
+/// by the `Union` and its consumers redirected. Idempotent: the outer
+/// filter-over-union pattern is gone.
 fn try_r4<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    let _ = db;
+    for filt in 0..ops.len() {
+        let Op::Filter { input: un, pred: p } = &ops[filt] else {
+            continue;
+        };
+        let un = *un;
+        let p = p.clone();
+        let Some(Op::Union {
+            left: s1,
+            right: s2,
+        }) = ops.get(un)
+        else {
+            continue;
+        };
+        if consumer_count(ops, un) != 1 {
+            continue;
+        }
+        let (s1, s2) = (*s1, *s2);
+        // Append filter(s₁, p) and filter(s₂, p).
+        let f1 = insert_op(
+            ops,
+            Op::Filter {
+                input: s1,
+                pred: p.clone(),
+            },
+        );
+        let f2 = insert_op(ops, Op::Filter { input: s2, pred: p });
+        // Rewire the Union onto the two new filters.
+        ops[un] = Op::Union {
+            left: f1,
+            right: f2,
+        };
+        // The old top Filter becomes a passthrough to the Union; redirect its
+        // consumers onto the Union and drop the now-dead Filter node.
+        redirect_consumers(ops, filt, un, filt);
+        reindex_after_removal(ops, filt, un);
+        return true;
+    }
     false
 }
 
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_ref_mut,
-    clippy::ptr_arg,
-    dead_code
-)]
+/// R5 — filter-into-join pushdown:
+/// `filter(join(s₁, s₂, c), p)` → `join(filter(s₁, p), s₂, c)`
+/// **if `free(p) ⊆ schema(s₁)`**.
+///
+/// Pushes the predicate into the LEFT join input only (canonical direction).
+/// The guard ensures the predicate's columns are available in `s₁`; once
+/// pushed, the guard is false at the join's top so R5 cannot re-fire.
 fn try_r5<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    for filt in 0..ops.len() {
+        let Op::Filter { input: jn, pred: p } = &ops[filt] else {
+            continue;
+        };
+        let jn = *jn;
+        let p = p.clone();
+        let Some(Op::Join {
+            left,
+            right,
+            on,
+            kind,
+            left_name,
+            right_name,
+        }) = ops.get(jn)
+        else {
+            continue;
+        };
+        if consumer_count(ops, jn) != 1 {
+            continue;
+        }
+        let (left, right) = (*left, *right);
+        let (on, kind) = (on.clone(), *kind);
+        let (left_name, right_name) = (left_name.clone(), right_name.clone());
+        // Guard: free(p) ⊆ schema(s₁) (the LEFT input schema).
+        let free = free_cols(&p);
+        let left_schema: std::collections::BTreeSet<SmolStr> =
+            schema_of(db, ops, left).into_iter().collect();
+        if !free.is_subset(&left_schema) {
+            continue;
+        }
+        // Append filter(s₁, p), rewire the join's left onto it.
+        let f1 = insert_op(
+            ops,
+            Op::Filter {
+                input: left,
+                pred: p,
+            },
+        );
+        ops[jn] = Op::Join {
+            left: f1,
+            right,
+            on,
+            kind,
+            left_name,
+            right_name,
+        };
+        // The old top Filter becomes a passthrough to the Join; redirect its
+        // consumers and drop the dead Filter.
+        redirect_consumers(ops, filt, jn, filt);
+        reindex_after_removal(ops, filt, jn);
+        return true;
+    }
     false
 }
 
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_ref_mut,
-    clippy::ptr_arg,
-    dead_code
-)]
+/// R6 — rename expansion:
+/// `rename(s, a, b)` → `extend(project(s, schema(s) \ {a}), b, ref(a))`.
+///
+/// Replaces a `Rename` with an `Extend` over a `Project` (per
+/// operator-algebra.md §4.1). `schema(s) \ {a}` drops the renamed-away column;
+/// the new `Extend` re-introduces it under the new name `b` as a `ColRef(a)`.
+/// Idempotent: no `Rename` remains to re-trigger.
 fn try_r6<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
+    for rn in 0..ops.len() {
+        let Op::Rename {
+            input: s,
+            old: a,
+            new: b,
+        } = &ops[rn]
+        else {
+            continue;
+        };
+        let s = *s;
+        let a = a.clone();
+        let b = b.clone();
+        // schema(s) \ {a}.
+        let cols: Vec<SmolStr> = schema_of(db, ops, s)
+            .into_iter()
+            .filter(|c| *c != a)
+            .collect();
+        // Append project(s, schema(s) \ {a}), then rewrite the Rename node into
+        // an Extend over that project. The Extend keeps index `rn`, so external
+        // consumers need no redirect.
+        let proj = insert_op(ops, Op::Project { input: s, cols });
+        ops[rn] = Op::Extend {
+            input: proj,
+            field: b,
+            expr: Expr::ColRef {
+                source: SmolStr::default(),
+                column: a,
+            },
+        };
+        return true;
+    }
     false
+}
+
+/// The `bool` primitive type, for the fused `BinOp(And, …)` predicate in R1.
+fn bool_ty(db: &dyn fossil_base::Db) -> fossil_hir::Ty<'_> {
+    fossil_hir::Ty::new(
+        db,
+        fossil_hir::TyKind::Primitive(fossil_hir::Primitive::Bool),
+    )
 }
