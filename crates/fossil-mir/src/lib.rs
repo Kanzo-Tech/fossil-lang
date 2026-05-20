@@ -23,6 +23,7 @@
 pub mod graph;
 pub mod lower;
 pub mod op;
+pub mod rewrite;
 pub mod schema;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
@@ -31,4 +32,5 @@ pub mod schema;
 pub use graph::MirGraph;
 pub use lower::lower_to_mir;
 pub use op::{AggFn, AggSpec, CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat};
+pub use rewrite::rewrite;
 pub use schema::{free_cols, schema_of};

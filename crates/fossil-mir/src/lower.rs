@@ -160,7 +160,13 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
         sink: SinkRef::GraphAr,
     });
 
-    MirGraph::new(db, ops)
+    // Run the structural rewriting engine (R1–R6) as PLAIN RUST inside this
+    // tracked frame — NOT a separate tracked query (ADR-0010), so the
+    // per-mapping fan-out is unchanged. hello.fossil's `Source → Extend →
+    // TripleEmit → Sink` matches none of the R1–R6 triggers, so its SQL stays
+    // byte-identical.
+    let graph = MirGraph::new(db, ops);
+    crate::rewrite::rewrite(db, graph)
 }
 
 /// Phase 1 fallback row type: `Record({id: String, name: String})`.
