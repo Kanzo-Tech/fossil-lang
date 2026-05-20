@@ -21,16 +21,41 @@
 //! 7. Renders the type kind as Markdown: a fenced code block ```` ```fossil ````
 //!    + the rendered `TyKind` + an italic provenance trailer.
 //!
-//! Phase 2 limitation: hover only fires for literal-subset RHS expressions
-//! (`StringLit` / `Template` / `PrefixedName`). `FieldRef`s return `None`
-//! (the source-row type comes from CSVW, Phase 3 territory).
+//! Phase 2 limitation (DISCHARGED in Phase 3 plan 03-07): hover used to fire
+//! only for literal-subset RHS expressions (`StringLit` / `Template` /
+//! `PrefixedName`); `FieldRef`s returned `None`. Phase 3 plan 03-05 made
+//! [`fossil_hir::check::typecheck_mapping`] the source of truth, so a
+//! `FieldRef` resolved against a CSVW source row now carries an
+//! [`ExprTypeEntry`] — hover surfaces its type (the standard `*from
+//! InputDescriptor { .. }*` trailer).
+//!
+//! # Phase 3 plan 03-07: SC#3 implicit-closure surfacing
+//!
+//! Plan 03-06 populated [`ProvenanceKind::SynthesizedClosureRendering`] on the
+//! body `ExprId` of an implicitly-synthesised closure (the ONLY lambda form in
+//! Fossil — type-system.md §7). This handler reads that variant in
+//! [`render_markdown`] and renders the closure binding as a fenced `fossil`
+//! code block ABOVE the field type, plus a `*synthesised closure parameter
+//! binding*` tagline so the synthesis is NEVER hidden from the user (SC#3 /
+//! CORE-07). All type rendering goes through [`render_ty_kind`], so
+//! `TyKind::Unknown(InferenceId)` normalises to `?` and never leaks (STATE.md
+//! "Do NOT expose `Unknown`").
+//!
+//! The full JSON-RPC end-to-end SC#3 surface form
+//! (`users |> seq.filter(.age >= 18)`) is deferred to Phase 6: per plan
+//! 03-05's recorded decision, no
+//! `seq.filter` registry stub was added (Phase 3 v0.1's `HirExpr` has no
+//! `Pipeline` / `Call` variant to lower), so the synthesis is unreachable
+//! through surface syntax. The SC#3 rendering is verified at the
+//! `render_markdown` unit layer here + a direct integration test in
+//! `fossil-lsp/tests/lsp_hover_smoke.rs`.
 
 use std::ops::Range;
 
 use fossil_base::SourceFile;
 use fossil_hir::body::ExprId;
 use fossil_hir::def_map::def_map;
-use fossil_hir::provenance::{ExprTypeEntry, ty_origin};
+use fossil_hir::provenance::{ExprTypeEntry, ProvenanceKind, ty_origin};
 use fossil_syntax::SyntaxKind;
 
 // Phase 3 plan 03-05 (Serious #7): `render_ty_kind` was PROMOTED to
@@ -116,17 +141,51 @@ pub fn hover(
     // Per checker Blocker 5: ty_origin returns Option<ExprTypeEntry<'db>>
     // (NOT Option<(Ty, Provenance)>). We destructure the struct fields.
     let entry: ExprTypeEntry<'_> = ty_origin(db, mapping, expr_id)?;
-    let ty = entry.ty;
-    let prov = entry.provenance;
 
-    let kind_str = render_ty_kind(db, ty.kind(db));
-    let markdown = format!("```fossil\n{kind_str}\n```\n\n*from {:?}*", prov.kind);
+    let markdown = render_markdown(db, &entry);
 
     let r = property_node.text_range();
     Some(HoverInfo {
         markdown,
         range: r.start().into()..r.end().into(),
     })
+}
+
+/// Render the Markdown body for an [`ExprTypeEntry`].
+///
+/// Two paths:
+///
+/// 1. [`ProvenanceKind::SynthesizedClosureRendering`] (Phase 3 plan 03-07,
+///    SC#3 / CORE-07): the entry sits on the body `ExprId` of an implicitly
+///    synthesised closure. Render the closure binding as a fenced `fossil`
+///    code block ABOVE the field type, then a `*synthesised closure parameter
+///    binding*` tagline. Both the closure binding AND the field type appear —
+///    the synthesis is NEVER hidden from the user (RESEARCH.md §Pitfall 6).
+///
+/// 2. Every other provenance kind (the Phase 2 literal subset + Phase 3's
+///    CSVW-`FieldRef` widening): a fenced `fossil` type block + an italic
+///    `*from {provenance:?}*` origin trailer.
+///
+/// All type rendering routes through [`render_ty_kind`], so
+/// `TyKind::Unknown(InferenceId)` normalises to `?` and never leaks.
+#[must_use]
+pub fn render_markdown(db: &dyn fossil_base::Db, entry: &ExprTypeEntry<'_>) -> String {
+    let field_ty = render_ty_kind(db, entry.ty.kind(db));
+    match &entry.provenance.kind {
+        // SC#3: the closure rendering ALREADY carries the row Record's field
+        // names + types (built by `render_closure` via `render_ty_kind` in
+        // plan 03-06), so it is reproduced verbatim as a fenced block. The
+        // field type below is the closure body's result type.
+        ProvenanceKind::SynthesizedClosureRendering { rendering } => format!(
+            "```fossil\n{rendering}\n```\n\n\
+             field type: `{field_ty}`\n\n\
+             *synthesised closure parameter binding*",
+        ),
+        // Phase 2 literal subset + Phase 3 CSVW FieldRef widening. The
+        // `*from {:?}*` trailer is preserved verbatim from plan 02-06 so the
+        // existing lsp_hover_smoke literal assertion (`"Literal"`) holds.
+        other => format!("```fossil\n{field_ty}\n```\n\n*from {other:?}*"),
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -181,17 +240,146 @@ User : ex:Person from users
         );
     }
 
-    /// Hover on the `ex:name = .name` line returns `None` — the RHS is a
-    /// `FieldRef`, deferred to Phase 3.
+    /// Hover on the `ex:name = .name` line returns `None` for the HELLO
+    /// fixture — its `users` source declares NO CSVW schema arg, so
+    /// `resolve_source_row` returns `None` and the `FieldRef` synthesises no
+    /// entry (matching the Phase 2 behaviour for the schema-less case). Plan
+    /// 03-05 widened `FieldRef` hover ONLY when a CSVW schema is declared; with
+    /// a schema, `render_markdown` surfaces the field type (see the
+    /// `render_markdown_for_fieldref_with_csvw_propagation` unit test).
     #[test]
-    fn hover_on_field_ref_returns_none_phase_2() {
+    fn hover_on_field_ref_returns_none_without_csvw_schema() {
         let (db, file) = db_with_text(HELLO);
         // Line 4 is `    ex:name = .name`. Cursor inside the property at
-        // character 10 (somewhere on the value).
+        // character 14 (somewhere on the value).
         let info = hover(&db, file, 4, 14);
         assert!(
             info.is_none(),
-            "Phase 2 hover on FieldRef RHS must return None (deferred to Phase 3)"
+            "hover on FieldRef RHS with no CSVW schema must return None \
+             (no source row to resolve against)"
         );
+    }
+
+    use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
+    use fossil_hir::ty::{InferenceId, Primitive, Record, RecordField, Ty, TyKind};
+
+    fn bare_db() -> fossil_base::FossilDb {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        fossil_base::FossilDb::new(system)
+    }
+
+    /// SC#3 surface (CORE-07): an `ExprTypeEntry` carrying
+    /// `SynthesizedClosureRendering` renders the closure binding as a fenced
+    /// `fossil` block, then the field type, then the tagline — BOTH the
+    /// closure parameter binding AND the field type are present.
+    #[test]
+    fn render_markdown_synthesized_closure() {
+        let db = bare_db();
+        let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
+        let rendering = smol_str::SmolStr::from("(row: Record<{age: Integer}>) => row.age >= 18");
+        let entry = ExprTypeEntry {
+            expr_id: ExprId(0),
+            ty: int_ty,
+            provenance: Provenance {
+                span: fossil_base::Span { start: 0, end: 0 },
+                kind: ProvenanceKind::SynthesizedClosureRendering { rendering },
+            },
+        };
+        let md = render_markdown(&db, &entry);
+        // (a) the closure binding, as a fenced fossil code block.
+        assert!(
+            md.contains("```fossil\n(row: Record<{age: Integer}>) => row.age >= 18\n```"),
+            "expected the closure rendering as a fenced fossil block, got {md:?}",
+        );
+        // (b) the field type.
+        assert!(
+            md.contains("field type: `Integer`"),
+            "expected the field type `Integer`, got {md:?}",
+        );
+        // (c) the tagline so the user understands WHY the closure appears.
+        assert!(
+            md.contains("*synthesised closure parameter binding*"),
+            "expected the synthesis tagline, got {md:?}",
+        );
+        // The synthesis is NEVER hidden: closure binding + field type both present.
+        assert!(md.contains("row.age >= 18") && md.contains("Integer"));
+        // Risk Register: internal inference state must never leak.
+        assert!(!md.contains("Unknown") && !md.contains("InferenceId"));
+    }
+
+    /// Phase 3 widening: a `FieldRef` resolved against a CSVW source row
+    /// carries `InputDescriptor` provenance + the field's type.
+    /// `render_markdown` surfaces the type (Phase 2 returned `None` for
+    /// `FieldRef`).
+    #[test]
+    fn render_markdown_for_fieldref_with_csvw_propagation() {
+        let db = bare_db();
+        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+        let entry = ExprTypeEntry {
+            expr_id: ExprId(1),
+            ty: str_ty,
+            provenance: Provenance {
+                span: fossil_base::Span { start: 0, end: 0 },
+                kind: ProvenanceKind::InputDescriptor {
+                    source_name: smol_str::SmolStr::from("users"),
+                    column: smol_str::SmolStr::from("name"),
+                },
+            },
+        };
+        let md = render_markdown(&db, &entry);
+        assert!(
+            md.contains("String"),
+            "expected the CSVW field type `String`, got {md:?}",
+        );
+        assert!(
+            md.contains("```fossil"),
+            "expected a fenced fossil block, got {md:?}",
+        );
+        // Not a closure context — no closure binding rendered.
+        assert!(
+            !md.contains("(row:"),
+            "FieldRef outside a closure must NOT render a closure binding, got {md:?}",
+        );
+        assert!(!md.contains("Unknown") && !md.contains("InferenceId"));
+    }
+
+    /// Risk Register: `render_ty_kind` (re-exported here) maps EVERY `TyKind`
+    /// variant to user-facing text — no rendered output contains the internal
+    /// `Unknown` / `InferenceId` placeholders (STATE.md "Do NOT expose
+    /// `TyKind::Unknown(InferenceId)`").
+    #[test]
+    fn render_ty_kind_normalises_unknown_to_question_mark() {
+        let db = bare_db();
+        let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
+        let rec = Record::new(
+            &db,
+            vec![RecordField {
+                name: smol_str::SmolStr::from("age"),
+                ty: int_ty,
+            }],
+        );
+        let sig = fossil_hir::ty::FnSig::new(&db, vec![int_ty], int_ty);
+        let variants: Vec<TyKind<'_>> = vec![
+            TyKind::Primitive(Primitive::String),
+            TyKind::Optional(int_ty),
+            TyKind::Seq(int_ty),
+            TyKind::Record(rec),
+            TyKind::Iri,
+            TyKind::IriTemplate,
+            TyKind::Shape(fossil_hir::ty::ShapeId(0)),
+            TyKind::Fn(sig),
+            TyKind::TripleTerm,
+            TyKind::Unknown(InferenceId(7)),
+        ];
+        // 10 surface-constructible variants + Error (constructed below) = 11.
+        for kind in &variants {
+            let s = render_ty_kind(&db, kind);
+            assert!(
+                !s.contains("Unknown") && !s.contains("InferenceId"),
+                "render_ty_kind leaked internal state for {kind:?}: {s:?}",
+            );
+        }
+        // The Unknown variant specifically normalises to "?".
+        assert_eq!(render_ty_kind(&db, &TyKind::Unknown(InferenceId(7))), "?");
     }
 }

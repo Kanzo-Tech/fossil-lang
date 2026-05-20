@@ -1109,6 +1109,7 @@ dependencies = [
  "fossil-syntax",
  "rowan",
  "salsa",
+ "smol_str",
 ]
 
 [[package]]

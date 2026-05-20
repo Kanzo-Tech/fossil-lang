@@ -20,3 +20,8 @@ fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
 rowan = { workspace = true }
 salsa = { workspace = true }
+
+[dev-dependencies]
+# Plan 03-07: hover unit tests construct ExprTypeEntry/Provenance scenarios
+# (SynthesizedClosureRendering, InputDescriptor) directly, which need SmolStr.
+smol_str = { workspace = true }
