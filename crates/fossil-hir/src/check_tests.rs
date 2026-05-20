@@ -472,6 +472,306 @@ fn typecheck_mapping_is_memoised() {
     assert_eq!(a, b);
 }
 
+// ── CORE-07: implicit closure synthesis (plan 03-06) ───────────────────────
+
+/// Build a `Record` row `Ty` with the given `(name, primitive)` fields.
+fn row_record<'db>(db: &'db dyn fossil_base::Db, fields: &[(&str, Primitive)]) -> Ty<'db> {
+    let rec = crate::ty::Record::new(
+        db,
+        fields
+            .iter()
+            .map(|(n, p)| crate::ty::RecordField {
+                name: smol_str::SmolStr::from(*n),
+                ty: Ty::new(db, TyKind::Primitive(*p)),
+            })
+            .collect::<Vec<_>>(),
+    );
+    Ty::new(db, TyKind::Record(rec))
+}
+
+/// `Fn(Record<R> -> τ)` expected type.
+fn fn_over_row<'db>(db: &'db dyn fossil_base::Db, row: Ty<'db>, ret: Ty<'db>) -> Ty<'db> {
+    let sig = crate::ty::FnSig::new(db, vec![row], ret);
+    Ty::new(db, TyKind::Fn(sig))
+}
+
+/// The `SynthesizedClosureRendering` rendering recorded on `expr_id`, if any.
+fn closure_rendering(cx: &Checker<'_>, expr_id: ExprId) -> Option<String> {
+    cx.entries.iter().rev().find_map(|e| {
+        if e.expr_id == expr_id
+            && let ProvenanceKind::SynthesizedClosureRendering { rendering } = &e.provenance.kind
+        {
+            return Some(rendering.to_string());
+        }
+        None
+    })
+}
+
+#[test]
+fn rewrite_field_refs_to_row_dot_edge_cases() {
+    // Bare single field ref.
+    assert_eq!(rewrite_field_refs_to_row_dot(".age"), "row.age");
+    // Binop predicate: only the `.age` gets rewritten, the literal `18` doesn't.
+    assert_eq!(rewrite_field_refs_to_row_dot(".age >= 18"), "row.age >= 18");
+    // A decimal point inside a number must NOT be rewritten (prev char is a
+    // digit → blocked).
+    assert_eq!(rewrite_field_refs_to_row_dot("3.14"), "3.14");
+    // Leading whitespace + two field refs in a comparison.
+    assert_eq!(rewrite_field_refs_to_row_dot(".x > .y"), "row.x > row.y");
+    // Field ref at expression start preceded by `(`.
+    assert_eq!(rewrite_field_refs_to_row_dot("(.id)"), "(row.id)");
+}
+
+#[test]
+fn expr_contains_free_field_refs_visits_all_arms() {
+    // FieldRef → true.
+    assert!(expr_contains_free_field_refs(&HirExpr::FieldRef(
+        smol_str::SmolStr::from("age")
+    )));
+    // Non-FieldRef leaf forms → false (no row dependency).
+    assert!(!expr_contains_free_field_refs(&HirExpr::StringLit(
+        smol_str::SmolStr::from("hi")
+    )));
+    assert!(!expr_contains_free_field_refs(&HirExpr::Template(
+        smol_str::SmolStr::from("`x`")
+    )));
+    assert!(!expr_contains_free_field_refs(&HirExpr::PrefixedName {
+        iri: smol_str::SmolStr::from("https://example.org/Foo"),
+    }));
+}
+
+#[test]
+fn closure_synth_on_simple_field_ref() {
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let row = row_record(db, &[("id", Primitive::String)]);
+        let str_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+        let expected = fn_over_row(db, row, str_ty);
+        let mut cx = build_checker(db, m, Some(row), None);
+        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("id"));
+        let result = cx.check(
+            ExprId(0),
+            &arg,
+            expected,
+            Cardinality::Exact(1),
+            &BlamePos::Expr(ExprId(0)),
+        );
+        assert!(result.is_ok(), "closure synth over `.id` must check OK");
+        closure_rendering(&cx, ExprId(0))
+    }
+
+    let (db, file) = db_with(HELLO);
+    let rendering = shim(&db, file).expect("closure rendering must be recorded");
+    assert_eq!(rendering, "(row: Record<{id: String}>) => row.id");
+}
+
+#[test]
+fn closure_synth_on_binop_predicate() {
+    // SC#3-shape: the canonical `users |> filter(.age >= 18)` predicate body.
+    // Phase 3 v0.1 has no surface binop HIR node, so we drive synthesis with a
+    // FieldRef arg and assert the rendering for the FieldRef form; the binop
+    // text form is exercised via render_closure directly below.
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let row = row_record(db, &[("age", Primitive::Integer)]);
+        let int_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
+        // The closure body `.age` resolves to Integer; expected predicate
+        // result Integer. (Bool comparison ops are a later phase; the row
+        // context resolution + rendering is what CORE-07 validates here.)
+        let expected = fn_over_row(db, row, int_ty);
+        let mut cx = build_checker(db, m, Some(row), None);
+        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("age"));
+        let _ = cx.check(
+            ExprId(0),
+            &arg,
+            expected,
+            Cardinality::Exact(1),
+            &BlamePos::Expr(ExprId(0)),
+        );
+        closure_rendering(&cx, ExprId(0))
+    }
+
+    let (db, file) = db_with(HELLO);
+    let rendering = shim(&db, file).expect("closure rendering recorded");
+    assert_eq!(rendering, "(row: Record<{age: Integer}>) => row.age");
+
+    // The SC#3 acceptance shape — `(row: Record<{age: Integer}>) => row.age >= 18`
+    // — via render_closure directly (the binop text form), proving the renderer
+    // produces the documented SC#3 string once a binop HIR node exists.
+    let (db2, _f2) = db_with(HELLO);
+    let row = row_record(&db2, &[("age", Primitive::Integer)]);
+    let sc3 = render_closure(&db2, row, ".age >= 18");
+    assert_eq!(
+        sc3.as_str(),
+        "(row: Record<{age: Integer}>) => row.age >= 18"
+    );
+}
+
+#[test]
+fn closure_synth_multi_field_record_rendering() {
+    // A multi-field row renders every field name + type in declaration order.
+    let (db, _file) = db_with(HELLO);
+    let row = row_record(
+        &db,
+        &[
+            ("id", Primitive::String),
+            ("name", Primitive::String),
+            ("age", Primitive::Integer),
+        ],
+    );
+    let rendering = render_closure(&db, row, ".age");
+    assert_eq!(
+        rendering.as_str(),
+        "(row: Record<{id: String, name: String, age: Integer}>) => row.age"
+    );
+}
+
+#[test]
+fn no_closure_synth_when_no_free_field_refs() {
+    // A function-arg position expecting Fn(Record<{}> -> Iri) whose arg is a
+    // PrefixedName (no FieldRef) must NOT synthesise a closure — it falls
+    // through to the standard synth + compatible path, so no
+    // SynthesizedClosureRendering entry is recorded.
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<bool> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let row = row_record(db, &[]);
+        let iri_ty = Ty::new(db, TyKind::Iri);
+        let expected = fn_over_row(db, row, iri_ty);
+        let mut cx = build_checker(db, m, Some(row), None);
+        let arg = HirExpr::PrefixedName {
+            iri: smol_str::SmolStr::from("https://example.org/Foo"),
+        };
+        let _ = cx.check(
+            ExprId(0),
+            &arg,
+            expected,
+            Cardinality::Exact(1),
+            &BlamePos::Expr(ExprId(0)),
+        );
+        Some(closure_rendering(&cx, ExprId(0)).is_some())
+    }
+
+    let (db, file) = db_with(HELLO);
+    let synthesised = shim(&db, file).expect("shim ran");
+    assert!(
+        !synthesised,
+        "no FieldRef → no implicit closure synthesis (standard check path)"
+    );
+}
+
+#[test]
+fn closure_synth_with_missing_field_emits_did_you_mean() {
+    // A `.naem` typo inside the closure body emits the did-you-mean diagnostic
+    // (against the row's ACTUAL fields), AND the closure rendering is still
+    // produced (synthesis does not abort on a body error).
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let row = row_record(db, &[("name", Primitive::String)]);
+        let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
+        let expected = fn_over_row(db, row, bool_ty);
+        let mut cx = build_checker(db, m, Some(row), None);
+        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("naem")); // typo
+        let _ = cx.check(
+            ExprId(0),
+            &arg,
+            expected,
+            Cardinality::Exact(1),
+            &BlamePos::Expr(ExprId(0)),
+        );
+        closure_rendering(&cx, ExprId(0))
+    }
+
+    let (db, file) = db_with(HELLO);
+    let rendering = shim(&db, file).expect("rendering still produced on body error");
+    // Rendering uses the row's real field (`name`), not the typo'd `.naem`.
+    assert_eq!(rendering, "(row: Record<{name: String}>) => row.naem");
+    let diags = shim::accumulated::<Diagnostic>(&db, file);
+    let msg = diags
+        .iter()
+        .map(|d| d.message.as_str())
+        .find(|m| m.contains("naem"))
+        .expect("did-you-mean diagnostic for the typo");
+    assert!(
+        msg.contains("unknown column `naem`") && msg.contains("did you mean `name`"),
+        "missing-field inside closure must still fire did-you-mean, got {msg:?}"
+    );
+}
+
+#[test]
+fn closure_synth_rendering_never_contains_unknown_or_inferenceid() {
+    // Risk Register: the closure renderer must never leak the internal
+    // TyKind::Unknown(InferenceId) placeholder. Build a row whose field is
+    // explicitly Unknown(InferenceId) and assert it renders as `?`, not the
+    // Debug form.
+    let (db, _file) = db_with(HELLO);
+    let unknown = Ty::new(&db, TyKind::Unknown(crate::ty::InferenceId(7)));
+    let rec = crate::ty::Record::new(
+        &db,
+        vec![crate::ty::RecordField {
+            name: smol_str::SmolStr::from("mystery"),
+            ty: unknown,
+        }],
+    );
+    let row = Ty::new(&db, TyKind::Record(rec));
+    let rendering = render_closure(&db, row, ".mystery");
+    assert!(
+        !rendering.contains("Unknown"),
+        "rendering must NOT leak `Unknown`, got {rendering:?}"
+    );
+    assert!(
+        !rendering.contains("InferenceId"),
+        "rendering must NOT leak `InferenceId`, got {rendering:?}"
+    );
+    assert_eq!(
+        rendering.as_str(),
+        "(row: Record<{mystery: ?}>) => row.mystery",
+        "internal inference state normalises to `?` at the display boundary"
+    );
+}
+
+#[test]
+fn closure_synth_type_mismatch_emits_diagnostic() {
+    // A closure body whose type does not satisfy the predicate result type
+    // emits a standard mismatch diagnostic (synthesis does not swallow errors).
+    // `.id : String` checked against expected predicate result `Integer` →
+    // String ≮: Integer.
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<bool> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let row = row_record(db, &[("id", Primitive::String)]);
+        let int_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
+        let expected = fn_over_row(db, row, int_ty);
+        let mut cx = build_checker(db, m, Some(row), None);
+        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("id")); // String
+        let _ = cx.check(
+            ExprId(0),
+            &arg,
+            expected,
+            Cardinality::Exact(1),
+            &BlamePos::Expr(ExprId(0)),
+        );
+        Some(cx.first_error.is_some())
+    }
+
+    let (db, file) = db_with(HELLO);
+    let errored = shim(&db, file).expect("shim ran");
+    assert!(errored, "String body vs Integer predicate must error");
+    let diags = shim::accumulated::<Diagnostic>(&db, file);
+    let msg = diags
+        .iter()
+        .map(|d| d.message.as_str())
+        .find(|m| m.contains("String") && m.contains("Integer"))
+        .expect("type mismatch diagnostic inside closure body");
+    assert!(
+        msg.contains("expected `Integer`") && msg.contains("got `String`"),
+        "closure body type mismatch must surface, got {msg:?}"
+    );
+}
+
 #[test]
 fn pipeline_typechecks_in_phase_3_v0_1() {
     // Phase 3 v0.1's HirExpr is the Phase 2 leaf surface (Template / FieldRef /

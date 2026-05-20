@@ -235,6 +235,116 @@ pub fn compatible<'db>(
     Err(eg)
 }
 
+/// Does `e` contain at least one free `.field` reference?
+///
+/// CORE-07: an arg expression in a `Fn(Record<R> -> τ)` position is lifted to
+/// an implicit closure ONLY when it references the row via a `.field` access
+/// (otherwise it is an already-evaluated value, e.g. a literal predicate, and
+/// gets the standard `check` path).
+///
+/// Phase 3 v0.1's [`HirExpr`] is the Phase 2 leaf surface (`Template` /
+/// `FieldRef` / `StringLit` / `PrefixedName` — all non-recursive leaves), so
+/// this is a flat match. When the Pratt-lowered expression tree extends
+/// `HirExpr` with `Call` / `Pipeline` / `Ternary` / `BinOp` (a later phase),
+/// this walker gains the recursive arms (the plan 03-06 sketch anticipated
+/// them) — but the algorithm here is identical: ANY descendant `FieldRef`
+/// triggers synthesis.
+const fn expr_contains_free_field_refs(e: &HirExpr) -> bool {
+    match e {
+        HirExpr::FieldRef(_) => true,
+        // Phase 2 leaf forms with no `.field` descendants. (A `Template` MAY
+        // contain `${.id}` placeholders textually, but those are not yet a
+        // structured `FieldRef` HIR node in Phase 3 v0.1 — template parsing is
+        // deferred. A template in a closure position is treated as a value, not
+        // a row-dependent predicate, until the expression tree lands.)
+        HirExpr::Template(_) | HirExpr::StringLit(_) | HirExpr::PrefixedName { .. } => false,
+    }
+}
+
+/// Textual rewrite for closure-binding DISPLAY only: every standalone
+/// `.identifier` becomes `row.identifier`. Used to render the implicit closure
+/// parameter binding (e.g. `.age >= 18` → `row.age >= 18`); NOT used for
+/// type-checking (the checker walks the [`HirExpr`] structure directly).
+///
+/// Heuristic state machine (no regex): a `.` begins a field reference when it
+/// is followed by an ASCII-alphabetic identifier-start char AND it is NOT
+/// itself preceded by an identifier char or another `.` (which would make it a
+/// member-access chain / decimal point rather than a bare field ref). Phase 3
+/// v0.1's surface `.field` grammar is single-segment (no `.a.b` chaining), so a
+/// single `row` insertion per bare `.ident` is correct.
+fn rewrite_field_refs_to_row_dot(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut prev: Option<char> = None;
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '.' {
+            let next_is_ident_start = chars
+                .get(i + 1)
+                .is_some_and(|n| n.is_ascii_alphabetic() || *n == '_');
+            let prev_blocks =
+                matches!(prev, Some(p) if p.is_ascii_alphanumeric() || p == '_' || p == '.');
+            if next_is_ident_start && !prev_blocks {
+                out.push_str("row");
+            }
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
+/// Structural rendering of a leaf [`HirExpr`] as closure-body text, used when
+/// no real source span is available (the test-driven path — there is no surface
+/// pipeline/call syntax in Phase 3 v0.1, so closure synthesis is validated by
+/// directly constructed `HirExpr`s without arena spans). A `FieldRef("age")`
+/// renders as `.age` (which `rewrite_field_refs_to_row_dot` then turns into
+/// `row.age`); literals render verbatim.
+fn render_leaf_expr_text(e: &HirExpr) -> String {
+    match e {
+        HirExpr::FieldRef(name) => format!(".{name}"),
+        HirExpr::StringLit(s) => format!("\"{s}\""),
+        HirExpr::Template(t) => t.to_string(),
+        HirExpr::PrefixedName { iri } => iri.to_string(),
+    }
+}
+
+/// Render an implicit-closure binding for diagnostic + hover display (CORE-07,
+/// SC#3). Produces text like
+/// `(row: Record<{id: String, age: Integer}>) => row.age >= 18`.
+///
+/// CRITICAL (Risk Register): the `row` Record type is rendered via
+/// [`render_ty_kind`] (the shared `TyDisplay`) — never raw `{:?}` Debug. The
+/// returned string MUST NOT contain `Unknown` or `InferenceId`; any internal
+/// inference-state placeholder normalises to `?` at the display boundary inside
+/// `render_ty_kind`.
+fn render_closure<'db>(
+    db: &'db dyn fossil_base::Db,
+    row_ty: Ty<'db>,
+    expr_source_text: &str,
+) -> SmolStr {
+    let row_display = render_record_for_closure(db, row_ty);
+    let body_text = rewrite_field_refs_to_row_dot(expr_source_text.trim());
+    SmolStr::from(format!("(row: {row_display}) => {body_text}"))
+}
+
+/// Render the closure's `row` parameter type. For a `Record`, expand the field
+/// list (`Record<{id: String, age: Integer}>`) — the bare `render_ty_kind`
+/// `Record { ... }` form would hide the field names the hover needs to surface.
+/// Falls back to `render_ty_kind` for any non-Record row (defensive).
+fn render_record_for_closure<'db>(db: &'db dyn fossil_base::Db, row_ty: Ty<'db>) -> String {
+    match row_ty.kind(db) {
+        TyKind::Record(rec) => {
+            let fields: Vec<String> = rec
+                .fields(db)
+                .iter()
+                .map(|f| format!("{}: {}", f.name, render_ty_kind(db, f.ty.kind(db))))
+                .collect();
+            format!("Record<{{{}}}>", fields.join(", "))
+        }
+        other => render_ty_kind(db, other),
+    }
+}
+
 /// Recursive subtyping per `type-system.md` §9 (5 rules + reflexivity).
 /// Direct enum dispatch — NO `Box<dyn>`, NO trait objects.
 fn subtypes<'db>(db: &'db dyn fossil_base::Db, actual: Ty<'db>, expected: Ty<'db>) -> bool {
@@ -320,6 +430,13 @@ impl<'db> Checker<'db> {
     }
 
     /// Checking-mode entry. Phase 3 v0.1: synth then [`compatible`].
+    ///
+    /// CORE-07 fast-path: when `expected` is a single-param `Fn(Record<R> -> τ)`
+    /// AND the arg `e` contains free `.field` references, lift `e` to an
+    /// implicit closure (the ONLY lambda form in Fossil — type-system.md §7)
+    /// via [`Self::synthesize_closure`]. The synthesised closure has the `Fn`
+    /// type itself (which trivially satisfies `expected` by S-Refl), so we
+    /// return `Ok(())` once synthesis succeeds.
     pub fn check(
         &mut self,
         expr_id: ExprId,
@@ -328,6 +445,27 @@ impl<'db> Checker<'db> {
         cardinality: Cardinality,
         dest: &BlamePos,
     ) -> Result<(), ErrorGuaranteed> {
+        // CORE-07 implicit closure synthesis fast-path.
+        if let TyKind::Fn(sig) = expected.kind(self.db) {
+            // Single-parameter only — multi-arg lambdas are out of scope
+            // (PROJECT.md "Out of Scope").
+            let params = sig.params(self.db);
+            if params.len() == 1 {
+                let param_ty = params[0];
+                if matches!(param_ty.kind(self.db), TyKind::Record(_))
+                    && expr_contains_free_field_refs(e)
+                {
+                    let closure_ty = self.synthesize_closure(expr_id, e, expected, param_ty);
+                    // synthesize_closure type-checks the body in the row context
+                    // and records the SynthesizedClosureRendering provenance. The
+                    // closure value has the `Fn` type — S-Refl against `expected`.
+                    return compatible(self, closure_ty, expected, cardinality, expr_id, dest);
+                }
+                // No free FieldRefs → not a row-dependent predicate; fall
+                // through to the standard `synth` + `compatible` path (the arg
+                // is an already-typed value, e.g. a named Fn).
+            }
+        }
         let Some(actual) = self.synth(expr_id, e) else {
             // synth already emitted a diagnostic + recorded the error (e.g. a
             // field-not-found). Propagate without double-reporting.
@@ -402,25 +540,105 @@ impl<'db> Checker<'db> {
         Some(Ty::new(db, TyKind::Error(eg)))
     }
 
-    /// Implicit closure synthesis HOOK — implemented by plan 03-06 (Wave 4).
+    /// Implicit closure synthesis (CORE-07, type-system.md §7 T-Closure) —
+    /// plan 03-06 fills the plan-03-05 hook.
     ///
-    /// Implicit closure synthesis is the ONLY lambda form in Fossil. This plan
-    /// leaves the hook returning an `Error` type + a "not yet implemented"
-    /// diagnostic; plan 03-06 fills it in. NOT mock-filled.
+    /// Implicit closure synthesis is the ONLY lambda form in Fossil: there is no
+    /// surface `\row -> ...` syntax. Given an arg expression that contains free
+    /// `.field` references and an expected type `Fn(Record<R> -> τ_pred)`, bind
+    /// `row: Record<R>` and type-check the original expression `arg` against
+    /// `τ_pred` in that row context. The closure is METADATA wrapped around the
+    /// existing [`HirExpr`] — NOT a new HIR node (RESEARCH.md §"Don't
+    /// Hand-Roll"), so the lowering arena is unchanged.
+    ///
+    /// Records a [`ProvenanceKind::SynthesizedClosureRendering`] entry on
+    /// `expr_id` (the closure body's outer id) so plan 03-07's LSP hover (SC#3)
+    /// can surface the binding. The synthesis is NEVER hidden from the user.
+    ///
+    /// Returns `expected` (the `Fn` type) on success — the closure VALUE has the
+    /// function type, not its body type — or a [`TyKind::Error`] type if the
+    /// precondition (an `Fn` expected type) is violated. Type errors INSIDE the
+    /// body (missing field, type mismatch) emit standard diagnostics via the
+    /// recursive [`Self::check`] call and do NOT swallow the closure rendering.
     pub fn synthesize_closure(
         &mut self,
-        _arg: &HirExpr,
-        _expected: Ty<'db>,
-        _row: Ty<'db>,
+        expr_id: ExprId,
+        arg: &HirExpr,
+        expected: Ty<'db>,
+        row: Ty<'db>,
     ) -> Ty<'db> {
-        let eg = delay_span_bug(
-            self.db,
-            Span { start: 0, end: 0 },
-            "implicit closure synthesis is not yet implemented in Phase 3 \
-             plan 03-05 (deferred to plan 03-06)",
-        );
-        self.record_error(eg);
-        Ty::new(self.db, TyKind::Error(eg))
+        let db = self.db;
+        // Precondition (asserted by `check`): `expected` is `Fn(sig)`.
+        let TyKind::Fn(sig) = expected.kind(db) else {
+            let eg = delay_span_bug(
+                db,
+                self.span_of(expr_id),
+                "internal: synthesize_closure called with a non-Fn expected type",
+            );
+            self.record_error(eg);
+            return Ty::new(db, TyKind::Error(eg));
+        };
+        let result_ty = sig.return_ty(db);
+
+        // Swap the row context: inside the closure body, `.field` resolves
+        // against `row` (the closure parameter's Record), not the outer source
+        // row. Restore afterwards regardless of the check outcome.
+        let prior_source_row = self.source_row;
+        self.source_row = Some(row);
+
+        // Type-check the body against the predicate's result type IN the row
+        // context. We call `synth` + `compatible` directly (NOT `self.check`)
+        // to avoid re-entering the Fn-typed fast-path on `result_ty` (which is
+        // a value type, e.g. Bool, not an Fn — so it would not recurse anyway,
+        // but going through synth keeps the entry recording explicit).
+        if let Some(actual) = self.synth(expr_id, arg) {
+            let _ = compatible(
+                self,
+                actual,
+                result_ty,
+                Cardinality::Exact(1),
+                expr_id,
+                &BlamePos::Expr(expr_id),
+            );
+        }
+        // (If synth returned None — e.g. a missing field — it already emitted a
+        // did-you-mean diagnostic + recorded the error. The closure rendering is
+        // still produced below against the row's ACTUAL fields.)
+
+        self.source_row = prior_source_row;
+
+        // Build the rendering from a STRUCTURAL rendering of the leaf
+        // `HirExpr`. Phase 3 v0.1 has no surface pipeline/call syntax, so a
+        // closure body is always one of the four leaf forms — rendering it
+        // structurally (`.age` → `row.age`, literals verbatim) is exact and
+        // span-independent. When a later phase adds the Pratt-lowered
+        // expression tree (and real arena spans for closure-arg positions), the
+        // body can be sliced from the original source verbatim (`file.text(db)`
+        // by span) for richer multi-token bodies; not needed in v0.1 because no
+        // surface form produces a closure-arg span yet.
+        let span = self.span_of(expr_id);
+        let body_for_render = render_leaf_expr_text(arg);
+        let rendering = render_closure(db, row, &body_for_render);
+
+        // Amend the entry `synth` pushed for `expr_id` (replace its provenance
+        // with the closure rendering), or push a fresh one if `synth` recorded
+        // none (e.g. the field-not-found path returned None).
+        let provenance = Provenance {
+            span,
+            kind: ProvenanceKind::SynthesizedClosureRendering { rendering },
+        };
+        if let Some(entry) = self.entries.iter_mut().rev().find(|e| e.expr_id == expr_id) {
+            entry.provenance = provenance;
+        } else {
+            self.entries.push(ExprTypeEntry {
+                expr_id,
+                ty: result_ty,
+                provenance,
+            });
+        }
+
+        // The closure value has the `Fn` type — return `expected` (S-Refl).
+        expected
     }
 
     /// Surface `ShEx` lowering errors (`OneOf` rejection → SC#4 split
