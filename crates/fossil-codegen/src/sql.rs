@@ -33,8 +33,9 @@ use std::fmt::Write as _;
 
 use fossil_hir::MappingLoc;
 use fossil_mir::op::CmpOp;
-use fossil_mir::{Expr, Op, lower_to_mir};
+use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
 
+use crate::ast;
 use crate::manifest::manifest_template;
 
 #[salsa::tracked]
@@ -47,24 +48,68 @@ pub struct SqlPlan<'db> {
 
 /// Lower one `MappingLoc` to a [`SqlPlan`] containing the `DuckDB` SQL script
 /// (`CREATE VIEW` + `COPY`) and the `GraphAr` manifest YAML.
+///
+/// Thin wrapper over the [`codegen_graph`] test seam: lowers the mapping to its
+/// [`MirGraph`] then defers all MIR-walking to `codegen_graph`. Keeping the walk
+/// behind a `MirGraph`-keyed helper lets the `tests/codegen_ops.rs` suite drive
+/// directly-constructed graphs for the source-unreachable operators (ADR-0009)
+/// without needing a `.fossil` source.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn codegen_sql<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> SqlPlan<'db> {
-    let mir = lower_to_mir(db, mapping);
+    codegen_graph(db, lower_to_mir(db, mapping))
+}
+
+/// The MIR → `DuckDB` SQL walk, keyed on a [`MirGraph`] rather than a mapping.
+///
+/// This is the codegen test seam (RESEARCH Code Examples / plan note): the 7
+/// source-unreachable operators (`Project` / `Rename` / `Filter` / `Distinct` /
+/// `Union` / `Empty`, + `Join` / `GroupBy` / `Aggregate` in plan 04-05) are
+/// exercised by hand-building a `MirGraph` and calling
+/// [`codegen_graph_for_test`] (the public test wrapper) — no surface syntax
+/// required.
+///
+/// # Relation referencing
+///
+/// Each op produces a *relation reference* (`rel_ref[i]`) consumed by its
+/// downstream ops:
+/// - `Source` — a `CREATE VIEW` statement; its reference is the bare view name.
+/// - the single-input SELECT ops (`Project` / `Rename` / `Filter` / `Distinct`
+///   / `Empty`) and `Union` — build their SELECT body via the [`crate::ast`]
+///   helpers; their reference is the body wrapped as `(<body>) AS step_<i>`
+///   (nested subquery — chosen over a `WITH` CTE chain for self-containment and
+///   snapshot stability; documented in ADR-0012).
+/// - `Extend` — buffered, NOT emitted as a standalone SELECT, so its reference
+///   is a *passthrough* of its input's reference. This is the byte-identical
+///   `hello.fossil` path: the `iri` Extend collapses into the COPY's inner
+///   SELECT exactly as in Phase 1.
+///
+/// `TripleEmit` / `Sink` keep the Phase 1 hand-wrapped COPY (Pitfall 1).
+#[salsa::tracked]
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> SqlPlan<'db> {
+    let ops = mir.ops(db);
     let mut sql = String::new();
 
-    // Per-mapping codegen state. Phase 4 promotes these to a proper visitor
-    // when the 11-operator algebra needs richer threading (e.g. Project
-    // pushdown, Join's two-input shape).
-    let mut source_view: Option<String> = None;
+    // The relation reference for each op index (the FROM-able SQL a downstream
+    // op should read). `None` for terminal ops (TripleEmit/Sink) that produce
+    // no consumable relation.
+    let mut rel_ref: Vec<Option<String>> = vec![None; ops.len()];
+
+    // For a buffered Extend, the relation it reads FROM (so a consuming
+    // TripleEmit collapses into a COPY over that same relation rather than a
+    // redundant subquery — the byte-identical hello.fossil path).
+    let mut collapse_from: Vec<Option<String>> = vec![None; ops.len()];
+
+    // Buffered Extends (field name → rendered expr SQL). An Extend feeding a
+    // TripleEmit collapses into the COPY's inner SELECT (byte-identical
+    // hello.fossil); it never becomes a standalone SELECT.
     let mut extends: Vec<(String, String)> = Vec::new();
-    // (subject_expr, predicate_iri, object_expr, source_view) — buffered by
-    // TripleEmit and consumed by Sink so the COPY wrapper sees the resolved
-    // subject expression rather than a column reference into a non-existent
-    // view.
+    // (subject_expr, predicate_iri, object_expr, from_relation) — buffered by
+    // TripleEmit and consumed by Sink.
     let mut emit: Option<(String, String, String, String)> = None;
 
-    for op in mir.ops(db) {
+    for (idx, op) in ops.iter().enumerate() {
         match op {
             Op::Source {
                 uri,
@@ -77,66 +122,131 @@ pub fn codegen_sql<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) 
                     "CREATE VIEW {view_name} AS\nSELECT * FROM read_csv_auto('{uri}', sample_size=-1);"
                 )
                 .expect("writing to a String never fails");
-                source_view = Some(view_name);
+                rel_ref[idx] = Some(view_name);
             }
-            Op::Extend {
-                input: _,
-                field,
-                expr,
-            } => {
-                let default_source = source_view.as_deref().unwrap_or("source");
-                let expr_sql = render_expr(expr, default_source);
-                extends.push((field.to_string(), expr_sql));
+            Op::Extend { input, field, expr } => {
+                // Buffer the computed field. The qualifier for unqualified
+                // ColRefs is the input relation's view name (the source view in
+                // the hello.fossil path).
+                let from = input_relation(&rel_ref, *input);
+                let expr_sql = render_expr(expr, &from);
+                extends.push((field.to_string(), expr_sql.clone()));
+                // Dual exposure (ADR-0012):
+                // - A downstream *TripleEmit* inlines the buffered expr into the
+                //   COPY's inner SELECT (the byte-identical hello.fossil path —
+                //   no standalone SELECT, no extra subquery).
+                // - A downstream *relational* op (e.g. Extend→Filter) instead
+                //   FROMs a standalone `SELECT *, <expr> AS "field"` subquery so
+                //   the computed column is materialised. `select_extend` builds
+                //   that body; the COPY collapse simply prefers the buffer.
+                let body = ast::select_extend(&from, field, &expr_sql);
+                rel_ref[idx] = Some(subquery(&body, idx));
+                collapse_from[idx] = Some(from);
+            }
+            Op::Project { input, cols } => {
+                let body = ast::select_cols_from(cols, &input_relation(&rel_ref, *input));
+                rel_ref[idx] = Some(subquery(&body, idx));
+            }
+            Op::Rename { input, old, new } => {
+                let body = ast::select_rename(&input_relation(&rel_ref, *input), old, new);
+                rel_ref[idx] = Some(subquery(&body, idx));
+            }
+            Op::Filter { input, pred } => {
+                let pred_sql = render_expr(pred, &input_relation(&rel_ref, *input));
+                let body = ast::select_filter(&input_relation(&rel_ref, *input), &pred_sql);
+                rel_ref[idx] = Some(subquery(&body, idx));
+            }
+            Op::Distinct { input, by } => {
+                let body = ast::select_distinct(&input_relation(&rel_ref, *input), by.as_deref());
+                rel_ref[idx] = Some(subquery(&body, idx));
+            }
+            Op::Union { left, right } => {
+                let left_sql = ast::select_all_from(&input_relation(&rel_ref, *left));
+                let right_sql = ast::select_all_from(&input_relation(&rel_ref, *right));
+                let body = ast::union(&left_sql, &right_sql);
+                rel_ref[idx] = Some(subquery(&body, idx));
+            }
+            Op::Empty { schema } => {
+                // ADR-0011 R9 target: a `WHERE false` shell over a notional
+                // input view so the empty relation has the right column shape.
+                let body = ast::select_empty(schema, "source");
+                rel_ref[idx] = Some(subquery(&body, idx));
             }
             Op::TripleEmit {
-                input: _,
+                input,
                 subject,
                 predicate,
                 object,
                 graph: _,
             } => {
-                let view = source_view.clone().unwrap_or_else(|| "source".to_string());
+                // When the input is a buffered Extend, COPY over the relation
+                // that Extend reads (collapse the computed column inline) — the
+                // byte-identical hello.fossil path. Otherwise FROM the input op's
+                // own relation (e.g. a Project/Filter subquery feeding emit).
+                let from = collapse_from
+                    .get(*input)
+                    .and_then(Clone::clone)
+                    .unwrap_or_else(|| input_relation(&rel_ref, *input));
                 // Resolve `subject` / `object`. A bare `ColRef { source: "",
-                // column }` that names a buffered Extend (e.g. the shared
-                // `iri` column) is substituted with that Extend's rendered SQL
-                // so the COPY wrapper sees the resolved expression rather than
-                // a reference into a non-existent view column. This keeps the
-                // hello.fossil output byte-identical with Phase 1.
-                let subject_expr = render_emit_operand(subject, &extends, &view);
-                let object_expr = render_emit_operand(object, &extends, &view);
-                emit = Some((subject_expr, predicate.to_string(), object_expr, view));
+                // column }` naming a buffered Extend (the shared `iri` column)
+                // is substituted with that Extend's rendered SQL so the COPY
+                // sees the resolved expression. Keeps hello.fossil
+                // byte-identical with Phase 1.
+                let subject_expr = render_emit_operand(subject, &extends, &from);
+                let object_expr = render_emit_operand(object, &extends, &from);
+                emit = Some((subject_expr, predicate.to_string(), object_expr, from));
             }
             Op::Sink { input: _, sink: _ } => {
-                if let Some((subject, predicate, object, view)) = &emit {
+                if let Some((subject, predicate, object, from)) = &emit {
                     writeln!(
                         sql,
-                        "COPY (\n    SELECT\n        {subject} AS subject,\n        '{predicate}' AS predicate,\n        {object} AS object\n    FROM {view}\n) TO 'output.parquet' (FORMAT PARQUET);"
+                        "COPY (\n    SELECT\n        {subject} AS subject,\n        '{predicate}' AS predicate,\n        {object} AS object\n    FROM {from}\n) TO 'output.parquet' (FORMAT PARQUET);"
                     )
                     .expect("writing to a String never fails");
                 }
             }
-            // The remaining 7 operators + Empty are NOT produced by source
-            // lowering this phase (ADR-0009 — they are exercised via direct
-            // MirGraph construction); their codegen lands in plans 04-04/04-05.
-            // The corpus does not hit these arms yet, so a clearly-marked empty
-            // fragment keeps the match exhaustive without a panic in the
-            // production path.
-            Op::Project { .. }
-            | Op::Rename { .. }
-            | Op::Filter { .. }
-            | Op::Join { .. }
-            | Op::Union { .. }
-            | Op::GroupBy { .. }
-            | Op::Aggregate { .. }
-            | Op::Distinct { .. }
-            | Op::Empty { .. } => {
-                // TODO(04-04/04-05): real codegen for the non-source-reachable
-                // operators. No corpus test exercises these arms this phase.
+            // Join / GroupBy / Aggregate land in plan 04-05. No corpus test or
+            // direct-MIR snapshot exercises these arms this plan; a clearly
+            // marked no-op keeps the match exhaustive without a production
+            // panic.
+            Op::Join { .. } | Op::GroupBy { .. } | Op::Aggregate { .. } => {
+                // TODO(04-05): two-input Join + GroupBy/Aggregate codegen.
             }
         }
     }
 
     SqlPlan::new(db, sql, manifest_template())
+}
+
+/// Test-only entry point into the codegen seam.
+///
+/// Drives [`codegen_graph`] with a hand-built [`MirGraph`] from the `tests/`
+/// integration crate. The Salsa query itself stays `pub` for the wrapper, but
+/// tests call through this stable name so the seam is explicit. Used to snapshot
+/// the source-unreachable operators (ADR-0009).
+#[allow(clippy::elidable_lifetime_names)]
+pub fn codegen_graph_for_test<'db>(
+    db: &'db dyn fossil_base::Db,
+    mir: MirGraph<'db>,
+) -> SqlPlan<'db> {
+    codegen_graph(db, mir)
+}
+
+/// Resolve op index `i`'s relation reference, falling back to the conventional
+/// `"source"` view name when an op references an index that produced no
+/// relation (a malformed graph — never in practice). `&rel_ref[i]` is the
+/// view name (Source) or `(<body>) AS step_<i>` subquery (single-input ops).
+fn input_relation(rel_ref: &[Option<String>], i: usize) -> String {
+    rel_ref
+        .get(i)
+        .and_then(Clone::clone)
+        .unwrap_or_else(|| "source".to_string())
+}
+
+/// Wrap a SELECT body as a nested-subquery relation reference for downstream
+/// ops: `(<body>) AS step_<idx>` (ADR-0012 — subquery over CTE chain).
+fn subquery(body: &str, idx: usize) -> String {
+    format!("({body}) AS step_{idx}")
 }
 
 /// Render a `TripleEmit` subject/object operand to SQL. A bare `ColRef` whose

@@ -38,10 +38,10 @@
 //!   `DISTINCT ON (...)`.
 //! - `SelectItem::{Wildcard(WildcardAdditionalOptions), UnnamedExpr(Expr),
 //!   ExprWithAlias { expr, alias }}`.
-//! - DuckDB `EXCLUDE` rides on the wildcard via
+//! - `DuckDB` `EXCLUDE` rides on the wildcard via
 //!   `WildcardAdditionalOptions.opt_exclude: Option<ExcludeSelectItem>`;
 //!   `ExcludeSelectItem::Multiple(Vec<Ident>)` renders the parenthesised
-//!   `EXCLUDE (col)` form (DuckDB's documented spelling).
+//!   `EXCLUDE (col)` form (`DuckDB`'s documented spelling).
 //! - `TableFactor::Table` carries 11 fields; only `name` is meaningful here.
 //! - `SetExpr::SetOperation { op: SetOperator::Union, set_quantifier, left,
 //!   right }` builds `UNION`.
@@ -49,6 +49,12 @@
 //!
 //! The compiler's non-exhaustive-struct error catches drift loudly on a
 //! `sqlparser` bump; re-verify this field set then (and update the ADR).
+
+// These builders are deliberately `pub(crate)` — they are the codegen-internal
+// AST surface that `sql.rs` calls. The module is itself `pub(crate)`, so clippy
+// flags the qualifier as redundant; we keep it for documentation intent (these
+// are not crate-public API and must never leak out of `fossil-codegen`).
+#![allow(clippy::redundant_pub_crate)]
 
 use smol_str::SmolStr;
 use sqlparser::ast::helpers::attached_token::AttachedToken;
@@ -181,7 +187,7 @@ pub(crate) fn select_extend(view: &str, field: &str, expr_sql: &str) -> String {
 }
 
 /// `Rename(old, new)` — `SELECT * EXCLUDE (<old>), <old> AS "<new>" FROM <view>`
-/// (DuckDB `EXCLUDE`).
+/// (`DuckDB` `EXCLUDE`).
 pub(crate) fn select_rename(view: &str, old: &str, new: &str) -> String {
     let wildcard_with_exclude = SelectItem::Wildcard(WildcardAdditionalOptions {
         opt_exclude: Some(ExcludeSelectItem::Multiple(vec![Ident::new(old)])),
@@ -212,14 +218,13 @@ pub(crate) fn select_filter(view: &str, pred_sql: &str) -> String {
 
 /// `Distinct(by)` — `SELECT DISTINCT [ON (<by>)] * FROM <view>`.
 pub(crate) fn select_distinct(view: &str, by: Option<&[SmolStr]>) -> String {
-    let distinct = match by {
-        None => Distinct::Distinct,
-        Some(cols) => Distinct::On(
+    let distinct = by.map_or(Distinct::Distinct, |cols| {
+        Distinct::On(
             cols.iter()
                 .map(|c| SqlExpr::Identifier(Ident::new(c.as_str())))
                 .collect(),
-        ),
-    };
+        )
+    });
     render_select(base_select(vec![wildcard()], view, None, Some(distinct)))
 }
 
@@ -257,15 +262,17 @@ fn parse_set_expr(query_sql: &str) -> SetExpr {
         .tokenize()
         .ok()
         .and_then(|tokens| Parser::new(&dialect).with_tokens(tokens).parse_query().ok());
-    match parsed {
-        Some(query) => *query.body,
-        None => SetExpr::Select(Box::new(base_select(
-            vec![wildcard()],
-            query_sql,
-            None,
-            None,
-        ))),
-    }
+    parsed.map_or_else(
+        || {
+            SetExpr::Select(Box::new(base_select(
+                vec![wildcard()],
+                query_sql,
+                None,
+                None,
+            )))
+        },
+        |query| *query.body,
+    )
 }
 
 /// `Empty(schema)` — `SELECT <cols> FROM <view> WHERE false` (ADR-0011 R9

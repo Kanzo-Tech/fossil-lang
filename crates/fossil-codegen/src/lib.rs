@@ -26,4 +26,4 @@ pub mod sql;
 // and `fossil-mir`: types at the crate root, query functions stay under
 // their module path (`fossil_codegen::sql::codegen_sql`).
 pub use manifest::manifest_template;
-pub use sql::{SqlPlan, codegen_sql};
+pub use sql::{SqlPlan, codegen_graph, codegen_graph_for_test, codegen_sql};
