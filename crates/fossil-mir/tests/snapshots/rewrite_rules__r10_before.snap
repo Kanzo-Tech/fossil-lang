@@ -1,0 +1,30 @@
+---
+source: crates/fossil-mir/tests/rewrite_rules.rs
+expression: "format!(\"{:#?}\", graph.ops(&db))"
+---
+[
+    Source {
+        uri: "sales.csv",
+        format: Csv,
+        row_type: Ty(
+            Id(401),
+        ),
+    },
+    GroupBy {
+        input: 0,
+        keys: [
+            "region",
+        ],
+    },
+    GroupBy {
+        input: 1,
+        keys: [
+            "region",
+            "year",
+        ],
+    },
+    Sink {
+        input: 2,
+        sink: GraphAr,
+    },
+]

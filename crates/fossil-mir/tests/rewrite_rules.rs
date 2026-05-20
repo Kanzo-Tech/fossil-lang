@@ -1,6 +1,7 @@
-//! R1–R6 before/after MIR snapshots + idempotency assertions (SC#2).
+//! R1–R10 before/after MIR snapshots + idempotency assertions (SC#2).
 //!
-//! For each of the six structural rules (operator-algebra.md §4.1) this file:
+//! For each of the ten rewrite rules (operator-algebra.md §4.1 structural
+//! R1–R6 + §4.2 typed R7–R10) this file:
 //! 1. constructs a `MirGraph` whose ops match the rule's TRIGGER pattern via
 //!    direct construction (the trigger ops are NOT reachable from `.fossil`
 //!    source per ADR-0009, so we build them directly);
@@ -10,7 +11,7 @@
 //! 5. asserts idempotency: `rewrite(rewrite(g)).ops == rewrite(g).ops`
 //!    (RESEARCH Pitfall 2 — the fixpoint converges).
 //!
-//! 12 snapshots (6 before + 6 after) + 6 idempotency asserts.
+//! 20 snapshots (10 before + 10 after) + 10 idempotency asserts.
 //!
 //! # The `#[salsa::tracked]` test seam
 //!
@@ -52,8 +53,9 @@ struct Case {
     rule: u8,
 }
 
-/// Build the trigger-pattern `MirGraph` for `case.rule` (1..=6). Tracked so the
-/// `MirGraph::new` / `Source.row_type` interning runs inside a tracked frame.
+/// Build the trigger-pattern `MirGraph` for `case.rule` (1..=10). Tracked so
+/// the `MirGraph::new` / `Source.row_type` interning runs inside a tracked
+/// frame.
 #[salsa::tracked]
 fn trigger_graph<'db>(db: &'db dyn fossil_base::Db, case: Case) -> MirGraph<'db> {
     let ops = match case.rule(db) {
@@ -63,6 +65,10 @@ fn trigger_graph<'db>(db: &'db dyn fossil_base::Db, case: Case) -> MirGraph<'db>
         4 => r4_trigger(db),
         5 => r5_trigger(db),
         6 => r6_trigger(db),
+        7 => r7_trigger(db),
+        8 => r8_trigger(db),
+        9 => r9_trigger(db),
+        10 => r10_trigger(db),
         other => panic!("unknown rule case {other}"),
     };
     MirGraph::new(db, ops)
@@ -110,6 +116,18 @@ fn eq_pred<'db>(db: &'db dyn fossil_base::Db, col: &str, lit: &str) -> Expr<'db>
             column: SmolStr::from(col),
         }),
         rhs: Box::new(Expr::LitString(SmolStr::from(lit))),
+        ty: bool_ty,
+    }
+}
+
+/// `"lhs" == "rhs"` predicate over two string literals — statically decidable
+/// (`true` when the literals are equal, `false` otherwise). Drives R8/R9.
+fn lit_eq_pred<'db>(db: &'db dyn fossil_base::Db, lhs: &str, rhs: &str) -> Expr<'db> {
+    let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
+    Expr::BinOp {
+        op: CmpOp::Eq,
+        lhs: Box::new(Expr::LitString(SmolStr::from(lhs))),
+        rhs: Box::new(Expr::LitString(SmolStr::from(rhs))),
         ty: bool_ty,
     }
 }
@@ -225,6 +243,67 @@ fn r6_trigger<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
     ]
 }
 
+/// R7 — extend(s, "iri", "a" ++ "b") with a foldable Concat of two literals.
+/// After R7 the Concat folds to `LitString("ab")`.
+fn r7_trigger<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    vec![
+        source(db, "users.csv", &["id"]),
+        Op::Extend {
+            input: 0,
+            field: SmolStr::from("iri"),
+            expr: Expr::Concat(
+                Box::new(Expr::LitString(SmolStr::from("a"))),
+                Box::new(Expr::LitString(SmolStr::from("b"))),
+            ),
+        },
+        sink(1),
+    ]
+}
+
+/// R8 — filter(s, "x" == "x"): a statically-TRUE predicate. After R8 the
+/// Filter is dropped and the Sink rewires onto the Source.
+fn r8_trigger<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    vec![
+        source(db, "users.csv", &["id", "status"]),
+        Op::Filter {
+            input: 0,
+            pred: lit_eq_pred(db, "x", "x"),
+        },
+        sink(1),
+    ]
+}
+
+/// R9 — filter(s, "a" == "b"): a statically-FALSE predicate. After R9 the
+/// Filter is replaced by `Op::Empty { schema: schema(s) }`.
+fn r9_trigger<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    vec![
+        source(db, "users.csv", &["id", "status"]),
+        Op::Filter {
+            input: 0,
+            pred: lit_eq_pred(db, "a", "b"),
+        },
+        sink(1),
+    ]
+}
+
+/// R10 — a `GroupBy` on `[region]` feeding a `GroupBy` on `[region, year]`:
+/// nested group-bys. After R10 a single `GroupBy` with the fused key set
+/// `[region, year]` remains (k₁ = {region} is a subset of the source schema).
+fn r10_trigger<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    vec![
+        source(db, "sales.csv", &["region", "year", "amount"]),
+        Op::GroupBy {
+            input: 0,
+            keys: vec![SmolStr::from("region")],
+        },
+        Op::GroupBy {
+            input: 1,
+            keys: vec![SmolStr::from("region"), SmolStr::from("year")],
+        },
+        sink(2),
+    ]
+}
+
 // --------------------------------------------------------------------------
 // The shared check: before snapshot, rewrite, after snapshot, idempotency.
 // --------------------------------------------------------------------------
@@ -275,4 +354,44 @@ fn r5_filter_into_join_pushdown() {
 #[test]
 fn r6_rename_expansion() {
     check_rule(6, "r6_before", "r6_after");
+}
+
+#[test]
+fn r7_partial_eval_extend() {
+    check_rule(7, "r7_before", "r7_after");
+}
+
+#[test]
+fn r8_drop_statically_true_filter() {
+    check_rule(8, "r8_before", "r8_after");
+}
+
+#[test]
+fn r9_statically_false_filter_to_empty() {
+    check_rule(9, "r9_before", "r9_after");
+
+    // R9 must produce an `Op::Empty` (the statically-false Filter is gone).
+    let db = db();
+    let case = Case::new(&db, 9);
+    let graph = trigger_graph(&db, case);
+    let rewritten = rewrite_graph(&db, graph);
+    assert!(
+        rewritten
+            .ops(&db)
+            .iter()
+            .any(|op| matches!(op, Op::Empty { .. })),
+        "R9 must rewrite the statically-false Filter into an Op::Empty"
+    );
+    assert!(
+        !rewritten
+            .ops(&db)
+            .iter()
+            .any(|op| matches!(op, Op::Filter { .. })),
+        "R9 must remove the Filter"
+    );
+}
+
+#[test]
+fn r10_group_by_fusion() {
+    check_rule(10, "r10_before", "r10_after");
 }
