@@ -55,10 +55,11 @@
 //! ) -> MirGraph<'db>;
 //! ```
 
-use fossil_hir::body::{HirBody, body};
+use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{PrefixEntry, def_map};
 use fossil_hir::lower::lower_to_hir;
+use fossil_hir::spans::spans;
 use fossil_hir::ty::RecordField;
 use fossil_hir::{HirExpr, HirMapping, MappingLoc, Primitive, PropertyKey, Record, Ty, TyKind};
 use smol_str::SmolStr;
@@ -119,7 +120,19 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     });
 
     // 1: Extend — attach the IRI template result as a column named "iri".
-    let iri_expr = lower_iri_property(m, body, prefixes, db).unwrap_or_else(|| {
+    //
+    // SC#4 / P-CRIT-4 (CORE-10): the IRI template's `${.field}` placeholders are
+    // the un-statically-dischargeable check this phase mitigates — a NULL field
+    // would yield a malformed IRI. We resolve the source LINE for the `iri`
+    // property HERE (during lowering) from the per-mapping `spans` side table so
+    // codegen stays a pure render (RESEARCH Pitfall 3 — never read
+    // `parse(db, file)` in the per-mapping path; `spans` and `mapping_cst_node`
+    // are already barrier-routed, so this does NOT widen the per-mapping
+    // fan-out). `iri_span_line` is then threaded into the field-ref wrapping in
+    // `lower_iri_template` → `lower_placeholder`, where each `${.field}` ColRef
+    // becomes `Expr::Assert { name: "iri_template_unbound", span_line, inner }`.
+    let iri_span_line = iri_property_line(db, mapping, body);
+    let iri_expr = lower_iri_property(m, body, prefixes, db, iri_span_line).unwrap_or_else(|| {
         // No `iri = ...` property; emit an empty literal to keep the upstream
         // Extend present for the TripleEmit subjects to reference.
         Expr::LitString(SmolStr::default())
@@ -142,7 +155,10 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
         let PropertyKey::PrefixedName { iri } = &prop.key else {
             continue; // skip the `iri = ...` property (handled by the Extend)
         };
-        let object = lower_property_value(&prop.value, &m.source_binding, prefixes);
+        // Object positions are NOT wrapped in an assertion this phase (SC#4
+        // candidate 1 is the IRI-template subject only; object-side cardinality
+        // assertions are deferred — see the `<context>` note in 04-06-PLAN).
+        let object = lower_property_value(&prop.value, &m.source_binding, prefixes, None);
         ops.push(Op::TripleEmit {
             input: extend_idx,
             subject: subject.clone(),
@@ -192,13 +208,67 @@ fn phase1_row_type(db: &dyn fossil_base::Db) -> Ty<'_> {
     Ty::new(db, TyKind::Record(record))
 }
 
+/// Resolve the 1-based, MAPPING-RELATIVE source line of the `iri = ...`
+/// property's RHS expression for the SC#4 named assertion (`line=<N>`).
+///
+/// # Why mapping-relative (RESEARCH Pitfall 3)
+///
+/// The `spans` side table records MAPPING-RELATIVE byte offsets (rowan's
+/// `new_root` resets offsets to zero — see `fossil_hir::spans` offset-semantics
+/// doc). We deliberately count newlines in the MAPPING's own CST text (read via
+/// [`mapping_cst_node`], the SAME barrier `body`/`spans` already read) rather
+/// than the whole-file source. Reading `parse(db, file)` for a file-absolute
+/// line would tie this per-mapping query to the whole-file CST and break
+/// `MAX_PER_MAPPING_FAN_OUT = 1`. The file-absolute conversion (if ever wanted)
+/// is a display concern for the CLI/codegen wrapper, where a whole-file read
+/// already exists. For Phase 4 the mapping-relative line is snapshot-stable and
+/// sufficient.
+///
+/// `ExprId(i)` is the i-th lowered property's RHS (the `body`/`spans` indexing
+/// convention). We find the `iri` property's position in `body.properties` and
+/// look up its span. On a missing span (defensive — should not happen for a
+/// well-formed mapping) we fall back to line `0`.
+fn iri_property_line<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+    body: HirBody<'db>,
+) -> u32 {
+    let Some(iri_idx) = body
+        .properties(db)
+        .iter()
+        .position(|p| matches!(p.key, PropertyKey::Iri))
+    else {
+        return 0;
+    };
+    let expr_id = ExprId(u32::try_from(iri_idx).unwrap_or(u32::MAX));
+    let Some(span) = spans(db, mapping).get(db, expr_id) else {
+        return 0;
+    };
+    // Count newlines in the mapping body text up to the span start → 1-based
+    // mapping-relative line. `mapping_cst_node` is the barrier `spans` itself
+    // reads, so its offsets and the span offsets share the same origin.
+    let Some(node) = mapping_cst_node(db, mapping).syntax() else {
+        return 0;
+    };
+    let text = node.text().to_string();
+    let start = (span.start as usize).min(text.len());
+    let newlines = text.as_bytes()[..start]
+        .iter()
+        .filter(|&&b| b == b'\n')
+        .count();
+    u32::try_from(newlines + 1).unwrap_or(u32::MAX)
+}
+
 /// Find the `iri = ...` property in a mapping's body and lower its template
-/// value to a concat-chain of [`Expr`].
+/// value to a concat-chain of [`Expr`]. `span_line` is the resolved
+/// mapping-relative source line (see [`iri_property_line`]) used to populate the
+/// SC#4 `Expr::Assert` wrappers on the template's `${.field}` placeholders.
 fn lower_iri_property<'db>(
     m: &HirMapping,
     body: HirBody<'db>,
     prefixes: &[PrefixEntry],
     db: &'db dyn fossil_base::Db,
+    span_line: u32,
 ) -> Option<Expr<'db>> {
     let prop = body
         .properties(db)
@@ -208,6 +278,7 @@ fn lower_iri_property<'db>(
         &prop.value,
         &m.source_binding,
         prefixes,
+        Some(span_line),
     ))
 }
 
@@ -215,10 +286,17 @@ fn lower_iri_property<'db>(
 /// [`Expr`]. `FieldRef` → `ColRef`; `StringLit` → `LitString`;
 /// `Template` → the concat-chain of literals + column refs;
 /// `PrefixedName` → `LitString` of the resolved IRI.
+///
+/// `assert_line` is `Some(N)` when lowering an IRI-template subject context
+/// (the `iri = ...` property), `None` for object positions. When `Some`, each
+/// `${.field}` placeholder ColRef in a `Template` is wrapped in
+/// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` (SC#4 —
+/// the un-statically-dischargeable NULL-field check).
 fn lower_property_value<'db>(
     value: &HirExpr,
     source_binding: &SmolStr,
     prefixes: &[PrefixEntry],
+    assert_line: Option<u32>,
 ) -> Expr<'db> {
     match value {
         HirExpr::FieldRef(field) => Expr::ColRef {
@@ -226,7 +304,7 @@ fn lower_property_value<'db>(
             column: field.clone(),
         },
         HirExpr::StringLit(s) => Expr::LitString(s.clone()),
-        HirExpr::Template(raw) => lower_iri_template(raw, source_binding, prefixes),
+        HirExpr::Template(raw) => lower_iri_template(raw, source_binding, prefixes, assert_line),
         // A `PrefixedName` RHS resolved to its full IRI by the HIR; render it
         // as a literal string value (the IRI text).
         HirExpr::PrefixedName { iri } => Expr::LitString(iri.clone()),
@@ -244,6 +322,7 @@ fn lower_iri_template<'db>(
     raw: &str,
     source_binding: &SmolStr,
     prefixes: &[PrefixEntry],
+    assert_line: Option<u32>,
 ) -> Expr<'db> {
     // Strip the surrounding backticks (the HIR keeps them on the raw token).
     let inner = raw.trim_start_matches('`').trim_end_matches('`');
@@ -276,7 +355,12 @@ fn lower_iri_template<'db>(
         };
         let close = after_open + close_off;
         let placeholder = &inner[after_open..close];
-        parts.push(lower_placeholder(placeholder, source_binding, prefixes));
+        parts.push(lower_placeholder(
+            placeholder,
+            source_binding,
+            prefixes,
+            assert_line,
+        ));
         cursor = close + 1; // skip past `}`
     }
 
@@ -285,19 +369,37 @@ fn lower_iri_template<'db>(
 
 /// Lower one placeholder body (the text between `${` and `}`).
 ///
-/// - `.field` → `ColRef` against the mapping's source binding.
+/// - `.field` → `ColRef` against the mapping's source binding, wrapped in an
+///   `Expr::Assert { name: "iri_template_unbound", .. }` when `assert_line` is
+///   `Some` (the IRI-template subject context — SC#4 / P-CRIT-4). The assertion
+///   name is a FIXED snake_case identifier; NO type text is ever interpolated
+///   (RESEARCH Pitfall 5).
 /// - `prefix:` → the prefix's resolved IRI from the per-file prefix table.
-/// - anything else → echo the placeholder back as a literal (Phase 6's named
-///   runtime assertion is a candidate for unresolved placeholders).
+/// - anything else → echo the placeholder back as a literal.
 fn lower_placeholder<'db>(
     body: &str,
     source_binding: &SmolStr,
     prefixes: &[PrefixEntry],
+    assert_line: Option<u32>,
 ) -> Expr<'db> {
     if let Some(field) = body.strip_prefix('.') {
-        return Expr::ColRef {
+        let col_ref = Expr::ColRef {
             source: source_binding.clone(),
             column: SmolStr::from(field),
+        };
+        // SC#4: in the IRI-template subject context, a `${.field}` whose value
+        // may be NULL at runtime would produce a malformed IRI. We cannot
+        // statically discharge non-nullness here (Optional-tracking on
+        // `source_row` is thin in v0.1), so CONSERVATIVELY wrap every template
+        // field ref in a named runtime assertion. Codegen renders this as
+        // `CASE WHEN <field> IS NOT NULL THEN <field> ELSE error(...) END`.
+        return match assert_line {
+            Some(line) => Expr::Assert {
+                name: SmolStr::new_static("iri_template_unbound"),
+                span_line: line,
+                inner: Box::new(col_ref),
+            },
+            None => col_ref,
         };
     }
     // `prefix:` form — resolve against the real prefix table (replaces the
@@ -393,15 +495,35 @@ User : ex:Person from users
                 assert_eq!(*input, 0);
                 assert_eq!(field.as_str(), "iri");
                 match expr {
+                    // SC#4: the `${.id}` field ref is now wrapped in a named
+                    // runtime assertion (iri_template_unbound) — the `inner` is
+                    // the original ColRef. The literal prefix is unchanged.
                     Expr::Concat(l, r) => match (l.as_ref(), r.as_ref()) {
-                        (Expr::LitString(lit), Expr::ColRef { source, column }) => {
+                        (
+                            Expr::LitString(lit),
+                            Expr::Assert {
+                                name,
+                                span_line,
+                                inner,
+                            },
+                        ) => {
                             assert_eq!(lit.as_str(), "https://example.org/user/");
-                            assert_eq!(source.as_str(), "users");
-                            assert_eq!(column.as_str(), "id");
+                            assert_eq!(name.as_str(), "iri_template_unbound");
+                            assert!(
+                                *span_line >= 1,
+                                "span_line must be a resolved 1-based line, got {span_line}"
+                            );
+                            match inner.as_ref() {
+                                Expr::ColRef { source, column } => {
+                                    assert_eq!(source.as_str(), "users");
+                                    assert_eq!(column.as_str(), "id");
+                                }
+                                other => panic!("expected ColRef inside Assert, got {other:?}"),
+                            }
                         }
-                        (lo, ro) => {
-                            panic!("expected Concat(LitString, ColRef), got Concat({lo:?}, {ro:?})")
-                        }
+                        (lo, ro) => panic!(
+                            "expected Concat(LitString, Assert(ColRef)), got Concat({lo:?}, {ro:?})"
+                        ),
                     },
                     other => panic!("expected Concat for iri expr, got {other:?}"),
                 }
@@ -459,10 +581,41 @@ User : ex:Person from users
         // `${.id}/profile` → Concat(ColRef(users.id), LitString("/profile"))
         let raw = "`${.id}/profile`";
         let binding = SmolStr::new_static("users");
-        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &[]);
+        // `assert_line = None` → object-position lowering (no Assert wrapper).
+        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &[], None);
         match lowered {
             Expr::Concat(l, r) => {
                 assert!(matches!(l.as_ref(), Expr::ColRef { .. }));
+                assert!(matches!(r.as_ref(), Expr::LitString(s) if s.as_str() == "/profile"));
+            }
+            other => panic!("expected Concat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn template_field_ref_wraps_in_named_assertion_when_subject_context() {
+        // `assert_line = Some(N)` (the IRI-template subject context) → the
+        // `${.id}` field ref is wrapped in `Assert { name:
+        // "iri_template_unbound", span_line: N }` (SC#4 / P-CRIT-4). The
+        // assertion NAME is a fixed snake_case identifier — never type text.
+        let raw = "`${.id}/profile`";
+        let binding = SmolStr::new_static("users");
+        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &[], Some(3));
+        match lowered {
+            Expr::Concat(l, r) => {
+                match l.as_ref() {
+                    Expr::Assert {
+                        name,
+                        span_line,
+                        inner,
+                    } => {
+                        assert_eq!(name.as_str(), "iri_template_unbound");
+                        assert_eq!(*span_line, 3);
+                        assert!(matches!(inner.as_ref(), Expr::ColRef { column, .. }
+                            if column.as_str() == "id"));
+                    }
+                    other => panic!("expected Assert(ColRef), got {other:?}"),
+                }
                 assert!(matches!(r.as_ref(), Expr::LitString(s) if s.as_str() == "/profile"));
             }
             other => panic!("expected Concat, got {other:?}"),
@@ -480,7 +633,9 @@ User : ex:Person from users
             name: SmolStr::new_static("ex"),
             iri: SmolStr::new_static("https://example.org/"),
         }];
-        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &prefixes);
+        // `assert_line = None` → bare ColRef (object-position semantics) so this
+        // test stays focused on prefix-table resolution + literal fusion.
+        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &prefixes, None);
         match lowered {
             Expr::Concat(l, r) => {
                 assert!(
