@@ -18,6 +18,7 @@
 //! `tests/compile_hello.rs` (Phase 1 success criterion #5 from
 //! ROADMAP).
 
+pub(crate) mod ast;
 pub mod manifest;
 pub mod sql;
 
