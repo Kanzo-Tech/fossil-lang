@@ -25,6 +25,11 @@ fossil-syntax = { path = "../fossil-syntax" }
 # returns `Option<&'static str>` to avoid importing `fossil-hir::ty::Primitive`).
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Phase 3 plan 03-05: the checker inspects `ShEx` `valueExpr`
+# (`shex_ast::ShapeExpr::NodeConstraint`) when converting a `ShapeBinding`'s
+# constraint table into Fossil type space (`crate::shapes`). `shex_ast` is
+# WASM-clean per the Phase 0 spike (`decisions/rudof-wasm.md`).
+shex_ast = { workspace = true }
 salsa = { workspace = true }
 indexmap = { workspace = true }
 rowan = { workspace = true }

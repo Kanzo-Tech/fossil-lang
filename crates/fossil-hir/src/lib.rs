@@ -50,9 +50,12 @@ pub mod ast_id;
 pub mod body;
 pub mod check;
 pub mod def_map;
+pub mod didyoumean;
+pub mod infer;
 pub mod item_tree;
 pub mod lower;
 pub mod provenance;
+pub mod shapes;
 pub mod spans;
 pub mod ty;
 
@@ -72,5 +75,8 @@ pub use provenance::{
 // (the module path is intentional — the bare `spans` name would shadow the
 // module). Mirrors the rust-analyzer convention of keeping Salsa query
 // functions under their module paths.
+pub use check::{BlamePos, Checker, TypeckOutput, compatible, typecheck_mapping};
+pub use didyoumean::did_you_mean;
 pub use spans::Spans;
+pub use ty::display::render_ty_kind;
 pub use ty::{FnSig, InferenceId, Primitive, Record, RecordField, ShapeId, Ty, TyKind};

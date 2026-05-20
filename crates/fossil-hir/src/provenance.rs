@@ -52,11 +52,14 @@
 use fossil_base::Span;
 use smol_str::SmolStr;
 
-use crate::body::{ExprId, body};
+use crate::body::ExprId;
 use crate::def_map::{MappingLoc, def_map};
+use crate::ty::Ty;
+
+#[cfg(test)]
 use crate::lower::HirExpr;
-use crate::spans::spans;
-use crate::ty::{Primitive, Ty, TyKind};
+#[cfg(test)]
+use crate::ty::{Primitive, TyKind};
 
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
 /// type was synthesised) + a categorical [`ProvenanceKind`] (semantic reason).
@@ -127,51 +130,28 @@ pub struct ExprTypeEntry<'db> {
     pub provenance: Provenance,
 }
 
-/// Per-mapping type inference for the Phase 2 literal subset.
+/// Per-mapping type table — Phase 3 thin accessor over [`typecheck_mapping`].
 ///
-/// Iterates the mapping's [`crate::body::HirBody::properties`]; for each
-/// property whose RHS [`HirExpr`] has a literal-synthesisable type
-/// (`StringLit` / `Template` / `PrefixedName`), pushes an [`ExprTypeEntry`].
-/// `FieldRef` is absent — its type depends on the source row schema, which
-/// is Phase 3 (forward CSVW propagation).
+/// Phase 3 (plan 03-05) INVERTS the Phase 2 dependency direction: the
+/// bidirectional checker's [`crate::check::typecheck_mapping`] is now the
+/// SOURCE OF TRUTH for per-expression types (over the full `HirExpr` space,
+/// including `FieldRef` resolved against the CSVW source row). `expr_types` is
+/// the projection — it returns `typecheck_mapping(db, mapping)?.expr_types(db)`,
+/// or an empty table if the mapping had a type error (the error already
+/// emitted ≥1 diagnostic per P-CRIT-4).
 ///
-/// The `ExprId` for property `i` is `ExprId(i as u32)` — matches the
-/// `expr_count` advancement in [`crate::body::body`].
+/// Phase 2's literal-subset behaviour is preserved as a strict widening: a
+/// `Template` RHS still synthesises `IriTemplate`, a `StringLit` still
+/// synthesises `String`, etc. — the new path additionally resolves `FieldRef`
+/// when a CSVW schema is declared (otherwise `FieldRef` synthesises no entry,
+/// matching Phase 2).
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
-    // Phase 3 plan 03-04 (ADR-0008): read real per-mapping spans from the
-    // side table. The `spans()` query depends on `mapping_cst_node`, so
-    // it inherits the per-mapping invalidation barrier — sibling mappings
-    // stay cached on body edits (verified by tests/invalidation_regression).
-    let hir_body = body(db, mapping);
-    let properties = hir_body.properties(db);
-    let spans_table = spans(db, mapping);
-    let mut entries: Vec<ExprTypeEntry<'db>> = Vec::new();
-    for (i, prop) in properties.iter().enumerate() {
-        let expr_id = ExprId(u32::try_from(i).unwrap_or(u32::MAX));
-        if let Some((ty, kind)) = infer_literal_type_kind(db, &prop.value) {
-            // Real span from spans() side table. Fallback to zero-width
-            // only if body() and spans() disagree — defensive; never
-            // triggers in practice because both walk the same CST with
-            // the same PROPERTY filter.
-            let span = spans_table.get(db, expr_id).unwrap_or_else(|| {
-                debug_assert!(
-                    false,
-                    "spans({mapping:?}) missing entry for {expr_id:?} \
-                     even though body has property {i}; body() and \
-                     spans() are out of sync."
-                );
-                Span { start: 0, end: 0 }
-            });
-            entries.push(ExprTypeEntry {
-                expr_id,
-                ty,
-                provenance: Provenance { span, kind },
-            });
-        }
+    match crate::check::typecheck_mapping(db, mapping) {
+        Ok(out) => out.expr_types(db),
+        Err(_eg) => ExprTypes::new(db, Vec::new()),
     }
-    ExprTypes::new(db, entries)
 }
 
 /// Lookup helper: `(MappingLoc, ExprId) -> Option<ExprTypeEntry>`.
@@ -194,9 +174,14 @@ pub fn ty_origin<'db>(
         .cloned()
 }
 
-/// Phase 2 literal-subset type synthesis — span-free form (plan 03-04
-/// split: the [`Provenance::span`] is populated by the caller from
-/// [`crate::spans::spans`] per ADR-0008).
+/// Phase 2 literal-subset type synthesis — span-free form.
+///
+/// Phase 3 plan 03-05 moved the production path into
+/// [`crate::check::Checker::synth`] (the bidirectional checker is now the
+/// source of truth). This helper is retained `#[cfg(test)]`-only for the
+/// plan 02-06 `ty_origin_returns_iri_for_iri_literal_in_property` test, which
+/// synthesises a `HirExpr::PrefixedName` directly.
+#[cfg(test)]
 fn infer_literal_type_kind<'db>(
     db: &'db dyn fossil_base::Db,
     expr: &HirExpr,

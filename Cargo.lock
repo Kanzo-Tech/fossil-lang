@@ -1094,6 +1094,7 @@ dependencies = [
  "indexmap",
  "rowan",
  "salsa",
+ "shex_ast",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",

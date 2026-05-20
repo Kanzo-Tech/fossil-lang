@@ -31,8 +31,14 @@ use fossil_base::SourceFile;
 use fossil_hir::body::ExprId;
 use fossil_hir::def_map::def_map;
 use fossil_hir::provenance::{ExprTypeEntry, ty_origin};
-use fossil_hir::ty::TyKind;
 use fossil_syntax::SyntaxKind;
+
+// Phase 3 plan 03-05 (Serious #7): `render_ty_kind` was PROMOTED to
+// `fossil_hir::ty::display` as the single source of truth for type
+// pretty-printing. It is re-exported here for back-compat so existing
+// `fossil_ide::hover::render_ty_kind` callers (and plan 03-07's hover
+// widening) keep working without a local definition.
+pub use fossil_hir::render_ty_kind;
 
 use crate::position::node_at_position;
 
@@ -121,27 +127,6 @@ pub fn hover(
         markdown,
         range: r.start().into()..r.end().into(),
     })
-}
-
-/// Render a [`TyKind`] as a Fossil-style type string for hover display.
-///
-/// Phase 2 limitation: Unknown(InferenceId) renders as `"?"` per plan 02-05
-/// gotcha — internal inference state must never reach the surface
-/// diagnostic / hover layer.
-fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> String {
-    match kind {
-        TyKind::Primitive(p) => format!("{p:?}"),
-        TyKind::Iri => "Iri".to_string(),
-        TyKind::IriTemplate => "IriTemplate".to_string(),
-        TyKind::TripleTerm => "TripleTerm".to_string(),
-        TyKind::Optional(inner) => format!("Optional<{}>", render_ty_kind(db, inner.kind(db))),
-        TyKind::Seq(inner) => format!("Seq<{}>", render_ty_kind(db, inner.kind(db))),
-        TyKind::Record(_) => "Record { ... }".to_string(),
-        TyKind::Shape(_) => "Shape(...)".to_string(),
-        TyKind::Fn(_) => "Fn(...)".to_string(),
-        TyKind::Error(_) => "Error".to_string(),
-        TyKind::Unknown(_) => "?".to_string(),
-    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -48,6 +48,16 @@ pub struct PrefixEntry {
 pub struct SourceEntry<'db> {
     pub name: SmolStr,
     pub loc: SourceLoc<'db>,
+    /// Value of the source constructor's `schema = "<path>"` NAMED argument,
+    /// if present (e.g. `users := io.csv("u.csv", schema = "users.csvw.json")`).
+    ///
+    /// Phase 3 plan 03-05 reads this to wire forward CSVW propagation
+    /// ([`crate::infer::resolve_source_row`]). It is a SIGNATURE-only datum:
+    /// it is read from the `SOURCE_DEF` header tokens, NOT from any mapping
+    /// body, so it does NOT widen the per-mapping `body()` fan-out. The
+    /// `def_map` query is file-keyed and structurally stable across
+    /// body-only edits (verified by `tests/invalidation_regression.rs`).
+    pub schema_arg: Option<SmolStr>,
 }
 
 #[salsa::tracked(debug)]
@@ -80,6 +90,17 @@ impl<'db> DefMap<'db> {
             .iter()
             .find(|e| e.name.as_str() == name)
             .map(|e| e.loc)
+    }
+
+    /// Look up the `schema = "<path>"` argument bound to a source name, if the
+    /// source declared one. Used by plan 03-05's
+    /// [`crate::infer::resolve_source_row`] to wire forward CSVW propagation.
+    #[must_use]
+    pub fn lookup_source_schema(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<SmolStr> {
+        self.sources(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .and_then(|e| e.schema_arg.clone())
     }
 }
 
@@ -125,9 +146,11 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
             }
             SyntaxKind::SOURCE_DEF => {
                 if let Some(name) = parse_source_name(&item) {
+                    let schema_arg = parse_source_schema_arg(&item);
                     sources.push(SourceEntry {
                         name,
                         loc: SourceLoc::new(db, file, source_idx),
+                        schema_arg,
                     });
                     source_idx += 1;
                 }
@@ -170,6 +193,49 @@ fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
         .filter_map(fossil_syntax::SyntaxElement::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)?;
     Some(SmolStr::from(ident.text()))
+}
+
+/// Extract the `schema = "<path>"` NAMED argument from a `SOURCE_DEF` node's
+/// call expression, if present.
+///
+/// This reads ONLY the `SOURCE_DEF` header tokens (the call expression on the
+/// right of `:=`), never any mapping body — so it stays signatures-only per
+/// ADR-0005 and does not widen the per-mapping `body()` fan-out (Serious #6
+/// mitigation for plan 03-05's `resolve_source_row`).
+///
+/// Heuristic token scan (the parser's `NAMED_ARG` / `CALL_EXPR` surface is not
+/// yet a stable structured node in Phase 3 v0.1): find an `IDENT` whose text is
+/// `schema`, immediately followed (skipping trivia) by an `=`/assignment token
+/// and then a `STRING` literal. Returns the unquoted string contents.
+fn parse_source_schema_arg(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
+    use fossil_syntax::SyntaxKind;
+    let toks: Vec<_> = node
+        .descendants_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            )
+        })
+        .collect();
+    for (i, t) in toks.iter().enumerate() {
+        if t.kind() == SyntaxKind::IDENT && t.text() == "schema" {
+            // Look ahead for a STRING within the next two non-trivia tokens
+            // (covers both `schema = "x"` and a degenerate `schema "x"` form).
+            if let Some(s) = toks
+                .iter()
+                .skip(i + 1)
+                .take(2)
+                .find(|t| t.kind() == SyntaxKind::STRING)
+            {
+                let raw = s.text();
+                let inner = raw.trim_start_matches('"').trim_end_matches('"');
+                return Some(SmolStr::from(inner));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

@@ -16,6 +16,12 @@
 use fossil_base::ErrorGuaranteed;
 use smol_str::SmolStr;
 
+/// Type pretty-printing.
+///
+/// The single source of truth for rendering Fossil types (promoted here from
+/// `fossil-ide::hover` in Phase 3 plan 03-05).
+pub mod display;
+
 /// Interned type handle. Two equal-shaped types share a single `Ty<'db>` id —
 /// structural equality is pointer equality at the Salsa storage layer.
 #[salsa::interned(debug)]
