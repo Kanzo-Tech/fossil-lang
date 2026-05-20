@@ -51,9 +51,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
-use fossil_descriptors_output::{
-    ShExDescriptor, ShExLoweringError, generate_split_suggestion,
-};
+use fossil_descriptors_output::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
 use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
 use fossil_hir::shapes::{ResolvedShape, one_of_rejections};
@@ -183,7 +181,9 @@ fn run_shex_fixture(bucket: &str, name: &str) -> String {
 
     let mut out = String::new();
     out.push_str("# mode: helper-proven (ShExDescriptor + ResolvedShape; resolve_target_shape\n");
-    out.push_str("#       returns None in the production Db path until Phase 6 — see module docs)\n");
+    out.push_str(
+        "#       returns None in the production Db path until Phase 6 — see module docs)\n",
+    );
     out.push_str("# bucket: ");
     out.push_str(bucket);
     out.push('\n');
@@ -191,20 +191,20 @@ fn run_shex_fixture(bucket: &str, name: &str) -> String {
     // Resolved constraint table (the SC#2 backward-check input surface).
     let binding = descriptor.shapes().next();
     if let Some(binding) = binding {
-        let shape = ResolvedShape::from_binding(&db, binding, ShapeId::placeholder(0), errors.clone());
+        let shape =
+            ResolvedShape::from_binding(&db, binding, ShapeId::placeholder(0), errors.clone());
         if shape.constraints.is_empty() {
-            let _ = writeln!(out, "resolved constraints: (none — OneOf body, see rejection below)");
+            let _ = writeln!(
+                out,
+                "resolved constraints: (none — OneOf body, see rejection below)"
+            );
         } else {
             let _ = writeln!(out, "resolved constraints:");
             for c in &shape.constraints {
                 let ty_text = c
                     .value_ty
                     .map_or_else(|| "(any)".to_string(), |t| render_ty_kind(&db, t.kind(&db)));
-                let _ = writeln!(
-                    out,
-                    "  {} : {} [{:?}]",
-                    c.predicate, ty_text, c.cardinality
-                );
+                let _ = writeln!(out, "  {} : {} [{:?}]", c.predicate, ty_text, c.cardinality);
             }
         }
     } else {
@@ -346,7 +346,10 @@ fn csvw_forward_propagation_unknown_datatype() {
 
 #[test]
 fn shex_backward_check_optional_for_required() {
-    assert_snapshot!(run_shex_fixture("shex_backward_check", "optional_for_required"));
+    assert_snapshot!(run_shex_fixture(
+        "shex_backward_check",
+        "optional_for_required"
+    ));
 }
 
 #[test]
