@@ -32,7 +32,7 @@
 use std::fmt::Write as _;
 
 use fossil_hir::MappingLoc;
-use fossil_mir::op::CmpOp;
+use fossil_mir::op::{AggFn, CmpOp, JoinKind};
 use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
 
 use crate::ast;
@@ -121,8 +121,12 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
     // hello.fossil); it never becomes a standalone SELECT.
     let mut extends: Vec<(String, String)> = Vec::new();
     // (subject_expr, predicate_iri, object_expr, from_relation) — buffered by
-    // TripleEmit and consumed by Sink.
-    let mut emit: Option<(String, String, String, String)> = None;
+    // each TripleEmit and consumed by Sink. A mapping with N TripleEmits
+    // (multi-property, produced by 04-01's generalised lower_to_mir) collects N
+    // entries; the Sink UNION-ALLs their triple-projections into one COPY. For
+    // N = 1 the wrapper collapses to exactly the Phase-1 single-projection COPY
+    // (byte-identical hello.fossil — guarded in the Sink arm).
+    let mut emits: Vec<(String, String, String, String)> = Vec::new();
 
     for (idx, op) in ops.iter().enumerate() {
         match op {
@@ -231,23 +235,95 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                 // byte-identical with Phase 1.
                 let subject_expr = render_emit_operand(subject, &extends, &qual);
                 let object_expr = render_emit_operand(object, &extends, &qual);
-                emit = Some((subject_expr, predicate.to_string(), object_expr, from));
+                emits.push((subject_expr, predicate.to_string(), object_expr, from));
             }
             Op::Sink { input: _, sink: _ } => {
-                if let Some((subject, predicate, object, from)) = &emit {
+                // Generalised SinkOp/COPY: wrap the buffered TripleEmit
+                // projection(s) into one `COPY (...) TO 'output.parquet'
+                // (FORMAT PARQUET)`. For a single TripleEmit the inner SELECT is
+                // the Phase-1 shape verbatim (byte-identical hello.fossil); for
+                // N > 1 the N triple-projections are `UNION ALL`'d (flat-triple
+                // GraphAr Phase-1 contract — Phase 5 owns vertex/edge
+                // decomposition). The COPY stays HAND-WRAPPED (Pitfall 1 — never
+                // round-trip through sqlparser).
+                if let Some(inner) = sink_inner_select(&emits) {
                     writeln!(
                         sql,
-                        "COPY (\n    SELECT\n        {subject} AS subject,\n        '{predicate}' AS predicate,\n        {object} AS object\n    FROM {from}\n) TO 'output.parquet' (FORMAT PARQUET);"
+                        "COPY (\n{inner}\n) TO 'output.parquet' (FORMAT PARQUET);"
                     )
                     .expect("writing to a String never fails");
                 }
             }
-            // Join / GroupBy / Aggregate land in plan 04-05. No corpus test or
-            // direct-MIR snapshot exercises these arms this plan; a clearly
-            // marked no-op keeps the match exhaustive without a production
-            // panic.
-            Op::Join { .. } | Op::GroupBy { .. } | Op::Aggregate { .. } => {
-                // TODO(04-05): two-input Join + GroupBy/Aggregate codegen.
+            Op::Join {
+                left,
+                right,
+                on,
+                kind,
+                left_name,
+                right_name,
+            } => {
+                // Two-input join. Each side's relation reference becomes a
+                // parenthesised subquery aliased on the binding name
+                // (`left_name` / `right_name`) so columns disambiguate across
+                // the union of the two schemas (operator-algebra.md §2.6).
+                let left_sql = input_relation(&rel_ref, *left);
+                let right_sql = input_relation(&rel_ref, *right);
+                // The ON predicate's `ColRef`s already carry their binding name
+                // (`orders` / `users`) as `source`; the `default_source` only
+                // covers a bare (empty-source) ColRef, which a join ON should
+                // never use. Pass the left binding name as the conventional
+                // fallback.
+                let on_sql = render_expr(on, left_name.as_str());
+                let body = ast::select_join(
+                    &left_sql,
+                    left_name.as_str(),
+                    &right_sql,
+                    right_name.as_str(),
+                    join_kind_sql(*kind),
+                    &on_sql,
+                );
+                rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
+            }
+            Op::GroupBy { input, keys } => {
+                // A GroupBy establishes the grouping keys. If the immediately
+                // following op is an Aggregate, that arm renders the paired
+                // `SELECT <keys>, <aggs> ... GROUP BY <keys>` (operator-algebra
+                // treats GroupBy + Aggregate as one SELECT). A GroupBy NOT
+                // followed by an Aggregate is just the key projection.
+                let aggregated = matches!(ops.get(idx + 1), Some(Op::Aggregate { input: agg_in, .. }) if *agg_in == idx);
+                if !aggregated {
+                    let body = ast::select_group_by(&input_relation(&rel_ref, *input), keys, &[]);
+                    rel_ref[idx] = Some(subquery(&body, idx));
+                    qualifier[idx] = Some(step_alias(idx));
+                }
+                // When the next op aggregates this GroupBy, defer to that arm —
+                // leave this op's rel_ref unset; the Aggregate reads `keys` back
+                // off this GroupBy node.
+            }
+            Op::Aggregate { input, aggs } => {
+                // Pair with the upstream GroupBy (if any) so the keys + agg
+                // exprs render into one `GROUP BY` SELECT. If `input` is not a
+                // GroupBy, this is a bare aggregate (no keys → global aggregate).
+                let (keys, group_input) = match ops.get(*input) {
+                    Some(Op::GroupBy { input: gb_in, keys }) => (keys.clone(), *gb_in),
+                    _ => (Vec::new(), *input),
+                };
+                let agg_exprs: Vec<String> = aggs
+                    .iter()
+                    .map(|spec| {
+                        format!(
+                            "{}({}) AS \"{}\"",
+                            agg_fn_sql(spec.agg_fn),
+                            spec.in_field,
+                            spec.out_field,
+                        )
+                    })
+                    .collect();
+                let body =
+                    ast::select_group_by(&input_relation(&rel_ref, group_input), &keys, &agg_exprs);
+                rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
         }
     }
@@ -267,6 +343,33 @@ pub fn codegen_graph_for_test<'db>(
     mir: MirGraph<'db>,
 ) -> SqlPlan<'db> {
     codegen_graph(db, mir)
+}
+
+/// Build the inner SELECT of the terminal COPY from the buffered `TripleEmit`
+/// projections.
+///
+/// - 0 emits → `None` (no COPY emitted — a Sink with no upstream `TripleEmit`).
+/// - 1 emit → the Phase-1 single-projection SELECT verbatim (byte-identical
+///   `hello.fossil`).
+/// - N emits → the N triple-projections combined with `UNION ALL` (multi-
+///   property mapping; flat-triple `GraphAr` Phase-1 contract).
+///
+/// The COPY wrapper itself stays hand-formatted in the caller (Pitfall 1).
+fn sink_inner_select(emits: &[(String, String, String, String)]) -> Option<String> {
+    if emits.is_empty() {
+        return None;
+    }
+    let projection = |(subject, predicate, object, from): &(String, String, String, String)| {
+        format!(
+            "    SELECT\n        {subject} AS subject,\n        '{predicate}' AS predicate,\n        {object} AS object\n    FROM {from}"
+        )
+    };
+    let inner = emits
+        .iter()
+        .map(projection)
+        .collect::<Vec<_>>()
+        .join("\n    UNION ALL\n");
+    Some(inner)
 }
 
 /// Resolve op index `i`'s relation reference, falling back to the conventional
@@ -374,6 +477,36 @@ fn render_expr(expr: &Expr<'_>, default_source: &str) -> String {
             span_line: _,
             inner,
         } => render_expr(inner, default_source),
+    }
+}
+
+/// Map a [`JoinKind`] to its DuckDB-portable JOIN keyword
+/// (operator-algebra.md §2.6).
+///
+/// Rendered as a string rather than a `sqlparser::ast::JoinOperator` because
+/// sqlparser 0.59 Display's `JoinOperator::FullOuter` as `FULL JOIN`, dropping
+/// the explicit `OUTER` the corpus snapshots want. Both `FULL JOIN` and
+/// `FULL OUTER JOIN` are DuckDB-equivalent; we emit the explicit spelling for
+/// every kind for uniformity. These keywords are DuckDB-portable (RESEARCH
+/// Pitfall 6 — portable JOIN syntax only).
+const fn join_kind_sql(kind: JoinKind) -> &'static str {
+    match kind {
+        JoinKind::Inner => "INNER JOIN",
+        JoinKind::LeftOuter => "LEFT OUTER JOIN",
+        JoinKind::RightOuter => "RIGHT OUTER JOIN",
+        JoinKind::Full => "FULL OUTER JOIN",
+    }
+}
+
+/// Map an [`AggFn`] to its `DuckDB` aggregate-function spelling
+/// (operator-algebra.md §2.9).
+const fn agg_fn_sql(agg: AggFn) -> &'static str {
+    match agg {
+        AggFn::Count => "COUNT",
+        AggFn::Sum => "SUM",
+        AggFn::Min => "MIN",
+        AggFn::Max => "MAX",
+        AggFn::Avg => "AVG",
     }
 }
 

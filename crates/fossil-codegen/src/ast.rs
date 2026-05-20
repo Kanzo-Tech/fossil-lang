@@ -275,6 +275,70 @@ fn parse_set_expr(query_sql: &str) -> SetExpr {
     )
 }
 
+/// `Join(left, right, on, kind, ln, rn)` —
+/// `SELECT <ln>.*, <rn>.* FROM (<left_sql>) AS <ln> <kind> JOIN (<right_sql>) AS <rn> ON <on_sql>`.
+///
+/// `left_sql` / `right_sql` are pre-rendered relation references (a bare view
+/// name OR a `(<body>) AS step_<i>` subquery); `kind` is the already-mapped
+/// JOIN keyword (`INNER JOIN` / `LEFT OUTER JOIN` / `RIGHT OUTER JOIN` /
+/// `FULL OUTER JOIN`) produced by [`crate::sql::join_kind_sql`]; `on_sql` is a
+/// pre-rendered predicate fragment from [`crate::sql::render_expr`] (the
+/// `ColRef`s already qualified on `left_name` / `right_name`).
+///
+/// # Why the JOIN keyword is a string, not the AST `JoinOperator`
+///
+/// sqlparser 0.59 renders `JoinOperator::FullOuter` as `FULL JOIN` (dropping
+/// `OUTER`); `Join`'s done-criterion + the corpus snapshots want the explicit
+/// `FULL OUTER JOIN` spelling (both are DuckDB-equivalent). So the JOIN keyword
+/// is threaded as a verified DuckDB-portable string while the table factors +
+/// aliases keep their structured form. The select-list (`<ln>.*`, `<rn>.*`) and
+/// `ON` predicate are likewise rendered via the string fragments codegen
+/// already produces — `Join` is the one body where the string path buys exact,
+/// portable keyword control over the AST `JoinOperator` Display.
+pub(crate) fn select_join(
+    left_sql: &str,
+    left_name: &str,
+    right_sql: &str,
+    right_name: &str,
+    kind: &str,
+    on_sql: &str,
+) -> String {
+    format!(
+        "SELECT {left_name}.*, {right_name}.* FROM ({left_sql}) AS {left_name} {kind} ({right_sql}) AS {right_name} ON {on_sql}"
+    )
+}
+
+/// `GroupBy(keys) + Aggregate(aggs)` —
+/// `SELECT <keys>, <agg_exprs> FROM (<input_sql>) GROUP BY <keys>`.
+///
+/// `input_sql` is a pre-rendered relation reference (view name or subquery);
+/// `keys` are the group keys (also the leading projection columns); `agg_exprs`
+/// are pre-rendered `<agg_fn>(<in_field>) AS "<out_field>"` fragments built by
+/// [`crate::sql`] from the consuming `Aggregate`'s `AggSpec`s. A `GroupBy` with
+/// no consuming `Aggregate` passes `agg_exprs = &[]` (just the key projection).
+pub(crate) fn select_group_by(input_sql: &str, keys: &[SmolStr], agg_exprs: &[String]) -> String {
+    let keys_csv = keys
+        .iter()
+        .map(SmolStr::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut projection = keys_csv.clone();
+    if !agg_exprs.is_empty() {
+        if !projection.is_empty() {
+            projection.push_str(", ");
+        }
+        projection.push_str(&agg_exprs.join(", "));
+    }
+    if projection.is_empty() {
+        projection.push('*');
+    }
+    if keys.is_empty() {
+        format!("SELECT {projection} FROM ({input_sql})")
+    } else {
+        format!("SELECT {projection} FROM ({input_sql}) GROUP BY {keys_csv}")
+    }
+}
+
 /// `Empty(schema)` — `SELECT <cols> FROM <view> WHERE false` (ADR-0011 R9
 /// target). Carries the would-be schema so downstream ops see the right column
 /// shape even though the relation is empty.
