@@ -105,6 +105,23 @@ pub enum ProvenanceKind {
     /// Type came from the LHS of a pipeline (`x |> f` — `x`'s type flows into
     /// `f`'s expected param).
     PipelineLhs,
+    /// Type was synthesised inside an IMPLICIT closure body (CORE-07,
+    /// type-system.md §7). The closure was implicitly created because the
+    /// surrounding function-arg position expected `Fn(Record<R> -> τ)` and the
+    /// arg expression contains free `.field` references (Fossil has no surface
+    /// lambda syntax — implicit closure synthesis is the ONLY lambda form).
+    ///
+    /// `rendering` is the displayable form of the closure, e.g.
+    /// `(row: Record<{id: String, name: String, age: Integer}>) => row.age >= 18`.
+    /// LSP hover (plan 03-07) renders this above the field type so the synthesis
+    /// is NEVER hidden from the user (RESEARCH.md §Pitfall 6).
+    ///
+    /// CRITICAL (Risk Register): `rendering` MUST NEVER contain the substring
+    /// `Unknown` or `InferenceId` — it is built via [`crate::render_ty_kind`]
+    /// (the shared `TyDisplay`), never raw `{:?}` Debug. The internal
+    /// `TyKind::Unknown(InferenceId)` synthesis-state placeholder normalises to
+    /// `?` at the display boundary.
+    SynthesizedClosureRendering { rendering: SmolStr },
 }
 
 /// Per-mapping interned table of `(expr_id, ty, provenance)` triples.
