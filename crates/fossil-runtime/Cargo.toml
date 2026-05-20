@@ -18,3 +18,11 @@ workspace = true
 # `duckdb = { version = "1.10502", features = ["bundled"] }` (~80MB C++,
 # 3-5 min cold-cache compile per RESEARCH.md Risk 6).
 duckdb = { workspace = true }
+
+[dev-dependencies]
+# SC#1 cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
+# the canonical ordered result-set serialization + JSON writer for
+# native_baseline.json. Both are native-only test deps (the runtime crate is
+# native-only anyway via the wasm32 cfg-tripwire).
+sha2 = { workspace = true }
+serde_json = { workspace = true }

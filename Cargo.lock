@@ -1160,6 +1160,8 @@ name = "fossil-runtime"
 version = "0.1.0"
 dependencies = [
  "duckdb",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

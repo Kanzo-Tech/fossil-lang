@@ -32,6 +32,10 @@ smol_str = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
+# Pure-Rust SHA-256 for the SC#1 cross-engine parity digest (native_baseline.json
+# producer in fossil-runtime tests). Already a transitive dep via duckdb/parquet;
+# WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
+sha2 = "0.10"
 
 # === Input descriptors (Phase 5+, declared here for inheritance) ===
 csv = "1.3"
