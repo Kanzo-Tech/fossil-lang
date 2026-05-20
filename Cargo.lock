@@ -1122,11 +1122,14 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "fossil-base",
+ "fossil-descriptors-input",
+ "fossil-hir",
  "fossil-ide",
  "lsp-server",
  "lsp-types",
  "serde",
  "serde_json",
+ "smol_str",
  "tracing",
  "tracing-subscriber",
 ]

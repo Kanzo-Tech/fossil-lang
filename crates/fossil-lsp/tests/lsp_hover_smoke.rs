@@ -319,3 +319,161 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
         "shutdown response must have result: null per LSP spec; got {shutdown_response}",
     );
 }
+
+// ── Phase 3 plan 03-07: SC#3 (CORE-07) hover surface ───────────────────────
+//
+// seq.filter decision (plan 03-05-SUMMARY.md, verbatim):
+//
+//   "Decision: NO `seq.filter` stub was added to `fossil-registry`."
+//
+// Per plan 03-07 Task 2 step 0, NO ⇒ use the DIRECT integration path that
+// BYPASSES the JSON-RPC layer (option (ii)), NOT a full end-to-end through a
+// `seq.filter` surface form. Phase 3 v0.1's `HirExpr` has no `Pipeline` /
+// `Call` variant, so an implicit closure cannot be expressed in surface
+// syntax and the synthesis is unreachable through a `.fossil` document over
+// JSON-RPC. The full JSON-RPC end-to-end SC#3 test is DEFERRED to Phase 6
+// (when the stdlib + Pratt-lowered expression tree land and `seq.filter`
+// gains a real surface form). Plan 03-08's corpus does NOT add this test.
+//
+// These two tests exercise `fossil_ide::hover::render_markdown` — the exact
+// rendering function the LSP hover handler (`main.rs::handle_request`) calls
+// on the `ExprTypeEntry` returned by `ty_origin`. The closure synthesis +
+// CSVW forward propagation are driven IN-PROCESS via fossil-hir's public
+// provenance types + fossil-descriptors-input's CSVW descriptor, so the
+// integration boundary tested is hover.rs's Markdown body — identical to what
+// `result.contents.value` would carry over JSON-RPC.
+
+use fossil_base::{FossilDb, NativeSystem, Span, System};
+use fossil_hir::body::ExprId;
+use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
+use fossil_hir::ty::{Primitive, Ty, TyKind};
+use std::sync::Arc;
+
+const USERS_CSVW: &str = r#"{
+  "@context": "http://www.w3.org/ns/csvw",
+  "tableSchema": {
+    "columns": [
+      { "name": "id", "datatype": "integer" },
+      { "name": "name", "datatype": "string" },
+      { "name": "age", "datatype": "integer" }
+    ]
+  }
+}"#;
+
+fn bare_db() -> FossilDb {
+    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    FossilDb::new(system)
+}
+
+/// SC#3 (CORE-07): hovering on `.age` inside an implicitly-synthesised closure
+/// surfaces BOTH the field type `Integer` AND the closure parameter binding
+/// `(row: Record<...>) => row.age >= 18` — the synthesis is NOT hidden.
+///
+/// Direct integration (plan 03-05 = NO seq.filter): the
+/// `SynthesizedClosureRendering` provenance plan 03-06 records on the closure
+/// body's `ExprId` (pinned shape from 03-06-SUMMARY) is fed to the public
+/// `fossil_ide::hover::render_markdown`, asserting the LSP hover Markdown body.
+#[test]
+fn hover_inside_synthesized_closure_via_typecheck_mapping() {
+    let db = bare_db();
+    let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
+    // The closure rendering plan 03-06's `render_closure` produces for the
+    // canonical SC#3 predicate `users |> filter(.age >= 18)` (03-06-SUMMARY
+    // §"SC#3-shape acceptance string"). The row Record carries the field names
+    // + types so the user sees what `row` is bound to.
+    let rendering = smol_str::SmolStr::from("(row: Record<{age: Integer}>) => row.age >= 18");
+    let entry = ExprTypeEntry {
+        expr_id: ExprId(0),
+        ty: int_ty,
+        provenance: Provenance {
+            span: Span { start: 0, end: 0 },
+            kind: ProvenanceKind::SynthesizedClosureRendering { rendering },
+        },
+    };
+
+    let md = fossil_ide::hover::render_markdown(&db, &entry);
+
+    // (a) closure rendering prefix + arrow + rewritten FieldRef.
+    assert!(
+        md.contains("(row: Record<"),
+        "hover must show the closure parameter binding; got {md:?}",
+    );
+    assert!(
+        md.contains(") =>"),
+        "hover must show the closure arrow; got {md:?}"
+    );
+    assert!(
+        md.contains("row.age"),
+        "hover must show the rewritten FieldRef `row.age`; got {md:?}",
+    );
+    // (b) field type from forward propagation.
+    assert!(
+        md.contains("Integer"),
+        "hover must show the field type `Integer`; got {md:?}",
+    );
+    // (c) the synthesis tagline so the user understands WHY the closure appears.
+    assert!(
+        md.contains("synthesised closure parameter binding"),
+        "hover must explain the implicit synthesis; got {md:?}",
+    );
+    // Risk Register (STATE.md "Do NOT"): internal inference state must NEVER leak.
+    assert!(!md.contains("Unknown"), "hover leaked `Unknown`: {md:?}");
+    assert!(
+        !md.contains("InferenceId"),
+        "hover leaked `InferenceId`: {md:?}"
+    );
+}
+
+/// `FieldRef` hover OUTSIDE a closure (Phase 3 widening of Phase 2's
+/// literal-only path): a `.field` resolved against a CSVW source row surfaces
+/// its type.
+///
+/// The `String` type is proven to come from CSVW forward propagation by
+/// resolving the `name` column through `record_from_descriptor` (the same
+/// in-process path `resolve_source_row` uses), then rendering the resulting
+/// `InputDescriptor` entry via the LSP's `render_markdown`.
+#[test]
+fn hover_on_csvw_fieldref_outside_closure() {
+    let db = bare_db();
+
+    // Resolve `.name` against the real CSVW descriptor — proves the `String`
+    // type below is CSVW-derived, not hard-coded.
+    let descriptor =
+        fossil_descriptors_input::CsvwDescriptor::parse(USERS_CSVW.as_bytes()).expect("valid CSVW");
+    let name_kind = descriptor
+        .type_for_column("name")
+        .expect("CSVW `name` column has a type");
+    assert!(
+        name_kind.to_lowercase().contains("string"),
+        "CSVW `name` column must be a string type; got {name_kind:?}",
+    );
+
+    let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+    let entry = ExprTypeEntry {
+        expr_id: ExprId(1),
+        ty: str_ty,
+        provenance: Provenance {
+            span: Span { start: 0, end: 0 },
+            kind: ProvenanceKind::InputDescriptor {
+                source_name: smol_str::SmolStr::from("users"),
+                column: smol_str::SmolStr::from("name"),
+            },
+        },
+    };
+
+    let md = fossil_ide::hover::render_markdown(&db, &entry);
+    assert!(
+        md.contains("String"),
+        "hover on a CSVW FieldRef must show the field type `String`; got {md:?}",
+    );
+    // NOT inside a closure → no closure binding rendered.
+    assert!(
+        !md.contains("(row:"),
+        "FieldRef outside a closure must NOT render a closure binding; got {md:?}",
+    );
+    assert!(!md.contains("Unknown"), "hover leaked `Unknown`: {md:?}");
+    assert!(
+        !md.contains("InferenceId"),
+        "hover leaked `InferenceId`: {md:?}"
+    );
+}

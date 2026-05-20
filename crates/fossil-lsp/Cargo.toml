@@ -29,3 +29,17 @@ serde              = { workspace = true }
 serde_json         = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+# Plan 03-07 (SC#3 / CORE-07): the lsp_hover_smoke integration test drives
+# implicit-closure synthesis + CSVW forward propagation IN-PROCESS (via
+# fossil-hir's Checker + fossil-descriptors-input's CSVW descriptor) and
+# asserts on fossil_ide::hover::render_markdown — the exact rendering surface
+# the LSP hover handler invokes. The full JSON-RPC end-to-end SC#3 surface
+# form is deferred to Phase 6 (Phase 3 v0.1 has no seq.filter / pipeline
+# surface syntax to trigger synthesis — plan 03-05 decision: NO seq.filter
+# stub). serde_json is the existing JSON-RPC smoke-test dep (declared above
+# as a normal dependency — also used by the smoke test).
+fossil-hir               = { path = "../fossil-hir" }
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+smol_str                 = { workspace = true }
