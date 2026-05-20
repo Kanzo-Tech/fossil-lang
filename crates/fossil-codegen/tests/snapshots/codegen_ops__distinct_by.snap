@@ -1,0 +1,14 @@
+---
+source: crates/fossil-codegen/tests/codegen_ops.rs
+assertion_line: 276
+expression: sql_for(5)
+---
+CREATE VIEW users AS
+SELECT * FROM read_csv_auto('examples/users.csv', sample_size=-1);
+COPY (
+    SELECT
+        step_1.iri AS subject,
+        'https://example.org/name' AS predicate,
+        step_1.name AS object
+    FROM (SELECT DISTINCT ON (id) * FROM users) AS step_1
+) TO 'output.parquet' (FORMAT PARQUET);

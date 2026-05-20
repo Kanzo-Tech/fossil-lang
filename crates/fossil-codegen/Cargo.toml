@@ -26,3 +26,7 @@ smol_str    = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# Direct-MIR-construction codegen snapshots (tests/codegen_ops.rs) build
+# MirGraphs by hand for the source-unreachable operators (ADR-0009), so the
+# test crate needs the MIR + HIR (Ty/Record) + base (Db) construction surface.
+smol_str = { workspace = true }

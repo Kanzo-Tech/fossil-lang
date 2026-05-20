@@ -85,21 +85,36 @@ pub fn codegen_sql<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) 
 ///   SELECT exactly as in Phase 1.
 ///
 /// `TripleEmit` / `Sink` keep the Phase 1 hand-wrapped COPY (Pitfall 1).
+// `elidable_lifetime_names`: explicit 'db documents the Phase 2-9 contract.
+// `too_many_lines`: the single op-dispatch match over the 12-variant Op enum is
+// one coherent unit; splitting per-arm helpers would scatter the shared rel_ref
+// / qualifier / extends / emit threading and hurt readability. Plan 04-05 adds
+// the Join/GroupBy/Aggregate arms — revisit extraction then if it grows further.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names, clippy::too_many_lines)]
 pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> SqlPlan<'db> {
     let ops = mir.ops(db);
     let mut sql = String::new();
 
     // The relation reference for each op index (the FROM-able SQL a downstream
     // op should read). `None` for terminal ops (TripleEmit/Sink) that produce
-    // no consumable relation.
+    // no consumable relation. For a Source this is the bare view name; for a
+    // single-input SELECT op it is `(<body>) AS step_<idx>` (a nested subquery).
     let mut rel_ref: Vec<Option<String>> = vec![None; ops.len()];
+
+    // The *column qualifier* (relation name) for each op index — what a
+    // downstream `ColRef` should prefix with. For a Source it is the view name;
+    // for a subquery op it is the subquery alias (`step_<idx>`). This is
+    // distinct from `rel_ref` (the FROM text): a `ColRef` qualifies on the
+    // alias, while the `FROM` clause carries the full `(<body>) AS step_<idx>`.
+    let mut qualifier: Vec<Option<String>> = vec![None; ops.len()];
 
     // For a buffered Extend, the relation it reads FROM (so a consuming
     // TripleEmit collapses into a COPY over that same relation rather than a
-    // redundant subquery — the byte-identical hello.fossil path).
+    // redundant subquery — the byte-identical hello.fossil path) + the column
+    // qualifier to use for that collapsed relation.
     let mut collapse_from: Vec<Option<String>> = vec![None; ops.len()];
+    let mut collapse_qual: Vec<Option<String>> = vec![None; ops.len()];
 
     // Buffered Extends (field name → rendered expr SQL). An Extend feeding a
     // TripleEmit collapses into the COPY's inner SELECT (byte-identical
@@ -122,14 +137,16 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                     "CREATE VIEW {view_name} AS\nSELECT * FROM read_csv_auto('{uri}', sample_size=-1);"
                 )
                 .expect("writing to a String never fails");
-                rel_ref[idx] = Some(view_name);
+                rel_ref[idx] = Some(view_name.clone());
+                qualifier[idx] = Some(view_name);
             }
             Op::Extend { input, field, expr } => {
-                // Buffer the computed field. The qualifier for unqualified
-                // ColRefs is the input relation's view name (the source view in
-                // the hello.fossil path).
+                // Buffer the computed field. Unqualified ColRefs in the expr
+                // qualify on the input relation's column qualifier (the source
+                // view name in the hello.fossil path).
+                let input_qual = input_qualifier(&qualifier, *input);
                 let from = input_relation(&rel_ref, *input);
-                let expr_sql = render_expr(expr, &from);
+                let expr_sql = render_expr(expr, &input_qual);
                 extends.push((field.to_string(), expr_sql.clone()));
                 // Dual exposure (ADR-0012):
                 // - A downstream *TripleEmit* inlines the buffered expr into the
@@ -141,36 +158,47 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                 //   that body; the COPY collapse simply prefers the buffer.
                 let body = ast::select_extend(&from, field, &expr_sql);
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
+                // A buffered Extend that collapses into a COPY exposes its
+                // input relation (FROM text) + qualifier so the emit FROMs the
+                // source view directly and qualifies columns on it.
                 collapse_from[idx] = Some(from);
+                collapse_qual[idx] = Some(input_qual);
             }
             Op::Project { input, cols } => {
                 let body = ast::select_cols_from(cols, &input_relation(&rel_ref, *input));
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
             Op::Rename { input, old, new } => {
                 let body = ast::select_rename(&input_relation(&rel_ref, *input), old, new);
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
             Op::Filter { input, pred } => {
-                let pred_sql = render_expr(pred, &input_relation(&rel_ref, *input));
+                let pred_sql = render_expr(pred, &input_qualifier(&qualifier, *input));
                 let body = ast::select_filter(&input_relation(&rel_ref, *input), &pred_sql);
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
             Op::Distinct { input, by } => {
                 let body = ast::select_distinct(&input_relation(&rel_ref, *input), by.as_deref());
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
             Op::Union { left, right } => {
                 let left_sql = ast::select_all_from(&input_relation(&rel_ref, *left));
                 let right_sql = ast::select_all_from(&input_relation(&rel_ref, *right));
                 let body = ast::union(&left_sql, &right_sql);
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
             Op::Empty { schema } => {
                 // ADR-0011 R9 target: a `WHERE false` shell over a notional
                 // input view so the empty relation has the right column shape.
                 let body = ast::select_empty(schema, "source");
                 rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
             }
             Op::TripleEmit {
                 input,
@@ -183,17 +211,26 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                 // that Extend reads (collapse the computed column inline) — the
                 // byte-identical hello.fossil path. Otherwise FROM the input op's
                 // own relation (e.g. a Project/Filter subquery feeding emit).
+                //
+                // `from` is the FROM-clause text (view name OR `(<body>) AS
+                // step_<i>` subquery); `qual` is the column qualifier (the view
+                // name OR the subquery alias `step_<i>`) — distinct, since a
+                // bare ColRef must prefix the alias, not the whole subquery.
                 let from = collapse_from
                     .get(*input)
                     .and_then(Clone::clone)
                     .unwrap_or_else(|| input_relation(&rel_ref, *input));
+                let qual = collapse_qual
+                    .get(*input)
+                    .and_then(Clone::clone)
+                    .unwrap_or_else(|| input_qualifier(&qualifier, *input));
                 // Resolve `subject` / `object`. A bare `ColRef { source: "",
                 // column }` naming a buffered Extend (the shared `iri` column)
                 // is substituted with that Extend's rendered SQL so the COPY
                 // sees the resolved expression. Keeps hello.fossil
                 // byte-identical with Phase 1.
-                let subject_expr = render_emit_operand(subject, &extends, &from);
-                let object_expr = render_emit_operand(object, &extends, &from);
+                let subject_expr = render_emit_operand(subject, &extends, &qual);
+                let object_expr = render_emit_operand(object, &extends, &qual);
                 emit = Some((subject_expr, predicate.to_string(), object_expr, from));
             }
             Op::Sink { input: _, sink: _ } => {
@@ -243,10 +280,24 @@ fn input_relation(rel_ref: &[Option<String>], i: usize) -> String {
         .unwrap_or_else(|| "source".to_string())
 }
 
+/// Resolve op index `i`'s column qualifier (the relation name a downstream
+/// `ColRef` prefixes), falling back to `"source"` for a malformed graph.
+fn input_qualifier(qualifier: &[Option<String>], i: usize) -> String {
+    qualifier
+        .get(i)
+        .and_then(Clone::clone)
+        .unwrap_or_else(|| "source".to_string())
+}
+
+/// The subquery alias for op index `idx`: `step_<idx>`.
+fn step_alias(idx: usize) -> String {
+    format!("step_{idx}")
+}
+
 /// Wrap a SELECT body as a nested-subquery relation reference for downstream
 /// ops: `(<body>) AS step_<idx>` (ADR-0012 — subquery over CTE chain).
 fn subquery(body: &str, idx: usize) -> String {
-    format!("({body}) AS step_{idx}")
+    format!("({body}) AS {}", step_alias(idx))
 }
 
 /// Render a `TripleEmit` subject/object operand to SQL. A bare `ColRef` whose
