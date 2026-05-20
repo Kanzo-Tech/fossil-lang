@@ -390,7 +390,7 @@ fn multi_triple_emit_sink_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>>
 ///
 /// The `iri` template's `${.id}` field ref is wrapped in
 /// `Expr::Assert { name: "iri_template_unbound", span_line: 42, .. }` (the SC#4
-/// / P-CRIT-4 carrier — lower_to_mir populates this in practice; here we
+/// / P-CRIT-4 carrier — `lower_to_mir` populates this in practice; here we
 /// construct it directly with a fixed line so the snapshot is stable). Codegen
 /// must render the named runtime assertion `CASE WHEN <id> IS NOT NULL THEN
 /// <id> ELSE error('fossil_assertion_iri_template_unbound:line=42') END`.
@@ -522,7 +522,7 @@ fn assert_iri_template_unbound() {
 
 /// SC#4 no-leak guard (RESEARCH Pitfall 5): the rendered assertion SQL must
 /// contain the named, line-located message but NEVER any `TyKind::Unknown(` or
-/// `InferenceId` debug text. The assertion name is a fixed snake_case
+/// `InferenceId` debug text. The assertion name is a fixed `snake_case`
 /// identifier; the only number embedded is the resolved `line=<N>`.
 #[test]
 fn assert_sql_never_leaks_unknown_or_inference_id() {

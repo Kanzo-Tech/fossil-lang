@@ -6,7 +6,7 @@
 //! error('fossil_assertion_<name>:line=<N>') END` into the generated SQL. This
 //! test proves the contract end-to-end against native `DuckDB` 1.10502: feed a
 //! row whose guarded column is NULL, execute the assertion SQL via
-//! [`fossil_runtime::execute`], and assert it returns `Err` with the DuckDB
+//! [`fossil_runtime::execute`], and assert it returns `Err` with the `DuckDB`
 //! error message CONTAINING the named assertion (`fossil_assertion_…`). If the
 //! assertion silently passed (the P-CRIT-4 failure mode), `execute` would
 //! return `Ok` and this test would fail.
