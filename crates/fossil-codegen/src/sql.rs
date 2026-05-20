@@ -32,7 +32,8 @@
 use std::fmt::Write as _;
 
 use fossil_hir::MappingLoc;
-use fossil_mir::{ExprLowered, Op, lower_to_mir};
+use fossil_mir::op::CmpOp;
+use fossil_mir::{Expr, Op, lower_to_mir};
 
 use crate::manifest::manifest_template;
 
@@ -89,23 +90,20 @@ pub fn codegen_sql<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) 
             }
             Op::TripleEmit {
                 input: _,
-                subject_col,
+                subject,
                 predicate,
-                object_col,
+                object,
+                graph: _,
             } => {
                 let view = source_view.clone().unwrap_or_else(|| "source".to_string());
-                // Resolve the subject via the buffered Extend (Phase 1 always
-                // emits Extend(field="iri") before TripleEmit). If the
-                // mapping had no Extend (malformed for Phase 1, but tolerated)
-                // we fall back to a column reference into the source view.
-                let subject_expr = extends
-                    .iter()
-                    .find(|(name, _)| name == subject_col.as_str())
-                    .map_or_else(
-                        || format!("{view}.{subject_col}"),
-                        |(_, expr_sql)| expr_sql.clone(),
-                    );
-                let object_expr = format!("{view}.{object_col}");
+                // Resolve `subject` / `object`. A bare `ColRef { source: "",
+                // column }` that names a buffered Extend (e.g. the shared
+                // `iri` column) is substituted with that Extend's rendered SQL
+                // so the COPY wrapper sees the resolved expression rather than
+                // a reference into a non-existent view column. This keeps the
+                // hello.fossil output byte-identical with Phase 1.
+                let subject_expr = render_emit_operand(subject, &extends, &view);
+                let object_expr = render_emit_operand(object, &extends, &view);
                 emit = Some((subject_expr, predicate.to_string(), object_expr, view));
             }
             Op::Sink { input: _, sink: _ } => {
@@ -117,22 +115,63 @@ pub fn codegen_sql<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) 
                     .expect("writing to a String never fails");
                 }
             }
+            // The remaining 7 operators + Empty are NOT produced by source
+            // lowering this phase (ADR-0009 — they are exercised via direct
+            // MirGraph construction); their codegen lands in plans 04-04/04-05.
+            // The corpus does not hit these arms yet, so a clearly-marked empty
+            // fragment keeps the match exhaustive without a panic in the
+            // production path.
+            Op::Project { .. }
+            | Op::Rename { .. }
+            | Op::Filter { .. }
+            | Op::Join { .. }
+            | Op::Union { .. }
+            | Op::GroupBy { .. }
+            | Op::Aggregate { .. }
+            | Op::Distinct { .. }
+            | Op::Empty { .. } => {
+                // TODO(04-04/04-05): real codegen for the non-source-reachable
+                // operators. No corpus test exercises these arms this phase.
+            }
         }
     }
 
     SqlPlan::new(db, sql, manifest_template())
 }
 
-/// Render an [`ExprLowered`] tree to a `DuckDB` SQL fragment.
+/// Render a `TripleEmit` subject/object operand to SQL. A bare `ColRef` whose
+/// `source` is empty and whose `column` names a buffered [`Op::Extend`] is
+/// substituted with that Extend's rendered expression (so the shared `iri`
+/// subject column resolves to its full template). Otherwise the operand renders
+/// via [`render_expr`] qualified by the source view.
+fn render_emit_operand(operand: &Expr<'_>, extends: &[(String, String)], view: &str) -> String {
+    if let Expr::ColRef { source, column } = operand
+        && source.is_empty()
+        && let Some((_, expr_sql)) = extends.iter().find(|(name, _)| name == column.as_str())
+    {
+        return expr_sql.clone();
+    }
+    render_expr(operand, view)
+}
+
+/// Render an [`Expr`] tree to a `DuckDB` SQL fragment.
 ///
-/// `default_source` is used as the qualifier for [`ExprLowered::ColRef`]
-/// entries whose `source` field is empty (Phase 1 always populates it, so the
-/// argument is kept for Phase 4's multi-source joins where a `ColRef` may
-/// name a binding that the codegen needs to disambiguate).
-fn render_expr(expr: &ExprLowered, default_source: &str) -> String {
+/// `default_source` is used as the qualifier for [`Expr::ColRef`] entries whose
+/// `source` field is empty (the shared `iri` subject reference, and Phase 4's
+/// multi-source joins where a `ColRef` may name a binding the codegen must
+/// disambiguate).
+///
+/// `LitString` / `ColRef` / `Concat` render byte-identically with Phase 1. The
+/// Phase 4..6 additions (`LitBool` / `Call` / `BinOp` / `Assert`) render as:
+/// - `LitBool` → `TRUE` / `FALSE`
+/// - `Call` → passthrough `func(arg, ...)` (stdlib → SQL mapping is Phase 5)
+/// - `BinOp` → `lhs <op> rhs` ([`CmpOp`] → SQL operator)
+/// - `Assert` → its `inner` (no-op until plan 04-06 fills the `CASE WHEN` shape)
+fn render_expr(expr: &Expr<'_>, default_source: &str) -> String {
     match expr {
-        ExprLowered::LitString(s) => format!("'{}'", s.replace('\'', "''")),
-        ExprLowered::ColRef { source, column } => {
+        Expr::LitString(s) => format!("'{}'", s.replace('\'', "''")),
+        Expr::LitBool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+        Expr::ColRef { source, column } => {
             let qualifier = if source.is_empty() {
                 default_source
             } else {
@@ -140,13 +179,54 @@ fn render_expr(expr: &ExprLowered, default_source: &str) -> String {
             };
             format!("{qualifier}.{column}")
         }
-        ExprLowered::Concat(lhs, rhs) => {
+        Expr::Concat(lhs, rhs) => {
             format!(
                 "{} || {}",
                 render_expr(lhs, default_source),
                 render_expr(rhs, default_source),
             )
         }
+        Expr::Call { func, args, ty: _ } => {
+            let rendered: Vec<String> = args
+                .iter()
+                .map(|a| render_expr(a, default_source))
+                .collect();
+            format!("{func}({})", rendered.join(", "))
+        }
+        Expr::BinOp {
+            op,
+            lhs,
+            rhs,
+            ty: _,
+        } => {
+            format!(
+                "{} {} {}",
+                render_expr(lhs, default_source),
+                cmp_op_sql(*op),
+                render_expr(rhs, default_source),
+            )
+        }
+        // Plan 04-06 fills the named-runtime-assertion `CASE WHEN` shape; until
+        // then `Assert` is a transparent wrapper.
+        Expr::Assert {
+            name: _,
+            span_line: _,
+            inner,
+        } => render_expr(inner, default_source),
+    }
+}
+
+/// Map a [`CmpOp`] to its `DuckDB` SQL operator spelling.
+const fn cmp_op_sql(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "=",
+        CmpOp::Ne => "<>",
+        CmpOp::Lt => "<",
+        CmpOp::Le => "<=",
+        CmpOp::Gt => ">",
+        CmpOp::Ge => ">=",
+        CmpOp::And => "AND",
+        CmpOp::Or => "OR",
     }
 }
 

@@ -1,20 +1,49 @@
-//! HIR → MIR lowering for the Phase 1 canonical example.
+//! HIR → MIR lowering for the source-reachable operator subset.
 //!
-//! Consumes the per-mapping HEADER from [`fossil_hir::HirMapping`] plus the
+//! Consumes the per-mapping HEADER from [`fossil_hir::HirMapping`], the
 //! per-mapping BODY from [`fossil_hir::body::body`] (separated per ADR-0005,
-//! Plan 02-04) and emits a 4-node [`MirGraph`]:
-//! `Source → Extend(iri = ...) → TripleEmit → Sink(GraphAr)`.
+//! Plan 02-04), and the per-mapping TYPES from
+//! [`fossil_hir::check::typecheck_mapping`] (Phase 3, CORE-04..07). Emits a
+//! [`MirGraph`] of the shape:
+//! `Source → Extend(iri = ...) → TripleEmit* → Sink(GraphAr)`.
 //!
-//! # Phase 1 hardcoded paths (deferred work flagged inline)
+//! # Reachability (ADR-0009)
+//!
+//! `HirExpr` has only 4 leaf forms (`Template` / `FieldRef` / `StringLit` /
+//! `PrefixedName`) — no surface pipeline / call / filter / join syntax. So only
+//! 4 of the 11 [`Op`] variants are reachable from `.fossil` source: `Source`,
+//! `Extend`, `TripleEmit`, `Sink`. This function lowers exactly those four. The
+//! other 7 operators (`Project` / `Rename` / `Filter` / `Join` / `Union` /
+//! `GroupBy` / `Aggregate` / `Distinct`) are exercised via direct `MirGraph`
+//! construction in plans 04-04/04-05, NOT via source lowering. Surface pipeline
+//! syntax is DEFERRED (see ADR-0009).
+//!
+//! # Phase 4 generalisations over the Phase 1 hardcodes
+//!
+//! - **Source row type** comes from [`fossil_hir::check::TypeckOutput`]'s
+//!   `source_row` (CSVW-derived) when type-checking succeeds; otherwise it
+//!   falls back to the Phase 1 `Record({id, name})` so codegen still produces
+//!   output (walking-skeleton preserved — never panic).
+//! - **Prefix expansion** uses the real per-file prefix table from
+//!   [`fossil_hir::def_map`] instead of the hardcoded `ex:` →
+//!   `https://example.org/`.
+//! - **Multi-property mappings** emit one shared upstream `Extend(field="iri")`
+//!   feeding N `TripleEmit`s (one per non-`iri` property), then one `Sink`.
+//!
+//! # Source URI (still Phase 1)
 //!
 //! - **Source URI** is `"examples/users.csv"` regardless of the source
 //!   binding's actual `io.csv("...")` argument. Phase 5 STDL-06 promotes this
 //!   to a real registry lookup against the `SOURCE_DEF` CST.
-//! - **Row type** is `Record({id: String, name: String})`. Phase 3 CORE-05
-//!   replaces this with a CSVW-derived row type via forward propagation.
-//! - **IRI-template prefix expansion** is hardcoded for the single prefix
-//!   `ex:` → `https://example.org/`. Phase 4 lifts template parsing from
-//!   raw-text dispatch into a proper expression tree on the HIR side.
+//!
+//! # CRITICAL barrier rule (RESEARCH Pitfall 3)
+//!
+//! `lower_to_mir` may read `body(db, mapping)`, `typecheck_mapping(db, mapping)`
+//! — all barrier-routed through `mapping_cst_node` per ADR-0005 + plan 02-07.
+//! It MUST NOT add a `parse(db, file)` read in the per-mapping path (would
+//! break `MAX_PER_MAPPING_FAN_OUT = 1`). `def_map(db, file)` is file-keyed and
+//! structurally stable across body-only edits, so the `def_map` reads here do
+//! not widen the per-mapping fan-out.
 //!
 //! # Public Salsa query signature (Phase 2-9 contract — locked)
 //!
@@ -27,22 +56,23 @@
 //! ```
 
 use fossil_hir::body::{HirBody, body};
-use fossil_hir::def_map::def_map;
+use fossil_hir::check::typecheck_mapping;
+use fossil_hir::def_map::{PrefixEntry, def_map};
 use fossil_hir::lower::lower_to_hir;
 use fossil_hir::ty::RecordField;
 use fossil_hir::{HirExpr, HirMapping, MappingLoc, Primitive, PropertyKey, Record, Ty, TyKind};
 use smol_str::SmolStr;
 
 use crate::graph::MirGraph;
-use crate::op::{ExprLowered, Op, SinkRef, SourceFormat};
+use crate::op::{Expr, Op, SinkRef, SourceFormat};
 
-/// Lower one [`fossil_hir::MappingLoc`] to a [`MirGraph`] of 4 ops:
-/// `Source → Extend(iri) → TripleEmit → Sink(GraphAr)`.
+/// Lower one [`fossil_hir::MappingLoc`] to a [`MirGraph`]:
+/// `Source → Extend(iri) → TripleEmit* → Sink(GraphAr)`.
 ///
-/// Phase 1 emits exactly one [`Op::TripleEmit`] per mapping (the single
-/// `ex:name = .name` property). Phase 2 (CORE-08) generalises to multi-
-/// property mappings (one `TripleEmit` per non-`iri` property, all sharing the
-/// same `Extend(iri)` upstream).
+/// Generalised over the 4 source-reachable operators (ADR-0009). Emits one
+/// shared `Extend(field="iri")` feeding N `TripleEmit`s (one per non-`iri`
+/// property), then one `Sink`. The single-property `hello.fossil` produces the
+/// same `Source → Extend → TripleEmit → Sink` sequence as Phase 1.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> MirGraph<'db> {
@@ -59,7 +89,6 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     let mapping_locs = dm.mappings(db);
     let Some(dense_idx) = mapping_locs.iter().position(|loc| *loc == mapping) else {
         // Foreign MappingLoc — emit an empty graph rather than panicking.
-        // Phase 3 (CORE-04..07) plumbs ErrorGuaranteed propagation.
         return MirGraph::new(db, Vec::new());
     };
     let hir = lower_to_hir(db, file);
@@ -68,53 +97,77 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
         return MirGraph::new(db, Vec::new());
     };
     let body = body(db, mapping);
+    let prefixes = dm.prefixes(db);
 
-    let row_type = phase1_row_type(db);
+    // Source row type: prefer the type-checker's CSVW-derived `source_row`
+    // (CORE-05). On a type error or a schema-less source, fall back to the
+    // Phase 1 `Record({id, name})` so codegen still emits output and the
+    // walking-skeleton stays byte-identical (NEVER panic — Pitfall: type
+    // errors must not regress `fossil compile`).
+    let row_type = typecheck_mapping(db, mapping).map_or_else(
+        |_| phase1_row_type(db),
+        |out| out.source_row(db).unwrap_or_else(|| phase1_row_type(db)),
+    );
+
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(4);
 
-    // 0: Source — read users.csv as Record({id: String, name: String})
+    // 0: Source
     ops.push(Op::Source {
         uri: SmolStr::from("examples/users.csv"),
         format: SourceFormat::Csv,
         row_type,
     });
 
-    // 1: Extend — attach the IRI template result as a column named "iri"
-    let iri_expr = lower_iri_property(m, body, db).unwrap_or_else(|| {
-        // No `iri = ...` property in the mapping; emit an empty literal to
-        // keep the op-count invariant. Phase 3 (CORE-04..07) reports this as
-        // a type error against the ShEx output descriptor.
-        ExprLowered::LitString(SmolStr::default())
+    // 1: Extend — attach the IRI template result as a column named "iri".
+    let iri_expr = lower_iri_property(m, body, prefixes, db).unwrap_or_else(|| {
+        // No `iri = ...` property; emit an empty literal to keep the upstream
+        // Extend present for the TripleEmit subjects to reference.
+        Expr::LitString(SmolStr::default())
     });
     ops.push(Op::Extend {
         input: 0,
         field: SmolStr::new_static("iri"),
         expr: iri_expr,
     });
+    let extend_idx = 1usize;
 
-    // 2: TripleEmit — for the single (PrefixedName, FieldRef) property pair.
-    let (predicate, object_col) = lower_first_predicate_property(body, db)
-        .unwrap_or_else(|| (SmolStr::default(), SmolStr::default()));
-    ops.push(Op::TripleEmit {
-        input: 1,
-        subject_col: SmolStr::new_static("iri"),
-        predicate,
-        object_col,
-    });
+    // 2..N: one TripleEmit per non-`iri` predicate property (subject = the
+    // shared `iri` column reference; object = the property RHS lowered to an
+    // `Expr`). The `iri` column is produced by the Extend at `extend_idx`.
+    let subject = Expr::ColRef {
+        source: SmolStr::default(),
+        column: SmolStr::new_static("iri"),
+    };
+    for prop in body.properties(db) {
+        let PropertyKey::PrefixedName { iri } = &prop.key else {
+            continue; // skip the `iri = ...` property (handled by the Extend)
+        };
+        let object = lower_property_value(&prop.value, &m.source_binding, prefixes);
+        ops.push(Op::TripleEmit {
+            input: extend_idx,
+            subject: subject.clone(),
+            predicate: iri.clone(),
+            object,
+            graph: None,
+        });
+    }
 
-    // 3: Sink — GraphAr terminal
+    // Final: Sink — GraphAr terminal, consuming the last op (the last
+    // TripleEmit if any properties exist, else the Extend).
+    let sink_input = ops.len() - 1;
     ops.push(Op::Sink {
-        input: 2,
+        input: sink_input,
         sink: SinkRef::GraphAr,
     });
 
     MirGraph::new(db, ops)
 }
 
-/// Build the Phase 1 row type: `Record({id: String, name: String})`.
+/// Phase 1 fallback row type: `Record({id: String, name: String})`.
 ///
-/// Phase 3 (CORE-05) replaces this stub with a CSVW-driven derivation from
-/// the `SOURCE_DEF` descriptor.
+/// Used when [`typecheck_mapping`] returns `Err` or the source declared no
+/// CSVW `schema` (the walking-skeleton `hello.fossil` case has no `schema`
+/// arg, so `TypeckOutput.source_row` is `None`).
 fn phase1_row_type(db: &dyn fossil_base::Db) -> Ty<'_> {
     let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
     let record = Record::new(
@@ -134,60 +187,62 @@ fn phase1_row_type(db: &dyn fossil_base::Db) -> Ty<'_> {
 }
 
 /// Find the `iri = ...` property in a mapping's body and lower its template
-/// value to a concat-chain of [`ExprLowered`].
-///
-/// Per ADR-0005, the property list lives in [`HirBody`] (reached via the
-/// `body()` Salsa query), not on [`HirMapping`]. The mapping HEADER is still
-/// needed for the `source_binding` (used to scope `${.field}` placeholders
-/// in the IRI template).
+/// value to a concat-chain of [`Expr`].
 fn lower_iri_property<'db>(
     m: &HirMapping,
     body: HirBody<'db>,
+    prefixes: &[PrefixEntry],
     db: &'db dyn fossil_base::Db,
-) -> Option<ExprLowered> {
+) -> Option<Expr<'db>> {
     let prop = body
         .properties(db)
         .iter()
         .find(|p| matches!(p.key, PropertyKey::Iri))?;
-    let HirExpr::Template(raw) = &prop.value else {
-        return None;
-    };
-    Some(lower_iri_template_phase1(raw, &m.source_binding))
+    Some(lower_property_value(
+        &prop.value,
+        &m.source_binding,
+        prefixes,
+    ))
 }
 
-/// Find the first `<prefix>:<local> = <field-ref>` property in a mapping's
-/// body and return `(predicate_iri, object_col)` for the `TripleEmit`.
-fn lower_first_predicate_property<'db>(
-    body: HirBody<'db>,
-    db: &'db dyn fossil_base::Db,
-) -> Option<(SmolStr, SmolStr)> {
-    for prop in body.properties(db) {
-        if let PropertyKey::PrefixedName { iri } = &prop.key
-            && let HirExpr::FieldRef(field) = &prop.value
-        {
-            return Some((iri.clone(), field.clone()));
-        }
+/// Lower a property RHS [`HirExpr`] (one of the 4 leaf forms) to a typed
+/// [`Expr`]. `FieldRef` → `ColRef`; `StringLit` → `LitString`;
+/// `Template` → the concat-chain of literals + column refs;
+/// `PrefixedName` → `LitString` of the resolved IRI.
+fn lower_property_value<'db>(
+    value: &HirExpr,
+    source_binding: &SmolStr,
+    prefixes: &[PrefixEntry],
+) -> Expr<'db> {
+    match value {
+        HirExpr::FieldRef(field) => Expr::ColRef {
+            source: source_binding.clone(),
+            column: field.clone(),
+        },
+        HirExpr::StringLit(s) => Expr::LitString(s.clone()),
+        HirExpr::Template(raw) => lower_iri_template(raw, source_binding, prefixes),
+        // A `PrefixedName` RHS resolved to its full IRI by the HIR; render it
+        // as a literal string value (the IRI text).
+        HirExpr::PrefixedName { iri } => Expr::LitString(iri.clone()),
     }
-    None
 }
 
-/// Phase 1 IRI-template lowering. Parses the raw template token text
-/// (including surrounding backticks and `${...}` placeholders) and emits a
-/// left-leaning [`ExprLowered::Concat`] chain of literal segments and column
-/// references.
+/// IRI-template lowering. Parses the raw template token text (including
+/// surrounding backticks and `${...}` placeholders) and emits a left-leaning
+/// [`Expr::Concat`] chain of literal segments and column references.
 ///
 /// Recognised placeholder forms:
-/// - `${ex:}` → literal `https://example.org/` (the only Phase 1 prefix)
-/// - `${.field}` → [`ExprLowered::ColRef`] against the mapping's source binding
-///
-/// Phase 4 lifts template parsing into a proper HIR-side expression tree;
-/// the resolved-prefix table will be threaded through, so the hardcoded `ex:`
-/// branch goes away.
-fn lower_iri_template_phase1(raw: &str, source_binding: &SmolStr) -> ExprLowered {
+/// - `${prefix:}` → the prefix's resolved IRI from the per-file prefix table
+/// - `${.field}` → [`Expr::ColRef`] against the mapping's source binding
+fn lower_iri_template<'db>(
+    raw: &str,
+    source_binding: &SmolStr,
+    prefixes: &[PrefixEntry],
+) -> Expr<'db> {
     // Strip the surrounding backticks (the HIR keeps them on the raw token).
     let inner = raw.trim_start_matches('`').trim_end_matches('`');
 
-    let mut parts: Vec<ExprLowered> = Vec::new();
+    let mut parts: Vec<Expr<'db>> = Vec::new();
     let mut cursor = 0usize;
     while cursor < inner.len() {
         // Find the next `${` placeholder start.
@@ -195,7 +250,7 @@ fn lower_iri_template_phase1(raw: &str, source_binding: &SmolStr) -> ExprLowered
             // No more placeholders — push the remaining literal tail.
             let tail = &inner[cursor..];
             if !tail.is_empty() {
-                parts.push(ExprLowered::LitString(SmolStr::from(tail)));
+                parts.push(Expr::LitString(SmolStr::from(tail)));
             }
             break;
         };
@@ -203,19 +258,19 @@ fn lower_iri_template_phase1(raw: &str, source_binding: &SmolStr) -> ExprLowered
         // Push the literal segment before the placeholder.
         if open > cursor {
             let lit = &inner[cursor..open];
-            parts.push(ExprLowered::LitString(SmolStr::from(lit)));
+            parts.push(Expr::LitString(SmolStr::from(lit)));
         }
         // Find the matching `}`.
         let after_open = open + 2; // skip "${"
         let Some(close_off) = inner[after_open..].find('}') else {
             // Unterminated placeholder; treat the rest as a literal tail.
             let tail = &inner[open..];
-            parts.push(ExprLowered::LitString(SmolStr::from(tail)));
+            parts.push(Expr::LitString(SmolStr::from(tail)));
             break;
         };
         let close = after_open + close_off;
         let placeholder = &inner[after_open..close];
-        parts.push(lower_placeholder_phase1(placeholder, source_binding));
+        parts.push(lower_placeholder(placeholder, source_binding, prefixes));
         cursor = close + 1; // skip past `}`
     }
 
@@ -223,35 +278,43 @@ fn lower_iri_template_phase1(raw: &str, source_binding: &SmolStr) -> ExprLowered
 }
 
 /// Lower one placeholder body (the text between `${` and `}`).
-fn lower_placeholder_phase1(body: &str, source_binding: &SmolStr) -> ExprLowered {
-    // Recognised forms (in priority order):
-    //   `.field` → ColRef against the mapping's source binding
-    //   `ex:`    → hardcoded Phase 1 prefix expansion (Phase 4 generalises)
-    //   anything else → echo the placeholder back as a literal for debugging
-    //                  (Phase 3 reports this as a diagnostic against IriTemplate)
-    match body.strip_prefix('.') {
-        Some(field) => ExprLowered::ColRef {
+///
+/// - `.field` → `ColRef` against the mapping's source binding.
+/// - `prefix:` → the prefix's resolved IRI from the per-file prefix table.
+/// - anything else → echo the placeholder back as a literal (Phase 6's named
+///   runtime assertion is a candidate for unresolved placeholders).
+fn lower_placeholder<'db>(
+    body: &str,
+    source_binding: &SmolStr,
+    prefixes: &[PrefixEntry],
+) -> Expr<'db> {
+    if let Some(field) = body.strip_prefix('.') {
+        return Expr::ColRef {
             source: source_binding.clone(),
             column: SmolStr::from(field),
-        },
-        None if body == "ex:" => {
-            ExprLowered::LitString(SmolStr::new_static("https://example.org/"))
-        }
-        None => ExprLowered::LitString(SmolStr::from(format!("${{{body}}}"))),
+        };
     }
+    // `prefix:` form — resolve against the real prefix table (replaces the
+    // Phase 1 hardcoded `ex:` branch). The prefix table stores `name` WITHOUT
+    // the trailing colon.
+    if let Some(name) = body.strip_suffix(':')
+        && let Some(entry) = prefixes.iter().find(|e| e.name.as_str() == name)
+    {
+        return Expr::LitString(entry.iri.clone());
+    }
+    Expr::LitString(SmolStr::from(format!("${{{body}}}")))
 }
 
 /// Fold a list of expression parts into a left-leaning Concat chain with
 /// adjacent-literal fusion: `[Lit("a"), Lit("b"), Col]` → `Concat(Lit("ab"), Col)`.
 ///
-/// Fusion is required for the Phase 1 codegen to produce the snapshot SQL
-/// in RESEARCH.md Example 13 character-for-character (the snapshot expects
-/// `'https://example.org/user/'`, not `'https://example.org/' || 'user/'`).
-fn fold_concat_left(parts: Vec<ExprLowered>) -> ExprLowered {
-    let mut fused: Vec<ExprLowered> = Vec::with_capacity(parts.len());
+/// Fusion is required for codegen to produce the snapshot SQL
+/// (`'https://example.org/user/'`, not `'https://example.org/' || 'user/'`).
+fn fold_concat_left<'db>(parts: Vec<Expr<'db>>) -> Expr<'db> {
+    let mut fused: Vec<Expr<'db>> = Vec::with_capacity(parts.len());
     for part in parts {
         match (fused.last_mut(), &part) {
-            (Some(ExprLowered::LitString(prev)), ExprLowered::LitString(next)) => {
+            (Some(Expr::LitString(prev)), Expr::LitString(next)) => {
                 let merged = SmolStr::from(format!("{prev}{next}"));
                 *prev = merged;
             }
@@ -259,12 +322,12 @@ fn fold_concat_left(parts: Vec<ExprLowered>) -> ExprLowered {
         }
     }
     if fused.is_empty() {
-        return ExprLowered::LitString(SmolStr::default());
+        return Expr::LitString(SmolStr::default());
     }
     let mut iter = fused.into_iter();
     let mut acc = iter.next().expect("non-empty after the empty check above");
     for next in iter {
-        acc = ExprLowered::Concat(Box::new(acc), Box::new(next));
+        acc = Expr::Concat(Box::new(acc), Box::new(next));
     }
     acc
 }
@@ -324,8 +387,8 @@ User : ex:Person from users
                 assert_eq!(*input, 0);
                 assert_eq!(field.as_str(), "iri");
                 match expr {
-                    ExprLowered::Concat(l, r) => match (l.as_ref(), r.as_ref()) {
-                        (ExprLowered::LitString(lit), ExprLowered::ColRef { source, column }) => {
+                    Expr::Concat(l, r) => match (l.as_ref(), r.as_ref()) {
+                        (Expr::LitString(lit), Expr::ColRef { source, column }) => {
                             assert_eq!(lit.as_str(), "https://example.org/user/");
                             assert_eq!(source.as_str(), "users");
                             assert_eq!(column.as_str(), "id");
@@ -340,18 +403,27 @@ User : ex:Person from users
             other => panic!("expected Extend at index 1, got {other:?}"),
         }
 
-        // Op 2: TripleEmit(subject_col=iri, predicate=ex:name, object_col=name)
+        // Op 2: TripleEmit(subject=ColRef(iri), predicate=ex:name, object=ColRef(name))
         match &ops[2] {
             Op::TripleEmit {
                 input,
-                subject_col,
+                subject,
                 predicate,
-                object_col,
+                object,
+                graph,
             } => {
                 assert_eq!(*input, 1);
-                assert_eq!(subject_col.as_str(), "iri");
+                assert!(
+                    matches!(subject, Expr::ColRef { column, .. } if column.as_str() == "iri"),
+                    "expected subject ColRef(iri), got {subject:?}"
+                );
                 assert_eq!(predicate.as_str(), "https://example.org/name");
-                assert_eq!(object_col.as_str(), "name");
+                assert!(
+                    matches!(object, Expr::ColRef { source, column }
+                        if source.as_str() == "users" && column.as_str() == "name"),
+                    "expected object ColRef(users.name), got {object:?}"
+                );
+                assert_eq!(*graph, None);
             }
             other => panic!("expected TripleEmit at index 2, got {other:?}"),
         }
@@ -381,12 +453,37 @@ User : ex:Person from users
         // `${.id}/profile` → Concat(ColRef(users.id), LitString("/profile"))
         let raw = "`${.id}/profile`";
         let binding = SmolStr::new_static("users");
-        let lowered = lower_iri_template_phase1(raw, &binding);
+        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &[]);
         match lowered {
-            ExprLowered::Concat(l, r) => {
-                assert!(matches!(l.as_ref(), ExprLowered::ColRef { .. }));
+            Expr::Concat(l, r) => {
+                assert!(matches!(l.as_ref(), Expr::ColRef { .. }));
+                assert!(matches!(r.as_ref(), Expr::LitString(s) if s.as_str() == "/profile"));
+            }
+            other => panic!("expected Concat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+    fn template_lowering_resolves_real_prefix_table() {
+        // `${ex:}user/${.id}` with ex -> https://example.org/ resolves the
+        // prefix from the table (not a hardcoded branch).
+        let raw = "`${ex:}user/${.id}`";
+        let binding = SmolStr::new_static("users");
+        let prefixes = vec![PrefixEntry {
+            name: SmolStr::new_static("ex"),
+            iri: SmolStr::new_static("https://example.org/"),
+        }];
+        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &prefixes);
+        match lowered {
+            Expr::Concat(l, r) => {
                 assert!(
-                    matches!(r.as_ref(), ExprLowered::LitString(s) if s.as_str() == "/profile")
+                    matches!(l.as_ref(), Expr::LitString(s) if s.as_str() == "https://example.org/user/"),
+                    "expected fused prefix+literal, got {:?}",
+                    l.as_ref()
+                );
+                assert!(
+                    matches!(r.as_ref(), Expr::ColRef { column, .. } if column.as_str() == "id")
                 );
             }
             other => panic!("expected Concat, got {other:?}"),

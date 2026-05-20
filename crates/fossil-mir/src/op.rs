@@ -173,10 +173,12 @@ pub enum SinkRef {
     GraphAr,
 }
 
-/// Typed MIR expression — the Phase 4 generalisation of the Phase 1
-/// `ExprLowered`. `LitString` / `ColRef` / `Concat` are the
-/// rendering-compatible subset (hello.fossil SQL is byte-identical); `Call` /
-/// `BinOp` / `Assert` / `LitBool` are the Phase 4..6 additions.
+/// Typed MIR expression.
+///
+/// The Phase 4 generalisation of the Phase 1 `ExprLowered`. `LitString` /
+/// `ColRef` / `Concat` are the rendering-compatible subset (hello.fossil SQL is
+/// byte-identical); `Call` / `BinOp` / `Assert` / `LitBool` are the Phase 4..6
+/// additions.
 ///
 /// The `ty: Ty<'db>` carriage on `Call` / `BinOp` is intentional — it makes
 /// the "erase types ≡ untyped property" check (SC#3, plan 04-07) testable.
