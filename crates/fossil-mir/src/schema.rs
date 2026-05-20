@@ -23,9 +23,10 @@ use smol_str::SmolStr;
 
 use crate::op::{Expr, Op};
 
-/// Output column schema of the op at `idx`, computed by structural induction
-/// over the topo-ordered DAG (operator-algebra.md §3). Returns column names in
-/// schema order.
+/// Output column schema of the op at `idx`.
+///
+/// Computed by structural induction over the topo-ordered DAG
+/// (operator-algebra.md §3). Returns column names in schema order.
 ///
 /// Per-operator rules (operator-algebra.md §3):
 /// - `Source` → field names of `row_type` (deref the interned `Record`)
@@ -45,7 +46,7 @@ use crate::op::{Expr, Op};
 /// yields an empty schema rather than panicking — callers in the rewriting
 /// engine handle malformed intermediate graphs gracefully.
 #[must_use]
-pub fn schema_of<'db>(db: &dyn fossil_base::Db, ops: &[Op<'db>], idx: usize) -> Vec<SmolStr> {
+pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<SmolStr> {
     let Some(op) = ops.get(idx) else {
         return Vec::new();
     };
@@ -54,7 +55,7 @@ pub fn schema_of<'db>(db: &dyn fossil_base::Db, ops: &[Op<'db>], idx: usize) -> 
         Op::Project { cols, .. } => cols.clone(),
         Op::Extend { input, field, .. } => {
             let mut schema = schema_of(db, ops, *input);
-            if !schema.iter().any(|c| c == field) {
+            if !schema.contains(field) {
                 schema.push(field.clone());
             }
             schema
@@ -68,7 +69,11 @@ pub fn schema_of<'db>(db: &dyn fossil_base::Db, ops: &[Op<'db>], idx: usize) -> 
             }
             schema
         }
-        Op::Filter { input, .. } | Op::Distinct { input, .. } => schema_of(db, ops, *input),
+        // Schema-preserving operators: pass the input schema through unchanged.
+        Op::Filter { input, .. }
+        | Op::Distinct { input, .. }
+        | Op::TripleEmit { input, .. }
+        | Op::Sink { input, .. } => schema_of(db, ops, *input),
         Op::Join { left, right, .. } => {
             let mut schema = schema_of(db, ops, *left);
             schema.extend(schema_of(db, ops, *right));
@@ -87,35 +92,35 @@ pub fn schema_of<'db>(db: &dyn fossil_base::Db, ops: &[Op<'db>], idx: usize) -> 
         Op::Aggregate { input, aggs } => {
             let mut schema = schema_of(db, ops, *input);
             for agg in aggs {
-                if !schema.iter().any(|c| *c == agg.out_field) {
+                if !schema.contains(&agg.out_field) {
                     schema.push(agg.out_field.clone());
                 }
             }
             schema
         }
-        Op::TripleEmit { input, .. } | Op::Sink { input, .. } => schema_of(db, ops, *input),
         Op::Empty { schema } => schema.clone(),
     }
 }
 
-/// Free column references in an expression, for the R3/R5 `free(p)` rewrite
-/// guards. Walks the [`Expr`] recursively collecting `ColRef.column` names;
+/// Free column references in an expression (for the R3/R5 `free(p)` guards).
+///
+/// Walks the [`Expr`] recursively collecting `ColRef.column` names;
 /// `LitString` / `LitBool` contribute nothing; `Concat` / `Call` / `BinOp` /
 /// `Assert` recurse into their children.
 #[must_use]
-pub fn free_cols<'db>(expr: &Expr<'db>) -> BTreeSet<SmolStr> {
+pub fn free_cols(expr: &Expr<'_>) -> BTreeSet<SmolStr> {
     let mut acc = BTreeSet::new();
     collect_free_cols(expr, &mut acc);
     acc
 }
 
-fn collect_free_cols<'db>(expr: &Expr<'db>, acc: &mut BTreeSet<SmolStr>) {
+fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
     match expr {
         Expr::LitString(_) | Expr::LitBool(_) => {}
         Expr::ColRef { column, .. } => {
             acc.insert(column.clone());
         }
-        Expr::Concat(lhs, rhs) => {
+        Expr::Concat(lhs, rhs) | Expr::BinOp { lhs, rhs, .. } => {
             collect_free_cols(lhs, acc);
             collect_free_cols(rhs, acc);
         }
@@ -123,10 +128,6 @@ fn collect_free_cols<'db>(expr: &Expr<'db>, acc: &mut BTreeSet<SmolStr>) {
             for arg in args {
                 collect_free_cols(arg, acc);
             }
-        }
-        Expr::BinOp { lhs, rhs, .. } => {
-            collect_free_cols(lhs, acc);
-            collect_free_cols(rhs, acc);
         }
         Expr::Assert { inner, .. } => collect_free_cols(inner, acc),
     }
