@@ -47,6 +47,7 @@ Use [`template.md`](template.md) as the starting point. Copy, fill in, commit.
 | [0006](0006-output-descriptor-kind-enum-dispatch.md) | `OutputDescriptorKind` enum dispatch + `SystemWithDescriptors` extension trait + structured `Diagnostic.suggestion_source` | accepted | 2026-05-19 |
 | [0007](0007-csvw-jsonld-subset-cutoff.md) | Cap CSVW Metadata Vocabulary support at a literal-`@context` JSON-LD subset | accepted | 2026-05-19 |
 | [0008](0008-real-spans-via-side-table.md) | Real per-mapping spans via a `Spans<'db>` side table (NOT a field on `HirExpr`) | accepted | 2026-05-19 |
+| [0009](0009-mir-reachability-direct-construction.md) | Define all 11 MIR ops; lower 4 from source, test 7 via direct construction; Op::Empty for R9; defer surface pipeline syntax | accepted | 2026-05-20 |
 
 (ADRs 0001-0003 are written in Plan 05; this README is updated as new ADRs land.)
 
