@@ -52,6 +52,7 @@ Use [`template.md`](template.md) as the starting point. Copy, fill in, commit.
 | [0011](0011-r9-empty-source-representation.md) | R9 rewrites a statically-false filter to a dedicated `Op::Empty { schema }` (not a `Source` with a marker); codegen emits `SELECT … WHERE false` / `LIMIT 0` preserving the declared schema | accepted | 2026-05-20 |
 | [0012](0012-codegen-sqlparser-ast-hybrid.md) | Build codegen SELECT bodies via sqlparser 0.59 AST construction (structured FROM/WHERE/projection/DISTINCT/UNION/EXCLUDE), hand-wrap the COPY statement (Pitfall 1), render leaf expr fragments via the string path | accepted | 2026-05-20 |
 | [0013](0013-mir-type-preservation.md) | MIR types are operationally erasable — codegen ignores them; `codegen(g) == codegen(erase_types(g))` over the 30-mapping corpus (SC#3 type preservation, induction over the DAG) | accepted | 2026-05-20 |
+| [0014](0014-sql-parity-two-tier.md) | SC#1 SQL parity is two-tier: automated native `duckdb` execution writes `native_baseline.json`; a documented manual DuckDB-WASM node harness reproduces + diffs the digests at phase close | accepted | 2026-05-20 |
 
 (ADRs 0001-0003 are written in Plan 05; this README is updated as new ADRs land.)
 
