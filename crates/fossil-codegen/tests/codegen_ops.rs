@@ -30,7 +30,7 @@ use std::sync::Arc;
 use fossil_codegen::codegen_graph;
 use fossil_hir::{Primitive, Record, RecordField, Ty, TyKind};
 use fossil_mir::graph::MirGraph;
-use fossil_mir::op::{CmpOp, Expr, Op, SinkRef, SourceFormat};
+use fossil_mir::op::{AggFn, AggSpec, CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat};
 use smol_str::SmolStr;
 
 fn db() -> fossil_base::FossilDb {
@@ -58,6 +58,11 @@ fn codegen_case<'db>(db: &'db dyn fossil_base::Db, case: Case) -> fossil_codegen
         5 => distinct_by_ops(db),
         6 => union_two_sources_ops(db),
         7 => empty_relation_ops(db),
+        8 => join_inner_ops(db),
+        9 => join_left_outer_ops(db),
+        10 => group_by_count_ops(db),
+        11 => aggregate_sum_ops(db),
+        12 => multi_triple_emit_sink_ops(db),
         other => panic!("unknown case {other}"),
     };
     codegen_graph(db, MirGraph::new(db, ops))
@@ -242,6 +247,144 @@ fn empty_relation_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
     ops
 }
 
+/// `Source(orders) Source(users) Join(0,1,on=orders.user_id=users.id,kind)`
+/// → `TripleEmit` → `Sink`. Locks the per-`JoinKind` JOIN keyword + auto-prefix
+/// qualifiers (operator-algebra.md §2.6).
+fn join_ops<'db>(db: &'db dyn fossil_base::Db, kind: JoinKind) -> Vec<Op<'db>> {
+    let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
+    let mut ops = vec![
+        source(db, "examples/orders.csv", &["id", "user_id"]),
+        source(db, "examples/users.csv", &["id", "name"]),
+        Op::Join {
+            left: 0,
+            right: 1,
+            on: Expr::BinOp {
+                op: CmpOp::Eq,
+                lhs: Box::new(Expr::ColRef {
+                    source: SmolStr::new_static("orders"),
+                    column: SmolStr::new_static("user_id"),
+                }),
+                rhs: Box::new(Expr::ColRef {
+                    source: SmolStr::new_static("users"),
+                    column: SmolStr::new_static("id"),
+                }),
+                ty: bool_ty,
+            },
+            kind,
+            left_name: SmolStr::new_static("orders"),
+            right_name: SmolStr::new_static("users"),
+        },
+    ];
+    ops.extend(emit_and_sink(2, "step_2"));
+    ops
+}
+
+fn join_inner_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    join_ops(db, JoinKind::Inner)
+}
+
+fn join_left_outer_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    join_ops(db, JoinKind::LeftOuter)
+}
+
+/// `Source(users) GroupBy(["country"]) Aggregate([COUNT(id) AS n])` →
+/// `TripleEmit` → `Sink`. The `GroupBy` + consuming `Aggregate` render into one
+/// `GROUP BY` SELECT (operator-algebra.md §2.8/§2.9).
+fn group_by_count_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    let bigint_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
+    let mut ops = vec![
+        source(db, "examples/users.csv", &["id", "country"]),
+        Op::GroupBy {
+            input: 0,
+            keys: vec![SmolStr::new_static("country")],
+        },
+        Op::Aggregate {
+            input: 1,
+            aggs: vec![AggSpec {
+                out_field: SmolStr::new_static("n"),
+                agg_fn: AggFn::Count,
+                in_field: SmolStr::new_static("id"),
+                ty: bigint_ty,
+            }],
+        },
+    ];
+    ops.extend(emit_and_sink(2, "step_2"));
+    ops
+}
+
+/// `Source(orders) GroupBy(["user_id"]) Aggregate([SUM(amount) AS total])`.
+/// Locks the `SUM(...)` aggregate spelling.
+fn aggregate_sum_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    let num_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
+    let mut ops = vec![
+        source(db, "examples/orders.csv", &["user_id", "amount"]),
+        Op::GroupBy {
+            input: 0,
+            keys: vec![SmolStr::new_static("user_id")],
+        },
+        Op::Aggregate {
+            input: 1,
+            aggs: vec![AggSpec {
+                out_field: SmolStr::new_static("total"),
+                agg_fn: AggFn::Sum,
+                in_field: SmolStr::new_static("amount"),
+                ty: num_ty,
+            }],
+        },
+    ];
+    ops.extend(emit_and_sink(2, "step_2"));
+    ops
+}
+
+/// `Source(users) Extend("iri", ...) TripleEmit(p1) TripleEmit(p2) Sink`.
+/// Two `TripleEmit`s over the same `Extend` → the COPY inner SELECT
+/// `UNION ALL`s the two triple-projections (generalised `SinkOp`; flat-triple
+/// `GraphAr` contract).
+fn multi_triple_emit_sink_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    let iri = || Expr::ColRef {
+        source: SmolStr::default(),
+        column: SmolStr::new_static("iri"),
+    };
+    vec![
+        source(db, "examples/users.csv", &["id", "name", "email"]),
+        Op::Extend {
+            input: 0,
+            field: SmolStr::new_static("iri"),
+            expr: Expr::Concat(
+                Box::new(Expr::LitString(SmolStr::new_static("https://example.org/"))),
+                Box::new(Expr::ColRef {
+                    source: SmolStr::new_static("users"),
+                    column: SmolStr::new_static("id"),
+                }),
+            ),
+        },
+        Op::TripleEmit {
+            input: 1,
+            subject: iri(),
+            predicate: SmolStr::new_static("https://example.org/name"),
+            object: Expr::ColRef {
+                source: SmolStr::new_static("users"),
+                column: SmolStr::new_static("name"),
+            },
+            graph: None,
+        },
+        Op::TripleEmit {
+            input: 1,
+            subject: iri(),
+            predicate: SmolStr::new_static("https://example.org/email"),
+            object: Expr::ColRef {
+                source: SmolStr::new_static("users"),
+                column: SmolStr::new_static("email"),
+            },
+            graph: None,
+        },
+        Op::Sink {
+            input: 3,
+            sink: SinkRef::GraphAr,
+        },
+    ]
+}
+
 // --------------------------------------------------------------------------
 // Snapshots — one per single-input operator (ADR-0009 reachability gap).
 // --------------------------------------------------------------------------
@@ -284,4 +427,33 @@ fn union_two_sources() {
 #[test]
 fn empty_relation() {
     insta::assert_snapshot!("empty_relation", sql_for(7));
+}
+
+// --------------------------------------------------------------------------
+// Snapshots — multi-input / aggregating ops + multi-TripleEmit Sink (04-05).
+// --------------------------------------------------------------------------
+
+#[test]
+fn join_inner() {
+    insta::assert_snapshot!("join_inner", sql_for(8));
+}
+
+#[test]
+fn join_left_outer() {
+    insta::assert_snapshot!("join_left_outer", sql_for(9));
+}
+
+#[test]
+fn group_by_count() {
+    insta::assert_snapshot!("group_by_count", sql_for(10));
+}
+
+#[test]
+fn aggregate_sum() {
+    insta::assert_snapshot!("aggregate_sum", sql_for(11));
+}
+
+#[test]
+fn multi_triple_emit_sink() {
+    insta::assert_snapshot!("multi_triple_emit_sink", sql_for(12));
 }
