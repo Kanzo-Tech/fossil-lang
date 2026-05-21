@@ -30,13 +30,29 @@
 //! ```
 
 use std::fmt::Write as _;
+use std::sync::LazyLock;
 
 use fossil_hir::MappingLoc;
 use fossil_mir::op::{AggFn, CmpOp, JoinKind};
 use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
+use fossil_registry::{FunctionRegistry, InlineForm, LoweringKind};
 
 use crate::ast;
 use crate::manifest::manifest_template;
+
+/// The stdlib classification catalog (05-01), read by [`render_expr`]'s
+/// [`Expr::Call`] arm to lower a scalar call to its `DuckDB` builtin / inline
+/// SQL / native-UDF marker.
+///
+/// # No `Box<dyn>` in Salsa (ADR-0015 / CLAUDE.md hard rule)
+///
+/// [`render_expr`] runs INSIDE the [`codegen_graph`] `#[salsa::tracked]` query.
+/// The registry it consults is this plain `&'static FunctionRegistry`, NEVER a
+/// trait object fetched through `db.system()`. The v0.1 stdlib is
+/// program-invariant (no federation — REG-01 deferred), so a process-lifetime
+/// `LazyLock` static is correct and sidesteps the Salsa-interning hazard
+/// entirely. Dispatch is over the [`LoweringKind`] enum, not a trait.
+static STDLIB: LazyLock<FunctionRegistry> = LazyLock::new(FunctionRegistry::stdlib_default);
 
 #[salsa::tracked]
 pub struct SqlPlan<'db> {
@@ -428,7 +444,12 @@ fn render_emit_operand(operand: &Expr<'_>, extends: &[(String, String)], view: &
 /// `LitString` / `ColRef` / `Concat` render byte-identically with Phase 1. The
 /// Phase 4..6 additions (`LitBool` / `Call` / `BinOp` / `Assert`) render as:
 /// - `LitBool` → `TRUE` / `FALSE`
-/// - `Call` → passthrough `func(arg, ...)` (stdlib → SQL mapping is Phase 5)
+/// - `Call` → registry-driven (Phase 5 / STDL-02..05): the [`STDLIB`] catalog's
+///   [`LoweringKind`] decides — a `DuckDB` `Builtin{duckdb_name}` call
+///   (`clean.trim` → `trim(x)`), an [`InlineForm`] via [`render_inline`]
+///   (`parse.integer` → `CAST(x AS BIGINT)`), or a `Udf{udf_name}` marker
+///   (`clean.slug` → `fossil_slug(x)`) the native runtime resolves. Unknown /
+///   `Plan`-kind names fall back to a defensive `func(arg, ...)` passthrough.
 /// - `BinOp` → `lhs <op> rhs` ([`CmpOp`] → SQL operator)
 /// - `Assert` → the SC#4 named runtime assertion
 ///   `CASE WHEN <guard> THEN <inner> ELSE error('fossil_assertion_<name>:line=<N>') END`
@@ -453,11 +474,44 @@ fn render_expr(expr: &Expr<'_>, default_source: &str) -> String {
             )
         }
         Expr::Call { func, args, ty: _ } => {
+            // Render args recursively first. NOTE: this arm reads ONLY `func`
+            // and `args` — never the `ty` field — so no `TyKind::Unknown` /
+            // `InferenceId` debug text can ever be interpolated into the SQL
+            // (STATE.md no-leak rule / RESEARCH Pitfall 5). The function is
+            // looked up by name in the `&'static` STDLIB catalog (enum dispatch
+            // over `LoweringKind`, no `Box<dyn>` across the Salsa boundary).
             let rendered: Vec<String> = args
                 .iter()
                 .map(|a| render_expr(a, default_source))
                 .collect();
-            format!("{func}({})", rendered.join(", "))
+            match STDLIB.lookup(func).map(|e| &e.lowering) {
+                // A DuckDB scalar/aggregate builtin called by name:
+                // `clean.trim` → `trim(x)`, `anon.hash` → `sha256(x)`.
+                Some(LoweringKind::Builtin { duckdb_name }) => {
+                    format!("{duckdb_name}({})", rendered.join(", "))
+                }
+                // An inline SQL form (CAST / strptime / json_extract / literal /
+                // ...): `parse.integer` → `CAST(x AS BIGINT)`.
+                Some(LoweringKind::Inline(form)) => render_inline(form, &rendered),
+                // A native Rust UDF: render the registered call name so the
+                // native runtime (05-03) resolves it and the playground can
+                // disable it: `clean.slug` → `fossil_slug(x)`.
+                Some(LoweringKind::Udf { udf_name }) => {
+                    format!("{udf_name}({})", rendered.join(", "))
+                }
+                // `Plan`-kind entries (the `seq/` operator family + `io/`
+                // sources) are MIR ops, NOT scalar `Expr::Call`s — they are
+                // surface-unreachable in v0.1 (ADR-0009) and never reach this
+                // arm in practice. Render defensively as a passthrough rather
+                // than panicking inside the tracked query.
+                Some(LoweringKind::Plan(_)) => {
+                    format!("{func}({})", rendered.join(", "))
+                }
+                // Unknown function: defensive passthrough (a malformed graph;
+                // never produced by `lower_to_mir`, which only emits registered
+                // calls).
+                None => format!("{func}({})", rendered.join(", ")),
+            }
         }
         Expr::BinOp {
             op,
@@ -489,6 +543,55 @@ fn render_expr(expr: &Expr<'_>, default_source: &str) -> String {
             let guard = assert_guard_sql(name, &inner_sql);
             ast::render_assert(name, *span_line, &guard, &inner_sql)
         }
+    }
+}
+
+/// Render an [`InlineForm`] (a `pure_sql` stdlib call that compiles to an inline
+/// SQL expression, not a named function call) over its already-rendered
+/// arguments.
+///
+/// Covers every [`InlineForm`] variant the 05-01 catalog defines:
+/// - [`InlineForm::Cast`] → `CAST(<a0> AS <sql_type>)` (`parse.integer` →
+///   `CAST(x AS BIGINT)`, `parse.float` → `DOUBLE`, `parse.decimal` →
+///   `DECIMAL(38,18)`).
+/// - [`InlineForm::Concat`] → the args joined with ` || ` (`core.triple`).
+/// - [`InlineForm::LiteralStr`] → a fixed `'<value>'` literal, IGNORING args
+///   (`anon.redact` → `'[REDACTED]'`). The value is single-quote-escaped.
+/// - [`InlineForm::SplitPart`] → `split_part(<args>)` (`parse.csv_row`).
+/// - [`InlineForm::JsonExtract`] → `json_extract(<a0>, <a1>)` (`parse.json`;
+///   a single-arg call degrades to `json_extract(<a0>)` defensively).
+/// - [`InlineForm::BlankNode`] → `'_:bnode_' || <a0>` (`core.blank`).
+/// - [`InlineForm::RequireNonNull`] → `CASE WHEN <a0> IS NULL THEN
+///   error('fossil_require_null') ELSE <a0> END` (`core.require`).
+/// - [`InlineForm::Identity`] → the single argument verbatim (`core.iri` /
+///   `core.literal` / `core.typed` / `core.lang` — the datatype/lang annotation
+///   rides a side column, not this scalar expression).
+///
+/// Like the Call arm, this reads only the rendered argument strings and the
+/// form's own fixed SQL text — never any type text — so it cannot leak
+/// `TyKind::Unknown` / `InferenceId` into the SQL (RESEARCH Pitfall 5).
+fn render_inline(form: &InlineForm, args: &[String]) -> String {
+    // A safe argument accessor: a malformed (wrong-arity) call degrades to an
+    // empty fragment rather than panicking inside the tracked query.
+    let arg = |i: usize| args.get(i).map_or("", String::as_str);
+    match form {
+        InlineForm::Cast { sql_type } => format!("CAST({} AS {sql_type})", arg(0)),
+        InlineForm::Concat => args.join(" || "),
+        InlineForm::LiteralStr { value } => format!("'{}'", value.replace('\'', "''")),
+        InlineForm::SplitPart => format!("split_part({})", args.join(", ")),
+        InlineForm::JsonExtract => {
+            if args.len() >= 2 {
+                format!("json_extract({}, {})", arg(0), arg(1))
+            } else {
+                format!("json_extract({})", arg(0))
+            }
+        }
+        InlineForm::BlankNode => format!("'_:bnode_' || {}", arg(0)),
+        InlineForm::RequireNonNull => {
+            let a0 = arg(0);
+            format!("CASE WHEN {a0} IS NULL THEN error('fossil_require_null') ELSE {a0} END")
+        }
+        InlineForm::Identity => arg(0).to_string(),
     }
 }
 

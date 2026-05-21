@@ -15,6 +15,11 @@ workspace = true
 fossil-base = { path = "../fossil-base" }
 fossil-hir  = { path = "../fossil-hir" }
 fossil-mir  = { path = "../fossil-mir" }
+# The stdlib classification catalog (05-01). Held behind a LazyLock static and
+# consulted by render_expr's Expr::Call arm — enum dispatch over LoweringKind,
+# never a Box<dyn> across the Salsa boundary (ADR-0015 / CLAUDE.md hard rule).
+# WASM-clean (no native deps): joins the 6-crate WASM gate transitively here.
+fossil-registry = { path = "../fossil-registry" }
 salsa       = { workspace = true }
 # sqlparser is a workspace dep wired in for Phase 4 readiness; Phase 1 codegen
 # uses hand-formatted SQL templates per RESEARCH.md Pitfall 6 (no full COPY
