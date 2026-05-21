@@ -85,6 +85,65 @@ impl FossilPlayground {
         };
         serde_wasm_bindgen::to_value(&result).map_err(JsError::from)
     }
+
+    /// Return the stdlib classification manifest as a JS array of
+    /// `{ name, wasm_class }` objects (STDL-07).
+    ///
+    /// `wasm_class` is the string `"pure_sql"` or `"native_udf_only"`. The
+    /// playground reads this once at startup to render `native_udf_only`
+    /// functions as disabled with a "native-only — unavailable in the browser"
+    /// tooltip (SC#1 playground half). `DuckDB`-WASM cannot register the Rust
+    /// UDFs those functions need (Pitfall 3), so the classification is the
+    /// authority on what is runnable in-browser.
+    ///
+    /// This is pure read-only data projected from the `&'static`-ready
+    /// `fossil_registry::FunctionRegistry` — no `DuckDB`, no native UDF code,
+    /// WASM-clean.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error only if the manifest fails to serialize to `JsValue`.
+    pub fn classification(&self) -> Result<JsValue, JsError> {
+        let manifest = stdlib_classification();
+        serde_wasm_bindgen::to_value(&manifest).map_err(JsError::from)
+    }
+}
+
+/// One stdlib function's WASM classification (STDL-07). Serialized to a JS
+/// object `{ name, wasm_class }` for the playground.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FnClassification {
+    /// Fully-qualified dotted name (e.g. `"clean.slug"`, `"clean.trim"`).
+    pub name: String,
+    /// `"pure_sql"` (runs in the browser) or `"native_udf_only"` (disabled).
+    pub wasm_class: String,
+}
+
+/// Project the full stdlib registry into the serializable classification
+/// manifest: every function name + its `wasm_class` string.
+///
+/// Read directly from `fossil_registry::FunctionRegistry::stdlib_default()`,
+/// the single source of truth (SC#1 — the playground and the native UDFs agree
+/// on which functions are `native_udf_only`).
+#[must_use]
+pub fn stdlib_classification() -> Vec<FnClassification> {
+    use fossil_registry::WasmClass;
+
+    let registry = fossil_registry::FunctionRegistry::stdlib_default();
+    let mut manifest: Vec<FnClassification> = registry
+        .iter()
+        .map(|entry| FnClassification {
+            name: entry.name.to_string(),
+            wasm_class: match entry.wasm_class {
+                WasmClass::PureSql => "pure_sql".to_string(),
+                WasmClass::NativeUdfOnly => "native_udf_only".to_string(),
+            },
+        })
+        .collect();
+    // Stable order so the manifest (and any consumer snapshot) is deterministic;
+    // the registry iterates a HashMap (unspecified order).
+    manifest.sort_by(|a, b| a.name.cmp(&b.name));
+    manifest
 }
 
 impl Default for FossilPlayground {

@@ -1208,6 +1208,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-hir",
  "fossil-mir",
+ "fossil-registry",
  "fossil-syntax",
  "getrandom 0.3.4",
  "js-sys",
