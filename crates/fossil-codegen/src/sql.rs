@@ -33,7 +33,7 @@ use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use fossil_hir::MappingLoc;
-use fossil_mir::op::{AggFn, CmpOp, JoinKind};
+use fossil_mir::op::{AggFn, CmpOp, JoinKind, SourceFormat};
 use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
 use fossil_registry::{FunctionRegistry, InlineForm, LoweringKind};
 
@@ -148,15 +148,19 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
         match op {
             Op::Source {
                 uri,
-                format: _,
+                format,
                 row_type: _,
             } => {
                 let view_name = derive_view_name(uri);
-                writeln!(
-                    sql,
-                    "CREATE VIEW {view_name} AS\nSELECT * FROM read_csv_auto('{uri}', sample_size=-1);"
-                )
-                .expect("writing to a String never fails");
+                // STDL-06: the DuckDB table function is selected by the source
+                // FORMAT. `read_csv_auto('{uri}', sample_size=-1)` is UNCHANGED
+                // for Csv (byte-identical hello.fossil); Json/Parquet add their
+                // own readers. All three run identically on native DuckDB and
+                // DuckDB-WASM (SC#2 — codegen emits the SQL text; execution is
+                // DuckDB's job).
+                let reader = source_reader(*format, uri);
+                writeln!(sql, "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};")
+                    .expect("writing to a String never fails");
                 rel_ref[idx] = Some(view_name.clone());
                 qualifier[idx] = Some(view_name);
             }
@@ -662,6 +666,26 @@ const fn cmp_op_sql(op: CmpOp) -> &'static str {
         CmpOp::Ge => ">=",
         CmpOp::And => "AND",
         CmpOp::Or => "OR",
+    }
+}
+
+/// Render the `DuckDB` table-function call that reads a source of `format` at
+/// `uri` (STDL-06). This is the FROM-clause expression of the source view's
+/// `SELECT * FROM <reader>`:
+/// - [`SourceFormat::Csv`] → `read_csv_auto('{uri}', sample_size=-1)` (the
+///   Phase-1 string verbatim — `hello.fossil` stays byte-identical).
+/// - [`SourceFormat::Json`] → `read_json_auto('{uri}')`.
+/// - [`SourceFormat::Parquet`] → `read_parquet('{uri}')`.
+///
+/// All three are DuckDB-portable table functions that behave identically on
+/// native DuckDB and DuckDB-WASM (SC#2 — native↔WASM byte-identity is verified
+/// end-to-end by plan 05-09's parity test).
+#[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names
+fn source_reader(format: SourceFormat, uri: &str) -> String {
+    match format {
+        SourceFormat::Csv => format!("read_csv_auto('{uri}', sample_size=-1)"),
+        SourceFormat::Json => format!("read_json_auto('{uri}')"),
+        SourceFormat::Parquet => format!("read_parquet('{uri}')"),
     }
 }
 

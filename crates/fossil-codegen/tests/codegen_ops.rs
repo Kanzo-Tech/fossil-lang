@@ -64,6 +64,8 @@ fn codegen_case<'db>(db: &'db dyn fossil_base::Db, case: Case) -> fossil_codegen
         11 => aggregate_sum_ops(db),
         12 => multi_triple_emit_sink_ops(db),
         13 => assert_iri_template_unbound_ops(db),
+        14 => json_source_ops(db),
+        15 => parquet_source_ops(db),
         other => panic!("unknown case {other}"),
     };
     codegen_graph(db, MirGraph::new(db, ops))
@@ -93,11 +95,47 @@ fn string_record<'db>(db: &'db dyn fossil_base::Db, names: &[&str]) -> Ty<'db> {
 }
 
 fn source<'db>(db: &'db dyn fossil_base::Db, uri: &str, cols: &[&str]) -> Op<'db> {
+    source_with_format(db, uri, cols, SourceFormat::Csv)
+}
+
+fn source_with_format<'db>(
+    db: &'db dyn fossil_base::Db,
+    uri: &str,
+    cols: &[&str],
+    format: SourceFormat,
+) -> Op<'db> {
     Op::Source {
         uri: SmolStr::from(uri),
-        format: SourceFormat::Csv,
+        format,
         row_type: string_record(db, cols),
     }
+}
+
+/// STDL-06: a `Json`-format source feeding a `TripleEmit` + `Sink`. Snapshots
+/// the `CREATE VIEW ... read_json_auto('a.json')` reader (the only difference
+/// from the csv path).
+fn json_source_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    let mut ops = vec![source_with_format(
+        db,
+        "a.json",
+        &["id", "name"],
+        SourceFormat::Json,
+    )];
+    ops.extend(emit_and_sink(0, "a"));
+    ops
+}
+
+/// STDL-06: a `Parquet`-format source feeding a `TripleEmit` + `Sink`.
+/// Snapshots the `CREATE VIEW ... read_parquet('a.parquet')` reader.
+fn parquet_source_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
+    let mut ops = vec![source_with_format(
+        db,
+        "a.parquet",
+        &["id", "name"],
+        SourceFormat::Parquet,
+    )];
+    ops.extend(emit_and_sink(0, "a"));
+    ops
 }
 
 /// A `TripleEmit(subject = iri, predicate, object = <obj_src>.name)` over
@@ -505,6 +543,37 @@ fn aggregate_sum() {
 #[test]
 fn multi_triple_emit_sink() {
     insta::assert_snapshot!("multi_triple_emit_sink", sql_for(12));
+}
+
+// --------------------------------------------------------------------------
+// Snapshot — STDL-06 io source formats (read_json_auto / read_parquet).
+// --------------------------------------------------------------------------
+
+/// `io.json` source → `CREATE VIEW a AS SELECT * FROM read_json_auto('a.json')`.
+#[test]
+fn json_source_reader() {
+    let sql = sql_for(14);
+    assert!(
+        sql.contains("read_json_auto('a.json')"),
+        "expected read_json_auto reader, got:\n{sql}"
+    );
+    assert!(
+        !sql.contains("read_csv_auto"),
+        "csv reader leaked into json source SQL:\n{sql}"
+    );
+    insta::assert_snapshot!("json_source", sql);
+}
+
+/// `io.parquet` source → `CREATE VIEW a AS SELECT * FROM
+/// read_parquet('a.parquet')`.
+#[test]
+fn parquet_source_reader() {
+    let sql = sql_for(15);
+    assert!(
+        sql.contains("read_parquet('a.parquet')"),
+        "expected read_parquet reader, got:\n{sql}"
+    );
+    insta::assert_snapshot!("parquet_source", sql);
 }
 
 // --------------------------------------------------------------------------

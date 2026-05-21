@@ -1,0 +1,13 @@
+---
+source: crates/fossil-codegen/tests/codegen_ops.rs
+expression: sql
+---
+CREATE VIEW a AS
+SELECT * FROM read_json_auto('a.json');
+COPY (
+    SELECT
+        a.iri AS subject,
+        'https://example.org/name' AS predicate,
+        a.name AS object
+    FROM a
+) TO 'output.parquet' (FORMAT PARQUET);
