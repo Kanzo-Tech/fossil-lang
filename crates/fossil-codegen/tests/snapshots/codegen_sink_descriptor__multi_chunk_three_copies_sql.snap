@@ -1,0 +1,25 @@
+---
+source: crates/fossil-codegen/tests/codegen_sink_descriptor.rs
+assertion_line: 286
+expression: sql
+---
+CREATE VIEW people AS
+SELECT * FROM read_csv_auto('people.csv', sample_size=-1);
+COPY (
+    SELECT * EXCLUDE (_rn) FROM (
+SELECT *, row_number() OVER (ORDER BY iri) AS _rn FROM (SELECT DISTINCT ON (iri) iri AS id, name FROM (SELECT 'http://example.org/' || people.id AS iri, people.name AS name FROM people) AS base ORDER BY iri) AS _src
+    ) AS _chunked
+    WHERE _rn BETWEEN 1 AND 1
+) TO 'vertex/person/chunk0.parquet' (FORMAT PARQUET);
+COPY (
+    SELECT * EXCLUDE (_rn) FROM (
+SELECT *, row_number() OVER (ORDER BY iri) AS _rn FROM (SELECT DISTINCT ON (iri) iri AS id, name FROM (SELECT 'http://example.org/' || people.id AS iri, people.name AS name FROM people) AS base ORDER BY iri) AS _src
+    ) AS _chunked
+    WHERE _rn BETWEEN 2 AND 2
+) TO 'vertex/person/chunk1.parquet' (FORMAT PARQUET);
+COPY (
+    SELECT * EXCLUDE (_rn) FROM (
+SELECT *, row_number() OVER (ORDER BY iri) AS _rn FROM (SELECT DISTINCT ON (iri) iri AS id, name FROM (SELECT 'http://example.org/' || people.id AS iri, people.name AS name FROM people) AS base ORDER BY iri) AS _src
+    ) AS _chunked
+    WHERE _rn BETWEEN 3 AND 3
+) TO 'vertex/person/chunk2.parquet' (FORMAT PARQUET);

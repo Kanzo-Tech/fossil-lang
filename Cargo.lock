@@ -1068,9 +1068,11 @@ name = "fossil-codegen"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
+ "fossil-descriptors-output",
  "fossil-hir",
  "fossil-mir",
  "fossil-registry",
+ "fossil-sinks",
  "insta",
  "salsa",
  "smol_str",

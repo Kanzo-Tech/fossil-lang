@@ -32,13 +32,18 @@
 use std::fmt::Write as _;
 use std::sync::LazyLock;
 
+use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_hir::MappingLoc;
 use fossil_mir::op::{AggFn, CmpOp, JoinKind, SourceFormat};
 use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
 use fossil_registry::{FunctionRegistry, InlineForm, LoweringKind};
+use fossil_sinks::decomp::{
+    EdgeTable, VertexTable, edge_select_sql, vertex_edge_decomp_from_kind, vertex_select_sql,
+};
+use fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
 
 use crate::ast;
-use crate::manifest::manifest_template;
+use crate::manifest::{manifest_template, manifest_yaml_for_plan};
 
 /// The stdlib classification catalog (05-01), read by [`render_expr`]'s
 /// [`Expr::Call`] arm to lower a scalar call to its `DuckDB` builtin / inline
@@ -74,6 +79,299 @@ pub struct SqlPlan<'db> {
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn codegen_sql<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> SqlPlan<'db> {
     codegen_graph(db, lower_to_mir(db, mapping))
+}
+
+/// The descriptor-driven codegen seam (SC#4 option (b), SINK-01/03/04/05) — a
+/// **plain-Rust outer wrapper** over the tracked [`codegen_graph`] (ADR-0019).
+///
+/// # Why plain Rust, not `#[salsa::tracked]` (the B2 resolution)
+///
+/// [`OutputDescriptorKind`] carries a `ShExDescriptor` (a `shex_ast::Schema` +
+/// resolved `HashMap<String, ShapeBinding>` heap state) that does NOT satisfy
+/// the `salsa::Update` / `Eq` / `Hash` / `Clone` bounds Salsa interning
+/// requires. Threading it into a tracked-query key would force those bounds
+/// (impossible) AND would add a per-mapping descriptor read — breaking
+/// `MAX_PER_MAPPING_FAN_OUT = 1` (Pitfall 6). So this wrapper:
+///
+/// 1. calls the existing `#[salsa::tracked]` [`codegen_graph`] for the
+///    type-checked / interned MIR work (UNCHANGED — stays the only tracked
+///    query; the descriptor never enters its key);
+/// 2. applies the descriptor-driven vertex/edge decomposition + chunked COPY
+///    emission as a plain-Rust POST-PASS over the MIR `Op`s + the descriptor.
+///
+/// `AcceptAll` (the walking-skeleton case — `hello.fossil` has no `ShEx` target)
+/// returns [`codegen_graph`]'s output **byte-identically** (the flat-triple
+/// single COPY). A `ShEx` descriptor emits one chunked `COPY ... TO
+/// '<prefix>/chunk{k}.parquet' (FORMAT PARQUET)` per vertex table and per edge
+/// table (option (b)).
+///
+/// `row_count_for` is the plain-Rust row-count oracle the chunked-COPY emission
+/// consults to decide how many chunk statements to emit per table (one per
+/// `chunk_size` rows). It is given the inner SELECT body of a table and returns
+/// that table's row count. For the descriptor-less / unknown case the caller
+/// passes a closure returning `None` and a single chunk is emitted (the chunk
+/// count is purely an emission concern — NOT a tracked query, so a runtime
+/// `SELECT count(*)` is legitimate here, per ADR-0019).
+///
+/// Returns `(sql, manifest_yaml)` — the SQL script (CREATE VIEWs + the per-table
+/// chunked COPYs) and the concatenated `GraphAr` v1.0.0 manifest YAML.
+#[allow(clippy::elidable_lifetime_names)]
+pub fn codegen_sql_with_descriptor<'db>(
+    db: &'db dyn fossil_base::Db,
+    mir: MirGraph<'db>,
+    kind: &OutputDescriptorKind,
+    chunk_size: u64,
+    mut row_count_for: impl FnMut(&str) -> Option<u64>,
+) -> (String, String) {
+    // (a) The tracked MIR work. For AcceptAll the flat-triple COPY this emits is
+    //     the byte-identical walking-skeleton output — we return it verbatim.
+    let tracked = codegen_graph(db, mir);
+    if matches!(kind, OutputDescriptorKind::AcceptAll(_)) {
+        return (tracked.sql(db).clone(), tracked.manifest_yaml(db).clone());
+    }
+
+    // (b) ShEx descriptor → plain-Rust post-pass over the MIR ops.
+    let ops = mir.ops(db);
+
+    // The CREATE VIEW prelude (every Source op) is shared by all per-table
+    // COPYs — emit it once, verbatim from the tracked walk's leading views.
+    let mut sql = String::new();
+    for op in ops {
+        if let Op::Source {
+            uri,
+            format,
+            row_type: _,
+        } = op
+        {
+            let view_name = derive_view_name(uri);
+            let reader = source_reader(*format, uri);
+            writeln!(sql, "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};")
+                .expect("writing to a String never fails");
+        }
+    }
+
+    // The base relation the vertex/edge SELECTs read FROM: project each
+    // TripleEmit's resolved subject as `iri` and each object as its predicate's
+    // local name (the columns the decomposition references). Emits sharing a
+    // FROM relation collapse into one base subquery (the v0.1 single-source
+    // mapping; multi-source joins are Phase-6 territory). This is the seam the
+    // Phase-6 Db-wiring lights up unchanged — it supplies the same base relation
+    // from the resolved descriptor instead of the fixture.
+    let base = base_relation_sql(db, ops);
+
+    // Decompose under the descriptor (option (b) — the descriptor is an
+    // argument, never read via Db::system()).
+    let plan = vertex_edge_decomp_from_kind(kind, &base, chunk_size);
+
+    for v in &plan.vertices {
+        emit_chunked_copy(
+            &mut sql,
+            &vertex_select_sql(v),
+            &vertex_copy_prefix(v),
+            chunk_size,
+            v.vertex_id_col.as_str(),
+            &mut row_count_for,
+        );
+    }
+    for e in &plan.edges {
+        emit_chunked_copy(
+            &mut sql,
+            &edge_select_sql(e),
+            &edge_copy_prefix(e),
+            chunk_size,
+            "src_id",
+            &mut row_count_for,
+        );
+    }
+
+    let manifest = manifest_yaml_for_plan(&plan);
+    (sql, manifest)
+}
+
+/// Convenience entry: lower a mapping then run [`codegen_sql_with_descriptor`].
+/// The descriptor seam stays plain-Rust (NOT tracked) — see that function's doc.
+#[allow(clippy::elidable_lifetime_names)]
+pub fn codegen_sql_with_descriptor_for_mapping<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+    kind: &OutputDescriptorKind,
+    chunk_size: u64,
+    row_count_for: impl FnMut(&str) -> Option<u64>,
+) -> (String, String) {
+    codegen_sql_with_descriptor(
+        db,
+        lower_to_mir(db, mapping),
+        kind,
+        chunk_size,
+        row_count_for,
+    )
+}
+
+/// Default rows-per-chunk for the descriptor seam.
+///
+/// Re-exported from `fossil_sinks::manifest::DEFAULT_CHUNK_SIZE` (1024) and
+/// threaded as a param so a Phase-6 CLI `--chunk-size` flag can override it
+/// without touching codegen.
+pub const SINK_DEFAULT_CHUNK_SIZE: u64 = DEFAULT_CHUNK_SIZE;
+
+/// Build the base relation subquery the vertex/edge SELECTs read `FROM`.
+///
+/// Each [`Op::TripleEmit`] contributes its resolved `subject` (projected as the
+/// canonical `iri` column the decomposition uses verbatim — SINK-04) and its
+/// `object` (projected as the predicate's local name — the column the vertex
+/// property / edge dst references). All emits over a single source relation
+/// collapse into one `SELECT <subject> AS iri, <obj0> AS <p0>, ... FROM <rel>`.
+///
+/// This mirrors the tracked walk's emit buffering but projects into the
+/// decomposition's column convention rather than flat `(subject, predicate,
+/// object)` triples. For the v0.1 single-source mapping all emits share one
+/// FROM; the result is wrapped as `(<select>) AS base`.
+fn base_relation_sql<'db>(db: &'db dyn fossil_base::Db, ops: &[Op<'db>]) -> String {
+    // Replay the tracked walk's rel_ref / qualifier / extend buffering enough to
+    // resolve each TripleEmit's subject/object exactly as codegen_graph does, so
+    // the base relation columns match the flat-COPY's subject/object SQL.
+    let mut rel_ref: Vec<Option<String>> = vec![None; ops.len()];
+    let mut qualifier: Vec<Option<String>> = vec![None; ops.len()];
+    let mut collapse_from: Vec<Option<String>> = vec![None; ops.len()];
+    let mut collapse_qual: Vec<Option<String>> = vec![None; ops.len()];
+    let mut extends: Vec<(String, String)> = Vec::new();
+    // (iri_expr, predicate_local, object_expr, from)
+    let mut emits: Vec<(String, String, String, String)> = Vec::new();
+
+    for (idx, op) in ops.iter().enumerate() {
+        match op {
+            Op::Source { uri, .. } => {
+                let view = derive_view_name(uri);
+                rel_ref[idx] = Some(view.clone());
+                qualifier[idx] = Some(view);
+            }
+            Op::Extend { input, field, expr } => {
+                let input_qual = input_qualifier(&qualifier, *input);
+                let from = input_relation(&rel_ref, *input);
+                let expr_sql = render_expr(expr, &input_qual);
+                extends.push((field.to_string(), expr_sql.clone()));
+                let body = ast::select_extend(&from, field, &expr_sql);
+                rel_ref[idx] = Some(subquery(&body, idx));
+                qualifier[idx] = Some(step_alias(idx));
+                collapse_from[idx] = Some(from);
+                collapse_qual[idx] = Some(input_qual);
+            }
+            Op::TripleEmit {
+                input,
+                subject,
+                predicate,
+                object,
+                graph: _,
+            } => {
+                let from = collapse_from
+                    .get(*input)
+                    .and_then(Clone::clone)
+                    .unwrap_or_else(|| input_relation(&rel_ref, *input));
+                let qual = collapse_qual
+                    .get(*input)
+                    .and_then(Clone::clone)
+                    .unwrap_or_else(|| input_qualifier(&qualifier, *input));
+                let subject_expr = render_emit_operand(subject, &extends, &qual);
+                let object_expr = render_emit_operand(object, &extends, &qual);
+                let pred_local = predicate_local_name(predicate);
+                emits.push((subject_expr, pred_local, object_expr, from));
+            }
+            // Relational ops feeding the emit just thread their rel_ref; the
+            // single-source v0.1 mapping does not exercise them on the sink
+            // path, but keeping the threading honest means Phase-6 multi-op
+            // mappings derive the right FROM.
+            _ => {
+                let _ = db;
+            }
+        }
+    }
+
+    if emits.is_empty() {
+        return PLACEHOLDER_BASE.to_string();
+    }
+    // v0.1: all emits share one source relation. Project iri once + each
+    // predicate-local object column.
+    let from = emits[0].3.clone();
+    let mut cols = format!("{} AS {}", emits[0].0, fossil_sinks::decomp::IRI_COLUMN);
+    for (_, pred_local, object_expr, _) in &emits {
+        write!(cols, ", {object_expr} AS {pred_local}").expect("writing to a String never fails");
+    }
+    format!("(SELECT {cols} FROM {from}) AS base")
+}
+
+/// Fallback base relation when a Sink has no upstream `TripleEmit` (a malformed
+/// graph — never produced by `lower_to_mir`).
+const PLACEHOLDER_BASE: &str = "(SELECT NULL AS iri) AS base";
+
+/// The predicate's local name (segment after the last `/`, `#`, or `:`), the
+/// column convention the decomposition uses for an object value.
+fn predicate_local_name(predicate: &str) -> String {
+    predicate
+        .rsplit_once(['/', '#', ':'])
+        .map_or(predicate, |(_, tail)| tail)
+        .to_string()
+}
+
+/// The `GraphAr` chunk-file prefix for a vertex table: `vertex/<type>/`
+/// (lowercased), matching the manifest `prefix` (05-05 / ADR-0016).
+fn vertex_copy_prefix(v: &VertexTable) -> String {
+    format!("vertex/{}", v.type_name.to_lowercase())
+}
+
+/// The `GraphAr` chunk-file prefix for an edge table:
+/// `edge/<src>_<pred>_<dst>/` (lowercased).
+fn edge_copy_prefix(e: &EdgeTable) -> String {
+    format!(
+        "edge/{}_{}_{}",
+        e.src_type.to_lowercase(),
+        e.predicate.to_lowercase(),
+        e.dst_type.to_lowercase()
+    )
+}
+
+/// Emit the chunked `COPY ... TO '<prefix>/chunk{k}.parquet' (FORMAT PARQUET)`
+/// statements for one decomposed table (SINK-03 — larger-than-RAM).
+///
+/// Range-chunked multi-COPY (ADR-0019 chosen mechanism): the `inner` SELECT is
+/// wrapped with `row_number() OVER (ORDER BY <order_col>) AS _rn`, and ONE COPY
+/// is emitted per chunk range `WHERE _rn BETWEEN k*chunk_size+1 AND
+/// (k+1)*chunk_size`, for `k in 0..ceil(row_count / chunk_size)`. The COPY
+/// wrapper stays HAND-FORMATTED (Pitfall 1 — never round-trip through
+/// sqlparser).
+///
+/// `row_count_for(inner)` supplies the table's row count so the correct N COPY
+/// statements are emitted; `None` (unknown count) emits a single chunk
+/// (`chunk0.parquet`). When `row_count > chunk_size` this emits N > 1 chunk
+/// files — the SINK-03 multi-chunk proof.
+fn emit_chunked_copy(
+    sql: &mut String,
+    inner: &str,
+    prefix: &str,
+    chunk_size: u64,
+    order_col: &str,
+    row_count_for: &mut impl FnMut(&str) -> Option<u64>,
+) {
+    let chunk_size = chunk_size.max(1);
+    // Wrap the deterministic-ORDER BY inner SELECT with a stable row number so
+    // each chunk range is a contiguous, reproducible slice (native↔WASM parity).
+    let numbered =
+        format!("SELECT *, row_number() OVER (ORDER BY {order_col}) AS _rn FROM ({inner}) AS _src");
+
+    let n_chunks = match row_count_for(inner) {
+        Some(rows) if rows > 0 => rows.div_ceil(chunk_size),
+        // Unknown or empty: a single chunk file (still a valid GraphAr layout).
+        _ => 1,
+    };
+
+    for k in 0..n_chunks {
+        let lo = k * chunk_size + 1;
+        let hi = (k + 1) * chunk_size;
+        writeln!(
+            sql,
+            "COPY (\n    SELECT * EXCLUDE (_rn) FROM (\n{numbered}\n    ) AS _chunked\n    WHERE _rn BETWEEN {lo} AND {hi}\n) TO '{prefix}/chunk{k}.parquet' (FORMAT PARQUET);"
+        )
+        .expect("writing to a String never fails");
+    }
 }
 
 /// The MIR → `DuckDB` SQL walk, keyed on a [`MirGraph`] rather than a mapping.

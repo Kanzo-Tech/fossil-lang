@@ -20,6 +20,15 @@ fossil-mir  = { path = "../fossil-mir" }
 # never a Box<dyn> across the Salsa boundary (ADR-0015 / CLAUDE.md hard rule).
 # WASM-clean (no native deps): joins the 6-crate WASM gate transitively here.
 fossil-registry = { path = "../fossil-registry" }
+# 05-08 (SINK-03): the ShEx vertex/edge decomposition (SinkPlan, vertex/edge
+# select SQL) the Op::Sink arm wraps in chunked COPY. fossil-sinks is the 7th
+# WASM-gated crate (arrow-schema only; ADR-0017) and pulls
+# fossil-descriptors-output → shex_ast — both confirmed WASM-clean by the
+# fail-fast pre-check (ADR-0018 / ADR-0019). The OutputDescriptorKind it exposes
+# is NEVER threaded into a Salsa key (the descriptor seam is a plain-Rust outer
+# wrapper — codegen_sql_with_descriptor — per ADR-0019).
+fossil-sinks = { path = "../fossil-sinks" }
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 salsa       = { workspace = true }
 # sqlparser is a workspace dep wired in for Phase 4 readiness; Phase 1 codegen
 # uses hand-formatted SQL templates per RESEARCH.md Pitfall 6 (no full COPY
@@ -35,3 +44,8 @@ insta = { workspace = true }
 # MirGraphs by hand for the source-unreachable operators (ADR-0009), so the
 # test crate needs the MIR + HIR (Ty/Record) + base (Db) construction surface.
 smol_str = { workspace = true }
+# 05-08 descriptor-seam snapshots (tests/codegen_sink_descriptor.rs): drive the
+# plain-Rust codegen_sql_with_descriptor wrapper with a hand-built MirGraph + a
+# fixture ShExDescriptor (option (b)), inside a salsa::tracked frame.
+salsa = { workspace = true }
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
