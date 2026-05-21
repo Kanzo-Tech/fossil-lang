@@ -19,6 +19,16 @@ workspace = true
 # 3-5 min cold-cache compile per RESEARCH.md Risk 6).
 duckdb = { workspace = true }
 
+# Native_udf_only stdlib UDF impl crates (STDL-03/05). All native-only — this
+# crate carries the wasm32 cfg-tripwire so none of these can leak into the WASM
+# gate (Pitfall 3). sha2 (hex hashing for hmac) is workspace-pinned at 0.10.
+unicode-normalization = { workspace = true }
+slug = { workspace = true }
+voca_rs = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+
 [dev-dependencies]
 # SC#1 cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
 # the canonical ordered result-set serialization + JSON writer for

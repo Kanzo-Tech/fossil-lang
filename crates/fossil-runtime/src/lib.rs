@@ -25,6 +25,8 @@ compile_error!(
 
 use duckdb::Connection;
 
+pub mod udf;
+
 /// Execute a batch of SQL statements (semicolon-delimited) on a fresh
 /// in-memory `DuckDB` connection.
 ///
@@ -35,12 +37,21 @@ use duckdb::Connection;
 /// `COPY` statement write to the process's current working directory unless
 /// the SQL embeds an absolute path.
 ///
+/// Before the batch runs, every `native_udf_only` stdlib function is
+/// registered on the connection via [`udf::register_stdlib_udfs`] (STDL-05),
+/// so a generated `fossil_slug(x)` / `fossil_validate_email(x)` /
+/// `fossil_hmac(x, k)` call resolves natively. These UDFs are unavailable in
+/// `DuckDB`-WASM — the playground reads the classification manifest and
+/// disables them in-browser (STDL-07).
+///
 /// # Errors
 ///
 /// Returns the underlying [`duckdb::Error`] if the in-memory connection
-/// cannot be opened or any statement in the batch fails to execute.
+/// cannot be opened, a UDF fails to register, or any statement in the batch
+/// fails to execute.
 pub fn execute(sql: &str) -> Result<(), duckdb::Error> {
     let conn = Connection::open_in_memory()?;
+    udf::register_stdlib_udfs(&conn)?;
     conn.execute_batch(sql)?;
     Ok(())
 }

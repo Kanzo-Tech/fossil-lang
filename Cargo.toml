@@ -57,7 +57,19 @@ arrow = "59"
 parquet = "59"
 
 # === Runtime — NATIVE ONLY ===
-duckdb = { version = "1.10502", features = ["bundled"] }
+# `vscalar` enables the scalar-UDF registration API (VScalar trait + Connection::
+# register_scalar_function) used for the native_udf_only stdlib functions in
+# fossil-runtime (STDL-03/05). Native-only crate (wasm32 cfg-tripwire) so these
+# never reach the WASM gate.
+duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
+
+# === Native Rust UDF impl crates (Phase 5 STDL-03/05 — NATIVE ONLY) ===
+# Implement the native_udf_only stdlib functions registered on the DuckDB
+# connection in fossil-runtime. NEVER referenced by a WASM-gated crate (Pitfall 3).
+unicode-normalization = "0.1"           # clean.normalize_unicode (NFC/NFD/NFKC/NFKD)
+slug = "0.1"                            # clean.slug (URL slugification)
+voca_rs = "1"                           # clean.strip_html (strip tags → text)
+hmac = "0.12"                           # anon.hmac (keyed HMAC; digest 0.10 compatible with sha2 0.10)
 
 # === LSP — NATIVE ONLY ===
 lsp-server = "0.7"
