@@ -1,0 +1,18 @@
+---
+source: crates/fossil-sinks/tests/manifest_yaml.rs
+expression: "person_vertex().to_yaml().expect(\"vertex serialization\")"
+---
+type: Person
+chunk_size: 1024
+prefix: vertex/person/
+property_groups:
+- file_type: parquet
+  properties:
+  - name: id
+    data_type: int64
+    is_primary: true
+    is_nullable: false
+  - name: name
+    data_type: string
+    is_primary: false
+version: gar/v1

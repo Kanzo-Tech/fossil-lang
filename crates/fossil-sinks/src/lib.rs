@@ -11,6 +11,13 @@
 //! Phase 5 grows the trait with `vertex_edge_decomp(plan: &MirGraph) -> SinkPlan`,
 //! `manifest(plan: &SinkPlan) -> Vec<u8>`, and `sql_for(plan: &SinkPlan) -> Vec<SqlStatement>`.
 //! Additive-only: Phase 1's two methods stay.
+//!
+//! Phase 5 (SINK-02, ADR-0016) adds the [`manifest`] module: programmatic `GraphAr` v1.0.0
+//! vertex-info/edge-info structs serialized via `serde_yaml_ng`, superseding the hand-templated
+//! [`Sink::manifest_template`] (whose `graphar_version:`/`vertex_types:` spelling conformed to no
+//! `GraphAr` reader). The codegen-side duplicate `manifest_template` is collapsed in plan 05-08.
+
+pub mod manifest;
 
 /// Output sink trait. Phase 1 surface is `name()` + `manifest_template()`.
 /// Phase 5 SINK-01..06 adds programmatic decomposition + manifest + SQL emission.
@@ -25,8 +32,13 @@ pub trait Sink: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
 
     /// Phase 1: returns a hand-templated manifest constant.
-    /// Phase 5 (SINK-01..06): programmatic generation driven by the MIR plan
-    /// + the active `OutputDescriptor` (`ShEx` → vertex/edge decomposition).
+    ///
+    /// **Superseded (SINK-02, ADR-0016):** the Phase-1 spelling (`graphar_version: 1.0.0`,
+    /// `vertex_types:`, `data_type: string`) conforms to no `GraphAr` reader. Programmatic
+    /// generation now lives in [`crate::manifest`] ([`crate::manifest::VertexInfo`] /
+    /// [`crate::manifest::EdgeInfo`] → `serde_yaml_ng`, `GraphAr` v1.0.0 field names). This method
+    /// is retained additively per the Phase-1 trait contract and is collapsed with the
+    /// codegen-side duplicate in plan 05-08.
     fn manifest_template(&self) -> String;
 }
 
