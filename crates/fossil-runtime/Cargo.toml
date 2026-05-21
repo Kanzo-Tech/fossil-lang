@@ -36,3 +36,8 @@ uuid = { workspace = true }
 # native-only anyway via the wasm32 cfg-tripwire).
 sha2 = { workspace = true }
 serde_json = { workspace = true }
+# SC#1 native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
+# per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
+# builtin fails CI on native DuckDB (Pitfall 4). fossil-registry is WASM-clean; it
+# is a dev-dep only here so the native-only runtime's wasm32 tripwire is unaffected.
+fossil-registry = { path = "../fossil-registry" }

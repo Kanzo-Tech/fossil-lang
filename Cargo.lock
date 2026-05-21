@@ -1178,6 +1178,7 @@ name = "fossil-runtime"
 version = "0.1.0"
 dependencies = [
  "duckdb",
+ "fossil-registry",
  "hmac",
  "serde_json",
  "sha2",
