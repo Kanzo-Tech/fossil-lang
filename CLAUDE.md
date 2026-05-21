@@ -25,7 +25,8 @@ cargo clippy --workspace --all-targets -- -D warnings            # lint check
 cargo deny check                                                 # advisories + licenses + bans
 cargo check --target wasm32-unknown-unknown \
     -p fossil-base -p fossil-syntax -p fossil-hir \
-    -p fossil-mir -p fossil-codegen -p fossil-sinks -p fossil-wasm  # WASM gate (7 crates)
+    -p fossil-mir -p fossil-codegen -p fossil-sinks \
+    -p fossil-ide -p fossil-ide-db -p fossil-wasm  # WASM gate (9 crates)
 ```
 
 CI runs all of the above on every PR. Locally, the WASM gate is the highest-leverage
@@ -34,7 +35,7 @@ check — run it before any commit that touches a compiler-core crate.
 ## Hard Rules
 
 - **WASM gate is non-negotiable.** A PR that breaks `cargo check --target wasm32-unknown-unknown`
-  on any of the 6 gated compiler crates does not merge. No exceptions, no `continue-on-error`.
+  on any of the 9 gated compiler crates does not merge. No exceptions, no `continue-on-error`.
 - **Forbidden crates** (banned in `deny.toml`): `serde_yml` (RUSTSEC-2025-0068; use `serde_yaml_ng`),
   `tower-lsp` (unmaintained; use `lsp-server` per ADR-0001), `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).

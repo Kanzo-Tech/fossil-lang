@@ -67,6 +67,9 @@ jobs:
             -p fossil-hir \
             -p fossil-mir \
             -p fossil-codegen \
+            -p fossil-sinks \
+            -p fossil-ide \
+            -p fossil-ide-db \
             -p fossil-wasm
       - name: cargo build --release for fossil-wasm (smoke)
         run: cargo build --target wasm32-unknown-unknown --release -p fossil-wasm
