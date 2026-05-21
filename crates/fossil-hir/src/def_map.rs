@@ -58,6 +58,17 @@ pub struct SourceEntry<'db> {
     /// `def_map` query is file-keyed and structurally stable across
     /// body-only edits (verified by `tests/invalidation_regression.rs`).
     pub schema_arg: Option<SmolStr>,
+    /// Dotted name of the source constructor (`io.csv` / `io.json` /
+    /// `io.parquet`), if a `CALL_EXPR`-shaped RHS could be parsed. The
+    /// constructor name selects the source FORMAT downstream
+    /// (`fossil-mir::lower` maps it to `SourceFormat`). Like [`Self::schema_arg`]
+    /// this is a SIGNATURE-only `SOURCE_DEF`-header datum (Phase 5 STDL-06).
+    pub constructor: Option<SmolStr>,
+    /// The first POSITIONAL string argument of the constructor — the source
+    /// URI (`io.csv("examples/users.csv")` → `examples/users.csv`). Resolved by
+    /// `fossil-mir::lower` into `Op::Source.uri`, replacing the Phase-1
+    /// hardcoded `examples/users.csv`. Signature-only (Phase 5 STDL-06).
+    pub uri: Option<SmolStr>,
 }
 
 #[salsa::tracked(debug)]
@@ -101,6 +112,24 @@ impl<'db> DefMap<'db> {
             .iter()
             .find(|e| e.name.as_str() == name)
             .and_then(|e| e.schema_arg.clone())
+    }
+
+    /// Look up the `(constructor, uri)` pair bound to a source name (e.g.
+    /// `users` → `("io.csv", "examples/users.csv")`). Used by Phase 5
+    /// `fossil-mir::lower` (STDL-06) to resolve `Op::Source`'s format + URI
+    /// from the real binding instead of the Phase-1 hardcode. Either component
+    /// is `None` when the `SOURCE_DEF` RHS is not a recognisable
+    /// `io.*("...")` call.
+    #[must_use]
+    pub fn lookup_source_call(
+        self,
+        db: &'db dyn fossil_base::Db,
+        name: &str,
+    ) -> Option<(Option<SmolStr>, Option<SmolStr>)> {
+        self.sources(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .map(|e| (e.constructor.clone(), e.uri.clone()))
     }
 }
 
@@ -147,10 +176,13 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
             SyntaxKind::SOURCE_DEF => {
                 if let Some(name) = parse_source_name(&item) {
                     let schema_arg = parse_source_schema_arg(&item);
+                    let (constructor, uri) = parse_source_call(&item);
                     sources.push(SourceEntry {
                         name,
                         loc: SourceLoc::new(db, file, source_idx),
                         schema_arg,
+                        constructor,
+                        uri,
                     });
                     source_idx += 1;
                 }
@@ -238,6 +270,87 @@ fn parse_source_schema_arg(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> 
     None
 }
 
+/// Extract the source constructor's dotted callee name and first positional
+/// string argument from a `SOURCE_DEF` node:
+/// `users := io.csv("examples/users.csv")` → `(Some("io.csv"),
+/// Some("examples/users.csv"))`.
+///
+/// Like [`parse_source_schema_arg`] this reads ONLY the `SOURCE_DEF` header
+/// tokens (the `CALL_EXPR` on the right of `:=`), never any mapping body, so it
+/// is signatures-only per ADR-0005 and does NOT widen the per-mapping `body()`
+/// fan-out. The `def_map` query is file-keyed and structurally stable across
+/// body-only edits (`tests/invalidation_regression.rs`).
+///
+/// Heuristic token scan (the parser's `CALL_EXPR` surface is not yet a stable
+/// structured node):
+/// - the callee is the dotted run of `IDENT`s separated by `DOT` that begins
+///   AFTER the `ASSIGN` token (skips the bound name's IDENT before `:=`);
+/// - the URI is the FIRST `STRING` token, but only when it is POSITIONAL — a
+///   `STRING` immediately preceded by `=`/`ASSIGN` is a named-argument value
+///   (e.g. `schema = "users.csvw.json"`) and is skipped.
+fn parse_source_call(node: &fossil_syntax::SyntaxNode) -> (Option<SmolStr>, Option<SmolStr>) {
+    use fossil_syntax::SyntaxKind;
+    let toks: Vec<_> = node
+        .descendants_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            )
+        })
+        .collect();
+
+    // Find the `:=` (DEFINE) that separates the bound name from the RHS call.
+    // (`=`/`ASSIGN` is the NAMED-ARG separator, handled below — not this one.)
+    let Some(define_pos) = toks.iter().position(|t| t.kind() == SyntaxKind::DEFINE) else {
+        return (None, None);
+    };
+    let rhs = &toks[define_pos + 1..];
+
+    // Callee: the leading dotted IDENT run (`io` `.` `csv` → `io.csv`).
+    let mut constructor = String::new();
+    let mut expect_ident = true;
+    for t in rhs {
+        match t.kind() {
+            SyntaxKind::IDENT if expect_ident => {
+                constructor.push_str(t.text());
+                expect_ident = false;
+            }
+            SyntaxKind::DOT if !expect_ident => {
+                constructor.push('.');
+                expect_ident = true;
+            }
+            _ => break,
+        }
+    }
+    let constructor = if constructor.is_empty() {
+        None
+    } else {
+        Some(SmolStr::from(constructor))
+    };
+
+    // URI: the first POSITIONAL string in the RHS. A `STRING` whose immediately
+    // preceding non-trivia token is `=`/`ASSIGN` is a named-arg value — skip it.
+    let mut uri = None;
+    for (i, t) in rhs.iter().enumerate() {
+        if t.kind() == SyntaxKind::STRING {
+            let preceded_by_eq = i
+                .checked_sub(1)
+                .and_then(|p| rhs.get(p))
+                .is_some_and(|p| matches!(p.kind(), SyntaxKind::ASSIGN | SyntaxKind::EQ));
+            if !preceded_by_eq {
+                let raw = t.text();
+                let inner = raw.trim_start_matches('"').trim_end_matches('"');
+                uri = Some(SmolStr::from(inner));
+                break;
+            }
+        }
+    }
+
+    (constructor, uri)
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -276,6 +389,53 @@ User : ex:Person from users
         assert_eq!(dm.sources(&db).len(), 1);
         assert!(dm.lookup_source(&db, "users").is_some());
         assert_eq!(dm.mappings(&db).len(), 1);
+    }
+
+    #[test]
+    fn def_map_resolves_source_constructor_and_uri() {
+        let (db, file) = db_with_hello();
+        let dm = def_map(&db, file);
+        let (ctor, uri) = dm.lookup_source_call(&db, "users").expect("users is bound");
+        assert_eq!(ctor.as_deref(), Some("io.csv"));
+        assert_eq!(uri.as_deref(), Some("examples/users.csv"));
+    }
+
+    #[test]
+    fn def_map_resolves_json_and_parquet_constructors() {
+        let src = "\
+a := io.json(\"a.json\")
+b := io.parquet(\"b.parquet\")
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        assert_eq!(
+            dm.lookup_source_call(&db, "a"),
+            Some((Some("io.json".into()), Some("a.json".into())))
+        );
+        assert_eq!(
+            dm.lookup_source_call(&db, "b"),
+            Some((Some("io.parquet".into()), Some("b.parquet".into())))
+        );
+    }
+
+    #[test]
+    fn def_map_skips_named_arg_string_for_uri() {
+        // The POSITIONAL URI is resolved, the `schema = "..."` named-arg string
+        // is NOT mistaken for the URI.
+        let src = "u := io.csv(\"u.csv\", schema = \"u.csvw.json\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        let (ctor, uri) = dm.lookup_source_call(&db, "u").unwrap();
+        assert_eq!(ctor.as_deref(), Some("io.csv"));
+        assert_eq!(uri.as_deref(), Some("u.csv"));
+        assert_eq!(
+            dm.lookup_source_schema(&db, "u").as_deref(),
+            Some("u.csvw.json")
+        );
     }
 
     #[test]

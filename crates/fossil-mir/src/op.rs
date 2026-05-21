@@ -160,10 +160,20 @@ pub enum AggFn {
     Avg,
 }
 
-/// Source formats. Phase 1 ships `Csv`; Phase 5 adds `Json`, `Parquet`.
+/// Source formats — the three `io/` source constructors (STDL-06).
+///
+/// Each maps to a `DuckDB` table function in codegen (`read_csv_auto` /
+/// `read_json_auto` / `read_parquet`) that runs identically on native DuckDB
+/// and DuckDB-WASM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+#[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names
 pub enum SourceFormat {
+    /// `io.csv(...)` → `read_csv_auto`.
     Csv,
+    /// `io.json(...)` → `read_json_auto`.
+    Json,
+    /// `io.parquet(...)` → `read_parquet`.
+    Parquet,
 }
 
 /// Sink references. Phase 1 ships `GraphAr`; Phase 9+ adds `Turtle`, `JsonLd`,

@@ -30,11 +30,18 @@
 //! - **Multi-property mappings** emit one shared upstream `Extend(field="iri")`
 //!   feeding N `TripleEmit`s (one per non-`iri` property), then one `Sink`.
 //!
-//! # Source URI (still Phase 1)
+//! # Source URI + format (Phase 5 STDL-06)
 //!
-//! - **Source URI** is `"examples/users.csv"` regardless of the source
-//!   binding's actual `io.csv("...")` argument. Phase 5 STDL-06 promotes this
-//!   to a real registry lookup against the `SOURCE_DEF` CST.
+//! - **Source URI + format** are resolved from the mapping's source binding via
+//!   [`fossil_hir::DefMap::lookup_source_call`] — the `io.csv` / `io.json` /
+//!   `io.parquet` constructor name selects the [`SourceFormat`]; the
+//!   constructor's first positional string is the URI. This replaces the
+//!   Phase-1 hardcoded `examples/users.csv` / `Csv`. `def_map(db, file)` is
+//!   already read here (file-keyed, structurally stable across body edits — see
+//!   the barrier note below), so resolving the source call adds NO new
+//!   per-mapping Salsa fan-out. A binding with no recognisable `io.*("...")`
+//!   call (a malformed source) falls back to `examples/users.csv` / `Csv` so
+//!   `lower_to_mir` never panics.
 //!
 //! # CRITICAL barrier rule (RESEARCH Pitfall 3)
 //!
@@ -57,7 +64,7 @@
 
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
-use fossil_hir::def_map::{PrefixEntry, def_map};
+use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
 use fossil_hir::lower::lower_to_hir;
 use fossil_hir::spans::spans;
 use fossil_hir::ty::RecordField;
@@ -112,10 +119,18 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
 
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(4);
 
-    // 0: Source
+    // 0: Source — resolve the real URI + format from the mapping's source
+    // binding (STDL-06). `dm` (def_map, file-keyed) is already read above; the
+    // `lookup_source_call` is a pure read off that same handle, so this adds NO
+    // new per-mapping fan-out (RESEARCH Pitfall 3 / STATE.md "Do NOT"). The
+    // constructor NAME (`io.csv`/`io.json`/`io.parquet`) selects the format; the
+    // constructor's first positional string is the URI. A malformed/unknown
+    // binding falls back to the Phase-1 csv hardcode so we never panic and the
+    // walking-skeleton stays byte-identical when the binding IS `io.csv`.
+    let (uri, format) = resolve_source(dm, db, &m.source_binding);
     ops.push(Op::Source {
-        uri: SmolStr::from("examples/users.csv"),
-        format: SourceFormat::Csv,
+        uri,
+        format,
         row_type,
     });
 
@@ -183,6 +198,40 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     // byte-identical.
     let graph = MirGraph::new(db, ops);
     crate::rewrite::rewrite(db, graph)
+}
+
+/// Resolve the `Op::Source` URI + [`SourceFormat`] for a mapping's source
+/// binding (STDL-06).
+///
+/// Reads the `(constructor, uri)` pair off the already-loaded [`DefMap`]
+/// (file-keyed — NO new per-mapping fan-out, RESEARCH Pitfall 3). The
+/// constructor name selects the format:
+/// - `io.csv` → [`SourceFormat::Csv`] (DuckDB `read_csv_auto`)
+/// - `io.json` → [`SourceFormat::Json`] (DuckDB `read_json_auto`)
+/// - `io.parquet` → [`SourceFormat::Parquet`] (DuckDB `read_parquet`)
+///
+/// A binding with no recognisable `io.*("...")` call, or an unknown
+/// constructor, degrades to the Phase-1 `examples/users.csv` / `Csv` so
+/// `lower_to_mir` never panics on a malformed source. When the binding IS
+/// `io.csv("examples/users.csv")` (the walking-skeleton `hello.fossil`) the
+/// resolved value equals the old hardcode → byte-identical SQL.
+#[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names, not Rust items
+fn resolve_source<'db>(
+    dm: DefMap<'db>,
+    db: &'db dyn fossil_base::Db,
+    binding: &SmolStr,
+) -> (SmolStr, SourceFormat) {
+    let (constructor, uri) = dm.lookup_source_call(db, binding).unwrap_or((None, None));
+    let format = match constructor.as_deref() {
+        Some("io.json") => SourceFormat::Json,
+        Some("io.parquet") => SourceFormat::Parquet,
+        // `io.csv`, an unknown constructor, or no constructor → Csv (the
+        // Phase-1 default; keeps malformed sources lowering rather than
+        // panicking).
+        _ => SourceFormat::Csv,
+    };
+    let uri = uri.unwrap_or_else(|| SmolStr::new_static("examples/users.csv"));
+    (uri, format)
 }
 
 /// Phase 1 fallback row type: `Record({id: String, name: String})`.
@@ -568,6 +617,56 @@ User : ex:Person from users
             }
             other => panic!("expected Sink at index 3, got {other:?}"),
         }
+    }
+
+    /// STDL-06: a mapping reading from an `io.json("...")` / `io.parquet("...")`
+    /// binding lowers `Op::Source` with the real URI from the binding and the
+    /// format selected by the constructor name.
+    fn lower_source_for(src: &str) -> (SmolStr, SourceFormat) {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        let mapping = *dm.mappings(&db).first().expect("one mapping");
+        let mir = lower_to_mir(&db, mapping);
+        match &mir.ops(&db)[0] {
+            Op::Source { uri, format, .. } => (uri.clone(), *format),
+            other => panic!("expected Source at index 0, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+    fn lower_to_mir_resolves_json_source() {
+        let src = "\
+prefix ex: <https://example.org/>
+
+rows := io.json(\"a.json\")
+
+User : ex:Person from rows
+    iri = `${ex:}user/${.id}`
+    ex:name = .name
+";
+        let (uri, format) = lower_source_for(src);
+        assert_eq!(uri.as_str(), "a.json");
+        assert_eq!(format, SourceFormat::Json);
+    }
+
+    #[test]
+    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+    fn lower_to_mir_resolves_parquet_source() {
+        let src = "\
+prefix ex: <https://example.org/>
+
+rows := io.parquet(\"a.parquet\")
+
+User : ex:Person from rows
+    iri = `${ex:}user/${.id}`
+    ex:name = .name
+";
+        let (uri, format) = lower_source_for(src);
+        assert_eq!(uri.as_str(), "a.parquet");
+        assert_eq!(format, SourceFormat::Parquet);
     }
 
     #[test]
