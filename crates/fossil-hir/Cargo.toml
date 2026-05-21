@@ -30,6 +30,11 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # constraint table into Fossil type space (`crate::shapes`). `shex_ast` is
 # WASM-clean per the Phase 0 spike (`decisions/rudof-wasm.md`).
 shex_ast = { workspace = true }
+# Plan 06-01 (LSP-01, ADR-0020): `resolve_target_shape` builds an `IriS` from a
+# mapping's fully-resolved shape IRI to drive `ShExDescriptor::lookup_shape`
+# (the production Db-wired path that resolves the Phase-3 deferral #3). Promoted
+# from a dev-dependency. `rudof_iri` is WASM-clean per `decisions/rudof-wasm.md`.
+rudof_iri = { workspace = true }
 salsa = { workspace = true }
 indexmap = { workspace = true }
 rowan = { workspace = true }
@@ -45,4 +50,3 @@ strsim = { workspace = true }
 # production Db path until Phase 6, so the corpus drives ShExDescriptor +
 # ResolvedShape directly — see tests/diagnostic_corpus.rs module docs).
 insta = { workspace = true }
-rudof_iri = { workspace = true }

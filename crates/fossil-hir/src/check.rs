@@ -82,7 +82,19 @@ pub fn typecheck_mapping<'db>(
     let hir_body = body(db, mapping);
     let spans_table = spans(db, mapping);
     let source_row = resolve_source_row(db, mapping);
-    let resolved_shape = resolve_target_shape(db, mapping);
+    // The tracked query reads the descriptor through the thin `fossil_base::Db`
+    // vtable, which (by ADR-0006) does NOT carry `HirDb`. To keep the descriptor
+    // OUT of this query's Salsa key (`MAX_PER_MAPPING_FAN_OUT = 1`; ADR-0020),
+    // the in-query path supplies the degraded `AcceptAll` default — so the
+    // ten-mapping invalidation fixture sees `None` and the fan-out is unchanged.
+    // A host that has loaded a `ShEx` schema drives the `Some` path by calling
+    // `resolve_target_shape` directly with its `HirDb::output_descriptor_kind()`
+    // (the descriptor is a plain argument, never interned).
+    let resolved_shape = resolve_target_shape(
+        db,
+        mapping,
+        &fossil_descriptors_output::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+    );
     let target_shape_id = resolved_shape.as_ref().map(|r| r.shape_id);
 
     let mut cx = Checker {

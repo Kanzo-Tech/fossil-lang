@@ -1126,6 +1126,7 @@ dependencies = [
  "fossil-base",
  "fossil-hir",
  "fossil-syntax",
+ "lsp-types",
  "rowan",
  "salsa",
  "smol_str",

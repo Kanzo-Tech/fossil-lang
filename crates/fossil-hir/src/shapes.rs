@@ -4,34 +4,35 @@
 //! carrying the per-predicate constraint table converted from the `ShEx`
 //! [`fossil_descriptors_output::ShapeBinding`].
 //!
-//! # Dispatch + the `Db::system()` limitation
+//! # Dispatch on the host-supplied descriptor (R2 — ADR-0020)
 //!
 //! Backward shape checking dispatches on
 //! [`fossil_descriptors_output::OutputDescriptorKind`]:
 //!   - `ShEx(d)`     → `d.lookup_shape(&iri)` → `Option<&ShapeBinding>`
 //!   - `AcceptAll(_)`→ `None` (skip backward checking)
 //!
-//! However, [`fossil_base::Db::system`] returns `&dyn fossil_base::System`,
-//! which does NOT carry the `SystemWithDescriptors` vtable (the extension
-//! trait lives in `fossil-descriptors-output` per ADR-0006, Option B). So the
-//! tracked `typecheck_mapping` query CANNOT reach the host's descriptor through
-//! the thin `Db` trait in Phase 3 v0.1. The hosts (CLI / WASM) both default to
-//! `AcceptAll` anyway (plan 03-03), so [`resolve_target_shape`] returns `None`
-//! in the standard query path — backward checking is a no-op for the
-//! walking-skeleton and the ten-mapping invalidation fixture (neither declares
-//! a `ShEx` schema).
+//! [`resolve_target_shape`] receives the descriptor kind as a PLAIN borrowed
+//! ARGUMENT (read once at the top), supplied by the host through the
+//! [`crate::HirDb`] extension trait (ADR-0020 — the R2 wiring that resolves the
+//! Phase-3 deferral #3 / #8). It is NOT read via a `#[salsa::tracked]` query,
+//! NOT interned, and NEVER a Salsa key — exactly the ADR-0018 "descriptor as
+//! argument, not key" seam, so `MAX_PER_MAPPING_FAN_OUT` stays `1`. A host that
+//! loads a `ShEx` schema now gets `Some(ResolvedShape)`; a host on the degraded
+//! `AcceptAll` default (the walking-skeleton + ten-mapping invalidation
+//! fixture) still gets `None` — backward checking remains a correct no-op
+//! there. ADR-0006 keeps `fossil-base` descriptor-ignorant: the accessor lives
+//! on the `fossil-hir`-owned [`crate::HirDb`], never on `fossil_base::Db`.
 //!
 //! The backward-check LOGIC (constraint-table conversion, `OneOf` surfacing)
-//! is exposed as plain-Rust helpers ([`ResolvedShape::from_binding`],
-//! [`one_of_rejections`]) that plan 03-05's integration tests drive directly
-//! with a constructed [`fossil_descriptors_output::ShExDescriptor`].
-//! Widening `Db::system()` to surface `SystemWithDescriptors` (so a real host
-//! `ShEx` schema flows into the query) is deferred to Phase 6 LSP wiring — it
-//! is a `Db`-trait change out of plan 03-05's scope.
+//! is also exposed as plain-Rust helpers ([`ResolvedShape::from_binding`],
+//! [`one_of_rejections`]) that the diagnostic corpus drives directly with a
+//! constructed [`fossil_descriptors_output::ShExDescriptor`].
 
 use fossil_descriptors_output::{
-    Cardinality, OneOfRejection, ResolvedConstraint, ShExLoweringError, ShapeBinding,
+    Cardinality, OneOfRejection, OutputDescriptorKind, ResolvedConstraint, ShExLoweringError,
+    ShapeBinding,
 };
+use rudof_iri::IriS;
 use shex_ast::ShapeExpr;
 use smol_str::SmolStr;
 
@@ -175,20 +176,70 @@ pub fn one_of_rejections(errors: &[ShExLoweringError]) -> Vec<&OneOfRejection> {
         .collect()
 }
 
-/// Resolve a mapping's target shape in the standard tracked-query path.
+/// Resolve a mapping's target shape against the host-supplied descriptor.
 ///
-/// Phase 3 v0.1: always returns `None` because [`fossil_base::Db::system`]
-/// returns `&dyn System` without the `SystemWithDescriptors` extension vtable
-/// (see module docs). Hosts default to `AcceptAll`, so this is correct for the
-/// walking-skeleton + the ten-mapping invalidation fixture. The real `ShEx`
-/// wiring (and the `Db`-trait widening it requires) lands in Phase 6.
+/// R2 wiring (ADR-0020 — resolves Phase-3 deferral #3 / #8). The descriptor
+/// `kind` is a PLAIN borrowed argument (read once here), threaded in by the
+/// host via [`crate::HirDb::output_descriptor_kind`]; it is never interned and
+/// never a Salsa key, so `MAX_PER_MAPPING_FAN_OUT` stays `1`.
+///
+/// - `OutputDescriptorKind::ShEx(d)`: look up the mapping's fully-resolved
+///   shape IRI in the descriptor. Returns `Some(ResolvedShape)` iff the
+///   descriptor declares that shape (otherwise `None` — the mapping targets a
+///   shape the schema does not define).
+/// - `OutputDescriptorKind::AcceptAll(_)`: `None` — backward checking is a
+///   correct no-op (the degraded fallback; the walking-skeleton + the
+///   ten-mapping invalidation fixture both land here).
 #[must_use]
-#[allow(clippy::unused_self, clippy::needless_pass_by_value)]
 pub fn resolve_target_shape<'db>(
-    _db: &'db dyn fossil_base::Db,
-    _mapping: MappingLoc<'db>,
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+    kind: &OutputDescriptorKind,
 ) -> Option<ResolvedShape<'db>> {
-    None
+    // Read the descriptor as a plain value — AcceptAll short-circuits.
+    let descriptor = match kind {
+        OutputDescriptorKind::ShEx(d) => d,
+        OutputDescriptorKind::AcceptAll(_) => return None,
+    };
+
+    // The mapping's fully-resolved target shape IRI (prefix already expanded by
+    // `lower_to_hir`). A mapping with no shape clause yields no resolution.
+    let file = mapping.file(db);
+    let hir = crate::lower::lower_to_hir(db, file);
+    let hir_mapping = hir.mappings(db).get(mapping.index(db))?;
+    let shape_iri = hir_mapping.shape_iri.clone();
+    if shape_iri.is_empty() {
+        return None;
+    }
+
+    // Dispatch into the ShEx descriptor's resolved shape table.
+    let iri = IriS::new_unchecked(shape_iri.as_str());
+    let binding = descriptor.lookup_shape(&iri)?;
+
+    // Filter the descriptor's lowering errors to this shape so the consuming
+    // mapping surfaces only its own OneOf/cycle/unresolved-ref rejections.
+    let errors: Vec<ShExLoweringError> = descriptor
+        .lowering_errors()
+        .iter()
+        .filter(|e| lowering_error_targets(e, shape_iri.as_str()))
+        .cloned()
+        .collect();
+
+    // Phase 3 v0.1 mints a stable per-mapping shape id from the mapping index
+    // (each mapping targets at most one shape).
+    let shape_id = ShapeId::placeholder(u32::try_from(mapping.index(db)).unwrap_or(u32::MAX));
+    Some(ResolvedShape::from_binding(db, binding, shape_id, errors))
+}
+
+/// `true` iff a `ShEx` lowering error belongs to the shape identified by
+/// `shape_iri`. `OneOfRejection` carries the offending shape IRI; other error
+/// variants are conservatively associated with every shape (they describe
+/// schema-wide problems the consuming mapping should still see).
+fn lowering_error_targets(err: &ShExLoweringError, shape_iri: &str) -> bool {
+    match err {
+        ShExLoweringError::OneOfRejection(rej) => rej.shape_iri.as_str() == shape_iri,
+        _ => true,
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -228,6 +279,100 @@ mod tests {
         assert_eq!(
             primitive_from_xsd_iri("http://example.org/CustomType"),
             None
+        );
+    }
+
+    // --- ADR-0020 R2 wiring: resolve_target_shape consumes a host descriptor ---
+
+    use std::sync::Arc;
+
+    use fossil_descriptors_output::ShExDescriptor;
+
+    /// A minimal `.fossil` source whose single mapping targets `ex:Person`,
+    /// resolving to `http://example.org/Person` — the shape the `ShEx` fixture
+    /// below declares.
+    const SRC: &str = "\
+prefix ex: <http://example.org/>
+users := io.csv(\"x.csv\")
+User : ex:Person from users
+    iri = `${ex:}u/${.id}`
+    ex:name = .name
+";
+
+    /// A `ShEx` schema declaring exactly `ex:Person` (full IRI
+    /// `http://example.org/Person`) with one triple constraint `ex:name`.
+    const SHEX_SRC: &str = r#"{
+      "@context": "http://www.w3.org/ns/shex.jsonld",
+      "type": "Schema",
+      "shapes": [
+        {
+          "type": "ShapeDecl",
+          "id": "http://example.org/Person",
+          "shapeExpr": {
+            "type": "Shape",
+            "expression": {
+              "type": "TripleConstraint",
+              "predicate": "http://example.org/name"
+            }
+          }
+        }
+      ]
+    }"#;
+
+    fn new_db() -> fossil_base::FossilDb {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        fossil_base::FossilDb::new(system)
+    }
+
+    #[test]
+    fn resolve_target_shape_returns_some_for_matching_shex_kind() {
+        let db = new_db();
+        let file = fossil_base::SourceFile::new(&db, SRC.to_string(), "person.fossil".to_string());
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let shex = ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("schema parses");
+        let kind = OutputDescriptorKind::ShEx(shex);
+
+        let resolved = resolve_target_shape(&db, mapping, &kind);
+        assert!(
+            resolved.is_some(),
+            "a host ShEx descriptor declaring the mapping's target shape must \
+             resolve to Some (ADR-0020 R2 wiring; Phase-3 deferral #3 resolved)"
+        );
+        let resolved = resolved.unwrap();
+        assert!(
+            resolved.constraint_for("http://example.org/name").is_some(),
+            "the resolved shape must carry the ex:name constraint"
+        );
+    }
+
+    #[test]
+    fn resolve_target_shape_returns_none_for_accept_all() {
+        let db = new_db();
+        let file = fossil_base::SourceFile::new(&db, SRC.to_string(), "person.fossil".to_string());
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let kind = OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
+        assert!(
+            resolve_target_shape(&db, mapping, &kind).is_none(),
+            "AcceptAll is the degraded fallback — backward checking is a no-op"
+        );
+    }
+
+    #[test]
+    fn resolve_target_shape_returns_none_when_schema_omits_the_shape() {
+        let db = new_db();
+        let file = fossil_base::SourceFile::new(&db, SRC.to_string(), "person.fossil".to_string());
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        // A ShEx schema that declares NO shapes — the mapping's target is absent.
+        let empty = r#"{
+          "@context": "http://www.w3.org/ns/shex.jsonld",
+          "type": "Schema",
+          "shapes": []
+        }"#;
+        let shex = ShExDescriptor::from_reader(empty.as_bytes()).expect("schema parses");
+        let kind = OutputDescriptorKind::ShEx(shex);
+        assert!(
+            resolve_target_shape(&db, mapping, &kind).is_none(),
+            "a ShEx descriptor lacking the target shape must resolve to None"
         );
     }
 }

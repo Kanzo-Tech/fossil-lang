@@ -49,6 +49,7 @@
 pub mod ast_id;
 pub mod body;
 pub mod check;
+pub mod db_ext;
 pub mod def_map;
 pub mod didyoumean;
 pub mod infer;
@@ -76,6 +77,7 @@ pub use provenance::{
 // module). Mirrors the rust-analyzer convention of keeping Salsa query
 // functions under their module paths.
 pub use check::{BlamePos, Checker, TypeckOutput, compatible, typecheck_mapping};
+pub use db_ext::HirDb;
 pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;
