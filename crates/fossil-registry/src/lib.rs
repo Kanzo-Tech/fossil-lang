@@ -795,6 +795,51 @@ impl FunctionRegistry {
     }
 }
 
+/// SC#1 / STDL-07 single source of truth: the curated set of `DuckDB` builtin
+/// function names a pure-SQL [`LoweringKind::Builtin`] entry may render to.
+///
+/// The classification CI gate (plan 05-07, `tests/classification_gate.rs`)
+/// asserts that every `Builtin.duckdb_name` in [`FunctionRegistry::stdlib_default`]
+/// is a member of this allowlist — so a typo'd or non-`DuckDB` builtin name fails
+/// CI structurally. The native smoke (`fossil-runtime/tests/builtin_smoke.rs`)
+/// then proves each name is a *real* `DuckDB` 1.10502 function.
+///
+/// This set is kept aligned to the authoritative `stdlib.md` catalog: it carries
+/// **exactly** the `duckdb_name`s the catalog's `Builtin` entries use and ONLY
+/// those. In particular it has **no** `ceil`/`floor` — `stdlib.md`'s `math/` has
+/// exactly six functions (`sum`, `avg`, `min`, `max`, `abs`, `round`), none of
+/// which is `ceil`/`floor`. `split_part`/`json_extract` are likewise absent: they
+/// are `Inline` forms ([`InlineForm::SplitPart`]/[`InlineForm::JsonExtract`]), not
+/// named `Builtin` entries, so they never reach the allowlist check.
+pub const DUCKDB_BUILTIN_ALLOWLIST: &[&str] = &[
+    // clean/ string builtins
+    "trim",
+    "lower",
+    "upper",
+    // parse/ — date/datetime parsing
+    "strptime",
+    // math/ (EXACTLY 6 — NO ceil/floor)
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "abs",
+    "round",
+    // str/ string builtins
+    "length",
+    "substring",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "replace",
+    "string_split",
+    "concat",
+    // validate/regex
+    "regexp_matches",
+    // anon/hash (default sha256, no salt)
+    "sha256",
+];
+
 /// Helper: a `DuckDB` builtin lowering by name.
 fn builtin(name: &str) -> LoweringKind {
     LoweringKind::Builtin {
