@@ -1152,6 +1152,9 @@ dependencies = [
 name = "fossil-registry"
 version = "0.1.0"
 dependencies = [
+ "fossil-base",
+ "fossil-hir",
+ "salsa",
  "smol_str",
 ]
 

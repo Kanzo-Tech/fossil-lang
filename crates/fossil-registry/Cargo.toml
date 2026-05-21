@@ -12,6 +12,14 @@ description = "Stdlib function registry (pure-SQL vs native-UDF classification)"
 workspace = true
 
 [dependencies]
-# Phase 1: standalone data — no fossil-base dep yet.
-# Phase 5 STDL-01..07 may add fossil-mir/fossil-codegen when entries carry codegen hints.
+# Phase 5 STDL-01..07: the registry now carries function signatures + lowering
+# classification. fossil-hir supplies the Ty/FnSig ADT (Phase 2 ty.rs) so a
+# registry entry can materialize a real interned `FnSig<'db>` on demand.
+# fossil-hir is already WASM-clean, so the WASM gate stays green (no leak).
+fossil-hir = { path = "../fossil-hir" }
+salsa = { workspace = true }
 smol_str = { workspace = true }
+
+[dev-dependencies]
+# Tests materialize FnSig against a real FossilDb (NativeSystem).
+fossil-base = { path = "../fossil-base" }
