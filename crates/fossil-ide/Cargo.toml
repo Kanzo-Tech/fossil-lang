@@ -20,6 +20,12 @@ fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
 rowan = { workspace = true }
 salsa = { workspace = true }
+# Plan 06-01 Spike A (Research Open Question #3): does `lsp-types` compile to
+# wasm32-unknown-unknown? If yes, fossil-ide may return `lsp_types` structs
+# directly (recommended downstream API shape); if no, it must return
+# Fossil-domain byte-range structs translated in fossil-lsp. Spike outcome
+# recorded in 06-01-SUMMARY.md + ADR-0020.
+lsp-types = { workspace = true }
 
 [dev-dependencies]
 # Plan 03-07: hover unit tests construct ExprTypeEntry/Provenance scenarios
