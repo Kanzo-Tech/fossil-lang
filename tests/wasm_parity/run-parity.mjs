@@ -44,6 +44,21 @@ const CORPUS_SQL_PATH = resolve(
   "crates/fossil-codegen/tests/wasm_parity/corpus_sql.json",
 );
 
+// SC#2 (Phase 5): the io/csv + io/json + io/parquet parity tier. Written by
+// crates/fossil-runtime/tests/io_parity_corpus.rs (the native side) — a mapping
+// reading all three source formats + clean/parse/seq ops (sources end-to-end;
+// ops via direct MIR/Expr::Call construction, ADR-0009 reachability gap). This
+// harness registers the three fixture inputs in the WASM VFS and re-runs the
+// identical SQL, diffing the digests against the io baseline.
+const IO_BASELINE_PATH = resolve(
+  ROOT,
+  "crates/fossil-codegen/tests/wasm_parity/io_parity_baseline.json",
+);
+const IO_SQL_PATH = resolve(
+  ROOT,
+  "crates/fossil-codegen/tests/wasm_parity/io_parity_sql.json",
+);
+
 // The fixture CSVs the executable corpus reads, by the relative path the SQL
 // names them (read_csv_auto('examples/users.csv', ...)). Registered into the
 // DuckDB-WASM virtual filesystem under the SAME path so the SQL is verbatim.
@@ -52,6 +67,17 @@ const FIXTURES = [
   "examples/orders.csv",
   "examples/a.csv",
   "examples/b.csv",
+];
+
+// SC#2 io tier: the three source-format fixtures, registered under their
+// SQL-referenced relative paths (read_csv_auto('tests/wasm_parity/fixtures/...'),
+// read_json_auto(...), read_parquet(...)) so the SQL text is byte-identical
+// native↔WASM. The Parquet fixture is a committed, deterministic file (generated
+// once via DuckDB COPY) so both engines read the same bytes.
+const IO_FIXTURES = [
+  "tests/wasm_parity/fixtures/io_people.csv",
+  "tests/wasm_parity/fixtures/io_orgs.json",
+  "tests/wasm_parity/fixtures/io_depts.parquet",
 ];
 
 function sha256Hex(s) {
@@ -92,26 +118,15 @@ async function makeDb() {
   return db;
 }
 
-async function main() {
-  const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
-  const corpusSql = JSON.parse(readFileSync(CORPUS_SQL_PATH, "utf8"));
-
-  const db = await makeDb();
-
-  // Register the fixture CSVs into the WASM virtual filesystem under their
-  // SQL-referenced relative paths (so the SQL text is byte-identical native↔WASM).
-  for (const rel of FIXTURES) {
-    const buf = readFileSync(resolve(ROOT, rel));
-    db.registerFileBuffer(rel, new Uint8Array(buf));
-  }
-
-  const conn = db.connect();
-
+/// Diff one baseline (`[{name, sql_sha256, row_count, result_sha256}]`) against
+/// its `{name: sql}` map, re-running each SQL on the shared DuckDB-WASM
+/// connection. Returns the number of failures.
+function runTier(conn, tierName, baseline, sqlMap) {
   let failures = 0;
   for (const entry of baseline) {
-    const sql = corpusSql[entry.name];
+    const sql = sqlMap[entry.name];
     if (typeof sql !== "string") {
-      console.error(`MISSING SQL: corpus_sql.json has no entry for "${entry.name}"`);
+      console.error(`MISSING SQL (${tierName}): no SQL entry for "${entry.name}"`);
       failures += 1;
       continue;
     }
@@ -120,7 +135,7 @@ async function main() {
     const sqlHash = sha256Hex(sql);
     if (sqlHash !== entry.sql_sha256) {
       console.error(
-        `SQL MISMATCH for ${entry.name}:\n  baseline sql_sha256=${entry.sql_sha256}\n  wasm     sql_sha256=${sqlHash}`,
+        `SQL MISMATCH (${tierName}) for ${entry.name}:\n  baseline sql_sha256=${entry.sql_sha256}\n  wasm     sql_sha256=${sqlHash}`,
       );
       failures += 1;
       continue;
@@ -137,23 +152,62 @@ async function main() {
     // (3) Diff against the native baseline.
     if (rowCount !== entry.row_count || resultHash !== entry.result_sha256) {
       console.error(
-        `RESULT MISMATCH for ${entry.name}:\n` +
+        `RESULT MISMATCH (${tierName}) for ${entry.name}:\n` +
           `  baseline row_count=${entry.row_count} result_sha256=${entry.result_sha256}\n` +
           `  wasm     row_count=${rowCount} result_sha256=${resultHash}`,
       );
       failures += 1;
     } else {
-      console.log(`OK  ${entry.name}  (rows=${rowCount})`);
+      console.log(`OK  [${tierName}] ${entry.name}  (rows=${rowCount})`);
     }
   }
+  return failures;
+}
+
+async function main() {
+  const corpusBaseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+  const corpusSql = JSON.parse(readFileSync(CORPUS_SQL_PATH, "utf8"));
+
+  // The SC#2 io tier is optional at load time only so the corpus tier still runs
+  // if the io baseline has not been produced yet; in a full phase-close run the
+  // native io_parity_corpus.rs test writes it first.
+  let ioBaseline = [];
+  let ioSql = {};
+  try {
+    ioBaseline = JSON.parse(readFileSync(IO_BASELINE_PATH, "utf8"));
+    ioSql = JSON.parse(readFileSync(IO_SQL_PATH, "utf8"));
+  } catch {
+    console.warn(
+      "WARN: io_parity_baseline.json not found — run `cargo test -p fossil-runtime --test io_parity_corpus` first to produce the SC#2 io tier.",
+    );
+  }
+
+  const db = await makeDb();
+
+  // Register the corpus fixture CSVs + the SC#2 io fixtures (csv/json/parquet)
+  // into the WASM VFS under their SQL-referenced relative paths (so the SQL text
+  // is byte-identical native↔WASM).
+  for (const rel of [...FIXTURES, ...IO_FIXTURES]) {
+    const buf = readFileSync(resolve(ROOT, rel));
+    db.registerFileBuffer(rel, new Uint8Array(buf));
+  }
+
+  const conn = db.connect();
+
+  let failures = 0;
+  failures += runTier(conn, "corpus", corpusBaseline, corpusSql);
+  failures += runTier(conn, "io", ioBaseline, ioSql);
 
   conn.close();
 
+  const total = corpusBaseline.length + ioBaseline.length;
   if (failures > 0) {
     console.error(`\nPARITY FAILED: ${failures} entr${failures === 1 ? "y" : "ies"} diverged.`);
     process.exit(1);
   }
-  console.log(`\nPARITY OK: all ${baseline.length} entries match native_baseline.json.`);
+  console.log(
+    `\nPARITY OK: all ${total} entries match (corpus=${corpusBaseline.length}, io=${ioBaseline.length}).`,
+  );
   process.exit(0);
 }
 
