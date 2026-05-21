@@ -164,12 +164,16 @@ pub fn codegen_sql_with_descriptor<'db>(
     let plan = vertex_edge_decomp_from_kind(kind, &base, chunk_size);
 
     for v in &plan.vertices {
+        // The inner vertex SELECT projects the id column as `id` (SINK-04), so
+        // the chunk row_number() window orders by the OUTPUT alias `id`, not the
+        // source `vertex_id_col`.
+        let _ = &v.vertex_id_col;
         emit_chunked_copy(
             &mut sql,
             &vertex_select_sql(v),
             &vertex_copy_prefix(v),
             chunk_size,
-            v.vertex_id_col.as_str(),
+            "id",
             &mut row_count_for,
         );
     }
