@@ -1,0 +1,5 @@
+---
+source: crates/fossil-sinks/tests/decomp.rs
+expression: sql
+---
+SELECT DISTINCT ON (iri) iri AS id, name FROM relation ORDER BY iri

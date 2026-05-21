@@ -1,0 +1,5 @@
+---
+source: crates/fossil-sinks/tests/decomp.rs
+expression: sql
+---
+SELECT iri AS src_id, knows AS dst_id FROM relation ORDER BY src_id, dst_id

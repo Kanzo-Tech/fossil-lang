@@ -129,6 +129,54 @@ pub const fn is_single_valued(card: Cardinality) -> bool {
     }
 }
 
+/// Render the inner vertex SELECT for a [`VertexTable`] (the body 05-08 wraps in `COPY ... TO`).
+///
+/// Single-valued vertices collapse duplicate subjects with `SELECT DISTINCT ON (iri)`; every SELECT
+/// carries a deterministic `ORDER BY iri` so the chunked-COPY parity digest is stable across
+/// native↔WASM (Pitfall 5 — the deterministic `ORDER BY` is mandatory). The `iri` column is
+/// projected verbatim as `id` (SINK-04).
+///
+/// Property columns follow the subject `id`; if the vertex has any single-valued property the whole
+/// vertex projection collapses (one row per subject), matching the per-shape cardinality.
+#[must_use]
+pub fn vertex_select_sql(v: &VertexTable) -> String {
+    let collapse = v.properties.iter().any(|p| p.single_valued) || v.properties.is_empty();
+    let mut cols = format!("{IRI_COLUMN} AS id");
+    for p in &v.properties {
+        cols.push_str(", ");
+        cols.push_str(&p.name);
+    }
+    let distinct = if collapse {
+        format!("DISTINCT ON ({IRI_COLUMN}) ")
+    } else {
+        String::new()
+    };
+    format!(
+        "SELECT {distinct}{cols} FROM {relation} ORDER BY {IRI_COLUMN}",
+        relation = v.source_relation,
+    )
+}
+
+/// Render the inner edge SELECT for an [`EdgeTable`] (the body 05-08 wraps in `COPY ... TO`).
+///
+/// Projects `src_id_expr AS src_id`, `dst_id_expr AS dst_id` verbatim (SINK-04). A deterministic
+/// `ORDER BY src_id, dst_id` keeps the parity digest stable (Pitfall 5). Single-valued edges
+/// collapse with `DISTINCT ON (src_id)`; multi-valued edges (`OneOrMore`/`ZeroOrMore`) keep all rows.
+#[must_use]
+pub fn edge_select_sql(e: &EdgeTable) -> String {
+    let distinct = if e.single_valued {
+        "DISTINCT ON (src_id) ".to_string()
+    } else {
+        String::new()
+    };
+    format!(
+        "SELECT {distinct}{src} AS src_id, {dst} AS dst_id FROM {relation} ORDER BY src_id, dst_id",
+        src = e.src_id_expr,
+        dst = e.dst_id_expr,
+        relation = e.source_relation,
+    )
+}
+
 /// Decompose a mapping `plan` into a [`SinkPlan`] under a target shape descriptor (SC#4 option (b)).
 ///
 /// The `kind` descriptor is passed **directly** (NOT read via `Db::system()`). `db` is the Salsa
