@@ -53,8 +53,14 @@ prefixmap = "0.3"
 strsim = "0.11"
 
 # === Sinks (Phase 5+) ===
-arrow = "59"
-parquet = "59"
+# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc;
+# SC#5 / ADR-0017). The `arrow` umbrella + `parquet` stay for native byte-level test deps.
+# Pinned to 58 — the latest published arrow/parquet line (59 is not on crates.io as of
+# 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
+# is what Cargo.lock already resolves transitively via duckdb's parquet.
+arrow-schema = "58"
+arrow = "58"
+parquet = "58"
 
 # === Runtime — NATIVE ONLY ===
 # `vscalar` enables the scalar-UDF registration API (VScalar trait + Connection::

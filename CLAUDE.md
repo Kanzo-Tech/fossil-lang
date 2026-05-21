@@ -25,7 +25,7 @@ cargo clippy --workspace --all-targets -- -D warnings            # lint check
 cargo deny check                                                 # advisories + licenses + bans
 cargo check --target wasm32-unknown-unknown \
     -p fossil-base -p fossil-syntax -p fossil-hir \
-    -p fossil-mir -p fossil-codegen -p fossil-wasm               # WASM gate (6 crates)
+    -p fossil-mir -p fossil-codegen -p fossil-sinks -p fossil-wasm  # WASM gate (7 crates)
 ```
 
 CI runs all of the above on every PR. Locally, the WASM gate is the highest-leverage

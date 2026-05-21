@@ -12,5 +12,26 @@ description = "Output sinks: GraphAr Parquet writer (arrow + parquet)"
 workspace = true
 
 [dependencies]
-# Phase 1: no deps. Phase 5 SINK-01..06 adds arrow + parquet + serde_yaml_ng + fossil-mir
-# when programmatic manifest generation + chunked COPY land.
+# Phase 5 SINK-02/06 (ADR-0016 + ADR-0017). The GraphAr "writer" is DuckDB COPY —
+# fossil-sinks is a plan + manifest generator, NOT an I/O library, so it never byte-writes
+# Parquet from Rust. It therefore depends on `arrow-schema` ONLY (DataType -> data_type
+# string names; pulls no mio/arrow-ipc/arrow-csv) and `serde_yaml_ng` (manifest emission).
+# This keeps fossil-sinks WASM-clean — it joins the WASM gate as the 7th gated crate.
+serde = { workspace = true }
+serde_yaml_ng = { workspace = true }
+# `arrow-schema` sub-crate ONLY — NOT the `arrow` umbrella crate, whose default features
+# pull `arrow-ipc`/`arrow-csv` (mio leak; SC#5 / Pitfall 1 / ADR-0017). `arrow_schema::DataType`
+# is the single authority for GraphAr `data_type` string spellings (RESEARCH §"Don't Hand-Roll");
+# we deliberately depend on it ALONE rather than fossil-hir's `Primitive` so the manifest layer
+# stays decoupled from the type system and the WASM dep surface is minimal.
+arrow-schema = { workspace = true }
+
+[dev-dependencies]
+# Test-only Parquet schema read-back. `default-features = false` drops parquet's `arrow`
+# feature (the `ArrowWriter` path → arrow-ipc). Tests are native; `parquet` is NEVER a
+# normal dependency of this WASM-gated crate (ADR-0017 / Pitfall 1).
+# Pinned directly (not `workspace = true`) so we can set `default-features = false` —
+# Cargo forbids overriding a workspace dep's default-features at the member level. The
+# version tracks the workspace `parquet = "58"` pin.
+parquet = { version = "58", default-features = false }
+insta = { workspace = true }
