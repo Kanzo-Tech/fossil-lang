@@ -78,39 +78,33 @@ impl SymbolIndex {
         for item in root.children() {
             match item.kind() {
                 SyntaxKind::PREFIX_DECL => {
-                    if let Some(decl) = PrefixDecl::cast(item.clone()) {
-                        if let Some(name) = decl.name() {
-                            entries.push(SymbolEntry {
-                                name,
-                                kind: SymbolKind::Prefix,
-                                range: node_range(&item),
-                            });
-                        }
+                    if let Some(name) = PrefixDecl::cast(item.clone()).and_then(|d| d.name()) {
+                        entries.push(SymbolEntry {
+                            name,
+                            kind: SymbolKind::Prefix,
+                            range: node_range(&item),
+                        });
                     }
                 }
                 SyntaxKind::MAPPING => {
-                    if let Some(mapping) = Mapping::cast(item.clone()) {
-                        if let Some(header) = mapping.header() {
-                            if let Some(name) = header.name() {
-                                entries.push(SymbolEntry {
-                                    name,
-                                    kind: SymbolKind::Mapping,
-                                    range: node_range(&item),
-                                });
-                            }
-                            // A mapping's header carries a shape ref
-                            // (`ex:Person`); record it so goto-def on the shape
-                            // resolves to its declaring mapping site.
-                            if let Some(shape) = header.shape_expr() {
-                                if let Some(iri) = shape.primary_iri() {
-                                    let s = iri.syntax();
-                                    entries.push(SymbolEntry {
-                                        name: SmolStr::from(s.text().to_string()),
-                                        kind: SymbolKind::Shape,
-                                        range: node_range(s),
-                                    });
-                                }
-                            }
+                    if let Some(header) = Mapping::cast(item.clone()).and_then(|m| m.header()) {
+                        if let Some(name) = header.name() {
+                            entries.push(SymbolEntry {
+                                name,
+                                kind: SymbolKind::Mapping,
+                                range: node_range(&item),
+                            });
+                        }
+                        // A mapping's header carries a shape ref (`ex:Person`);
+                        // record it so goto-def on the shape resolves to its
+                        // declaring mapping site.
+                        if let Some(iri) = header.shape_expr().and_then(|s| s.primary_iri()) {
+                            let s = iri.syntax();
+                            entries.push(SymbolEntry {
+                                name: SmolStr::from(s.text().to_string()),
+                                kind: SymbolKind::Shape,
+                                range: node_range(s),
+                            });
                         }
                     }
                 }
@@ -160,14 +154,12 @@ fn push_function(entries: &mut Vec<SymbolEntry>, node: &SyntaxNode) {
 /// Record a function definition from a `DEFINITION` node with an explicit range
 /// (used for the `EXPORTED_DEFINITION` wrapper case).
 fn push_function_with_range(entries: &mut Vec<SymbolEntry>, def: &SyntaxNode, range: Range<u32>) {
-    if let Some(d) = fossil_syntax::ast::Definition::cast(def.clone()) {
-        if let Some(name) = d.name() {
-            entries.push(SymbolEntry {
-                name,
-                kind: SymbolKind::Function,
-                range,
-            });
-        }
+    if let Some(name) = fossil_syntax::ast::Definition::cast(def.clone()).and_then(|d| d.name()) {
+        entries.push(SymbolEntry {
+            name,
+            kind: SymbolKind::Function,
+            range,
+        });
     }
 }
 
@@ -220,7 +212,7 @@ Org : ex:Organization from users
     #[test]
     fn ranges_are_nonempty_and_in_bounds() {
         let idx = index_of(TWO_MAPPINGS);
-        let len = TWO_MAPPINGS.len() as u32;
+        let len = u32::try_from(TWO_MAPPINGS.len()).unwrap();
         for e in idx.entries() {
             assert!(e.range.start < e.range.end, "empty range for {}", e.name);
             assert!(e.range.end <= len, "range OOB for {}", e.name);

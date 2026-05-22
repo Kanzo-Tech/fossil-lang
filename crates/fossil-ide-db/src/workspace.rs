@@ -5,7 +5,8 @@
 //! from file B. This implements the **open-files-as-workspace** model
 //! (ADR-0023): the file set is whatever the host holds open — the LSP's
 //! `LspState.files` map or the playground's multi-panel set — NOT a filesystem
-//! scan of a workspace root (deferred to v2; conflicts with the WASM VirtualFS).
+//! scan of a workspace root (deferred to v2; conflicts with the WASM
+//! `VirtualFS`).
 //!
 //! Like [`SymbolIndex`] this is a plain struct (no Salsa query of its own), so
 //! it adds zero tracked queries and keeps the per-mapping `body()` fan-out at 1

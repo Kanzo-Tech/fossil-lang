@@ -52,12 +52,13 @@ impl PrefixIndex {
     pub fn from_root(root: &SyntaxNode) -> Self {
         let mut declared = Vec::new();
         for item in root.children() {
-            if item.kind() == SyntaxKind::PREFIX_DECL {
-                if let Some(decl) = PrefixDecl::cast(item) {
-                    if let (Some(prefix), Some(iri)) = (decl.name(), decl.iri()) {
-                        declared.push(PrefixBinding { prefix, iri });
-                    }
-                }
+            if item.kind() != SyntaxKind::PREFIX_DECL {
+                continue;
+            }
+            if let Some(decl) = PrefixDecl::cast(item)
+                && let (Some(prefix), Some(iri)) = (decl.name(), decl.iri())
+            {
+                declared.push(PrefixBinding { prefix, iri });
             }
         }
         Self { declared }
