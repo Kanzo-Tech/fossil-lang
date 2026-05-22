@@ -26,15 +26,20 @@ clap = { workspace = true }
 # `terminal_size` + `supports-color` which would break the WASM gate per
 # RESEARCH.md Pitfall 3. fossil-cli is NATIVE-ONLY (cfg-tripwire below), so
 # the leak is contained.
-miette = { workspace = true, features = ["fancy"] }
+miette = { workspace = true, features = ["fancy", "derive"] }
+# CLI-02: the `CheckError` / `CheckReport` reports derive `thiserror::Error`
+# alongside `miette::Diagnostic` (the recommended miette derive shape).
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# CLI-03 result summary: `fossil run` reads the produced Parquet back through a
+# DuckDB count query (RESEARCH Pitfall 6). Cargo dedupes against
+# fossil-runtime's bundled DuckDB so the build cost is incurred once.
+duckdb = { workspace = true }
 
 [dev-dependencies]
-# Integration test reads the produced parquet to assert 5-row count.
-# Cargo dedupes against fossil-runtime's bundled DuckDB (~80MB C++) so the
-# build cost is incurred once across both crates — acceptable for native CI.
-duckdb = { workspace = true }
+# Integration tests read produced parquet + snapshot rendered diagnostics.
+insta = { workspace = true }
 
 [[bin]]
 name = "fossil"
