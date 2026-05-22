@@ -1058,7 +1058,9 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-hir",
  "fossil-runtime",
+ "insta",
  "miette",
+ "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1135,6 +1137,11 @@ dependencies = [
 [[package]]
 name = "fossil-ide-db"
 version = "0.1.0"
+dependencies = [
+ "fossil-base",
+ "fossil-syntax",
+ "smol_str",
+]
 
 [[package]]
 name = "fossil-lsp"
@@ -2086,6 +2093,7 @@ dependencies = [
  "backtrace",
  "backtrace-ext",
  "cfg-if",
+ "miette-derive",
  "owo-colors",
  "supports-color",
  "supports-hyperlinks",
@@ -2093,6 +2101,17 @@ dependencies = [
  "terminal_size",
  "textwrap",
  "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "miette-derive"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5b29714e950dbb20d5e6f74f9dcec4edbcc1067bb7f8ed198c097b8c1a818b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

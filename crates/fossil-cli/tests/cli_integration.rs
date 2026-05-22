@@ -159,8 +159,9 @@ fn fossil_check_hello_exits_zero() {
 
 #[test]
 fn fossil_run_hello_writes_output_parquet_and_manifest() {
-    // `fossil run` aliases `fossil compile` in Phase 1; verify the alias
-    // produces the same artefacts so a regression in dispatch is caught early.
+    // `fossil run` compiles + executes; verify it still produces the artefacts
+    // so a regression in dispatch is caught early. (The run *summary* is
+    // asserted by run_summary.rs.)
     let bin = fossil_binary();
     let workdir = fresh_workdir("run");
 
@@ -184,5 +185,51 @@ fn fossil_run_hello_writes_output_parquet_and_manifest() {
     assert!(
         workdir.join("manifest.yaml").exists(),
         "manifest.yaml missing"
+    );
+}
+
+#[test]
+fn fossil_compile_out_dir_writes_artifacts_to_target_dir_not_cwd() {
+    // CLI-01: `--out-dir` lands `output.parquet` + `manifest.yaml` in the
+    // target dir, NOT the process cwd (the COPY literal is retargeted to an
+    // absolute path inside out-dir).
+    let bin = fossil_binary();
+    let workdir = fresh_workdir("outdir");
+    let out_dir = workdir.join("artifacts");
+
+    let output = Command::new(bin)
+        .args([
+            "compile",
+            "examples/hello.fossil",
+            "--out-dir",
+            out_dir.to_str().expect("utf8 out-dir"),
+        ])
+        .current_dir(&workdir)
+        .output()
+        .expect("spawn fossil compile --out-dir");
+
+    assert!(
+        output.status.success(),
+        "fossil compile --out-dir exited {}: stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    // Artifacts in the out-dir...
+    assert!(
+        out_dir.join("output.parquet").exists(),
+        "output.parquet missing in --out-dir {}",
+        out_dir.display()
+    );
+    assert!(
+        out_dir.join("manifest.yaml").exists(),
+        "manifest.yaml missing in --out-dir {}",
+        out_dir.display()
+    );
+    // ...and NOT leaked into the cwd.
+    assert!(
+        !workdir.join("output.parquet").exists(),
+        "output.parquet leaked into cwd; --out-dir should contain it"
     );
 }

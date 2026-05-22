@@ -1,0 +1,16 @@
+---
+source: crates/fossil-cli/tests/check_diagnostics.rs
+expression: normalised
+---
+Error:   × type-checking failed: 1 error(s)
+
+Error: 
+  × unknown column `naem` — did you mean `name`?
+   ╭─[<FIXTURE>/mapping.fossil:2:39]
+ 1 │ prefix ex: <https://example.org/>
+ 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
+   ·                                       ──┬──
+   ·                                         ╰── here
+ 3 │ User : ex:Person from users
+   ╰────
+  help: did you mean `name`?

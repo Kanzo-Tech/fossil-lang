@@ -183,22 +183,33 @@ struct CheckReport {
     related: Vec<CheckError>,
 }
 
-/// Convert a drained [`Diagnostic`] into a [`CheckError`]. The `help` line is
-/// the structured `suggestion_source` when present, otherwise `None` (the
-/// did-you-mean text already lives inline in `message`, so miette renders it as
-/// the headline). Spans are byte offsets, directly usable as a [`SourceSpan`].
+/// Convert a drained [`Diagnostic`] into a [`CheckError`]. The `#[help]` line is
+/// the structured `suggestion_source` when present; otherwise, if the message
+/// carries an inline did-you-mean clause, surface it as a standalone rustc-style
+/// help line. Spans are byte offsets, directly usable as a [`SourceSpan`].
 ///
 /// `message` is the diagnostic text verbatim from the checker, which routes
 /// every rendered type through `fossil_hir::render_ty_kind` — so a
 /// `TyKind::Unknown` never reaches this layer (it renders as `?`).
 fn to_check_error(d: &Diagnostic, src: &NamedSource<String>) -> CheckError {
     let len = d.span.end.saturating_sub(d.span.start) as usize;
+    let help = d
+        .suggestion_source
+        .clone()
+        .or_else(|| extract_did_you_mean(&d.message));
     CheckError {
         message: d.message.clone(),
         src: src.clone(),
         span: SourceSpan::new((d.span.start as usize).into(), len),
-        help: d.suggestion_source.clone(),
+        help,
     }
+}
+
+/// If `message` contains an inline `did you mean …?` clause, lift it to a
+/// standalone `help:` line so miette renders it rustc-style under the snippet.
+fn extract_did_you_mean(message: &str) -> Option<String> {
+    let idx = message.find("did you mean")?;
+    Some(message[idx..].to_string())
 }
 
 /// Load a `ShEx` output descriptor from `--shape` (or an auto-discovered
