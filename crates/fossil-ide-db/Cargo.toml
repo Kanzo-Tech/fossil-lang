@@ -12,5 +12,10 @@ description = "Symbol indexes and analysis primitives shared between IDE and LSP
 workspace = true
 
 [dependencies]
-# Phase 1: empty placeholder. Phase 6 LSP-01 wires symbol indexes
-# (rust-analyzer ide-db pattern) and adds salsa + fossil-base + fossil-syntax + fossil-hir.
+# Phase 6 LSP-01 (plan 06-03): cross-file symbol/prefix/workspace indexes
+# (rust-analyzer `ide-db` pattern). All three deps below are WASM-clean —
+# fossil-ide-db is in the 9-crate WASM gate (06-01). No native-only deps
+# (no lsp-server, no tokio) may enter this crate.
+fossil-base = { path = "../fossil-base" }
+fossil-syntax = { path = "../fossil-syntax" }
+smol_str = { workspace = true }
