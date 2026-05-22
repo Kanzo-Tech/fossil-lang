@@ -28,16 +28,18 @@ User : ex:Person from users
 ";
 
 fn render(src: &str) -> String {
+    use std::fmt::Write as _;
     let system: Arc<dyn System> = Arc::new(NativeSystem);
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
     let data = semantic_tokens(&db, file);
     let mut out = String::new();
     for (line, col, len, ty) in decode_tokens(&data) {
-        out.push_str(&format!(
-            "{line:>2}:{col:<2} len={len:<2} {}\n",
+        let _ = writeln!(
+            out,
+            "{line:>2}:{col:<2} len={len:<2} {}",
             legend_type_name(ty)
-        ));
+        );
     }
     out
 }

@@ -23,7 +23,7 @@
 //! | `Prefix`         | `NAMESPACE`      | a `prefix ex: <iri>` is a namespace |
 //! | `Mapping`        | `CLASS`          | a mapping produces typed subjects   |
 //! | `Function`       | `FUNCTION`       | a `@export f := …` definition       |
-//! | `Shape`          | `INTERFACE`      | a ShEx shape is a structural type   |
+//! | `Shape`          | `INTERFACE`      | a `ShEx` shape is a structural type |
 //!
 //! WASM-clean: returns `lsp_types::DocumentSymbol` directly (06-01 Spike A:
 //! lsp-types is wasm32-clean), so the playground consumes it with no translation.

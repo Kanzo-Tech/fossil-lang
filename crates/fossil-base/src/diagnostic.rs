@@ -24,9 +24,9 @@
 //! `Diagnostic` also carries an optional `did_you_mean: Option<DidYouMean>` —
 //! the STRUCTURED carrier for the Levenshtein replacement candidate that
 //! `fossil_hir::didyoumean::did_you_mean` (Phase 3) computes. Phase 3 surfaced
-//! the candidate only inside the diagnostic *message* text (`… did you mean
-//! \`name\`?`); Phase 6's `fossil_ide::code_action` did-you-mean quick-fix needs
-//! the `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
+//! the candidate only inside the diagnostic message text (the "did you mean
+//! ..." suffix); Phase 6's `fossil_ide::code_action` did-you-mean quick-fix
+//! needs the `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
 //! `WorkspaceEdit` without re-parsing the message string. This mirrors the
 //! `suggestion_source` precedent exactly (ADR-0006 Approach A — structured, not
 //! string-parsed). Defaults to `None`; plain data (wasm-clean).

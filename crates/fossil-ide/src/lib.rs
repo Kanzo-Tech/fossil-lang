@@ -25,6 +25,7 @@
 //!   - semantic tokens (Monaco depends on this)
 //!   - document outline (textDocument/documentSymbol)
 
+pub mod code_action;
 pub mod completion;
 pub mod goto_def;
 pub mod hover;
@@ -33,6 +34,7 @@ pub mod outline;
 pub mod position;
 pub mod semantic;
 
+pub use code_action::code_actions;
 pub use completion::completions;
 pub use goto_def::{NavigationTarget, goto_definition};
 pub use hover::{HoverInfo, hover, hover_bidirectional};

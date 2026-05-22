@@ -2,7 +2,7 @@
 //!
 //! Renders the document-symbol outline (a flat `Vec<DocumentSymbol>` in v0.1)
 //! into a stable `kind name @ start-end` table so the snapshot diffs readably
-//! when the SymbolIndex walk or the kind mapping changes.
+//! when the `SymbolIndex` walk or the kind mapping changes.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -28,7 +28,7 @@ Org : ex:Organization from users
     ex:title = .title
 ";
 
-fn kind_name(k: SymbolKind) -> &'static str {
+const fn kind_name(k: SymbolKind) -> &'static str {
     match k {
         SymbolKind::NAMESPACE => "namespace",
         SymbolKind::CLASS => "class",
@@ -39,20 +39,22 @@ fn kind_name(k: SymbolKind) -> &'static str {
 }
 
 fn render(src: &str) -> String {
+    use std::fmt::Write as _;
     let system: Arc<dyn System> = Arc::new(NativeSystem);
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
     let mut out = String::new();
     for s in document_symbols(&db, file) {
-        out.push_str(&format!(
-            "{:<10} {:<16} @ {}:{}-{}:{}\n",
+        let _ = writeln!(
+            out,
+            "{:<10} {:<16} @ {}:{}-{}:{}",
             kind_name(s.kind),
             s.name,
             s.range.start.line,
             s.range.start.character,
             s.range.end.line,
             s.range.end.character,
-        ));
+        );
     }
     out
 }
