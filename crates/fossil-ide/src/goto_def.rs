@@ -72,46 +72,76 @@ pub fn goto_definition(
     let Some(token) = token_at_position(db, file, line, character) else {
         return Vec::new();
     };
-    let raw = token.text();
+
+    // The set of name candidates to resolve. A prefixed name like `ex:Person`
+    // is several leaf tokens (`ex`, `:`, `Person`) under an `IRI_EXPR` /
+    // `PREFIXED_NAME` node, so the bare token under the cursor (`Person`) does
+    // NOT match the index entry, which is keyed by the full surface text. We
+    // therefore try the raw token text PLUS the text of each ancestor node up to
+    // the enclosing prefixed-name node — covering a cursor anywhere inside
+    // `ex:Person` (the shape-ref case, SC#4).
+    let candidates = name_candidates(&token);
 
     let ws = WorkspaceIndex::build(db, files);
     let mut targets = Vec::new();
 
-    // 1. Prefix use: the cursor is on the prefix segment of a `prefix:local`
-    //    name (`ex` in `ex:Person`), or on a bare prefix token. The token under
-    //    the cursor is the bare prefix IDENT; resolve it to its declaring
-    //    `prefix ... ` site. We also handle the case where the lexer hands back
-    //    the whole `ex:Person` PNAME token by splitting on the first `:`.
-    let prefix_candidate = raw.split(':').next().unwrap_or(raw);
-    if !prefix_candidate.is_empty() {
-        for (decl_file, _iri) in ws.resolve_prefix(prefix_candidate) {
-            if let Some(range) = prefix_decl_range(db, decl_file, prefix_candidate) {
-                push_unique(
-                    &mut targets,
-                    NavigationTarget {
-                        file: decl_file,
-                        range,
-                    },
-                );
+    for candidate in &candidates {
+        // 1. Prefix use: the prefix segment of a `prefix:local` name (`ex` in
+        //    `ex:Person`), or a bare prefix token. Resolve it to its declaring
+        //    `prefix ... ` site (cross-file).
+        let prefix_candidate = candidate.split(':').next().unwrap_or(candidate);
+        if !prefix_candidate.is_empty() {
+            for (decl_file, _iri) in ws.resolve_prefix(prefix_candidate) {
+                if let Some(range) = prefix_decl_range(db, decl_file, prefix_candidate) {
+                    push_unique(
+                        &mut targets,
+                        NavigationTarget {
+                            file: decl_file,
+                            range,
+                        },
+                    );
+                }
             }
+        }
+
+        // 2/3/4. Mapping / function / shape-ref names. Shape-ref index entries
+        //    are keyed by their full surface text (`ex:Person`); mapping +
+        //    function names by their bare IDENT.
+        for (decl_file, entry) in ws.resolve(candidate) {
+            push_unique(
+                &mut targets,
+                NavigationTarget {
+                    file: decl_file,
+                    range: entry.range,
+                },
+            );
         }
     }
 
-    // 2/3/4. Mapping / function / shape-ref names. The shape index entries are
-    //    keyed by their full surface text (`ex:Person`), so resolving the raw
-    //    token text covers shape refs directly; mapping + function names resolve
-    //    by their bare IDENT.
-    for (decl_file, entry) in ws.resolve(raw) {
-        push_unique(
-            &mut targets,
-            NavigationTarget {
-                file: decl_file,
-                range: entry.range,
-            },
-        );
-    }
-
     targets
+}
+
+/// Build the ordered set of name candidates for the token under the cursor: the
+/// token's own text, then the (whitespace-trimmed) text of each ancestor node up
+/// to and including the enclosing `IRI_EXPR` / `PREFIXED_NAME` node. This lets a
+/// cursor on any leaf of a multi-token prefixed name (`ex` or `Person` in
+/// `ex:Person`) resolve the whole name (the shape-ref case).
+fn name_candidates(token: &fossil_syntax::SyntaxToken) -> Vec<String> {
+    use fossil_syntax::SyntaxKind;
+    let mut out = vec![token.text().to_string()];
+    let mut node = token.parent();
+    while let Some(n) = node {
+        if matches!(n.kind(), SyntaxKind::IRI_EXPR | SyntaxKind::PREFIXED_NAME) {
+            let text = n.text().to_string();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() && !out.iter().any(|c| c == trimmed) {
+                out.push(trimmed.to_string());
+            }
+            break;
+        }
+        node = n.parent();
+    }
+    out
 }
 
 /// Find the byte range of the `prefix <name>: <iri>` declaration in `file`.
