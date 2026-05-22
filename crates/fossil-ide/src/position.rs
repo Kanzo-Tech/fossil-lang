@@ -12,14 +12,21 @@
 //! boundary) deterministically picks the LEFT token, matching what the LSP
 //! hover semantics expect (the token the cursor "is in" / "just past").
 //!
-//! Note: LSP positions use UTF-16 code units, but Phase 2 fixtures + the
-//! hover smoke test use ASCII-only `.fossil` source. This module treats
-//! `character` as a byte offset within a line — sufficient for Phase 2; a
-//! UTF-16 ↔ UTF-8 bridge can land in Phase 6 (LSP-01) when multi-byte
-//! identifiers become a real concern.
+//! # UTF-16 positions (Phase 6 LSP-01)
+//!
+//! LSP positions use UTF-16 code units (Monaco / VS Code). Phase 2 treated the
+//! `character` column as a raw byte offset — correct only for ASCII source.
+//! Phase 6 plumbs proper conversion via [`crate::line_index::LineIndex`]
+//! (rust-analyzer pattern, Research Pitfall #4): [`position_to_offset`] now
+//! interprets `character` as a UTF-16 code unit, and [`offset_to_lsp_position`]
+//! converts a byte offset back to a UTF-16 column. Both build the index from
+//! the SAME FILE-keyed [`line_offsets`] table, so no new per-mapping Salsa
+//! query is added (`MAX_PER_MAPPING_FAN_OUT` untouched).
 
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxNode, SyntaxToken};
+
+use crate::line_index::{LineIndex, Utf16Position};
 
 /// Per-file table of byte offsets at the start of each line.
 ///
@@ -47,15 +54,32 @@ pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> Line
     LineOffsets::new(db, offsets)
 }
 
-/// Convert an LSP `(line, character)` position to a byte offset using
-/// `line_offsets`. Returns `None` if `line` is past the end of the file.
+/// Convert an LSP `(line, character)` position to a byte offset.
 ///
-/// `character` is treated as a byte offset within the line (Phase 2 ASCII-
-/// only assumption — Phase 6 LSP-01 will plumb proper UTF-16 conversion).
+/// `character` is interpreted as a UTF-16 code unit (the LSP wire convention),
+/// converted to a UTF-8 byte offset via the [`LineIndex`]. Returns `None` if
+/// `line` is past the end of the file. (Phase 6 LSP-01 — replaces Phase 2's
+/// byte-offset-as-column assumption; Research Pitfall #4.)
 #[must_use]
-pub fn position_to_offset(offsets: &[u32], line: u32, character: u32) -> Option<u32> {
-    let line_start = *offsets.get(line as usize)?;
-    Some(line_start + character)
+pub fn position_to_offset(index: &LineIndex, line: u32, character: u32) -> Option<u32> {
+    index.offset(Utf16Position { line, character })
+}
+
+/// Convert a UTF-8 byte offset back to an LSP UTF-16 `(line, character)`
+/// position. The inverse of [`position_to_offset`]; the LSP handler uses this
+/// to translate Fossil byte ranges into UTF-16-correct `lsp_types::Range`s.
+#[must_use]
+pub fn offset_to_lsp_position(index: &LineIndex, offset: u32) -> Utf16Position {
+    index.position(offset)
+}
+
+/// Build the [`LineIndex`] for `file` from the FILE-keyed [`line_offsets`]
+/// table + the file text. Convenience for the position-resolution helpers and
+/// the LSP handler; adds no Salsa query (reads the existing memoised table).
+#[must_use]
+pub fn line_index(db: &dyn fossil_base::Db, file: SourceFile) -> LineIndex {
+    let los = line_offsets(db, file);
+    LineIndex::new(file.text(db), los.offsets(db))
 }
 
 /// Resolve an LSP position to the [`SyntaxToken`] that "contains" it.
@@ -70,8 +94,8 @@ pub fn token_at_position(
     line: u32,
     character: u32,
 ) -> Option<SyntaxToken> {
-    let los = line_offsets(db, file);
-    let offset = position_to_offset(los.offsets(db), line, character)?;
+    let index = line_index(db, file);
+    let offset = position_to_offset(&index, line, character)?;
     let cst = fossil_syntax::parse(db, file);
     let root: SyntaxNode = cst.root(db).syntax();
     let offset = rowan::TextSize::new(offset);
@@ -115,14 +139,18 @@ mod tests {
 
     #[test]
     fn position_to_offset_handles_line_2_char_1() {
-        let offsets = vec![0u32, 4, 9];
-        assert_eq!(position_to_offset(&offsets, 1, 1), Some(5));
+        // "abc\ndefg\nh": line 1 starts at byte 4; UTF-16 col 1 → byte 5.
+        let idx = LineIndex::new("abc\ndefg\nh", &[0u32, 4, 9]);
+        assert_eq!(position_to_offset(&idx, 1, 1), Some(5));
+        // Inverse round-trips.
+        assert_eq!(offset_to_lsp_position(&idx, 5).line, 1);
+        assert_eq!(offset_to_lsp_position(&idx, 5).character, 1);
     }
 
     #[test]
     fn position_to_offset_returns_none_past_eof_line() {
-        let offsets = vec![0u32, 4, 9];
-        assert!(position_to_offset(&offsets, 99, 0).is_none());
+        let idx = LineIndex::new("abc\ndefg\nh", &[0u32, 4, 9]);
+        assert!(position_to_offset(&idx, 99, 0).is_none());
     }
 
     /// `token_at_position` on `"prefix ex: <https://example.org/>\n"` at

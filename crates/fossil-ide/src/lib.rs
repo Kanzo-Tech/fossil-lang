@@ -26,11 +26,14 @@
 //!   - document outline (textDocument/documentSymbol)
 
 pub mod hover;
+pub mod line_index;
 pub mod position;
 
 pub use hover::{HoverInfo, hover};
+pub use line_index::{LineIndex, Utf16Position};
 pub use position::{
-    LineOffsets, line_offsets, node_at_position, position_to_offset, token_at_position,
+    LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
+    position_to_offset, token_at_position,
 };
 
 /// IDE analysis entry point.
