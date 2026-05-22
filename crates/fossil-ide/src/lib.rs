@@ -25,11 +25,13 @@
 //!   - semantic tokens (Monaco depends on this)
 //!   - document outline (textDocument/documentSymbol)
 
+pub mod completion;
 pub mod goto_def;
 pub mod hover;
 pub mod line_index;
 pub mod position;
 
+pub use completion::completions;
 pub use goto_def::{NavigationTarget, goto_definition};
 pub use hover::{HoverInfo, hover, hover_bidirectional};
 pub use line_index::{LineIndex, Utf16Position};
