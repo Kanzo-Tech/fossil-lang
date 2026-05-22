@@ -18,6 +18,18 @@
 //! Why structured (not Markdown-message-substring): type-safe, future-proof
 //! for other suggestion-emitting diagnostics, and avoids brittle string
 //! manipulation. See ADR-0006 §Consequences.
+//!
+//! ## `did_you_mean` field (Phase 6 plan 06-08 — SC#5 code-actions)
+//!
+//! `Diagnostic` also carries an optional `did_you_mean: Option<DidYouMean>` —
+//! the STRUCTURED carrier for the Levenshtein replacement candidate that
+//! `fossil_hir::didyoumean::did_you_mean` (Phase 3) computes. Phase 3 surfaced
+//! the candidate only inside the diagnostic *message* text (`… did you mean
+//! \`name\`?`); Phase 6's `fossil_ide::code_action` did-you-mean quick-fix needs
+//! the `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
+//! `WorkspaceEdit` without re-parsing the message string. This mirrors the
+//! `suggestion_source` precedent exactly (ADR-0006 Approach A — structured, not
+//! string-parsed). Defaults to `None`; plain data (wasm-clean).
 
 #[salsa::accumulator]
 #[derive(Debug, Clone)]
@@ -31,13 +43,49 @@ pub struct Diagnostic {
     /// via the typed field, NOT via Markdown delimiter parsing. See module
     /// doc + ADR-0006.
     pub suggestion_source: Option<String>,
+    /// Optional structured did-you-mean candidate. Populated by a diagnostic
+    /// whose [`Severity::Error`] message proposes a Levenshtein replacement for
+    /// a typo'd identifier; read directly by the `fossil_ide::code_action`
+    /// did-you-mean quick-fix to build a `WorkspaceEdit` replacing
+    /// [`DidYouMean::wrong_span`] with [`DidYouMean::replacement`], NOT by
+    /// parsing the message text. See module doc + ADR-0006.
+    pub did_you_mean: Option<DidYouMean>,
+}
+
+/// A structured did-you-mean candidate: replace the source text at
+/// `wrong_span` with `replacement`.
+///
+/// Carried by [`Diagnostic::did_you_mean`] so the IDE did-you-mean code action
+/// (Phase 6 SC#5) can build a `WorkspaceEdit` STRUCTURALLY — the `(span,
+/// replacement)` pair is the exact input a single-edit quick-fix needs, with no
+/// message-string parsing. Plain data → wasm-clean.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DidYouMean {
+    /// The byte span of the typo'd identifier in the source — what the quick-fix
+    /// replaces.
+    pub wrong_span: Span,
+    /// The suggested replacement text (the Levenshtein nearest candidate).
+    pub replacement: String,
+}
+
+impl DidYouMean {
+    /// Build a did-you-mean candidate from the typo's span + the replacement.
+    #[must_use]
+    pub fn new(wrong_span: Span, replacement: impl Into<String>) -> Self {
+        Self {
+            wrong_span,
+            replacement: replacement.into(),
+        }
+    }
 }
 
 impl Diagnostic {
-    /// Build a [`Diagnostic`] with no attached suggestion source.
+    /// Build a [`Diagnostic`] with no attached suggestion source or
+    /// did-you-mean candidate.
     ///
-    /// Equivalent to the struct literal with `suggestion_source: None`. Use
-    /// [`Self::with_suggestion_source`] to attach one fluently.
+    /// Equivalent to the struct literal with `suggestion_source: None` and
+    /// `did_you_mean: None`. Use [`Self::with_suggestion_source`] /
+    /// [`Self::with_did_you_mean`] to attach them fluently.
     #[must_use]
     pub fn new(severity: Severity, message: impl Into<String>, span: Span) -> Self {
         Self {
@@ -45,6 +93,7 @@ impl Diagnostic {
             message: message.into(),
             span,
             suggestion_source: None,
+            did_you_mean: None,
         }
     }
 
@@ -53,6 +102,14 @@ impl Diagnostic {
     #[must_use]
     pub fn with_suggestion_source(mut self, source: impl Into<String>) -> Self {
         self.suggestion_source = Some(source.into());
+        self
+    }
+
+    /// Attach a structured did-you-mean candidate (the typo's span + the
+    /// Levenshtein replacement) so the IDE quick-fix reads it structurally.
+    #[must_use]
+    pub fn with_did_you_mean(mut self, wrong_span: Span, replacement: impl Into<String>) -> Self {
+        self.did_you_mean = Some(DidYouMean::new(wrong_span, replacement));
         self
     }
 }
@@ -113,7 +170,30 @@ mod tests {
             message: "ok".into(),
             span: Span::new(0, 0),
             suggestion_source: None,
+            did_you_mean: None,
         };
         assert!(d.suggestion_source.is_none());
+        assert!(d.did_you_mean.is_none());
+    }
+
+    #[test]
+    fn diagnostic_default_did_you_mean_is_none() {
+        let d = Diagnostic::new(Severity::Error, "oops", Span::new(0, 4));
+        assert!(d.did_you_mean.is_none());
+    }
+
+    #[test]
+    fn diagnostic_with_did_you_mean_carries_structured_candidate() {
+        // The IDE quick-fix reads the (wrong_span, replacement) pair directly —
+        // no message-string parsing (ADR-0006 Approach A).
+        let d = Diagnostic::new(
+            Severity::Error,
+            "unknown column `naem` — did you mean `name`?",
+            Span::new(10, 14),
+        )
+        .with_did_you_mean(Span::new(10, 14), "name");
+        let dym = d.did_you_mean.expect("did-you-mean candidate present");
+        assert_eq!(dym.wrong_span, Span::new(10, 14));
+        assert_eq!(dym.replacement, "name");
     }
 }
