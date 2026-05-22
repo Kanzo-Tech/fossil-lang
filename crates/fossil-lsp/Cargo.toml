@@ -20,8 +20,17 @@ path = "src/main.rs"
 # day 1 (no fase-4 trap) but shipped zero compiler features. Phase 2 plan 02-06
 # adds fossil-base + fossil-ide for the minimum hover delta. Phase 6 LSP-01
 # grows the full provider surface.
-fossil-base        = { path = "../fossil-base" }
-fossil-ide         = { path = "../fossil-ide" }
+# Phase 6 LSP-01: the full provider surface. fossil-hir supplies the
+# parse→def_map→typecheck diagnostics pipeline + the `HirDb` trait the LSP db
+# implements (so target-side hover/completion resolve); fossil-descriptors-output
+# supplies `OutputDescriptorKind` (the host descriptor the LSP db carries) +
+# `ShExDescriptor` (sibling-.shex loading). salsa is needed for the `Setter`
+# (`set_text`) cancellation trigger + the custom `#[salsa::db]` LSP db.
+fossil-base               = { path = "../fossil-base" }
+fossil-ide                = { path = "../fossil-ide" }
+fossil-hir                = { path = "../fossil-hir" }
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+salsa              = { workspace = true }
 lsp-server         = { workspace = true }
 lsp-types          = { workspace = true }
 crossbeam-channel  = { workspace = true }
@@ -40,6 +49,8 @@ tracing-subscriber = { workspace = true }
 # surface syntax to trigger synthesis — plan 03-05 decision: NO seq.filter
 # stub). serde_json is the existing JSON-RPC smoke-test dep (declared above
 # as a normal dependency — also used by the smoke test).
-fossil-hir               = { path = "../fossil-hir" }
+# fossil-hir is a normal dependency (above) as of Phase 6 LSP-01; the smoke
+# test still uses its `Checker`. fossil-descriptors-input + smol_str remain
+# dev-only (the in-process CSVW forward-propagation smoke test).
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str                 = { workspace = true }
