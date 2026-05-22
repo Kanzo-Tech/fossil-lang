@@ -20,6 +20,8 @@
 
 pub mod prefix_index;
 pub mod symbol_index;
+pub mod workspace;
 
 pub use prefix_index::{PrefixBinding, PrefixIndex, WELL_KNOWN_PREFIXES};
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
+pub use workspace::WorkspaceIndex;
