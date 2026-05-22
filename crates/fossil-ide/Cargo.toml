@@ -31,3 +31,8 @@ lsp-types = { workspace = true }
 # Plan 03-07: hover unit tests construct ExprTypeEntry/Provenance scenarios
 # (SynthesizedClosureRendering, InputDescriptor) directly, which need SmolStr.
 smol_str = { workspace = true }
+# Plan 06-05 (SC#4): the bidirectional-hover integration test builds a custom
+# `HirDb` whose `output_descriptor_kind()` returns a real `ShEx` schema, to
+# drive the target-side render path end-to-end (a host-wiring stand-in). Needs
+# `OutputDescriptorKind` + `ShExDescriptor`, plus `salsa` for the custom db.
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
