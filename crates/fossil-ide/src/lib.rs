@@ -29,7 +29,7 @@ pub mod hover;
 pub mod line_index;
 pub mod position;
 
-pub use hover::{HoverInfo, hover};
+pub use hover::{HoverInfo, hover, hover_bidirectional};
 pub use line_index::{LineIndex, Utf16Position};
 pub use position::{
     LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
