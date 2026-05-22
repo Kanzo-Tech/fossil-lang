@@ -1,0 +1,190 @@
+// canonical_200.fossil — the canonical ~200-line Fossil program used as the
+// LSP performance fixture (didChange round-trip budget) AND the cross-file
+// feature test input.
+//
+// Authored by plan 06-09 (Research Wave 0 gap / Phase-0 Open Question #4): no
+// realistic multi-mapping Fossil corpus existed before this. It exercises the
+// full v0.1 surface — prefix decls, exported functions, source bindings,
+// mapping headers with shape refs, IRI templates, field refs, and stdlib calls
+// across the io / clean / str / math / core namespaces — and type-checks
+// cleanly under AcceptAll (no sibling .shex).
+//
+// Comment lines use `//` (the Fossil comment syntax). A bare `#` is unlexable
+// and would hang the parser (06-07 deferred-items.md) — it MUST NOT appear.
+
+prefix ex:    <https://example.org/>
+prefix schema: <https://schema.org/>
+prefix foaf:  <http://xmlns.com/foaf/0.1/>
+prefix org:   <https://example.org/org/>
+prefix prod:  <https://example.org/product/>
+
+// ─── Exported helper functions (cross-file reusable) ─────────────────────
+
+@export normalize_name := clean.trim(clean.upper(.raw))
+
+@export slugify := clean.slug(.title)
+
+@export full_label := str.concat(.first, .last)
+
+@export round_price := math.round(.amount)
+
+// ─── Source bindings ─────────────────────────────────────────────────────
+
+users := io.csv("users.csv")
+
+orders := io.csv("orders.csv")
+
+products := io.csv("products.csv")
+
+orgs := io.csv("organizations.csv")
+
+memberships := io.csv("memberships.csv")
+
+reviews := io.csv("reviews.csv")
+
+addresses := io.csv("addresses.csv")
+
+categories := io.csv("categories.csv")
+
+// ─── Mapping 1: people ───────────────────────────────────────────────────
+
+Person : ex:Person from users
+    iri = `${ex:}person/${.id}`
+    foaf:name = clean.trim(.name)
+    foaf:nick = clean.lower(.nick)
+    schema:email = .email
+    ex:age = .age
+    ex:active = .active
+
+// ─── Mapping 2: organizations ──────────────────────────────────────────────
+
+Organization : ex:Organization from orgs
+    iri = `${org:}${.org_id}`
+    schema:name = clean.upper(.org_name)
+    schema:legalName = .legal_name
+    ex:country = .country
+    ex:founded = .founded_year
+
+// ─── Mapping 3: products ───────────────────────────────────────────────────
+
+Product : ex:Product from products
+    iri = `${prod:}${.sku}`
+    schema:name = .product_name
+    schema:price = math.round(.price)
+    ex:currency = .currency
+    ex:inStock = .in_stock
+    ex:slug = clean.slug(.product_name)
+
+// ─── Mapping 4: orders ─────────────────────────────────────────────────────
+
+Order : ex:Order from orders
+    iri = `${ex:}order/${.order_id}`
+    ex:placedBy = `${ex:}person/${.user_id}`
+    schema:total = math.round(.amount)
+    ex:quantity = .quantity
+    ex:orderedAt = .created_at
+
+// ─── Mapping 5: reviews ────────────────────────────────────────────────────
+
+Review : schema:Review from reviews
+    iri = `${ex:}review/${.review_id}`
+    schema:author = `${ex:}person/${.author_id}`
+    schema:itemReviewed = `${prod:}${.sku}`
+    schema:reviewBody = clean.trim(.body)
+    schema:ratingValue = .rating
+
+// ─── Mapping 6: memberships (joins person ↔ org) ────────────────────────────
+
+Membership : ex:Membership from memberships
+    iri = `${ex:}membership/${.membership_id}`
+    ex:member = `${ex:}person/${.user_id}`
+    ex:organization = `${org:}${.org_id}`
+    ex:role = clean.upper(.role)
+    ex:since = .joined_at
+
+// ─── Mapping 7: addresses ──────────────────────────────────────────────────
+
+Address : schema:PostalAddress from addresses
+    iri = `${ex:}address/${.address_id}`
+    schema:streetAddress = clean.trim(.street)
+    schema:addressLocality = .city
+    schema:postalCode = .zip
+    schema:addressCountry = clean.upper(.country_code)
+
+// ─── Mapping 8: categories ─────────────────────────────────────────────────
+
+Category : ex:Category from categories
+    iri = `${ex:}category/${.category_id}`
+    schema:name = .category_name
+    ex:slug = clean.slug(.category_name)
+    ex:parent = .parent_id
+
+// ─── Mapping 9: product → category link ─────────────────────────────────────
+
+ProductCategory : ex:Product from products
+    iri = `${prod:}${.sku}`
+    ex:belongsTo = `${ex:}category/${.category_id}`
+    ex:displayName = str.concat(.product_name, .currency)
+
+// ─── Mapping 10: enriched person profile ────────────────────────────────────
+
+PersonProfile : foaf:Person from users
+    iri = `${ex:}profile/${.id}`
+    foaf:name = clean.trim(.name)
+    foaf:mbox = .email
+    ex:displayLabel = str.concat(.name, .nick)
+    ex:ageGroup = .age
+    ex:homepage = `${ex:}person/${.id}/home`
+
+// ─── More exported helpers (string + math compositions) ──────────────────
+
+@export clean_email := clean.lower(clean.trim(.email))
+
+@export display_total := math.round(math.abs(.amount))
+
+@export upper_country := clean.upper(.country)
+
+// ─── Mapping 11: order line items ───────────────────────────────────────────
+
+OrderLine : ex:OrderLine from orders
+    iri = `${ex:}orderline/${.order_id}/${.user_id}`
+    ex:lineOrder = `${ex:}order/${.order_id}`
+    ex:lineProduct = `${prod:}${.sku}`
+    schema:quantity = .quantity
+    schema:price = math.round(.amount)
+
+// ─── Mapping 12: organization contacts ──────────────────────────────────────
+
+OrgContact : ex:Contact from orgs
+    iri = `${org:}${.org_id}/contact`
+    ex:contactOf = `${org:}${.org_id}`
+    schema:name = clean.trim(.contact_name)
+    schema:email = clean.lower(.contact_email)
+    schema:telephone = .phone
+
+// ─── Mapping 13: product pricing snapshot ───────────────────────────────────
+
+PriceSnapshot : ex:PriceSnapshot from products
+    iri = `${prod:}${.sku}/price`
+    ex:snapshotOf = `${prod:}${.sku}`
+    schema:price = math.round(.price)
+    schema:priceCurrency = clean.upper(.currency)
+    ex:capturedAt = .updated_at
+
+// ─── Mapping 14: review summary per product ─────────────────────────────────
+
+ReviewSummary : ex:ReviewSummary from reviews
+    iri = `${ex:}review/${.review_id}/summary`
+    ex:summaryOf = `${prod:}${.sku}`
+    ex:reviewer = `${ex:}person/${.author_id}`
+    schema:reviewRating = .rating
+    ex:headline = clean.trim(.body)
+
+// ─── Mapping 15: address geocoding stub ─────────────────────────────────────
+
+GeoAddress : ex:GeoAddress from addresses
+    iri = `${ex:}geo/${.address_id}`
+    ex:locationOf = `${ex:}address/${.address_id}`
+    schema:addressLocality = clean.upper(.city)
+    ex:postalCode = .zip
+    ex:countryCode = clean.upper(.country_code)

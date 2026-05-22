@@ -1,0 +1,25 @@
+// canonical_200_b.fossil — the cross-file sibling of canonical_200.fossil.
+//
+// It deliberately USES (without re-declaring) the `ex` and `schema` prefixes
+// and the `normalize_name` / `slugify` functions DECLARED in canonical_200.fossil
+// so cross-file goto-def has a target in the sibling file (ADR-0023: the
+// workspace is the OPEN file set). Type-checks cleanly under AcceptAll.
+
+events := io.csv("events.csv")
+
+tags := io.csv("tags.csv")
+
+// Mapping using the `ex` + `schema` prefixes from the sibling file.
+Event : ex:Event from events
+    iri = `${ex:}event/${.event_id}`
+    schema:name = clean.trim(.event_name)
+    schema:startDate = .start_date
+    ex:organizer = `${ex:}person/${.organizer_id}`
+    ex:venue = clean.upper(.venue)
+
+// Mapping using the `ex` prefix; the `slug` is built locally.
+Tag : ex:Tag from tags
+    iri = `${ex:}tag/${.tag_id}`
+    schema:name = .label
+    ex:slug = clean.slug(.label)
+    ex:relatedTo = `${ex:}event/${.event_id}`
