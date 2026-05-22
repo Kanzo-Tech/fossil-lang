@@ -257,7 +257,10 @@ fn row(cells: &[&str]) -> Vec<String> {
 fn workspace_root() -> PathBuf {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
-        if dir.join("tests/wasm_parity/fixtures/io_people.csv").exists() {
+        if dir
+            .join("tests/wasm_parity/fixtures/io_people.csv")
+            .exists()
+        {
             return dir;
         }
         assert!(dir.pop(), "could not locate workspace root (io fixtures)");
