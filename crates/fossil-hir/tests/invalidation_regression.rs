@@ -110,6 +110,39 @@
 //! NEVER walks up from `mapping_cst_node` to the FILE CST (Serious #6). The
 //! per-mapping fan-out stays at 1 (verified below).
 //!
+//! ─────────────────────────────────────────────────────────────────────────
+//! PHASE 6 AUDIT (LSP-02 / SC#3) — fan-out unchanged
+//! ─────────────────────────────────────────────────────────────────────────
+//!
+//! Phase 6 was audited against P-CRIT-3 (the load-bearing fan-out invariant)
+//! when the SC#3 regression was grown (plan 06-04). Findings:
+//!
+//!   * Plan 06-01 wired the output descriptor into `resolve_target_shape` so
+//!     it returns `Some` in production (ADR-0020). The descriptor is exposed
+//!     via a NON-Salsa `HirDb::output_descriptor_kind()` accessor — a plain
+//!     host-supplied value (the ADR-0018 "descriptor as argument, not key"
+//!     seam). It is NOT a `#[salsa::tracked]` query, NOT a per-mapping Salsa
+//!     key, and adds NO new tracked query to the per-mapping fan-out set.
+//!     The ten-mapping fixture declares no `ShEx` schema, so the in-query
+//!     path still observes `AcceptAll` → `resolve_target_shape` returns `None`
+//!     here, exactly as in Phase 3/4. Fan-out is provably unchanged.
+//!   * Plans 06-02 (CLI) and 06-03 (`fossil-ide-db` `WorkspaceIndex`) touch
+//!     only native CLI / WASM-clean IDE-index code; neither introduces a
+//!     `#[salsa::tracked]` query keyed by `MappingLoc`. The IDE indexes are
+//!     plain structs built from `def_map` (file-keyed) — not per-mapping
+//!     tracked queries (ADR-0023).
+//!
+//! The complete per-mapping (`MappingLoc`-keyed) `#[salsa::tracked]` query
+//! set is therefore UNCHANGED from Phase 4: `body`, `typecheck_mapping`,
+//! `expr_types`, `spans`. Each is asserted to re-execute ≤
+//! `MAX_PER_MAPPING_FAN_OUT` (= 1) after the single-char body edit by
+//! `keyset_of_reexecuted_queries_matches_expected_four`. No new per-mapping
+//! query needed registration; `MAX_REEXECUTIONS` stays at 18 (breakdown
+//! above). Any FUTURE Phase-6 IDE feature that adds a per-mapping tracked
+//! query MUST register it in the keyset assertion and cap it at 1 — a NEW
+//! whole-file (FILE-keyed) query re-runs exactly once and is allowed to bump
+//! `MAX_REEXECUTIONS` ONLY with an updated breakdown here.
+//!
 //! If the test fails with count > 18, something else is leaking. If the
 //! per-mapping fan-out test (body / typecheck / expr_types / spans > 1)
 //! fails, ADR-0005's invalidation barrier is broken — DO NOT relax that
