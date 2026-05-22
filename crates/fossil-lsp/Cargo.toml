@@ -15,6 +15,14 @@ workspace = true
 name = "fossil-lsp"
 path = "src/main.rs"
 
+# SC#2 (plan 06-09 / ADR-0021): the ADVISORY Criterion benchmark for the
+# didChange round-trip. The HARD CI gate is the margined wall-clock correctness
+# test (`tests/didchange_budget.rs`); this benchmark's 20%-regression check is
+# reliable only on a pinned/self-hosted runner (documented in ADR-0021).
+[[bench]]
+name = "lsp_didchange"
+harness = false
+
 [dependencies]
 # Phase 1 LSP scope (per ADR-0001, NOT tower-lsp): wired the LSP transport from
 # day 1 (no fase-4 trap) but shipped zero compiler features. Phase 2 plan 02-06
@@ -54,3 +62,6 @@ tracing-subscriber = { workspace = true }
 # dev-only (the in-process CSVW forward-propagation smoke test).
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str                 = { workspace = true }
+# Criterion for the advisory didChange benchmark (SC#2 / ADR-0021). No default
+# features → no rayon/plotters pull-in; native-only (fossil-lsp is native-only).
+criterion                = { version = "0.5", default-features = false }

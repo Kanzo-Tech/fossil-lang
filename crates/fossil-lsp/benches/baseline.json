@@ -1,0 +1,16 @@
+{
+  "_comment": "ADVISORY committed baseline for the SC#2 didChange round-trip benchmark (ADR-0021). This is a REFERENCE point captured on the plan-06-09 author's dev hardware (Apple M-series, macOS, --release). Criterion's live target/criterion/ baseline is gitignored and runner-local; the 20%-regression comparison is reliable only on a pinned/self-hosted runner. On shared CI the benchmark is informational. The HARD gate is tests/didchange_budget.rs (margined wall-clock).",
+  "benchmark": "lsp_didchange/canonical_200_round_trip",
+  "fixture": "tests/fixtures/canonical_200.fossil",
+  "fixture_lines": 190,
+  "measures": "set_text (Salsa Setter, revision bump) -> def_map -> typecheck_mapping over every mapping -> drain Diagnostic accumulator",
+  "warm_round_trip": {
+    "point_estimate_ns": 120042,
+    "point_estimate_ms": 0.12,
+    "unit": "nanoseconds (slope point estimate)"
+  },
+  "design_goal_ms": 100,
+  "hard_gate_budget_ms": 400,
+  "advisory_regression_threshold_pct": 20,
+  "captured": "2026-05-22"
+}
