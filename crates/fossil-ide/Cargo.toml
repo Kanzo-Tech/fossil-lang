@@ -39,3 +39,7 @@ lsp-types = { workspace = true }
 # drive the target-side render path end-to-end (a host-wiring stand-in). Needs
 # `OutputDescriptorKind` + `ShExDescriptor`, plus `salsa` for the custom db.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Plan 06-07 (SC#4 / SC#5): semantic-tokens + outline snapshot tests render the
+# (decoded) token stream / document-symbol tree into a stable, reviewable
+# golden file (Research test-map). insta is the workspace snapshot dev-dep.
+insta = { workspace = true }

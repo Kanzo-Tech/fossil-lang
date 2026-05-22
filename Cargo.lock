@@ -1131,6 +1131,7 @@ dependencies = [
  "fossil-ide-db",
  "fossil-registry",
  "fossil-syntax",
+ "insta",
  "lsp-types",
  "rowan",
  "salsa",

@@ -203,22 +203,85 @@ fn prefixed_name_type(tok: &SyntaxToken) -> u32 {
     }
 }
 
-/// A bare `IDENT` is a *function* when it heads a `CALL_EXPR` callee (a stdlib
-/// call like `upper(...)` / `io.csv(...)`), a *namespace* when it is the prefix
-/// segment of a prefixed name, and a *variable* otherwise (a mapping subject
-/// name, a source name, a definition name). Always classifies (every IDENT gets
-/// a color); the three-way choice is by enclosing-node kind.
+/// Classify a bare `IDENT`. The grammar (parser/expr.rs) produces no `CALL_EXPR`
+/// / `FIELD_REF` *leaf* — calls and member access are `POSTFIX_EXPR` nodes and a
+/// primary field ref is a `FIELD_REF_EXPR`. So we read the IDENT's local tree
+/// shape, in priority order:
+///
+/// 1. **property** — the IDENT names a record field: it is the IDENT of a
+///    `FIELD_REF_EXPR` (`.name` in primary position) or it directly follows a
+///    `DOT` sibling (`x.name` member access under a `POSTFIX_EXPR`).
+/// 2. **function** — the IDENT is a *call callee*: its primary node
+///    (`LITERAL_EXPR` / `IRI_EXPR`) is the first child of a `POSTFIX_EXPR` that
+///    also has an `LPAREN` child (`upper(...)`, `io.csv(...)`).
+/// 3. **namespace** — the prefix segment of a prefixed name (`ex` in
+///    `ex:Person`): under an `IRI_EXPR`.
+/// 4. **variable** — otherwise (a mapping subject, a source name, a binding).
 fn ident_type(tok: &SyntaxToken) -> u32 {
-    // The prefix segment of `ex:Person` lexes as its own IDENT under a
-    // PREFIXED_NAME-bearing node; color it as a namespace.
-    if has_ancestor(tok, SyntaxKind::IRI_EXPR) && !has_ancestor(tok, SyntaxKind::CALL_EXPR) {
-        return ty::NAMESPACE;
+    if is_field_name(tok) {
+        return ty::PROPERTY;
     }
-    if has_ancestor(tok, SyntaxKind::CALL_EXPR) {
+    if is_call_callee(tok) {
         return ty::FUNCTION;
     }
-    // Mapping subject / source / definition name — a binding.
+    if has_ancestor(tok, SyntaxKind::IRI_EXPR) {
+        return ty::NAMESPACE;
+    }
     ty::VARIABLE
+}
+
+/// Whether `tok` names a record field — the IDENT of a `FIELD_REF_EXPR` or an
+/// IDENT immediately preceded by a `DOT` token (member access).
+fn is_field_name(tok: &SyntaxToken) -> bool {
+    if tok
+        .parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::FIELD_REF_EXPR)
+    {
+        return true;
+    }
+    // Preceding sibling token is a DOT (postfix `x.name`).
+    prev_token_kind(tok) == Some(SyntaxKind::DOT)
+}
+
+/// Whether `tok` is the callee of a call — its primary node is the first child of
+/// a `POSTFIX_EXPR` that has an `LPAREN` child (a function application).
+fn is_call_callee(tok: &SyntaxToken) -> bool {
+    let Some(primary) = tok.parent() else {
+        return false;
+    };
+    if !matches!(
+        primary.kind(),
+        SyntaxKind::LITERAL_EXPR | SyntaxKind::IRI_EXPR
+    ) {
+        return false;
+    }
+    let Some(postfix) = primary.parent() else {
+        return false;
+    };
+    if postfix.kind() != SyntaxKind::POSTFIX_EXPR {
+        return false;
+    }
+    // The primary must be the first child (the callee, not an argument), and the
+    // POSTFIX must carry a call `(`.
+    let is_callee = postfix.first_child().is_some_and(|c| c == primary);
+    let has_call_paren = postfix
+        .children_with_tokens()
+        .filter_map(rowan::NodeOrToken::into_token)
+        .any(|t| t.kind() == SyntaxKind::LPAREN);
+    is_callee && has_call_paren
+}
+
+/// The `SyntaxKind` of the token immediately preceding `tok` in source order,
+/// skipping whitespace/newlines, or `None` if there is no prior token.
+fn prev_token_kind(tok: &SyntaxToken) -> Option<SyntaxKind> {
+    let mut cur = tok.prev_token();
+    while let Some(t) = cur {
+        if !matches!(t.kind(), SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) {
+            return Some(t.kind());
+        }
+        cur = t.prev_token();
+    }
+    None
 }
 
 /// Whether `tok` has an ancestor node of `kind`.

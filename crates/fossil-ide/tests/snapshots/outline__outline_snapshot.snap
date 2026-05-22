@@ -1,0 +1,10 @@
+---
+source: crates/fossil-ide/tests/outline.rs
+expression: render(FIXTURE)
+---
+namespace  ex               @ 0:0-0:33
+function   greet            @ 4:0-6:0
+class      User             @ 6:0-9:0
+interface  ex:Person        @ 6:7-6:16
+class      Org              @ 9:0-11:0
+interface  ex:Organization  @ 9:6-9:21
