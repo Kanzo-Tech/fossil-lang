@@ -30,6 +30,7 @@ pub mod goto_def;
 pub mod hover;
 pub mod line_index;
 pub mod position;
+pub mod semantic;
 
 pub use completion::completions;
 pub use goto_def::{NavigationTarget, goto_definition};
@@ -39,6 +40,7 @@ pub use position::{
     LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
     position_to_offset, token_at_position,
 };
+pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
 
 /// IDE analysis entry point.
 ///
