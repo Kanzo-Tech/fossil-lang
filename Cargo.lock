@@ -1128,6 +1128,8 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-output",
  "fossil-hir",
+ "fossil-ide-db",
+ "fossil-registry",
  "fossil-syntax",
  "lsp-types",
  "rowan",
