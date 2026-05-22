@@ -37,10 +37,10 @@ use fossil_ide_db::WorkspaceIndex;
 
 use crate::position::token_at_position;
 
-/// A goto-def navigation target: the owning file + the byte range of the
-/// definition site. `fossil-lsp` (06-08) translates `range` to a UTF-16
-/// `lsp_types::Range` and pairs it with the file URI to build a
-/// `lsp_types::Location`.
+/// A goto-def navigation target: the owning file + the byte range.
+///
+/// `fossil-lsp` (06-08) translates `range` to a UTF-16 `lsp_types::Range` and
+/// pairs it with the file URI to build a `lsp_types::Location`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigationTarget {
     /// The file that contains the definition.

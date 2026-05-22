@@ -87,11 +87,12 @@ fn stdlib_completions(prefixes: &PrefixIndex, items: &mut Vec<CompletionItem>) {
         let native_only = entry.wasm_class == WasmClass::NativeUdfOnly;
 
         let mut detail = render_sig(namespace, entry);
-        let mut tags = None;
-        if native_only {
+        let tags = if native_only {
             detail.push_str("  (native-only)");
-            tags = Some(vec![CompletionItemTag::DEPRECATED]);
-        }
+            Some(vec![CompletionItemTag::DEPRECATED])
+        } else {
+            None
+        };
 
         // gleam-lsp auto-import: if the namespace prefix is not yet declared in
         // the file, attach a top-of-file `use <ns>` insertion so accepting the
@@ -188,6 +189,7 @@ fn shape_property_completions(
 /// Resolve the cursor's enclosing mapping to its [`def_map`] `MappingLoc`
 /// (mirrors `hover::resolve_hover_target`'s filter-then-nth contract per
 /// ADR-0005, without the property-level resolution).
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn enclosing_mapping_loc<'db>(
     db: &'db dyn HirDb,
     file: SourceFile,
@@ -227,16 +229,17 @@ fn render_sig(namespace: &str, entry: &fossil_registry::RegistryEntry) -> String
         .sig
         .params
         .iter()
+        .copied()
         .map(scalar_name)
         .collect::<Vec<_>>()
         .join(", ");
-    let ret = scalar_name(&entry.sig.ret);
+    let ret = scalar_name(entry.sig.ret);
     format!("{}({params}) -> {ret}  [{namespace}]", entry.name)
 }
 
 /// Human-readable name for a `'db`-free [`fossil_registry::ScalarTy`]. Mirrors
 /// `render_ty_kind`'s surface names; never emits `Unknown`.
-fn scalar_name(s: &fossil_registry::ScalarTy) -> String {
+fn scalar_name(s: fossil_registry::ScalarTy) -> String {
     use fossil_registry::ScalarTy as S;
     match s {
         S::String => "String",
@@ -266,7 +269,7 @@ fn prefix_import_edit(prefix: &str, iri: &str) -> TextEdit {
 
 /// The zero-width range at the very start of the file (line 0, char 0) — where
 /// auto-import insertions land.
-fn top_of_file() -> Range {
+const fn top_of_file() -> Range {
     Range {
         start: Position {
             line: 0,
