@@ -91,7 +91,7 @@ pub struct HoverInfo {
 /// carry the descriptor vtable, so it renders the source-side type only —
 /// exactly the degraded `AcceptAll` behaviour. A host that has loaded a `ShEx`
 /// schema calls [`hover_bidirectional`] with its [`HirDb`] to also surface the
-/// target-side (ShEx) type (SC#4).
+/// target-side (`ShEx`) type (SC#4).
 #[must_use]
 pub fn hover(
     db: &dyn fossil_base::Db,
@@ -168,6 +168,7 @@ struct ResolvedHover<'db> {
 /// Resolve an LSP position to the enclosing mapping + property `ExprId` +
 /// predicate IRI + source range. Shared by the source-only and bidirectional
 /// hover entries so the position logic lives in one place.
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn resolve_hover_target<'db>(
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
@@ -472,7 +473,7 @@ User : ex:Person from users
     }
 
     /// SC#4: `render_markdown_bidirectional` with a `Some(target)` appends a
-    /// SECOND fenced block + the ShEx tagline — BOTH the source-side type and
+    /// SECOND fenced block + the `ShEx` tagline — BOTH the source-side type and
     /// the target-side type appear, in that order. With `None` it is identical
     /// to the source-only `render_markdown` (the "if reachable" hedge).
     #[test]

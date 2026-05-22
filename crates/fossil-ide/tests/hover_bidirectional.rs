@@ -14,7 +14,7 @@
 //!
 //! Three cases:
 //!   1. `Some`-shape: hover shows BOTH the source-side (`String`) and the
-//!      target-side (ShEx) type, with the target block carrying the ShEx
+//!      target-side (`ShEx`) type, with the target block carrying the `ShEx`
 //!      tagline.
 //!   2. `AcceptAll`: hover shows the source-side block ONLY — no target block,
 //!      no error (the "if reachable" hedge).
@@ -32,6 +32,9 @@
 //! `fossil_hir::db_ext`.
 
 #![cfg(not(target_arch = "wasm32"))]
+// The `.fossil` fixture sources contain `${ex:}` / `${.id}` template
+// placeholders — LITERAL Fossil source, not Rust format-string args.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use std::sync::Arc;
 
@@ -129,7 +132,7 @@ const SHEX_SRC: &str = r#"{
 
 /// Build a `.fossil` source whose `users` source declares the CSVW schema
 /// (so source-side `.name` resolves to `String`) and whose mapping targets
-/// `ex:Person` (so target-side resolution finds the ShEx shape). Write the
+/// `ex:Person` (so target-side resolution finds the `ShEx` shape). Write the
 /// CSVW file next to the `.fossil` so `resolve_source_row`'s relative-path
 /// read succeeds.
 fn fixture(dir: &std::path::Path) -> (ShExHostDb, SourceFile, OutputDescriptorKind) {
@@ -164,7 +167,7 @@ const NAME_LINE: u32 = 4;
 const NAME_COL: u32 = 14;
 
 /// Case 1 — the `Some`-shape path: hover shows BOTH the source-side (CSVW
-/// `String`) AND the target-side (ShEx `Integer`) type, target block tagged.
+/// `String`) AND the target-side (`ShEx` `Integer`) type, target block tagged.
 #[test]
 fn hover_shows_source_and_target_type_when_shape_resolves() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-bidi-{}", std::process::id()));

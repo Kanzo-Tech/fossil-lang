@@ -92,16 +92,18 @@ impl LineIndex {
         // each line-start byte offset.
         let mut line: usize = 0;
         for (byte_off, ch) in text.char_indices() {
+            // Source files we accept are well under u32::MAX bytes.
+            let byte_off = u32::try_from(byte_off).unwrap_or(u32::MAX);
             // Advance to the line this byte belongs to.
-            while line + 1 < line_count && (byte_off as u32) >= line_starts[line + 1] {
+            while line + 1 < line_count && byte_off >= line_starts[line + 1] {
                 line += 1;
             }
             if !ch.is_ascii() {
                 let line_start = line_starts[line];
                 wide_chars[line].push(WideChar {
-                    byte_col: byte_off as u32 - line_start,
-                    utf8_len: ch.len_utf8() as u32,
-                    utf16_len: ch.len_utf16() as u32,
+                    byte_col: byte_off - line_start,
+                    utf8_len: u32::try_from(ch.len_utf8()).unwrap_or(4),
+                    utf16_len: u32::try_from(ch.len_utf16()).unwrap_or(2),
                 });
             }
         }

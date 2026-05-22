@@ -65,17 +65,20 @@ pub fn position_to_offset(index: &LineIndex, line: u32, character: u32) -> Optio
     index.offset(Utf16Position { line, character })
 }
 
-/// Convert a UTF-8 byte offset back to an LSP UTF-16 `(line, character)`
-/// position. The inverse of [`position_to_offset`]; the LSP handler uses this
-/// to translate Fossil byte ranges into UTF-16-correct `lsp_types::Range`s.
+/// Convert a UTF-8 byte offset back to an LSP UTF-16 `(line, character)`.
+///
+/// The inverse of [`position_to_offset`]; the LSP handler uses this to
+/// translate Fossil byte ranges into UTF-16-correct `lsp_types::Range`s.
 #[must_use]
 pub fn offset_to_lsp_position(index: &LineIndex, offset: u32) -> Utf16Position {
     index.position(offset)
 }
 
-/// Build the [`LineIndex`] for `file` from the FILE-keyed [`line_offsets`]
-/// table + the file text. Convenience for the position-resolution helpers and
-/// the LSP handler; adds no Salsa query (reads the existing memoised table).
+/// Build the [`LineIndex`] for `file`.
+///
+/// Reads the FILE-keyed [`line_offsets`] table + the file text — a convenience
+/// for the position-resolution helpers and the LSP handler. Adds no Salsa
+/// query (reuses the existing memoised table).
 #[must_use]
 pub fn line_index(db: &dyn fossil_base::Db, file: SourceFile) -> LineIndex {
     let los = line_offsets(db, file);
