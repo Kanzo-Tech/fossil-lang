@@ -1,0 +1,45 @@
+:root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+body, html, #app { height: 100%; margin: 0; }
+#app { display: grid; grid-template-rows: auto 1fr; }
+header { display: flex; justify-content: space-between; align-items: center;
+         padding: 0.5rem 1rem; border-bottom: 1px solid #ccc; }
+header h1 { margin: 0; font-size: 1rem; font-weight: 600; }
+header nav button { margin-left: 0.5rem; }
+
+#grid {
+    display: grid;
+    gap: 4px;
+    padding: 4px;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    grid-template-areas:
+        "mapping csvw"
+        "mapping csv"
+        "shex    output";
+    height: calc(100% - 56px);
+}
+
+#panel-mapping { grid-area: mapping; }
+#panel-csvw    { grid-area: csvw; }
+#panel-csv     { grid-area: csv; }
+#panel-shex    { grid-area: shex; }
+#panel-output  { grid-area: output; }
+
+.panel { display: flex; flex-direction: column; border: 1px solid #999; min-height: 0; }
+.panel h2 { margin: 0; padding: 0.25rem 0.5rem; background: #f0f0f0; font-size: 0.85rem; font-weight: 600; }
+.editor, .output { flex: 1; min-height: 0; }
+
+/* Placeholder textarea styling — replaced by Monaco editors in 07-05. */
+.editor textarea {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 0.5rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    background: #fafafa;
+}
+.output { padding: 0.5rem; color: #666; font-style: italic; }

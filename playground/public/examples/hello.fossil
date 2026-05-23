@@ -1,0 +1,16 @@
+// Phase 1 walking skeleton — exercises every crate with the minimum
+// grammar surface (prefix decl, source binding, mapping header, one
+// property assignment, IRI template, field reference, string field).
+//
+// Grammar productions used: PrefixDecl, SourceDef, Mapping, MappingHeader,
+//   Property, TEMPLATE, FieldRef, IRIExpr (PrefixedName + ABS_IRI).
+// Stdlib used: io/csv (source ctor), implicit core/iri (template→IRI),
+//   implicit core/literal (string→Literal).
+
+prefix ex: <https://example.org/>
+
+users := io.csv("examples/users.csv")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:name = .name

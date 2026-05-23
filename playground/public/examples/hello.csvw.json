@@ -1,0 +1,11 @@
+{
+  "@context": "http://www.w3.org/ns/csvw",
+  "url": "hello.csv",
+  "tableSchema": {
+    "columns": [
+      { "name": "id",   "titles": "id",   "datatype": "integer", "required": true },
+      { "name": "name", "titles": "name", "datatype": "string",  "required": true }
+    ],
+    "primaryKey": "id"
+  }
+}
