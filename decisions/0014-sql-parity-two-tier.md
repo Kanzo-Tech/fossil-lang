@@ -84,3 +84,12 @@ engine versions agree.
 - **SQL-text snapshots as a parity proxy.** Rejected: identical SQL text does
   not prove identical *results* across two different engine versions; the digest
   baseline + WASM re-execution is what actually closes the SC#1 claim.
+
+## Amendments
+
+- **2026-05-23 (ADR-0025):** The PLAYGROUND-side `@duckdb/duckdb-wasm` pin is now
+  exact `1.32.0` (the last fully-stable npm tag; `1.33.x` is `dev`-only at the time
+  of writing). The PARITY HARNESS (`tests/wasm_parity/package.json`) retains the
+  `latest` float documented above — its job is precisely to track the upstream
+  train, and the digest baseline catches any divergence at phase close. The
+  two-version asymmetry is intentional; see ADR-0025 for the policy rationale.
