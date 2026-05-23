@@ -66,6 +66,30 @@ pub(crate) const CLOSE_BRACKET_ANCHORS: &[SyntaxKind] =
 ///
 /// If the current token already matches an anchor, this is a no-op (no
 /// `ERROR` node, no diagnostic).
+///
+/// # No-progress invariant — CALLER RESPONSIBILITY
+///
+/// `recover_to` is **deliberately no-op** when the current token is already
+/// in `anchors` (the "we're already at a known recovery point" fast path).
+/// This means a caller that sits **inside an outer `loop`** and dispatches
+/// based on the same anchor set must NEVER fall through to `recover_to`
+/// for a kind that is in its own anchor set — the loop would re-enter the
+/// same arm with the same token forever (the parser hangs at 100% CPU).
+///
+/// When the caller cannot itself advance past an unexpected token (because
+/// the unexpected kind is *in* the anchor set — typically `IDENT` in
+/// `TOP_LEVEL_ANCHORS`), it MUST use [`super::Parser::bump_as_error`]
+/// instead. `bump_as_error` ALWAYS consumes exactly one token under an
+/// ERROR node, guaranteeing `p.pos` advances monotonically.
+///
+/// See `crates/fossil-syntax/src/parser/items.rs::parse_program` for the
+/// canonical example of the safe shape: when the IDENT lookahead doesn't
+/// match `DEFINE` or `SHAPE_SEP`, the fall-through is `p.bump_as_error()`,
+/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`. Historical bug:
+/// `.planning/phases/06-cli-complete-lsp/deferred-items.md` (parser-hang on
+/// a bare `#` — the logos lexer drops `#` silently, the next non-trivia
+/// token is often IDENT, and `IDENT ∈ TOP_LEVEL_ANCHORS` made the call a
+/// no-op).
 pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
     p.skip_trivia();
     if at_anchor(p, anchors) {

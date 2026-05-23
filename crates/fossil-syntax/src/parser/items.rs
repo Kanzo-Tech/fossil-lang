@@ -105,9 +105,24 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 // `IDENT ::` (treated as a TypeAnnotation followed by an
                 // implicit Definition on the next line). Unreachable in
                 // the Wave 0 / Phase 1 fixtures; kept defensive.
-                _ => recover::recover_to(p, TOP_LEVEL_ANCHORS),
+                //
+                // Always make progress on a token we don't know what to do
+                // with at the program level — `bump_as_error` emits a single
+                // ERROR token and advances, making the outer loop monotone
+                // in `p.pos`. We CANNOT call `recover_to(p, TOP_LEVEL_ANCHORS)`
+                // here because `IDENT` is itself in `TOP_LEVEL_ANCHORS` and
+                // `recover_to` would no-op while the outer `loop` re-enters
+                // this arm forever (see `.planning/phases/06-cli-complete-lsp/
+                // deferred-items.md` — parser-hang on bare `#`, the bytes
+                // logos drops silently which leave IDENT as the next token).
+                _ => p.bump_as_error(),
             },
-            _ => recover::recover_to(p, TOP_LEVEL_ANCHORS),
+            // Always make progress on a token we don't know what to do with
+            // at the program level — same invariant as the IDENT-arm above.
+            // The dropped `#` becomes lexer-silence; the next non-trivia
+            // token reaches this outer `_` and MUST be consumed under an
+            // ERROR node so the outer `loop` advances.
+            _ => p.bump_as_error(),
         }
     }
     p.finish();
