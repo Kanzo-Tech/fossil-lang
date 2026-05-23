@@ -49,6 +49,16 @@ fossil-ide = { path = "../fossil-ide" }
 # `Database` derive macro at the trait-object level.
 salsa = { workspace = true }
 
+# Plan 07-03 (WASM-02 / PLAY-01): the WASM LSP transport speaks raw LSP
+# JSON-RPC over `postMessage` to a Web Worker. lsp-types gives us the typed
+# request / notification params + capability surface (mirrors fossil-lsp 06-09
+# 1:1); web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
+# `start_lsp_worker` entrypoint installs. Both are wasm32-clean (lsp-types
+# proven by the 9-crate gate from Phase 6; web-sys is the canonical
+# JsCast-able binding crate). No tokio, no mio (Pitfall 5).
+lsp-types = { workspace = true }
+web-sys = { workspace = true, features = ["MessageEvent", "DedicatedWorkerGlobalScope"] }
+
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
 # RESEARCH.md Pitfall 5: the lib version MUST match the wasm-bindgen-cli
 # version installed locally / in CI.

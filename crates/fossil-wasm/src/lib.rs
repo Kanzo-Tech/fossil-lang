@@ -46,8 +46,11 @@
 //! WASM-first architecture, and RESEARCH.md §"WASM API scope" / Example 17
 //! for the verbatim API contract this file implements.
 
+pub(crate) mod lsp_worker;
 mod wasm_system;
 mod workspace;
+
+pub use crate::lsp_worker::start_lsp_worker;
 
 use std::sync::Arc;
 
@@ -505,6 +508,52 @@ impl FossilPlayground {
         self.files.insert(path, file)
     }
 
+    // ----- LSP-worker dispatch helpers (07-03 — pub(crate)) -----
+    //
+    // These accessors are consumed by `lsp_worker::dispatch` to route LSP
+    // requests / notifications onto the existing fossil-ide free functions
+    // without leaking the `WasmDb` type or duplicating bookkeeping. They
+    // mirror the analogous `LspState` accessors in `fossil-lsp` 06-09.
+
+    /// URI → `FileHandle` lookup used by `textDocument/didChange` /
+    /// `didClose` / custom `fossil/compileFile` dispatch.
+    pub(crate) fn lookup_handle_by_uri(&self, uri: &str) -> Option<FileHandle> {
+        self.files.lookup_uri(uri)
+    }
+
+    /// URI → `SourceFile` lookup used by request handlers (hover, completion,
+    /// goto-def, etc.) that consume Salsa inputs directly.
+    pub(crate) fn lookup_file_by_uri(&self, uri: &str) -> Option<SourceFile> {
+        let handle = self.files.lookup_uri(uri)?;
+        self.files.get(handle)
+    }
+
+    /// `HirDb` accessor for hover / completion (they take `&dyn HirDb` for
+    /// the target-aware descriptor read — ADR-0020).
+    pub(crate) fn hir_db(&self) -> &dyn HirDb {
+        &self.db
+    }
+
+    /// Base `fossil_base::Db` accessor for goto-def / document-symbol /
+    /// semantic-tokens / code-action (they take `&dyn fossil_base::Db`).
+    pub(crate) fn base_db(&self) -> &dyn fossil_base::Db {
+        &self.db
+    }
+
+    /// Snapshot of currently-open `SourceFile`s — fed to `goto_definition` /
+    /// `completions` for their workspace-wide name resolution pass.
+    pub(crate) fn open_source_files(&self) -> Vec<SourceFile> {
+        self.files.iter().map(|(_, f)| f).collect()
+    }
+
+    /// Drain Salsa `Diagnostic` accumulators for `file` in their structured
+    /// form (still carrying `did_you_mean` / `suggestion_source`). Used by
+    /// `textDocument/codeAction` to re-derive the carriers the wire form
+    /// drops — mirrors fossil-lsp's `diagnostics_for` in 06-09.
+    pub(crate) fn drain_diagnostics_for_file(&self, file: SourceFile) -> Vec<Diagnostic> {
+        diagnostics_for_file(&self.db, file)
+    }
+
     /// Native-reachable `ShEx` install — pure-Rust mirror of
     /// `set_target_shex`.
     ///
@@ -666,4 +715,63 @@ const fn utf16_to_pos(p: Utf16Position) -> CheckPosition {
         line: p.line,
         character: p.character,
     }
+}
+
+// ----- LSP dispatch test hook (07-03 Task 2) -----
+//
+// The LSP-worker `dispatch` function is `pub(crate)`; native integration
+// tests in `crates/fossil-wasm/tests/lsp_worker.rs` reach it through this
+// `#[doc(hidden)]` shim. The shim deserializes a `serde_json::Value` (the
+// shape every test builds) into the typed `LspRequest` and forwards.
+
+/// Dispatch test hook — not part of the published JS surface.
+///
+/// # Panics
+///
+/// Panics if `req` is not a valid LSP JSON-RPC payload (intentional — tests
+/// must not feed it malformed JSON).
+#[doc(hidden)]
+#[must_use]
+pub fn __dispatch_for_test(
+    pg: &mut FossilPlayground,
+    req: serde_json::Value,
+) -> DispatchTestOutput {
+    let parsed: lsp_worker::LspRequest = serde_json::from_value(req).expect("malformed test req");
+    let out = lsp_worker::dispatch(pg, parsed);
+    DispatchTestOutput {
+        response: out.response.map(|r| DispatchTestResponse {
+            id: r.id,
+            result: r.result,
+            error: r.error.map(|e| DispatchTestError {
+                code: e.code,
+                message: e.message,
+            }),
+        }),
+        diagnostics: out.diagnostics,
+    }
+}
+
+/// Native-test-only response wrapper. The `lsp_worker::LspResponse` /
+/// `LspError` types are `pub(crate)`; this mirrors them so the test surface
+/// has stable field access.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct DispatchTestOutput {
+    pub response: Option<DispatchTestResponse>,
+    pub diagnostics: Vec<serde_json::Value>,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct DispatchTestResponse {
+    pub id: serde_json::Value,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<DispatchTestError>,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct DispatchTestError {
+    pub code: i32,
+    pub message: String,
 }
