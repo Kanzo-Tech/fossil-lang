@@ -252,8 +252,7 @@ impl FossilPlayground {
     /// (`u32::MAX` files — would require a runaway loop in JS, not a normal
     /// failure mode).
     pub fn open_file(&mut self, path: String, contents: String) -> Result<FileHandle, JsError> {
-        let file = fossil_base::SourceFile::new(&self.db, contents, path.clone());
-        Ok(self.files.insert(path, file))
+        Ok(self.open_file_native(path, contents))
     }
 
     /// Apply an edit to an open file. Mutates the SAME `SourceFile` via the
@@ -269,13 +268,8 @@ impl FossilPlayground {
     ///
     /// Returns a JS error if `handle` was never opened or was already closed.
     pub fn update_file(&mut self, handle: FileHandle, contents: String) -> Result<(), JsError> {
-        use salsa::Setter as _;
-        let file = self
-            .files
-            .get(handle)
-            .ok_or_else(|| JsError::new("unknown file handle"))?;
-        file.set_text(&mut self.db).to(contents);
-        Ok(())
+        self.update_file_native(handle, contents)
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Close a file in the workspace. Idempotent in spirit but strict in
@@ -286,10 +280,8 @@ impl FossilPlayground {
     ///
     /// Returns a JS error if `handle` was never opened or was already closed.
     pub fn close_file(&mut self, handle: FileHandle) -> Result<(), JsError> {
-        self.files
-            .remove(handle)
-            .ok_or_else(|| JsError::new("unknown file handle"))?;
-        Ok(())
+        self.close_file_native(handle)
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 
     /// Run `parse → def_map → typecheck_mapping` across every open file and
@@ -307,15 +299,12 @@ impl FossilPlayground {
     ///
     /// Returns a JS error only if the result fails to serialize to `JsValue`.
     pub fn check(&self) -> Result<JsValue, JsError> {
-        let mut all: Vec<JsCheckDiagnostic> = Vec::new();
-        for (h, file) in self.files.iter() {
-            let uri = self.files.path_for(h, &self.db).unwrap_or_default();
-            let index = fossil_ide::line_index(&self.db, file);
-            for d in diagnostics_for_file(&self.db, file) {
-                all.push(to_js_diagnostic(&uri, &index, &d));
-            }
-        }
-        serde_wasm_bindgen::to_value(&all).map_err(JsError::from)
+        // Native-side tests reach the pure-Rust core via `check_rows()`;
+        // the wasm-bindgen wrapper just serializes. Separating the two
+        // halves keeps `cargo test -p fossil-wasm` runnable without a JS
+        // runtime (the `to_value` call panics on native targets — the
+        // wasm-bindgen library's deliberate guard).
+        serde_wasm_bindgen::to_value(&self.check_rows()).map_err(JsError::from)
     }
 
     /// Per-file diagnostic drain — the B3 follow-up accessor the LSP Worker
@@ -329,16 +318,9 @@ impl FossilPlayground {
     ///
     /// Returns a JS error if `handle` is unknown, or if serialization fails.
     pub fn diagnostics_for(&self, handle: FileHandle) -> Result<JsValue, JsError> {
-        let file = self
-            .files
-            .get(handle)
-            .ok_or_else(|| JsError::new("unknown file handle"))?;
-        let uri = self.files.path_for(handle, &self.db).unwrap_or_default();
-        let index = fossil_ide::line_index(&self.db, file);
-        let rows: Vec<JsCheckDiagnostic> = diagnostics_for_file(&self.db, file)
-            .into_iter()
-            .map(|d| to_js_diagnostic(&uri, &index, &d))
-            .collect();
+        let rows = self
+            .diagnostics_for_rows(handle)
+            .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
 
@@ -353,21 +335,9 @@ impl FossilPlayground {
     /// Returns a JS error if `handle` is unknown, the file has no mapping,
     /// or serialization fails.
     pub fn compile_file(&self, handle: FileHandle) -> Result<JsValue, JsError> {
-        let file = self
-            .files
-            .get(handle)
-            .ok_or_else(|| JsError::new("unknown file handle"))?;
-        let dm = fossil_hir::def_map::def_map(&self.db, file);
-        let mapping = dm
-            .mappings(&self.db)
-            .first()
-            .copied()
-            .ok_or_else(|| JsError::new("no mapping found in file"))?;
-        let plan = fossil_codegen::codegen_sql(&self.db, mapping);
-        let result = CompileResult {
-            sql: plan.sql(&self.db).clone(),
-            manifest_yaml: plan.manifest_yaml(&self.db).clone(),
-        };
+        let result = self
+            .compile_file_result(handle)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&result).map_err(JsError::from)
     }
 
@@ -388,12 +358,168 @@ impl FossilPlayground {
     ///
     /// Returns a JS error if the text is not a parseable `ShEx` schema.
     pub fn set_target_shex(&mut self, text: &str) -> Result<(), JsError> {
+        self.set_target_shex_native(text)
+            .map_err(|e| JsError::new(&e))
+    }
+}
+
+// ----- Pure-Rust core (test-reachable; no wasm-bindgen serialization) -----
+//
+// The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`,
+// `compile_file`) call `serde_wasm_bindgen::to_value` and construct
+// `JsError`s, both of which call wasm-bindgen extern intrinsics that panic
+// on native targets ("cannot call wasm-bindgen imported functions on
+// non-wasm targets" — wasm-bindgen 0.2 lib.rs:101). Splitting the
+// pure-Rust half out into a separate non-#[wasm_bindgen] impl block lets
+// `cargo test -p fossil-wasm --test workspace` exercise the full lifecycle
+// natively (the wasm-bindgen attribute layer is a transparent pass-through
+// over these helpers — a passing native test guarantees the wire-side
+// methods compile + dispatch correctly). Mirrors the `classification()` ↔
+// `stdlib_classification()` split that has been the pattern since Phase 5.
+
+/// Pure-Rust error returned by the `*_native` / `*_rows` / `*_result`
+/// helpers.
+///
+/// The `#[wasm_bindgen]` wrappers translate this to `JsError` (the
+/// JS-facing error type) so native tests never construct a `JsError`
+/// directly — wasm-bindgen's intrinsic-construction routines panic on
+/// non-wasm32 targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceError {
+    /// The handle was never opened, or was already closed.
+    UnknownHandle,
+    /// The file parsed to zero mappings — `compile_file` has nothing to
+    /// compile. The `check` path is fine with this case (it returns an
+    /// empty diagnostic stream).
+    NoMappingInFile,
+}
+
+impl std::fmt::Display for WorkspaceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownHandle => f.write_str("unknown file handle"),
+            Self::NoMappingInFile => f.write_str("no mapping found in file"),
+        }
+    }
+}
+
+impl std::error::Error for WorkspaceError {}
+
+impl FossilPlayground {
+    /// Native-reachable workspace-wide diagnostic drain. Returns the same
+    /// row structures `check()` serializes, without going through
+    /// `serde_wasm_bindgen`.
+    #[must_use]
+    pub fn check_rows(&self) -> Vec<CheckRow> {
+        let mut all: Vec<CheckRow> = Vec::new();
+        for (h, file) in self.files.iter() {
+            let uri = self.files.path_for(h, &self.db).unwrap_or_default();
+            let index = fossil_ide::line_index(&self.db, file);
+            for d in diagnostics_for_file(&self.db, file) {
+                all.push(to_check_row(&uri, &index, &d));
+            }
+        }
+        all
+    }
+
+    /// Native-reachable per-file diagnostic drain. Returns `None` when
+    /// `handle` is unknown / closed (the wasm-bindgen wrapper translates
+    /// `None` to a `JsError`).
+    #[must_use]
+    pub fn diagnostics_for_rows(&self, handle: FileHandle) -> Option<Vec<CheckRow>> {
+        let file = self.files.get(handle)?;
+        let uri = self.files.path_for(handle, &self.db).unwrap_or_default();
+        let index = fossil_ide::line_index(&self.db, file);
+        Some(
+            diagnostics_for_file(&self.db, file)
+                .into_iter()
+                .map(|d| to_check_row(&uri, &index, &d))
+                .collect(),
+        )
+    }
+
+    /// Native-reachable per-file compile. Returns `CompileResult` directly;
+    /// the wasm-bindgen wrapper serializes it via `serde_wasm_bindgen`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(WorkspaceError)` if the handle is unknown / closed or
+    /// the file has no mapping. The wasm-bindgen wrapper rewraps the error
+    /// string as `JsError`.
+    pub fn compile_file_result(&self, handle: FileHandle) -> Result<CompileResult, WorkspaceError> {
+        let file = self
+            .files
+            .get(handle)
+            .ok_or(WorkspaceError::UnknownHandle)?;
+        let dm = fossil_hir::def_map::def_map(&self.db, file);
+        let mapping = dm
+            .mappings(&self.db)
+            .first()
+            .copied()
+            .ok_or(WorkspaceError::NoMappingInFile)?;
+        let plan = fossil_codegen::codegen_sql(&self.db, mapping);
+        Ok(CompileResult {
+            sql: plan.sql(&self.db).clone(),
+            manifest_yaml: plan.manifest_yaml(&self.db).clone(),
+        })
+    }
+
+    /// Native-reachable update — pure-Rust mirror of `update_file`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(WorkspaceError::UnknownHandle)` if `handle` was never
+    /// opened or was already closed.
+    pub fn update_file_native(
+        &mut self,
+        handle: FileHandle,
+        contents: String,
+    ) -> Result<(), WorkspaceError> {
+        use salsa::Setter as _;
+        let file = self
+            .files
+            .get(handle)
+            .ok_or(WorkspaceError::UnknownHandle)?;
+        file.set_text(&mut self.db).to(contents);
+        Ok(())
+    }
+
+    /// Native-reachable close — pure-Rust mirror of `close_file`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(WorkspaceError::UnknownHandle)` if `handle` was never
+    /// opened or was already closed.
+    pub fn close_file_native(&mut self, handle: FileHandle) -> Result<(), WorkspaceError> {
+        self.files
+            .remove(handle)
+            .ok_or(WorkspaceError::UnknownHandle)?;
+        Ok(())
+    }
+
+    /// Native-reachable open — pure-Rust mirror of `open_file`. Returns the
+    /// fresh handle directly (panics on `u32::MAX` counter overflow, same
+    /// as the wasm-bindgen wrapper).
+    pub fn open_file_native(&mut self, path: String, contents: String) -> FileHandle {
+        let file = fossil_base::SourceFile::new(&self.db, contents, path.clone());
+        self.files.insert(path, file)
+    }
+
+    /// Native-reachable `ShEx` install — pure-Rust mirror of
+    /// `set_target_shex`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the lowering error string when the schema does not parse;
+    /// the previously-installed descriptor is RETAINED (no half-applied
+    /// state).
+    pub fn set_target_shex_native(&mut self, text: &str) -> Result<(), String> {
         match ShExDescriptor::from_reader(text.as_bytes()) {
             Ok(d) => {
                 self.db.set_descriptor(OutputDescriptorKind::ShEx(d));
                 Ok(())
             }
-            Err(e) => Err(JsError::new(&format!("ShEx parse error: {e:?}"))),
+            Err(e) => Err(format!("ShEx parse error: {e:?}")),
         }
     }
 }
@@ -444,10 +570,14 @@ impl Default for FossilPlayground {
 /// Phase 1 [`FossilPlayground::compile`] return shape — flat object with two
 /// `String` fields. Phase 7 `compile_file` reuses the same shape (additive
 /// to the JS-side contract).
-#[derive(serde::Serialize)]
-struct CompileResult {
-    sql: String,
-    manifest_yaml: String,
+///
+/// Re-exposed publicly for the native cargo-test path
+/// (`compile_file_result`) so integration tests can inspect the SQL +
+/// manifest strings without going through `serde_wasm_bindgen`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CompileResult {
+    pub sql: String,
+    pub manifest_yaml: String,
 }
 
 /// One diagnostic row in the [`FossilPlayground::check`] return array.
@@ -455,25 +585,28 @@ struct CompileResult {
 /// Mirrors the LSP `Diagnostic` shape exactly so the LSP Worker (07-03) can
 /// republish each row as-is inside a `PublishDiagnosticsParams` payload
 /// without a second translation step. UTF-16 ranges; integer LSP severities.
-#[derive(serde::Serialize)]
-struct JsCheckDiagnostic {
-    uri: String,
-    range: JsRange,
-    severity: u8,
-    message: String,
+///
+/// Pub-visible for the native cargo-test path (`check_rows`,
+/// `diagnostics_for_rows`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CheckRow {
+    pub uri: String,
+    pub range: CheckRange,
+    pub severity: u8,
+    pub message: String,
 }
 
 /// LSP-shaped range (zero-based line + UTF-16 column).
-#[derive(serde::Serialize)]
-struct JsRange {
-    start: JsPosition,
-    end: JsPosition,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct CheckRange {
+    pub start: CheckPosition,
+    pub end: CheckPosition,
 }
 
-#[derive(serde::Serialize)]
-struct JsPosition {
-    line: u32,
-    character: u32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct CheckPosition {
+    pub line: u32,
+    pub character: u32,
 }
 
 /// Drain the Salsa `Diagnostic` accumulator across every mapping in `file`
@@ -496,13 +629,13 @@ fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
 /// into the message as a `help:` suffix (mirroring `fossil-lsp::
 /// to_lsp_diagnostic` in 06-09 — keep the structured carriers reachable by
 /// re-draining the accumulator on the consumer side).
-fn to_js_diagnostic(uri: &str, index: &LineIndex, d: &Diagnostic) -> JsCheckDiagnostic {
-    let range = span_to_js_range(index, d.span);
+fn to_check_row(uri: &str, index: &LineIndex, d: &Diagnostic) -> CheckRow {
+    let range = span_to_range(index, d.span);
     let message = d.suggestion_source.as_ref().map_or_else(
         || d.message.clone(),
         |s| format!("{}\nhelp: {s}", d.message),
     );
-    JsCheckDiagnostic {
+    CheckRow {
         uri: uri.to_string(),
         range,
         severity: severity_to_lsp_int(d.severity),
@@ -521,15 +654,15 @@ const fn severity_to_lsp_int(s: Severity) -> u8 {
 }
 
 /// Translate a byte-offset [`Span`] to a UTF-16 LSP-shaped range.
-fn span_to_js_range(index: &LineIndex, span: Span) -> JsRange {
-    JsRange {
-        start: utf16_to_js(fossil_ide::offset_to_lsp_position(index, span.start)),
-        end: utf16_to_js(fossil_ide::offset_to_lsp_position(index, span.end)),
+fn span_to_range(index: &LineIndex, span: Span) -> CheckRange {
+    CheckRange {
+        start: utf16_to_pos(fossil_ide::offset_to_lsp_position(index, span.start)),
+        end: utf16_to_pos(fossil_ide::offset_to_lsp_position(index, span.end)),
     }
 }
 
-const fn utf16_to_js(p: Utf16Position) -> JsPosition {
-    JsPosition {
+const fn utf16_to_pos(p: Utf16Position) -> CheckPosition {
+    CheckPosition {
         line: p.line,
         character: p.character,
     }
