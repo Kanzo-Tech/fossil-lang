@@ -37,6 +37,17 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does
 # NOT pull fossil-runtime or any native UDF crate (Pitfall 3).
 fossil-registry = { path = "../fossil-registry" }
+# Plan 07-02 (WASM-02): the `check()` method converts byte-offset spans to
+# UTF-16 LSP ranges via `fossil_ide::LineIndex` (rust-analyzer model from
+# 06-05). fossil-ide is the 7th crate in the 9-crate WASM gate (Phase 6) —
+# wasm32-clean by construction. Wiring this dep lets `check()` return the
+# same range shape the LSP Worker (07-03) republishes verbatim.
+fossil-ide = { path = "../fossil-ide" }
+# Plan 07-02: `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` in
+# 06-09 — production hosts own their own db; `impl HirDb for FossilDb` is
+# `#[cfg(test)]`-only). Needs the `salsa::Storage<Self>` field + the
+# `Database` derive macro at the trait-object level.
+salsa = { workspace = true }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
 # RESEARCH.md Pitfall 5: the lib version MUST match the wasm-bindgen-cli

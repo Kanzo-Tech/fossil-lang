@@ -14,9 +14,9 @@
 //! to read them. Phase 1 [`crate::FossilPlayground::compile`] does NOT use
 //! this — `compile(source: &str)` ingests the source string directly via
 //! [`fossil_base::SourceFile::new`] — so the map stays empty during the Phase
-//! 1 smoke test. The setter exists so Phase 7 PLAY-01's
-//! `open_file/update_file/close_file` lifecycle has a place to land without
-//! reshaping the system trait.
+//! 1 smoke test. The setter exists so Phase 7's `open_file/update_file/
+//! close_file` lifecycle has a place to land without reshaping the system
+//! trait.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -62,17 +62,21 @@ impl System for WasmSystem {
 /// Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` impl
 /// on its concrete `WasmSystem` struct. Default `output_descriptor_kind()`
 /// returns `AcceptAll` for Phase 3 v0.1 — plan 03-05's tests construct
-/// `ShExDescriptor` directly. Phase 7+ playground wires user-supplied
-/// `ShEx` text via a future `FossilPlayground::load_shex(...)` method.
+/// `ShExDescriptor` directly. Phase 7 plan 07-02 (this commit) wires the
+/// user-supplied `ShEx` text via [`crate::FossilPlayground::set_target_shex`]
+/// — but the swappable storage lives on the host's `WasmDb`
+/// (`Arc<OutputDescriptorKind>`, mirroring `LspDb`), not on the `System`
+/// trait object. The accessor is on `HirDb`, not `Db::system()` (ADR-0020).
 impl SystemWithDescriptors for WasmSystem {}
 
+#[allow(clippy::redundant_pub_crate)]
 impl WasmSystem {
     /// Programmatic file write — used by hosts (Phase 7 PLAY-01 calls this
     /// from `FossilPlayground::open_file`). Phase 1 has no callers; the
     /// method exists for completeness as the symmetric setter to
     /// [`System::read_file`] and to anchor the symbol so Phase 7's lifecycle
     /// API doesn't have to reshape this module.
-    #[allow(dead_code, clippy::redundant_pub_crate)] // Phase 7 PLAY-01 wires the first caller
+    #[allow(dead_code)] // Phase 7 PLAY-01 wires the first caller
     pub(crate) fn write(&self, path: &str, contents: Vec<u8>) {
         self.fs
             .write()
