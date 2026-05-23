@@ -6,6 +6,10 @@ header { display: flex; justify-content: space-between; align-items: center;
 header h1 { margin: 0; font-size: 1rem; font-weight: 600; }
 header nav button { margin-left: 0.5rem; }
 
+/* 07-06: Run-button progress indicator (DuckDB-WASM lazy-load). */
+progress[hidden] { display: none; }
+progress { width: 200px; height: 1em; margin-left: 0.5rem; vertical-align: middle; }
+
 #grid {
     display: grid;
     gap: 4px;
