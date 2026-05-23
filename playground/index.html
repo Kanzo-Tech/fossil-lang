@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fossil Playground</title>
+    <link rel="stylesheet" href="/src/panels/layout.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Fossil Playground</h1>
+        <nav>
+          <!-- Reset button is wired in 07-08; placeholder here -->
+          <button id="btn-reset" type="button" disabled>Reset playground</button>
+          <button id="btn-run" type="button" disabled>Run</button>
+        </nav>
+      </header>
+      <main id="grid">
+        <section id="panel-mapping" class="panel"><h2>Mapping (.fossil)</h2><div class="editor" data-panel="mapping"></div></section>
+        <section id="panel-csvw"    class="panel"><h2>CSVW descriptor</h2><div class="editor" data-panel="csvw"></div></section>
+        <section id="panel-csv"     class="panel"><h2>CSV data</h2><div class="editor" data-panel="csv"></div></section>
+        <section id="panel-shex"    class="panel"><h2>ShEx shape</h2><div class="editor" data-panel="shex"></div></section>
+        <section id="panel-output"  class="panel"><h2>Output graph</h2><div class="output" data-panel="output"></div></section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
