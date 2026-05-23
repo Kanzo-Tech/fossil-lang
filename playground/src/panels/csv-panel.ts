@@ -1,17 +1,26 @@
-// CSV data panel — plaintext editor. No LSP awareness in v0.1.
+// CSV data panel — plaintext editor. No LSP / Monarch syntax in v0.1.
 
-import type { PanelHandle } from './mapping-panel';
+import * as monaco from 'monaco-editor';
+import type { PanelHandle } from './types';
 
 export function mountCsvPanel(host: HTMLElement, initial: string): PanelHandle {
-    const ta = document.createElement('textarea');
-    ta.value = initial;
-    ta.spellcheck = false;
-    ta.setAttribute('aria-label', 'CSV data editor');
-    ta.setAttribute('data-lang', 'csv');
-    host.replaceChildren(ta);
+    const uri = monaco.Uri.parse('inmemory://playground/data.csv');
+    const existing = monaco.editor.getModel(uri);
+    const model = existing ?? monaco.editor.createModel(initial, 'plaintext', uri);
+    if (existing && existing.getValue() !== initial) existing.setValue(initial);
+
+    const editor = monaco.editor.create(host, {
+        model,
+        theme: 'vs-dark',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        fontSize: 13,
+        scrollBeyondLastLine: false,
+    });
+
     return {
-        get text() { return ta.value; },
-        set text(v: string) { ta.value = v; },
-        dispose() { ta.remove(); },
+        get text(): string { return model.getValue(); },
+        set text(v: string) { model.setValue(v); },
+        dispose(): void { editor.dispose(); model.dispose(); },
     };
 }

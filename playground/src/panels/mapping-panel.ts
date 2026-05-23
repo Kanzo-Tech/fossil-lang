@@ -1,28 +1,38 @@
 // Mapping panel — Fossil source (`.fossil`) editor.
 //
-// In 07-04 this is a placeholder <textarea>. In 07-05 it is replaced by a
-// Monaco editor wired to monaco-languageclient + the LSP-over-postMessage
-// worker (07-03). The `PanelHandle` shape is forward-compatible: the
-// Monaco swap-in will preserve the `text` getter/setter contract so the
-// `Reset` button (07-08) and example-load path (this file's mount call)
-// keep working.
+// 07-05: replaced the 07-04 placeholder <textarea> with a Monaco editor
+// wired to monaco-languageclient + the LSP-over-postMessage Worker
+// (07-03 + 07-05/client.ts). The PanelHandle.text contract is preserved.
+//
+// The model URI matches the LSP `textDocument/didOpen` URI so
+// monaco-languageclient routes events to the correct file inside the
+// fossil-wasm Workspace (`inmemory://playground/main.fossil`).
 
-export type PanelHandle = {
-    get text(): string;
-    set text(v: string);
-    dispose(): void;
-};
+import * as monaco from 'monaco-editor';
+import type { PanelHandle } from './types';
+
+export type { PanelHandle } from './types';
 
 export function mountMappingPanel(host: HTMLElement, initial: string): PanelHandle {
-    const ta = document.createElement('textarea');
-    ta.value = initial;
-    ta.spellcheck = false;
-    ta.setAttribute('aria-label', 'mapping editor (.fossil)');
-    ta.setAttribute('data-lang', 'fossil');
-    host.replaceChildren(ta);
+    const uri = monaco.Uri.parse('inmemory://playground/main.fossil');
+    const existing = monaco.editor.getModel(uri);
+    const model = existing ?? monaco.editor.createModel(initial, 'fossil', uri);
+    if (existing && existing.getValue() !== initial) existing.setValue(initial);
+
+    const editor = monaco.editor.create(host, {
+        model,
+        theme: 'vs-dark',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        fontSize: 13,
+        scrollBeyondLastLine: false,
+        // Required for the LSP-returned semantic tokens to render.
+        'semanticHighlighting.enabled': true,
+    });
+
     return {
-        get text() { return ta.value; },
-        set text(v: string) { ta.value = v; },
-        dispose() { ta.remove(); },
+        get text(): string { return model.getValue(); },
+        set text(v: string) { model.setValue(v); },
+        dispose(): void { editor.dispose(); model.dispose(); },
     };
 }

@@ -1,17 +1,28 @@
-// ShEx shape panel — plaintext editor. No LSP awareness in v0.1.
+// ShEx shape panel — uses the minimal Monarch tokenizer registered by
+// `playground/src/lsp/shex-lang.ts`. The `fossil/setTargetShex` LSP custom
+// request (debounced send of model content) is wired in 07-06 Task 2.
 
-import type { PanelHandle } from './mapping-panel';
+import * as monaco from 'monaco-editor';
+import type { PanelHandle } from './types';
 
 export function mountShexPanel(host: HTMLElement, initial: string): PanelHandle {
-    const ta = document.createElement('textarea');
-    ta.value = initial;
-    ta.spellcheck = false;
-    ta.setAttribute('aria-label', 'ShEx shape editor');
-    ta.setAttribute('data-lang', 'shex');
-    host.replaceChildren(ta);
+    const uri = monaco.Uri.parse('inmemory://playground/shape.shex');
+    const existing = monaco.editor.getModel(uri);
+    const model = existing ?? monaco.editor.createModel(initial, 'shex', uri);
+    if (existing && existing.getValue() !== initial) existing.setValue(initial);
+
+    const editor = monaco.editor.create(host, {
+        model,
+        theme: 'vs-dark',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        fontSize: 13,
+        scrollBeyondLastLine: false,
+    });
+
     return {
-        get text() { return ta.value; },
-        set text(v: string) { ta.value = v; },
-        dispose() { ta.remove(); },
+        get text(): string { return model.getValue(); },
+        set text(v: string) { model.setValue(v); },
+        dispose(): void { editor.dispose(); model.dispose(); },
     };
 }
