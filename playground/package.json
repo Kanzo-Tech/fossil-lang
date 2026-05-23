@@ -8,7 +8,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:wasm": "bash ../scripts/build-wasm-worker.sh",
+    "prebuild": "npm run build:wasm",
+    "predev": "npm run build:wasm"
   },
   "dependencies": {
     "monaco-editor": "0.52.0",
