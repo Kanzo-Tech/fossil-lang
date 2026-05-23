@@ -1324,6 +1324,7 @@ dependencies = [
  "fossil-syntax",
  "getrandom 0.3.4",
  "js-sys",
+ "lsp-types",
  "salsa",
  "serde",
  "serde-wasm-bindgen",
@@ -1331,6 +1332,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-test",
+ "web-sys",
 ]
 
 [[package]]
