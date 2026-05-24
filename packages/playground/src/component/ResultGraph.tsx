@@ -99,12 +99,29 @@ export function ResultGraph({
   }, [vertices, edges]);
 
   return (
-    <div className={className ?? 'fossil-result-graph'}>
+    // id="graph-canvas" is LOAD-BEARING and lives on the OUTER wrapper (not
+    // only on the inner canvas) so the axe-core `exclude: ['#graph-canvas']`
+    // selector hits whether or not enableWebGL is on. RESEARCH.md Pitfall 5 +
+    // Pattern 4: canvases have no inherent semantic content; the tabular
+    // fallback below provides SR-accessible data. The id is the contract
+    // between this component and the 08-11 axe-core E2E gate; renaming is
+    // a breaking change.
+    //
+    // role="img" + aria-label apply to the OUTER wrapper too so the region
+    // has a stable accessible name even in the v0.1 default (enableWebGL=
+    // false → only fallback renders). SR users hear "Result graph, image"
+    // and the fallback's tabular content gives them the data.
+    <div
+      id="graph-canvas"
+      role="img"
+      aria-label="Result graph; tabular fallback follows below for screen readers."
+      className={className ?? 'fossil-result-graph'}
+    >
       {enableWebGL && (
         <div
           ref={hostRef}
-          role="img"
-          aria-label="Result graph (WebGL). Tabular fallback follows below."
+          // Inner WebGL host. axe-core's exclusion targets the outer
+          // #graph-canvas wrapper which transitively excludes this.
           style={{ minHeight: 300 }}
         />
       )}

@@ -41,6 +41,7 @@ import { useDuckDb } from '../hooks/useDuckDb.js';
 import { useResetPlayground } from '../hooks/useResetPlayground.js';
 import { useTheme } from '../hooks/useTheme.js';
 import { cssVarsToStyle } from '../theme/tokens.js';
+import { announce, ARIA_LABELS } from '../a11y/index.js';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -214,6 +215,10 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
    */
   async function handleRun(): Promise<void> {
     setRunError(null);
+    // Announce start to screen readers (polite live region). The user
+    // can hear "Compiling and running mapping..." while focus stays on
+    // the Run button — no focus jump required.
+    const clearStartAnnouncement = announce('Compiling and running mapping…');
     try {
       // KNOWN GAP — see SUMMARY.md. The compile path lives behind the LSP
       // client's `client.request<P,R>(method, params)` escape hatch (per the
@@ -227,6 +232,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       setVertices(result.vertices);
       setEdges(result.edges);
       onRun?.(result);
+      announce('Run complete.');
       // Surface to maxResolvedBytes so lint doesn't flag it; the 10 MB cap is
       // load-bearing once the Run pipeline lands in 08-11 (will be inside the
       // resolver.resolve() loop).
@@ -235,6 +241,12 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       const err = e instanceof Error ? e : new Error(String(e));
       setRunError(err);
       onError?.(err);
+      // Errors get an ASSERTIVE `role="alert"` block in the JSX below — the
+      // live region announces the polite event-completion phrase so SR users
+      // hear both: the polite "Run failed" + the assertive error details.
+      announce(`Run failed: ${err.message}`);
+    } finally {
+      clearStartAnnouncement();
     }
   }
 
@@ -244,9 +256,11 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       setVertices([]);
       setEdges([]);
       setRunError(null);
+      announce('Playground reset.');
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       onError?.(err);
+      announce(`Reset failed: ${err.message}`);
     }
   }
 
@@ -258,6 +272,14 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     <div
       className="fossil-playground"
       data-testid="fossil-playground"
+      // role="application" tells AT this is a rich-interaction widget (the
+      // CodeMirror editor + LSP-driven completions need direct key capture).
+      // Per WAI-ARIA 1.2 application role: appropriate when the page contains
+      // composite custom widgets where normal AT browse-mode would interfere
+      // with intended interactions. The aria-label gives the role a name so
+      // SR users hear "Fossil playground, application" on entry.
+      role="application"
+      aria-label="Fossil playground"
       // CSS custom properties applied at the root — every descendant
       // (including the CodeMirror editor host + ResultTable/Graph) reads from
       // here. Hosts can ALSO override the same `--fossil-*` variables at any
@@ -265,38 +287,54 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       // overrides require no prop changes. Per THEME-01 + CONTEXT.md.
       style={cssVarsToStyle(cssVars)}
     >
-      <header className="fossil-playground__toolbar">
+      <header className="fossil-playground__toolbar" role="banner">
         <button
           type="button"
           onClick={() => {
             void handleRun();
           }}
           disabled={duck.loading}
-          aria-label="Run mapping"
+          // Accessible name comes from ARIA_LABELS — the visible text inside
+          // the button changes ("Run" → "Running…") but the accessible name
+          // stays stable so SR users don't hear the label flip mid-interaction.
+          aria-label={ARIA_LABELS.runButton}
+          // aria-busy mirrors the disabled state so AT announces the busy
+          // state in addition to the disabled state (some SR ignore disabled
+          // buttons entirely; aria-busy is the canonical busy signal).
+          aria-busy={duck.loading || undefined}
         >
           {duck.loading ? 'Running…' : 'Run'}
         </button>
         <button
           type="button"
           onClick={handleReset}
-          aria-label="Reset playground"
+          aria-label={ARIA_LABELS.resetButton}
         >
           Reset playground
         </button>
       </header>
       <main className="fossil-playground__main">
-        <FossilEditor
-          value={mapping}
-          onChange={setMapping}
-          extensions={extensions}
-        />
+        <section aria-label={ARIA_LABELS.editor}>
+          <FossilEditor
+            value={mapping}
+            onChange={setMapping}
+            extensions={extensions}
+          />
+        </section>
         {(runError || duck.error) && (
-          <div role="alert" aria-live="assertive" className="fossil-playground__error">
+          // role="alert" — ASSERTIVE announcement (interrupts whatever the
+          // SR is currently saying). Reserved for genuine errors; routine
+          // status changes use the polite announce() live region.
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="fossil-playground__error"
+          >
             Error: {(runError ?? duck.error)?.message}
           </div>
         )}
         <section
-          aria-label="Results"
+          aria-label={ARIA_LABELS.resultsRegion}
           className="fossil-playground__results"
         >
           <ResultGraph vertices={vertices} edges={edges} fallback={tabularFallback} />

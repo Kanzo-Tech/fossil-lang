@@ -44,5 +44,8 @@ export {
   CSS_VAR_PREFIX,
 } from './theme/tokens.js';
 
+// Accessibility primitives (A11Y-01)
+export { announce, ARIA_LABELS, LIVE_REGION_ID } from './a11y/index.js';
+
 // Transport adapter
 export { createWorkerTransport } from './lsp/WorkerTransport.js';
