@@ -1,0 +1,40 @@
+name: pnpm-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pnpm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build WASM first — every TS package downstream depends on the wasm-bindgen output
+      # being present in packages/wasm/pkg/. This step is a no-op early in Phase 8
+      # (the @fossil-lang/wasm package doesn't exist yet; its script will be `echo ok`).
+      # Once 08-06 lands, this builds the real artifact.
+      - name: Build wasm
+        run: pnpm --filter "@fossil-lang/wasm" run build:wasm || echo "no @fossil-lang/wasm yet"
+
+      - name: Build all packages
+        run: pnpm -r build
+
+      - name: Test all packages
+        run: pnpm -r test
+
+      - name: Type-check all packages
+        run: pnpm -r exec tsc --noEmit

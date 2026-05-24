@@ -1,0 +1,63 @@
+name: wasm-size
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  wasm-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned toolchain matches CLAUDE.md (Rust 1.90 + wasm-bindgen 0.2.120).
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli (exact pin 0.2.120 per CLAUDE.md)
+        run: cargo install --version 0.2.120 wasm-bindgen-cli
+
+      - name: Install wasm-opt (binaryen)
+        run: |
+          curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-x86_64-linux.tar.gz | tar xz
+          echo "$PWD/binaryen-version_119/bin" >> $GITHUB_PATH
+
+      - name: Build fossil-wasm
+        run: cargo build --release --target wasm32-unknown-unknown -p fossil-wasm
+
+      - name: Run wasm-bindgen
+        run: |
+          mkdir -p packages/wasm/pkg
+          wasm-bindgen target/wasm32-unknown-unknown/release/fossil_wasm.wasm \
+            --target web \
+            --out-dir packages/wasm/pkg
+
+      - name: Run wasm-opt -O3
+        run: wasm-opt -O3 packages/wasm/pkg/fossil_wasm_bg.wasm -o packages/wasm/pkg/fossil_wasm_bg.wasm
+
+      - name: Assert WASM compressed size <= 2 MB (PKG-03)
+        run: |
+          # gzip the wasm; assert compressed size is <= 2 * 1024 * 1024 = 2097152 bytes
+          gzip -9 -k packages/wasm/pkg/fossil_wasm_bg.wasm
+          SIZE=$(wc -c < packages/wasm/pkg/fossil_wasm_bg.wasm.gz)
+          LIMIT=2097152
+          echo "WASM compressed size: $SIZE bytes (limit: $LIMIT)"
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error::WASM bundle exceeds 2 MB compressed (PKG-03): $SIZE > $LIMIT"
+            exit 1
+          fi
+
+      - name: Assert total deployable artefact <= 10 MB (CONTEXT.md SC#3)
+        run: |
+          # Sum of all files in packages/wasm/pkg/ (the published artifact)
+          TOTAL=$(du -bsc packages/wasm/pkg/* | tail -1 | awk '{print $1}')
+          LIMIT=10485760
+          echo "Total packages/wasm/pkg/ size: $TOTAL bytes (limit: $LIMIT)"
+          if [ "$TOTAL" -gt "$LIMIT" ]; then
+            echo "::error::Total wasm/pkg artefact exceeds 10 MB"
+            exit 1
+          fi
