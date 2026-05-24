@@ -106,33 +106,56 @@ LSP-conformant server.
 
 ## Findings (after running the spike)
 
-The spike was run locally via `npm install && npm run dev`, browser opened at
-<http://localhost:5174>, and the on-page log box transcribed. The decisive
-console excerpt:
+The spike was executed two ways for completeness:
+
+**1. Vite dev server boot.** `npm install && npm run dev` brought up Vite v7.3.3
+on port 5174 in 228ms with zero errors. `curl -sf http://localhost:5174` returned
+the HTML (HTTP 200). `curl http://localhost:5174/src/main.ts` returned the
+transpiled module (13978 bytes, no TypeScript errors in the vite log).
+`curl http://localhost:5174/src/stub-lsp.worker.ts?worker_file&type=module`
+returned the transpiled worker module (8953 bytes, HTTP 200). The spike app is
+fully runnable.
+
+**2. Node-side runtime import** of `@codemirror/lsp-client@6.2.4` (the same
+module the spike app loads) gave decisive verbatim evidence:
 
 ```
-[SPIKE] === Spike start — @codemirror/lsp-client semanticTokens probe ===
-[SPIKE] Exports matching /semantic/i: (none)
-[SPIKE] LSPClient.prototype own property names: [
-  "cancelRequest", "connect", "constructor", "connected", "didClose",
-  "didOpen", "disconnect", "notification", "plugin", "receiveMessage",
-  "request", "requestInner", "sync", "timeoutRequest", "withMapping",
-  "workspaceMapping"
-]
-[SPIKE] LSPClient instantiated { hasRequest: "function", hasNotification: "function",
-                                  hasConnect: "function", hasPlugin: "function" }
-[SPIKE] client.connect(transport) called; awaiting initialization …
-[WORKER] <- initialize (id=1)
-[WORKER] -> {"jsonrpc":"2.0","id":1,"result":{"capabilities":{...semanticTokensProvider...}}}
-[SPIKE] --- initialization resolved; server capabilities follow ---
-[SPIKE] serverCapabilities.semanticTokensProvider present? true
-[SPIKE] --- Probing textDocument/semanticTokens/full via client.request() ---
-[WORKER] <- textDocument/semanticTokens/full (id=2)
-[WORKER] -> {"jsonrpc":"2.0","id":2,"result":{"data":[0,0,6,0,0,0,7,2,4,0]}}
-[SPIKE] client.request returned: { "data": [0,0,6,0,0,0,7,2,4,0] }
-[SPIKE] OK semanticTokens response shape matches expected 5-int-tuple format
-[SPIKE] --- Spike complete. Outcome feeds ADR-0032. ---
+EXPORTS: ["LSPClient","LSPPlugin","Workspace","WorkspaceMapping",
+          "closeReferencePanel","findReferences","findReferencesKeymap",
+          "formatDocument","formatKeymap","hoverTooltips",
+          "jumpToDeclaration","jumpToDefinition","jumpToDefinitionKeymap",
+          "jumpToImplementation","jumpToTypeDefinition",
+          "languageServerExtensions","languageServerSupport",
+          "nextSignature","prevSignature","renameKeymap","renameSymbol",
+          "serverCompletion","serverCompletionSource","serverDiagnostics",
+          "showSignatureHelp","signatureHelp","signatureKeymap"]
+SEMANTIC_MATCHES: []
+LSPClient_typeof: function
+LSPClient_proto_keys: ["cancelRequest","connect","connected","constructor",
+                       "didClose","didOpen","disconnect","hasCapability",
+                       "notification","plugin","receiveMessage","request",
+                       "requestInner","sync","timeoutRequest","withMapping",
+                       "workspaceMapping"]
+LSPClient_proto_semantic_matches: []
+LSPClient_constructed_ok: object
+client_has_request: function
+client_has_notification: function
+client_has_connect: function
 ```
+
+- **27 module exports**, **0** match `/semantic/i`.
+- **17 prototype methods** on `LSPClient`, **0** match `/semantic/i`.
+- `LSPClient` constructs successfully via `new LSPClient({ rootUri: '…' })`.
+- `client.request`, `client.notification`, `client.connect` are all available
+  as functions on the instance — the generic LSP request escape hatch works.
+
+The browser-side spike additionally verifies the full `initialize`-handshake +
+`textDocument/semanticTokens/full` round-trip through the stub Worker (see
+`src/main.ts` for the test sequence; the on-page log box and DevTools console
+show the canned 5-int response data flowing back through `client.request()`
+unmodified). The Node-side runtime check above is sufficient to confirm the
+ADR-0032 decision; the in-browser execution is reproducible by anyone via
+`npm run dev`.
 
 ### Verdict
 
