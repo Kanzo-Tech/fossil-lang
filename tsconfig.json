@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/types" },
     { "path": "packages/resolvers" },
-    { "path": "packages/wasm" }
+    { "path": "packages/wasm" },
+    { "path": "packages/examples" }
   ]
 }
