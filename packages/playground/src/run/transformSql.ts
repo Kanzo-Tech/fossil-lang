@@ -297,16 +297,36 @@ export interface TransformedSql {
 }
 
 /**
- * Full SQL transform: resolve every `@connector/path` reference, substitute
- * the URLs in, then rewrite COPYs into CREATE TABLEs.
+ * Full SQL transform: resolve every `@connector/path` reference (so the
+ * caller can pre-register the resolved URL with DuckDB-WASM's virtual FS),
+ * then rewrite COPYs into CREATE TABLEs.
  *
  *   sql → extractSourceRefs → for ref in refs: resolver.resolve(ref) →
- *         enforceContentLengthCap(url, ref) → substitute literal → rewriteCopyToCreateTable
+ *         enforceContentLengthCap(url, ref) → collect (virtualName, url) →
+ *         rewriteCopyToCreateTable
  *
- * Substitution is in-place via simple string replace — the candidate literal
- * is unique per ref (it's the user-typed `@connector/path` text), so a
- * `split(literal).join(url)` collapses all occurrences in one pass without
- * regex-escaping the replacement string.
+ * # URL handling: virtual-FS registration, NOT in-place substitution
+ *
+ * Earlier drafts of this function inlined the resolved URL into the SQL
+ * (`read_csv_auto('@examples/hello.csv')` → `read_csv_auto('blob:abc-…')`).
+ * That works for `https:` URLs the DuckDB-WASM Worker can fetch via its
+ * `DuckDBDataProtocol.HTTP`, but BREAKS for `blob:` URLs — the Worker's
+ * HEAD pre-flight against a main-thread-created blob URL fails with
+ * `net::ERR_METHOD_NOT_SUPPORTED` (blob URLs aren't visible from inside a
+ * Worker without explicit transfer; the HTTP fetch refuses the HEAD).
+ *
+ * Surfaced by the 08-13 Task 3 Playwright debug iteration — the SC#1 spec
+ * went red against the in-place-substitution path because the Tier-1
+ * default resolver returns `blob:` URLs.
+ *
+ * Fix (Rule 1 auto-fix): leave the original `@connector/path` literal in
+ * the SQL and rely on the caller to register the resolved URL under that
+ * virtual name via DuckDB's `registerFileBuffer` (after fetching the URL
+ * to bytes). `read_csv_auto('@examples/hello.csv')` then resolves through
+ * DuckDB's in-memory FS, which works for ANY content the main thread can
+ * fetch — blob, https, or anything in between. The CONN-01 invariant is
+ * preserved because the URL still never enters React state; it flows
+ * through the local `registeredFiles` array into `db.registerFileBuffer`.
  */
 export async function transformSql(
   sql: string,
@@ -315,21 +335,15 @@ export async function transformSql(
 ): Promise<TransformedSql> {
   const refs = extractSourceRefs(sql);
   const registeredFiles: Array<{ virtualName: string; url: string }> = [];
-  let working = sql;
   // De-duplicate refs by literal — the same `@examples/hello.csv` may appear
-  // in N source readers; one resolver call serves all.
+  // in N source readers; one resolver call (and one virtual-FS registration)
+  // serves all.
   const seenLiterals = new Set<string>();
   for (const { ref, literal } of refs) {
     if (seenLiterals.has(literal)) continue;
     seenLiterals.add(literal);
     const resolved = await resolver.resolve(ref);
     await enforceContentLengthCap(resolved.url, ref, opts.maxResolvedBytes);
-    const escapedUrl = escapeSqlLiteral(resolved.url);
-    // Substitute the literal text wherever it appears between the surrounding
-    // single quotes. Because `literal` is the user-supplied connector/path
-    // string (matched verbatim from the SQL), splitting on it preserves the
-    // surrounding `'...'` quotes the codegen emitted.
-    working = working.split(literal).join(escapedUrl);
     registeredFiles.push({ virtualName: literal, url: resolved.url });
   }
   const {
@@ -337,7 +351,7 @@ export async function transformSql(
     vertexTables,
     edgeTables,
     tripleTables,
-  } = rewriteCopyToCreateTable(working);
+  } = rewriteCopyToCreateTable(sql);
   return {
     executableSql: rewrittenSql,
     vertexTables,
@@ -346,3 +360,9 @@ export async function transformSql(
     registeredFiles,
   };
 }
+
+// `escapeSqlLiteral` is retained for the (currently unused) defensive
+// URL-substitution path; kept lint-silenced so a future hybrid mode (some
+// resolvers return `https:` URLs the HTTP protocol CAN handle without a
+// virtual-FS round-trip) can re-enable it without re-deriving the escape.
+void escapeSqlLiteral;

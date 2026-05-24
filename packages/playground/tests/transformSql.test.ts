@@ -167,7 +167,13 @@ describe('transformSql (end-to-end)', () => {
     },
   });
 
-  it('substitutes @ref → blob URL and rewrites the COPY in one pass', async () => {
+  it('resolves @ref → registeredFiles entry, leaves SQL literal intact, rewrites the COPY', async () => {
+    // Post-Task-3 contract: transformSql does NOT substitute the URL into
+    // the SQL — DuckDB-WASM's HTTP protocol cannot resolve `blob:` URLs
+    // from the Worker realm. Instead, the caller (runPipeline) fetches the
+    // URL and registers the bytes under the original `@`-literal via
+    // `db.registerFileBuffer`, so `read_csv_auto('@examples/hello.csv')`
+    // resolves through DuckDB's virtual FS.
     const sql = `
       CREATE VIEW users AS
       SELECT * FROM read_csv_auto('@examples/hello.csv', sample_size=-1);
@@ -179,10 +185,15 @@ describe('transformSql (end-to-end)', () => {
     });
     // maxResolvedBytes 0 disables the cap so we don't have to stub fetch.
     const result = await transformSql(sql, resolver, { maxResolvedBytes: 0 });
-    expect(result.executableSql).toMatch(/'blob:fake-url-abc'/);
-    expect(result.executableSql).not.toMatch(/@examples\/hello\.csv/);
+    // SQL literal is PRESERVED (NOT substituted) — the original `@`-ref
+    // stays so DuckDB resolves it via the virtual-FS registration the
+    // caller does next.
+    expect(result.executableSql).toMatch(/'@examples\/hello\.csv'/);
+    expect(result.executableSql).not.toMatch(/blob:fake-url-abc/);
     expect(result.executableSql).toMatch(/CREATE OR REPLACE TABLE "output" AS/);
     expect(result.tripleTables).toEqual(['output']);
+    // The resolved URL is surfaced via registeredFiles — never leaks into
+    // SQL or React state. The caller uses this to drive registerFileBuffer.
     expect(result.registeredFiles).toEqual([
       { virtualName: '@examples/hello.csv', url: 'blob:fake-url-abc' },
     ]);
@@ -219,7 +230,13 @@ describe('transformSql (end-to-end)', () => {
     const result = await transformSql(sql, resolver, {
       maxResolvedBytes: 1_000_000,
     });
-    expect(result.executableSql).toMatch(/'https:\/\/example\.test\/sized\.csv'/);
+    // Post-Task-3: URL is NOT substituted into SQL (registerFileBuffer
+    // path); the original `@`-literal is preserved and the resolved URL
+    // surfaces only via registeredFiles.
+    expect(result.executableSql).toMatch(/'@examples\/sized\.csv'/);
+    expect(result.registeredFiles).toEqual([
+      { virtualName: '@examples/sized.csv', url: 'https://example.test/sized.csv' },
+    ]);
   });
 
   it('de-duplicates identical @ref literals — one resolver.resolve call per unique literal', async () => {
@@ -237,9 +254,14 @@ describe('transformSql (end-to-end)', () => {
     };
     const result = await transformSql(sql, resolver, { maxResolvedBytes: 0 });
     expect(resolveFn).toHaveBeenCalledTimes(1);
-    // Both occurrences substituted in a single split/join pass.
+    // Both occurrences of the original `@`-literal are PRESERVED in the SQL
+    // (no substitution); single registered-file entry serves both reads via
+    // DuckDB's virtual FS.
     expect(
-      (result.executableSql.match(/blob:dedup-test/g) ?? []).length,
+      (result.executableSql.match(/@examples\/x\.csv/g) ?? []).length,
     ).toBe(2);
+    expect(result.registeredFiles).toEqual([
+      { virtualName: '@examples/x.csv', url: 'blob:dedup-test' },
+    ]);
   });
 });

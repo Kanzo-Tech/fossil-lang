@@ -143,13 +143,24 @@ function tableToRows(table: any): Record<string, unknown>[] {
 }
 
 /**
- * Numeric value of `DuckDBDataProtocol.HTTP` — `@duckdb/duckdb-wasm`
- * exports this as an enum, but importing the enum statically would pull
- * the whole DuckDB module into the initial bundle. The numeric value `4`
- * has been stable across `@duckdb/duckdb-wasm` 1.x releases (verified
- * against ADR-0025's exact-pinned 1.32.0).
+ * Fetch a resolver-returned URL and return its bytes. Used for the
+ * `registerFileBuffer` virtual-FS registration path (see comment block on
+ * `transformSql` for why we don't use DuckDB's HTTP protocol for blob URLs).
+ *
+ * Main-thread fetch — works for both `blob:` and `https:` URLs uniformly.
+ * Errors propagate to the caller so the SQL execution doesn't proceed against
+ * a missing virtual file.
  */
-const DUCKDB_DATA_PROTOCOL_HTTP = 4;
+async function fetchUrlBytes(url: string): Promise<Uint8Array> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `runPipeline: failed to fetch resolved source (${response.status} ${response.statusText}): ${url}`,
+    );
+  }
+  const buffer = await response.arrayBuffer();
+  return new Uint8Array(buffer);
+}
 
 /**
  * The Run pipeline. Orchestrates compile → transformSql → DuckDB execute →
@@ -178,24 +189,21 @@ export async function runPipeline(
   // Step 2: resolve refs + substitute URLs + rewrite COPYs.
   const transformed = await transformSql(sql, resolver, { maxResolvedBytes });
 
-  // Step 3: lazy-boot DuckDB-WASM + register virtual files.
+  // Step 3: lazy-boot DuckDB-WASM + register every resolved source as a
+  // virtual file under its `@connector/path` name, so the SQL's untouched
+  // `read_csv_auto('@examples/hello.csv')` reads through DuckDB's in-memory
+  // FS instead of going out over the network.
+  //
+  // Why fetch-then-registerFileBuffer (not registerFileURL with HTTP
+  // protocol): DuckDB-WASM's HTTP protocol runs inside the DuckDB Worker,
+  // which cannot resolve `blob:` URLs created on the main thread (the HEAD
+  // pre-flight fails with `net::ERR_METHOD_NOT_SUPPORTED`). Fetching on
+  // the main thread + buffering the bytes works uniformly for blob/https/
+  // anything-fetch-can-reach. See `transformSql.ts` for the longer write-up.
   const db = await deps.getDuckDb();
-  // Register Tier-1 blob URLs under their `@connector/path` virtual name so
-  // any leftover `read_csv_auto('@...')` (theoretically — we substitute
-  // in-place, but defence in depth) resolves via DuckDB's file system.
   for (const { virtualName, url } of transformed.registeredFiles) {
-    try {
-      await db.registerFileURL(
-        virtualName,
-        url,
-        DUCKDB_DATA_PROTOCOL_HTTP,
-        false,
-      );
-    } catch {
-      // Registration is best-effort — the URL substitution above already
-      // made the SQL self-contained. Some test stubs don't implement
-      // registerFileURL; that's fine.
-    }
+    const bytes = await fetchUrlBytes(url);
+    await db.registerFileBuffer(virtualName, bytes);
   }
 
   // Step 4: execute on ONE connection then read back.
