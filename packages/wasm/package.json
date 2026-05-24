@@ -1,0 +1,50 @@
+{
+  "name": "@fossil-lang/wasm",
+  "version": "0.1.0",
+  "description": "JS/TS wrapper around the fossil-wasm wasm-bindgen artifacts (--target web). Exposes initFossilWasm + tokenize + semanticLegend + FossilPlayground class for downstream @fossil-lang/* packages.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/wasm"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pkg/fossil_wasm_bg.wasm": "./pkg/fossil_wasm_bg.wasm"
+  },
+  "files": [
+    "dist/",
+    "pkg/fossil_wasm.js",
+    "pkg/fossil_wasm.d.ts",
+    "pkg/fossil_wasm_bg.wasm",
+    "pkg/fossil_wasm_bg.wasm.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "build": "pnpm run build:wasm && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
