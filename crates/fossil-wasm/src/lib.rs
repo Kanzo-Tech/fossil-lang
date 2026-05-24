@@ -47,10 +47,17 @@
 //! for the verbatim API contract this file implements.
 
 pub(crate) mod lsp_worker;
+pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
 pub use crate::lsp_worker::start_lsp_worker;
+pub use crate::tokenize::{TokenRow, tokenize_native};
+// The #[wasm_bindgen] `tokenize` and `semantic_legend` functions are exposed
+// to JS by virtue of their attribute. The `tokenize` module is `pub` so the
+// `#[wasm_bindgen]` items are reachable (the unreachable_pub lint would
+// otherwise flag them — they ARE reachable, just via wasm-bindgen-generated
+// glue, not via Rust callers).
 
 use std::sync::Arc;
 
