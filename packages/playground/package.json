@@ -31,7 +31,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "size": "size-limit"
   },
   "sideEffects": false,
   "dependencies": {
@@ -73,7 +74,9 @@
     "@fossil-lang/codemirror-fossil": "workspace:*",
     "@duckdb/duckdb-wasm": "1.32.0",
     "@testing-library/react": "^16.0.0",
+    "@size-limit/preset-small-lib": "^11.0.0",
     "happy-dom": "^15.0.0",
+    "size-limit": "^11.0.0",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   }
