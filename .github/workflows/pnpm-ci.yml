@@ -38,3 +38,11 @@ jobs:
 
       - name: Type-check all packages
         run: pnpm -r exec tsc --noEmit
+
+      # PKG-03 JS half — enforce per-package bundle budgets via size-limit.
+      # Currently only @fossil-lang/playground declares a size script + budget
+      # (500 KB gzip per CONTEXT.md SC#4 + 08-VERIFICATION.md gap 2). Future
+      # packages with budgets are picked up automatically by `pnpm -r`.
+      # The WASM half of PKG-03 is enforced separately by wasm-size.yml.
+      - name: Bundle size budget (PKG-03 JS half)
+        run: pnpm -r size
