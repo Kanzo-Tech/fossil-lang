@@ -1,0 +1,41 @@
+{
+  "name": "@fossil-lang/resolvers",
+  "version": "0.1.0",
+  "description": "Default + mock + public-HTTP ConnectionResolver implementations for the @fossil-lang/playground React component (Tier 1 per ADR-0029).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/resolvers"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist/", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0",
+    "happy-dom": "^15.0.0"
+  }
+}
