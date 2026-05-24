@@ -158,6 +158,16 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const [vertices, setVertices] = useState<VertexRow[]>([]);
   const [edges, setEdges] = useState<EdgeRow[]>([]);
   const [runError, setRunError] = useState<Error | null>(null);
+  // Main-thread WASM init gate. CodeMirror's StreamParser eagerly calls
+  // tokenize() on every line at editor-mount time; if WASM hasn't
+  // initialised yet the call hits a __wbindgen_malloc_command_export
+  // undefined property and crashes the editor render. We defer the
+  // <FossilEditor/> mount until initFossilWasm resolves so the parser
+  // sees a ready WASM module on its first invocation.
+  //
+  // Surfaced by the 08-11 Playwright suite (the unit tests stub
+  // tokenize via vi.mock so the race never fires in vitest).
+  const [wasmReady, setWasmReady] = useState<boolean>(false);
 
   const lspClient = useLspWorker({ wasmUrl, workerUrl });
   const duck = useDuckDb();
@@ -168,10 +178,18 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   // compileFile() directly on the main thread for the Run path; the LSP
   // Worker boots its own WASM instance separately).
   useEffect(() => {
-    initFossilWasm({ wasmUrl }).catch((e) => {
-      const err = e instanceof Error ? e : new Error(String(e));
-      onError?.(err);
-    });
+    let cancelled = false;
+    initFossilWasm({ wasmUrl })
+      .then(() => {
+        if (!cancelled) setWasmReady(true);
+      })
+      .catch((e) => {
+        const err = e instanceof Error ? e : new Error(String(e));
+        onError?.(err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [wasmUrl, onError]);
 
   // Compose CodeMirror extensions. Per ADR-0032 + 08-08:
@@ -315,11 +333,27 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       </header>
       <main className="fossil-playground__main">
         <section aria-label={ARIA_LABELS.editor}>
-          <FossilEditor
-            value={mapping}
-            onChange={setMapping}
-            extensions={extensions}
-          />
+          {wasmReady ? (
+            <FossilEditor
+              value={mapping}
+              onChange={setMapping}
+              extensions={extensions}
+            />
+          ) : (
+            // Gated on main-thread WASM init: CodeMirror's StreamParser
+            // calls tokenize() eagerly at mount; rendering the editor
+            // before initFossilWasm resolves crashes the parser. The
+            // playground stays interactive (Run/Reset buttons render)
+            // while the editor is loading.
+            <div
+              role="status"
+              aria-live="polite"
+              className="fossil-playground__editor-loading"
+              style={{ padding: '1rem', color: 'var(--fossil-colors-muted)' }}
+            >
+              Loading editor…
+            </div>
+          )}
         </section>
         {(runError || duck.error) && (
           // role="alert" — ASSERTIVE announcement (interrupts whatever the

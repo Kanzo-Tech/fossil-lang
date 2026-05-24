@@ -1,0 +1,12 @@
+{
+  "extends": "../../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "isolatedModules": true,
+    "moduleResolution": "Bundler",
+    "verbatimModuleSyntax": false,
+    "types": ["vite/client"]
+  },
+  "include": ["main.tsx", "vite.config.ts"]
+}

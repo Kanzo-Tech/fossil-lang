@@ -1,0 +1,75 @@
+name: playwright
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (for fossil-wasm build)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install wasm-bindgen-cli (exact 0.2.120 per stack pin)
+        run: cargo install --version 0.2.120 wasm-bindgen-cli --locked
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install workspace deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build WASM artefact (fossil-wasm)
+        run: pnpm --filter @fossil-lang/wasm build:wasm
+
+      - name: Build all packages + apps
+        run: pnpm -r build
+
+      - name: Install Playwright browsers (chromium only — CI saves time)
+        run: pnpm --filter @fossil-lang/landing exec playwright install --with-deps chromium
+
+      - name: Run Playwright E2E (landing + multi-host + a11y + offline)
+        run: pnpm --filter @fossil-lang/landing test:e2e
+        env:
+          CI: '1'
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/landing/playwright-report
+          retention-days: 7
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/landing/test-results
+          retention-days: 7

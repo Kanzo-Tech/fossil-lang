@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { FossilPlayground } from '../src/index.js';
 import { createMockResolver } from '@fossil-lang/resolvers';
 
@@ -31,7 +31,7 @@ describe('<FossilPlayground/>', () => {
     expect(screen.getByRole('button', { name: /reset playground/i })).toBeTruthy();
   });
 
-  it('respects initialMapping when provided', () => {
+  it('respects initialMapping when provided', async () => {
     render(
       <FossilPlayground
         resolver={mockResolver}
@@ -39,12 +39,20 @@ describe('<FossilPlayground/>', () => {
         initialMapping="prefix custom: <https://custom.org/>"
       />,
     );
-    // The CodeMirror editor host is present (the actual content rendering by
-    // CodeMirror itself requires a real browser layout engine which happy-dom
-    // approximates but doesn't fully replicate; this assertion verifies the
-    // wrapper mounted, which is enough for the unit-test layer).
-    const host = document.querySelector('.fossil-editor');
-    expect(host).toBeTruthy();
+    // The CodeMirror editor host is mounted ASYNC: <FossilPlayground/>
+    // defers the editor render until initFossilWasm resolves (08-11 Rule 1
+    // fix — CodeMirror's StreamParser eagerly calls tokenize() on mount
+    // and would crash if WASM hadn't initialised). The mock in
+    // tests/setup.ts resolves initFossilWasm() immediately so this
+    // waitFor flips quickly; in production the same flip happens after
+    // the .wasm bundle finishes downloading.
+    await waitFor(
+      () => {
+        const host = document.querySelector('.fossil-editor');
+        expect(host).toBeTruthy();
+      },
+      { timeout: 2_000 },
+    );
   });
 
   it('renders the Results section with a tabular fallback', () => {
