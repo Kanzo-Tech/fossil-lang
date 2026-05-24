@@ -35,8 +35,10 @@ node_modules/
 **/.turbo/
 # wasm-bindgen output is committed-elsewhere or built-on-demand, never tracked
 packages/wasm/pkg/
-# individual changesets are PR-bound; config + README are tracked
-.changeset/*.md
+# Changesets are tracked on main; the `changeset version` step consumes them at
+# release time. Only the empty-template fixture (if any) is ignored.
+# (Earlier 08-01 ignored .changeset/*.md as "PR-bound" — corrected in 08-12 once
+# the publish pipeline made tracking necessary.)
 !.changeset/config.json
 !.changeset/README.md
 # TS incremental build state

@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write       # npm provenance OIDC (Trusted Publishing)
+  contents: write       # Changesets opens + commits the Version Packages PR
+  pull-requests: write  # Changesets opens + updates PRs
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Changesets compares against history to compute bumps
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli (exact 0.2.120 per CLAUDE.md stack pins)
+        run: cargo install --version 0.2.120 wasm-bindgen-cli
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          # registry-url is REQUIRED for npm Trusted Publishing OIDC to work
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build WASM artifact (@fossil-lang/wasm)
+        run: pnpm --filter @fossil-lang/wasm build:wasm
+
+      - name: Build all packages (recursive)
+        run: pnpm -r build
+
+      - name: Test (gate before publishing)
+        run: pnpm -r test
+
+      - name: Create Release Pull Request or Publish to npm
+        uses: changesets/action@v1
+        with:
+          # `version` opens the Version Packages PR aggregating accumulated changesets;
+          # `publish` runs after that PR merges — invokes pnpm release which calls
+          # `changeset publish` with --provenance (set via .changeset/config.json
+          # provenance: true). npm Trusted Publishing OIDC uses the id-token: write
+          # permission above + the registry-url + provenance flag — NO NPM_TOKEN secret.
+          publish: pnpm release
+          version: pnpm version
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NPM_TOKEN intentionally omitted — Trusted Publishing OIDC handles auth.
+          # If Trusted Publishing isn't yet configured on the npm side (one-time human
+          # action on npmjs.com → org settings → trusted publishers), the publish step
+          # will fail with a clear "missing OIDC" error — that's the gate. For Phase 8
+          # close, we just need this workflow to EXIST; the first actual publish runs
+          # as part of Phase 10's coordinated release.
