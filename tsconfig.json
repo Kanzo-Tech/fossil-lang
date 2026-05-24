@@ -5,6 +5,7 @@
     { "path": "packages/resolvers" },
     { "path": "packages/wasm" },
     { "path": "packages/examples" },
-    { "path": "packages/codemirror-fossil" }
+    { "path": "packages/codemirror-fossil" },
+    { "path": "packages/playground" }
   ]
 }

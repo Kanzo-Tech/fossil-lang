@@ -24,11 +24,36 @@ import {
   FileHandle as RawFileHandle,
   tokenize as rawTokenize,
   semantic_legend as rawSemanticLegend,
+  start_lsp_worker as rawStartLspWorker,
 } from '../pkg/fossil_wasm.js';
 import type { TokenRow, SemanticTokensLegend } from '@fossil-lang/types';
 
 export { initFossilWasm } from './load.js';
 export type { InitFossilWasmOpts } from './load.js';
+
+/**
+ * Install the LSP-over-postMessage dispatcher on the current Worker scope.
+ *
+ * Per ADR-0024 (`fossil-wasm` IS the LSP server-side) + Phase 7 plan 07-03
+ * (the 16-route dispatch loop). The Rust function (re-exported from
+ * `crates/fossil-wasm/src/lsp_worker.rs`) installs `self.onmessage` on the
+ * Worker scope and owns LSP JSON-RPC dispatch from that point forward —
+ * including per-file `textDocument/publishDiagnostics` drains (B3 fix from
+ * 07-03), `textDocument/semanticTokens/full` (06-07), hover, completion,
+ * definition, references, rename, formatting, code actions, document
+ * symbols, signature help.
+ *
+ * MUST be called inside a Web Worker scope, AFTER {@link initFossilWasm} has
+ * resolved. Calling it on the main thread is a no-op (the dispatcher needs
+ * `DedicatedWorkerGlobalScope.onmessage`).
+ *
+ * Consumed by `@fossil-lang/playground`'s `src/workers/lsp.worker.ts` —
+ * the React component's LSP Worker entry boots the WASM module then calls
+ * this function once.
+ */
+export function start_lsp_worker(): void {
+  rawStartLspWorker();
+}
 
 /**
  * Opaque file-handle returned by {@link FossilPlayground.openFile}. Pass it
