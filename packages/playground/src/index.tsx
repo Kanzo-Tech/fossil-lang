@@ -49,3 +49,21 @@ export { announce, ARIA_LABELS, LIVE_REGION_ID } from './a11y/index.js';
 
 // Transport adapter
 export { createWorkerTransport } from './lsp/WorkerTransport.js';
+
+// Run pipeline — the orchestration helper handleRun composes. Exposed so
+// advanced consumers building custom layouts (the multi-host fixture in
+// 08-11 is the canonical example) can reuse the same four-step pipeline
+// without re-implementing compile → resolver.resolve → COPY-rewrite →
+// DuckDB execute. Per 08-13 Task 1 + 08-09 SUMMARY advanced-composition path.
+export { runPipeline } from './run/runPipeline.js';
+export type {
+  RunPipelineDeps,
+  RunPipelineInput,
+  RunPipelineResult,
+} from './run/runPipeline.js';
+export {
+  extractSourceRefs,
+  rewriteCopyToCreateTable,
+  transformSql,
+} from './run/transformSql.js';
+export type { TableClass, TransformedSql } from './run/transformSql.js';

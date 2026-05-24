@@ -10,24 +10,32 @@
  *   - FossilEditor (hand-rolled React wrapper — ~50 LOC; NOT @uiw/react-codemirror)
  *   - ResultGraph + ResultTable (vertex/edge viz with a11y fallback)
  *
- * The Run pipeline is documented inline (compileFile → URL substitution via
- * resolver.resolve → duck.run). For v0.1 some wiring is left as placeholders
- * the executor flagged in the plan output (KNOWN GAPS): cosmos.gl mount API
- * verification (RESEARCH.md Open Question 6) + the precise compile-vs-LSP
- * routing for the Run path. The component renders, mounts, and exposes the
- * full surface; the network-running Run path is exercised end-to-end in the
- * apps/landing/ Playwright suite (08-11).
+ * The Run pipeline (compileFile → URL substitution via resolver.resolve →
+ * COPY-rewrite → DuckDB execute → vertex/edge projection) lives in
+ * `../run/runPipeline.ts` so it can be reused by advanced consumers building
+ * custom layouts (the same surface 08-09 SUMMARY anticipated).
+ *
+ * Per ADR-0026 there are now THREE WASM-side resources with three distinct
+ * lifecycles:
+ *   - LSP Worker (module-singleton, long-lived; never terminated by Reset)
+ *   - DuckDB Worker (module-singleton, terminate+recreate on Reset)
+ *   - main-thread `FossilPlayground` (component-scope, `free()` on unmount
+ *     AND on Reset so Salsa state doesn't compound across many resets)
  *
  * Per CONN-01 / SC#5: the component MUST NOT retain credential-shape strings
  * in its rendered DOM. The `resolver.resolve()` return value contains the
- * fetchable URL — but the component substitutes it into SQL on the WAY to
+ * fetchable URL — but the pipeline substitutes it into SQL on the WAY to
  * the Worker; it does NOT cache the URL into React state. The
  * no-credentials-leak.test.tsx test asserts this structurally.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { fossil } from '@fossil-lang/codemirror-fossil';
-import { initFossilWasm } from '@fossil-lang/wasm';
+import {
+  initFossilWasm,
+  FossilPlayground as FossilPlaygroundWasm,
+  type FileHandle,
+} from '@fossil-lang/wasm';
 import { helloExample } from '@fossil-lang/examples';
 import { languageServerSupport } from '@codemirror/lsp-client';
 import type { Extension } from '@codemirror/state';
@@ -37,11 +45,12 @@ import { FossilEditor } from './FossilEditor.js';
 import { ResultTable } from './ResultTable.js';
 import { ResultGraph } from './ResultGraph.js';
 import { useLspWorker } from '../hooks/useLspWorker.js';
-import { useDuckDb } from '../hooks/useDuckDb.js';
+import { useDuckDb, getDuckDb } from '../hooks/useDuckDb.js';
 import { useResetPlayground } from '../hooks/useResetPlayground.js';
 import { useTheme } from '../hooks/useTheme.js';
 import { cssVarsToStyle } from '../theme/tokens.js';
 import { announce, ARIA_LABELS } from '../a11y/index.js';
+import { runPipeline } from '../run/runPipeline.js';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -174,9 +183,77 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const reset = useResetPlayground();
   const { cssVars, editorTheme } = useTheme(themeProp);
 
-  // Boot the main-thread WASM module too (the playground may call
-  // compileFile() directly on the main thread for the Run path; the LSP
-  // Worker boots its own WASM instance separately).
+  /**
+   * Main-thread `FossilPlayground` instance + opened file handle.
+   *
+   * Why component-scope (not module-singleton like the LSP Worker):
+   *   - The LSP Worker is the long-lived language-features instance per
+   *     ADR-0026; it owns its own Salsa store inside the Worker's WASM
+   *     module. We need a SEPARATE main-thread instance for the Run path
+   *     so we don't postMessage hundreds of KB of generated SQL through
+   *     the Worker boundary on every Run.
+   *   - The main-thread instance must `free()` on unmount so the Salsa
+   *     store + interned strings inside the WASM linear memory don't
+   *     leak when a host re-mounts the playground (e.g. an examples
+   *     gallery switching between mappings in Phase 9).
+   *   - It must ALSO `free()` on Reset so Salsa state doesn't compound
+   *     across many resets (mirrors the DuckDB Worker terminate+recreate
+   *     spirit — recreating the compile instance is cheap, ~hundreds of
+   *     μs, vs the ~hundreds of ms DuckDB-WASM cold-start).
+   *
+   * The handle is lazy: first Run mints the instance + openFile, every
+   * subsequent Run updateFiles the same handle so Salsa benefits from
+   * incremental memoisation (ADR-0022 — set_text bumps the revision,
+   * downstream tracked queries invalidate incrementally).
+   */
+  const compileInstanceRef = useRef<{
+    instance: FossilPlaygroundWasm | null;
+    handle: FileHandle | null;
+  }>({ instance: null, handle: null });
+
+  /** Stable URI the LSP client + the main-thread compile instance both key on. */
+  const documentUri = 'file:///playground/main.fossil';
+
+  /**
+   * Free the component-scope main-thread FossilPlayground instance. Idempotent
+   * so it's safe to call from both the unmount cleanup and from handleReset.
+   * The LSP Worker is untouched (ADR-0026 asymmetric API).
+   */
+  const freeCompileInstance = useCallback((): void => {
+    const r = compileInstanceRef.current;
+    if (r.instance) {
+      try {
+        r.instance.free();
+      } catch {
+        // free() on an already-freed instance throws — swallow.
+      }
+    }
+    compileInstanceRef.current = { instance: null, handle: null };
+  }, []);
+
+  /**
+   * Compile callback handed to runPipeline. Lazy-mints the FossilPlayground
+   * instance + opened file on first call; updateFile on subsequent calls so
+   * Salsa's incremental memoisation kicks in across re-Runs of the same
+   * mapping (the byte-identical-edit case = zero recompute).
+   */
+  const compile = useCallback(async (mappingText: string): Promise<string> => {
+    const r = compileInstanceRef.current;
+    if (!r.instance) {
+      const instance = new FossilPlaygroundWasm();
+      const handle = instance.openFile(documentUri, mappingText);
+      compileInstanceRef.current = { instance, handle };
+      return instance.compileFile(handle).sql;
+    }
+    if (r.handle !== null) {
+      r.instance.updateFile(r.handle, mappingText);
+    }
+    return r.instance.compileFile(r.handle!).sql;
+  }, []);
+
+  // Boot the main-thread WASM module too (the Run path calls compileFile()
+  // directly on the main thread; the LSP Worker boots its own WASM instance
+  // separately).
   useEffect(() => {
     let cancelled = false;
     initFossilWasm({ wasmUrl })
@@ -192,11 +269,20 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     };
   }, [wasmUrl, onError]);
 
+  // Free the main-thread compile instance on unmount. Triggers Rust-side
+  // Salsa store drop (per ADR-0026's intent — heap-heavy resources outside
+  // React state are torn down on lifecycle boundaries, not garbage-collected
+  // opportunistically).
+  useEffect(() => {
+    return () => {
+      freeCompileInstance();
+    };
+  }, [freeCompileInstance]);
+
   // Compose CodeMirror extensions. Per ADR-0032 + 08-08:
   //   - fossil({ resolver }) provides syntactic highlighting + @-autocomplete
   //   - languageServerSupport(client, uri) provides diagnostics + semantic
   //     tokens overlay + LSP completion (the @codemirror/lsp-client extensions)
-  const documentUri = 'file:///playground/main.fossil';
   const extensions = useMemo<Extension[]>(() => {
     const exts: Extension[] = fossil({ resolver });
     // Theme extension goes BEFORE the LSP support extension so the LSP's
@@ -212,24 +298,22 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   }, [resolver, lspClient, editorTheme]);
 
   /**
-   * Run handler. Pipeline (per 07-06 SUMMARY carry-forward):
-   *   1. Compile the mapping via the LSP client (request `workspace/executeCommand`
-   *      with method `fossil/compile`) OR via a main-thread FossilPlayground
-   *      instance — the LSP Worker owns one for language features; the main
-   *      thread owns another for compile (avoids round-tripping ~hundreds of KB
-   *      of SQL through postMessage).
-   *   2. Iterate the SQL for `@connector/path` references; await
-   *      resolver.resolve() for each; substitute the returned URL.
-   *   3. Defensive: validate Content-Length <= maxResolvedBytes BEFORE feeding
-   *      the URL into the DuckDB SQL (per PLAY-12 / SC#4).
-   *   4. duck.run(sqlWithUrls) → Arrow result.
-   *   5. Split into vertex + edge tables, setState.
+   * Run handler. Delegates the four-step pipeline (compile → resolve+rewrite →
+   * DuckDB execute → vertex/edge readback) to `runPipeline`. The four-step
+   * separation lives in `../run/runPipeline.ts` so:
    *
-   * For v0.1 the full pipeline lands in 08-11 (apps/landing/) where the
-   * Playwright suite exercises it end-to-end against the bundled hello
-   * example. Here we implement the surface + stub the network steps; the
-   * mount smoke test in tests/FossilPlayground.test.tsx covers the
-   * component renders + buttons fire + reset doesn't throw.
+   *   - the pipeline can be reused by advanced consumers building custom
+   *     layouts via the sub-components (the advanced composition path from
+   *     08-09 SUMMARY — same surface, different chrome);
+   *   - the orchestration is unit-testable without a real WASM or DuckDB
+   *     boot (the `compile` and `getDuckDb` deps are injected here);
+   *   - this component stays focused on React state / ARIA / lifecycle
+   *     concerns.
+   *
+   * Per CONN-01: the runPipeline never stores resolved URLs in React state.
+   * It substitutes them inline into the SQL string then hands the SQL to
+   * DuckDB; the URLs disappear with the local `transformed.executableSql`
+   * variable when runPipeline returns.
    */
   async function handleRun(): Promise<void> {
     setRunError(null);
@@ -238,23 +322,21 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     // the Run button — no focus jump required.
     const clearStartAnnouncement = announce('Compiling and running mapping…');
     try {
-      // KNOWN GAP — see SUMMARY.md. The compile path lives behind the LSP
-      // client's `client.request<P,R>(method, params)` escape hatch (per the
-      // ADR-0032 spike); the actual `fossil/compile` workspace command is a
-      // 06-07-style server-side hook that 08-11 wires + tests. Stub here so
-      // the button is functional and the empty state renders correctly.
-      const result: { vertices: VertexRow[]; edges: EdgeRow[] } = {
-        vertices: [],
-        edges: [],
-      };
+      if (!wasmReady) {
+        throw new Error(
+          'WASM is still loading — please wait a moment and try again.',
+        );
+      }
+      const result = await runPipeline(
+        { getDuckDb, compile },
+        { resolver, mapping, maxResolvedBytes },
+      );
       setVertices(result.vertices);
       setEdges(result.edges);
       onRun?.(result);
-      announce('Run complete.');
-      // Surface to maxResolvedBytes so lint doesn't flag it; the 10 MB cap is
-      // load-bearing once the Run pipeline lands in 08-11 (will be inside the
-      // resolver.resolve() loop).
-      void maxResolvedBytes;
+      announce(
+        `Run complete: ${result.vertices.length} vertices, ${result.edges.length} edges.`,
+      );
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       setRunError(err);
@@ -271,6 +353,12 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   function handleReset(): void {
     try {
       reset();
+      // Free + null the main-thread compile instance so a fresh Run starts
+      // from a clean Salsa store. Matches the spirit of ADR-0026 PLAY-12 —
+      // the DuckDB Worker is recreated; the compile instance is light
+      // enough to recreate too, and dropping it prevents Salsa state from
+      // compounding across many Resets.
+      freeCompileInstance();
       setVertices([]);
       setEdges([]);
       setRunError(null);
