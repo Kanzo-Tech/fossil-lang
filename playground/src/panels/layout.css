@@ -48,6 +48,35 @@ progress { width: 200px; height: 1em; margin-left: 0.5rem; vertical-align: middl
 }
 .output { padding: 0.5rem; color: #666; font-style: italic; }
 
+/* 07-08: CSV >10MB refusal modal (PLAY-12 / SC#4). Native <dialog>
+   element styled to match the rest of the chrome. */
+dialog.csv-limit-modal {
+    max-width: 480px;
+    padding: 1rem;
+    border: 1px solid #999;
+    border-radius: 4px;
+}
+dialog.csv-limit-modal h3 { margin: 0 0 0.5rem 0; font-size: 0.95rem; }
+dialog.csv-limit-modal p  { margin: 0.25rem 0; font-size: 0.85rem; }
+dialog.csv-limit-modal pre {
+    background: #f0f0f0;
+    padding: 0.5rem;
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+}
+dialog.csv-limit-modal button { margin-top: 0.5rem; }
+
+/* 07-08: small footer hint under the CSV panel so the 10MB cap is
+   visible at all times, not just at refusal. */
+.csv-panel-hint {
+    margin: 0;
+    padding: 0.25rem 0.5rem;
+    background: #f7f7f7;
+    color: #555;
+    font-size: 0.75rem;
+    border-top: 1px solid #ddd;
+}
+
 /* 07-07: vertex+edge table render host (plain-<table> fallback after
    vgplot 0.10 API drift — see playground/src/viz/mosaic.ts). */
 .mosaic-target { padding: 0.5rem; overflow: auto; height: 100%; box-sizing: border-box; }

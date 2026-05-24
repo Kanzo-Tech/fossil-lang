@@ -21,6 +21,11 @@ import { registerFossilLanguage } from './lsp/fossil-lang';
 import { registerShexLanguage }   from './lsp/shex-lang';
 import { startLspClient }         from './lsp/client';
 import { runCompiledSql }         from './duckdb/runner';
+import {
+    assertWithinLimit,
+    showCsvLimitModal,
+    CsvTooLargeError,
+} from './limits/csv-size';
 
 async function fetchText(path: string, fallback: string): Promise<string> {
     try {
@@ -93,6 +98,21 @@ async function bootstrap(): Promise<void> {
         progressEl.hidden = false;
         progressEl.value = 0;
         try {
+            // 07-08: load-bearing 10MB CSV refusal — happens BEFORE we
+            // ever touch the LSP Worker or DuckDB Worker. The CSV-panel
+            // paste guard is belt-and-suspenders; this is what enforces
+            // the SC#4 cap across every code path (paste, drop, reset,
+            // programmatic, future URL-state-loaded mappings).
+            try {
+                assertWithinLimit(csvHandle.text);
+            } catch (e) {
+                if (e instanceof CsvTooLargeError) {
+                    await showCsvLimitModal(e);
+                    return;                  // skip compile + DuckDB altogether
+                }
+                throw e;
+            }
+
             const uri = 'inmemory://playground/main.fossil';
             const compileResult = await lspChannel.client.sendRequest(
                 'fossil/compileFile',
