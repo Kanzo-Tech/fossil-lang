@@ -1,9 +1,0 @@
-node_modules/
-package-lock.json
-dist/
-pkg-lsp-worker/
-pkg-node/
-.vite/
-playwright-report/
-test-results/
-.DS_Store

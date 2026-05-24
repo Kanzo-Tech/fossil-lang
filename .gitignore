@@ -3,18 +3,9 @@
 **/*.rs.bk
 Cargo.lock.bak
 
-# WASM build outputs (Phase 0 throwaway)
-/playground-poc/pkg/
-
-# Future playground (Phase 7+)
-/playground/node_modules/
-/playground/dist/
-/playground/.vite/
-
-# Future VS Code extension (Phase 9)
-/extension/node_modules/
-/extension/out/
-/extension/*.vsix
+# WASM build outputs (wasm-bindgen-cli writes ./pkg next to the crate;
+# also covers the new packages/wasm/pkg/ home per ADR-0031)
+/crates/fossil-wasm/pkg/
 
 # IDE
 .idea/
@@ -36,4 +27,17 @@ CLAUDE.local.md
 /manifest.yaml
 /.scratch-walking-skel/
 
-/crates/fossil-wasm/pkg/
+# === JS/TS ecosystem (pnpm monorepo per ADR-0031) ===
+node_modules/
+**/dist/
+**/.next/
+**/.vite/
+**/.turbo/
+# wasm-bindgen output is committed-elsewhere or built-on-demand, never tracked
+packages/wasm/pkg/
+# individual changesets are PR-bound; config + README are tracked
+.changeset/*.md
+!.changeset/config.json
+!.changeset/README.md
+# TS incremental build state
+*.tsbuildinfo

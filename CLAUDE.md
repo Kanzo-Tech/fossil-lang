@@ -47,6 +47,7 @@ check — run it before any commit that touches a compiler-core crate.
 - **`unsafe_code = "deny"`** at workspace level (per ADR-0004). Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
 - **ADR ritual:** any decision between alternatives that took >15 minutes gets an ADR within 24h.
   Use `decisions/template.md`, file naming `NNNN-verb-noun-phrase.md`. See ADR-0001/0002/0003 as examples.
+- **pnpm + cargo coexist at repo root** (per ADR-0031). Rust contributors don't need pnpm; JS/TS contributors need pnpm 9.x + Node 20+. The Rust workspace (`crates/`) and the pnpm workspace (`packages/` + `apps/`) are independent; CI runs them in parallel matrices.
 - **`RETURNING.md` ritual:** before stepping away from the project for >1 week, write/update
   `RETURNING.md` (gitignored, local-only) describing current state, what's broken, next 3 steps,
   what NOT to do because tried-it. Read on return before any code change. Mitigates P-SOLO-2.
@@ -89,10 +90,20 @@ crates/
   fossil-ide/              hover, completion, goto-def
   fossil-cli/              `fossil compile/check/run` [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
-  fossil-wasm/             WASM host shim (FossilPlayground API)
+  fossil-wasm/             WASM host shim (FossilPlayground API + tokenize export per ADR-0030)
+
+packages/                  npm-published @fossil-lang/* family (pnpm workspace, per ADR-0031)
+  wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
+  types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
+  codemirror-fossil/       CodeMirror 6 language extension (StreamParser → fossil-wasm tokenize)
+  resolvers/               default + mock + public-HTTP ConnectionResolver impls
+  examples/                bundled .fossil/.csv/.csvw.json/.shex fixtures
+  playground/              top-level <FossilPlayground/> React component
+
+apps/                      NOT published (pnpm workspace)
+  landing/                 Next.js 15 reference host → playground.kanzo.dev
 
 decisions/                 ADRs + non-numbered decision logs (rudof-wasm spike, etc.)
-playground-poc/            Phase 0 throwaway WASM smoke test (replaced by playground/ in Phase 7)
 .planning/                 GSD orchestration artifacts (gitignored — commit_docs=false)
 ```
 
@@ -113,7 +124,7 @@ playground-poc/            Phase 0 throwaway WASM smoke test (replaced by playgr
   using one of the three stub templates (compiler-core, native-only with cfg-tripwire, or wasm-shim).
   Update ADR-0002 if the crate count changes from 15.
 - **Add a new ADR:** copy `decisions/template.md`, increment NNNN. Update `decisions/README.md` index.
-- **Run the WASM smoke test:** see `playground-poc/README.md`. Phase 7 replaces this with a Vite project.
+- **Run the WASM smoke test:** historical `playground-poc/` removed in Phase 8 plan 08-01 (ADR-0031). Phase 8 builds a pnpm-workspace React library family under `packages/` + a Next.js host under `apps/landing/`.
 
 ## Anti-patterns
 
@@ -122,4 +133,4 @@ playground-poc/            Phase 0 throwaway WASM smoke test (replaced by playgr
   rudof spike outcome (`decisions/rudof-wasm.md`).
 - Putting compiler logic in `fossil-base` — it is the trait + db substrate, no business logic.
 - Skipping the WASM gate locally. CI catches it eventually but the feedback loop is slower.
-- Editing a generated file (`playground-poc/pkg/*` or `target/*`). They are regenerated.
+- Editing a generated file (`packages/wasm/pkg/*`, `crates/fossil-wasm/pkg/*`, or `target/*`). They are regenerated.
