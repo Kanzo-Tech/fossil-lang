@@ -26,6 +26,7 @@ import {
     showCsvLimitModal,
     CsvTooLargeError,
 } from './limits/csv-size';
+import { resetPlayground } from './lifecycle/reset';
 
 async function fetchText(path: string, fallback: string): Promise<string> {
     try {
@@ -57,11 +58,24 @@ async function bootstrap(): Promise<void> {
         if (!el) throw new Error(`missing host element for #${id}`);
         return el;
     };
-    mountMappingPanel(host('panel-mapping'), mapping);
-    mountCsvwPanel(host('panel-csvw'), csvw);
-    const csvHandle  = mountCsvPanel(host('panel-csv'), csv);
-    const shexHandle = mountShexPanel(host('panel-shex'), shex);
+    // 07-08: capture all four text-panel handles + the Mosaic output
+    // container at bootstrap. The Reset button writes through these
+    // handles (mapping/csvw/csv/shex) and clears the container —
+    // re-querying the DOM at click time would re-couple the reset
+    // module to the bootstrap layout.
+    const mappingHandle = mountMappingPanel(host('panel-mapping'), mapping);
+    const csvwHandle    = mountCsvwPanel(host('panel-csvw'), csvw);
+    const csvHandle     = mountCsvPanel(host('panel-csv'), csv);
+    const shexHandle    = mountShexPanel(host('panel-shex'), shex);
     mountOutputPanel(host('panel-output'), '');
+    const outputContainer = document.querySelector<HTMLElement>(
+        '#panel-output .mosaic-target',
+    );
+    if (!outputContainer) {
+        throw new Error(
+            '#panel-output .mosaic-target missing — output panel mount failed',
+        );
+    }
 
     // 4. Start the LSP client AFTER models exist — the language client
     //    sends `textDocument/didOpen` for every matching document found
@@ -151,7 +165,40 @@ async function bootstrap(): Promise<void> {
         }
     });
 
-    console.info('playground: panels + LSP + DuckDB Run wired; Mosaic rendering lands in 07-07');
+    // 7. Reset button (07-08 / PLAY-12 / SC#4). resetPlayground()
+    //    terminates the DuckDB-WASM Worker (memory reclaim per P-MOD-1),
+    //    clears the Mosaic output, and reloads the default example into
+    //    the four text panels. The fossil-wasm LSP Worker is NOT touched
+    //    — long-lived editor session per ADR-0026.
+    //
+    //    The button is rendered disabled in index.html so we can't
+    //    invoke the reset path before the panel handles exist; flip to
+    //    enabled here (after all mounts succeeded) and toggle around
+    //    each click to prevent double-trigger during the in-flight
+    //    `fetchTextOrEmpty` calls.
+    const resetBtn = document.getElementById('btn-reset') as HTMLButtonElement | null;
+    if (!resetBtn) {
+        throw new Error('Reset button (#btn-reset) missing from index.html');
+    }
+    resetBtn.disabled = false;
+    resetBtn.addEventListener('click', async () => {
+        resetBtn.disabled = true;
+        runBtn.disabled   = true;       // can't Run while panels are being rewritten
+        try {
+            await resetPlayground({
+                mappingHandle, csvwHandle, csvHandle, shexHandle,
+                outputContainer,
+            });
+        } catch (err) {
+            console.error('reset failed:', err);
+            alert(`Reset failed: ${String(err)}`);
+        } finally {
+            resetBtn.disabled = false;
+            runBtn.disabled   = false;
+        }
+    });
+
+    console.info('playground: panels + LSP + DuckDB Run + Reset wired (07-08)');
 }
 
 bootstrap().catch((err: unknown) => {
