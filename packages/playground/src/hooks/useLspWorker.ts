@@ -42,7 +42,14 @@ export interface UseLspWorkerOpts {
   /**
    * Optional override for the LSP Worker URL. Useful in tests that want to
    * inject a stub Worker via `new URL(...)`. Defaults to the bundled
-   * `../workers/lsp.worker.ts` resolved relative to this module.
+   * `../workers/lsp.worker.js` resolved relative to this module.
+   *
+   * NOTE: the default uses `.js` (not `.ts`) so the `new URL(...,
+   * import.meta.url)` pattern resolves against the PUBLISHED `dist/` tree
+   * in every bundler — webpack 5 (Next.js, Rspack), Vite, Parcel, esbuild.
+   * Vite is forgiving of `.ts` extensions in source resolution; webpack and
+   * the ESM spec are not. The fix for 08-11's Next.js 15 build was a
+   * one-character edit to this string (Rule 1 bug surfaced by 08-11).
    */
   workerUrl?: string | URL;
 }
@@ -66,8 +73,12 @@ export function useLspWorker(opts: UseLspWorkerOpts): LSPClient | null {
       setClient(_client);
       return;
     }
+    // Resolve the Worker URL against THIS module's location. Default uses
+    // `.js` so it lands on the PUBLISHED `dist/workers/lsp.worker.js` in
+    // every bundler (webpack/Vite/Parcel/esbuild). See UseLspWorkerOpts
+    // .workerUrl docstring for the full rationale.
     const workerUrl =
-      opts.workerUrl ?? new URL('../workers/lsp.worker.ts', import.meta.url);
+      opts.workerUrl ?? new URL('../workers/lsp.worker.js', import.meta.url);
     _worker = new Worker(workerUrl, { type: 'module' });
     // Send the boot message so the Worker can resolve initFossilWasm. The
     // worker entry queues messages until boot completes; this is safe.
