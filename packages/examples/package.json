@@ -1,0 +1,46 @@
+{
+  "name": "@fossil-lang/examples",
+  "version": "0.1.0",
+  "description": "Bundled .fossil/.csv/.csvw.json/.shex fixture examples for the @fossil-lang/playground React component (v0.1 ships the canonical walking-skeleton hello example).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/examples"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./hello/*": "./src/hello/*"
+  },
+  "files": [
+    "dist/",
+    "src/hello/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-fixtures.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
