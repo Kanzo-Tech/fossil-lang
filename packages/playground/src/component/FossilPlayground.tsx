@@ -31,7 +31,7 @@ import { initFossilWasm } from '@fossil-lang/wasm';
 import { helloExample } from '@fossil-lang/examples';
 import { languageServerSupport } from '@codemirror/lsp-client';
 import type { Extension } from '@codemirror/state';
-import type { ConnectionResolver } from '@fossil-lang/types';
+import type { ConnectionResolver, FossilThemeProp } from '@fossil-lang/types';
 
 import { FossilEditor } from './FossilEditor.js';
 import { ResultTable } from './ResultTable.js';
@@ -39,6 +39,8 @@ import { ResultGraph } from './ResultGraph.js';
 import { useLspWorker } from '../hooks/useLspWorker.js';
 import { useDuckDb } from '../hooks/useDuckDb.js';
 import { useResetPlayground } from '../hooks/useResetPlayground.js';
+import { useTheme } from '../hooks/useTheme.js';
+import { cssVarsToStyle } from '../theme/tokens.js';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -99,6 +101,22 @@ export interface FossilPlaygroundProps {
    * Consumers typically forward this to a toast/snackbar.
    */
   onError?: (error: Error) => void;
+
+  /**
+   * Theme: `'light'` (default) | `'dark'` | a custom `FossilTheme` object.
+   *
+   * The chosen theme applies via CSS custom properties on the playground
+   * root element (e.g. `--fossil-colors-background`). Hosts can override
+   * individual tokens at ANY ancestor element by setting the same custom
+   * property — the cascade wins, so per-instance overrides are possible
+   * without re-mounting. Per THEME-01 + CONTEXT.md Monaco-style API.
+   *
+   * Custom themes: spread one of the built-ins (`lightTheme`, `darkTheme`
+   * exported from this package) and override the leaf tokens you care
+   * about. Memoise the resulting object via `useMemo` to avoid
+   * tearing-down the CodeMirror editor on every render.
+   */
+  theme?: FossilThemeProp;
 }
 
 /** Vertex row as it flows from DuckDB-WASM into the result panel. */
@@ -130,6 +148,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     maxResolvedBytes = DEFAULT_MAX_RESOLVED_BYTES,
     onRun,
     onError,
+    theme: themeProp = 'light',
   } = props;
 
   const [mapping, setMapping] = useState<string>(
@@ -142,6 +161,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const lspClient = useLspWorker({ wasmUrl, workerUrl });
   const duck = useDuckDb();
   const reset = useResetPlayground();
+  const { cssVars, editorTheme } = useTheme(themeProp);
 
   // Boot the main-thread WASM module too (the playground may call
   // compileFile() directly on the main thread for the Run path; the LSP
@@ -160,11 +180,17 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const documentUri = 'file:///playground/main.fossil';
   const extensions = useMemo<Extension[]>(() => {
     const exts: Extension[] = fossil({ resolver });
+    // Theme extension goes BEFORE the LSP support extension so the LSP's
+    // semantic-tokens overlay can be styled by the same theme tokens at the
+    // editor surface (cm-content/cm-cursor/cm-gutters etc.). HighlightStyle
+    // precedence allows later extensions to refine the syntax-only mapping
+    // without losing the chrome styling.
+    exts.push(editorTheme);
     if (lspClient) {
       exts.push(languageServerSupport(lspClient, documentUri, 'fossil'));
     }
     return exts;
-  }, [resolver, lspClient]);
+  }, [resolver, lspClient, editorTheme]);
 
   /**
    * Run handler. Pipeline (per 07-06 SUMMARY carry-forward):
@@ -229,7 +255,16 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   );
 
   return (
-    <div className="fossil-playground" data-testid="fossil-playground">
+    <div
+      className="fossil-playground"
+      data-testid="fossil-playground"
+      // CSS custom properties applied at the root — every descendant
+      // (including the CodeMirror editor host + ResultTable/Graph) reads from
+      // here. Hosts can ALSO override the same `--fossil-*` variables at any
+      // ancestor element via plain CSS; the cascade wins, so per-instance
+      // overrides require no prop changes. Per THEME-01 + CONTEXT.md.
+      style={cssVarsToStyle(cssVars)}
+    >
       <header className="fossil-playground__toolbar">
         <button
           type="button"

@@ -32,6 +32,17 @@ export { useLspWorker } from './hooks/useLspWorker.js';
 export type { UseLspWorkerOpts } from './hooks/useLspWorker.js';
 export { useDuckDb, getDuckDb, resetDuckDb } from './hooks/useDuckDb.js';
 export { useResetPlayground } from './hooks/useResetPlayground.js';
+export { useTheme } from './hooks/useTheme.js';
+export type { UseThemeResult } from './hooks/useTheme.js';
+
+// Theme — built-in light + dark + the flat-CSS-var helpers (THEME-01)
+export { lightTheme } from './theme/light.js';
+export { darkTheme } from './theme/dark.js';
+export {
+  themeToCssVars,
+  cssVarsToStyle,
+  CSS_VAR_PREFIX,
+} from './theme/tokens.js';
 
 // Transport adapter
 export { createWorkerTransport } from './lsp/WorkerTransport.js';
