@@ -82,3 +82,18 @@ export {
   PermalinkTooLargeError,
 } from './permalink/index.js';
 export type { PermalinkStateV1 } from './permalink/index.js';
+
+// Turtle serializer (PLAY-10) — synchronous TTL writer wrapping n3.Writer.
+// Aliased types (TurtleVertexRow / TurtleEdgeRow) avoid collision with the
+// VertexRow / EdgeRow already exported from FossilPlayground's prop surface.
+export { rowsToTurtle } from './turtle/index.js';
+export type {
+  VertexRow as TurtleVertexRow,
+  EdgeRow as TurtleEdgeRow,
+} from './turtle/index.js';
+
+// CSVW inference (PLAY-09 + PLAY-11) — DuckDB DESCRIBE → minimal CSVW JSON-LD.
+// The pure type-map (duckdbTypeToCsvw) is exported for callers that already
+// have a DESCRIBE result in hand and only need the type translation.
+export { inferCsvw, duckdbTypeToCsvw } from './csvw/index.js';
+export type { CsvwTable, CsvwColumn } from './csvw/index.js';

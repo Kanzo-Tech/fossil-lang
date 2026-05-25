@@ -40,7 +40,8 @@
     "@fossil-lang/examples": "workspace:*",
     "@fossil-lang/resolvers": "workspace:*",
     "@fossil-lang/types": "workspace:*",
-    "fflate": "^0.8.3"
+    "fflate": "^0.8.3",
+    "n3": "~1.17"
   },
   "peerDependencies": {
     "@codemirror/autocomplete": "^6.0.0",
@@ -72,6 +73,7 @@
     "@lezer/highlight": "^1.2.0",
     "@size-limit/preset-small-lib": "^11.0.0",
     "@testing-library/react": "^16.0.0",
+    "@types/n3": "^1.26",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
     "happy-dom": "^15.0.0",
