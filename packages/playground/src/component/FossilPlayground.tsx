@@ -61,6 +61,17 @@ import {
 // BibTeX cite modal (PLAY-08) — toolbar trigger + native <dialog> modal showing
 // Min Oo & Hartig + the current permalink BibTeX. See ../bibtex/BibtexModal.tsx.
 import { BibtexModal } from '../bibtex/BibtexModal.js';
+// CSVW inference + editable preview (PLAY-09 + PLAY-11). The component
+// auto-infers the descriptor when the user pastes a CSV with an empty CSVW
+// panel; the inferred result populates an editable preview the user can
+// refine before Run. See ../csvw/{infer,apply,CsvwPreview}.ts.
+import {
+  inferCsvw,
+  applyCsvw,
+  type CsvwTable,
+} from '../csvw/index.js';
+import { CsvwPreview } from '../csvw/CsvwPreview.js';
+import { parseSourceRef } from '@fossil-lang/resolvers';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -243,6 +254,26 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   // surfaces lands later.
   const [csvw, setCsvw] = useState<string | undefined>(undefined);
   const [shex, setShex] = useState<string | undefined>(undefined);
+  // PLAY-09 + PLAY-11 — auto-inferred CSVW + dirty-state guard.
+  //
+  // `csvwInferred` is the latest value returned by `inferCsvw()`; the parent
+  // hands it to <CsvwPreview/> so the Reset button can restore the inferred
+  // shape after the user has edited.
+  //
+  // `csvwDirty` flips TRUE the first time the user edits the descriptor (via
+  // CsvwPreview.onChange). The inference effect bails on `csvwDirty === true`
+  // so a background inference NEVER clobbers a manual edit — RESEARCH.md
+  // Pitfall 4 ("never overwrite user input mid-flight").
+  //
+  // `currentCsvUrl` is the FIRST `io.csv("...")` literal scraped from the
+  // mapping source. v0.1 simplification: ONE csv source per mapping (the
+  // canonical hello-example shape). v0.2 will track per-binding URLs so a
+  // mapping that joins two CSV sources can have two CSVW descriptors.
+  const [csvwInferred, setCsvwInferred] = useState<CsvwTable | null>(null);
+  const [csvwDirty, setCsvwDirty] = useState<boolean>(false);
+  const [currentCsvUrl, setCurrentCsvUrl] = useState<string | undefined>(
+    undefined,
+  );
   const [vertices, setVertices] = useState<VertexRow[]>([]);
   const [edges, setEdges] = useState<EdgeRow[]>([]);
   const [runError, setRunError] = useState<Error | null>(null);
@@ -464,6 +495,74 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       clearTimeout(handle);
     };
   }, [mapping, wasmReady, compile, showCompiledSql]);
+
+  // PLAY-09 + PLAY-11 — scrape the FIRST `io.csv("...")` literal from the
+  // mapping source. Drives the auto-inference trigger below.
+  //
+  // v0.1 simplification: a mapping with multiple `io.csv(...)` bindings still
+  // surfaces only the first; the editable preview shows ONE descriptor at a
+  // time. Multi-csv-source support is v0.2 (per CONTEXT.md "Deferred").
+  // TODO(v0.2): track per-binding CSV URLs + render one CsvwPreview per source.
+  useEffect(() => {
+    const match = mapping.match(/io\.csv\s*\(\s*["']([^"']+)["']\s*\)/);
+    setCurrentCsvUrl(match?.[1] ?? undefined);
+  }, [mapping]);
+
+  // PLAY-09 + PLAY-11 — auto-inference trigger.
+  //
+  // Runs `inferCsvw()` against a transient DuckDB connection when:
+  //   - we have a csv URL scraped from the mapping;
+  //   - the CSVW descriptor panel is empty (`csvw` is undefined or whitespace);
+  //   - the user hasn't started editing yet (RESEARCH.md Pitfall 4);
+  //   - main-thread WASM is ready (so the resolver + DuckDB lazy-boot don't
+  //     race the initial editor mount).
+  //
+  // The resolver substitutes the `@connector/path` for a fetchable URL; the
+  // transient connection is closed in the finally so we don't leak it across
+  // re-runs of the effect. Failures are logged but never thrown — inference
+  // is best-effort; the user can still hand-type a descriptor.
+  useEffect(() => {
+    if (!wasmReady) return;
+    if (!currentCsvUrl) return;
+    if (csvw && csvw.trim().length > 0) return;
+    if (csvwDirty) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ref = parseSourceRef(currentCsvUrl);
+        const resolved = await resolver.resolve(ref);
+        const db = await getDuckDb();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const conn = await (db as any).connect();
+        try {
+          // The conn shape matches `DescribingConnection` structurally —
+          // duckdb-wasm's AsyncDuckDBConnection.query returns an Arrow Table
+          // whose `.toArray()` produces the `{ column_name, column_type }`
+          // rows that DESCRIBE emits.
+          const inferred = await inferCsvw(conn, resolved.url);
+          if (cancelled) return;
+          setCsvwInferred(inferred);
+          setCsvw(applyCsvw(inferred));
+        } finally {
+          try {
+            await conn.close();
+          } catch {
+            // swallow — the original error (if any) already propagated.
+          }
+        }
+      } catch (e) {
+        // Inference failure is non-fatal: log + leave the descriptor empty
+        // so the user can type their own. The original `@connector/path`
+        // string may not parse (legacy mapping, typo, literal URL — none
+        // of which the resolver knows how to fetch).
+        // eslint-disable-next-line no-console
+        console.warn('[FossilPlayground] CSVW inference failed:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentCsvUrl, csvw, csvwDirty, wasmReady, resolver]);
 
   // Free the main-thread compile instance on unmount. Triggers Rust-side
   // Salsa store drop (per ADR-0026's intent — heap-heavy resources outside
@@ -720,6 +819,33 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
               Loading editor…
             </div>
           )}
+        </section>
+        {/* PLAY-09 + PLAY-11 — editable CSVW preview. Always mounted so the
+            empty-state placeholder ("No CSVW descriptor. Paste a CSV source
+            to auto-infer.") gives the user a hint about what the panel does
+            before inference has run. After inference (or a permalink hydration
+            that carries `csvw`) the panel switches to the structured editor.
+            Edits flow back into `csvw` state via setCsvw + flip csvwDirty so
+            background inference is suppressed for the rest of the session. */}
+        <section aria-label="CSVW descriptor">
+          <CsvwPreview
+            inferred={csvwInferred}
+            value={csvw ?? ''}
+            onChange={(next) => {
+              setCsvw(next);
+              setCsvwDirty(true);
+            }}
+            dirty={csvwDirty}
+            onReset={() => {
+              if (csvwInferred) {
+                setCsvw(applyCsvw(csvwInferred));
+              } else {
+                setCsvw(undefined);
+              }
+              setCsvwDirty(false);
+            }}
+            theme={resolvedTheme}
+          />
         </section>
         {(runError || duck.error) && (
           // role="alert" — ASSERTIVE announcement (interrupts whatever the

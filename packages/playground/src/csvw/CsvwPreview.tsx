@@ -137,7 +137,18 @@ export function CsvwPreview({
       data-theme={theme}
       className="fossil-csvw-preview"
     >
-      <header className="fossil-csvw-preview__header">
+      {/*
+        Header bar — uses <div> rather than <header> so happy-dom's implicit
+        ARIA-role computation doesn't surface a stray role="banner" landmark
+        inside the region. The HTML4 / WAI-ARIA spec says <header> only gets
+        role="banner" when NOT descended from main/article/aside/nav/section,
+        but happy-dom 15's role-computation doesn't honour that exception
+        (the a11y.test.tsx banner-uniqueness assertion is the gate that
+        surfaced the bug — Rule 1 auto-fix per the executor's deviation
+        rules). Using <div> keeps the visual structure identical without
+        any spurious landmark.
+      */}
+      <div className="fossil-csvw-preview__header">
         <span>
           CSVW descriptor {dirty ? '(edited)' : '(auto-inferred)'}
         </span>
@@ -151,7 +162,7 @@ export function CsvwPreview({
             Reset to inferred
           </button>
         ) : null}
-      </header>
+      </div>
       {!parsed ? (
         <p role="status" data-testid="csvw-empty">
           No CSVW descriptor. Paste a CSV source to auto-infer.
