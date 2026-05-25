@@ -36,6 +36,7 @@
   },
   "sideEffects": false,
   "dependencies": {
+    "@codemirror/lang-sql": "^6.10.0",
     "@codemirror/lsp-client": "^6.2.4",
     "@fossil-lang/examples": "workspace:*",
     "@fossil-lang/resolvers": "workspace:*",
