@@ -104,14 +104,24 @@ export function usePermalink(args: UsePermalinkArgs): void {
   } = args;
 
   // --- One-shot decode on mount ----------------------------------------
-  // `hydratedRef` survives across re-renders so even if the parent passes a
-  // new `initialPermalink` reference (or eventually clears it after wiring),
-  // we never double-hydrate and clobber the user's in-progress edits.
+  // `hydratedRef` survives across re-renders so once we've successfully
+  // decoded (or errored on) a permalink, we never re-hydrate and clobber
+  // the user's in-progress edits — even if the parent passes a new
+  // initialPermalink reference (or eventually clears it after wiring).
+  //
+  // The latch flips ONLY when there's an actual permalink to process,
+  // NOT on the first render with `initialPermalink === undefined`. This
+  // matters for the Next.js dynamic({ ssr: false }) + useEffect host
+  // pattern: the host reads `window.location.hash` in a useEffect, so on
+  // first paint the component sees `initialPermalink=undefined`, and on
+  // the second render sees the actual hash. Without the conditional
+  // latch the hook would mark itself "hydrated" on the first render and
+  // skip the real hash on the second.
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (hydratedRef.current) return;
-    hydratedRef.current = true;
     if (!initialPermalink) return;
+    hydratedRef.current = true;
     try {
       const state = decodePermalink(initialPermalink);
       onHydrate?.(state);
