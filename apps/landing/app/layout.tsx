@@ -5,8 +5,15 @@
  * its own chrome (toolbar + editor + results regions per A11Y-01 from
  * 08-10). The landing page is intentionally bare so the PRODUCT is the
  * playground itself, not surrounding marketing copy. Phase 9 PLAY-06
- * adds branding + cite-snippet + nav.
+ * adds branding + cite-snippet + nav via `<LandingHero/>` above the
+ * playground, with styles in `./styles/landing.css`.
+ *
+ * The CSS import goes at the very top of the root layout so the
+ * cascade is set before any page renders. Next.js's App Router
+ * supports plain `.css` imports here — they're emitted as static
+ * stylesheets and referenced from the <head> automatically.
  */
+import './styles/landing.css';
 import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {

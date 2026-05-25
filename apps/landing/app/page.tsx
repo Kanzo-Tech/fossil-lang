@@ -1,7 +1,7 @@
 /**
- * Landing home page — a Next.js 15 Server Component that renders a thin
- * Client Component shell which in turn dynamic-imports the WASM-bearing
- * playground with `ssr: false`.
+ * Landing home page — a Next.js 15 Server Component that renders the
+ * PLAY-06 hero above a thin Client Component shell which in turn
+ * dynamic-imports the WASM-bearing playground with `ssr: false`.
  *
  * Why two boundaries (Server → ClientShell → PlaygroundHost):
  *
@@ -19,32 +19,41 @@
  *   `dynamic({ ssr: false })` call lives — now in a Client Component,
  *   not a Server Component.
  *
- *   This keeps the SSR-side HTML response tiny (just the header + the
+ *   This keeps the SSR-side HTML response tiny (just the hero + the
  *   loading shell) which protects SC#3 cold-load.
+ *
+ * PLAY-06 hero placement:
+ *
+ *   <LandingHero/> (Server Component, zero JS) renders ABOVE the
+ *   playground. The CTA anchor links to `#playground` — the host's
+ *   outer wrapper carries `id="playground"` so the browser scrolls
+ *   natively (no JS handler needed). HARTIG_BIBTEX is pulled from
+ *   `@fossil-lang/playground` but it's a plain string constant, so
+ *   nothing else from that package ends up in this Server chunk.
  */
 import { ClientShell } from './ClientShell';
+import { LandingHero } from './landing-hero';
 
 export default function HomePage(): JSX.Element {
   return (
-    <main
-      style={{
-        maxWidth: 1280,
-        margin: '0 auto',
-        padding: '2rem 1.5rem',
-      }}
-    >
-      <header style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ marginTop: 0, fontSize: '1.75rem', fontWeight: 600 }}>
-          Fossil playground
-        </h1>
-        <p style={{ color: '#475569', marginTop: '0.5rem', maxWidth: 720 }}>
-          Edit a Fossil mapping, type-check it in the browser, run it
-          against DuckDB-WASM, and see the resulting graph. Everything
-          happens client-side — no backend, works offline after first
-          visit.
-        </p>
-      </header>
-      <ClientShell />
-    </main>
+    <>
+      <LandingHero />
+      {/*
+        The `id="playground"` anchor pairs with `<LandingHero/>`'s CTA
+        `href="#playground"` — clicking the CTA scrolls the user to the
+        playground via the browser's native hash-anchor behaviour. No
+        JS handler is needed; this is a Server Component.
+      */}
+      <main
+        id="playground"
+        style={{
+          maxWidth: 1280,
+          margin: '0 auto',
+          padding: '2rem 1.5rem',
+        }}
+      >
+        <ClientShell />
+      </main>
+    </>
   );
 }
