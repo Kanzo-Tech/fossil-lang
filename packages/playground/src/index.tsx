@@ -104,3 +104,18 @@ export type {
 // have a DESCRIBE result in hand and only need the type translation.
 export { inferCsvw, duckdbTypeToCsvw } from './csvw/index.js';
 export type { CsvwTable, CsvwColumn } from './csvw/index.js';
+
+// BibTeX modal (PLAY-08) — cite modal triggered from the playground toolbar.
+// Embeds the current permalink URL so the cite round-trips state; pre-bundled
+// with the Min Oo & Hartig (ESWC 2025) foundational-paper reference per
+// 09-CONTEXT.md. The cite-templates helpers are exported separately so
+// advanced consumers (the landing hero is the canonical example) can render
+// the BibTeX inline without mounting the modal.
+export { BibtexModal } from './bibtex/index.js';
+export type { BibtexModalProps } from './bibtex/index.js';
+export {
+  HARTIG_BIBTEX,
+  HARTIG_PLAINTEXT,
+  buildPlaygroundBibtex,
+  buildPlaygroundPlaintext,
+} from './bibtex/index.js';

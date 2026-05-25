@@ -52,6 +52,15 @@ import { usePermalink } from '../hooks/usePermalink.js';
 import { cssVarsToStyle } from '../theme/tokens.js';
 import { announce, ARIA_LABELS } from '../a11y/index.js';
 import { runPipeline } from '../run/runPipeline.js';
+import { CompiledSqlPanel } from '../compiled-sql/index.js';
+import {
+  TurtleTab,
+  type VertexRow as TurtleVertexRow,
+  type EdgeRow as TurtleEdgeRow,
+} from '../turtle/index.js';
+// BibTeX cite modal (PLAY-08) — toolbar trigger + native <dialog> modal showing
+// Min Oo & Hartig + the current permalink BibTeX. See ../bibtex/BibtexModal.tsx.
+import { BibtexModal } from '../bibtex/BibtexModal.js';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -60,6 +69,36 @@ import { runPipeline } from '../run/runPipeline.js';
  * bytes hit the Worker).
  */
 const DEFAULT_MAX_RESOLVED_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Debounce window for the live "Compiled SQL" panel recompile after a
+ * keystroke (PLAY-07). Matches the 200 ms permalink debounce from
+ * `usePermalink` so we coalesce the same keystroke burst into a single
+ * compile + a single permalink encode. Per 09-CONTEXT.md locked decision.
+ */
+const COMPILED_SQL_DEBOUNCE_MS = 200;
+
+/**
+ * Default `@prefix` block for the Turtle tab (PLAY-10). Parsing the source
+ * `.fossil`'s declared prefixes is deferred to a v0.2 polish; the defaults
+ * cover the `hello` example + the bundled curated set. Callers passing a
+ * non-trivial mapping with custom prefixes will see their IRIs un-shortened
+ * in the Turtle view but still RDF-correct — round-trip via n3.Parser.
+ */
+const TURTLE_DEFAULT_PREFIXES: Record<string, string> = {
+  ex: 'https://example.org/',
+  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
+  rdfs: 'http://www.w3.org/2000/01/rdf-schema#',
+  xsd: 'http://www.w3.org/2001/XMLSchema#',
+};
+
+/**
+ * Discriminator for the result-panel tablist (PLAY-10). The Graph tab is the
+ * pre-Phase-9 default + carries the WebGL canvas (or its tabular fallback);
+ * Edges is the pre-Phase-9 edge table; Turtle is the new PLAY-10 panel that
+ * serializes vertex+edge into TTL text.
+ */
+type ResultTabKey = 'graph' | 'edges' | 'turtle';
 
 export interface FossilPlaygroundProps {
   /**
@@ -207,6 +246,28 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const [vertices, setVertices] = useState<VertexRow[]>([]);
   const [edges, setEdges] = useState<EdgeRow[]>([]);
   const [runError, setRunError] = useState<Error | null>(null);
+  // Latest permalink emitted by usePermalink (PLAY-08). The Cite button
+  // embeds this into the per-snapshot BibTeX entry. Starts undefined; flips
+  // on the first debounced encode (~200 ms after mount, per usePermalink's
+  // contract from 09-05). Kept in component state so the modal re-renders
+  // when the encoded permalink changes — paste-from-modal stays in sync
+  // with the editor.
+  const [currentPermalink, setCurrentPermalink] = useState<string | undefined>(
+    undefined,
+  );
+  // PLAY-07: live-recompiled DuckDB SQL for the Compiled SQL panel. Drives
+  // the `<CompiledSqlPanel/>` rendered when `showCompiledSql` is true. The
+  // value is recomputed via a 200 ms debounced effect over `mapping`.
+  const [compiledSql, setCompiledSql] = useState<string>('');
+  // PLAY-07: collapsed-by-default toggle for the Compiled SQL panel. The
+  // user opens on demand via the "Show compiled SQL" toolbar button.
+  const [showCompiledSql, setShowCompiledSql] = useState<boolean>(false);
+  // PLAY-10: active tab in the result panel's tablist. Default `graph`
+  // matches the pre-Phase-9 behaviour (the Graph viz was the only landing
+  // surface). Switching to `turtle` renders the post-Run TTL view; switching
+  // to `edges` renders the bare edges table.
+  const [activeResultTab, setActiveResultTab] =
+    useState<ResultTabKey>('graph');
   // Main-thread WASM init gate. CodeMirror's StreamParser eagerly calls
   // tokenize() on every line at editor-mount time; if WASM hasn't
   // initialised yet the call hits a __wbindgen_malloc_command_export
@@ -222,6 +283,12 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const duck = useDuckDb();
   const reset = useResetPlayground();
   const { cssVars, editorTheme } = useTheme(themeProp);
+  // PLAY-07 + PLAY-10: discriminator passed to child panels' `data-theme`
+  // attribute. Custom FossilTheme objects don't carry a light/dark flag —
+  // they default to `light` here; hosts that want dark-mode CSS for a
+  // custom theme should pass the literal `'dark'` prop instead.
+  const resolvedTheme: 'light' | 'dark' =
+    themeProp === 'dark' ? 'dark' : 'light';
 
   // PLAY-04 — decode `initialPermalink` on mount + emit debounced
   // `onStateChange` on edits. The component DOES NOT touch window.location
@@ -251,13 +318,25 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     },
     [],
   );
+  // Wrap the consumer's onStateChange so we ALSO mirror the freshly-encoded
+  // permalink into our `currentPermalink` state (PLAY-08). The Cite modal
+  // reads from `currentPermalink` to embed the URL in its per-snapshot
+  // BibTeX entry. The host's onStateChange still fires with the same value
+  // (this is a tee, not a replacement).
+  const handlePermalinkStateChange = useCallback(
+    (permalink: string): void => {
+      setCurrentPermalink(permalink);
+      onStateChange?.(permalink);
+    },
+    [onStateChange],
+  );
   usePermalink({
     initialPermalink,
     source: mapping,
     csvw,
     shex,
     onHydrate: handlePermalinkHydrate,
-    onStateChange,
+    onStateChange: handlePermalinkStateChange,
     onError: handlePermalinkError,
   });
 
@@ -346,6 +425,36 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       cancelled = true;
     };
   }, [wasmUrl, onError]);
+
+  // PLAY-07: debounced recompile of the Compiled SQL panel.
+  //
+  // We could subscribe only when `showCompiledSql` is true (cheaper when the
+  // panel is hidden), but priming the panel content on toggle-open feels
+  // sluggish to the user (200 ms blank panel after every open). Since the
+  // compile call hits the Salsa-memoised path (incremental — re-running on
+  // the same source is near-free), eagerly maintaining `compiledSql` keeps
+  // the toggle-open instant + lets E2E timing assertions hold.
+  //
+  // On compile failure the SQL is replaced with a comment so the panel never
+  // crashes — the real error surfaces via the existing `runError` alert
+  // when the user clicks Run.
+  useEffect(() => {
+    if (!wasmReady) return;
+    const handle = setTimeout(() => {
+      compile(mapping)
+        .then((sql) => {
+          setCompiledSql(sql);
+        })
+        .catch(() => {
+          setCompiledSql(
+            '-- (compile error — see Diagnostics panel for details)',
+          );
+        });
+    }, COMPILED_SQL_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(handle);
+    };
+  }, [mapping, wasmReady, compile]);
 
   // Free the main-thread compile instance on unmount. Triggers Rust-side
   // Salsa store drop (per ADR-0026's intent — heap-heavy resources outside
@@ -452,6 +561,66 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     <ResultTable rows={vertices} caption="Vertices (tabular fallback)" />
   );
 
+  /**
+   * Adapter from the component's flat `VertexRow` / `EdgeRow` shape (whose
+   * keys are DuckDB column names from the projection in `runPipeline.ts`)
+   * into the Turtle serializer's `{ iri, type, props }` / `{ src, pred, dst }`
+   * shape (PLAY-10). The serializer is shape-agnostic at the type level —
+   * we centralise the adapter here so the TurtleTab stays pure-presentational.
+   *
+   * Type defaults:
+   *   - vertex `type` comes from a `type`/`class` column when present; falls
+   *     back to `ex:Vertex` so the rdf:type quad is always emitted.
+   *   - edge `pred` comes from a `predicate`/`pred` column when present; falls
+   *     back to `ex:edge` so each edge becomes a valid quad.
+   *
+   * `props` includes every non-`id` / non-`type` column on the vertex row —
+   * already in the right value-type vocabulary (string | number | boolean |
+   * null) per `rowsToTurtle`'s contract.
+   */
+  const turtleVertices = useMemo<TurtleVertexRow[]>(() => {
+    return vertices.map((v) => {
+      const { id, type, class: cls, ...rest } = v as Record<string, unknown> & {
+        id: string;
+      };
+      const props: Record<string, string | number | boolean | null> = {};
+      for (const [k, val] of Object.entries(rest)) {
+        if (
+          val === null ||
+          typeof val === 'string' ||
+          typeof val === 'number' ||
+          typeof val === 'boolean'
+        ) {
+          props[k] = val;
+        } else if (val !== undefined) {
+          // Arrow types (BigInt / Date / Decimal) reach here in production —
+          // stringify so the writer emits a plain literal. Lossless for our
+          // demo data; a future polish can specialise.
+          props[k] = String(val);
+        }
+      }
+      return {
+        iri: id,
+        type: String(type ?? cls ?? 'https://example.org/Vertex'),
+        props,
+      };
+    });
+  }, [vertices]);
+
+  const turtleEdges = useMemo<TurtleEdgeRow[]>(() => {
+    return edges.map((e) => {
+      const er = e as Record<string, unknown> & {
+        source: string;
+        target: string;
+      };
+      return {
+        src: er.source,
+        pred: String(er.predicate ?? er.pred ?? 'https://example.org/edge'),
+        dst: er.target,
+      };
+    });
+  }, [edges]);
+
   return (
     <div
       className="fossil-playground"
@@ -496,6 +665,14 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
         >
           Reset playground
         </button>
+        {/*
+          PLAY-08 Cite button. Embeds the current permalink (debounced ~200 ms
+          after the last edit) into the snapshot BibTeX entry alongside the
+          foundational-paper reference. The modal is hidden until clicked.
+          Native <dialog> — focus trap + Escape-close + role="dialog" all
+          inherited from the platform per RULE-3 deviation in 09-08.
+        */}
+        <BibtexModal permalink={currentPermalink} />
       </header>
       <main className="fossil-playground__main">
         <section aria-label={ARIA_LABELS.editor}>
