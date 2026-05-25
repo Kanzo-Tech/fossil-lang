@@ -67,3 +67,18 @@ export {
   transformSql,
 } from './run/transformSql.js';
 export type { TableClass, TransformedSql } from './run/transformSql.js';
+
+// Permalink (PLAY-04) — stateless gzip+base64url URL-fragment encoder/decoder.
+// Aliased re-exports so library consumers can call encodePermalink /
+// decodePermalink without colliding with any encoding helpers they may
+// already have in scope. The PermalinkStateV1 type is exposed for callers
+// who want to round-trip the shape through their own state machine
+// (e.g. apps/landing wiring window.location.hash <-> playground state).
+export {
+  encode as encodePermalink,
+  decode as decodePermalink,
+  SCHEMA_VERSION as PERMALINK_SCHEMA_VERSION,
+  MAX_PERMALINK_BYTES,
+  PermalinkTooLargeError,
+} from './permalink/index.js';
+export type { PermalinkStateV1 } from './permalink/index.js';
