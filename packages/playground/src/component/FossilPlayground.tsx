@@ -665,6 +665,20 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
         >
           Reset playground
         </button>
+        {/* PLAY-07: collapsed-by-default toggle for the Compiled SQL panel.
+            Accessible name describes the action — "Show" / "Hide" flip per
+            state so SR users hear the new state on activation. */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowCompiledSql((v) => !v);
+          }}
+          aria-expanded={showCompiledSql}
+          aria-controls="fossil-compiled-sql-region"
+          data-testid="toggle-compiled-sql"
+        >
+          {showCompiledSql ? 'Hide compiled SQL' : 'Show compiled SQL'}
+        </button>
         {/*
           PLAY-08 Cite button. Embeds the current permalink (debounced ~200 ms
           after the last edit) into the snapshot BibTeX entry alongside the
@@ -714,9 +728,109 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
           aria-label={ARIA_LABELS.resultsRegion}
           className="fossil-playground__results"
         >
-          <ResultGraph vertices={vertices} edges={edges} fallback={tabularFallback} />
-          <ResultTable rows={edges} caption="Edges" />
+          {/* PLAY-10: tablist gating Graph / Edges / Turtle. Native ARIA
+              pattern — role="tablist" + role="tab" + role="tabpanel" + the
+              tab's `aria-selected` + `aria-controls` linkage. Keyboard
+              navigation between tabs uses the platform's default focus
+              order (left/right arrows are a Phase-10 polish; for v0.1
+              Tab + Enter / Space works out of the box). */}
+          <div
+            role="tablist"
+            aria-label="Result views"
+            className="fossil-playground__tablist"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeResultTab === 'graph'}
+              aria-controls="fossil-result-panel-graph"
+              id="fossil-result-tab-graph"
+              data-testid="result-tab-graph"
+              onClick={() => {
+                setActiveResultTab('graph');
+              }}
+            >
+              Graph
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeResultTab === 'edges'}
+              aria-controls="fossil-result-panel-edges"
+              id="fossil-result-tab-edges"
+              data-testid="result-tab-edges"
+              onClick={() => {
+                setActiveResultTab('edges');
+              }}
+            >
+              Edges
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeResultTab === 'turtle'}
+              aria-controls="fossil-result-panel-turtle"
+              id="fossil-result-tab-turtle"
+              data-testid="result-tab-turtle"
+              onClick={() => {
+                setActiveResultTab('turtle');
+              }}
+            >
+              Turtle
+            </button>
+          </div>
+          {activeResultTab === 'graph' && (
+            <div
+              role="tabpanel"
+              id="fossil-result-panel-graph"
+              aria-labelledby="fossil-result-tab-graph"
+            >
+              <ResultGraph
+                vertices={vertices}
+                edges={edges}
+                fallback={tabularFallback}
+              />
+            </div>
+          )}
+          {activeResultTab === 'edges' && (
+            <div
+              role="tabpanel"
+              id="fossil-result-panel-edges"
+              aria-labelledby="fossil-result-tab-edges"
+            >
+              <ResultTable rows={edges} caption="Edges" />
+            </div>
+          )}
+          {activeResultTab === 'turtle' && (
+            <div
+              id="fossil-result-panel-turtle"
+              aria-labelledby="fossil-result-tab-turtle"
+            >
+              {/* TurtleTab carries its own role="tabpanel" + aria-label —
+                  the wrapper div above is just the id/aria-labelledby
+                  anchor for the tablist linkage. */}
+              <TurtleTab
+                vertices={turtleVertices}
+                edges={turtleEdges}
+                prefixes={TURTLE_DEFAULT_PREFIXES}
+                theme={resolvedTheme}
+              />
+            </div>
+          )}
         </section>
+        {/* PLAY-07: Compiled SQL panel — collapsed by default; toggled via
+            the toolbar button above. Always-mounted state (effect populates
+            `compiledSql` on every debounced keystroke), so opening the
+            panel is instant — no first-open flash. */}
+        {showCompiledSql && (
+          <section
+            id="fossil-compiled-sql-region"
+            aria-label="Compiled SQL"
+            className="fossil-playground__compiled-sql"
+          >
+            <CompiledSqlPanel sql={compiledSql} theme={resolvedTheme} />
+          </section>
+        )}
       </main>
     </div>
   );

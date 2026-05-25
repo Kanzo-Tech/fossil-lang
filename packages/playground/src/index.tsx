@@ -99,6 +99,21 @@ export type {
   EdgeRow as TurtleEdgeRow,
 } from './turtle/index.js';
 
+// Turtle tab (PLAY-10) — React tab panel rendering the serialized Turtle
+// next to Graph + Edges in the result panel. Pure presentational; takes
+// pre-adapted TurtleVertexRow / TurtleEdgeRow arrays (the FossilPlayground
+// component owns the adapter from its native VertexRow / EdgeRow shape).
+export { TurtleTab } from './turtle/index.js';
+export type { TurtleTabProps } from './turtle/index.js';
+
+// Compiled SQL panel (PLAY-07) — read-only CodeMirror 6 view with the
+// DuckDB dialect of @codemirror/lang-sql. Subscribes to the parent's `sql`
+// prop; the SQL string is sourced from FossilPlayground::compileFile() in
+// the integrated component, and can be sourced from any caller's compile
+// path when consuming CompiledSqlPanel standalone (advanced composition).
+export { CompiledSqlPanel, DuckDB } from './compiled-sql/index.js';
+export type { CompiledSqlPanelProps } from './compiled-sql/index.js';
+
 // CSVW inference (PLAY-09 + PLAY-11) — DuckDB DESCRIBE → minimal CSVW JSON-LD.
 // The pure type-map (duckdbTypeToCsvw) is exported for callers that already
 // have a DESCRIBE result in hand and only need the type translation.
