@@ -117,8 +117,19 @@ export type { CompiledSqlPanelProps } from './compiled-sql/index.js';
 // CSVW inference (PLAY-09 + PLAY-11) — DuckDB DESCRIBE → minimal CSVW JSON-LD.
 // The pure type-map (duckdbTypeToCsvw) is exported for callers that already
 // have a DESCRIBE result in hand and only need the type translation.
-export { inferCsvw, duckdbTypeToCsvw } from './csvw/index.js';
-export type { CsvwTable, CsvwColumn } from './csvw/index.js';
+// `applyCsvw` / `parseCsvw` are the JSON round-trip helpers consumed by the
+// editable preview AND by advanced consumers that want to validate persisted
+// descriptors before round-tripping through their own state machine.
+// `CsvwPreview` is the editable React panel (PLAY-09) that mounts inside the
+// playground component but is also exported standalone for advanced layouts.
+export {
+  inferCsvw,
+  duckdbTypeToCsvw,
+  applyCsvw,
+  parseCsvw,
+  CsvwPreview,
+} from './csvw/index.js';
+export type { CsvwTable, CsvwColumn, CsvwPreviewProps } from './csvw/index.js';
 
 // BibTeX modal (PLAY-08) — cite modal triggered from the playground toolbar.
 // Embeds the current permalink URL so the cite round-trips state; pre-bundled

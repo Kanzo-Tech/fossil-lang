@@ -12,3 +12,6 @@
 export { inferCsvw } from './infer.js';
 export type { CsvwTable, CsvwColumn, DescribingConnection } from './infer.js';
 export { duckdbTypeToCsvw } from './type-map.js';
+export { applyCsvw, parseCsvw } from './apply.js';
+export { CsvwPreview } from './CsvwPreview.js';
+export type { CsvwPreviewProps } from './CsvwPreview.js';
