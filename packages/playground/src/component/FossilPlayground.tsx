@@ -48,6 +48,7 @@ import { useLspWorker } from '../hooks/useLspWorker.js';
 import { useDuckDb, getDuckDb } from '../hooks/useDuckDb.js';
 import { useResetPlayground } from '../hooks/useResetPlayground.js';
 import { useTheme } from '../hooks/useTheme.js';
+import { usePermalink } from '../hooks/usePermalink.js';
 import { cssVarsToStyle } from '../theme/tokens.js';
 import { announce, ARIA_LABELS } from '../a11y/index.js';
 import { runPipeline } from '../run/runPipeline.js';
@@ -127,6 +128,35 @@ export interface FossilPlaygroundProps {
    * tearing-down the CodeMirror editor on every render.
    */
   theme?: FossilThemeProp;
+
+  /**
+   * Permalink to hydrate from on mount (PLAY-04). When defined, the
+   * component attempts to decode it via the package's standalone permalink
+   * codec (gzip + base64url + schema-versioned envelope; see
+   * `../permalink/index.ts`). On success the decoded `source`/`csvw`/`shex`
+   * seed the editor + descriptor panels — taking precedence over
+   * `initialMapping`. On failure (corrupted, future-version, base64/gzip/JSON
+   * errors) the component falls back to its defaults and emits the error via
+   * `onError` — never crashes.
+   *
+   * Per CONTEXT.md locked decision: the component does NOT touch
+   * `window.location` itself. The host (apps/landing/app/PlaygroundHost.tsx)
+   * reads `window.location.hash` on mount and passes it here.
+   */
+  initialPermalink?: string;
+
+  /**
+   * Debounced callback fired with the freshly-encoded permalink whenever the
+   * editor source (and, in future plans, csvw/shex panels) change. The host
+   * typically pipes this into `window.history.replaceState(null, '', '#' +
+   * permalink)` so the URL stays shareable + reload-survivable.
+   *
+   * Debounce is 200ms (per CONTEXT.md decision — coalesces keystrokes without
+   * making "share my URL right now" feel laggy). Errors from the encoder
+   * (e.g. `PermalinkTooLargeError` above 8000 bytes) are surfaced via
+   * `onError` and DO NOT suppress the underlying state change.
+   */
+  onStateChange?: (permalink: string) => void;
 }
 
 /** Vertex row as it flows from DuckDB-WASM into the result panel. */
@@ -159,11 +189,21 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     onRun,
     onError,
     theme: themeProp = 'light',
+    initialPermalink,
+    onStateChange,
   } = props;
 
   const [mapping, setMapping] = useState<string>(
     initialMapping ?? helloExample.mapping,
   );
+  // CSVW + ShEx state slots (PLAY-04 round-trip). The descriptor + shape
+  // panels are wired in future plans (PLAY-09 + PLAY-11 + the ShEx editor);
+  // we hold the state here today so the permalink can round-trip them — a
+  // hydrated permalink that carries `csvw`/`shex` preserves the user's
+  // descriptor + shape on reload even though the visible editor for those
+  // surfaces lands later.
+  const [csvw, setCsvw] = useState<string | undefined>(undefined);
+  const [shex, setShex] = useState<string | undefined>(undefined);
   const [vertices, setVertices] = useState<VertexRow[]>([]);
   const [edges, setEdges] = useState<EdgeRow[]>([]);
   const [runError, setRunError] = useState<Error | null>(null);
@@ -182,6 +222,44 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   const duck = useDuckDb();
   const reset = useResetPlayground();
   const { cssVars, editorTheme } = useTheme(themeProp);
+
+  // PLAY-04 — decode `initialPermalink` on mount + emit debounced
+  // `onStateChange` on edits. The component DOES NOT touch window.location
+  // here; the host (apps/landing/app/PlaygroundHost.tsx) is responsible for
+  // the URL-fragment side of the loop per CONTEXT.md locked decision. See
+  // ../hooks/usePermalink.ts for the two-effect implementation (one-shot
+  // decode + debounced encode).
+  const handlePermalinkError = useCallback(
+    (err: Error): void => {
+      if (onError) {
+        onError(err);
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('[FossilPlayground] permalink:', err.message);
+      }
+    },
+    [onError],
+  );
+  const handlePermalinkHydrate = useCallback(
+    (state: { source: string; csvw?: string; shex?: string }): void => {
+      setMapping(state.source);
+      // setCsvw/setShex use the incoming undefined as a "clear" signal so
+      // hydration is total — a hydrated envelope without csvw/shex resets
+      // any locally-typed values (matching the round-trip invariant).
+      setCsvw(state.csvw);
+      setShex(state.shex);
+    },
+    [],
+  );
+  usePermalink({
+    initialPermalink,
+    source: mapping,
+    csvw,
+    shex,
+    onHydrate: handlePermalinkHydrate,
+    onStateChange,
+    onError: handlePermalinkError,
+  });
 
   /**
    * Main-thread `FossilPlayground` instance + opened file handle.

@@ -35,6 +35,13 @@ export { useResetPlayground } from './hooks/useResetPlayground.js';
 export { useTheme } from './hooks/useTheme.js';
 export type { UseThemeResult } from './hooks/useTheme.js';
 
+// usePermalink hook — PLAY-04 wiring (decodes initialPermalink on mount +
+// emits debounced onStateChange on edits). Advanced consumers can call this
+// hook directly when composing a custom layout outside <FossilPlayground/>
+// (the multi-host fixture pattern from 08-09 SUMMARY).
+export { usePermalink } from './hooks/usePermalink.js';
+export type { UsePermalinkArgs } from './hooks/usePermalink.js';
+
 // Theme — built-in light + dark + the flat-CSS-var helpers (THEME-01)
 export { lightTheme } from './theme/light.js';
 export { darkTheme } from './theme/dark.js';
