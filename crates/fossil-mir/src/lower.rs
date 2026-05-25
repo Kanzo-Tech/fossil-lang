@@ -348,19 +348,21 @@ fn lower_iri_property<'db>(
 ///
 /// # CODEGEN-LOWERING-01 (Phase 8 carry-forward closed in Phase 9-01)
 ///
-/// Field-ref ColRefs emit `source: SmolStr::default()` (empty) — NOT the
-/// source-binding name. `fossil_codegen::render_expr` (sql.rs:763-773)
-/// substitutes its `default_source` argument (the view name derived from
-/// `derive_view_name(uri)` — e.g. `hello` for `@examples/hello.csv`) for any
-/// empty source. Letting the codegen's view-name substitution be the single
-/// source of truth keeps binding names out of emitted SQL — they are a HIR
-/// concern, not a SQL concern. Before the fix, lowering emitted
-/// `source: source_binding` (the binding name `users`), which `render_expr`
-/// honoured verbatim, producing `users.id` even when the URI was
-/// `@examples/hello.csv` (view aliased as `hello`) — DuckDB-WASM rejected
-/// with `Binder Error: Referenced table "users" not found! Candidate tables:
-/// "hello"`. See `.planning/phases/08-playground-react-library-v0-1/deferred-items.md`
-/// (CODEGEN-LOWERING-01) and `.planning/phases/09-playground-polish-differentiators/09-01-PLAN.md`.
+/// Field-ref [`Expr::ColRef`] values emit `source: SmolStr::default()` (empty)
+/// — NOT the source-binding name. [`fossil_codegen::render_expr`]
+/// (sql.rs:763-773) substitutes its `default_source` argument (the view name
+/// derived from `derive_view_name(uri)` — e.g. `hello` for
+/// `@examples/hello.csv`) for any empty source. Letting the codegen's
+/// view-name substitution be the single source of truth keeps binding names
+/// out of emitted SQL — they are a HIR concern, not a SQL concern. Before the
+/// fix, lowering emitted `source: source_binding` (the binding name `users`),
+/// which `render_expr` honoured verbatim, producing `users.id` even when the
+/// URI was `@examples/hello.csv` (view aliased as `hello`) — DuckDB-WASM
+/// rejected with `Binder Error: Referenced table "users" not found! Candidate
+/// tables: "hello"`. See
+/// `.planning/phases/08-playground-react-library-v0-1/deferred-items.md`
+/// (CODEGEN-LOWERING-01) and
+/// `.planning/phases/09-playground-polish-differentiators/09-01-PLAN.md`.
 fn lower_property_value<'db>(
     value: &HirExpr,
     source_binding: &SmolStr,
