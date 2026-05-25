@@ -345,6 +345,22 @@ fn lower_iri_property<'db>(
 /// `${.field}` placeholder `ColRef` in a `Template` is wrapped in
 /// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` (SC#4 —
 /// the un-statically-dischargeable NULL-field check).
+///
+/// # CODEGEN-LOWERING-01 (Phase 8 carry-forward closed in Phase 9-01)
+///
+/// Field-ref ColRefs emit `source: SmolStr::default()` (empty) — NOT the
+/// source-binding name. `fossil_codegen::render_expr` (sql.rs:763-773)
+/// substitutes its `default_source` argument (the view name derived from
+/// `derive_view_name(uri)` — e.g. `hello` for `@examples/hello.csv`) for any
+/// empty source. Letting the codegen's view-name substitution be the single
+/// source of truth keeps binding names out of emitted SQL — they are a HIR
+/// concern, not a SQL concern. Before the fix, lowering emitted
+/// `source: source_binding` (the binding name `users`), which `render_expr`
+/// honoured verbatim, producing `users.id` even when the URI was
+/// `@examples/hello.csv` (view aliased as `hello`) — DuckDB-WASM rejected
+/// with `Binder Error: Referenced table "users" not found! Candidate tables:
+/// "hello"`. See `.planning/phases/08-playground-react-library-v0-1/deferred-items.md`
+/// (CODEGEN-LOWERING-01) and `.planning/phases/09-playground-polish-differentiators/09-01-PLAN.md`.
 fn lower_property_value<'db>(
     value: &HirExpr,
     source_binding: &SmolStr,
@@ -353,7 +369,9 @@ fn lower_property_value<'db>(
 ) -> Expr<'db> {
     match value {
         HirExpr::FieldRef(field) => Expr::ColRef {
-            source: source_binding.clone(),
+            // CODEGEN-LOWERING-01: empty source — codegen's `default_source`
+            // (the view name from `derive_view_name(uri)`) substitutes.
+            source: SmolStr::default(),
             column: field.clone(),
         },
         HirExpr::StringLit(s) => Expr::LitString(s.clone()),
@@ -435,9 +453,17 @@ fn lower_placeholder<'db>(
     prefixes: &[PrefixEntry],
     assert_line: Option<u32>,
 ) -> Expr<'db> {
+    // `source_binding` is retained as a parameter for symmetry with
+    // `lower_property_value` and future multi-source disambiguation. It is NOT
+    // emitted into the ColRef — see CODEGEN-LOWERING-01 doc on
+    // `lower_property_value` above. The binding name stays a HIR concern;
+    // codegen's `default_source` (view name) is the SQL qualifier.
+    let _ = source_binding;
     if let Some(field) = body.strip_prefix('.') {
         let col_ref = Expr::ColRef {
-            source: source_binding.clone(),
+            // CODEGEN-LOWERING-01: empty source — codegen substitutes the
+            // view name via `default_source`.
+            source: SmolStr::default(),
             column: SmolStr::from(field),
         };
         // SC#4: in the IRI-template subject context, a `${.field}` whose value
@@ -568,7 +594,13 @@ User : ex:Person from users
                             );
                             match inner.as_ref() {
                                 Expr::ColRef { source, column } => {
-                                    assert_eq!(source.as_str(), "users");
+                                    // CODEGEN-LOWERING-01: ColRef.source is
+                                    // empty so codegen substitutes the view
+                                    // name (the URI stem from
+                                    // `derive_view_name`). Binding names
+                                    // (`users`) are a HIR concern, not a SQL
+                                    // concern.
+                                    assert_eq!(source.as_str(), "");
                                     assert_eq!(column.as_str(), "id");
                                 }
                                 other => panic!("expected ColRef inside Assert, got {other:?}"),
@@ -601,8 +633,8 @@ User : ex:Person from users
                 assert_eq!(predicate.as_str(), "https://example.org/name");
                 assert!(
                     matches!(object, Expr::ColRef { source, column }
-                        if source.as_str() == "users" && column.as_str() == "name"),
-                    "expected object ColRef(users.name), got {object:?}"
+                        if source.as_str() == "" && column.as_str() == "name"),
+                    "expected object ColRef(<empty>.name), got {object:?}"
                 );
                 assert_eq!(*graph, None);
             }
