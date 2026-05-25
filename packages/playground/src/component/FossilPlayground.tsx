@@ -428,18 +428,27 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
 
   // PLAY-07: debounced recompile of the Compiled SQL panel.
   //
-  // We could subscribe only when `showCompiledSql` is true (cheaper when the
-  // panel is hidden), but priming the panel content on toggle-open feels
-  // sluggish to the user (200 ms blank panel after every open). Since the
-  // compile call hits the Salsa-memoised path (incremental — re-running on
-  // the same source is near-free), eagerly maintaining `compiledSql` keeps
-  // the toggle-open instant + lets E2E timing assertions hold.
+  // Gated on `showCompiledSql` so the panel-closed default path does ZERO
+  // extra work — both for perf (no compile-per-keystroke when the panel is
+  // hidden) AND for correctness: the `compileInstanceRef` is shared with
+  // the Run path; an in-flight live-compile colliding with `handleRun`'s
+  // compile + the subsequent DuckDB execute can corrupt the shared WASM
+  // pointer (surfaced as `Error: null pointer passed to rust` in the SC#1
+  // E2E gate during plan 09-06 Task 3 — Rule-1 fix).
   //
-  // On compile failure the SQL is replaced with a comment so the panel never
-  // crashes — the real error surfaces via the existing `runError` alert
-  // when the user clicks Run.
+  // The trade-off: opening the panel for the first time triggers a single
+  // 200 ms-debounced compile. Subsequent mapping edits while open keep the
+  // panel within ~200 ms of the source. Closing the panel halts the live
+  // updates immediately. Run never collides because clicking Run typically
+  // happens AFTER the user has stopped typing — by then the debounced
+  // compile has either completed or been clear-timeout'd.
+  //
+  // On compile failure the SQL is replaced with a comment so the panel
+  // never crashes — the real error surfaces via the existing `runError`
+  // alert when the user clicks Run.
   useEffect(() => {
     if (!wasmReady) return;
+    if (!showCompiledSql) return;
     const handle = setTimeout(() => {
       compile(mapping)
         .then((sql) => {
@@ -454,7 +463,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     return () => {
       clearTimeout(handle);
     };
-  }, [mapping, wasmReady, compile]);
+  }, [mapping, wasmReady, compile, showCompiledSql]);
 
   // Free the main-thread compile instance on unmount. Triggers Rust-side
   // Salsa store drop (per ADR-0026's intent — heap-heavy resources outside
