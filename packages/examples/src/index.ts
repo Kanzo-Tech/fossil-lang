@@ -52,7 +52,11 @@ import { ecommerceExample } from './ecommerce/index.js';
 import { musicbrainzExample } from './musicbrainz/index.js';
 import { typingShowcaseExample } from './typing-showcase/index.js';
 import { multiSourceJoinExample } from './multi-source-join/index.js';
-import manifest from './manifest.json';
+// Import attribute (`with { type: 'json' }`) is required for Node 20+ ESM
+// resolution of JSON modules; bundlers (Vite/Next/esbuild) also honour it.
+// Without the attribute, `pnpm --filter ... start` (Next.js production
+// server) and Playwright spec imports both throw at module init.
+import manifest from './manifest.json' with { type: 'json' };
 
 export {
   helloExample,
