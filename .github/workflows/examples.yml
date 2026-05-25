@@ -1,0 +1,69 @@
+name: examples
+
+# Dedicated CI gate for the PLAY-05 curated examples + variations harness.
+# Separate from pnpm-ci.yml so:
+#   - Regressions in the example fixtures surface as a discrete failed check
+#     on the PR — reviewers see "examples" go red without grepping the wider
+#     pnpm log.
+#   - Triggers only when the examples or compiler change — saves CI minutes
+#     on docs-only / unrelated PRs.
+
+on:
+  pull_request:
+    paths:
+      - 'packages/examples/**'
+      - 'crates/**'
+      - '.github/workflows/examples.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/examples/**'
+      - 'crates/**'
+      - '.github/workflows/examples.yml'
+
+# Cancel in-progress runs on the same ref so a fresh push obsoletes the prior.
+concurrency:
+  group: examples-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  variations:
+    name: PLAY-05 variations harness (≥30 compile gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.90'
+          # The harness spawns `target/release/fossil` — cache the workspace
+          # target/ directory keyed on Cargo.lock so subsequent runs skip the
+          # cargo compile entirely.
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      # Build fossil-cli release — the variations harness uses this binary
+      # directly (REPO_ROOT/target/release/fossil) and skips its own cargo
+      # build step if the binary is present.
+      - name: Build fossil-cli (release)
+        run: cargo build -p fossil-cli --release --quiet
+
+      # Variations + manifest-smoke harness. Vitest discovers every
+      # tests/*.test.ts; the variations test alone runs ~30 cases (6 examples
+      # × 5 variations) and asserts the expected pass/fail outcome per file.
+      - name: Run examples test suite (variations + smoke)
+        run: pnpm --filter @fossil-lang/examples test
