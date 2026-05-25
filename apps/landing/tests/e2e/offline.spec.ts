@@ -110,11 +110,19 @@ test('OFFLINE-01: Service Worker is registered + controlling on first load', asy
   // `apps/landing/app/ClientShell.tsx`: on takeover the page reloads,
   // and the reloaded page sees a non-null controller deterministically.
   //
-  // Timeout budget: 30s (was 15s). The first load now potentially does
-  // a single controllerchange-triggered reload, which the previous 15s
-  // budget could clip in headless CI. 30s is the same per-test default
-  // as `playwright.config.ts` — leaves headroom for cold WASM + the
-  // reload absorb.
+  // Even with the listener, a single `evaluate` of
+  // `navigator.serviceWorker.ready → controller !== null` races with
+  // the claim arrival: `ready` resolves when an active worker exists
+  // on the registration, but `.controller` flips to non-null a few ms
+  // later. We use `waitForFunction` to poll the controller pointer —
+  // it's navigation-tolerant (re-evaluates after the
+  // controllerchange-triggered reload completes) and resolves once the
+  // page is stably under SW control.
+  //
+  // Timeout budget: 30s on the playground mount + 15s on the controller
+  // poll. Empirically the controller appears within ~1s of `goto` in
+  // headless Chromium; 15s leaves comfortable margin for headless CI
+  // cold-start under high worker concurrency.
   //
   // Companion multi-tab spec: `sw-multitab.spec.ts` (09-02 Task 3) —
   // proves two tabs converge on the same active SW under the same
@@ -122,11 +130,19 @@ test('OFFLINE-01: Service Worker is registered + controlling on first load', asy
   await page.goto('/');
   await page.getByTestId('fossil-playground').waitFor({ timeout: 30_000 });
 
-  const swControlling = await page.evaluate<boolean>(async () => {
-    if (!('serviceWorker' in navigator)) return false;
-    await navigator.serviceWorker.ready;
-    return navigator.serviceWorker.controller !== null;
-  });
+  // Poll the controller pointer via `waitForFunction` (navigation-
+  // tolerant — re-evaluates after the controllerchange-triggered
+  // reload). Read the final value FROM the waitForFunction return
+  // (NOT a follow-up `evaluate`) so we never race against the reload
+  // between the poll and the read.
+  const handle = await page.waitForFunction(
+    () => navigator.serviceWorker?.controller != null,
+    null,
+    { timeout: 15_000 },
+  );
+  // Allow the post-reload page to fully settle before the test ends.
+  await page.waitForLoadState('load');
+  const swControlling = (await handle.jsonValue()) as boolean;
 
   expect(swControlling).toBe(true);
 });
