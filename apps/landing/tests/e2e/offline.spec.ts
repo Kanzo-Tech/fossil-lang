@@ -98,8 +98,29 @@ test('OFFLINE-01: Service Worker precaches landing + WASM after first visit', as
 test('OFFLINE-01: Service Worker is registered + controlling on first load', async ({
   page,
 }) => {
+  // SW-FIRST-LOAD-01 (Phase 8 carry-forward → Phase 9 plan 09-02).
+  //
+  // History: this assertion previously flaked at `--workers=2` because
+  // the Serwist `skipWaiting: true` + `clientsClaim: true` on the SW
+  // side were not paired with a client-side `controllerchange` reload —
+  // so the first page-load saw `controller === null` while the SW
+  // activated silently in the background.
+  //
+  // 09-02 Task 1 added the missing controllerchange listener in
+  // `apps/landing/app/ClientShell.tsx`: on takeover the page reloads,
+  // and the reloaded page sees a non-null controller deterministically.
+  //
+  // Timeout budget: 30s (was 15s). The first load now potentially does
+  // a single controllerchange-triggered reload, which the previous 15s
+  // budget could clip in headless CI. 30s is the same per-test default
+  // as `playwright.config.ts` — leaves headroom for cold WASM + the
+  // reload absorb.
+  //
+  // Companion multi-tab spec: `sw-multitab.spec.ts` (09-02 Task 3) —
+  // proves two tabs converge on the same active SW under the same
+  // listener.
   await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 15_000 });
+  await page.getByTestId('fossil-playground').waitFor({ timeout: 30_000 });
 
   const swControlling = await page.evaluate<boolean>(async () => {
     if (!('serviceWorker' in navigator)) return false;
