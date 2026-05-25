@@ -13,9 +13,12 @@ describe('@fossil-lang/examples', () => {
     expect(examples.length).toBeGreaterThan(0);
   });
 
-  it('exports the canonical hello example as a singleton', () => {
+  it('exports the canonical hello example as the first registered example', () => {
+    // hello is the canonical 10-second walking-skeleton — must remain
+    // examples[0] so PlaygroundHost can mount it as the default seed.
     expect(examples[0]).toBe(helloExample);
-    expect(examples).toHaveLength(1); // v0.1; Phase 9 PLAY-05 grows this
+    // Phase 9 PLAY-05 grew the curated set from 1 → 6 examples.
+    expect(examples.length).toBeGreaterThanOrEqual(6);
   });
 
   it('helloExample has all required Example fields populated', () => {

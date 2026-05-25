@@ -1,0 +1,10 @@
+// PLAY-05 variation: 01-base — verbatim copy of hello.fossil.
+// MUST succeed under `fossil check` (sanity baseline for the harness).
+
+prefix ex: <https://example.org/>
+
+users := io.csv("@examples/hello.csv")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:name = .name

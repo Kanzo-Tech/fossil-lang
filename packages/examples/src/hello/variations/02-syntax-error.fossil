@@ -1,0 +1,10 @@
+// PLAY-05 variation: 02-syntax-error — missing colon after `prefix ex`.
+// MUST fail under `fossil check` with a parse-level diagnostic.
+
+prefix ex <https://example.org/>
+
+users := io.csv("@examples/hello.csv")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:name = .name

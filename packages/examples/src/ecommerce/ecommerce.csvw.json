@@ -1,0 +1,15 @@
+{
+  "@context": "http://www.w3.org/ns/csvw",
+  "url": "@examples/ecommerce-customers.csv",
+  "dialect": {
+    "header": true,
+    "delimiter": ","
+  },
+  "tableSchema": {
+    "columns": [
+      { "name": "customer_id", "titles": "customer_id", "datatype": "integer", "required": true },
+      { "name": "name",        "titles": "name",        "datatype": "string",  "required": true },
+      { "name": "email",       "titles": "email",       "datatype": "string",  "required": true }
+    ]
+  }
+}

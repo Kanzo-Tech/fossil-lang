@@ -1,0 +1,24 @@
+// PLAY-05 example — two-source mapping (R2RML-classic FK-join shape).
+//
+// Two CSV sources (`customers`, `orders`) emit independent mappings into the
+// same target graph. The Order resource mints an IRI based on `order_id` and
+// references its owning Customer by the same IRI template (`ex:customer/{customer_id}`)
+// — the FK join lives at the IRI-template level, not as a SQL JOIN.
+//
+// This is the canonical "relational mapping with foreign keys" shape that
+// R2RML/RML demos always showcase; in Fossil it's just two mappings sharing
+// a prefix.
+
+prefix ex <https://example.org/shop/>
+
+customers := io.csv("@examples/msj-customers.csv")
+orders    := io.csv("@examples/msj-orders.csv")
+
+Customer : ex:Customer from customers
+    iri = `${ex:}customer/${.customer_id}`
+    ex:name = .name
+
+Order : ex:Order from orders
+    iri = `${ex:}order/${.order_id}`
+    ex:customer = `${ex:}customer/${.customer_id}`
+    ex:amount   = .amount

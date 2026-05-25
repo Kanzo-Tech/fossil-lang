@@ -1,0 +1,17 @@
+// PLAY-05 example — R2RML-classic MusicBrainz subset (Artists).
+//
+// MusicBrainz is the de-facto music-domain knowledge graph; this example
+// extracts a tiny Artist subset (artist_id + name + country + type) and
+// produces `ex:Artist` resources typed by the bundled `musicbrainz.shex`
+// shape. Showcases mixing string + IRI properties.
+
+prefix ex:  <https://example.org/musicbrainz/>
+prefix xsd: <http://www.w3.org/2001/XMLSchema#>
+
+musicians := io.csv("@examples/musicbrainz-musicians.csv")
+
+Artist : ex:Artist from musicians
+    iri = `${ex:}artist/${.artist_id}`
+    ex:name    = .name
+    ex:country = .country
+    ex:type    = .artist_type

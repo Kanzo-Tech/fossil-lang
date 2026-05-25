@@ -1,0 +1,13 @@
+PREFIX ex:  <https://example.org/ecommerce/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Target shape for the R2RML-classic Northwind-subset ecommerce mapping.
+# Produces 3 triples per row of @examples/ecommerce-customers.csv:
+#   ex:customer/{customer_id} ex:name  "{name}"^^xsd:string
+#   ex:customer/{customer_id} ex:email "{email}"^^xsd:string
+# Subject IRIs follow `ex:customer/{customer_id}`; the type is `ex:Customer`.
+
+ex:Customer {
+  ex:name  xsd:string ;
+  ex:email xsd:string
+}

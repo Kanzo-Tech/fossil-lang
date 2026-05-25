@@ -1,0 +1,15 @@
+{
+  "@context": "http://www.w3.org/ns/csvw",
+  "url": "@examples/typing-showcase.csv",
+  "dialect": {
+    "header": true,
+    "delimiter": ","
+  },
+  "tableSchema": {
+    "columns": [
+      { "name": "id",   "titles": "id",   "datatype": "integer", "required": true },
+      { "name": "name", "titles": "name", "datatype": "string",  "required": true },
+      { "name": "age",  "titles": "age",  "datatype": "integer", "required": true }
+    ]
+  }
+}

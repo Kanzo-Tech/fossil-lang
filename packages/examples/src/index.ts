@@ -1,9 +1,9 @@
 /**
  * @fossil-lang/examples — bundled fixture examples for the playground.
  *
- * v0.1 ships a single example (`hello`) — the canonical walking-skeleton
- * mirror of the cargo CLI's `examples/hello.fossil`. Phase 9 PLAY-05 grows
- * this to a curated 6–10 examples with variations.
+ * v0.1 shipped a single example (`hello`); Phase 9 PLAY-05 grew this to a
+ * curated set of 6 examples + a `variations/` set per example (1 base + 4-5
+ * mutations) verified in CI by the variations harness.
  *
  * All example contents are inlined at consumer-bundle time via Vite `?raw`
  * imports (see `src/types.d.ts` for the ambient module shim). This keeps the
@@ -47,13 +47,45 @@ export interface Example {
 }
 
 import { helloExample } from './hello/index.js';
-export { helloExample };
+import { helloNoCsvwExample } from './hello-no-csvw/index.js';
+import { ecommerceExample } from './ecommerce/index.js';
+import { musicbrainzExample } from './musicbrainz/index.js';
+import { typingShowcaseExample } from './typing-showcase/index.js';
+import { multiSourceJoinExample } from './multi-source-join/index.js';
+import manifest from './manifest.json';
+
+export {
+  helloExample,
+  helloNoCsvwExample,
+  ecommerceExample,
+  musicbrainzExample,
+  typingShowcaseExample,
+  multiSourceJoinExample,
+};
 
 /**
- * All bundled examples. v0.1 ships one (`hello`); Phase 9 PLAY-05 grows the
- * array to 6–10.
+ * All bundled examples — ordered to match {@link EXAMPLES_MANIFEST} for
+ * stable dropdown enumeration in the playground UI.
  */
-export const examples: Example[] = [helloExample];
+export const examples: Example[] = [
+  helloExample,
+  helloNoCsvwExample,
+  ecommerceExample,
+  musicbrainzExample,
+  typingShowcaseExample,
+  multiSourceJoinExample,
+];
+
+/**
+ * Declarative manifest of curated examples (PLAY-05). The shape mirrors
+ * `manifest.json` on disk — consumed by the playground UI for dropdown
+ * enumeration, by the variations harness for path resolution, and by the
+ * landing app's `<ExampleSelector/>`.
+ */
+export const EXAMPLES_MANIFEST = manifest;
+
+/** Union of legal example ids drawn from the manifest. */
+export type ExampleId = (typeof manifest)['examples'][number]['id'];
 
 /**
  * Build the `examples` map argument for `createDefaultResolver({ examples })`

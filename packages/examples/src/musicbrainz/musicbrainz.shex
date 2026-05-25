@@ -1,0 +1,14 @@
+PREFIX ex:  <https://example.org/musicbrainz/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# Target shape for the R2RML-classic MusicBrainz-subset artist mapping.
+# Produces 3 triples per row of @examples/musicbrainz-artists.csv:
+#   ex:artist/{artist_id} ex:name    "{name}"^^xsd:string
+#   ex:artist/{artist_id} ex:country "{country}"^^xsd:string
+#   ex:artist/{artist_id} ex:type    "{artist_type}"^^xsd:string
+
+ex:Artist {
+  ex:name    xsd:string ;
+  ex:country xsd:string ;
+  ex:type    xsd:string
+}

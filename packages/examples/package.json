@@ -21,11 +21,23 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./hello/*": "./src/hello/*"
+    "./hello/*": "./src/hello/*",
+    "./hello-no-csvw/*": "./src/hello-no-csvw/*",
+    "./ecommerce/*": "./src/ecommerce/*",
+    "./musicbrainz/*": "./src/musicbrainz/*",
+    "./typing-showcase/*": "./src/typing-showcase/*",
+    "./multi-source-join/*": "./src/multi-source-join/*",
+    "./manifest.json": "./src/manifest.json"
   },
   "files": [
     "dist/",
     "src/hello/",
+    "src/hello-no-csvw/",
+    "src/ecommerce/",
+    "src/musicbrainz/",
+    "src/typing-showcase/",
+    "src/multi-source-join/",
+    "src/manifest.json",
     "README.md",
     "LICENSE"
   ],
