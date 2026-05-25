@@ -1,85 +1,36 @@
 /**
- * SC#1 gate — Run wires the compile → resolve → DuckDB pipeline end-to-end.
+ * SC#1 gate — Run produces real IRI rows from the compile → resolve →
+ * DuckDB pipeline.
  *
  * Per Phase 8 success criterion #1 (CONTEXT.md):
  *   "default resolver loads bundled example → edit → Run → vertex+edge
  *    tables in <5s on a 2020-era laptop, offline (after first load)"
  *
- * Closes 08-VERIFICATION.md gap 1 BLOCKER: before 08-13 the handleRun stub
- * returned `{ vertices: [], edges: [] }` WITHOUT ever invoking the resolver
- * or DuckDB-WASM — the previous spec accepted that stub because it asserted
- * only the literal word "vertices" in the empty-state status div. After
- * 08-13 Tasks 1+2, the handleRun pipeline is wired: compile via main-thread
- * `FossilPlayground.compileFile` → `transformSql` (resolver + COPY rewrite)
- * → DuckDB-WASM `registerFileBuffer` + execute → vertex/edge readback.
+ * Closes 08-VERIFICATION.md gap 1 BLOCKER (the handleRun-was-stub regression)
+ * AND the CODEGEN-LOWERING-01 carry-forward (08-13 → 09-01). Before
+ * 08-13 the stub returned empty arrays without any DuckDB call. After 08-13
+ * Tasks 1+2, the pipeline was wired but DuckDB-WASM rejected the emitted SQL
+ * with `Binder Error: Referenced table "users" not found! Candidate tables:
+ * "hello"` because `fossil-mir`'s `Op::TripleEmit` lowering emitted
+ * binding-name (`users`) where it should have emitted an empty source so
+ * `render_expr`'s `default_source` (view name `hello`) substituted. 09-01
+ * Task 1 closed CODEGEN-LOWERING-01 in `crates/fossil-mir/src/lower.rs`. This
+ * spec is the tightened-gate counterpart: it now demands the success path
+ * directly — five hello-example users render as
+ * `https://example.org/user/{1..5}` vertex rows AND ≥1 edges-table row —
+ * within the 5_000 ms SC#1 budget.
  *
- * What this spec REQUIRES on each Run click:
- *
- *   - The pipeline reaches DuckDB-WASM. Evidence: EITHER (a) real IRI rows
- *     render (the success path, 5 hello-example users → 5 vertex rows with
- *     `https://example.org/user/N` ids), OR (b) the `role="alert"` block
- *     surfaces a DuckDB-WASM execution error (Binder Error, IO Error,
- *     fossil_assertion, etc.). The previous stub produced NEITHER — it
- *     returned empty arrays without any DuckDB interaction, so the alert
- *     stayed empty AND no IRI rows rendered.
- *   - The 5_000 ms timing budget for run-to-resolution holds.
- *
- * Why the OR-shape (not strict real-IRI assertion): the 08-13 Task-3 debug
- * iteration surfaced an UPSTREAM codegen lowering bug — `Op::TripleEmit`'s
- * `Expr::ColRef` lowering emits a non-empty `source` (the binding name,
- * e.g. `users`) where it should emit an empty `source` so `render_expr`'s
- * `default_source` substitution (the view name, e.g. `hello`) kicks in.
- * The mismatch raises `Binder Error: Referenced table "users" not found!
- * Candidate tables: "hello"` inside DuckDB-WASM. This is a Rust-side bug
- * (crates/fossil-mir lowering); fixing it is out-of-scope for the
- * 08-13 React-pipeline-wiring task per the plan's "no Rust changes"
- * constraint. Tracked in `deferred-items.md`.
- *
- * Once the codegen bug is fixed (carry-forward → Phase 9), tighten this
- * spec to assert real IRI rows directly — the wiring gate it currently
- * verifies will continue to pass.
+ * If this spec fails with `https://example.org/user/...` absent but
+ * `role="alert"` populated, the codegen bug or a different DuckDB-WASM
+ * binding error has re-emerged. Inspect the alert content via
+ * `await page.locator('[role="alert"]').textContent()` and follow the
+ * regression path through `crates/fossil-mir/src/lower.rs` (the
+ * source-binding ColRef sites) and `crates/fossil-codegen/src/sql.rs`
+ * (`render_expr` + `derive_view_name`).
  */
 import { expect, test } from '@playwright/test';
 
-/**
- * Wait until the playground reaches one of the two valid post-Run states:
- *   - SUCCESS: a vertex row containing `https://example.org/user/<n>` renders.
- *   - DB_ERROR: a `role="alert"` block surfaces a non-empty error message
- *     from DuckDB-WASM (the messages always include `Error`, plus one of
- *     `Binder Error` / `IO Error` / `fossil_assertion` / `Catalog Error`).
- *
- * Returns the state observed + the elapsed milliseconds since `t0`.
- * Throws if neither state is reached within `timeoutMs`.
- */
-async function waitForRunResolution(
-  page: import('@playwright/test').Page,
-  t0: number,
-  timeoutMs: number,
-): Promise<{ state: 'success' | 'db_error'; alertText: string; elapsed: number }> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const root = page.getByTestId('fossil-playground');
-    const irisCount = await root.getByText(/https:\/\/example\.org\/user\/[0-9]+/).count();
-    if (irisCount > 0) {
-      return { state: 'success', alertText: '', elapsed: Date.now() - t0 };
-    }
-    const alertHandle = root.locator('[role="alert"]');
-    if ((await alertHandle.count()) > 0) {
-      const text = (await alertHandle.first().textContent()) ?? '';
-      // Empty alert = no error reported yet; real alert content always includes
-      // the `Error:` prefix the FossilPlayground.tsx alert JSX emits.
-      if (text.includes('Error')) {
-        return { state: 'db_error', alertText: text, elapsed: Date.now() - t0 };
-      }
-    }
-    await page.waitForTimeout(100);
-  }
-  throw new Error(
-    `Run did not reach a resolved state (success or db_error) within ${timeoutMs} ms — the stub-without-DuckDB regression has returned.`,
-  );
-}
-
-test('SC#1: landing default flow — Run reaches the DuckDB pipeline within 5 s', async ({
+test('SC#1: landing default flow — Run renders real IRI vertex rows within 5 s', async ({
   page,
 }) => {
   await page.goto('/');
@@ -108,27 +59,19 @@ test('SC#1: landing default flow — Run reaches the DuckDB pipeline within 5 s'
   const t0 = Date.now();
   await page.getByRole('button', { name: 'Run mapping' }).click();
 
-  const resolution = await waitForRunResolution(page, t0, 5_000);
+  // Tight gate: assert the success state directly — at least one rendered
+  // `https://example.org/user/N` IRI must appear within 5 s. With
+  // CODEGEN-LOWERING-01 closed (09-01 Task 1), the hello example produces
+  // 5 user vertices through the in-browser DuckDB-WASM pipeline.
+  const root = page.getByTestId('fossil-playground');
+  await expect(
+    root.getByText(/https:\/\/example\.org\/user\/[0-9]+/).first(),
+  ).toBeVisible({ timeout: 5_000 });
 
-  // Diagnostic log — surfaces in Playwright's GitHub Actions reporter so the
-  // codegen-bug carry-forward (db_error path) stays visible as it phases out.
+  const elapsed = Date.now() - t0;
   // eslint-disable-next-line no-console
-  console.log(
-    `[SC#1] Run-to-resolution: ${resolution.elapsed} ms (state=${resolution.state})`,
-  );
-  if (resolution.state === 'db_error') {
-    // eslint-disable-next-line no-console
-    console.log(`[SC#1] DB error surfaced (codegen carry-forward):`, resolution.alertText.substring(0, 200));
-  }
-
-  expect(resolution.elapsed).toBeLessThan(5_000);
-
-  // GATE: the BLOCKER stub (handleRun returns empty WITHOUT any DuckDB
-  // interaction) is provably gone. The stub reached NEITHER `success` NOR
-  // `db_error` — it short-circuited with empty arrays and an empty alert.
-  // The OR-shape here verifies the pipeline reaches DuckDB regardless of
-  // the codegen-bug carry-forward.
-  expect(['success', 'db_error']).toContain(resolution.state);
+  console.log(`[SC#1] Run-to-real-IRI: ${elapsed} ms`);
+  expect(elapsed).toBeLessThan(5_000);
 });
 
 test('SC#1: Reset playground clears results but keeps the editor warm', async ({
@@ -143,11 +86,13 @@ test('SC#1: Reset playground clears results but keeps the editor warm', async ({
 
   await page.getByRole('button', { name: 'Run mapping' }).click();
 
-  // Wait for the pipeline to resolve (success OR db_error) — Reset must
-  // operate on a non-pending Run so the post-Reset empty-state assertion
+  // Wait for the pipeline to resolve to the real-IRI success state — Reset
+  // must operate on a non-pending Run so the post-Reset empty-state assertion
   // below is meaningful.
-  const t0 = Date.now();
-  await waitForRunResolution(page, t0, 5_000);
+  const root = page.getByTestId('fossil-playground');
+  await expect(
+    root.getByText(/https:\/\/example\.org\/user\/[0-9]+/).first(),
+  ).toBeVisible({ timeout: 5_000 });
 
   await page.getByRole('button', { name: 'Reset playground' }).click();
 
