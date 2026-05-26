@@ -28,13 +28,17 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
-  // Multi-entry Vite app — four pages served concurrently by `vite
+  // Multi-entry Vite app — six pages served concurrently by `vite
   // preview` on :4173 for the Playwright suite:
-  //   - index.html       — Phase 8 SC#2 host-agnostic proof (FossilPlayground)
-  //   - primitives.html  — Phase 10 VIS-01 oracle (@fossil-lang/ui primitives)
-  //   - editor.html      — Phase 11 EDIT-01/02/03 oracle (Worker + HTTP editors co-mounted)
-  //   - editor-null.html — Phase 11 EDIT-02 mode #3 (NullTransport isolated;
-  //                        non-firing route assertion is structurally sound)
+  //   - index.html          — Phase 8 SC#2 host-agnostic proof (FossilPlayground)
+  //   - primitives.html     — Phase 10 VIS-01 oracle (@fossil-lang/ui primitives)
+  //   - editor.html         — Phase 11 EDIT-01/02/03 oracle (Worker + HTTP editors)
+  //   - editor-null.html    — Phase 11 EDIT-02 mode #3 (NullTransport isolated;
+  //                            non-firing route assertion is structurally sound)
+  //   - viewer.html         — Phase 12 VIEW-01/02/03 oracle (FossilViewer with WebGL)
+  //   - viewer-fallback.html — Phase 12 VIEW-04 oracle (FossilGraphView webgl=false
+  //                             forcing TabularFallback; isolated so the no-canvas
+  //                             assertion is uncontaminated by CosmosGraph state)
   build: {
     rollupOptions: {
       input: {
@@ -42,6 +46,8 @@ export default defineConfig({
         primitives: resolve(__dirname, 'primitives.html'),
         editor: resolve(__dirname, 'editor.html'),
         editorNull: resolve(__dirname, 'editor-null.html'),
+        viewer: resolve(__dirname, 'viewer.html'),
+        viewerFallback: resolve(__dirname, 'viewer-fallback.html'),
       },
     },
   },

@@ -153,6 +153,9 @@ importers:
       '@fossil-lang/ui':
         specifier: workspace:*
         version: link:../../../../../packages/ui
+      '@fossil-lang/viewer':
+        specifier: workspace:*
+        version: link:../../../../../packages/viewer
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../../../../../packages/wasm
@@ -162,6 +165,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.0.0
         version: 1.2.3
+      '@uwdata/mosaic-core':
+        specifier: ^0.21.1
+        version: 0.21.1
       react:
         specifier: ^18.3.0
         version: 18.3.1
