@@ -1,0 +1,57 @@
+{
+  "name": "@fossil-lang/ui",
+  "version": "0.1.0",
+  "description": "Radix UI primitives + Fossil design tokens for the @fossil-lang/* React component family. CSS-variable driven; no Tailwind/shadcn peer dependencies. Per ADR-0033 + ADR-0034.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/ui"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "size": "size-limit"
+  },
+  "sideEffects": [
+    "./src/styles/inject.ts",
+    "./dist/styles/inject.js"
+  ],
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "^11.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "happy-dom": "^15.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "size-limit": "^11.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
