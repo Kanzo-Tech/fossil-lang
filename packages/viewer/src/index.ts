@@ -26,4 +26,13 @@ export type { GraphCanvasProps } from './internals/GraphCanvas.js';
 export { useGraphData, GROUP_CSS_COLORS, hashPos } from './hooks/useGraphData.js';
 export type { VertexRow, EdgeRow, KGGraphData } from './hooks/useGraphData.js';
 export { useGraphCrossfilter } from './hooks/useGraphCrossfilter.js';
-// === 12-04 — FossilGraphView.tsx + FossilViewer.tsx + turtle/* exports go here ===
+// === 12-04 — accessibility/TabularFallback ===
+export { TabularFallback } from './accessibility/TabularFallback.js';
+export type { TabularFallbackProps } from './accessibility/TabularFallback.js';
+
+// === 12-04 — turtle (moved from @fossil-lang/playground) ===
+export { rowsToTurtle, TurtleTab } from './turtle/index.js';
+export type { TurtleVertexRow, TurtleEdgeRow, TurtleTabProps } from './turtle/index.js';
+
+// === 12-04 — FossilGraphView + FossilViewer (public API) ===
+// Filled in by Task 2 of plan 12-04.

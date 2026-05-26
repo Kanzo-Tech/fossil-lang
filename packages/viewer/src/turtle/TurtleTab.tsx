@@ -1,6 +1,10 @@
 /**
  * TurtleTab — renders the post-Run materialized triples as Turtle text.
  *
+ * Moved from `packages/playground/src/turtle/TurtleTab.tsx` to
+ * `@fossil-lang/viewer` in Phase 12 plan 12-04 — single-source for the
+ * view layer. `@fossil-lang/playground` re-exports for v0.1.x compat.
+ *
  * Foundation for PLAY-10 ("Turtle" tab next to Graph + Edges table). KGC
  * users verify the graph in Turtle FIRST (the graph viz is the wow, but the
  * Turtle is what makes it credible) — surfacing the serialized triples is

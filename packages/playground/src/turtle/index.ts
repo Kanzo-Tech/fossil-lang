@@ -1,14 +1,21 @@
 /**
- * Barrel for the Turtle serializer module.
+ * v0.1.x backwards-compat shim — the canonical turtle module now lives in
+ * `@fossil-lang/viewer` (Phase 12 plan 12-04). This file re-exports the
+ * same symbols so consumers using
+ * `import { rowsToTurtle } from '@fossil-lang/playground'` keep working
+ * without code changes.
  *
- * Public API (re-exported from `@fossil-lang/playground`):
- *   - rowsToTurtle(vertices, edges, prefixes) — synchronous TTL writer
- *   - VertexRow, EdgeRow — row shapes used by the writer
- *   - TurtleTab — React tab panel rendering the serialized Turtle (PLAY-10).
+ * Module-instance dedup via pnpm workspace symlinks (same pattern Phase
+ * 11 shipped for `@fossil-lang/editor`).
  *
- * Foundation for PLAY-10.
+ * The aliased re-export (`TurtleVertexRow as VertexRow`) preserves the
+ * EXACT v0.1.x export name — internal playground callers using
+ * `import { VertexRow } from './turtle/index.js'` continue to compile.
  */
 
-export { rowsToTurtle } from './render.js';
-export type { VertexRow, EdgeRow } from './render.js';
-export { TurtleTab, type TurtleTabProps } from './TurtleTab.js';
+export { rowsToTurtle, TurtleTab } from '@fossil-lang/viewer';
+export type {
+  TurtleVertexRow as VertexRow,
+  TurtleEdgeRow as EdgeRow,
+  TurtleTabProps,
+} from '@fossil-lang/viewer';

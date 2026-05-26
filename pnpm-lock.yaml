@@ -365,6 +365,9 @@ importers:
       '@fossil-lang/ui':
         specifier: workspace:*
         version: link:../ui
+      '@fossil-lang/viewer':
+        specifier: workspace:*
+        version: link:../viewer
       fflate:
         specifier: ^0.8.3
         version: 0.8.3

@@ -1,6 +1,13 @@
 /**
  * Turtle (TTL) serializer — wraps n3.Writer.
  *
+ * Moved from `packages/playground/src/turtle/render.ts` to
+ * `@fossil-lang/viewer` in Phase 12 plan 12-04 — single source of truth
+ * for the view layer. `@fossil-lang/playground` re-exports via a thin
+ * shim at `packages/playground/src/turtle/index.ts` so v0.1.x consumers
+ * (`import { rowsToTurtle } from '@fossil-lang/playground'`) keep
+ * working without code changes.
+ *
  * Foundation for PLAY-10 ("Turtle" result tab next to Graph).
  * Per 09-RESEARCH.md "Don't hand-roll": literal escaping + IRI
  * percent-encoding + datatype lexical forms are landmines; n3 handles them.
