@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fossil-lang/playground": "workspace:*",
+    "@fossil-lang/editor": "workspace:*",
     "@fossil-lang/resolvers": "workspace:*",
     "@fossil-lang/examples": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",

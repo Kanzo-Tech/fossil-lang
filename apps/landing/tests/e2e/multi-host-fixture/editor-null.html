@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Multi-host fixture — Phase 11 EDIT-02 NullTransport isolated oracle</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: var(--fossil-fonts-sans, system-ui, -apple-system, sans-serif);
+        font-size: var(--fossil-fonts-sizeBase, 14px);
+        color: var(--fossil-colors-foreground, #0f172a);
+        background: var(--fossil-colors-background, #ffffff);
+      }
+      main {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 1.5rem 1.5rem;
+      }
+      header h1 {
+        margin-top: 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+      header p {
+        color: var(--fossil-colors-muted, #475569);
+      }
+      .editor-cell {
+        border: 1px solid var(--fossil-colors-border, #e2e8f0);
+        border-radius: var(--fossil-radii-md, 6px);
+        padding: 0.75rem;
+      }
+      .editor-cell h2 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem 0;
+      }
+      .fossil-editor {
+        min-height: 180px;
+        border: 1px solid var(--fossil-colors-border, #e2e8f0);
+        border-radius: var(--fossil-radii-sm, 4px);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>@fossil-lang/editor — NullTransport (isolated)</h1>
+        <p>
+          Phase 11 EDIT-02 mode #3 — isolated page so the non-firing
+          network assertion is structurally sound (no co-mounted HTTP/
+          Worker editors to contaminate the route counter).
+        </p>
+      </header>
+      <div id="root"></div>
+    </main>
+    <script type="module" src="/main-editor-null.tsx"></script>
+  </body>
+</html>

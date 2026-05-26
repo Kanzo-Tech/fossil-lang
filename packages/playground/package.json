@@ -20,7 +20,9 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./src/workers/lsp.worker": "./src/workers/lsp.worker.ts",
+    "./dist/workers/lsp.worker.js": "./dist/workers/lsp.worker.js"
   },
   "files": [
     "dist/",

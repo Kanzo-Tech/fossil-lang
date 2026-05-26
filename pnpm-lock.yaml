@@ -135,6 +135,9 @@ importers:
       '@fossil-lang/codemirror-fossil':
         specifier: workspace:*
         version: link:../../../../../packages/codemirror-fossil
+      '@fossil-lang/editor':
+        specifier: workspace:*
+        version: link:../../../../../packages/editor
       '@fossil-lang/examples':
         specifier: workspace:*
         version: link:../../../../../packages/examples
