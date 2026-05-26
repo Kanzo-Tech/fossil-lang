@@ -58,8 +58,11 @@ export {
 // Accessibility primitives (A11Y-01)
 export { announce, ARIA_LABELS, LIVE_REGION_ID } from './a11y/index.js';
 
-// Transport adapter
-export { createWorkerTransport } from './lsp/WorkerTransport.js';
+// Transport adapter — re-export from @fossil-lang/editor (Phase 11 plan 11-03).
+// v0.1.x consumers can continue
+//   `import { createWorkerTransport } from '@fossil-lang/playground'`.
+// Module-instance dedup via pnpm workspace symlinks.
+export { createWorkerTransport } from '@fossil-lang/editor';
 
 // Run pipeline — the orchestration helper handleRun composes. Exposed so
 // advanced consumers building custom layouts (the multi-host fixture in

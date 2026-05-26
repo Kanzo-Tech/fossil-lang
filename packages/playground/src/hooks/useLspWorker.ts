@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react';
 import { LSPClient } from '@codemirror/lsp-client';
-import { createWorkerTransport } from '../lsp/WorkerTransport.js';
+import { createWorkerTransport } from '@fossil-lang/editor';
 
 /**
  * Module-singleton Worker + LSPClient. Survives every React unmount/remount
