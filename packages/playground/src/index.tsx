@@ -19,9 +19,13 @@ export type {
   EdgeRow,
 } from './component/FossilPlayground.js';
 
-// Sub-components — advanced composition
-export { FossilEditor } from './component/FossilEditor.js';
-export type { FossilEditorProps } from './component/FossilEditor.js';
+// Sub-components — advanced composition.
+// FossilEditor re-exported from @fossil-lang/editor (Phase 11 plan 11-02).
+// v0.1.x consumers (`import { FossilEditor } from '@fossil-lang/playground'`)
+// continue to work without code changes — the symbol is the same module
+// instance via pnpm workspace deduplication.
+export { FossilEditor } from '@fossil-lang/editor';
+export type { FossilEditorProps } from '@fossil-lang/editor';
 export { ResultTable } from './component/ResultTable.js';
 export type { ResultTableProps } from './component/ResultTable.js';
 export { ResultGraph } from './component/ResultGraph.js';

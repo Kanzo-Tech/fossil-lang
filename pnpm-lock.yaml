@@ -347,6 +347,9 @@ importers:
       '@codemirror/lsp-client':
         specifier: ^6.2.4
         version: 6.2.4
+      '@fossil-lang/editor':
+        specifier: workspace:*
+        version: link:../editor
       '@fossil-lang/examples':
         specifier: workspace:*
         version: link:../examples

@@ -38,6 +38,7 @@
   "dependencies": {
     "@codemirror/lang-sql": "^6.10.0",
     "@codemirror/lsp-client": "^6.2.4",
+    "@fossil-lang/editor": "workspace:*",
     "@fossil-lang/examples": "workspace:*",
     "@fossil-lang/resolvers": "workspace:*",
     "@fossil-lang/types": "workspace:*",

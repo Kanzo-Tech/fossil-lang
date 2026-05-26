@@ -41,7 +41,7 @@ import { languageServerSupport } from '@codemirror/lsp-client';
 import type { Extension } from '@codemirror/state';
 import type { ConnectionResolver, FossilThemeProp } from '@fossil-lang/types';
 
-import { FossilEditor } from './FossilEditor.js';
+import { FossilEditor } from '@fossil-lang/editor';
 import { ResultTable } from './ResultTable.js';
 import { ResultGraph } from './ResultGraph.js';
 import { useLspWorker } from '../hooks/useLspWorker.js';
@@ -821,6 +821,11 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
               value={mapping}
               onChange={setMapping}
               extensions={extensions}
+              // lspTransport is ignored when extensions is provided (the
+              // playground pre-composes its own LSP wiring via the local
+              // useLspWorker hook). Pass null to satisfy the LOCKED
+              // FossilEditorProps surface per ADR-0036 / Phase 11 11-02.
+              lspTransport={null}
             />
           ) : (
             // Gated on main-thread WASM init: CodeMirror's StreamParser
