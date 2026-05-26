@@ -22,4 +22,5 @@ export {
 } from './transports/Worker.js';
 export type { WorkerTransportOpts } from './transports/Worker.js';
 export { NullTransport } from './transports/Null.js';
-// HttpTransport added in Task 2 of plan 11-03.
+export { HttpTransport } from './transports/Http.js';
+export type { HttpTransportOpts } from './transports/Http.js';
