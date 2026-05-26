@@ -13,6 +13,10 @@
  */
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
@@ -23,6 +27,18 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+  },
+  // Multi-entry Vite app — index.html is the SC#2 host-agnostic proof
+  // (mounts <FossilPlayground/>); primitives.html is the Phase 10 VIS-01
+  // oracle (mounts @fossil-lang/ui primitives directly). Both are built
+  // into dist/ for `vite preview` to serve concurrently.
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        primitives: resolve(__dirname, 'primitives.html'),
+      },
+    },
   },
   // The fossil_wasm_bg.wasm artefact lives in the @fossil-lang/wasm pkg
   // directory; Vite's asset handling picks it up via the `?url` import

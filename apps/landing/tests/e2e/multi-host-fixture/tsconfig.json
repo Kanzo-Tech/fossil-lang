@@ -8,5 +8,5 @@
     "verbatimModuleSyntax": false,
     "types": ["vite/client"]
   },
-  "include": ["main.tsx", "vite.config.ts"]
+  "include": ["main.tsx", "main-primitives.tsx", "vite.config.ts"]
 }
