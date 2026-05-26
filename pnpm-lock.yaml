@@ -533,6 +533,9 @@ importers:
       '@uwdata/mosaic-core':
         specifier: ^0.21.1
         version: 0.21.1
+      '@uwdata/mosaic-sql':
+        specifier: ^0.21.1
+        version: 0.21.1
       n3:
         specifier: ^1.17.0
         version: 1.17.6

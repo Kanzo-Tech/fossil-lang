@@ -19,5 +19,9 @@ export const VIEWER_PACKAGE_VERSION = '0.1.0';
 // === 12-02 — internals/CosmosGraph.tsx exports ===
 export { CosmosGraph } from './internals/CosmosGraph.js';
 export type { CosmosGraphProps, CosmosGraphHandle } from './internals/CosmosGraph.js';
-// === 12-03 — internals/GraphCanvas.tsx + hooks/* exports go here ===
+// === 12-03 — internals/getAdaptiveConfig + hooks/useGraphData + hooks/useGraphCrossfilter ===
+export { getAdaptiveConfig, DEFAULT_GRAPH_CONFIG } from './internals/getAdaptiveConfig.js';
+export { useGraphData, GROUP_CSS_COLORS, hashPos } from './hooks/useGraphData.js';
+export type { VertexRow, EdgeRow, KGGraphData } from './hooks/useGraphData.js';
+export { useGraphCrossfilter } from './hooks/useGraphCrossfilter.js';
 // === 12-04 — FossilGraphView.tsx + FossilViewer.tsx + turtle/* exports go here ===

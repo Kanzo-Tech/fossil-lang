@@ -38,6 +38,7 @@
   "dependencies": {
     "@cosmos.gl/graph": "2.6.4",
     "@uwdata/mosaic-core": "^0.21.1",
+    "@uwdata/mosaic-sql": "^0.21.1",
     "@fossil-lang/types": "workspace:*",
     "@fossil-lang/ui": "workspace:*",
     "n3": "^1.17.0"

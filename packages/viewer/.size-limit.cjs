@@ -37,6 +37,7 @@ module.exports = [
       'react-dom',
       '@cosmos.gl/graph',
       '@uwdata/mosaic-core',
+      '@uwdata/mosaic-sql',
       'n3',
       '@fossil-lang/ui',
       '@fossil-lang/types',
