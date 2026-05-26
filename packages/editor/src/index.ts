@@ -1,10 +1,8 @@
 /**
  * @fossil-lang/editor — public entry point.
- *
- * Phase 11 plan 11-01: scaffold only — Transport contract exposed.
- * Plan 11-02 adds FossilEditor + FossilEditorProps.
- * Plan 11-03 adds WorkerTransport + HttpTransport + NullTransport.
  */
+
+// === 11-01: Transport contract ===
 export type {
   Transport,
   JsonRpcRequest,
@@ -12,3 +10,9 @@ export type {
   JsonRpcNotification,
   SendOptions,
 } from './transports/types.js';
+
+// === 11-02: FossilEditor + props ===
+export { FossilEditor } from './FossilEditor.js';
+export type { FossilEditorProps } from './FossilEditor.js';
+
+// === 11-03: Transports — Worker / Http / Null land in plan 11-03 ===
