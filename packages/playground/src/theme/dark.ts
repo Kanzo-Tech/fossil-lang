@@ -33,6 +33,10 @@ export const darkTheme: FossilTheme = {
     warning: '#fbbf24',
     /** Informational. sky-400 on #0f172a ≈ 7.4:1 (AAA). */
     info: '#38bdf8',
+    /** NEW (Phase 10 VIS-03). Focus ring colour anchor. Default = accent.
+     *  Hosts override this slot independently of accent. Emits
+     *  `--fossil-colors-ring`. */
+    ring: '#60a5fa',
     syntax: {
       /** violet-400 on #0f172a ≈ 5.7:1 (AA). */
       keyword: '#c084fc',
@@ -70,5 +74,43 @@ export const darkTheme: FossilTheme = {
   radius: {
     sm: '4px',
     md: '8px',
+  },
+  // ─── Phase 10 VIS-03: IDE-grade token namespaces (ADR-0034) ───
+  radii: {
+    sm: '4px',
+    md: '6px',
+    lg: '8px',
+    xl: '12px',
+    full: '9999px',
+  },
+  spacing: {
+    '0': '0',
+    '1': '4px',
+    '2': '8px',
+    '3': '12px',
+    '4': '16px',
+    '6': '24px',
+    '8': '32px',
+  },
+  motion: {
+    duration: {
+      fast: '150ms',
+      base: '200ms',
+    },
+    easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  focus: {
+    /** Pre-resolved rgba — derived from dark accent
+     *  (#60a5fa → R=96 G=165 B=250) at 50% opacity. Per ADR-0034 rule 4
+     *  (Safari <16.2 compat — modern CSS colour-blending functions are
+     *  unsupported there). */
+    ring: '0 0 0 3px rgba(96, 165, 250, 0.5)',
+  },
+  size: {
+    control: {
+      base: '32px',
+      sm: '24px',
+      lg: '40px',
+    },
   },
 };
