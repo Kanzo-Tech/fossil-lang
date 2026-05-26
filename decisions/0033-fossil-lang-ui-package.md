@@ -84,3 +84,29 @@ v0.1.x consumers can `import { Tabs, TabsList, ... } from
 
 - Naming: `@fossil-lang/ui` matches shadcn/Keasy convention so migrators
   recognise it.
+
+## Amendment 2026-05-26 (plan 10-09)
+
+`@fossil-lang/ui` is **theme-less**. The CSS custom properties under the
+`--fossil-*` prefix are a CONTRACT consumed via a host-provided theme — the
+primitive wrappers and the `inject.ts` stylesheet reference the vars at
+runtime; consumers without a theme provider see browser-default fallbacks
+(ARIA + keyboard + state selectors still wire correctly; only the visual
+chrome cascades to defaults).
+
+The original Phase 10 plan 10-06 added a `fossil-ide` default theme inside
+`@fossil-lang/playground` (file `packages/playground/src/theme/fossil-ide.ts`,
+plus a default-flip at both `useTheme` and `<FossilPlayground/>`'s prop
+destructure). That decision coupled OSS Fossil to one specific brand — the
+kanzo `kanzo.tech` commercial brand. Plan 10-09 extracted the theme to a
+new `@kanzo/theme` workspace package and REVERTED the `@fossil-lang/*`
+default-flips so the OSS surface is brand-agnostic again.
+
+The contract surface (`--fossil-*` CSS variable names + the `FossilTheme`
+TypeScript shape exposed by `@fossil-lang/types`) is unchanged. Brand
+ownership is now explicit: kanzo-branded hosts wrap their tree in
+`<KanzoThemeProvider/>` from `@kanzo/theme`; non-kanzo hosts ship their own
+theme or accept browser-default fallbacks.
+
+See [ADR-0035](0035-visual-ownership-separation.md) for the full visual
+ownership story and the alternatives considered.
