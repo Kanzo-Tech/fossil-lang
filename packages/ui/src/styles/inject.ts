@@ -81,7 +81,116 @@ const STYLESHEET = `
 }
 
 /* === plan 10-04: DropdownMenu / Tooltip / ScrollArea === */
-/* (Empty in this plan; Plan 10-04 appends its selectors here.) */
+
+/* DropdownMenu — content surface + item highlight state */
+[data-slot="dropdown-menu-content"],
+[data-slot="dropdown-menu-sub-content"] {
+  background-color: var(--fossil-colors-background);
+  color: var(--fossil-colors-foreground);
+  border: 1px solid var(--fossil-colors-border);
+  border-radius: var(--fossil-radii-lg);
+  padding: var(--fossil-spacing-1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  min-width: 8rem;
+}
+[data-slot="dropdown-menu-item"],
+[data-slot="dropdown-menu-checkbox-item"],
+[data-slot="dropdown-menu-radio-item"],
+[data-slot="dropdown-menu-sub-trigger"] {
+  padding: var(--fossil-spacing-1) var(--fossil-spacing-2);
+  border-radius: var(--fossil-radii-sm);
+  cursor: pointer;
+  outline: none;
+  font-size: var(--fossil-fonts-sizeSmall);
+  color: var(--fossil-colors-foreground);
+  transition: background-color var(--fossil-motion-duration-fast) var(--fossil-motion-easing);
+}
+[data-slot="dropdown-menu-item"]:hover,
+[data-slot="dropdown-menu-item"][data-highlighted],
+[data-slot="dropdown-menu-checkbox-item"]:hover,
+[data-slot="dropdown-menu-checkbox-item"][data-highlighted],
+[data-slot="dropdown-menu-radio-item"]:hover,
+[data-slot="dropdown-menu-radio-item"][data-highlighted],
+[data-slot="dropdown-menu-sub-trigger"]:hover,
+[data-slot="dropdown-menu-sub-trigger"][data-highlighted],
+[data-slot="dropdown-menu-sub-trigger"][data-state="open"] {
+  background-color: var(--fossil-colors-muted);
+  color: var(--fossil-colors-foreground);
+}
+[data-slot="dropdown-menu-separator"] {
+  height: 1px;
+  background-color: var(--fossil-colors-border);
+  margin: var(--fossil-spacing-1) 0;
+}
+[data-slot="dropdown-menu-label"] {
+  padding: var(--fossil-spacing-1) var(--fossil-spacing-2);
+  font-size: var(--fossil-fonts-sizeSmall);
+  font-weight: 500;
+  color: var(--fossil-colors-muted);
+}
+
+/* Tooltip — content surface + fade-in keyframes */
+[data-slot="tooltip-content"] {
+  background-color: var(--fossil-colors-foreground);
+  color: var(--fossil-colors-background);
+  padding: var(--fossil-spacing-1) var(--fossil-spacing-2);
+  border-radius: var(--fossil-radii-sm);
+  font-size: var(--fossil-fonts-sizeSmall);
+  line-height: 1.4;
+  max-width: 280px;
+  z-index: 60;
+}
+[data-slot="tooltip-content"][data-state="delayed-open"],
+[data-slot="tooltip-content"][data-state="instant-open"] {
+  animation: fossil-tooltip-fade-in var(--fossil-motion-duration-fast) var(--fossil-motion-easing);
+}
+@keyframes fossil-tooltip-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ScrollArea — visible-on-hover scrollbar pattern */
+[data-slot="scroll-area"] {
+  position: relative;
+  overflow: hidden;
+}
+[data-slot="scroll-area-viewport"] {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+[data-slot="scroll-area-scrollbar"] {
+  display: flex;
+  user-select: none;
+  touch-action: none;
+  padding: 2px;
+  background-color: transparent;
+  opacity: 0;
+  transition: opacity var(--fossil-motion-duration-fast) var(--fossil-motion-easing),
+              background-color var(--fossil-motion-duration-fast) var(--fossil-motion-easing);
+}
+[data-slot="scroll-area"]:hover [data-slot="scroll-area-scrollbar"],
+[data-slot="scroll-area-scrollbar"][data-state="visible"] {
+  opacity: 1;
+}
+[data-slot="scroll-area-scrollbar"][data-state="hidden"] {
+  opacity: 0;
+}
+[data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+  width: 10px;
+  height: 100%;
+}
+[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
+  height: 10px;
+  width: 100%;
+  flex-direction: column;
+}
+[data-slot="scroll-area-thumb"] {
+  flex: 1;
+  background-color: var(--fossil-colors-border);
+  border-radius: var(--fossil-radii-full);
+  position: relative;
+}
 
 /* === plan 10-05: Resizable / Toggle === */
 /* (Empty in this plan; Plan 10-05 appends its selectors here.) */
