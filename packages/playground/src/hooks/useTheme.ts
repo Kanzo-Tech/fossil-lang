@@ -43,6 +43,7 @@ import { tags as t } from '@lezer/highlight';
 import type { FossilTheme, FossilThemeProp } from '@fossil-lang/types';
 import { lightTheme } from '../theme/light.js';
 import { darkTheme } from '../theme/dark.js';
+import { fossilIdeTheme } from '../theme/fossil-ide.js';
 import { themeToCssVars } from '../theme/tokens.js';
 
 export interface UseThemeResult {
@@ -58,21 +59,28 @@ export interface UseThemeResult {
 
 /**
  * Resolve a theme prop into the application bundle (CSS vars + CodeMirror
- * extension). Memoised on `prop` identity — built-in names ('light'|'dark')
- * are referentially stable; custom `FossilTheme` objects should be
- * `useMemo`'d by the consumer to avoid editor-rebuilds on parent re-renders.
+ * extension). Memoised on `prop` identity — built-in names
+ * ('light' | 'dark' | 'fossil-ide') are referentially stable; custom
+ * `FossilTheme` objects should be `useMemo`'d by the consumer to avoid
+ * editor-rebuilds on parent re-renders.
  *
- * Default is `'light'`. Pass `'dark'` for the built-in dark; pass a
- * `FossilTheme` object for a custom palette (spread one of the built-ins to
- * override a subset of tokens).
+ * Default is `'fossil-ide'` (v0.2 onwards; v0.1.x default was `'light'` —
+ * consumers passing prop explicitly see no change). Pass `'light'` or
+ * `'dark'` for the v0.1.x built-ins; pass a `FossilTheme` object for a
+ * custom palette (spread one of the built-ins to override a subset of
+ * tokens).
  */
-export function useTheme(prop: FossilThemeProp = 'light'): UseThemeResult {
+export function useTheme(
+  prop: FossilThemeProp = 'fossil-ide',
+): UseThemeResult {
   return useMemo<UseThemeResult>(() => {
     const theme: FossilTheme =
       typeof prop === 'string'
         ? prop === 'dark'
           ? darkTheme
-          : lightTheme
+          : prop === 'fossil-ide'
+            ? fossilIdeTheme
+            : lightTheme // fallback for 'light' AND any unknown string
         : prop;
     const cssVars = themeToCssVars(theme);
     const editorTheme = buildEditorTheme(theme);

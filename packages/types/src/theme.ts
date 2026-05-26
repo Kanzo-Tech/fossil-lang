@@ -145,8 +145,10 @@ export interface FossilTheme {
   };
 }
 
-/** Built-in theme names; `theme` prop also accepts a full `FossilTheme` shape. */
-export type FossilThemeName = 'light' | 'dark';
+/** Built-in theme names ('light' | 'dark' | 'fossil-ide'); `theme` prop also accepts a full `FossilTheme` shape.
+ *  Default since v0.2: 'fossil-ide' (IDE-style look — tighter typography + IDE-grade primitives).
+ *  v0.1.x consumers passing 'light' or 'dark' see no change. */
+export type FossilThemeName = 'light' | 'dark' | 'fossil-ide';
 
 /** Accepted value for the `theme` prop on `<FossilPlayground />` + sub-components. */
 export type FossilThemeProp = FossilThemeName | FossilTheme;
