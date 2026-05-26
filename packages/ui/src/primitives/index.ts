@@ -5,5 +5,8 @@
  * (alphabetical) so future appends are unambiguous.
  */
 export * from './Dialog.js';
+export * from './DropdownMenu.js';
+export * from './ScrollArea.js';
 export * from './Separator.js';
 export * from './Tabs.js';
+export * from './Tooltip.js';
