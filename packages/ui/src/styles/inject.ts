@@ -193,7 +193,97 @@ const STYLESHEET = `
 }
 
 /* === plan 10-05: Resizable / Toggle === */
-/* (Empty in this plan; Plan 10-05 appends its selectors here.) */
+
+/* Toggle — base affordance + hover + pressed state. Used both by <Toggle>
+   (standalone) and <ToggleGroupItem> (which intentionally reuses the same
+   data-slot="toggle" selector so a single CSS rule applies to both — see
+   ToggleGroupItem in src/primitives/Toggle.tsx). */
+[data-slot="toggle"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fossil-spacing-2);
+  height: var(--fossil-size-control-base);
+  padding: 0 var(--fossil-spacing-2);
+  border-radius: var(--fossil-radii-md);
+  font-size: var(--fossil-fonts-sizeSmall);
+  font-weight: 500;
+  background: transparent;
+  color: var(--fossil-colors-foreground);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--fossil-motion-duration-fast) var(--fossil-motion-easing),
+              border-color var(--fossil-motion-duration-fast) var(--fossil-motion-easing),
+              color var(--fossil-motion-duration-fast) var(--fossil-motion-easing);
+}
+[data-slot="toggle"]:hover {
+  background-color: var(--fossil-colors-muted);
+}
+[data-slot="toggle"][data-state="on"] {
+  background-color: var(--fossil-colors-muted);
+  color: var(--fossil-colors-foreground);
+}
+[data-slot="toggle"][data-variant="outline"] {
+  border-color: var(--fossil-colors-border);
+}
+[data-slot="toggle"][data-variant="outline"]:hover {
+  background-color: var(--fossil-colors-muted);
+}
+[data-slot="toggle-group"] {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fossil-spacing-1);
+}
+
+/* Resizable — panel group layout + handle hover affordance.
+   react-resizable-panels sets its own [data-resize-handle-state="hover|drag"]
+   attribute during pointer interactions (in addition to the standard :hover);
+   we key off both for parity with the Keasy reference. */
+[data-slot="resizable-panel-group"] {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+[data-slot="resizable-panel-group"][data-panel-group-direction="vertical"] {
+  flex-direction: column;
+}
+[data-slot="resizable-handle"] {
+  position: relative;
+  flex: 0 0 1px;
+  background-color: var(--fossil-colors-border);
+  transition: background-color var(--fossil-motion-duration-fast) var(--fossil-motion-easing);
+}
+[data-slot="resizable-handle"]:hover,
+[data-slot="resizable-handle"][data-resize-handle-state="hover"],
+[data-slot="resizable-handle"][data-resize-handle-state="drag"] {
+  background-color: var(--fossil-colors-muted);
+}
+[data-slot="resizable-handle"][data-panel-group-direction="horizontal"] {
+  width: 1px;
+  height: 100%;
+  cursor: col-resize;
+}
+[data-slot="resizable-handle"][data-panel-group-direction="vertical"] {
+  height: 1px;
+  width: 100%;
+  cursor: row-resize;
+}
+[data-slot="resizable-handle-grip"] {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--fossil-colors-border);
+  border-radius: var(--fossil-radii-sm);
+  width: 12px;
+  height: 12px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fossil-colors-muted);
+}
 `.trim();
 
 export function injectFossilUiStyles(): void {
