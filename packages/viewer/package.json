@@ -1,0 +1,62 @@
+{
+  "name": "@fossil-lang/viewer",
+  "version": "0.1.0",
+  "description": "Cosmos.gl WebGL graph viewer + IDE-style tabs composition (Graph / Turtle / Vertices / Edges) for Fossil — promoted from Keasy's discovery view. Per Phase 12 of v0.2 (see .planning/phases/12-fossil-lang-viewer-port/12-CONTEXT.md for locked decisions).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/viewer"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "size": "size-limit"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@cosmos.gl/graph": "2.6.4",
+    "@uwdata/mosaic-core": "^0.21.1",
+    "@fossil-lang/types": "workspace:*",
+    "@fossil-lang/ui": "workspace:*",
+    "n3": "^1.17.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "^11.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@types/n3": "^1.21.0",
+    "happy-dom": "^15.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "size-limit": "^11.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
