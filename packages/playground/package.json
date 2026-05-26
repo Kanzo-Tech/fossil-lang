@@ -41,6 +41,7 @@
     "@fossil-lang/examples": "workspace:*",
     "@fossil-lang/resolvers": "workspace:*",
     "@fossil-lang/types": "workspace:*",
+    "@fossil-lang/ui": "workspace:*",
     "fflate": "^0.8.3",
     "n3": "~1.17"
   },

@@ -164,7 +164,8 @@ export interface FossilPlaygroundProps {
   onError?: (error: Error) => void;
 
   /**
-   * Theme: `'light'` (default) | `'dark'` | a custom `FossilTheme` object.
+   * Theme: `'fossil-ide'` (default since v0.2) | `'light'` | `'dark'` | a
+   * custom `FossilTheme` object.
    *
    * The chosen theme applies via CSS custom properties on the playground
    * root element (e.g. `--fossil-colors-background`). Hosts can override
@@ -172,10 +173,17 @@ export interface FossilPlaygroundProps {
    * property — the cascade wins, so per-instance overrides are possible
    * without re-mounting. Per THEME-01 + CONTEXT.md Monaco-style API.
    *
-   * Custom themes: spread one of the built-ins (`lightTheme`, `darkTheme`
-   * exported from this package) and override the leaf tokens you care
-   * about. Memoise the resulting object via `useMemo` to avoid
-   * tearing-down the CodeMirror editor on every render.
+   * v0.1.x compatibility: hosts that explicitly passed `theme='light'` or
+   * `theme='dark'` see IDENTICAL behaviour to v0.1.x — `'light'` resolves
+   * to `lightTheme` and `'dark'` resolves to `darkTheme`. ONLY the no-prop
+   * default changed (was `'light'`, now `'fossil-ide'`) so v0.1.x consumers
+   * that omitted `theme` get an automatic visual upgrade to the IDE look
+   * with zero code change. Per VIS-02 SC#2 + CONTEXT.md Reconciliation 6.
+   *
+   * Custom themes: spread one of the built-ins (`lightTheme`, `darkTheme`,
+   * `fossilIdeTheme` exported from this package) and override the leaf
+   * tokens you care about. Memoise the resulting object via `useMemo` to
+   * avoid tearing-down the CodeMirror editor on every render.
    */
   theme?: FossilThemeProp;
 
@@ -238,7 +246,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     maxResolvedBytes = DEFAULT_MAX_RESOLVED_BYTES,
     onRun,
     onError,
-    theme: themeProp = 'light',
+    theme: themeProp = 'fossil-ide',
     initialPermalink,
     onStateChange,
   } = props;

@@ -62,7 +62,7 @@ function contrast(a: string, b: string): number {
 }
 
 describe('THEME-01: <FossilPlayground theme={...}/>', () => {
-  it('default (no theme prop) applies light CSS vars at the root', () => {
+  it('default (no theme prop) applies fossil-ide CSS vars at the root', () => {
     const { container } = render(
       <FossilPlayground resolver={mockResolver} wasmUrl="https://mock/x" />,
     );
@@ -70,7 +70,14 @@ describe('THEME-01: <FossilPlayground theme={...}/>', () => {
       '.fossil-playground',
     ) as HTMLElement | null;
     expect(root).toBeTruthy();
-    // Inline style carries the flattened FossilTheme as CSS vars.
+    // fossil-ide is the v0.2 default (per VIS-02 SC#2 / CONTEXT.md
+    // Reconciliation 6). Distinguishing token vs lightTheme:
+    // fonts.sizeBase = 13px (lightTheme is 14px). Colors are INHERITED from
+    // lightTheme, so the existing colour-cascade assertions below still pass
+    // — they validate the no-regression invariant for the colour surface.
+    expect(root!.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe(
+      '13px',
+    );
     expect(root!.style.getPropertyValue('--fossil-colors-background')).toBe(
       lightTheme.colors.background,
     );

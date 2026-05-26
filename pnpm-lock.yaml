@@ -144,6 +144,9 @@ importers:
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../../../../../packages/types
+      '@fossil-lang/ui':
+        specifier: workspace:*
+        version: link:../../../../../packages/ui
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../../../../../packages/wasm
@@ -243,6 +246,9 @@ importers:
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types
+      '@fossil-lang/ui':
+        specifier: workspace:*
+        version: link:../ui
       fflate:
         specifier: ^0.8.3
         version: 0.8.3

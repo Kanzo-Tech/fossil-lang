@@ -145,3 +145,27 @@ export {
   buildPlaygroundBibtex,
   buildPlaygroundPlaintext,
 } from './bibtex/index.js';
+
+// ============================================================================
+// Re-export @fossil-lang/ui — primitives + tokens + utilities
+//
+// v0.2 zero-code-change upgrade path: consumers who only import from
+// '@fossil-lang/playground' get the new primitives (Tabs, Dialog, ...) without
+// adding a new package to their dependencies. Per ADR-0033 + Phase 10
+// CONTEXT.md.
+//
+// Direct consumers can still `import { Tabs } from '@fossil-lang/ui'` if they
+// want the smaller dependency footprint. Both paths resolve to the same
+// module instance (pnpm workspace deduplication).
+//
+// Name-collision audit (2026-05-26): @fossil-lang/playground exports
+// lightTheme, darkTheme, themeToCssVars, cssVarsToStyle, useTheme,
+// FossilPlayground (+ sub-components and hooks). @fossil-lang/ui exports cx,
+// injectFossilUiStyles, and the 8 Radix primitives + their sub-components
+// (Tabs/TabsList/.../Toggle/ToggleGroup/.../ResizablePanelGroup/...). No
+// overlap.
+// ============================================================================
+export * from '@fossil-lang/ui';
+
+// Re-export the new fossil-ide theme (companion to lightTheme + darkTheme).
+export { fossilIdeTheme } from './theme/fossil-ide.js';
