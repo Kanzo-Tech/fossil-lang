@@ -35,4 +35,7 @@ export { rowsToTurtle, TurtleTab } from './turtle/index.js';
 export type { TurtleVertexRow, TurtleEdgeRow, TurtleTabProps } from './turtle/index.js';
 
 // === 12-04 — FossilGraphView + FossilViewer (public API) ===
-// Filled in by Task 2 of plan 12-04.
+export { FossilGraphView } from './FossilGraphView.js';
+export type { FossilGraphViewProps } from './FossilGraphView.js';
+export { FossilViewer } from './FossilViewer.js';
+export type { FossilViewerProps } from './FossilViewer.js';

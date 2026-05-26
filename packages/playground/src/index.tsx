@@ -28,8 +28,22 @@ export { FossilEditor } from '@fossil-lang/editor';
 export type { FossilEditorProps } from '@fossil-lang/editor';
 export { ResultTable } from './component/ResultTable.js';
 export type { ResultTableProps } from './component/ResultTable.js';
+// ResultGraph is a v0.2.x deprecated alias of FossilGraphView from
+// `@fossil-lang/viewer` (Phase 12 plan 12-04). New consumers should
+// `import { FossilGraphView } from '@fossil-lang/viewer'` directly.
 export { ResultGraph } from './component/ResultGraph.js';
 export type { ResultGraphProps } from './component/ResultGraph.js';
+
+// FossilGraphView + FossilViewer re-exported from @fossil-lang/viewer
+// (Phase 12 plan 12-04). Module-instance dedup via pnpm workspace
+// symlinks — same single-source pattern Phase 11 shipped for the
+// editor. v0.1.x consumers importing only from @fossil-lang/playground
+// now reach the full viewer API surface.
+export { FossilGraphView, FossilViewer } from '@fossil-lang/viewer';
+export type {
+  FossilGraphViewProps,
+  FossilViewerProps,
+} from '@fossil-lang/viewer';
 
 // Hooks
 export { useLspWorker } from './hooks/useLspWorker.js';

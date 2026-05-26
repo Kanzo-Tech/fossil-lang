@@ -1,40 +1,44 @@
 /**
- * ResultGraph — Cosmos.gl WebGL graph viz with tabular a11y fallback.
+ * ResultGraph — v0.2.x deprecated alias of FossilGraphView.
  *
- * Per RESEARCH.md Pitfall 4 (Cosmos.gl React lifecycle):
- *   - WebGL contexts are heavyweight. Mount via `useRef` + `useEffect` with
- *     EMPTY dep array; the canvas lives OUTSIDE React's reconciler.
- *   - `update()` calls on prop changes via a SEPARATE useEffect that DOES
- *     depend on props.
- *   - Explicit `destroy()` in cleanup. NOT React-managed children.
+ * @deprecated use `@fossil-lang/viewer` `<FossilGraphView/>` directly.
  *
- * Per RESEARCH.md Open Question 6: `cosmos.gl` is the OpenJS Foundation home
- * for the Cosmograph WebGL engine (formerly `@cosmograph/cosmos`). The
- * exact API surface needs verification against the installed version; this
- * implementation is intentionally defensive — the dynamic import is wrapped
- * in try/catch, and on any failure the fallback prop renders. v0.1 prefers
- * the fallback (tabular) by default; consumers opt into the WebGL graph
- * once we've verified the API + tested against axe-core.
+ * The v0.1.x prop surface is preserved byte-for-byte so consumers
+ * upgrading from v0.1 to v0.2 do not need to change import sites.
+ * The prop translation:
+ *   - `enableWebGL` (v0.1 default: false — opt-IN) → `webgl`
+ *     (FossilGraphView default: true — opt-OUT). The alias honors the
+ *     v0.1 default-OFF semantic via `props.enableWebGL ?? false` so
+ *     `<ResultGraph/>` with no `enableWebGL` prop still renders the
+ *     accessible tabular path, just like v0.1.x shipped.
+ *   - `fallback` prop is now IGNORED — `FossilGraphView` renders its
+ *     own `<TabularFallback/>` accessibility path. We emit a one-time
+ *     `console.warn` in dev when callers pass a non-null `fallback`,
+ *     gated by a `useRef` sentinel + `useEffect` with empty deps so
+ *     it fires ONCE per component mount (Phase 12 plan 12-04 W1
+ *     deviation — prevents log-spam on re-renders).
  *
- * Per A11Y-01 (WCAG 2.1 AA): a WebGL canvas alone is not accessible. The
- * `fallback` prop renders alongside the canvas (or replaces it on failure)
- * so screen readers + keyboard navigation have a path through the data.
+ * Per Phase 12 plan 12-04 + ROADMAP Phase 18 migration guide.
  */
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { FossilGraphView } from '@fossil-lang/viewer';
 
 export interface ResultGraphProps {
   /** Vertex rows from the playground's compile+run output. */
   vertices: Array<{ id: string; [k: string]: unknown }>;
   /** Edge rows — `source` + `target` are required (ids referencing vertices). */
   edges: Array<{ source: string; target: string; [k: string]: unknown }>;
-  /** A11Y-01 fallback — rendered alongside (or in place of) the canvas. */
+  /**
+   * @deprecated v0.2.x ignores this prop — FossilGraphView ships its
+   * own TabularFallback. Will be removed in v0.3.x.
+   */
   fallback?: ReactNode;
   /**
-   * v0.1 default: tabular fallback only, NO WebGL canvas. Set to `true` to
-   * opt into the Cosmos.gl WebGL render path (still verifying API per
-   * RESEARCH.md Open Question 6). Phase 9 polish flips this default once
-   * the API is locked + axe-core gate is green.
+   * v0.1 default: tabular fallback only, NO WebGL canvas. The alias
+   * preserves this default-OFF behaviour by passing
+   * `webgl={enableWebGL ?? false}` to FossilGraphView (whose own
+   * default is true).
    */
   enableWebGL?: boolean;
   /** Optional class for theme hooks. */
@@ -48,84 +52,68 @@ export function ResultGraph({
   enableWebGL = false,
   className,
 }: ResultGraphProps): JSX.Element {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const viewRef = useRef<{ destroy(): void } | null>(null);
-
-  // Mount once — empty deps. Per RESEARCH.md Pitfall 4 the canvas must live
-  // outside the reconciler; updates flow through a separate effect below.
+  // W1 (12-04 plan-checker iteration 1): gate the deprecation warning to
+  // ONCE-per-mount. A naive `if (...) console.warn(...)` in the render
+  // body fires on every re-render — spammy in dev. The sentinel ref +
+  // empty-deps useEffect ensures exactly one log per mount, regardless
+  // of how many times the parent re-renders.
+  const warnedRef = useRef(false);
   useEffect(() => {
-    if (!enableWebGL) return;
-    if (!hostRef.current) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        // Lazy import via a variable to keep TS off the static module graph.
-        // RESEARCH.md Open Question 6 flagged cosmos.gl vs @sqlrooms/cosmos as
-        // unresolved — until 08-11 verifies the canonical package, this dynamic
-        // import is intentionally type-erased. Phase 9 polish locks the import
-        // target + adds the type ambient declaration.
-        const moduleSpec = 'cosmos.gl';
-        const cosmos = (await import(/* @vite-ignore */ moduleSpec).catch(
-          () => null,
-        )) as null | { default?: unknown; Graph?: unknown };
-        if (cancelled || !cosmos) return;
-        // Defensive: cosmos.gl's API surface needs verification per RESEARCH.md
-        // Open Question 6. We log + bail rather than crash so the tabular
-        // fallback always renders.
-        // eslint-disable-next-line no-console
-        console.warn(
-          '[ResultGraph] cosmos.gl WebGL mount path not yet wired — verify API per RESEARCH.md Open Question 6 + Phase 9 polish.',
-        );
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error('[ResultGraph] cosmos.gl init failed; falling back to tabular:', e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      viewRef.current?.destroy();
-      viewRef.current = null;
-    };
-    // Mount-once empty deps — explicit per Pitfall 4. Lint suppressed.
+    if (
+      !warnedRef.current &&
+      fallback != null &&
+      typeof process !== 'undefined' &&
+      process.env?.NODE_ENV !== 'production'
+    ) {
+      warnedRef.current = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[ResultGraph] `fallback` prop ignored in v0.2.x — FossilGraphView provides its own TabularFallback. See MIGRATION-v0.2.md.',
+      );
+    }
+    // Empty deps — we want the gating logic to evaluate once per mount,
+    // not on every prop change. The ref guards against re-fires even if
+    // `fallback` flips in a future re-render (the warning has already
+    // been delivered for this mount).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enableWebGL]);
+  }, []);
 
-  // Update on data change — separate effect per Pitfall 4. No-op until
-  // viewRef.current is populated (which requires the WebGL path to be
-  // enabled + cosmos.gl API verified — both deferred).
-  useEffect(() => {
-    if (!viewRef.current) return;
-    // viewRef.current.update(vertices, edges) — Phase 9 polish.
-  }, [vertices, edges]);
+  // Coerce the v0.1.x loose row shapes to FossilGraphView's stricter
+  // VertexRow / EdgeRow. Type + label are derived if missing. Spread
+  // the original row FIRST so explicit overrides (type/label coercions)
+  // win — preserves any extra columns from the v0.1.x runtime output.
+  const adaptedVertices = vertices.map((v) => ({
+    ...v,
+    id: v.id,
+    type: String(v.type ?? 'Unknown'),
+    label: String(v.label ?? v.id),
+  }));
+  const adaptedEdges = edges.map((e) => ({
+    ...e,
+    source: e.source,
+    target: e.target,
+    predicate:
+      typeof e.predicate === 'string' ? e.predicate : undefined,
+  }));
 
+  // The outer `id="graph-canvas"` + `role="img"` + `aria-label` MUST be
+  // preserved — they form the LOAD-BEARING contract with the
+  // apps/landing/ axe-core gate (Phase 8 plan 08-11) which excludes
+  // `#graph-canvas` from a11y rules (WebGL canvases have no inherent
+  // semantic content; see RESEARCH.md Pitfall 5). Renaming or removing
+  // is a breaking change to the v0.1.x A11Y-01 invariant.
   return (
-    // id="graph-canvas" is LOAD-BEARING and lives on the OUTER wrapper (not
-    // only on the inner canvas) so the axe-core `exclude: ['#graph-canvas']`
-    // selector hits whether or not enableWebGL is on. RESEARCH.md Pitfall 5 +
-    // Pattern 4: canvases have no inherent semantic content; the tabular
-    // fallback below provides SR-accessible data. The id is the contract
-    // between this component and the 08-11 axe-core E2E gate; renaming is
-    // a breaking change.
-    //
-    // role="img" + aria-label apply to the OUTER wrapper too so the region
-    // has a stable accessible name even in the v0.1 default (enableWebGL=
-    // false → only fallback renders). SR users hear "Result graph, image"
-    // and the fallback's tabular content gives them the data.
     <div
       id="graph-canvas"
       role="img"
       aria-label="Result graph; tabular fallback follows below for screen readers."
       className={className ?? 'fossil-result-graph'}
     >
-      {enableWebGL && (
-        <div
-          ref={hostRef}
-          // Inner WebGL host. axe-core's exclusion targets the outer
-          // #graph-canvas wrapper which transitively excludes this.
-          style={{ minHeight: 300 }}
-        />
-      )}
-      {fallback}
+      <FossilGraphView
+        vertices={adaptedVertices}
+        edges={adaptedEdges}
+        webgl={enableWebGL}
+      />
     </div>
   );
 }
