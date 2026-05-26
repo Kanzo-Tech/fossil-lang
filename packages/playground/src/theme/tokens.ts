@@ -43,6 +43,15 @@ export const CSS_VAR_PREFIX = '--fossil-';
  *
  * The output is suitable for direct splat into a React `style` prop (browsers
  * preserve `--*` properties verbatim). See `cssVarsToStyle` for the typed cast.
+ *
+ * Phase 10 VIS-03 (ADR-0034) — the Phase 10 extended namespaces (radii,
+ * spacing, motion.duration, focus, size.control) flow through this walker
+ * MECHANICALLY because the recursion has no depth limit. `motion.duration.fast`
+ * emits `--fossil-motion-duration-fast`; `size.control.base` emits
+ * `--fossil-size-control-base`. No code change is required to support the
+ * new namespaces — the structural recursion does the right thing as long as
+ * the FossilTheme leaf keys are kebab-case strings and the nesting depth is
+ * chosen to match the desired CSS variable name shape (per ADR-0034 rule 1).
  */
 export function themeToCssVars(theme: FossilTheme): Record<string, string> {
   const vars: Record<string, string> = {};

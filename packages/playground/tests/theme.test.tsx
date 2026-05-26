@@ -176,3 +176,125 @@ describe('THEME-01: <FossilPlayground theme={...}/>', () => {
     ).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+/**
+ * Phase 10 VIS-03 — new token namespaces flatten to CSS variables per
+ * ADR-0034 (mechanical-flatten naming convention).
+ *
+ * These assertions are SEPARATE from the THEME-01 suite above so the
+ * v0.1.x consumer regression surface stays scoped (the THEME-01 tests
+ * remain a stable contract; this suite adds NEW guarantees on top).
+ */
+describe('Phase 10 VIS-03 — new token namespaces flatten to CSS variables (ADR-0034)', () => {
+  const lightVars = themeToCssVars(lightTheme);
+  const darkVars = themeToCssVars(darkTheme);
+
+  describe('colors.ring (new slot)', () => {
+    it('emits --fossil-colors-ring as a sibling of --fossil-colors-accent', () => {
+      expect(lightVars['--fossil-colors-ring']).toBe('#3b82f6');
+      expect(darkVars['--fossil-colors-ring']).toBe('#60a5fa');
+      // Default == accent for built-in themes (hosts override to decouple).
+      expect(lightVars['--fossil-colors-ring']).toBe(
+        lightVars['--fossil-colors-accent'],
+      );
+      expect(darkVars['--fossil-colors-ring']).toBe(
+        darkVars['--fossil-colors-accent'],
+      );
+    });
+  });
+
+  describe('radii namespace', () => {
+    it('emits --fossil-radii-{sm,md,lg,xl,full} from light theme', () => {
+      expect(lightVars['--fossil-radii-sm']).toBe('4px');
+      expect(lightVars['--fossil-radii-md']).toBe('6px');
+      expect(lightVars['--fossil-radii-lg']).toBe('8px');
+      expect(lightVars['--fossil-radii-xl']).toBe('12px');
+      expect(lightVars['--fossil-radii-full']).toBe('9999px');
+    });
+
+    it('dark theme emits identical radii values (theme-independent)', () => {
+      expect(darkVars['--fossil-radii-md']).toBe('6px');
+      expect(darkVars['--fossil-radii-full']).toBe('9999px');
+    });
+  });
+
+  describe('spacing namespace', () => {
+    it('emits --fossil-spacing-{0,1,2,3,4,6,8} (numeric-string keys, ADR-0034 rule 3)', () => {
+      expect(lightVars['--fossil-spacing-0']).toBe('0');
+      expect(lightVars['--fossil-spacing-1']).toBe('4px');
+      expect(lightVars['--fossil-spacing-2']).toBe('8px');
+      expect(lightVars['--fossil-spacing-3']).toBe('12px');
+      expect(lightVars['--fossil-spacing-4']).toBe('16px');
+      expect(lightVars['--fossil-spacing-6']).toBe('24px');
+      expect(lightVars['--fossil-spacing-8']).toBe('32px');
+    });
+  });
+
+  describe('motion namespace (sub-object nesting, ADR-0034 rule 1)', () => {
+    it('emits --fossil-motion-duration-{fast,base} + --fossil-motion-easing', () => {
+      expect(lightVars['--fossil-motion-duration-fast']).toBe('150ms');
+      expect(lightVars['--fossil-motion-duration-base']).toBe('200ms');
+      expect(lightVars['--fossil-motion-easing']).toMatch(/cubic-bezier/);
+    });
+
+    it('does NOT emit camelCase variants like --fossil-motion-durationFast', () => {
+      // ADR-0034 rule 1 forbids camelCase leaves — the mechanical flattener
+      // would emit them verbatim, breaking the kebab-case CSS-var convention.
+      // Sub-object nesting (motion.duration.fast) is the antidote.
+      expect(lightVars['--fossil-motion-durationFast']).toBeUndefined();
+      expect(lightVars['--fossil-motion-durationBase']).toBeUndefined();
+    });
+  });
+
+  describe('focus.ring (pre-resolved rgba, ADR-0034 rule 4)', () => {
+    it('emits --fossil-focus-ring as a pre-resolved rgba shadow', () => {
+      expect(lightVars['--fossil-focus-ring']).toBe(
+        '0 0 0 3px rgba(59, 130, 246, 0.5)',
+      );
+      expect(darkVars['--fossil-focus-ring']).toBe(
+        '0 0 0 3px rgba(96, 165, 250, 0.5)',
+      );
+    });
+
+    it('focus ring value does NOT use modern CSS colour-blending functions (Safari <16.2 compat)', () => {
+      // ADR-0034 rule 4: the baseline must work on Safari <16.2, which lacks
+      // color-mix(). Hosts can opt into modern functions via override.
+      expect(lightVars['--fossil-focus-ring']).not.toMatch(/color-mix/);
+      expect(darkVars['--fossil-focus-ring']).not.toMatch(/color-mix/);
+    });
+
+    it('does NOT emit --fossil-focusRing (camelCase forbidden per ADR-0034)', () => {
+      expect(lightVars['--fossil-focusRing']).toBeUndefined();
+    });
+  });
+
+  describe('size.control namespace (sub-object nesting, ADR-0034 rule 7)', () => {
+    it('emits --fossil-size-control-{base,sm,lg}', () => {
+      expect(lightVars['--fossil-size-control-base']).toBe('32px');
+      expect(lightVars['--fossil-size-control-sm']).toBe('24px');
+      expect(lightVars['--fossil-size-control-lg']).toBe('40px');
+    });
+
+    it('does NOT emit unsuffixed --fossil-size-control (rule 7 — flattener emits leaves, not branch nodes)', () => {
+      // The default leaf is named `base`, so the canonical default control
+      // height is `--fossil-size-control-base`. Branch nodes never emit.
+      expect(lightVars['--fossil-size-control']).toBeUndefined();
+    });
+  });
+
+  describe('backwards compat — existing v0.1 tokens not regressed (ADR-0034 rule 6)', () => {
+    it('still emits --fossil-colors-* / --fossil-fonts-* / --fossil-space-* / --fossil-radius-*', () => {
+      expect(lightVars['--fossil-colors-background']).toBe('#ffffff');
+      expect(lightVars['--fossil-fonts-mono']).toBeDefined();
+      expect(lightVars['--fossil-space-md']).toBe('16px');
+      expect(lightVars['--fossil-radius-sm']).toBe('4px');
+      expect(lightVars['--fossil-radius-md']).toBe('8px');
+    });
+
+    it('dark theme also preserves existing v0.1 tokens', () => {
+      expect(darkVars['--fossil-colors-background']).toBe('#0f172a');
+      expect(darkVars['--fossil-space-md']).toBe('16px');
+      expect(darkVars['--fossil-radius-md']).toBe('8px');
+    });
+  });
+});
