@@ -2,8 +2,8 @@
  * cx — tiny class-name joiner. Filters out falsy values + joins with a
  * single space.
  *
- * Replaces `cn()` from Keasy's `web/src/lib/utils.ts` which combines
- * clsx + tailwind-merge; @fossil-lang/ui has no Tailwind utility
+ * Replaces Keasy's `cn()` helper (which combines a class-list composer with
+ * a utility-class deduplicator); @fossil-lang/ui has no utility-class
  * collisions to resolve so a plain concat suffices. Zero dependencies.
  *
  * @example
