@@ -16,6 +16,8 @@
 
 export const VIEWER_PACKAGE_VERSION = '0.1.0';
 
-// === 12-02 — internals/CosmosGraph.tsx export goes here ===
+// === 12-02 — internals/CosmosGraph.tsx exports ===
+export { CosmosGraph } from './internals/CosmosGraph.js';
+export type { CosmosGraphProps, CosmosGraphHandle } from './internals/CosmosGraph.js';
 // === 12-03 — internals/GraphCanvas.tsx + hooks/* exports go here ===
 // === 12-04 — FossilGraphView.tsx + FossilViewer.tsx + turtle/* exports go here ===
