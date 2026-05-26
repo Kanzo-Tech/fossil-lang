@@ -1,0 +1,76 @@
+{
+  "name": "@fossil-lang/editor",
+  "version": "0.1.0",
+  "description": "Standalone Fossil editor component — CodeMirror 6 + @fossil-lang/codemirror-fossil + LSP wiring with pluggable transport. Per ADR-0028 (multi-host React library family) + ADR-0032 (@codemirror/lsp-client semantic tokens) + ADR-0036 (Transport-superset design).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/editor"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "size": "size-limit"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*",
+    "@fossil-lang/ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0",
+    "@codemirror/language": "^6.0.0",
+    "@codemirror/autocomplete": "^6.0.0",
+    "@codemirror/lint": "^6.0.0",
+    "@codemirror/lsp-client": "^6.2.4",
+    "@lezer/highlight": "^1.0.0",
+    "@fossil-lang/codemirror-fossil": "workspace:*",
+    "@fossil-lang/wasm": "workspace:*"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.18.0",
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/lint": "^6.8.0",
+    "@codemirror/lsp-client": "^6.2.4",
+    "@codemirror/state": "^6.4.0",
+    "@codemirror/view": "^6.34.0",
+    "@fossil-lang/codemirror-fossil": "workspace:*",
+    "@fossil-lang/wasm": "workspace:*",
+    "@lezer/highlight": "^1.2.0",
+    "@size-limit/preset-small-lib": "^11.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "happy-dom": "^15.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "size-limit": "^11.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
