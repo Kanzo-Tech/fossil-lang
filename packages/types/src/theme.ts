@@ -145,10 +145,19 @@ export interface FossilTheme {
   };
 }
 
-/** Built-in theme names ('light' | 'dark' | 'fossil-ide'); `theme` prop also accepts a full `FossilTheme` shape.
- *  Default since v0.2: 'fossil-ide' (IDE-style look — tighter typography + IDE-grade primitives).
- *  v0.1.x consumers passing 'light' or 'dark' see no change. */
-export type FossilThemeName = 'light' | 'dark' | 'fossil-ide';
+/** Built-in @fossil-lang/* theme names. Hosts wanting brand-specific looks
+ *  (e.g. the kanzo IDE look) wrap their tree in a brand-owned ThemeProvider —
+ *  see ADR-0035 for the visual ownership separation story.
+ *
+ *  The OSS @fossil-lang/* surface is brand-agnostic: when no `theme` prop is
+ *  passed AND no ancestor provider supplies the `--fossil-*` CSS-var cascade,
+ *  consumers render against browser-default fallbacks (ARIA + keyboard + state
+ *  selectors still wire correctly via the primitives; only the visual chrome
+ *  cascades to defaults).
+ *
+ *  v0.1.x consumers passing 'light' or 'dark' explicitly see IDENTICAL
+ *  behaviour. */
+export type FossilThemeName = 'light' | 'dark';
 
 /** Accepted value for the `theme` prop on `<FossilPlayground />` + sub-components. */
 export type FossilThemeProp = FossilThemeName | FossilTheme;

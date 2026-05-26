@@ -149,10 +149,10 @@ export {
 // ============================================================================
 // Re-export @fossil-lang/ui — primitives + tokens + utilities
 //
-// v0.2 zero-code-change upgrade path: consumers who only import from
-// '@fossil-lang/playground' get the new primitives (Tabs, Dialog, ...) without
-// adding a new package to their dependencies. Per ADR-0033 + Phase 10
-// CONTEXT.md.
+// v0.2 zero-code-change upgrade path for the primitive surface: consumers
+// who only import from '@fossil-lang/playground' get the Radix primitives
+// (Tabs, Dialog, ...) without adding a new package to their dependencies.
+// Per ADR-0033 + Phase 10 CONTEXT.md.
 //
 // Direct consumers can still `import { Tabs } from '@fossil-lang/ui'` if they
 // want the smaller dependency footprint. Both paths resolve to the same
@@ -164,8 +164,11 @@ export {
 // injectFossilUiStyles, and the 8 Radix primitives + their sub-components
 // (Tabs/TabsList/.../Toggle/ToggleGroup/.../ResizablePanelGroup/...). No
 // overlap.
+//
+// NOTE: brand-owned theme values (kanzoTheme + <KanzoThemeProvider/>) live
+// in the SEPARATE @kanzo/theme package — NOT re-exported here. Per ADR-0035
+// (visual ownership separation, plan 10-09): @fossil-lang/* is brand-agnostic;
+// kanzo-branded hosts install @kanzo/theme directly. The brief 10-06
+// `fossilIdeTheme` named export was removed in plan 10-09.
 // ============================================================================
 export * from '@fossil-lang/ui';
-
-// Re-export the new fossil-ide theme (companion to lightTheme + darkTheme).
-export { fossilIdeTheme } from './theme/fossil-ide.js';

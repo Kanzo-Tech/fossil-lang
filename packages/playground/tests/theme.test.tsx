@@ -62,7 +62,7 @@ function contrast(a: string, b: string): number {
 }
 
 describe('THEME-01: <FossilPlayground theme={...}/>', () => {
-  it('default (no theme prop) applies fossil-ide CSS vars at the root', () => {
+  it('default (no theme prop) applies NO CSS vars at the root (host provides via Provider)', () => {
     const { container } = render(
       <FossilPlayground resolver={mockResolver} wasmUrl="https://mock/x" />,
     );
@@ -70,19 +70,46 @@ describe('THEME-01: <FossilPlayground theme={...}/>', () => {
       '.fossil-playground',
     ) as HTMLElement | null;
     expect(root).toBeTruthy();
-    // fossil-ide is the v0.2 default (per VIS-02 SC#2 / CONTEXT.md
-    // Reconciliation 6). Distinguishing token vs lightTheme:
-    // fonts.sizeBase = 13px (lightTheme is 14px). Colors are INHERITED from
-    // lightTheme, so the existing colour-cascade assertions below still pass
-    // — they validate the no-regression invariant for the colour surface.
-    expect(root!.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe(
-      '13px',
+    // Per ADR-0035 (visual ownership separation, plan 10-09): the v0.2.x
+    // @fossil-lang/playground default is BRAND-AGNOSTIC. When the host
+    // doesn't pass a `theme` prop AND doesn't wrap the tree in a provider,
+    // NO --fossil-* CSS vars are injected at the playground root. The host
+    // is expected to supply the cascade via <KanzoThemeProvider/> from
+    // @kanzo/theme (kanzo-branded hosts) OR an equivalent provider for
+    // non-kanzo brands. v0.1.x consumers passing 'light' or 'dark'
+    // explicitly continue to see IDENTICAL behaviour — those branches are
+    // tested below.
+    expect(root!.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe('');
+    expect(root!.style.getPropertyValue('--fossil-colors-background')).toBe(
+      '',
     );
+    expect(root!.style.getPropertyValue('--fossil-colors-foreground')).toBe(
+      '',
+    );
+  });
+
+  it('explicit theme="light" applies lightTheme CSS vars (v0.1.x backwards compat)', () => {
+    const { container } = render(
+      <FossilPlayground
+        resolver={mockResolver}
+        wasmUrl="https://mock/x"
+        theme="light"
+      />,
+    );
+    const root = container.querySelector(
+      '.fossil-playground',
+    ) as HTMLElement | null;
+    expect(root).toBeTruthy();
     expect(root!.style.getPropertyValue('--fossil-colors-background')).toBe(
       lightTheme.colors.background,
     );
     expect(root!.style.getPropertyValue('--fossil-colors-foreground')).toBe(
       lightTheme.colors.foreground,
+    );
+    // sizeBase from lightTheme is 14px (NOT 13px — the IDE-grade tightening
+    // lives in @kanzo/theme's kanzoTheme, not in @fossil-lang/* lightTheme).
+    expect(root!.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe(
+      '14px',
     );
   });
 

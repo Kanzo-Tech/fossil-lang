@@ -72,6 +72,7 @@
     "@duckdb/duckdb-wasm": "1.32.0",
     "@fossil-lang/codemirror-fossil": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
+    "@kanzo/theme": "workspace:*",
     "@lezer/highlight": "^1.2.0",
     "@size-limit/preset-small-lib": "^11.0.0",
     "@testing-library/react": "^16.0.0",

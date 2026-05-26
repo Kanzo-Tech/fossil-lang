@@ -164,26 +164,36 @@ export interface FossilPlaygroundProps {
   onError?: (error: Error) => void;
 
   /**
-   * Theme: `'fossil-ide'` (default since v0.2) | `'light'` | `'dark'` | a
-   * custom `FossilTheme` object.
+   * Theme: `'light'` | `'dark'` | a custom `FossilTheme` object, OR
+   * `undefined` (default — host-provider model).
+   *
+   * Per ADR-0035 (visual ownership separation, plan 10-09): the
+   * `@fossil-lang/playground` v0.2.x default is BRAND-AGNOSTIC. When
+   * `theme` is omitted, the component injects NO `--fossil-*` CSS vars
+   * at the root; the host is expected to supply the cascade via an
+   * ancestor theme provider (e.g. `<KanzoThemeProvider/>` from
+   * `@kanzo/theme` for kanzo-branded hosts). The playground stays
+   * interactive against browser defaults; only the visual chrome
+   * cascades.
+   *
+   * v0.1.x compatibility: hosts that explicitly passed `theme='light'`
+   * or `theme='dark'` see IDENTICAL behaviour — `'light'` resolves to
+   * `lightTheme` and `'dark'` resolves to `darkTheme`, exactly as v0.1.x.
+   * (Plan 10-06's brief flip of the no-prop default to `'fossil-ide'`
+   * was reverted in plan 10-09; the `'fossil-ide'` string alias is no
+   * longer a built-in @fossil-lang/* theme name. Hosts wanting the
+   * kanzo IDE look install `@kanzo/theme` and wrap their tree in
+   * `<KanzoThemeProvider/>`.)
    *
    * The chosen theme applies via CSS custom properties on the playground
-   * root element (e.g. `--fossil-colors-background`). Hosts can override
-   * individual tokens at ANY ancestor element by setting the same custom
-   * property — the cascade wins, so per-instance overrides are possible
-   * without re-mounting. Per THEME-01 + CONTEXT.md Monaco-style API.
+   * root element. Hosts can override individual tokens at ANY ancestor
+   * element by setting the same custom property — the cascade wins, so
+   * per-instance overrides are possible without re-mounting.
    *
-   * v0.1.x compatibility: hosts that explicitly passed `theme='light'` or
-   * `theme='dark'` see IDENTICAL behaviour to v0.1.x — `'light'` resolves
-   * to `lightTheme` and `'dark'` resolves to `darkTheme`. ONLY the no-prop
-   * default changed (was `'light'`, now `'fossil-ide'`) so v0.1.x consumers
-   * that omitted `theme` get an automatic visual upgrade to the IDE look
-   * with zero code change. Per VIS-02 SC#2 + CONTEXT.md Reconciliation 6.
-   *
-   * Custom themes: spread one of the built-ins (`lightTheme`, `darkTheme`,
-   * `fossilIdeTheme` exported from this package) and override the leaf
-   * tokens you care about. Memoise the resulting object via `useMemo` to
-   * avoid tearing-down the CodeMirror editor on every render.
+   * Custom themes: spread one of the built-ins (`lightTheme`, `darkTheme`
+   * exported from this package) and override the leaf tokens you care
+   * about. Memoise the resulting object via `useMemo` to avoid
+   * tearing-down the CodeMirror editor on every render.
    */
   theme?: FossilThemeProp;
 
@@ -246,7 +256,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     maxResolvedBytes = DEFAULT_MAX_RESOLVED_BYTES,
     onRun,
     onError,
-    theme: themeProp = 'fossil-ide',
+    theme: themeProp,
     initialPermalink,
     onStateChange,
   } = props;

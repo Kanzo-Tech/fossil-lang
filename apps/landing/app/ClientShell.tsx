@@ -47,6 +47,7 @@
 
 import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
+import { KanzoThemeProvider } from '@kanzo/theme';
 
 const PlaygroundHost = dynamic(() => import('./PlaygroundHost'), {
   ssr: false,
@@ -108,5 +109,21 @@ export function ClientShell(): JSX.Element {
     };
   }, []);
 
-  return <PlaygroundHost />;
+  // Wrap the dynamic-imported playground in <KanzoThemeProvider/> from
+  // @kanzo/theme. Per ADR-0035 (visual ownership separation, plan 10-09):
+  // brand visuals are owned by the @kanzo/* family; @fossil-lang/playground
+  // is brand-agnostic. apps/landing is a KANZO-branded reference host, so
+  // it installs the brand cascade here — every descendant (including
+  // <FossilPlayground/> and its @fossil-lang/ui primitives) inherits the
+  // --fossil-* CSS vars via the Provider's wrapping div's inline style.
+  //
+  // Keeping the brand wrap one layer up from PlaygroundHost (rather than
+  // inside PlaygroundHost itself) makes the OSS playground host file
+  // portable to a non-kanzo deployment — replacing this ClientShell with a
+  // different brand wrapper is the host-side knob.
+  return (
+    <KanzoThemeProvider style={{ minHeight: '100%' }}>
+      <PlaygroundHost />
+    </KanzoThemeProvider>
+  );
 }

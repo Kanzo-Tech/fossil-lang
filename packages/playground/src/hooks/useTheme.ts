@@ -1,38 +1,46 @@
 /**
- * useTheme — resolve a `FossilThemeProp` ('light' | 'dark' | FossilTheme) into:
- *   (a) the resolved `FossilTheme` shape (after normalising a string name);
+ * useTheme — resolve a `FossilThemeProp` ('light' | 'dark' | FossilTheme | undefined)
+ * into:
+ *   (a) the resolved `FossilTheme` shape (after normalising a string name),
+ *       OR `undefined` when no theme is provided (host-provider model);
  *   (b) the flat CSS-variable record to apply at the playground root (via
- *       React's `style` prop);
- *   (c) a CodeMirror `Extension` that styles the editor host to match — both
- *       the surrounding chrome (background/foreground/gutter/cursor) AND the
- *       syntactic highlighting categories (keyword/string/number/comment/...).
+ *       React's `style` prop) — EMPTY when no theme is provided;
+ *   (c) a CodeMirror `Extension` that styles the editor host — a NO-OP
+ *       extension when no theme is provided (the host's provider cascade
+ *       reaches the CodeMirror DOM via the `--fossil-*` vars regardless).
  *
- * Why this hook (vs scattering theme reads across components):
- *   - SINGLE source of truth: change the variable, CodeMirror + the chrome
- *     restyle together. THEME-01's Monaco-style override API depends on this
- *     coherence — host overrides one variable, BOTH the editor and chrome
- *     pick up the change.
- *   - Memoisation: the editor theme Extension is structurally complex; we
- *     compute it once per `prop` identity so React 18 + StrictMode re-renders
- *     don't tear down + rebuild the CodeMirror editor (which is the most
- *     expensive child of `FossilPlayground`).
- *   - Inversion: the host's `theme` prop can be a string name OR a full
- *     `FossilTheme` object. Tools that want to override JUST 2-3 colours
- *     should spread the built-in: `{ ...lightTheme, colors: { ...lightTheme.colors, accent: '#ff00ff' } }`
- *     — this works thanks to the resolution being shallow at the API boundary
- *     + the flattener walking the resolved value.
+ * v0.2.x ownership model (per ADR-0035 — visual ownership separation):
+ *   - No `theme` prop AND no ancestor provider → renders against browser
+ *     defaults (the playground stays interactive; only the visual chrome
+ *     cascades to defaults). This is the v0.2.x "OSS surface is
+ *     brand-agnostic" contract.
+ *   - Explicit `theme='light'` / `'dark'` → resolves to the built-in
+ *     lightTheme / darkTheme exactly as v0.1.x (backwards compat invariant).
+ *   - Explicit `FossilTheme` object → pass-through (advanced override path).
+ *   - No `theme` prop BUT an ancestor `<KanzoThemeProvider/>` (or any other
+ *     host-supplied theme cascade on a parent element) → the `--fossil-*`
+ *     CSS variables flow down via the cascade; this hook produces empty
+ *     cssVars (the host's provider already set them), and CodeMirror reads
+ *     the same variables for its inner chrome.
  *
- * Consumer pattern:
+ * Why no-injection on undefined (vs auto-applying lightTheme):
+ *   - In v0.1.x the default was 'light'. In v0.2.0 the v0.1 default was
+ *     briefly flipped to 'fossil-ide' (plan 10-06); plan 10-09 reverts that
+ *     default-flip per ADR-0035 (the brand surface lives in @kanzo/theme,
+ *     not @fossil-lang/playground).
+ *   - The v0.2.x contract is "OSS surface is brand-agnostic; hosts provide
+ *     the brand cascade". Auto-applying lightTheme would re-introduce a
+ *     brand decision the OSS surface shouldn't make.
+ *   - v0.1.x consumers that explicitly passed `theme='light'` see ZERO
+ *     change; they pass through the resolution branch as before.
+ *
+ * Consumer pattern unchanged from v0.1.x:
  *
  *   const { cssVars, editorTheme } = useTheme(themeProp);
  *   const extensions = useMemo(() => [...baseExts, editorTheme], [baseExts, editorTheme]);
  *   return <div style={cssVarsToStyle(cssVars)}>...</div>;
  *
- * The editor theme uses `@lezer/highlight` tags (the canonical CodeMirror
- * highlight-tag vocabulary the StreamParser path emits as string names —
- * see `@fossil-lang/codemirror-fossil/src/tags.ts`'s `KIND_TO_TAG`). Themes
- * matching on `t.keyword` style ALL keyword tokens (`prefix`, `from`, `in`,
- * `use`, `as`, `and`, `or`, `not`, `iri`) uniformly.
+ * @see decisions/0035-visual-ownership-separation.md
  */
 
 import { useMemo } from 'react';
@@ -43,44 +51,60 @@ import { tags as t } from '@lezer/highlight';
 import type { FossilTheme, FossilThemeProp } from '@fossil-lang/types';
 import { lightTheme } from '../theme/light.js';
 import { darkTheme } from '../theme/dark.js';
-import { fossilIdeTheme } from '../theme/fossil-ide.js';
 import { themeToCssVars } from '../theme/tokens.js';
 
 export interface UseThemeResult {
-  /** The resolved `FossilTheme` (after normalising a 'light'|'dark' string). */
-  theme: FossilTheme;
+  /** The resolved `FossilTheme` (after normalising a 'light'|'dark' string),
+   *  OR `undefined` when no theme prop was passed — host-provider model
+   *  per ADR-0035. */
+  theme: FossilTheme | undefined;
   /** Flat CSS variable record. Apply to the playground root via React's
-   *  `style` prop (use `cssVarsToStyle` from `theme/tokens` for the cast). */
+   *  `style` prop (use `cssVarsToStyle` from `theme/tokens` for the cast).
+   *  EMPTY (`{}`) when no theme prop was passed — host supplies via Provider
+   *  cascade per ADR-0035. */
   cssVars: Record<string, string>;
   /** CodeMirror Extension binding the resolved theme into the editor host
-   *  + syntactic highlighter. Memo-stable per `prop` identity. */
+   *  + syntactic highlighter. A NO-OP extension (`EditorView.theme({})`)
+   *  when no theme prop was passed — CodeMirror reads the cascaded
+   *  `--fossil-*` vars from the host's provider directly via inline-style
+   *  cascade. Memo-stable per `prop` identity. */
   editorTheme: Extension;
 }
 
 /**
  * Resolve a theme prop into the application bundle (CSS vars + CodeMirror
- * extension). Memoised on `prop` identity — built-in names
- * ('light' | 'dark' | 'fossil-ide') are referentially stable; custom
- * `FossilTheme` objects should be `useMemo`'d by the consumer to avoid
- * editor-rebuilds on parent re-renders.
+ * extension). Memoised on `prop` identity — built-in names ('light' | 'dark')
+ * are referentially stable; custom `FossilTheme` objects should be
+ * `useMemo`'d by the consumer to avoid editor-rebuilds on parent re-renders.
  *
- * Default is `'fossil-ide'` (v0.2 onwards; v0.1.x default was `'light'` —
- * consumers passing prop explicitly see no change). Pass `'light'` or
- * `'dark'` for the v0.1.x built-ins; pass a `FossilTheme` object for a
- * custom palette (spread one of the built-ins to override a subset of
- * tokens).
+ * Per ADR-0035 (visual ownership separation): the v0.2.x default behaviour
+ * (no `prop` passed) returns empty cssVars + a no-op editor theme. The host
+ * supplies the `--fossil-*` cascade via its own ThemeProvider (e.g.
+ * `<KanzoThemeProvider/>` from `@kanzo/theme` for kanzo-branded hosts).
+ *
+ * Explicit `'light'` / `'dark'` / `FossilTheme` props behave exactly as
+ * v0.1.x (backwards-compat invariant).
  */
-export function useTheme(
-  prop: FossilThemeProp = 'fossil-ide',
-): UseThemeResult {
+export function useTheme(prop?: FossilThemeProp): UseThemeResult {
   return useMemo<UseThemeResult>(() => {
+    // No prop → no injection. Host supplies via Provider cascade
+    // (ADR-0035). Returning empty cssVars + a no-op editor theme keeps the
+    // playground interactive against browser defaults; the host's
+    // `<KanzoThemeProvider/>` (or equivalent) supplies `--fossil-*` vars
+    // via inline-style on a wrapping div, which cascade into the
+    // playground root + into CodeMirror's DOM via standard CSS.
+    if (prop === undefined) {
+      return {
+        theme: undefined,
+        cssVars: {},
+        editorTheme: EditorView.theme({}),
+      };
+    }
     const theme: FossilTheme =
       typeof prop === 'string'
         ? prop === 'dark'
           ? darkTheme
-          : prop === 'fossil-ide'
-            ? fossilIdeTheme
-            : lightTheme // fallback for 'light' AND any unknown string
+          : lightTheme // fallback for 'light' AND any unknown string
         : prop;
     const cssVars = themeToCssVars(theme);
     const editorTheme = buildEditorTheme(theme);

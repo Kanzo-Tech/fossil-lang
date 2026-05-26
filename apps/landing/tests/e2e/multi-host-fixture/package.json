@@ -17,6 +17,7 @@
     "@fossil-lang/codemirror-fossil": "workspace:*",
     "@fossil-lang/types": "workspace:*",
     "@fossil-lang/ui": "workspace:*",
+    "@kanzo/theme": "workspace:*",
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
     "@codemirror/language": "^6.0.0",

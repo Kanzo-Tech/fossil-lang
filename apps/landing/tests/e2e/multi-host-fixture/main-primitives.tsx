@@ -14,14 +14,12 @@
  *   - Toggle + ToggleGroup (single + group with multiple selection)
  *   - Separator (horizontal between sections)
  *
- * Tokens applied via `themeToCssVars` + `cssVarsToStyle` from
- * @fossil-lang/playground. The IDE-grade theme is constructed inline as
- * `lightTheme` with `fonts.sizeBase=13px` + `fonts.sizeSmall=11px`
- * (matches packages/playground/src/theme/fossil-ide.ts shape). This
- * keeps the fixture decoupled from parallel plan 10-06's export of
- * `fossilIdeTheme` — when 10-06 ships and exports it from
- * @fossil-lang/playground, this fixture continues to work identically
- * because we replicate the same token shape.
+ * Tokens applied via `<KanzoThemeProvider/>` from `@kanzo/theme` — the v0.2.x
+ * canonical brand surface per ADR-0035 (visual ownership separation). The
+ * Provider wraps the primitives root and supplies the `--fossil-*` cssVars
+ * cascade via its wrapping div's inline style. Plan 10-07's original inline
+ * fossilIdeTheme construction was replaced in plan 10-09 by this Provider
+ * call to enforce the ownership inversion.
  */
 import { createRoot } from 'react-dom/client';
 import {
@@ -63,29 +61,11 @@ import {
   // Separator
   Separator,
 } from '@fossil-lang/ui';
-import {
-  lightTheme,
-  themeToCssVars,
-  cssVarsToStyle,
-} from '@fossil-lang/playground';
-
-// Inline construction of the IDE-grade theme — same shape as
-// packages/playground/src/theme/fossil-ide.ts. Decouples the fixture from
-// parallel plan 10-06's playground re-export ordering. The ONLY divergence
-// from lightTheme is fonts.sizeBase=13px + fonts.sizeSmall=11px.
-const fossilIdeTheme = {
-  ...lightTheme,
-  fonts: {
-    ...lightTheme.fonts,
-    sizeBase: '13px',
-    sizeSmall: '11px',
-  },
-};
+import { KanzoThemeProvider } from '@kanzo/theme';
 
 function PrimitivesPage() {
-  const cssVars = themeToCssVars(fossilIdeTheme);
   return (
-    <div style={cssVarsToStyle(cssVars)} data-testid="primitives-root">
+    <KanzoThemeProvider data-testid="primitives-root">
       <section data-testid="section-tabs-default">
         <h2>Tabs (variant=default)</h2>
         <Tabs defaultValue="a">
@@ -218,7 +198,7 @@ function PrimitivesPage() {
           <ResizablePanel defaultSize={40}>Panel B</ResizablePanel>
         </ResizablePanelGroup>
       </section>
-    </div>
+    </KanzoThemeProvider>
   );
 }
 

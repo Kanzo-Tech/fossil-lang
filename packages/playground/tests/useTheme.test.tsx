@@ -1,96 +1,114 @@
 /**
- * VIS-02 unit tests — the `useTheme` hook resolves a `FossilThemeProp` into
- * the `{ theme, cssVars, editorTheme }` triple, with the v0.2 default of
- * `'fossil-ide'`.
+ * useTheme — v0.2.x default behaviour (host-provider model, ADR-0035).
  *
- * Coverage:
- *   - no-prop default → fossilIdeTheme
- *   - explicit `undefined` prop → fossilIdeTheme (parity with no-prop;
- *     guards against future regressions where the default mechanism could
- *     diverge for explicit-undefined vs omitted)
- *   - `'fossil-ide'` string alias → fossilIdeTheme
- *   - `'light'` / `'dark'` string aliases still resolve to the v0.1 built-ins
- *     (backwards compat — VIS-02 SC#3)
- *   - custom FossilTheme object pass-through (no regression on advanced consumers)
- *   - cssVars record reflects the new default tokens
- *   - v0.1.x consumer rendered-component assertion: a tiny rendered child
- *     reads getComputedStyle on a div carrying the cssVars-as-style; the
- *     cascade is observable. Per CONTEXT.md Reconciliation 6 (Warning 4 fix)
- *     — placed here (not in FossilPlayground.test.tsx) to avoid snapshot
- *     churn.
+ * Coverage (post-10-09 ownership inversion):
+ *   - No prop → theme === undefined; cssVars === {} (empty). Host supplies
+ *     the cascade via an ancestor provider. The OSS surface is
+ *     brand-agnostic.
+ *   - Explicit `undefined` prop → same as no prop (parity with the
+ *     omitted case).
+ *   - Explicit `'light'` → lightTheme (v0.1.x backwards-compat invariant).
+ *   - Explicit `'dark'` → darkTheme (v0.1.x backwards-compat invariant).
+ *   - Custom FossilTheme object → pass-through (advanced consumers).
+ *   - Brand-cascade observability — rendered child under a
+ *     `<KanzoThemeProvider/>` (from @kanzo/theme) reads
+ *     `--fossil-fonts-sizeBase: 13px` from the Provider's wrapping div via
+ *     getComputedStyle. This is the new canonical proof that the brand
+ *     surface is provided EXTERNALLY (by @kanzo/theme), not by the
+ *     @fossil-lang/playground hook.
+ *
+ * Per CONTEXT.md Reconciliation 6 (v0.1.x consumer assertion pattern):
+ * the rendered Reader child reads getComputedStyle on the Provider's
+ * wrapper, NOT on the FossilPlayground component tree (avoids snapshot
+ * churn risk in the heavier FossilPlayground.test.tsx).
  */
 
 import { describe, it, expect } from 'vitest';
 import { render, renderHook } from '@testing-library/react';
 import * as React from 'react';
+import { KanzoThemeProvider } from '@kanzo/theme';
 import { useTheme } from '../src/hooks/useTheme.js';
 import { lightTheme } from '../src/theme/light.js';
 import { darkTheme } from '../src/theme/dark.js';
-import { fossilIdeTheme } from '../src/theme/fossil-ide.js';
 import { cssVarsToStyle } from '../src/theme/tokens.js';
 
-describe('useTheme — v0.2 default behaviour', () => {
-  it('defaults to fossil-ide when no prop is passed', () => {
+describe('useTheme — v0.2.x default behaviour (host-provider model, ADR-0035)', () => {
+  it('returns undefined theme + empty cssVars when no prop is passed (host provides via Provider)', () => {
     const { result } = renderHook(() => useTheme());
-    expect(result.current.theme).toBe(fossilIdeTheme);
-    expect(result.current.theme.fonts.sizeBase).toBe('13px');
+    expect(result.current.theme).toBeUndefined();
+    expect(result.current.cssVars).toEqual({});
+    // editorTheme is a no-op extension — type-level guarantee + shape check.
+    // (CodeMirror Extension type is structural; the runtime is an array or
+    // object — we assert it exists and is not falsy.)
+    expect(result.current.editorTheme).toBeTruthy();
   });
 
-  it('defaults to fossil-ide when prop is explicitly undefined', () => {
+  it('returns undefined theme + empty cssVars when prop is explicitly undefined', () => {
     const { result } = renderHook(() => useTheme(undefined));
-    expect(result.current.theme).toBe(fossilIdeTheme);
+    expect(result.current.theme).toBeUndefined();
+    expect(result.current.cssVars).toEqual({});
   });
 
-  it("resolves 'fossil-ide' string to fossilIdeTheme", () => {
-    const { result } = renderHook(() => useTheme('fossil-ide'));
-    expect(result.current.theme).toBe(fossilIdeTheme);
-  });
-
-  it("resolves 'light' string to lightTheme (backwards compat)", () => {
+  it("resolves 'light' string to lightTheme (v0.1.x backwards compat)", () => {
     const { result } = renderHook(() => useTheme('light'));
     expect(result.current.theme).toBe(lightTheme);
-    expect(result.current.theme.fonts.sizeBase).toBe('14px');
+    expect(result.current.theme?.fonts.sizeBase).toBe('14px');
+    expect(
+      result.current.cssVars['--fossil-fonts-sizeBase'],
+    ).toBe('14px');
   });
 
-  it("resolves 'dark' string to darkTheme (backwards compat)", () => {
+  it("resolves 'dark' string to darkTheme (v0.1.x backwards compat)", () => {
     const { result } = renderHook(() => useTheme('dark'));
     expect(result.current.theme).toBe(darkTheme);
-    expect(result.current.theme.fonts.sizeBase).toBe('14px');
+    expect(result.current.theme?.fonts.sizeBase).toBe('14px');
   });
 
-  it('accepts a custom FossilTheme object', () => {
+  it('accepts a custom FossilTheme object (advanced consumer)', () => {
     const custom = {
       ...lightTheme,
       fonts: { ...lightTheme.fonts, sizeBase: '99px' },
     };
     const { result } = renderHook(() => useTheme(custom));
-    expect(result.current.theme.fonts.sizeBase).toBe('99px');
+    expect(result.current.theme?.fonts.sizeBase).toBe('99px');
+    expect(result.current.cssVars['--fossil-fonts-sizeBase']).toBe('99px');
   });
 
-  it('emits CSS vars from fossil-ide reflecting the new default', () => {
-    const { result } = renderHook(() => useTheme());
-    expect(result.current.cssVars['--fossil-fonts-sizeBase']).toBe('13px');
-    expect(result.current.cssVars['--fossil-radii-md']).toBe('6px');
-    expect(result.current.cssVars['--fossil-focus-ring']).toMatch(/rgba/);
-  });
-
-  // v0.1.x consumer assertion — placed here per CONTEXT.md Reconciliation 6
-  // (Warning 4 fix). A rendered child component reads getComputedStyle on the
-  // root to confirm the cascade propagates. We avoid touching
-  // FossilPlayground.test.tsx (snapshot churn risk).
-  it('rendered component reads fossil-ide CSS vars from the root', () => {
+  // Brand-cascade observability — rendered child under a
+  // <KanzoThemeProvider/> (from @kanzo/theme) confirms the brand surface
+  // reaches consumers EXTERNALLY (via the Provider's wrapping div's inline
+  // style), NOT via the playground hook. This is the new canonical
+  // VIS-02 / ADR-0035 proof pattern.
+  it('rendered component under <KanzoThemeProvider/> reads kanzo cssVars from the Provider wrapper', () => {
     function Reader(): React.ReactElement {
-      const { theme, cssVars } = useTheme();
+      const { cssVars } = useTheme();
       const style = cssVarsToStyle(cssVars);
       return (
-        <div data-testid="theme-root" style={style}>
-          <span data-testid="size-base">{theme.fonts.sizeBase}</span>
+        <div data-testid="reader-root" style={style}>
+          <span data-testid="reader-marker">reader</span>
         </div>
       );
     }
-    const { getByTestId } = render(<Reader />);
-    const root = getByTestId('theme-root');
-    expect(root.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe('13px');
-    expect(getByTestId('size-base').textContent).toBe('13px');
+    const { getByTestId } = render(
+      <KanzoThemeProvider data-testid="provider-root">
+        <Reader />
+      </KanzoThemeProvider>,
+    );
+    // The Provider's wrapping div carries the brand cascade:
+    const providerRoot = getByTestId('provider-root');
+    expect(providerRoot.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe(
+      '13px',
+    );
+    // The inner Reader (calling useTheme() with no prop) carries NO inline
+    // --fossil-* style of its own — proof that the playground hook does
+    // NOT auto-inject the brand. The cascade reaches the Reader's
+    // descendants through standard CSS-var cascade (the inner div's
+    // computed style would resolve --fossil-fonts-sizeBase to 13px via
+    // the Provider's wrapper).
+    const readerRoot = getByTestId('reader-root');
+    expect(readerRoot.style.getPropertyValue('--fossil-fonts-sizeBase')).toBe(
+      '',
+    );
+    expect(getByTestId('reader-marker').textContent).toBe('reader');
   });
 });

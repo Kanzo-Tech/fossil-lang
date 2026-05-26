@@ -68,6 +68,9 @@ importers:
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../../packages/wasm
+      '@kanzo/theme':
+        specifier: workspace:*
+        version: link:../../packages/kanzo-theme
       '@lezer/highlight':
         specifier: ^1.0.0
         version: 1.2.3
@@ -150,6 +153,9 @@ importers:
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../../../../../packages/wasm
+      '@kanzo/theme':
+        specifier: workspace:*
+        version: link:../../../../../packages/kanzo-theme
       '@lezer/highlight':
         specifier: ^1.0.0
         version: 1.2.3
@@ -317,6 +323,9 @@ importers:
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../wasm
+      '@kanzo/theme':
+        specifier: workspace:*
+        version: link:../kanzo-theme
       '@lezer/highlight':
         specifier: ^1.2.0
         version: 1.2.3
