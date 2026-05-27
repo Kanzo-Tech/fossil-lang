@@ -163,6 +163,68 @@ describe('<FossilPlayground/> handleRun wiring (08-13 Task 2)', () => {
     });
   });
 
+  /**
+   * Phase 14 plan 14-01 — handleRun MUST await
+   * `inferredDescriptors.introspectAndRegister(mapping, instance)` BEFORE
+   * `runPipeline(...)` invokes WASM compile. Closes the Phase 13 deferred
+   * follow-up (the seam was constructed but unawaited in 13-04b).
+   *
+   * The test mocks both `useInferredDescriptors` AND `runPipeline` and records
+   * the call order via a shared array; the assertion is positional ('intro'
+   * strictly precedes 'pipeline'), not invocation-count.
+   */
+  it('handleRun awaits introspectAndRegister before compile', async () => {
+    const callLog: string[] = [];
+    const introspectMock = vi.fn(async () => {
+      callLog.push('intro');
+    });
+    const hookModule = await import('../src/hooks/useInferredDescriptors.js');
+    const useSpy = vi
+      .spyOn(hookModule, 'useInferredDescriptors')
+      .mockReturnValue({ introspectAndRegister: introspectMock });
+
+    const { runPipeline } = await import('../src/run/runPipeline.js');
+    const mockRun = vi.mocked(runPipeline);
+    mockRun.mockImplementation(async () => {
+      callLog.push('pipeline');
+      return { vertices: [], edges: [] };
+    });
+
+    render(
+      <FossilPlayground
+        resolver={mockResolver}
+        wasmUrl="https://mock/fossil.wasm"
+        initialMapping={'users := io.csv("@examples/u.csv")\n'}
+      />,
+    );
+    await waitFor(() => {
+      expect(document.querySelector('.fossil-editor')).toBeTruthy();
+    });
+
+    const runBtn = screen.getByRole('button', { name: /run mapping/i });
+    await act(async () => {
+      fireEvent.click(runBtn);
+    });
+
+    // The hook MUST have been called (with a mapping + a FossilPlayground
+    // instance) and introspect MUST appear before pipeline in the call log.
+    await waitFor(() => {
+      expect(introspectMock).toHaveBeenCalled();
+      expect(mockRun).toHaveBeenCalled();
+    });
+    expect(callLog[0]).toBe('intro');
+    expect(callLog[1]).toBe('pipeline');
+    expect(callLog.indexOf('intro')).toBeLessThan(callLog.indexOf('pipeline'));
+
+    // First arg = the mapping text we passed to initialMapping.
+    expect(introspectMock.mock.calls[0]![0]).toMatch(/^users := io\.csv/);
+    // Second arg = a FossilPlayground WASM instance (the stub from
+    // tests/setup.ts — duck-typed by presence of compileFile method).
+    expect(typeof introspectMock.mock.calls[0]![1]?.compileFile).toBe('function');
+
+    useSpy.mockRestore();
+  });
+
   it('runPipeline errors surface as role="alert" + onError', async () => {
     const { runPipeline } = await import('../src/run/runPipeline.js');
     const mockRun = vi.mocked(runPipeline);
@@ -173,6 +235,14 @@ describe('<FossilPlayground/> handleRun wiring (08-13 Task 2)', () => {
       <FossilPlayground
         resolver={mockResolver}
         wasmUrl="https://mock/fossil.wasm"
+        // Phase 14 plan 14-01: handleRun now awaits
+        // `inferredDescriptors.introspectAndRegister(...)` BEFORE runPipeline.
+        // With the helloExample default mapping (which contains
+        // `users := io.csv("@examples/hello.csv")`) the hook would attempt
+        // to boot DuckDB-WASM in the test env — slow + flaky. Pass a mapping
+        // with NO io.csv()/io.json() refs so the hook early-returns and the
+        // test exercises only the pipeline-error path it cares about.
+        initialMapping="prefix ex: <https://example.org/>"
         onError={onError}
       />,
     );

@@ -420,24 +420,46 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   }, []);
 
   /**
-   * Compile callback handed to runPipeline. Lazy-mints the FossilPlayground
-   * instance + opened file on first call; updateFile on subsequent calls so
-   * Salsa's incremental memoisation kicks in across re-Runs of the same
-   * mapping (the byte-identical-edit case = zero recompute).
+   * Ensure the main-thread `FossilPlaygroundWasm` instance + opened file
+   * exist; mint on first call, `updateFile` on subsequent calls so Salsa's
+   * incremental memoisation kicks in across re-Runs of the same mapping
+   * (the byte-identical-edit case = zero recompute).
+   *
+   * Returns the live instance so the caller can drive pre-compile orchestration
+   * (Phase 14 plan 14-01: `inferredDescriptors.introspectAndRegister(...)`
+   * is awaited against this instance BEFORE the `compile` callback is invoked
+   * via `runPipeline`).
    */
-  const compile = useCallback(async (mappingText: string): Promise<string> => {
-    const r = compileInstanceRef.current;
-    if (!r.instance) {
-      const instance = new FossilPlaygroundWasm();
-      const handle = instance.openFile(documentUri, mappingText);
-      compileInstanceRef.current = { instance, handle };
+  const ensureCompileInstance = useCallback(
+    (mappingText: string): FossilPlaygroundWasm => {
+      const r = compileInstanceRef.current;
+      if (!r.instance) {
+        const instance = new FossilPlaygroundWasm();
+        const handle = instance.openFile(documentUri, mappingText);
+        compileInstanceRef.current = { instance, handle };
+        return instance;
+      }
+      if (r.handle !== null) {
+        r.instance.updateFile(r.handle, mappingText);
+      }
+      return r.instance;
+    },
+    [],
+  );
+
+  /**
+   * Compile callback handed to runPipeline. Reuses `ensureCompileInstance`
+   * so the lazy-mint logic + Salsa-incremental-memoisation contract live in
+   * a single place.
+   */
+  const compile = useCallback(
+    async (mappingText: string): Promise<string> => {
+      const instance = ensureCompileInstance(mappingText);
+      const handle = compileInstanceRef.current.handle!;
       return instance.compileFile(handle).sql;
-    }
-    if (r.handle !== null) {
-      r.instance.updateFile(r.handle, mappingText);
-    }
-    return r.instance.compileFile(r.handle!).sql;
-  }, []);
+    },
+    [ensureCompileInstance],
+  );
 
   // Boot the main-thread WASM module too (the Run path calls compileFile()
   // directly on the main thread; the LSP Worker boots its own WASM instance
@@ -517,10 +539,6 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       return (await (db as any).connect()) as never;
     }) as never,
   });
-  // Reference suppression — the hook return is consumed at compile-time
-  // (`inferredDescriptors.introspectAndRegister(...)`); for now we keep the
-  // hook call so the orchestration seam exists.
-  void inferredDescriptors;
 
   // Free the main-thread compile instance on unmount. Triggers Rust-side
   // Salsa store drop (per ADR-0026's intent — heap-heavy resources outside
@@ -580,6 +598,22 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
           'WASM is still loading — please wait a moment and try again.',
         );
       }
+      // Phase 14 plan 14-01 — wire the Phase 13 deferred follow-up. The
+      // host-side InferredDescriptor flow (ADR-0037 / plan 13-04b) must run
+      // BEFORE WASM `compile()` so Salsa's forward-propagation of source
+      // types sees fresh `registerInferredDescriptor(...)` calls instead of
+      // falling back to the deprecated CSVW codepath.
+      //
+      // Hoist the WASM instance mint here (rather than letting `compile`
+      // lazy-mint on first call inside `runPipeline`) so the introspect step
+      // can target the same instance the subsequent `compile` callback uses.
+      // Per the `useInferredDescriptors` contract: per-source failures are
+      // logged + skipped internally — the promise resolves successfully even
+      // when individual sources fail. No try/catch wrap needed at the call
+      // site; the existing outer catch handles `ensureCompileInstance` failure
+      // (e.g. WASM not ready, mint throw).
+      const instance = ensureCompileInstance(mapping);
+      await inferredDescriptors.introspectAndRegister(mapping, instance);
       const result = await runPipeline(
         { getDuckDb, compile },
         { resolver, mapping, maxResolvedBytes },
