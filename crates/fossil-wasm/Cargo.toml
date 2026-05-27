@@ -32,6 +32,12 @@ fossil-codegen = { path = "../fossil-codegen" }
 # `WasmSystem` struct. Default `output_descriptor_kind()` returns AcceptAll
 # for Phase 3 v0.1 — Phase 7+ playground wires user-supplied ShEx text.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Phase 13 INPUT-01 (ADR-0037): WasmSystem stores InferredDescriptors registered
+# by the browser-side playground orchestration BEFORE invoking compile() — the
+# Rust forward-propagation path (13-02) reads them through the System trait
+# accessor.
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+smol_str = { workspace = true }
 # Phase 5 STDL-07: the stdlib classification table the playground reads to
 # disable native_udf_only functions in-browser. fossil-registry is WASM-clean
 # (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does

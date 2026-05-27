@@ -20,11 +20,13 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use std::time::SystemTime;
 
 use fossil_base::{FsError, System};
+use fossil_descriptors_input::InferredDescriptor;
 use fossil_descriptors_output::SystemWithDescriptors;
+use smol_str::SmolStr;
 
 // `pub(crate)` is the deliberate visibility: `WasmSystem` is an
 // implementation detail of the `fossil-wasm` crate. The clippy
@@ -37,6 +39,19 @@ use fossil_descriptors_output::SystemWithDescriptors;
 #[derive(Debug, Default)]
 pub(crate) struct WasmSystem {
     fs: RwLock<HashMap<String, Vec<u8>>>,
+    /// Phase 13 INPUT-01 (ADR-0037): host-registered InferredDescriptors,
+    /// keyed by source binding name (e.g. `"users"` for `users := io.csv(...)`).
+    /// Populated by the playground orchestration via
+    /// [`crate::FossilPlayground::register_inferred_descriptor`] BEFORE
+    /// invoking `compile()` / `compile_file()`. Consumed by
+    /// `fossil-hir::infer::resolve_source_row` (after 13-02 ships) inside
+    /// the typecheck tracked query.
+    ///
+    /// `Mutex` (not `RwLock`) — write traffic is rare (per-compile, once per
+    /// source binding) and reads are cheap clones (per-mapping); the
+    /// `RwLock` overhead isn't justified for this access pattern. Mirrors
+    /// the `NativeSystem` choice in `fossil-base::system::NativeSystem`.
+    inferred: Mutex<HashMap<SmolStr, InferredDescriptor>>,
 }
 
 impl System for WasmSystem {
@@ -56,6 +71,19 @@ impl System for WasmSystem {
         // panic documented in RESEARCH.md Pitfall 4. Phase 7+ adds the
         // `web-time` crate.
         SystemTime::UNIX_EPOCH
+    }
+
+    fn inferred_descriptor(&self, source_name: &str) -> Option<InferredDescriptor> {
+        // Lock can only fail if poisoned (another thread panicked while
+        // holding it). Treat that as "no descriptor available" — the
+        // typecheck fallback path handles missing descriptors gracefully.
+        self.inferred.lock().ok()?.get(source_name).cloned()
+    }
+
+    fn register_inferred_descriptor(&self, descriptor: InferredDescriptor) {
+        if let Ok(mut lock) = self.inferred.lock() {
+            lock.insert(descriptor.source_name.clone(), descriptor);
+        }
     }
 }
 

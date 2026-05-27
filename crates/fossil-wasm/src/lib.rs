@@ -371,6 +371,54 @@ impl FossilPlayground {
         self.set_target_shex_native(text)
             .map_err(|e| JsError::new(&e))
     }
+
+    // ----- Phase 13 (ADR-0037) — register a host-introspected descriptor -----
+
+    /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
+    /// source binding name BEFORE invoking [`Self::compile`] /
+    /// [`Self::compile_file`]. The Rust compiler reads from this registration
+    /// during forward type propagation (Phase 3 CORE-05 rewired in plan
+    /// 13-02).
+    ///
+    /// `descriptor_json` is the JSON serialisation of `InferredDescriptor`;
+    /// the canonical shape is exposed in `packages/wasm/src/index.ts` as
+    /// `InferredDescriptorJson`:
+    ///
+    /// ```json
+    /// {
+    ///   "source_name": "users",
+    ///   "columns": [
+    ///     { "name": "id", "primitive": "Integer" },
+    ///     { "name": "name", "primitive": "String" }
+    ///   ],
+    ///   "content_hash": ""
+    /// }
+    /// ```
+    ///
+    /// Called by the browser-side playground orchestration AFTER running
+    /// DuckDB-WASM `DESCRIBE read_csv_auto('<resolved-url>')` and BEFORE
+    /// invoking `compile()` / `compile_file()`. Keyed by source-binding
+    /// name (`"users"` for `users := io.csv("...")`), NOT by URL.
+    ///
+    /// Idempotent: re-registering with the same `source_name` OVERWRITES the
+    /// previous entry — intentional, since the host may re-introspect when
+    /// file content changes.
+    ///
+    /// # Errors
+    ///
+    /// - Malformed JSON / missing required fields → JS `Error` with the
+    ///   underlying serde_json message.
+    ///
+    /// Implementation: thin shim over the pure-Rust
+    /// [`Self::register_inferred_descriptor_native`] helper.
+    #[wasm_bindgen(js_name = registerInferredDescriptor)]
+    pub fn register_inferred_descriptor(
+        &self,
+        descriptor_json: &str,
+    ) -> Result<(), JsError> {
+        self.register_inferred_descriptor_native(descriptor_json)
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
 }
 
 // ----- Pure-Rust core (test-reachable; no wasm-bindgen serialization) -----
@@ -402,6 +450,10 @@ pub enum WorkspaceError {
     /// compile. The `check` path is fine with this case (it returns an
     /// empty diagnostic stream).
     NoMappingInFile,
+    /// The `register_inferred_descriptor` JSON payload did not deserialise
+    /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
+    /// underlying serde_json error message. Phase 13 (ADR-0037).
+    MalformedDescriptor(String),
 }
 
 impl std::fmt::Display for WorkspaceError {
@@ -409,6 +461,9 @@ impl std::fmt::Display for WorkspaceError {
         match self {
             Self::UnknownHandle => f.write_str("unknown file handle"),
             Self::NoMappingInFile => f.write_str("no mapping found in file"),
+            Self::MalformedDescriptor(msg) => {
+                write!(f, "malformed InferredDescriptor JSON: {msg}")
+            }
         }
     }
 }
@@ -577,6 +632,47 @@ impl FossilPlayground {
             }
             Err(e) => Err(format!("ShEx parse error: {e:?}")),
         }
+    }
+
+    // ----- Phase 13 (ADR-0037) — inferred-descriptor registration -----
+
+    /// Pure-Rust mirror of [`Self::register_inferred_descriptor`] (the
+    /// `#[wasm_bindgen]` wrapper).
+    ///
+    /// Cargo-tests call THIS function — the wasm-bindgen wrapper panics on
+    /// the native test target (wasm-bindgen 0.2 lib.rs:101). Mirrors the
+    /// `*_native` / `*_result` / `*_rows` convention documented in
+    /// `tests/workspace.rs`.
+    ///
+    /// `descriptor_json` is the JSON serialisation of
+    /// [`fossil_descriptors_input::InferredDescriptor`] — see
+    /// `packages/wasm/src/index.ts` `InferredDescriptorJson` for the
+    /// canonical shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorkspaceError::MalformedDescriptor`] if the JSON fails to
+    /// deserialise. The descriptor table is not modified on error.
+    pub fn register_inferred_descriptor_native(
+        &self,
+        descriptor_json: &str,
+    ) -> Result<(), WorkspaceError> {
+        let descriptor: fossil_descriptors_input::InferredDescriptor =
+            serde_json::from_str(descriptor_json)
+                .map_err(|e| WorkspaceError::MalformedDescriptor(e.to_string()))?;
+        self.system.register_inferred_descriptor(descriptor);
+        Ok(())
+    }
+
+    /// Native-reachable lookup mirroring `System::inferred_descriptor`.
+    /// Lets cargo-tests verify the registration round-trips without going
+    /// through the wasm-bindgen wrapper.
+    #[must_use]
+    pub fn inferred_descriptor_native(
+        &self,
+        source_name: &str,
+    ) -> Option<fossil_descriptors_input::InferredDescriptor> {
+        self.system.inferred_descriptor(source_name)
     }
 }
 
