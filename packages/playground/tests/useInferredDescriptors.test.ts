@@ -173,8 +173,9 @@ describe('useInferredDescriptors.introspectAndRegister', () => {
         connectionFactory: async () => conn,
       }),
     );
+    let returned: unknown;
     await act(async () => {
-      await result.current.introspectAndRegister(
+      returned = await result.current.introspectAndRegister(
         'users := io.csv("@examples/u.csv")',
         pg as unknown as FossilPlayground,
       );
@@ -188,10 +189,22 @@ describe('useInferredDescriptors.introspectAndRegister', () => {
       ],
       content_hash: '',
     });
+    // Phase 14 plan 14-03: the hook now also returns the captured schemas
+    // (`Promise<SourceSchema[]>`) so the SourcePanel can render the preview
+    // without a second DESCRIBE pass.
+    expect(returned).toEqual([
+      {
+        sourceName: 'users',
+        columns: [
+          { name: 'id', primitive: 'Integer' },
+          { name: 'name', primitive: 'String' },
+        ],
+      },
+    ]);
     expect(conn.closed).toBe(true);
   });
 
-  it('skips when there are no source refs', async () => {
+  it('skips when there are no source refs (returns empty SourceSchema[])', async () => {
     const conn = makeMockConnection([]);
     const pg = makeMockPlayground();
     const resolver = makeMockResolver();
@@ -199,14 +212,16 @@ describe('useInferredDescriptors.introspectAndRegister', () => {
     const { result } = renderHook(() =>
       useInferredDescriptors({ resolver, connectionFactory: factory }),
     );
+    let returned: unknown;
     await act(async () => {
-      await result.current.introspectAndRegister(
+      returned = await result.current.introspectAndRegister(
         'prefix ex: <https://example.org/>\n',
         pg as unknown as FossilPlayground,
       );
     });
     expect(pg.calls).toHaveLength(0);
     expect(factory).not.toHaveBeenCalled();
+    expect(returned).toEqual([]);
   });
 
   it('continues past a per-source failure (logs + skips)', async () => {

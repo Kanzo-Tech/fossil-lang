@@ -29,7 +29,7 @@
  * no-credentials-leak.test.tsx test asserts this structurally.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fossil } from '@fossil-lang/codemirror-fossil';
 import {
   initFossilWasm,
@@ -40,10 +40,8 @@ import { helloExample } from '@fossil-lang/examples';
 import { languageServerSupport } from '@codemirror/lsp-client';
 import type { Extension } from '@codemirror/state';
 import type { ConnectionResolver, FossilThemeProp } from '@fossil-lang/types';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@fossil-lang/ui';
 
-import { FossilEditor } from '@fossil-lang/editor';
-import { ResultTable } from './ResultTable.js';
-import { ResultGraph } from './ResultGraph.js';
 import { useLspWorker } from '../hooks/useLspWorker.js';
 import { useDuckDb, getDuckDb } from '../hooks/useDuckDb.js';
 import { useResetPlayground } from '../hooks/useResetPlayground.js';
@@ -53,11 +51,6 @@ import { cssVarsToStyle } from '../theme/tokens.js';
 import { announce, ARIA_LABELS } from '../a11y/index.js';
 import { runPipeline } from '../run/runPipeline.js';
 import { CompiledSqlPanel } from '../compiled-sql/index.js';
-import {
-  TurtleTab,
-  type VertexRow as TurtleVertexRow,
-  type EdgeRow as TurtleEdgeRow,
-} from '../turtle/index.js';
 // BibTeX cite modal (PLAY-08) — toolbar trigger + native <dialog> modal showing
 // Min Oo & Hartig + the current permalink BibTeX. See ../bibtex/BibtexModal.tsx.
 import { BibtexModal } from '../bibtex/BibtexModal.js';
@@ -70,6 +63,13 @@ import { BibtexModal } from '../bibtex/BibtexModal.js';
 // compile (with a D-CSVW-DEPRECATED warning surfaced from fossil-hir per
 // plan 13-02).
 import { useInferredDescriptors } from '../hooks/useInferredDescriptors.js';
+// Phase 14 plan 14-03 — IDE-style tabs layout. The playground composition
+// shells out to dedicated panel sub-components for each tab pane so the
+// component stays focused on orchestration (state + run pipeline + permalink).
+import { MappingPanel } from './MappingPanel.js';
+import { SourcePanel, type SourceSchema } from './SourcePanel.js';
+import { ShapePanel } from './ShapePanel.js';
+import { OutputPanel } from './OutputPanel.js';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -88,26 +88,20 @@ const DEFAULT_MAX_RESOLVED_BYTES = 10 * 1024 * 1024;
 const COMPILED_SQL_DEBOUNCE_MS = 200;
 
 /**
- * Default `@prefix` block for the Turtle tab (PLAY-10). Parsing the source
- * `.fossil`'s declared prefixes is deferred to a v0.2 polish; the defaults
- * cover the `hello` example + the bundled curated set. Callers passing a
- * non-trivial mapping with custom prefixes will see their IRIs un-shortened
- * in the Turtle view but still RDF-correct — round-trip via n3.Parser.
+ * Discriminator for the left-side IDE panel tabs (Phase 14 plan 14-03 /
+ * COMP-03). The Mapping tab carries the editor; Source shows the DuckDB
+ * DESCRIBE preview of resolved sources; Shape carries a write-capable
+ * editor over the ShEx target shape.
  */
-const TURTLE_DEFAULT_PREFIXES: Record<string, string> = {
-  ex: 'https://example.org/',
-  rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
-  rdfs: 'http://www.w3.org/2000/01/rdf-schema#',
-  xsd: 'http://www.w3.org/2001/XMLSchema#',
-};
+type LeftTabKey = 'mapping' | 'source' | 'shape';
 
 /**
- * Discriminator for the result-panel tablist (PLAY-10). The Graph tab is the
- * pre-Phase-9 default + carries the WebGL canvas (or its tabular fallback);
- * Edges is the pre-Phase-9 edge table; Turtle is the new PLAY-10 panel that
- * serializes vertex+edge into TTL text.
+ * Discriminator for the right-side IDE panel tabs. Output renders the
+ * `<FossilViewer/>` (Graph / Turtle / Vertices / Edges sub-tabs from
+ * Phase 12); Compiled SQL renders the always-mounted-but-tab-gated
+ * `<CompiledSqlPanel/>`.
  */
-type ResultTabKey = 'graph' | 'edges' | 'turtle';
+type RightTabKey = 'output' | 'compiled-sql';
 
 export interface FossilPlaygroundProps {
   /**
@@ -283,18 +277,23 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     undefined,
   );
   // PLAY-07: live-recompiled DuckDB SQL for the Compiled SQL panel. Drives
-  // the `<CompiledSqlPanel/>` rendered when `showCompiledSql` is true. The
-  // value is recomputed via a 200 ms debounced effect over `mapping`.
+  // the `<CompiledSqlPanel/>` rendered inside the right-panel tab. The value
+  // is recomputed via a 200 ms debounced effect over `mapping` whenever the
+  // Compiled SQL tab is active.
   const [compiledSql, setCompiledSql] = useState<string>('');
-  // PLAY-07: collapsed-by-default toggle for the Compiled SQL panel. The
-  // user opens on demand via the "Show compiled SQL" toolbar button.
-  const [showCompiledSql, setShowCompiledSql] = useState<boolean>(false);
-  // PLAY-10: active tab in the result panel's tablist. Default `graph`
-  // matches the pre-Phase-9 behaviour (the Graph viz was the only landing
-  // surface). Switching to `turtle` renders the post-Run TTL view; switching
-  // to `edges` renders the bare edges table.
-  const [activeResultTab, setActiveResultTab] =
-    useState<ResultTabKey>('graph');
+  // Phase 14 plan 14-03: IDE-tab discriminators. Left panel default
+  // 'mapping' is the .fossil source — the canonical landing surface. Right
+  // panel default 'output' is the post-Run viewer (Graph/Turtle/Vertices/
+  // Edges sub-tabs internally).
+  const [activeLeftTab, setActiveLeftTab] = useState<LeftTabKey>('mapping');
+  const [activeRightTab, setActiveRightTab] =
+    useState<RightTabKey>('output');
+  // Phase 14 plan 14-03: snapshot of the inferred source schemas — populated
+  // by handleRun after `inferredDescriptors.introspectAndRegister(...)`
+  // returns (the hook captures the schemas during the same DuckDB DESCRIBE
+  // pass that registers them with the WASM instance). Read by SourcePanel.
+  const [sourceSchemas, setSourceSchemas] = useState<SourceSchema[]>([]);
+  const [sourceLoading, setSourceLoading] = useState<boolean>(false);
   // Main-thread WASM init gate. CodeMirror's StreamParser eagerly calls
   // tokenize() on every line at editor-mount time; if WASM hasn't
   // initialised yet the call hits a __wbindgen_malloc_command_export
@@ -501,7 +500,12 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   // alert when the user clicks Run.
   useEffect(() => {
     if (!wasmReady) return;
-    if (!showCompiledSql) return;
+    // Phase 14 plan 14-03: gating switched from the standalone
+    // `showCompiledSql` boolean to the right-panel tab discriminator. When
+    // the Compiled SQL tab is not active, this effect is a no-op (no
+    // wasted compile-per-keystroke + no shared-instance collision with
+    // the Run path).
+    if (activeRightTab !== 'compiled-sql') return;
     const handle = setTimeout(() => {
       compile(mapping)
         .then((sql) => {
@@ -516,7 +520,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     return () => {
       clearTimeout(handle);
     };
-  }, [mapping, wasmReady, compile, showCompiledSql]);
+  }, [mapping, wasmReady, compile, activeRightTab]);
 
   // Phase 13 v0.2 (ADR-0037 / plan 13-04b) — host-side InferredDescriptor
   // orchestration replaces the Phase 9 CSVW inference + editable preview.
@@ -612,8 +616,21 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       // when individual sources fail. No try/catch wrap needed at the call
       // site; the existing outer catch handles `ensureCompileInstance` failure
       // (e.g. WASM not ready, mint throw).
+      //
+      // Phase 14 plan 14-03: the hook also returns the captured schemas so
+      // the Source tab's preview can render without a second DESCRIBE pass.
       const instance = ensureCompileInstance(mapping);
-      await inferredDescriptors.introspectAndRegister(mapping, instance);
+      setSourceLoading(true);
+      let schemas: SourceSchema[] = [];
+      try {
+        schemas = await inferredDescriptors.introspectAndRegister(
+          mapping,
+          instance,
+        );
+      } finally {
+        setSourceLoading(false);
+      }
+      setSourceSchemas(schemas);
       const result = await runPipeline(
         { getDuckDb, compile },
         { resolver, mapping, maxResolvedBytes },
@@ -649,6 +666,10 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       setVertices([]);
       setEdges([]);
       setRunError(null);
+      // Phase 14 plan 14-03: clear the source-schema snapshot too — keeping
+      // stale schemas across a Reset would mismatch the freshly-recreated
+      // WASM instance's Salsa store.
+      setSourceSchemas([]);
       announce('Playground reset.');
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -657,69 +678,12 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
     }
   }
 
-  const tabularFallback: ReactNode = (
-    <ResultTable rows={vertices} caption="Vertices (tabular fallback)" />
-  );
-
-  /**
-   * Adapter from the component's flat `VertexRow` / `EdgeRow` shape (whose
-   * keys are DuckDB column names from the projection in `runPipeline.ts`)
-   * into the Turtle serializer's `{ iri, type, props }` / `{ src, pred, dst }`
-   * shape (PLAY-10). The serializer is shape-agnostic at the type level —
-   * we centralise the adapter here so the TurtleTab stays pure-presentational.
-   *
-   * Type defaults:
-   *   - vertex `type` comes from a `type`/`class` column when present; falls
-   *     back to `ex:Vertex` so the rdf:type quad is always emitted.
-   *   - edge `pred` comes from a `predicate`/`pred` column when present; falls
-   *     back to `ex:edge` so each edge becomes a valid quad.
-   *
-   * `props` includes every non-`id` / non-`type` column on the vertex row —
-   * already in the right value-type vocabulary (string | number | boolean |
-   * null) per `rowsToTurtle`'s contract.
-   */
-  const turtleVertices = useMemo<TurtleVertexRow[]>(() => {
-    return vertices.map((v) => {
-      const { id, type, class: cls, ...rest } = v as Record<string, unknown> & {
-        id: string;
-      };
-      const props: Record<string, string | number | boolean | null> = {};
-      for (const [k, val] of Object.entries(rest)) {
-        if (
-          val === null ||
-          typeof val === 'string' ||
-          typeof val === 'number' ||
-          typeof val === 'boolean'
-        ) {
-          props[k] = val;
-        } else if (val !== undefined) {
-          // Arrow types (BigInt / Date / Decimal) reach here in production —
-          // stringify so the writer emits a plain literal. Lossless for our
-          // demo data; a future polish can specialise.
-          props[k] = String(val);
-        }
-      }
-      return {
-        iri: id,
-        type: String(type ?? cls ?? 'https://example.org/Vertex'),
-        props,
-      };
-    });
-  }, [vertices]);
-
-  const turtleEdges = useMemo<TurtleEdgeRow[]>(() => {
-    return edges.map((e) => {
-      const er = e as Record<string, unknown> & {
-        source: string;
-        target: string;
-      };
-      return {
-        src: er.source,
-        pred: String(er.predicate ?? er.pred ?? 'https://example.org/edge'),
-        dst: er.target,
-      };
-    });
-  }, [edges]);
+  // Phase 14 plan 14-03: The legacy `tabularFallback` (ResultTable wrapper)
+  // and the Turtle vertex/edge adapters are GONE — the post-Run viewer is
+  // now delegated entirely to `<FossilViewer/>` from `@fossil-lang/viewer`
+  // (Phase 12), which owns its own Graph / Turtle / Vertices / Edges sub-
+  // tabs plus TabularFallback. The result panel composition collapses to
+  // a single `<OutputPanel/>` call.
 
   return (
     <div
@@ -765,180 +729,121 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
         >
           Reset playground
         </button>
-        {/* PLAY-07: collapsed-by-default toggle for the Compiled SQL panel.
-            Accessible name describes the action — "Show" / "Hide" flip per
-            state so SR users hear the new state on activation. */}
-        <button
-          type="button"
-          onClick={() => {
-            setShowCompiledSql((v) => !v);
-          }}
-          aria-expanded={showCompiledSql}
-          aria-controls="fossil-compiled-sql-region"
-          data-testid="toggle-compiled-sql"
-        >
-          {showCompiledSql ? 'Hide compiled SQL' : 'Show compiled SQL'}
-        </button>
         {/*
           PLAY-08 Cite button. Embeds the current permalink (debounced ~200 ms
           after the last edit) into the snapshot BibTeX entry alongside the
           foundational-paper reference. The modal is hidden until clicked.
           Native <dialog> — focus trap + Escape-close + role="dialog" all
           inherited from the platform per RULE-3 deviation in 09-08.
+
+          Phase 14 plan 14-03: the "Show / Hide compiled SQL" toolbar button
+          is gone — the Compiled SQL panel is now a right-panel IDE tab
+          (always mounted, gated by `activeRightTab === 'compiled-sql'`).
+          Plan 14-04 will refactor the rest of this toolbar (Run + Reset +
+          Cite) onto @fossil-lang/ui primitives.
         */}
         <BibtexModal permalink={currentPermalink} />
       </header>
-      <main className="fossil-playground__main">
-        <section aria-label={ARIA_LABELS.editor}>
-          {wasmReady ? (
-            <FossilEditor
-              value={mapping}
-              onChange={setMapping}
-              extensions={extensions}
-              // lspTransport is ignored when extensions is provided (the
-              // playground pre-composes its own LSP wiring via the local
-              // useLspWorker hook). Pass null to satisfy the LOCKED
-              // FossilEditorProps surface per ADR-0036 / Phase 11 11-02.
-              lspTransport={null}
-            />
-          ) : (
-            // Gated on main-thread WASM init: CodeMirror's StreamParser
-            // calls tokenize() eagerly at mount; rendering the editor
-            // before initFossilWasm resolves crashes the parser. The
-            // playground stays interactive (Run/Reset buttons render)
-            // while the editor is loading.
-            <div
-              role="status"
-              aria-live="polite"
-              className="fossil-playground__editor-loading"
-              style={{ padding: '1rem', color: 'var(--fossil-colors-muted)' }}
-            >
-              Loading editor…
-            </div>
-          )}
+      <main
+        className="fossil-playground__main"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '0.5rem',
+          minHeight: 0,
+        }}
+      >
+        <div className="fossil-playground__left">
+          <Tabs
+            value={activeLeftTab}
+            onValueChange={(v) => {
+              setActiveLeftTab(v as LeftTabKey);
+            }}
+          >
+            <TabsList variant="line" aria-label="Input panels">
+              <TabsTrigger value="mapping" data-testid="ide-tab-mapping">
+                Mapping
+              </TabsTrigger>
+              <TabsTrigger value="source" data-testid="ide-tab-source">
+                Source
+              </TabsTrigger>
+              <TabsTrigger value="shape" data-testid="ide-tab-shape">
+                Shape
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="mapping">
+              <MappingPanel
+                value={mapping}
+                onChange={setMapping}
+                extensions={extensions}
+                wasmReady={wasmReady}
+              />
+            </TabsContent>
+            <TabsContent value="source">
+              <SourcePanel schemas={sourceSchemas} loading={sourceLoading} />
+            </TabsContent>
+            <TabsContent value="shape">
+              <ShapePanel
+                shex={shex}
+                onChange={setShex}
+                resolver={resolver}
+                wasmReady={wasmReady}
+              />
+            </TabsContent>
+          </Tabs>
+        </div>
+        <section
+          className="fossil-playground__right"
+          aria-label={ARIA_LABELS.resultsRegion}
+        >
+          <Tabs
+            value={activeRightTab}
+            onValueChange={(v) => {
+              setActiveRightTab(v as RightTabKey);
+            }}
+          >
+            <TabsList variant="line" aria-label="Output panels">
+              <TabsTrigger value="output" data-testid="ide-tab-output">
+                Output
+              </TabsTrigger>
+              <TabsTrigger
+                value="compiled-sql"
+                data-testid="ide-tab-compiled-sql"
+              >
+                Compiled SQL
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="output">
+              <OutputPanel vertices={vertices} edges={edges} />
+            </TabsContent>
+            <TabsContent value="compiled-sql">
+              <div
+                id="fossil-compiled-sql-region"
+                aria-label="Compiled SQL"
+                className="fossil-playground__compiled-sql"
+              >
+                <CompiledSqlPanel
+                  sql={compiledSql}
+                  theme={resolvedTheme}
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
         </section>
-        {/* Phase 13 v0.2 (ADR-0037 / plan 13-04b): the CSVW descriptor panel
-            is GONE. The user no longer writes or sees a CSVW descriptor;
-            schema is inferred at compile time via host-side DuckDB-WASM
-            DESCRIBE (orchestrated by `useInferredDescriptors` above). */}
         {(runError || duck.error) && (
           // role="alert" — ASSERTIVE announcement (interrupts whatever the
           // SR is currently saying). Reserved for genuine errors; routine
-          // status changes use the polite announce() live region.
+          // status changes use the polite announce() live region. Spans the
+          // full grid width so the error is visible regardless of which
+          // input/output tab is active.
           <div
             role="alert"
             aria-live="assertive"
             className="fossil-playground__error"
+            style={{ gridColumn: '1 / -1' }}
           >
             Error: {(runError ?? duck.error)?.message}
           </div>
-        )}
-        <section
-          aria-label={ARIA_LABELS.resultsRegion}
-          className="fossil-playground__results"
-        >
-          {/* PLAY-10: tablist gating Graph / Edges / Turtle. Native ARIA
-              pattern — role="tablist" + role="tab" + role="tabpanel" + the
-              tab's `aria-selected` + `aria-controls` linkage. Keyboard
-              navigation between tabs uses the platform's default focus
-              order (left/right arrows are a Phase-10 polish; for v0.1
-              Tab + Enter / Space works out of the box). */}
-          <div
-            role="tablist"
-            aria-label="Result views"
-            className="fossil-playground__tablist"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeResultTab === 'graph'}
-              aria-controls="fossil-result-panel-graph"
-              id="fossil-result-tab-graph"
-              data-testid="result-tab-graph"
-              onClick={() => {
-                setActiveResultTab('graph');
-              }}
-            >
-              Graph
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeResultTab === 'edges'}
-              aria-controls="fossil-result-panel-edges"
-              id="fossil-result-tab-edges"
-              data-testid="result-tab-edges"
-              onClick={() => {
-                setActiveResultTab('edges');
-              }}
-            >
-              Edges
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeResultTab === 'turtle'}
-              aria-controls="fossil-result-panel-turtle"
-              id="fossil-result-tab-turtle"
-              data-testid="result-tab-turtle"
-              onClick={() => {
-                setActiveResultTab('turtle');
-              }}
-            >
-              Turtle
-            </button>
-          </div>
-          {activeResultTab === 'graph' && (
-            <div
-              role="tabpanel"
-              id="fossil-result-panel-graph"
-              aria-labelledby="fossil-result-tab-graph"
-            >
-              <ResultGraph
-                vertices={vertices}
-                edges={edges}
-                fallback={tabularFallback}
-              />
-            </div>
-          )}
-          {activeResultTab === 'edges' && (
-            <div
-              role="tabpanel"
-              id="fossil-result-panel-edges"
-              aria-labelledby="fossil-result-tab-edges"
-            >
-              <ResultTable rows={edges} caption="Edges" />
-            </div>
-          )}
-          {activeResultTab === 'turtle' && (
-            <div
-              id="fossil-result-panel-turtle"
-              aria-labelledby="fossil-result-tab-turtle"
-            >
-              {/* TurtleTab carries its own role="tabpanel" + aria-label —
-                  the wrapper div above is just the id/aria-labelledby
-                  anchor for the tablist linkage. */}
-              <TurtleTab
-                vertices={turtleVertices}
-                edges={turtleEdges}
-                prefixes={TURTLE_DEFAULT_PREFIXES}
-                theme={resolvedTheme}
-              />
-            </div>
-          )}
-        </section>
-        {/* PLAY-07: Compiled SQL panel — collapsed by default; toggled via
-            the toolbar button above. Always-mounted state (effect populates
-            `compiledSql` on every debounced keystroke), so opening the
-            panel is instant — no first-open flash. */}
-        {showCompiledSql && (
-          <section
-            id="fossil-compiled-sql-region"
-            aria-label="Compiled SQL"
-            className="fossil-playground__compiled-sql"
-          >
-            <CompiledSqlPanel sql={compiledSql} theme={resolvedTheme} />
-          </section>
         )}
       </main>
     </div>

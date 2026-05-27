@@ -32,6 +32,7 @@ import { useCallback } from 'react';
 import { parseSourceRef } from '@fossil-lang/resolvers';
 import type { FossilPlayground, InferredDescriptorJson } from '@fossil-lang/wasm';
 import type { ConnectionResolver } from '@fossil-lang/types';
+import type { SourceSchema } from '../component/SourcePanel.js';
 
 // Phase 14 plan 14-02 (COMP-02): the pure source-binding introspection
 // helpers (`extractSourceRefs` + `duckdbTypeToFossilPrimitive`) moved into
@@ -80,11 +81,18 @@ export interface InferredDescriptorsApi {
    *
    * Failures per-source are non-fatal — log via `console.warn` + skip.
    * Resolves when ALL sources have been processed (registered or skipped).
+   *
+   * Phase 14 plan 14-03 widens the return type from `void` to
+   * `Promise<SourceSchema[]>` so the caller (typically `<FossilPlayground/>`
+   * for the Source tab) can render the captured schemas without a second
+   * DuckDB DESCRIBE round-trip. The array is empty when there are no source
+   * refs OR the DuckDB connection failed; partial when individual sources
+   * fail (the failed sources are omitted, the successful ones included).
    */
   introspectAndRegister(
     mappingText: string,
     playground: FossilPlayground,
-  ): Promise<void>;
+  ): Promise<SourceSchema[]>;
 }
 
 /**
@@ -99,9 +107,12 @@ export function useInferredDescriptors(
   const { resolver, connectionFactory } = args;
 
   const introspectAndRegister = useCallback(
-    async (mappingText: string, playground: FossilPlayground): Promise<void> => {
+    async (
+      mappingText: string,
+      playground: FossilPlayground,
+    ): Promise<SourceSchema[]> => {
       const refs = extractSourceRefs(mappingText);
-      if (refs.length === 0) return;
+      if (refs.length === 0) return [];
       let conn: DescribingConnection | null = null;
       try {
         conn = await connectionFactory();
@@ -114,8 +125,9 @@ export function useInferredDescriptors(
           '[useInferredDescriptors] DuckDB connection failed; skipping pre-introspection:',
           err,
         );
-        return;
+        return [];
       }
+      const captured: SourceSchema[] = [];
       try {
         for (const { sourceName, url } of refs) {
           try {
@@ -140,9 +152,21 @@ export function useInferredDescriptors(
               content_hash: '',
             };
             playground.registerInferredDescriptor(descriptor);
+            // Phase 14 plan 14-03: capture the schema for the SourcePanel
+            // preview. Same shape as the Rust-side InferredDescriptor minus
+            // the content_hash (the panel only displays name + primitive).
+            captured.push({
+              sourceName,
+              columns: columns.map((c) => ({
+                name: c.name,
+                primitive: c.primitive,
+              })),
+            });
           } catch (err) {
             // Per-source failure: log + skip (matches the Rust side's
-            // tracing::warn convention).
+            // tracing::warn convention). The captured array silently
+            // drops failed sources — the SourcePanel shows the successful
+            // subset only.
             // eslint-disable-next-line no-console
             console.warn(
               `[useInferredDescriptors] introspection failed for source \`${sourceName}\` (url=\`${url}\`):`,
@@ -157,6 +181,7 @@ export function useInferredDescriptors(
           // Swallow — the connection failure path already logged if any.
         }
       }
+      return captured;
     },
     [resolver, connectionFactory],
   );
