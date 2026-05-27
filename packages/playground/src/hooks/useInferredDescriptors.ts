@@ -33,62 +33,20 @@ import { parseSourceRef } from '@fossil-lang/resolvers';
 import type { FossilPlayground, InferredDescriptorJson } from '@fossil-lang/wasm';
 import type { ConnectionResolver } from '@fossil-lang/types';
 
-/**
- * Map a `DuckDB` column-type string to the canonical Fossil `Primitive`
- * name. MUST match `fossil-hir::infer::primitive_from_name`'s table
- * (canonical names: `Integer`, `Float`, `String`, `Bool`, `Date`,
- * `DateTime`, `Time`, `GYear`, `AnyURI`).
- *
- * Mirrors the Rust sibling `duckdb_type_to_fossil_primitive` in
- * `crates/fossil-cli/src/main.rs` (kept in sync — both consumers feed the
- * same Rust-side primitive table).
- */
-export function duckdbTypeToFossilPrimitive(t: string): string {
-  const upper = t.trim().toUpperCase();
-  if (
-    upper === 'INTEGER' ||
-    upper === 'BIGINT' ||
-    upper === 'INT' ||
-    upper === 'SMALLINT' ||
-    upper === 'TINYINT' ||
-    upper === 'HUGEINT'
-  ) {
-    return 'Integer';
-  }
-  if (upper === 'DOUBLE' || upper === 'FLOAT' || upper === 'REAL') return 'Float';
-  if (upper.startsWith('DECIMAL')) return 'Float';
-  if (upper === 'BOOLEAN' || upper === 'BOOL') return 'Bool';
-  if (upper === 'DATE') return 'Date';
-  if (upper === 'TIMESTAMP' || upper === 'DATETIME') return 'DateTime';
-  if (upper === 'TIME') return 'Time';
-  // VARCHAR / TEXT / STRING + any unrecognised type fall back to String
-  // (matching the fossil-hir wildcard arm).
-  return 'String';
-}
+// Phase 14 plan 14-02 (COMP-02): the pure source-binding introspection
+// helpers (`extractSourceRefs` + `duckdbTypeToFossilPrimitive`) moved into
+// the `run/` namespace per CONTEXT.md target layout. The hook keeps a
+// transitive re-export so existing imports (incl. the vitest spec) survive
+// byte-for-byte.
+export {
+  extractSourceRefs,
+  duckdbTypeToFossilPrimitive,
+} from '../run/introspection.js';
 
-/**
- * Scrape source-binding RHS source URLs from a `.fossil` text.
- *
- * Regex-based (v0.2 placeholder). Shape mirrors the Rust sibling
- * `extract_source_refs` in `crates/fossil-cli/src/main.rs` so playground
- * + CLI behave identically.
- *
- * LIMITATIONS (documented; Phase 14+ replaces with an AST walk):
- * - does NOT match multi-line constructor (`name :=\n  io.csv("...")`)
- * - does NOT match interleaved comments between `:=` and `io.csv(`
- * - does NOT handle backslash-escaped quotes inside the URL string
- */
-export function extractSourceRefs(text: string): Array<{ sourceName: string; url: string }> {
-  const re = /(\w[\w\d_]*)\s*:=\s*io\.(?:csv|json)\(\s*['"]([^'"]+)['"]/g;
-  const out: Array<{ sourceName: string; url: string }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m[1] && m[2]) {
-      out.push({ sourceName: m[1], url: m[2] });
-    }
-  }
-  return out;
-}
+import {
+  extractSourceRefs,
+  duckdbTypeToFossilPrimitive,
+} from '../run/introspection.js';
 
 /** Minimal `DuckDB-WASM` connection shape this hook needs. Compatible with
  *  the async connection returned by `AsyncDuckDB.connect()`. */
