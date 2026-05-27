@@ -85,5 +85,27 @@ export default defineConfig({
   timeout: 30_000,
   expect: {
     timeout: 5_000,
+    // Phase 15 plan 15-05 visual baselines: 2% pixel-diff tolerance per
+    // 15-CONTEXT.md ("≤2% pixel diff" target). This applies to every
+    // `toHaveScreenshot()` assertion across the suite; visual-baselines.spec.ts
+    // is the only current consumer but the Phase 17 cross-host suite (REL-03)
+    // will inherit the same threshold.
+    toHaveScreenshot: {
+      maxDiffPixelRatio: 0.02,
+    },
   },
+  // Phase 15 plan 15-05 visual baselines: golden screenshots live under
+  // `apps/landing/tests/visual/__snapshots__/` (NOT the default
+  // `<test-file>.spec.ts-snapshots/` next to the spec). This keeps all
+  // visual artefacts in one tree so Phase 16's Keasy migration PR can
+  // gate on the directory wholesale and `git status apps/landing/tests/visual/`
+  // surfaces drift independently of the spec files themselves.
+  //
+  // Template substitutions:
+  //   {testDir}       → /Users/.../apps/landing/tests/e2e
+  //   {testFilePath}  → visual-baselines.spec.ts (file basename, no extension stripped)
+  //   {arg}           → the name passed to `toHaveScreenshot('name.png')`
+  //   {ext}           → empty (the `{arg}` already carries `.png`); included for safety
+  snapshotPathTemplate:
+    '{testDir}/../visual/__snapshots__/{testFilePath}/{arg}{ext}',
 });
