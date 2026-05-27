@@ -4,5 +4,7 @@ expression: "run_csvw_fixture(\"did_you_mean\", \"short_name_one_char\")"
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: did_you_mean
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0
 Error: unknown column `ig` — did you mean `id`?
   at 69..72

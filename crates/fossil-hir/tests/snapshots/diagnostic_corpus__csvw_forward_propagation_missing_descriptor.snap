@@ -4,5 +4,7 @@ expression: "run_csvw_fixture(\"csvw_forward_propagation\", \"missing_descriptor
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: csvw_forward_propagation
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0
 Error: cannot read CSVW schema `descriptor.csvw.json` for source `users`: file not found: <FIXTURE>/tests/fixtures/diagnostics/csvw_forward_propagation/missing_descriptor/descriptor.csvw.json
   at 0..0

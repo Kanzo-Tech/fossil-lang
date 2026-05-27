@@ -6,3 +6,5 @@ expression: "run_csvw_fixture(\"csvw_forward_propagation\", \"unknown_datatype\"
 # bucket: csvw_forward_propagation
 Error: CSVW column `duration` in source `events` has an unknown or missing datatype; defaulting to String
   at 0..0
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `events` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0

@@ -5,4 +5,5 @@ expression: "run_accept_all_fixture(\"accept_all\", \"descriptor_skips_backward_
 # mode: SC#5 AcceptAll degraded fallback (Blocker #4)
 # shape.shex PRESENT but ignored — resolve_target_shape == None == AcceptAll
 backward-check diagnostics: 0
-(no diagnostics emitted — compiles equivalently to walking-skeleton)
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0

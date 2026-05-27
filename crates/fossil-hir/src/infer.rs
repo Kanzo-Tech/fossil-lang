@@ -1,5 +1,5 @@
 //! Source row resolution: `MappingLoc` → `Option<Ty<'db>>` (a `Record` built
-//! from a CSVW descriptor).
+//! from an inferred or CSVW descriptor).
 //!
 //! # Architectural constraint (Serious #6)
 //!
@@ -16,23 +16,44 @@
 //! regression test (`tests/invalidation_regression.rs`) verifies this — the
 //! per-mapping fan-out for `typecheck_mapping` stays at exactly 1.
 //!
-//! # Forward propagation
+//! # Forward propagation (Phase 13 v0.2, ADR-0037)
 //!
-//! When a mapping's `from` source declares `schema = "<path>"`, the path is
-//! resolved relative to the mapping's file, the bytes are read via
-//! `db.system().read_file(...)`, parsed by
-//! [`fossil_descriptors_input::CsvwDescriptor`], and each CSVW column becomes
-//! a [`crate::ty::RecordField`]. `.field` accesses in the mapping body then
-//! resolve against this `Record` (plan 03-05's `Checker::lookup_field`).
+//! Priority order:
 //!
-//! When NO `schema` arg is present (the walking-skeleton `hello.fossil` case),
-//! this returns `None` and forward propagation is disabled for the mapping —
-//! `.field` accesses synthesise no type (preserving the Phase 2 behaviour).
+//! 1. **`InferredDescriptor`** (preferred). When the host has pre-registered
+//!    a descriptor for the mapping's source binding name via
+//!    `db.system().register_inferred_descriptor(...)` (browser-side
+//!    `DuckDB-WASM` via `FossilPlayground::register_inferred_descriptor`;
+//!    native CLI via the `duckdb` crate), `resolve_source_row` consumes that
+//!    descriptor and builds the [`Record`] directly — no CSVW JSON is read
+//!    from disk.
+//!
+//! 2. **CSVW descriptor** (deprecated; ADR-0007 retained as intermediate IR).
+//!    When the source binding declares `schema = "<path>"` AND no
+//!    `InferredDescriptor` is registered, the legacy path runs: read the
+//!    bytes via `db.system().read_file(...)`, parse via
+//!    [`fossil_descriptors_input::CsvwDescriptor`], build the Record. The
+//!    checker ALSO emits the `D-CSVW-DEPRECATED` diagnostic so v0.1 `.fossil`
+//!    files see the deprecation message during their next compile.
+//!
+//! 3. **No descriptor**. Returns `None`; forward propagation is disabled for
+//!    the mapping — `.field` accesses synthesise no type (preserves Phase 2
+//!    behaviour).
+//!
+//! ## Salsa-safety of the inferred path
+//!
+//! `db.system().inferred_descriptor(source_name)` reads through the existing
+//! `System` abstraction (ADR-0003 / ADR-0020). The descriptor table is NOT a
+//! salsa::input — it is host-owned state on the System impl, mirroring
+//! `read_file`. Reads from inside a tracked query do not register a Salsa
+//! input dependency, so re-registering a descriptor does NOT trigger
+//! invalidation. (When the host wants to invalidate, it bumps the source
+//! file's text via `set_text`, which Salsa already tracks.)
 
 use std::path::PathBuf;
 
 use fossil_base::{Span, delay_span_bug};
-use fossil_descriptors_input::CsvwDescriptor;
+use fossil_descriptors_input::{CsvwDescriptor, InferredDescriptor};
 use smol_str::SmolStr;
 
 use crate::def_map::{MappingLoc, def_map};
@@ -59,9 +80,30 @@ pub fn resolve_source_row<'db>(
     let hir_mapping = mappings.mappings(db).get(mapping.index(db))?;
     let source_name = hir_mapping.source_binding.clone();
 
+    // Phase 13 v0.2 (ADR-0037): try the host-registered `InferredDescriptor`
+    // FIRST. This is the new authoring style — the user writes `io.csv("...")`
+    // and the host (browser-side `DuckDB-WASM`; native CLI `duckdb` crate)
+    // pre-registers the descriptor before invoking `compile`.
+    if let Some(inferred) = db.system().inferred_descriptor(source_name.as_str()) {
+        // If an explicit `schema = "..."` arg is ALSO present, the
+        // InferredDescriptor wins (it represents fresher truth from the
+        // file itself) but we ALSO emit the `D-CSVW-DEPRECATED` warning so
+        // the user knows the explicit arg is now redundant.
+        if dm.lookup_source_schema(db, source_name.as_str()).is_some() {
+            emit_csvw_deprecated_diagnostic(db, &source_name);
+        }
+        return Some(record_from_inferred(db, &inferred, source_name.as_str()));
+    }
+
+    // Phase 13 v0.2 FALLBACK PATH — legacy CSVW (deprecated; still functional).
+
     // 2. Read the `schema = "<path>"` NAMED arg from the DefMap (signatures-
     //    only — does not re-trigger body()).
     let schema_path = dm.lookup_source_schema(db, source_name.as_str())?;
+
+    // Explicit CSVW path is now deprecated — warn the user that v0.2 prefers
+    // the inferred-descriptor path. Compilation still proceeds via CSVW.
+    emit_csvw_deprecated_diagnostic(db, &source_name);
 
     // 3. Resolve the schema path relative to the mapping's file.
     let resolved = resolve_relative(db, file, schema_path.as_str());
@@ -176,6 +218,87 @@ fn primitive_from_name(name: &str) -> Primitive {
     }
 }
 
+/// Returns `true` iff `name` is one of the canonical [`Primitive`] variant
+/// names recognised by [`primitive_from_name`]. Used by
+/// [`record_from_inferred`] to emit a diagnostic when a host-provided
+/// `InferredColumn.primitive` string falls outside the catalog (mirrors the
+/// CSVW path's "unknown datatype → String" behaviour in
+/// [`record_from_descriptor`]).
+#[must_use]
+fn is_canonical_primitive_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Integer"
+            | "Float"
+            | "String"
+            | "Bool"
+            | "Date"
+            | "DateTime"
+            | "Time"
+            | "GYear"
+            | "AnyURI"
+    )
+}
+
+/// Build a `Record` [`Ty`] from a host-provided [`InferredDescriptor`].
+///
+/// Phase 13 v0.2 (ADR-0037) inferred-path companion to
+/// [`record_from_descriptor`]. The two functions produce structurally
+/// equivalent Records on identical column shapes (semantic-equivalence
+/// invariant from INPUT-03). When a column carries a non-canonical
+/// `primitive` string, this function defaults to `String` and emits a
+/// `D-INFERRED-UNKNOWN-DATATYPE` diagnostic (mirrors the CSVW path's
+/// behaviour on unknown CSVW datatypes — see [`record_from_descriptor`]).
+#[must_use]
+pub(crate) fn record_from_inferred<'db>(
+    db: &'db dyn fossil_base::Db,
+    inferred: &InferredDescriptor,
+    source_name: &str,
+) -> Ty<'db> {
+    let mut fields: Vec<RecordField<'db>> = Vec::new();
+    for col in &inferred.columns {
+        if !is_canonical_primitive_name(col.primitive.as_str()) {
+            let _eg = delay_span_bug(
+                db,
+                Span::new(0, 0),
+                format!(
+                    "D-INFERRED-UNKNOWN-DATATYPE: inferred column `{}` in source \
+                     `{source_name}` has non-canonical primitive `{}`; defaulting \
+                     to String",
+                    col.name, col.primitive
+                ),
+            );
+        }
+        let prim = primitive_from_name(col.primitive.as_str());
+        let field_ty = Ty::new(db, TyKind::Primitive(prim));
+        fields.push(RecordField {
+            name: col.name.clone(),
+            ty: field_ty,
+        });
+    }
+    let rec = Record::new(db, fields);
+    Ty::new(db, TyKind::Record(rec))
+}
+
+/// Emit the `D-CSVW-DEPRECATED` warning when a source binding's explicit
+/// `schema = "..."` arg is encountered (ADR-0037).
+///
+/// Severity is conveyed via the `D-CSVW-DEPRECATED:` text prefix consumed
+/// downstream by the diagnostic renderer; the underlying `delay_span_bug`
+/// accumulator is the existing Phase-3 channel (a dedicated `warning`
+/// accumulator is out-of-scope for plan 13-02).
+fn emit_csvw_deprecated_diagnostic(db: &dyn fossil_base::Db, source_name: &SmolStr) {
+    let _eg = delay_span_bug(
+        db,
+        Span::new(0, 0),
+        format!(
+            "D-CSVW-DEPRECATED: explicit CSVW descriptor for source \
+             `{source_name}` is deprecated; types will be inferred from the \
+             file directly. Remove the `schema = \"...\"` argument."
+        ),
+    );
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -231,4 +354,76 @@ mod tests {
         assert_eq!(primitive_from_name("GYear"), Primitive::GYear);
         assert_eq!(primitive_from_name("AnyURI"), Primitive::AnyURI);
     }
+
+    // Phase 13 v0.2 (ADR-0037, INPUT-03 semantic equivalence)
+    #[test]
+    fn record_from_inferred_matches_csvw_path_on_same_shape() {
+        use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+
+        let db = db();
+
+        // Build via the legacy CSVW path.
+        let csvw_descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).expect("valid CSVW");
+        let row_csvw = record_from_descriptor(&db, &csvw_descriptor, "users");
+
+        // Build the equivalent InferredDescriptor (same column shape).
+        let inferred = InferredDescriptor {
+            source_name: "users".into(),
+            columns: vec![
+                InferredColumn {
+                    name: "id".into(),
+                    primitive: "Integer".into(),
+                },
+                InferredColumn {
+                    name: "name".into(),
+                    primitive: "String".into(),
+                },
+                InferredColumn {
+                    name: "age".into(),
+                    primitive: "Integer".into(),
+                },
+            ],
+            content_hash: "test-hash".into(),
+        };
+        let row_inferred = record_from_inferred(&db, &inferred, "users");
+
+        // Both paths must produce a Record with structurally-identical fields.
+        let TyKind::Record(rec_csvw) = row_csvw.kind(&db) else {
+            panic!("CSVW: expected Record");
+        };
+        let TyKind::Record(rec_inferred) = row_inferred.kind(&db) else {
+            panic!("Inferred: expected Record");
+        };
+        let f_csvw = rec_csvw.fields(&db);
+        let f_inferred = rec_inferred.fields(&db);
+        assert_eq!(f_csvw.len(), f_inferred.len());
+        for (a, b) in f_csvw.iter().zip(f_inferred.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.ty.kind(&db), b.ty.kind(&db));
+        }
+    }
+
+    // Phase 13 v0.2 — guard the canonical-primitive table used by
+    // `record_from_inferred` for D-INFERRED-UNKNOWN-DATATYPE emission.
+    #[test]
+    fn is_canonical_primitive_name_matches_primitive_from_name_table() {
+        for name in [
+            "Integer", "Float", "String", "Bool", "Date", "DateTime", "Time", "GYear", "AnyURI",
+        ] {
+            assert!(is_canonical_primitive_name(name), "`{name}` is canonical");
+        }
+        assert!(!is_canonical_primitive_name("integer")); // case-sensitive
+        assert!(!is_canonical_primitive_name("Decimal")); // outside catalog
+        assert!(!is_canonical_primitive_name(""));
+    }
+
+    // Phase 13 v0.2 — `primitive_from_name` already covers the unknown-primitive
+    // → String fallback (see `primitive_from_name_round_trips_all_variants` for
+    // the canonical names; the wildcard `_ => Primitive::String` arm handles
+    // unknowns). A full `record_from_inferred` test for the unknown branch
+    // requires running inside a tracked Salsa query (the `D-INFERRED-UNKNOWN-
+    // DATATYPE` `delay_span_bug` only accumulates inside `#[salsa::tracked]`
+    // — outside one, the accumulator panics). The downstream e2e path
+    // exercised by `record_from_inferred_matches_csvw_path_on_same_shape`
+    // covers the canonical fast-path.
 }

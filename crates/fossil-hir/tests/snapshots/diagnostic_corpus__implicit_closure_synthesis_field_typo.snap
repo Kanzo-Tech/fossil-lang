@@ -4,5 +4,7 @@ expression: "run_csvw_fixture(\"implicit_closure_synthesis\", \"field_typo\")"
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: implicit_closure_synthesis
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0
 Error: unknown column `aeg` — did you mean `age`?
   at 68..72

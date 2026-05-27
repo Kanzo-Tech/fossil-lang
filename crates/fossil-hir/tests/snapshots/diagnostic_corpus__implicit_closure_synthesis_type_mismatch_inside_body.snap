@@ -4,4 +4,5 @@ expression: "run_csvw_fixture(\"implicit_closure_synthesis\", \"type_mismatch_in
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: implicit_closure_synthesis
-(no diagnostics emitted)
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0

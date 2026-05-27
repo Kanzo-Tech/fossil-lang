@@ -4,5 +4,7 @@ expression: "run_csvw_fixture(\"csvw_forward_propagation\", \"typo_with_did_you_
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: csvw_forward_propagation
+Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
+  at 0..0
 Error: unknown column `naem` — did you mean `name`?
   at 69..74
