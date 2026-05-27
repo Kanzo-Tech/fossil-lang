@@ -34,9 +34,10 @@ describe('usePermalink (PLAY-04)', () => {
   });
 
   test('initialPermalink decodes + calls onHydrate exactly once', () => {
+    // Phase 13 v0.2 (ADR-0037): v2 schema dropped user-facing CSVW. The
+    // hydration test stays valid — we just encode the v2-shaped state.
     const permalink = encodePermalink({
       source: 'prefix ex: <https://example.org/>\n',
-      csvw: '{"@context":"http://www.w3.org/ns/csvw"}',
     });
     const onHydrate = vi.fn();
     const onError = vi.fn();
@@ -57,9 +58,8 @@ describe('usePermalink (PLAY-04)', () => {
     expect(onError).not.toHaveBeenCalled();
     expect(onHydrate).toHaveBeenCalledTimes(1);
     expect(onHydrate.mock.calls[0]?.[0]).toMatchObject({
-      v: 1,
+      v: 2,
       source: 'prefix ex: <https://example.org/>\n',
-      csvw: '{"@context":"http://www.w3.org/ns/csvw"}',
     });
 
     // Even if the parent re-passes the permalink (or a different one), the
@@ -128,7 +128,7 @@ describe('usePermalink (PLAY-04)', () => {
     rerender({ initialPermalink: permalink });
     expect(onHydrate).toHaveBeenCalledTimes(1);
     expect(onHydrate.mock.calls[0]?.[0]).toMatchObject({
-      v: 1,
+      v: 2,
       source: 'late = "hydration\\nstill works"\n',
     });
   });

@@ -18,4 +18,9 @@
 export { encode, PermalinkTooLargeError, MAX_PERMALINK_BYTES } from './encode.js';
 export { decode } from './decode.js';
 export { SCHEMA_VERSION, migrate } from './envelope.js';
-export type { PermalinkStateV1 } from './envelope.js';
+// v0.2 active state shape + v0.1 historical shape kept for migration-aware tests.
+export type {
+  PermalinkState,
+  PermalinkStateV1,
+  PermalinkStateV2,
+} from './envelope.js';

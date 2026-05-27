@@ -48,7 +48,7 @@ import { createDefaultResolver } from '@fossil-lang/resolvers';
 import {
   buildResolverExamples,
   examples,
-  helloExample,
+  helloNoCsvwExample,
 } from '@fossil-lang/examples';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExampleSelector } from './example-selector';
@@ -102,8 +102,15 @@ export default function PlaygroundHost(): JSX.Element {
   //      for the loaded example's state, and the host will mirror it back
   //      via `updateHash` below.
   const [selectedExampleId, setSelectedExampleId] = useState<string>('');
+  // Phase 13 v0.2 default (ADR-0037 + 13-CONTEXT.md "canonical example"):
+  // hello-no-csvw shows the new authoring style — `io.csv("...")` WITHOUT
+  // an explicit `schema = "..."` argument. The compiler infers schema via
+  // host-side `DuckDB-WASM DESCRIBE` (orchestrated by 13-04b's
+  // useInferredDescriptors hook). The legacy hello example with its
+  // sidecar CSVW remains available in the dropdown for backwards-compat
+  // demonstration.
   const [activeMapping, setActiveMapping] = useState<string>(
-    helloExample.mapping,
+    helloNoCsvwExample.mapping,
   );
   const [remountKey, setRemountKey] = useState<number>(0);
 

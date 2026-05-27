@@ -55,11 +55,13 @@ describe('permalink forward-compat (PLAY-04 SC#1)', () => {
       // Payload fields must match the fixture's expected values exactly.
       expect(state.source).toBe(fx.expectedSource);
 
-      if (fx.expectedCsvw !== undefined) {
-        expect(state.csvw).toBe(fx.expectedCsvw);
-      } else {
-        expect(state.csvw).toBeUndefined();
-      }
+      // Phase 13 v0.2 (ADR-0037): the v2 schema dropped user-facing CSVW.
+      // The v1→v2 migration silently DROPS any `csvw` field. v0.1 fixtures
+      // that had `expectedCsvw` now decode WITHOUT csvw — that's the
+      // load-bearing migration claim. We deliberately do NOT update the
+      // fixture file (paper-permanence — old fixtures are immutable); we
+      // just adjust the assertion to expect the migration's drop behaviour.
+      expect((state as Record<string, unknown>).csvw).toBeUndefined();
 
       if (fx.expectedShex !== undefined) {
         expect(state.shex).toBe(fx.expectedShex);

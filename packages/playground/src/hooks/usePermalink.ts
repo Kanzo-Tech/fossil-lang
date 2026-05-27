@@ -38,7 +38,7 @@ import {
   encode as encodePermalink,
   decode as decodePermalink,
   PermalinkTooLargeError,
-  type PermalinkStateV1,
+  type PermalinkState,
 } from '../permalink/index.js';
 
 export interface UsePermalinkArgs {
@@ -55,7 +55,15 @@ export interface UsePermalinkArgs {
    */
   source: string;
 
-  /** Current CSVW descriptor (optional — emitted in envelope iff defined). */
+  /**
+   * Current CSVW descriptor (optional). Phase 13 v0.2 (ADR-0037) dropped
+   * user-facing CSVW from the permalink schema (v2); this arg is retained
+   * for backwards-compat with the FossilPlayground component's current
+   * state shape (the component reads/writes `csvw` for the 13-04b
+   * transition) but the hook IGNORES it — `csvw` is no longer encoded
+   * into the permalink. The arg will be removed when 13-04b drops the
+   * CSVW state from the component.
+   */
   csvw: string | undefined;
 
   /** Current ShEx target shape (optional — emitted iff defined). */
@@ -63,10 +71,10 @@ export interface UsePermalinkArgs {
 
   /**
    * Called exactly once on the first successful decode of `initialPermalink`.
-   * The component implements this to setState the editor/csvw/shex slots from
+   * The component implements this to setState the editor/shex slots from
    * the decoded shape. If decode fails this is NOT called.
    */
-  onHydrate?: (state: PermalinkStateV1) => void;
+  onHydrate?: (state: PermalinkState) => void;
 
   /**
    * Called (debounced) with the freshly-encoded permalink whenever (source,
@@ -95,7 +103,10 @@ export function usePermalink(args: UsePermalinkArgs): void {
   const {
     initialPermalink,
     source,
-    csvw,
+    // `csvw` retained for backwards-compat with the FossilPlayground state
+    // shape during the 13-04b transition; NOT encoded into the permalink
+    // (Phase 13 v0.2 / ADR-0037).
+    csvw: _csvw,
     shex,
     onHydrate,
     onStateChange,
@@ -144,7 +155,10 @@ export function usePermalink(args: UsePermalinkArgs): void {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       try {
-        const encoded = encodePermalink({ source, csvw, shex });
+        // Phase 13 v0.2 (ADR-0037): the v2 envelope has no csvw field; the
+        // hook IGNORES the csvw arg (kept in the args shape for the 13-04b
+        // transition's component contract).
+        const encoded = encodePermalink({ source, shex });
         onStateChange(encoded);
       } catch (e) {
         if (e instanceof PermalinkTooLargeError) {
@@ -157,5 +171,9 @@ export function usePermalink(args: UsePermalinkArgs): void {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [source, csvw, shex, onStateChange, onError, debounceMs]);
+    // `_csvw` deliberately excluded from deps — the hook IGNORES it (v2
+    // schema dropped user-facing CSVW per ADR-0037). Re-encoding when csvw
+    // changes would be wasted work.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, shex, onStateChange, onError, debounceMs]);
 }

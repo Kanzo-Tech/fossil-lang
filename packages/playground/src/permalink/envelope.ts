@@ -21,7 +21,17 @@
  * single library path simplifies Node-CI parity.
  */
 
-export const SCHEMA_VERSION = 1 as const;
+/**
+ * Current permalink envelope version.
+ *
+ * Phase 13 v0.2 (ADR-0037) bumped this from 1 → 2 alongside the drop of
+ * user-facing CSVW. v0.1 payloads (`v: 1`) with a `csvw` field still decode:
+ * the v1→v2 migration silently DROPS the `csvw` field (the user no longer
+ * needs to maintain CSVW; types are inferred via host-side DuckDB DESCRIBE
+ * orchestrated by 13-04b). The encoder now emits `v: 2` and never includes
+ * a `csvw` field.
+ */
+export const SCHEMA_VERSION = 2 as const;
 
 /**
  * URL-fragment safety budget. Chosen as 8000 bytes because:
@@ -37,15 +47,36 @@ export const SCHEMA_VERSION = 1 as const;
  */
 export const MAX_PERMALINK_BYTES = 8_000;
 
+/**
+ * v0.1 permalink shape — supported on decode for backwards compatibility
+ * (an old bookmark must still load). NEVER produced by the v0.2 encoder.
+ */
 export type PermalinkStateV1 = {
   v: 1;
   /** .fossil source text — the mapping the user is editing. */
   source: string;
-  /** Optional CSVW JSON-LD descriptor (PLAY-09 + PLAY-11 wire this). */
+  /** Optional CSVW JSON-LD descriptor (PLAY-09 + PLAY-11). Phase 13 drops
+   *  user-facing CSVW (ADR-0037); v0.1 payloads carrying this field
+   *  silently drop it during migration. */
   csvw?: string;
   /** Optional ShEx target shape text. */
   shex?: string;
 };
+
+/**
+ * v0.2 permalink shape — the current state shape returned by `decode()`
+ * and consumed by `encode()`. No `csvw` field (ADR-0037).
+ */
+export type PermalinkStateV2 = {
+  v: 2;
+  /** .fossil source text — the mapping the user is editing. */
+  source: string;
+  /** Optional ShEx target shape text. */
+  shex?: string;
+};
+
+/** Current state shape alias. Update when SCHEMA_VERSION bumps. */
+export type PermalinkState = PermalinkStateV2;
 
 /**
  * Migration registry. Each key migrates from v→v+1.
@@ -62,12 +93,28 @@ export type PermalinkStateV1 = {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const migrations: Record<number, (s: any) => any> = {
-  // 1: (s) => ({ ...s, v: 2, newField: defaultValue }),   // FUTURE
+  /**
+   * v1 → v2 migration (Phase 13 / ADR-0037).
+   *
+   * Drops the `csvw` field if present — the v0.2 model infers schema
+   * via host-side DuckDB DESCRIBE (orchestrated by the playground in
+   * plan 13-04b), so the CSVW payload is no longer meaningful.
+   *
+   * Preserves `source` + `shex` verbatim. No warning surfaced — the
+   * typical user flow is "click a v0.1 bookmark"; a toast would add
+   * noise without value. Discovered by paper-permanence design (v1
+   * fixtures must keep decoding).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  1: (s: any) => {
+    const { csvw: _droppedCsvw, ...rest } = s as Record<string, unknown>;
+    return { ...rest, v: 2 };
+  },
 };
 
 export function migrate(
   state: { v: number } & Record<string, unknown>,
-): PermalinkStateV1 {
+): PermalinkState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let cur: any = state;
   while (cur.v < SCHEMA_VERSION) {
@@ -80,7 +127,7 @@ export function migrate(
       `Permalink schema version ${cur.v} is newer than supported ${SCHEMA_VERSION}; upgrade the playground`,
     );
   }
-  return cur as PermalinkStateV1;
+  return cur as PermalinkState;
 }
 
 /**

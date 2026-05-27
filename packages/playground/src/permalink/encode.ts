@@ -21,7 +21,7 @@ import {
   MAX_PERMALINK_BYTES,
   SCHEMA_VERSION,
 } from './envelope.js';
-import type { PermalinkStateV1 } from './envelope.js';
+import type { PermalinkState } from './envelope.js';
 
 export { MAX_PERMALINK_BYTES };
 
@@ -48,14 +48,17 @@ export class PermalinkTooLargeError extends Error {
  * Accepting a partial type prevents callers from accidentally pinning to an
  * old SCHEMA_VERSION at the call site.
  */
-export function encode(state: Omit<PermalinkStateV1, 'v'>): string {
+export function encode(state: Omit<PermalinkState, 'v'>): string {
   // Always inject `v: SCHEMA_VERSION` first so the JSON key order is stable
   // and the version field appears at the head of the envelope. JSON.stringify
   // honors insertion order for non-integer keys (per ES2015+).
-  const envelope: PermalinkStateV1 = {
+  //
+  // Phase 13 v0.2 (ADR-0037): NO `csvw` field. The v1 schema had it; v2
+  // dropped user-facing CSVW. Old v1 payloads still decode via the migration
+  // registry (envelope.ts), which strips csvw silently.
+  const envelope: PermalinkState = {
     v: SCHEMA_VERSION,
     source: state.source,
-    ...(state.csvw !== undefined ? { csvw: state.csvw } : {}),
     ...(state.shex !== undefined ? { shex: state.shex } : {}),
   };
   const json = JSON.stringify(envelope);

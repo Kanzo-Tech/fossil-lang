@@ -12,9 +12,9 @@
 
 import { gunzipSync, strFromU8 } from 'fflate';
 import { fromB64Url, migrate } from './envelope.js';
-import type { PermalinkStateV1 } from './envelope.js';
+import type { PermalinkState } from './envelope.js';
 
-export function decode(s: string): PermalinkStateV1 {
+export function decode(s: string): PermalinkState {
   // Defend against the common "user pasted a URL including `#`" case so the
   // error message points at the right call site upstream.
   if (typeof s !== 'string' || s.length === 0) {

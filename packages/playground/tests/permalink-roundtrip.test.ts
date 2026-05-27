@@ -18,23 +18,25 @@ import {
   encodePermalink,
   decodePermalink,
   PERMALINK_SCHEMA_VERSION,
-  type PermalinkStateV1,
+  type PermalinkState,
 } from '../src/index.js';
 
-describe('permalink roundtrip (PLAY-04)', () => {
-  const cases: Array<{ name: string; state: Omit<PermalinkStateV1, 'v'> }> = [
+describe('permalink roundtrip (PLAY-04 / Phase 13 ADR-0037 schema v2)', () => {
+  // Phase 13 v0.2 (ADR-0037) drops the `csvw` field from the v2 schema. The
+  // previous "source + csvw + shex" case is replaced with "source + shex"
+  // (csvw is no longer in the v2 envelope shape). v0.1 backwards-compat is
+  // covered by permalink-forward-compat.test.ts.
+  const cases: Array<{ name: string; state: Omit<PermalinkState, 'v'> }> = [
     { name: 'empty source', state: { source: '' } },
     {
       name: 'minimal hello',
       state: { source: 'prefix ex: <https://example.org/>\n' },
     },
     {
-      name: 'source + csvw + shex',
+      name: 'source + shex',
       state: {
         source:
           'prefix ex: <https://example.org/>\nusers := io.csv("@examples/hello.csv")\n',
-        csvw:
-          '{"@context":"http://www.w3.org/ns/csvw","url":"@examples/hello.csv"}',
         shex: 'prefix ex: <https://example.org/>\nex:Person {}',
       },
     },
@@ -51,8 +53,9 @@ describe('permalink roundtrip (PLAY-04)', () => {
       const decoded = decodePermalink(encoded);
       expect(decoded.v).toBe(PERMALINK_SCHEMA_VERSION);
       expect(decoded.source).toBe(state.source);
-      expect(decoded.csvw).toBe(state.csvw);
       expect(decoded.shex).toBe(state.shex);
+      // Phase 13: v2 schema has NO csvw field — never read, never written.
+      expect((decoded as Record<string, unknown>).csvw).toBeUndefined();
     });
   }
 
@@ -75,14 +78,12 @@ describe('permalink roundtrip (PLAY-04)', () => {
   test('round-trip is idempotent — encode(decode(encode(x))) === encode(x)', () => {
     const state = {
       source: 'prefix ex: <https://example.org/>\nusers := io.csv("@x.csv")\n',
-      csvw: '{}',
     };
     const once = encodePermalink(state);
     const decoded = decodePermalink(once);
     // Re-encode from the decoded shape (omitting `v` because encode injects it).
     const twice = encodePermalink({
       source: decoded.source,
-      ...(decoded.csvw !== undefined ? { csvw: decoded.csvw } : {}),
       ...(decoded.shex !== undefined ? { shex: decoded.shex } : {}),
     });
     expect(twice).toBe(once);
