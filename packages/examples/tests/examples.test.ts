@@ -1,12 +1,74 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import {
   examples,
   buildResolverExamples,
   helloExample,
   type Example,
 } from '../src/index.js';
+
+const REPO_ROOT = resolve(__dirname, '../../..');
+const EXAMPLES_DIR = resolve(__dirname, '../src');
+
+// Resolve the fossil-cli binary — release preferred, debug fallback (mirrors
+// variations.test.ts contract).
+function resolveFossilBin(): string {
+  const release = join(REPO_ROOT, 'target', 'release', 'fossil');
+  const debug = join(REPO_ROOT, 'target', 'debug', 'fossil');
+  if (existsSync(release)) return release;
+  if (existsSync(debug)) return debug;
+  return release;
+}
+
+let FOSSIL_BIN: string;
+
+// Build the CLI once before any audit-smoke runs. Variations harness uses the
+// same pattern; if both files run in the same vitest session the cached binary
+// is reused.
+beforeAll(() => {
+  FOSSIL_BIN = resolveFossilBin();
+  if (!existsSync(FOSSIL_BIN)) {
+    execFileSync('cargo', ['build', '-p', 'fossil-cli', '--release', '--quiet'], {
+      cwd: REPO_ROOT,
+      stdio: 'inherit',
+    });
+    FOSSIL_BIN = resolveFossilBin();
+  }
+  if (!existsSync(FOSSIL_BIN)) {
+    throw new Error(
+      `fossil binary not found after build at ${FOSSIL_BIN} — audit smoke cannot run`,
+    );
+  }
+}, 180_000);
+
+interface CheckOutcome {
+  exitCode: number;
+  stderr: string;
+  stdout: string;
+}
+
+function runCheck(filePath: string): CheckOutcome {
+  try {
+    const stdout = execFileSync(FOSSIL_BIN, ['check', filePath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { exitCode: 0, stderr: '', stdout: String(stdout) };
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException & {
+      status?: number;
+      stderr?: Buffer | string;
+      stdout?: Buffer | string;
+    };
+    return {
+      exitCode: err.status ?? -1,
+      stderr: err.stderr ? String(err.stderr) : '',
+      stdout: err.stdout ? String(err.stdout) : '',
+    };
+  }
+}
 
 describe('@fossil-lang/examples', () => {
   it('exports at least one example', () => {
@@ -79,6 +141,42 @@ describe('@fossil-lang/examples', () => {
     }
     for (const v of Object.values(resolver)) {
       expect(v).not.toBe(helloExample.mapping);
+    }
+  });
+
+  // BUG-02 (Phase 15 plan 15-02) audit-aware smoke: every curated example's
+  // root `.fossil` source must compile end-to-end via `fossil check` and exit
+  // 0. This mirrors the Phase 13 ADR-0037 inferred-CSVW contract: examples no
+  // longer need a `schema = "..."` arg, and any sibling `.shex` shape must be
+  // loadable by the CLI's auto-discovery (JSON-LD form per
+  // `ShExDescriptor::from_reader`).
+  //
+  // Why this is separate from variations.test.ts: the variations harness
+  // exercises files under `<example>/variations/` (which have no sibling
+  // descriptors); this smoke exercises the example's ROOT `<example>.fossil`
+  // (which DOES have siblings — `.csv`, `.shex`, optional `.csvw.json`). It
+  // catches the auto-discovery failure mode (sibling format mismatch) the
+  // variations subtree by construction can't see.
+  const EXAMPLE_IDS = [
+    'hello',
+    'hello-no-csvw',
+    'ecommerce',
+    'musicbrainz',
+    'typing-showcase',
+    'multi-source-join',
+  ] as const;
+
+  describe('BUG-02 audit smoke: root .fossil compiles via `fossil check`', () => {
+    for (const id of EXAMPLE_IDS) {
+      it(`${id}/${id}.fossil → fossil check exit 0`, () => {
+        const filePath = join(EXAMPLES_DIR, id, `${id}.fossil`);
+        expect(existsSync(filePath), `${filePath} missing on disk`).toBe(true);
+        const { exitCode, stderr } = runCheck(filePath);
+        expect(
+          exitCode,
+          `expected exit 0 but ${id} failed:\nSTDERR:\n${stderr}`,
+        ).toBe(0);
+      }, 30_000);
     }
   });
 
