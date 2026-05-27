@@ -9,7 +9,7 @@
 //! identical column shapes) holds.
 //!
 //! The full lower→check→Record-Ty integration through `resolve_source_row`
-//! requires building a fully-wired `MappingLoc` (lower_to_hir + def_map setup)
+//! requires building a fully-wired `MappingLoc` (`lower_to_hir` + `def_map` setup)
 //! — that surface is exercised by the existing `fossil-hir` test suite via
 //! its own helpers. Here we cover the new seams introduced by plan 13-02:
 //! the System trait extension + the `NativeSystem` Mutex<HashMap> backing

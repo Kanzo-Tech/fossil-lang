@@ -44,7 +44,7 @@
 //!
 //! `db.system().inferred_descriptor(source_name)` reads through the existing
 //! `System` abstraction (ADR-0003 / ADR-0020). The descriptor table is NOT a
-//! salsa::input — it is host-owned state on the System impl, mirroring
+//! `salsa::input` — it is host-owned state on the System impl, mirroring
 //! `read_file`. Reads from inside a tracked query do not register a Salsa
 //! input dependency, so re-registering a descriptor does NOT trigger
 //! invalidation. (When the host wants to invalidate, it bumps the source
