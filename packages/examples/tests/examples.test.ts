@@ -45,14 +45,11 @@ describe('@fossil-lang/examples', () => {
     expect(lines[0]).toMatch(/,/);
   });
 
-  it('helloExample carries a CSVW JSON-LD descriptor', () => {
-    expect(helloExample.csvw).toBeDefined();
-    const parsed = JSON.parse(helloExample.csvw!);
-    expect(parsed['@context']).toBe('http://www.w3.org/ns/csvw');
-    expect(parsed.url).toBe('@examples/hello.csv');
-    expect(parsed.tableSchema.columns).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'id' })]),
-    );
+  it('helloExample no longer carries a CSVW JSON-LD descriptor (Phase 13 / ADR-0037)', () => {
+    // Phase 13 v0.2 (ADR-0037 / plan 13-04b) dropped user-facing CSVW. The
+    // hello example no longer ships a sidecar; schema is inferred at compile
+    // time via host-side DuckDB DESCRIBE (`useInferredDescriptors` hook).
+    expect(helloExample.csvw).toBeUndefined();
   });
 
   it('helloExample carries a ShEx target shape', () => {
