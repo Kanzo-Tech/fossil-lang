@@ -50,10 +50,33 @@ import {
   examples,
   helloNoCsvwExample,
 } from '@fossil-lang/examples';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExampleSelector } from './example-selector';
 
 export default function PlaygroundHost(): JSX.Element {
+  // Visual-baselines hook (Phase 15 plan 15-05): read ?theme=dark from the
+  // URL so the Playwright visual-baselines spec can capture dark-mode
+  // screenshots without needing a runtime toggle UI. Production landing
+  // hits `/` with no query string and falls through to 'light' — IDENTICAL
+  // behaviour to the prior hard-coded `theme="light"`.
+  //
+  // The playground's own `theme` prop wins over the <KanzoThemeProvider/>
+  // cascade installed by ClientShell.tsx (per useTheme.ts L96-108 — when a
+  // string prop is passed, useTheme injects the built-in lightTheme/darkTheme
+  // CSS vars at the playground root, shadowing the Provider's vars for the
+  // playground subtree). This is intentional: @kanzo/theme exports only
+  // `kanzoTheme` (light); there is no kanzoDarkTheme variant, so dark mode
+  // MUST be driven through the playground's own dark theme.
+  //
+  // Defensive `?? null`: useSearchParams() can return null during SSR; the
+  // playground is already inside a `dynamic({ ssr: false })` boundary via
+  // ClientShell.tsx so we should never see null here, but the optional-chain
+  // guard is cheap insurance against a future Next.js change.
+  const searchParams = useSearchParams();
+  const themeParam: 'light' | 'dark' =
+    searchParams?.get('theme') === 'dark' ? 'dark' : 'light';
+
   // Memoise the resolver — recreating it per render would invalidate the
   // playground's resolver-dependent state (autocomplete cache, etc.) and
   // cause unnecessary re-mount churn inside the CodeMirror extensions.
@@ -172,7 +195,7 @@ export default function PlaygroundHost(): JSX.Element {
         // side-effect). The Service Worker precaches it on first visit so
         // subsequent loads work offline (OFFLINE-01).
         wasmUrl="/wasm/fossil_wasm_bg.wasm"
-        theme="light"
+        theme={themeParam}
         // PLAY-04 wiring. On first mount only (remountKey === 0): if the
         // URL carried a `#...` permalink, hydrate from it; otherwise the
         // component defaults to `initialMapping`. After an example switch
