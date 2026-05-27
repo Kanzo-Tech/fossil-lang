@@ -22,5 +22,8 @@ workspace = true
 indexmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-smol_str = { workspace = true }
+# `serde` feature on smol_str opt-in for `InferredDescriptor` JSON round-trip
+# (ADR-0037 + plan 13-01). Other consumers of smol_str in the workspace remain
+# unaffected — Cargo feature unification merges features additively.
+smol_str = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }

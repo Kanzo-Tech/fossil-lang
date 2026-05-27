@@ -13,6 +13,18 @@
 //!
 //! Phase 5 STDL-06 may add JSON Schema / XSD / Parquet implementations.
 //!
+//! ## v0.2: drop user-facing CSVW; introduce `InferredDescriptor`
+//!
+//! Per ADR-0037, v0.2 deprecates the user-facing CSVW entry path: hosts no
+//! longer ship a CSVW JSON-LD sidecar. Instead they run DuckDB `DESCRIBE
+//! read_csv_auto(...)` (browser-side DuckDB-WASM, or native `duckdb` crate in
+//! `fossil-cli`) and pass the introspected column list as an
+//! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`. The
+//! [`CsvwDescriptor`] (Phase 3 CORE-05, ADR-0007) is retained as
+//! deprecated-but-functional internal IR: v0.1 `.fossil` files with an
+//! explicit `schema = "..."` argument still parse + compile (with a
+//! `D-CSVW-DEPRECATED` warning emitted by the checker in plan 13-02).
+//!
 //! ## Trait stability
 //!
 //! The Phase 1 trait surface (`name`, `parse`, `type_for_field`) is the
@@ -20,8 +32,10 @@
 //! for streaming descriptors) is allowed; method removal requires an ADR.
 
 pub mod csvw;
+pub mod inferred;
 
 pub use csvw::{CsvwDescriptor, CsvwMetadata, datatype_to_primitive_name};
+pub use inferred::{InferredColumn, InferredDescriptor};
 
 /// Input-side schema descriptor.
 ///
