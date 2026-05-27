@@ -40,7 +40,15 @@ import { helloExample } from '@fossil-lang/examples';
 import { languageServerSupport } from '@codemirror/lsp-client';
 import type { Extension } from '@codemirror/state';
 import type { ConnectionResolver, FossilThemeProp } from '@fossil-lang/types';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@fossil-lang/ui';
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from '@fossil-lang/ui';
 
 import { useLspWorker } from '../hooks/useLspWorker.js';
 import { useDuckDb, getDuckDb } from '../hooks/useDuckDb.js';
@@ -52,8 +60,7 @@ import { announce, ARIA_LABELS } from '../a11y/index.js';
 import { runPipeline } from '../run/runPipeline.js';
 import { CompiledSqlPanel } from '../compiled-sql/index.js';
 // BibTeX cite modal (PLAY-08) — toolbar trigger + native <dialog> modal showing
-// Min Oo & Hartig + the current permalink BibTeX. See ../bibtex/BibtexModal.tsx.
-import { BibtexModal } from '../bibtex/BibtexModal.js';
+// (BibtexModal import moved to Toolbar.tsx in Phase 14 plan 14-04)
 // Phase 13 (ADR-0037) — host-side InferredDescriptor orchestration. Replaces
 // the Phase 9 CSVW inference + editable preview. The hook scans the mapping
 // for io.csv("...") / io.json("...") refs, runs DuckDB-WASM DESCRIBE, and
@@ -70,6 +77,7 @@ import { MappingPanel } from './MappingPanel.js';
 import { SourcePanel, type SourceSchema } from './SourcePanel.js';
 import { ShapePanel } from './ShapePanel.js';
 import { OutputPanel } from './OutputPanel.js';
+import { Toolbar } from './Toolbar.js';
 
 /**
  * Default 10 MB cap for resolver-returned blob fetches. Per Phase 7 07-08 /
@@ -704,143 +712,130 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       // overrides require no prop changes. Per THEME-01 + CONTEXT.md.
       style={cssVarsToStyle(cssVars)}
     >
-      <header className="fossil-playground__toolbar" role="banner">
-        <button
-          type="button"
-          onClick={() => {
-            void handleRun();
-          }}
-          disabled={duck.loading}
-          // Accessible name comes from ARIA_LABELS — the visible text inside
-          // the button changes ("Run" → "Running…") but the accessible name
-          // stays stable so SR users don't hear the label flip mid-interaction.
-          aria-label={ARIA_LABELS.runButton}
-          // aria-busy mirrors the disabled state so AT announces the busy
-          // state in addition to the disabled state (some SR ignore disabled
-          // buttons entirely; aria-busy is the canonical busy signal).
-          aria-busy={duck.loading || undefined}
-        >
-          {duck.loading ? 'Running…' : 'Run'}
-        </button>
-        <button
-          type="button"
-          onClick={handleReset}
-          aria-label={ARIA_LABELS.resetButton}
-        >
-          Reset playground
-        </button>
-        {/*
-          PLAY-08 Cite button. Embeds the current permalink (debounced ~200 ms
-          after the last edit) into the snapshot BibTeX entry alongside the
-          foundational-paper reference. The modal is hidden until clicked.
-          Native <dialog> — focus trap + Escape-close + role="dialog" all
-          inherited from the platform per RULE-3 deviation in 09-08.
-
-          Phase 14 plan 14-03: the "Show / Hide compiled SQL" toolbar button
-          is gone — the Compiled SQL panel is now a right-panel IDE tab
-          (always mounted, gated by `activeRightTab === 'compiled-sql'`).
-          Plan 14-04 will refactor the rest of this toolbar (Run + Reset +
-          Cite) onto @fossil-lang/ui primitives.
-        */}
-        <BibtexModal permalink={currentPermalink} />
-      </header>
+      <Toolbar
+        onRun={() => {
+          void handleRun();
+        }}
+        onReset={handleReset}
+        running={duck.loading}
+        permalink={currentPermalink}
+      />
       <main
         className="fossil-playground__main"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '0.5rem',
-          minHeight: 0,
-        }}
+        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       >
-        <div className="fossil-playground__left">
-          <Tabs
-            value={activeLeftTab}
-            onValueChange={(v) => {
-              setActiveLeftTab(v as LeftTabKey);
-            }}
-          >
-            <TabsList variant="line" aria-label="Input panels">
-              <TabsTrigger value="mapping" data-testid="ide-tab-mapping">
-                Mapping
-              </TabsTrigger>
-              <TabsTrigger value="source" data-testid="ide-tab-source">
-                Source
-              </TabsTrigger>
-              <TabsTrigger value="shape" data-testid="ide-tab-shape">
-                Shape
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="mapping">
-              <MappingPanel
-                value={mapping}
-                onChange={setMapping}
-                extensions={extensions}
-                wasmReady={wasmReady}
-              />
-            </TabsContent>
-            <TabsContent value="source">
-              <SourcePanel schemas={sourceSchemas} loading={sourceLoading} />
-            </TabsContent>
-            <TabsContent value="shape">
-              <ShapePanel
-                shex={shex}
-                onChange={setShex}
-                resolver={resolver}
-                wasmReady={wasmReady}
-              />
-            </TabsContent>
-          </Tabs>
-        </div>
-        <section
-          className="fossil-playground__right"
-          aria-label={ARIA_LABELS.resultsRegion}
+        <ResizablePanelGroup
+          direction="horizontal"
+          autoSaveId="fossil-playground-split"
+          style={{ flex: 1, minHeight: 0 }}
         >
-          <Tabs
-            value={activeRightTab}
-            onValueChange={(v) => {
-              setActiveRightTab(v as RightTabKey);
-            }}
+          <ResizablePanel
+            defaultSize={50}
+            minSize={20}
+            data-testid="resizable-left"
           >
-            <TabsList variant="line" aria-label="Output panels">
-              <TabsTrigger value="output" data-testid="ide-tab-output">
-                Output
-              </TabsTrigger>
-              <TabsTrigger
-                value="compiled-sql"
-                data-testid="ide-tab-compiled-sql"
+            <div
+              className="fossil-playground__left"
+              style={{ height: '100%', overflow: 'hidden' }}
+            >
+              <Tabs
+                value={activeLeftTab}
+                onValueChange={(v) => {
+                  setActiveLeftTab(v as LeftTabKey);
+                }}
               >
-                Compiled SQL
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="output">
-              <OutputPanel vertices={vertices} edges={edges} />
-            </TabsContent>
-            <TabsContent value="compiled-sql">
-              <div
-                id="fossil-compiled-sql-region"
-                aria-label="Compiled SQL"
-                className="fossil-playground__compiled-sql"
+                <TabsList variant="line" aria-label="Input panels">
+                  <TabsTrigger value="mapping" data-testid="ide-tab-mapping">
+                    Mapping
+                  </TabsTrigger>
+                  <TabsTrigger value="source" data-testid="ide-tab-source">
+                    Source
+                  </TabsTrigger>
+                  <TabsTrigger value="shape" data-testid="ide-tab-shape">
+                    Shape
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="mapping">
+                  <MappingPanel
+                    value={mapping}
+                    onChange={setMapping}
+                    extensions={extensions}
+                    wasmReady={wasmReady}
+                  />
+                </TabsContent>
+                <TabsContent value="source">
+                  <SourcePanel
+                    schemas={sourceSchemas}
+                    loading={sourceLoading}
+                  />
+                </TabsContent>
+                <TabsContent value="shape">
+                  <ShapePanel
+                    shex={shex}
+                    onChange={setShex}
+                    resolver={resolver}
+                    wasmReady={wasmReady}
+                  />
+                </TabsContent>
+              </Tabs>
+            </div>
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel
+            defaultSize={50}
+            minSize={20}
+            data-testid="resizable-right"
+          >
+            <section
+              className="fossil-playground__right"
+              aria-label={ARIA_LABELS.resultsRegion}
+              style={{ height: '100%', overflow: 'hidden' }}
+            >
+              <Tabs
+                value={activeRightTab}
+                onValueChange={(v) => {
+                  setActiveRightTab(v as RightTabKey);
+                }}
               >
-                <CompiledSqlPanel
-                  sql={compiledSql}
-                  theme={resolvedTheme}
-                />
-              </div>
-            </TabsContent>
-          </Tabs>
-        </section>
+                <TabsList variant="line" aria-label="Output panels">
+                  <TabsTrigger value="output" data-testid="ide-tab-output">
+                    Output
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="compiled-sql"
+                    data-testid="ide-tab-compiled-sql"
+                  >
+                    Compiled SQL
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="output">
+                  <OutputPanel vertices={vertices} edges={edges} />
+                </TabsContent>
+                <TabsContent value="compiled-sql">
+                  <div
+                    id="fossil-compiled-sql-region"
+                    aria-label="Compiled SQL"
+                    className="fossil-playground__compiled-sql"
+                  >
+                    <CompiledSqlPanel
+                      sql={compiledSql}
+                      theme={resolvedTheme}
+                    />
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </section>
+          </ResizablePanel>
+        </ResizablePanelGroup>
         {(runError || duck.error) && (
           // role="alert" — ASSERTIVE announcement (interrupts whatever the
           // SR is currently saying). Reserved for genuine errors; routine
-          // status changes use the polite announce() live region. Spans the
-          // full grid width so the error is visible regardless of which
-          // input/output tab is active.
+          // status changes use the polite announce() live region.
           <div
             role="alert"
             aria-live="assertive"
             className="fossil-playground__error"
-            style={{ gridColumn: '1 / -1' }}
+            style={{ padding: '0.5rem' }}
           >
             Error: {(runError ?? duck.error)?.message}
           </div>

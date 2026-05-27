@@ -36,3 +36,7 @@ export { ResultTable } from './ResultTable.js';
 export type { ResultTableProps } from './ResultTable.js';
 export { ResultGraph } from './ResultGraph.js';
 export type { ResultGraphProps } from './ResultGraph.js';
+
+// 14-04: Toolbar — Run / Reset / Cite composed with @fossil-lang/ui Tooltip
+export { Toolbar } from './Toolbar.js';
+export type { ToolbarProps } from './Toolbar.js';
