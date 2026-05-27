@@ -59,7 +59,7 @@ fn bench_didchange(c: &mut Criterion) {
     group.bench_function("canonical_200_round_trip", |b| {
         // Build a warm db once; each iteration is a distinct edit so `set_text`
         // genuinely bumps the revision (the realistic editor case).
-        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let mut db = FossilDb::new(system);
         let file = SourceFile::new(&db, base.clone(), "canonical_200.fossil".to_string());
         let _ = round_trip(&mut db, file, format!("{base}\n// warm\n"));

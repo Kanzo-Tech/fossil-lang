@@ -64,7 +64,7 @@ fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, usiz
     let input_owned = input.to_string();
     thread::spawn(move || {
         let start = Instant::now();
-        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let db = FossilDb::new(system);
         let file = SourceFile::new(&db, input_owned, "regression.fossil".to_string());
         let _cst = parse(&db, file);

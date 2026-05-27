@@ -67,7 +67,7 @@ impl ShExHostDb {
     fn new(descriptor: OutputDescriptorKind) -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem),
+            system: Arc::new(NativeSystem::default()),
             files: Files::default(),
             descriptor: Arc::new(descriptor),
         }

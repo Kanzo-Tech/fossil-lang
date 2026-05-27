@@ -77,7 +77,7 @@ fn read_fixture(dir: &Path, file: &str) -> Option<String> {
 }
 
 fn new_db() -> FossilDb {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     FossilDb::new(system)
 }
 

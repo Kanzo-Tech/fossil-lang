@@ -30,7 +30,7 @@ User : ex:Person from users
 ";
 
 fn db_with_hello() -> (FossilDb, SourceFile) {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(
         &db,

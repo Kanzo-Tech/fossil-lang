@@ -33,7 +33,7 @@ use fossil_ide::code_actions;
 use lsp_types::{CodeAction, Position, Range, TextEdit};
 
 fn db() -> FossilDb {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     FossilDb::new(system)
 }
 

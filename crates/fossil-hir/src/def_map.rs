@@ -367,7 +367,7 @@ User : ex:Person from users
 ";
 
     fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -406,7 +406,7 @@ User : ex:Person from users
 a := io.json(\"a.json\")
 b := io.parquet(\"b.parquet\")
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
@@ -425,7 +425,7 @@ b := io.parquet(\"b.parquet\")
         // The POSITIONAL URI is resolved, the `schema = "..."` named-arg string
         // is NOT mistaken for the URI.
         let src = "u := io.csv(\"u.csv\", schema = \"u.csvw.json\")\n";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);

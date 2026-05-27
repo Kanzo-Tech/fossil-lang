@@ -320,7 +320,7 @@ User : ex:Person from users
     }"#;
 
     fn new_db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 

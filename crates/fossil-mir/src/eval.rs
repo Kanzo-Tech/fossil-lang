@@ -179,7 +179,7 @@ mod tests {
 
     fn db() -> fossil_base::FossilDb {
         let system: std::sync::Arc<dyn fossil_base::System> =
-            std::sync::Arc::new(fossil_base::NativeSystem);
+            std::sync::Arc::new(fossil_base::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 

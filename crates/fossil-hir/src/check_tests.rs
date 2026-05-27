@@ -27,7 +27,7 @@ User : ex:Person from users
 ";
 
 fn db_with(src: &str) -> (FossilDb, SourceFile) {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "test.fossil".to_string());
     (db, file)

@@ -40,7 +40,7 @@ const fn kind_name(k: SymbolKind) -> &'static str {
 
 fn render(src: &str) -> String {
     use std::fmt::Write as _;
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
     let mut out = String::new();

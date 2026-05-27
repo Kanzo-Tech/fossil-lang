@@ -69,7 +69,7 @@ fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
 #[test]
 fn didchange_round_trip_under_margined_budget() {
     let base = fixture();
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, base.clone(), "canonical_200.fossil".to_string());
 

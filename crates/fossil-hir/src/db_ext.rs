@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn hir_db_default_is_accept_all() {
         let system: std::sync::Arc<dyn fossil_base::System> =
-            std::sync::Arc::new(fossil_base::NativeSystem);
+            std::sync::Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         assert!(db.output_descriptor_kind().accepts_anything());
     }

@@ -209,7 +209,7 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
         }
     });
 
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let mut db = FossilDb::with_event_callback(system, callback);
 
     let file = SourceFile::new(&db, baseline.to_string(), "ten_mappings.fossil".to_string());
@@ -328,7 +328,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         }
     });
 
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let mut db = FossilDb::with_event_callback(system, callback);
 
     let file = SourceFile::new(&db, baseline.to_string(), "ten_mappings.fossil".to_string());
@@ -518,7 +518,7 @@ fn fixtures_have_ten_mappings() {
     let baseline = include_str!("fixtures/ten_mappings_baseline.fossil");
     let edited = include_str!("fixtures/ten_mappings_mapping_3_body_one_char_edit.fossil");
 
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db_a = FossilDb::new(system.clone());
     let db_b = FossilDb::new(system);
     let f_a = SourceFile::new(&db_a, baseline.to_string(), "a.fossil".to_string());

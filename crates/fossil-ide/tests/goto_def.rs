@@ -21,7 +21,7 @@ use fossil_base::{NativeSystem, SourceFile, System};
 use fossil_ide::goto_definition;
 
 fn db() -> fossil_base::FossilDb {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     fossil_base::FossilDb::new(system)
 }
 

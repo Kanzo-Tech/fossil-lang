@@ -397,7 +397,7 @@ User : ex:Person from users
 ";
 
     fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -510,7 +510,7 @@ User : ex:Person from users
     /// This is the structural fix the deferred-items.md flagged.
     #[test]
     fn iri_expr_lowers_prefixed_name_form() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -564,7 +564,7 @@ User : ex:Person from users
     fn iri_expr_unknown_prefix_emits_diagnostic() {
         use fossil_base::Diagnostic;
 
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,

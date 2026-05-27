@@ -1109,6 +1109,7 @@ dependencies = [
 name = "fossil-base"
 version = "0.1.0"
 dependencies = [
+ "fossil-descriptors-input",
  "salsa",
  "smol_str",
  "thiserror 1.0.69",

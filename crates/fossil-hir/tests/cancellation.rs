@@ -166,7 +166,7 @@ fn cancellation_mid_flight_unwinds_in_flight_query_via_cancelled() {
         }
     });
 
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::with_event_callback(system, callback);
     let file = SourceFile::new(
         &db,
@@ -251,7 +251,7 @@ fn uncancelled_query_runs_post_checkpoint_work() {
     let barrier_release = Arc::new(Barrier::new(2));
     reset_sentinel_state(&barrier_reached, &barrier_release);
 
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let main_db = FossilDb::new(system);
     let file = SourceFile::new(
         &main_db,

@@ -361,7 +361,7 @@ const USERS_CSVW: &str = r#"{
 }"#;
 
 fn bare_db() -> FossilDb {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     FossilDb::new(system)
 }
 

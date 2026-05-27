@@ -15,7 +15,7 @@ use fossil_syntax::{SyntaxKind, SyntaxNode, parse};
 /// Build a minimal Salsa db, run the parser, render the resulting CST as
 /// a debug-format tree the snapshot files can compare against.
 fn parse_to_cst_text(src: &str) -> String {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
     let cst = parse(&db, file);
@@ -297,7 +297,7 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
     for (bucket, stem) in recovery_fixtures {
         let path = format!("{crate_dir}/tests/fixtures/{bucket}/{stem}.fossil");
         let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
-        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let db = FossilDb::new(system);
         let file = SourceFile::new(&db, src, path.clone());
 

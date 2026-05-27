@@ -41,7 +41,7 @@ User : ex:Person from users
 
     #[test]
     fn parse_hello_produces_three_top_level_items() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -68,7 +68,7 @@ User : ex:Person from users
 
     #[test]
     fn parse_hello_mapping_body_has_two_properties() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -99,7 +99,7 @@ User : ex:Person from users
     #[test]
     fn parse_hello_round_trips_text() {
         // CST is lossless: re-serialising the root yields the original text.
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -114,7 +114,7 @@ User : ex:Person from users
     #[test]
     fn ast_view_extracts_prefix_name_and_iri() {
         use crate::ast::PrefixDecl;
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,

@@ -42,7 +42,7 @@ use fossil_mir::op::{Expr, Op, SinkRef, SourceFormat};
 use smol_str::SmolStr;
 
 fn db() -> fossil_base::FossilDb {
-    let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+    let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
     fossil_base::FossilDb::new(system)
 }
 

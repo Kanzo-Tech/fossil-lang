@@ -78,7 +78,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn diagnostics_phase1_stub_is_empty() {
         use std::sync::Arc;
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,

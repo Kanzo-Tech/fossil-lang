@@ -112,7 +112,7 @@ impl LspDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem),
+            system: Arc::new(NativeSystem::default()),
             files: Files::default(),
             descriptor: Arc::new(OutputDescriptorKind::ACCEPT_ALL_DEFAULT),
         }

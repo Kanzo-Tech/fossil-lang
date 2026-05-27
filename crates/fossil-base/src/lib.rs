@@ -30,7 +30,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn db_can_be_constructed_and_query_sourcefile() {
-        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let db = FossilDb::new(system);
         let file = SourceFile::new(&db, "hello".to_string(), "test.fossil".to_string());
         assert_eq!(file.text(&db), "hello");

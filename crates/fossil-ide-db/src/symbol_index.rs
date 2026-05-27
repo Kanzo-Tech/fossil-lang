@@ -175,7 +175,7 @@ mod tests {
     use std::sync::Arc;
 
     fn index_of(src: &str) -> SymbolIndex {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         SymbolIndex::build(&db, file)

@@ -538,7 +538,7 @@ User : ex:Person from users
 ";
 
     fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -657,7 +657,7 @@ User : ex:Person from users
     /// binding lowers `Op::Source` with the real URI from the binding and the
     /// format selected by the constructor name.
     fn lower_source_for(src: &str) -> (SmolStr, SourceFormat) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem);
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);

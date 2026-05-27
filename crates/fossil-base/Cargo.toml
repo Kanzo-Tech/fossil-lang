@@ -15,3 +15,11 @@ workspace = true
 salsa = { workspace = true }
 thiserror = { workspace = true }
 smol_str = { workspace = true }
+# Phase 13 INPUT-01 / ADR-0037 — System trait grows
+# `inferred_descriptor` + `register_inferred_descriptor` accessors that
+# traffic in `fossil_descriptors_input::InferredDescriptor`. Verified
+# (plan 13-02 Task 0): fossil-descriptors-input has NO dependency on
+# fossil-base — no cycle. The fossil-base → fossil-descriptors-input
+# direction matches the existing fossil-hir → fossil-descriptors-input
+# direction; descriptors-input remains a leaf data crate.
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }

@@ -108,7 +108,7 @@ mod tests {
             counter_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        let system: Arc<dyn System> = Arc::new(NativeSystem);
+        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let db = FossilDb::with_event_callback(system, callback);
         let file = SourceFile::new(&db, "x".to_string(), "x.fossil".to_string());
         // Executing a tracked function flushes a `WillExecute` event through

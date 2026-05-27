@@ -21,7 +21,7 @@ use fossil_base::{
 use std::sync::Arc;
 
 fn db_with_file() -> (FossilDb, SourceFile) {
-    let system: Arc<dyn System> = Arc::new(NativeSystem);
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, "x".to_string(), "x.fossil".to_string());
     (db, file)

@@ -326,7 +326,7 @@ mod tests {
     fn db() -> HostDb {
         HostDb {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem),
+            system: Arc::new(NativeSystem::default()),
             files: Files::default(),
         }
     }
