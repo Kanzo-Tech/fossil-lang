@@ -32,6 +32,28 @@
  *   absent from the curated set; the 5 mutations we DO ship (1 base + 4
  *   real mutations) × 6 examples = 30 compile-gate cases per PR, which
  *   discharges SC#2's "≥30 compile checks" requirement.
+ *
+ * BUG-03 hardening (Phase 15 plan 15-03):
+ *
+ *   The harness now fails LOUDLY — never silently — on the two pre-Phase-15
+ *   blind spots:
+ *
+ *     1. **Per-variation timeout.** `execFileSync` is called with an explicit
+ *        `timeout: PER_VARIATION_TIMEOUT_MS, killSignal: 'SIGTERM'`. When the
+ *        child is killed, `runCheck()` returns a diagnostic-shaped
+ *        `CheckOutcome` with `exitCode: 124` (POSIX timeout) and stderr
+ *        containing `Expected: ≥1 triple compile; Got: timeout (no compile
+ *        output within Ns)` plus a hint. The vitest-level test timeout is the
+ *        SAME constant so the two clocks can't drift.
+ *
+ *     2. **Diagnostic-shaped expect messages.** Every `expect(exitCode).toBe(0)`
+ *        (and its non-zero siblings) carries an `Expected: <file> compile pass;
+ *        Got: exit=N\nSTDERR:\n<stderr>` message string so the failure surfaces
+ *        in CI logs WITHOUT needing a separate `console.log` (which vitest may
+ *        truncate).
+ *
+ *   The self-test `variations-deliberate-break.test.ts` proves the contract:
+ *   if either guarantee silently regresses, that file's tests fail.
  */
 import { describe, test, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -40,6 +62,15 @@ import { join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 const EXAMPLES_DIR = resolve(__dirname, '../src');
+
+/**
+ * Single source of truth for per-variation timeout — used BOTH as the
+ * `execFileSync` child-process timeout AND as the vitest `test()` third-arg
+ * timeout. Keeping the two clocks in sync prevents the silent-kill failure
+ * mode BUG-03 was filed against (vitest killing the test 1ms before the child
+ * process had a chance to emit its diagnostic).
+ */
+const PER_VARIATION_TIMEOUT_MS = 30_000;
 
 // Resolve the fossil-cli binary path — prefer release if present, else fall
 // back to debug (slower but always available in dev). CI builds release in
@@ -93,21 +124,78 @@ interface CheckOutcome {
   stdout: string;
 }
 
-function runCheck(filePath: string): CheckOutcome {
+/**
+ * Run `fossil check <filePath>` and return a normalized `CheckOutcome`.
+ *
+ * Failure modes — all surface as a diagnostic-shaped `stderr`, never as a
+ * silent kill or empty string:
+ *
+ *   - **Compile error (non-zero exit, child wrote to stderr):** captured as-is.
+ *   - **Timeout (child killed by SIGTERM after `PER_VARIATION_TIMEOUT_MS`):**
+ *     `exitCode = 124` (POSIX timeout convention), stderr starts with
+ *     `Expected: ≥1 triple compile; Got: timeout (no compile output within Ns)`
+ *     plus an actionable hint.
+ *   - **Binary not found (ENOENT — should be unreachable post-`beforeAll`):**
+ *     `exitCode = 127` (POSIX command-not-found convention), stderr names the
+ *     FOSSIL_BIN path that was attempted.
+ *
+ * Exported so the deliberate-break self-test (`variations-deliberate-break.test.ts`)
+ * can exercise the exact same code path it's asserting against.
+ */
+export function runCheck(filePath: string): CheckOutcome {
   try {
     const stdout = execFileSync(FOSSIL_BIN, ['check', filePath], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: PER_VARIATION_TIMEOUT_MS,
+      killSignal: 'SIGTERM',
     });
     return { exitCode: 0, stderr: '', stdout: String(stdout) };
   } catch (e) {
-    // execFileSync throws on non-zero exit; the thrown object carries
-    // .status (exit code) and .stderr (Buffer).
+    // execFileSync throws on non-zero exit, on timeout (signal === 'SIGTERM'
+    // / code === 'ETIMEDOUT'), and on spawn failure (code === 'ENOENT').
+    // The thrown object carries .status (exit code), .stderr (Buffer),
+    // .stdout (Buffer), .signal (string|null), and .code (string|undefined).
     const err = e as NodeJS.ErrnoException & {
-      status?: number;
+      status?: number | null;
       stderr?: Buffer | string;
       stdout?: Buffer | string;
+      signal?: NodeJS.Signals | null;
     };
+
+    // --- Timeout path (BUG-03 fix) ------------------------------------------
+    // When execFileSync's timeout fires it kills the child with `killSignal`
+    // and re-throws; the thrown error carries either signal === 'SIGTERM'
+    // (most platforms) or code === 'ETIMEDOUT' (some Node versions).
+    if (err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT') {
+      const seconds = Math.round(PER_VARIATION_TIMEOUT_MS / 1000);
+      const diagnostic =
+        `Expected: ≥1 triple compile; Got: timeout (no compile output within ${seconds}s)\n` +
+        `[hint: increase PER_VARIATION_TIMEOUT_MS in variations.test.ts if the example legitimately needs >${seconds}s, ` +
+        `or diagnose the hung CLI invocation: \`${FOSSIL_BIN} check ${filePath}\`]`;
+      return {
+        exitCode: 124,
+        stderr: diagnostic,
+        stdout: err.stdout ? String(err.stdout) : '',
+      };
+    }
+
+    // --- Spawn-failure path (belt-and-suspenders) ---------------------------
+    // `beforeAll` already throws on missing binary, so this branch is
+    // unreachable in practice — kept defensively in case the binary is
+    // deleted between `beforeAll` and a specific test (e.g., concurrent
+    // `cargo clean` during a watch loop).
+    if (err.code === 'ENOENT') {
+      return {
+        exitCode: 127,
+        stderr:
+          `Expected: ${FOSSIL_BIN} executable; Got: ENOENT (binary not found)\n` +
+          `[hint: rebuild via \`cargo build -p fossil-cli --release\`]`,
+        stdout: '',
+      };
+    }
+
+    // --- Standard non-zero exit path (compile error etc.) -------------------
     return {
       exitCode: err.status ?? -1,
       stderr: err.stderr ? String(err.stderr) : '',
@@ -143,27 +231,41 @@ for (const example of exampleDirs) {
           case 'pass':
             expect(
               exitCode,
-              `expected pass but check failed:\nSTDERR:\n${stderr}`,
+              `Expected: ${file} compile pass; Got: exit=${exitCode}\nSTDERR:\n${stderr || '(empty)'}`,
             ).toBe(0);
             break;
           case 'syntax-error':
-            expect(exitCode, `expected fail but check passed`).not.toBe(0);
-            expect(stderr.toLowerCase()).toMatch(
-              /syntax|parse|unexpected|expected/,
-            );
+            expect(
+              exitCode,
+              `Expected: ${file} syntax-error (non-zero exit); Got: exit=${exitCode}\nSTDERR:\n${stderr || '(empty)'}`,
+            ).not.toBe(0);
+            expect(
+              stderr.toLowerCase(),
+              `Expected: stderr matches /syntax|parse|unexpected|expected/ for ${file}; Got:\n${stderr || '(empty)'}`,
+            ).toMatch(/syntax|parse|unexpected|expected/);
             break;
           case 'type-error':
-            expect(exitCode, `expected fail but check passed`).not.toBe(0);
-            expect(stderr.toLowerCase()).toMatch(
-              /type|unbound|undefined|unresolved|undeclared/,
-            );
+            expect(
+              exitCode,
+              `Expected: ${file} type-error (non-zero exit); Got: exit=${exitCode}\nSTDERR:\n${stderr || '(empty)'}`,
+            ).not.toBe(0);
+            expect(
+              stderr.toLowerCase(),
+              `Expected: stderr matches /type|unbound|undefined|unresolved|undeclared/ for ${file}; Got:\n${stderr || '(empty)'}`,
+            ).toMatch(/type|unbound|undefined|unresolved|undeclared/);
             break;
           case 'shex-mismatch':
-            expect(exitCode, `expected fail but check passed`).not.toBe(0);
-            expect(stderr.toLowerCase()).toMatch(/shex|shape|cardinality/);
+            expect(
+              exitCode,
+              `Expected: ${file} shex-mismatch (non-zero exit); Got: exit=${exitCode}\nSTDERR:\n${stderr || '(empty)'}`,
+            ).not.toBe(0);
+            expect(
+              stderr.toLowerCase(),
+              `Expected: stderr matches /shex|shape|cardinality/ for ${file}; Got:\n${stderr || '(empty)'}`,
+            ).toMatch(/shex|shape|cardinality/);
             break;
         }
-      }, 30_000);
+      }, PER_VARIATION_TIMEOUT_MS);
     }
   });
 }
