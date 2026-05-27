@@ -1,11 +1,21 @@
-PREFIX ex:  <https://example.org/>
-PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-
-# Target shape for the walking-skeleton hello mapping.
-# Produces 5 triples (one per row of @examples/hello.csv):
-#   ex:user/{id}  ex:name  "{name}"^^xsd:string
-# Subject IRIs follow `ex:user/{id}`; the type is `ex:Person`.
-
-ex:Person {
-  ex:name xsd:string
+{
+  "@context": "http://www.w3.org/ns/shex.jsonld",
+  "type": "Schema",
+  "shapes": [
+    {
+      "type": "ShapeDecl",
+      "id": "https://example.org/Person",
+      "shapeExpr": {
+        "type": "Shape",
+        "expression": {
+          "type": "TripleConstraint",
+          "predicate": "https://example.org/name",
+          "valueExpr": {
+            "type": "NodeConstraint",
+            "datatype": "http://www.w3.org/2001/XMLSchema#string"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -114,10 +114,14 @@ describe('@fossil-lang/examples', () => {
     expect(helloExample.csvw).toBeUndefined();
   });
 
-  it('helloExample carries a ShEx target shape', () => {
+  it('helloExample carries a ShEx target shape (JSON-LD form)', () => {
+    // Phase 15 plan 15-02 (BUG-02): the sibling .shex was converted from
+    // ShExC compact syntax to ShEx 2.1 JSON-LD so the CLI's
+    // `ShExDescriptor::from_reader` (JSON-LD only) auto-discovery succeeds.
     expect(helloExample.shex).toBeDefined();
-    expect(helloExample.shex!).toMatch(/PREFIX ex:/);
-    expect(helloExample.shex!).toMatch(/ex:Person/);
+    expect(helloExample.shex!).toMatch(/"@context"/);
+    expect(helloExample.shex!).toMatch(/shex\.jsonld/);
+    expect(helloExample.shex!).toMatch(/example\.org\/Person/);
   });
 
   it('buildResolverExamples maps data file paths → contents', () => {

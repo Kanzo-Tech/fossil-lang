@@ -27,7 +27,6 @@
       "files": {
         "fossil": "@examples/ecommerce.fossil",
         "csv":    "@examples/ecommerce-customers.csv",
-        "csvw":   "@examples/ecommerce.csvw.json",
         "shex":   "@examples/ecommerce.shex"
       }
     },
@@ -38,7 +37,6 @@
       "files": {
         "fossil": "@examples/musicbrainz.fossil",
         "csv":    "@examples/musicbrainz-artists.csv",
-        "csvw":   "@examples/musicbrainz.csvw.json",
         "shex":   "@examples/musicbrainz.shex"
       }
     },
@@ -48,8 +46,7 @@
       "description": "Pipeline `|>` + implicit closure synthesis (CORE-07).",
       "files": {
         "fossil": "@examples/typing-showcase.fossil",
-        "csv":    "@examples/typing-showcase.csv",
-        "csvw":   "@examples/typing-showcase.csvw.json"
+        "csv":    "@examples/typing-showcase.csv"
       }
     },
     {
@@ -59,8 +56,7 @@
       "files": {
         "fossil": "@examples/multi-source-join.fossil",
         "csv":    "@examples/msj-customers.csv",
-        "csv2":   "@examples/msj-orders.csv",
-        "csvw":   "@examples/multi-source-join.csvw.json"
+        "csv2":   "@examples/msj-orders.csv"
       }
     }
   ]

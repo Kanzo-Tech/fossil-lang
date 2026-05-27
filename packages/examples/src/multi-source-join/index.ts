@@ -4,13 +4,17 @@
  * `customers` + `orders` CSV sources emit independent mappings into the
  * same target graph; the FK is realised at the IRI-template level
  * (`ex:customer/{customer_id}` shared between both mappings).
+ *
+ * Phase 15 plan 15-02 (BUG-02): dropped the `multi-source-join.csvw.json`
+ * sidecar — post Phase 13 ADR-0037 the CLI infers the schema via DuckDB
+ * DESCRIBE; the sidecar was dead weight (the example already compiled
+ * without it).
  */
 
 import type { Example } from '../index.js';
 import mapping from './multi-source-join.fossil?raw';
 import customersCsv from './msj-customers.csv?raw';
 import ordersCsv from './msj-orders.csv?raw';
-import csvw from './multi-source-join.csvw.json?raw';
 
 export const multiSourceJoinExample: Example = {
   id: 'multi-source-join',
@@ -18,7 +22,6 @@ export const multiSourceJoinExample: Example = {
   description:
     'Two CSV sources (customers + orders) → one graph linked by foreign-key IRI templates.',
   mapping,
-  csvw,
   dataFiles: [
     { path: 'msj-customers.csv', contents: customersCsv, format: 'csv' },
     { path: 'msj-orders.csv',    contents: ordersCsv,    format: 'csv' },

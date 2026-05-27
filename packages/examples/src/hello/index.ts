@@ -20,6 +20,10 @@ import helloShex from './hello.shex?raw';
 // removed — the playground's `useInferredDescriptors` hook infers the schema
 // at compile time via host-side DuckDB-WASM DESCRIBE. v0.1 .fossil files
 // with explicit `schema = "..."` args still compile (deprecated path).
+//
+// Phase 15 plan 15-02 (BUG-02): the sibling `hello.shex` was converted from
+// ShExC compact syntax to ShEx 2.1 JSON-LD so `fossil-cli` sibling
+// auto-discovery (`ShExDescriptor::from_reader`, JSON-LD only) succeeds.
 export const helloExample: Example = {
   id: 'hello',
   title: 'Hello, Fossil',
