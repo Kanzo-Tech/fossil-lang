@@ -1,5 +1,5 @@
 //! `InferredDescriptor` — input schema produced by host-side runtime introspection
-//! (DuckDB `DESCRIBE read_csv_auto` in the playground; `duckdb::Connection` in
+//! (`DuckDB` `DESCRIBE read_csv_auto` in the playground; `duckdb::Connection` in
 //! the native CLI). See ADR-0037.
 //!
 //! Salsa-friendly: concrete struct (NOT trait object), Send + Sync + Clone +
@@ -18,7 +18,7 @@ use smol_str::SmolStr;
 /// One column from a host-introspected source.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InferredColumn {
-    /// Column name as introspected (DuckDB `column_name`).
+    /// Column name as introspected (`DuckDB` `column_name`).
     pub name: SmolStr,
     /// Canonical Primitive variant name — must match the lookup table in
     /// `fossil-hir::infer::primitive_from_name`:
@@ -61,7 +61,7 @@ impl InferredDescriptor {
     }
 
     /// Compute a deterministic content-hash from the column list if the host
-    /// did not supply one. Uses std DefaultHasher for portability (no new
+    /// did not supply one. Uses std `DefaultHasher` for portability (no new
     /// dep on blake3 / sha2 — WASM gate friendly). Returned as a 16-char hex
     /// string (sufficient for Salsa keying within a single workspace).
     #[must_use]
@@ -79,6 +79,10 @@ impl InferredDescriptor {
 }
 
 impl InputDescriptor for InferredDescriptor {
+    // Trait signature returns `&str` (not `&'static str`) for Phase 3+ dynamic
+    // naming compatibility — see `InputDescriptor::name` doc and the mirror
+    // allow on `CsvDescriptor::name` in `lib.rs`.
+    #[allow(clippy::unnecessary_literal_bound)]
     fn name(&self) -> &str {
         "inferred"
     }

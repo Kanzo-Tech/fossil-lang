@@ -16,8 +16,8 @@
 //! ## v0.2: drop user-facing CSVW; introduce `InferredDescriptor`
 //!
 //! Per ADR-0037, v0.2 deprecates the user-facing CSVW entry path: hosts no
-//! longer ship a CSVW JSON-LD sidecar. Instead they run DuckDB `DESCRIBE
-//! read_csv_auto(...)` (browser-side DuckDB-WASM, or native `duckdb` crate in
+//! longer ship a CSVW JSON-LD sidecar. Instead they run `DuckDB` `DESCRIBE
+//! read_csv_auto(...)` (browser-side `DuckDB-WASM`, or native `duckdb` crate in
 //! `fossil-cli`) and pass the introspected column list as an
 //! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`. The
 //! [`CsvwDescriptor`] (Phase 3 CORE-05, ADR-0007) is retained as
