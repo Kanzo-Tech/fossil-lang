@@ -21,8 +21,21 @@
  * Per Phase 12 plan 12-04 + ROADMAP Phase 18 migration guide.
  */
 
-import { useEffect, useRef, type ReactNode } from 'react';
-import { FossilGraphView } from '@fossil-lang/viewer';
+import { Suspense, lazy, useEffect, useRef, type ReactNode } from 'react';
+
+// 15-04 (BUG-02): defer `@fossil-lang/viewer` from the cold-load critical
+// path. Even though `ResultGraph` is a deprecated alias most consumers no
+// longer use directly, it's re-exported from `@fossil-lang/playground` (the
+// v0.1.x compat surface) and a static `import { FossilGraphView } from
+// '@fossil-lang/viewer'` here would drag the entire Cosmos.gl WebGL bundle
+// (~138 KB gzipped) into the playground's `dist/index.js` regardless of
+// whether the consumer actually instantiates <ResultGraph/>. Wrapping the
+// import in `React.lazy()` keeps the chunk out of the initial bundle
+// graph; it loads on first <ResultGraph/> render, matching the same pattern
+// applied to <FossilViewer/> in OutputPanel.tsx.
+const LazyFossilGraphView = lazy(() =>
+  import('@fossil-lang/viewer').then((m) => ({ default: m.FossilGraphView })),
+);
 
 export interface ResultGraphProps {
   /** Vertex rows from the playground's compile+run output. */
@@ -109,11 +122,30 @@ export function ResultGraph({
       aria-label="Result graph; tabular fallback follows below for screen readers."
       className={className ?? 'fossil-result-graph'}
     >
-      <FossilGraphView
-        vertices={adaptedVertices}
-        edges={adaptedEdges}
-        webgl={enableWebGL}
-      />
+      {/* 15-04 (BUG-02): Suspense boundary for the lazy-loaded FossilGraphView.
+        * Fallback is minimal — the surrounding `role="img"` + aria-label
+        * already give SR users the region name; FossilGraphView's own
+        * TabularFallback takes over once the chunk resolves. */}
+      <Suspense
+        fallback={
+          <div
+            data-testid="result-graph-loading"
+            style={{
+              padding: '1rem',
+              textAlign: 'center',
+              color: 'var(--fossil-color-fg-muted, #888)',
+            }}
+          >
+            Loading viewer…
+          </div>
+        }
+      >
+        <LazyFossilGraphView
+          vertices={adaptedVertices}
+          edges={adaptedEdges}
+          webgl={enableWebGL}
+        />
+      </Suspense>
     </div>
   );
 }

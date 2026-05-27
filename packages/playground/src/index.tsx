@@ -31,6 +31,12 @@ export type { ResultTableProps } from './component/ResultTable.js';
 // ResultGraph is a v0.2.x deprecated alias of FossilGraphView from
 // `@fossil-lang/viewer` (Phase 12 plan 12-04). New consumers should
 // `import { FossilGraphView } from '@fossil-lang/viewer'` directly.
+//
+// 15-04 (BUG-02): ResultGraph itself lazy-loads `@fossil-lang/viewer`
+// via React.lazy (see ./component/ResultGraph.tsx) so re-exporting it
+// from this barrel no longer drags Cosmos.gl WebGL into the playground's
+// cold-load bundle. The viewer chunk loads on FIRST <ResultGraph/>
+// instantiation.
 export { ResultGraph } from './component/ResultGraph.js';
 export type { ResultGraphProps } from './component/ResultGraph.js';
 
@@ -38,7 +44,18 @@ export type { ResultGraphProps } from './component/ResultGraph.js';
 // (Phase 12 plan 12-04). Module-instance dedup via pnpm workspace
 // symlinks — same single-source pattern Phase 11 shipped for the
 // editor. v0.1.x consumers importing only from @fossil-lang/playground
-// now reach the full viewer API surface.
+// reach the full viewer API surface.
+//
+// 15-04 (BUG-02): kept as STATIC re-exports for v0.2 API compatibility.
+// In real-world consumer bundles (Vite/Rollup/webpack with sideEffects:
+// false — see package.json), these re-exports are tree-shaken when the
+// consumer doesn't actually import them, so they do NOT drag the viewer
+// module into the cold-load critical path of a `<FossilPlayground/>`-
+// only consumer. The lazy() wrappers inside OutputPanel.tsx + Result-
+// Graph.tsx defer the viewer load even for consumers that DO mount the
+// playground composition. For our internal size-limit budget, the
+// viewer is treated as `external` in .size-limit.cjs (it's effectively
+// a deferred dep on par with the peer-optional DuckDB-WASM).
 export { FossilGraphView, FossilViewer } from '@fossil-lang/viewer';
 export type {
   FossilGraphViewProps,
@@ -114,6 +131,13 @@ export type { PermalinkStateV1 } from './permalink/index.js';
 // Turtle serializer (PLAY-10) — synchronous TTL writer wrapping n3.Writer.
 // Aliased types (TurtleVertexRow / TurtleEdgeRow) avoid collision with the
 // VertexRow / EdgeRow already exported from FossilPlayground's prop surface.
+//
+// 15-04 (BUG-02): like the FossilViewer re-exports above, these are kept
+// STATIC for v0.2 API compatibility. They're tree-shaken by consumer
+// bundlers when unused; for our size-limit budget the entire
+// `@fossil-lang/viewer` package is treated as `external` (see
+// .size-limit.cjs) because every viewer-touching consumer in the
+// playground bundle is now lazy-loaded.
 export { rowsToTurtle } from './turtle/index.js';
 export type {
   VertexRow as TurtleVertexRow,
