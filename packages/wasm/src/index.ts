@@ -131,6 +131,56 @@ export interface CompileResult {
 }
 
 /**
+ * Canonical primitive names for inferred-descriptor columns. Must match the
+ * lookup table in `fossil-hir::infer::primitive_from_name` (ADR-0037). Names
+ * map 1:1 to the `Primitive` enum in HIR (Integer, Float, String, Bool, Date,
+ * DateTime, Time, GYear, AnyURI).
+ *
+ * Unknown / non-canonical strings are accepted on the wire — the Rust side
+ * coerces them to `String` and emits a `D-INFERRED-UNKNOWN-DATATYPE`
+ * diagnostic. Hosts SHOULD canonicalise their DuckDB `DESCRIBE` output to
+ * these names before registering.
+ */
+export type InferredPrimitive =
+  | 'String'
+  | 'Integer'
+  | 'Float'
+  | 'Bool'
+  | 'Date'
+  | 'DateTime'
+  | 'Time'
+  | 'GYear'
+  | 'AnyURI';
+
+/** One column from a host-introspected source. */
+export interface InferredColumnJson {
+  name: string;
+  primitive: InferredPrimitive;
+}
+
+/**
+ * Host-introspected input schema. Produced by the playground's browser-side
+ * `DuckDB-WASM` `DESCRIBE read_csv_auto('<url>')` call (see plan 13-04b);
+ * consumed by the Rust compiler via
+ * {@link FossilPlayground.registerInferredDescriptor}. See ADR-0037 for the
+ * full architectural rationale (drop user-facing CSVW; host-side
+ * introspection feeds the compiler ahead of `compile()`).
+ */
+export interface InferredDescriptorJson {
+  /** Source binding name (e.g. `"users"` for `users := io.csv(...)`). */
+  source_name: string;
+  /** Ordered columns — order is significant for column-position fallback. */
+  columns: InferredColumnJson[];
+  /**
+   * Opaque content-hash. Empty string means "let the Rust side derive a
+   * deterministic hash from the column tuple list" (used for Salsa keying).
+   * Hosts that already maintain a per-file content-hash (e.g. resolver-side)
+   * MAY supply it.
+   */
+  content_hash: string;
+}
+
+/**
  * Workspace API class (ADR-0024). Thin TS wrapper around the wasm-bindgen
  * `FossilPlayground` that exposes camelCase method names for JS idiom + better
  * TS inference (the raw bindings use snake_case from the Rust impl block).
@@ -257,6 +307,35 @@ export class FossilPlayground {
    */
   setTargetShex(text: string): void {
     this._inner.set_target_shex(text);
+  }
+
+  /**
+   * Register an {@link InferredDescriptorJson} for a source binding name
+   * BEFORE invoking {@link compile} / {@link compileFile}. The Rust compiler
+   * reads from this registration during forward type propagation (Phase 3
+   * CORE-05 rewired in plan 13-02).
+   *
+   * The browser-side playground orchestration runs DuckDB-WASM
+   * `DESCRIBE read_csv_auto('<resolved-url>')` for each `io.csv("...")`
+   * reference in the source, canonicalises the columns to the
+   * {@link InferredPrimitive} catalog, and calls this method with the
+   * resulting descriptor before invoking {@link compile} or
+   * {@link compileFile}. See ADR-0037 for the full architectural rationale.
+   *
+   * Keyed by source-binding name (e.g. `"users"` for
+   * `users := io.csv("...")`), NOT by URL. Idempotent — re-registering with
+   * the same `source_name` overwrites the previous entry.
+   *
+   * @throws Error if the descriptor JSON fails to deserialise on the Rust
+   *         side (e.g. missing required fields). The error message includes
+   *         the underlying serde_json diagnostic.
+   *
+   * @see ADR-0037 — drop user-facing CSVW; infer via DuckDB DESCRIBE
+   */
+  registerInferredDescriptor(descriptor: InferredDescriptorJson): void {
+    // The wasm-bindgen wrapper exposes `registerInferredDescriptor(string)` —
+    // it accepts a JSON string. Serialise here so callers pass a typed object.
+    this._inner.registerInferredDescriptor(JSON.stringify(descriptor));
   }
 }
 
