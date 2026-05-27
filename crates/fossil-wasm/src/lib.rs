@@ -407,7 +407,7 @@ impl FossilPlayground {
     /// # Errors
     ///
     /// - Malformed JSON / missing required fields → JS `Error` with the
-    ///   underlying serde_json message.
+    ///   underlying `serde_json` message.
     ///
     /// Implementation: thin shim over the pure-Rust
     /// [`Self::register_inferred_descriptor_native`] helper.
@@ -452,7 +452,7 @@ pub enum WorkspaceError {
     NoMappingInFile,
     /// The `register_inferred_descriptor` JSON payload did not deserialise
     /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
-    /// underlying serde_json error message. Phase 13 (ADR-0037).
+    /// underlying `serde_json` error message. Phase 13 (ADR-0037).
     MalformedDescriptor(String),
 }
 

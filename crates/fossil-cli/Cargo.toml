@@ -20,6 +20,12 @@ fossil-runtime = { path = "../fossil-runtime" }
 # its concrete `CliSystem` struct. Default `output_descriptor_kind()`
 # returns AcceptAll for Phase 3 v0.1; Phase 6 LSP-01 will override here.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Phase 13 INPUT-01 / plan 13-04a: native CLI pre-introspects io.csv("...")
+# source bindings via DuckDB DESCRIBE + registers InferredDescriptor on the
+# CliSystem ahead of typecheck. ADR-0037.
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+smol_str = { workspace = true }
+regex = { workspace = true }
 
 clap = { workspace = true }
 # `fancy` ONLY in this crate (not workspace-level): pulls native-only

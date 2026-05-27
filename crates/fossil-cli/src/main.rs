@@ -27,14 +27,17 @@ compile_error!(
      do not add it to the WASM CI gate"
 );
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use clap::{Parser, Subcommand};
-use fossil_base::{Diagnostic, FsError, Severity, System};
+use fossil_base::{Db, Diagnostic, FsError, Severity, System};
+use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_descriptors_output::{OutputDescriptorKind, SystemWithDescriptors};
 use miette::{NamedSource, SourceSpan};
+use smol_str::SmolStr;
 use tracing_subscriber::EnvFilter;
 
 /// CLI host's [`System`] impl — a thin `NativeSystem`-style wrapper that
@@ -46,7 +49,17 @@ use tracing_subscriber::EnvFilter;
 /// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`]. Phase 6 LSP-01 / future CLI
 /// flags override this to load a `ShEx` schema from a side file.
 #[derive(Debug, Default)]
-struct CliSystem;
+struct CliSystem {
+    /// Phase 13 INPUT-01 (ADR-0037 / plan 13-04a) — host-registered
+    /// `InferredDescriptors`, keyed by source binding name (e.g. `"users"` for
+    /// `users := io.csv(...)`). Populated by [`pre_introspect_and_register`]
+    /// ahead of every typecheck/compile invocation.
+    ///
+    /// Mirrors `NativeSystem` in `fossil-base` (13-02). `Mutex` is appropriate
+    /// because writes happen once per compile (pre-introspection), reads are
+    /// per-mapping during typecheck — `RwLock` contention isn't justified.
+    inferred: Mutex<HashMap<SmolStr, InferredDescriptor>>,
+}
 
 impl System for CliSystem {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
@@ -58,6 +71,16 @@ impl System for CliSystem {
 
     fn now(&self) -> SystemTime {
         SystemTime::now()
+    }
+
+    fn inferred_descriptor(&self, source_name: &str) -> Option<InferredDescriptor> {
+        self.inferred.lock().ok()?.get(source_name).cloned()
+    }
+
+    fn register_inferred_descriptor(&self, descriptor: InferredDescriptor) {
+        if let Ok(mut lock) = self.inferred.lock() {
+            lock.insert(descriptor.source_name.clone(), descriptor);
+        }
     }
 }
 
@@ -239,10 +262,140 @@ fn load_descriptor(source: &Path, shape: Option<&Path>) -> miette::Result<Output
 
 /// Build a fresh `FossilDb` over the CLI [`System`] for `path` + `text`.
 fn open_db(text: String, path: &Path) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-    let system: Arc<dyn fossil_base::System> = Arc::new(CliSystem);
+    let system: Arc<dyn fossil_base::System> = Arc::new(CliSystem::default());
     let db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     (db, file)
+}
+
+// ----- Phase 13 INPUT-01 (ADR-0037 / plan 13-04a) — pre-introspection -----
+
+/// Map a `DuckDB` column-type string to the canonical Fossil Primitive name
+/// (matches `fossil-hir::infer::primitive_from_name` exactly).
+///
+/// The match table mirrors the TS sibling
+/// `packages/playground/src/hooks/useInferredDescriptors.ts` (kept in sync —
+/// both consumers feed the same fossil-hir primitive table).
+fn duckdb_type_to_fossil_primitive(t: &str) -> &'static str {
+    let upper = t.trim().to_ascii_uppercase();
+    match upper.as_str() {
+        "INTEGER" | "BIGINT" | "INT" | "SMALLINT" | "TINYINT" | "HUGEINT" => "Integer",
+        "DOUBLE" | "FLOAT" | "REAL" => "Float",
+        t if t.starts_with("DECIMAL") => "Float",
+        "BOOLEAN" | "BOOL" => "Bool",
+        "DATE" => "Date",
+        "TIMESTAMP" | "DATETIME" => "DateTime",
+        "TIME" => "Time",
+        // VARCHAR / TEXT / STRING + any unrecognised type fall back to String
+        // (matching the fossil-hir::infer::primitive_from_name wildcard arm).
+        _ => "String",
+    }
+}
+
+/// Scrape source-binding RHS source URLs from a `.fossil` file's text.
+///
+/// Regex-based (v0.2 placeholder). Shape mirrors the TS `extractSourceRefs`
+/// in `packages/playground/src/hooks/useInferredDescriptors.ts` so playground
+/// + CLI behave identically.
+///
+/// LIMITATIONS (documented; Phase 14+ replaces with AST walk):
+/// - does NOT match multi-line constructor (`name :=\n  io.csv("...")`)
+/// - does NOT match interleaved comments between `:=` and `io.csv(`
+/// - does NOT handle backslash-escaped quotes inside the URL string
+fn extract_source_refs(text: &str) -> Vec<(SmolStr, String)> {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r#"(\w[\w\d_]*)\s*:=\s*io\.(?:csv|json)\(\s*['"]([^'"]+)['"]"#)
+            .expect("static regex")
+    });
+    re.captures_iter(text)
+        .map(|c| {
+            (
+                SmolStr::from(c.get(1).unwrap().as_str()),
+                c.get(2).unwrap().as_str().to_string(),
+            )
+        })
+        .collect()
+}
+
+/// Pre-introspect every source binding and register an [`InferredDescriptor`]
+/// on the [`System`] BEFORE typecheck. Failures per-source are non-fatal —
+/// they log via `tracing::warn` + skip; the compile may still succeed via the
+/// legacy CSVW path or with no forward propagation for that source.
+fn pre_introspect_and_register(
+    system: &dyn fossil_base::System,
+    source_text: &str,
+    source_dir: &Path,
+) {
+    let conn = match duckdb::Connection::open_in_memory() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("DuckDB in-memory open failed; skipping pre-introspection: {e}");
+            return;
+        }
+    };
+    for (source_name, url) in extract_source_refs(source_text) {
+        // Resolve URL:
+        // - URL with http(s):// / s3:// / absolute path → pass through (DuckDB
+        //   read_csv_auto handles network IO via the httpfs extension per
+        //   CLAUDE.md stack pin + ADR-0037 Consequences §"Layer separation
+        //   scope" — native fossil-cli's wider IO surface is explicit).
+        // - Relative path → try source_dir-relative first (the v0.2 convention),
+        //   fall back to verbatim (= cwd-relative) so v0.1 .fossil files (e.g.
+        //   examples/hello.fossil using "examples/users.csv" relative to
+        //   repo-root) keep working unchanged.
+        let url_str = url.as_str();
+        let is_pass_through = url_str.starts_with("http://")
+            || url_str.starts_with("https://")
+            || url_str.starts_with("s3://")
+            || Path::new(url_str).is_absolute();
+        let resolved_path = if is_pass_through {
+            url_str.to_string()
+        } else {
+            let joined = source_dir.join(url_str);
+            if joined.exists() {
+                joined.to_string_lossy().into_owned()
+            } else {
+                url_str.to_string()
+            }
+        };
+
+        // Escape single-quotes for the SQL string literal (read_csv_auto takes
+        // a SQL string, not a prepared-statement parameter).
+        let escaped_path = resolved_path.replace('\'', "''");
+        let sql = format!("DESCRIBE SELECT * FROM read_csv_auto('{escaped_path}')");
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    "DESCRIBE prepare failed for source `{source_name}` (url=`{url}`): {e}"
+                );
+                continue;
+            }
+        };
+        let cols: Vec<InferredColumn> = match stmt.query_map([], |row| {
+            let name: String = row.get(0)?;
+            let typ: String = row.get(1)?;
+            Ok(InferredColumn {
+                name: SmolStr::from(name),
+                primitive: SmolStr::from(duckdb_type_to_fossil_primitive(&typ)),
+            })
+        }) {
+            Ok(iter) => iter.filter_map(Result::ok).collect(),
+            Err(e) => {
+                tracing::warn!("DESCRIBE query_map failed for `{source_name}`: {e}");
+                continue;
+            }
+        };
+        let descriptor = InferredDescriptor {
+            source_name: source_name.clone(),
+            columns: cols,
+            content_hash: String::new(),
+        };
+        system.register_inferred_descriptor(descriptor);
+        tracing::debug!("pre-registered InferredDescriptor for `{source_name}`");
+    }
 }
 
 /// `fossil check`: drain the Salsa `Diagnostic` accumulator across every
@@ -257,7 +410,12 @@ fn cmd_check(path: &Path, shape: Option<&Path>) -> miette::Result<()> {
     let _descriptor = load_descriptor(path, shape)?;
 
     let named = NamedSource::new(path.to_string_lossy(), text.clone());
-    let (db, file) = open_db(text, path);
+    let (db, file) = open_db(text.clone(), path);
+
+    // Phase 13 v0.2 (ADR-0037): same pre-introspection as `cmd_compile` so
+    // `fossil check` sees the same forward-propagated types the compiler will.
+    let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    pre_introspect_and_register(db.system(), &text, source_dir);
 
     let def_map = fossil_hir::def_map::def_map(&db, file);
     let mappings = def_map.mappings(&db);
@@ -339,7 +497,15 @@ fn cmd_compile(path: &Path, out_dir: Option<&Path>, shape: Option<&Path>) -> mie
     std::fs::create_dir_all(&out_dir)
         .map_err(|e| miette::miette!("create out-dir {}: {e}", out_dir.display()))?;
 
-    let (db, file) = open_db(text, path);
+    let (db, file) = open_db(text.clone(), path);
+
+    // Phase 13 v0.2 (ADR-0037 / plan 13-04a): pre-introspect every io.csv /
+    // io.json source binding and register the resulting InferredDescriptor on
+    // the System BEFORE typecheck/codegen. Mirrors the browser-side flow
+    // orchestrated by plan 13-04b.
+    let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    pre_introspect_and_register(db.system(), &text, source_dir);
+
     let plan = lower_to_plan(&db, file, path)?;
 
     let manifest_path = out_dir.join("manifest.yaml");
@@ -372,7 +538,12 @@ fn cmd_run(path: &Path, shape: Option<&Path>) -> miette::Result<()> {
     let _descriptor = load_descriptor(path, shape)?;
 
     let out_dir = std::env::current_dir().expect("cwd is readable");
-    let (db, file) = open_db(text, path);
+    let (db, file) = open_db(text.clone(), path);
+
+    // Phase 13 v0.2 (ADR-0037): pre-introspect before run-path lowering too.
+    let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    pre_introspect_and_register(db.system(), &text, source_dir);
+
     let plan = lower_to_plan(&db, file, path)?;
 
     std::fs::write(out_dir.join("manifest.yaml"), plan.manifest_yaml(&db))

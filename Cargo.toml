@@ -52,6 +52,13 @@ prefixmap = "0.3"
 # === Did-you-mean diagnostics (Phase 3 CORE-05) ===
 strsim = "0.11"
 
+# === Native CLI pre-introspection (Phase 13 INPUT-01 / plan 13-04a) ===
+# Source-binding extraction in fossil-cli scans the .fossil text for
+# io.csv("...") / io.json("...") references via regex (v0.2 placeholder;
+# Phase 14+ replaces with an AST walk). NATIVE-ONLY consumer; never
+# referenced by a WASM-gated crate.
+regex = "1"
+
 # === Sinks (Phase 5+) ===
 # `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc;
 # SC#5 / ADR-0017). The `arrow` umbrella + `parquet` stay for native byte-level test deps.

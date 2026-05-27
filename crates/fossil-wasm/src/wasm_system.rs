@@ -39,7 +39,7 @@ use smol_str::SmolStr;
 #[derive(Debug, Default)]
 pub(crate) struct WasmSystem {
     fs: RwLock<HashMap<String, Vec<u8>>>,
-    /// Phase 13 INPUT-01 (ADR-0037): host-registered InferredDescriptors,
+    /// Phase 13 INPUT-01 (ADR-0037): host-registered `InferredDescriptors`,
     /// keyed by source binding name (e.g. `"users"` for `users := io.csv(...)`).
     /// Populated by the playground orchestration via
     /// [`crate::FossilPlayground::register_inferred_descriptor`] BEFORE
