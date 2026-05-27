@@ -4,11 +4,10 @@
     {
       "id": "hello",
       "label": "Hello, Fossil",
-      "description": "The canonical 10-second example — CSV → typed triples.",
+      "description": "The canonical 10-second example — CSV → typed triples (schema inferred per ADR-0037).",
       "files": {
         "fossil": "@examples/hello.fossil",
         "csv":    "@examples/hello.csv",
-        "csvw":   "@examples/hello.csvw.json",
         "shex":   "@examples/hello.shex"
       }
     },

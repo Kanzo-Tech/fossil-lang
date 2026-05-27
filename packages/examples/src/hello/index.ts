@@ -14,16 +14,18 @@
 import type { Example } from '../index.js';
 import helloMapping from './hello.fossil?raw';
 import helloCsv from './hello.csv?raw';
-import helloCsvw from './hello.csvw.json?raw';
 import helloShex from './hello.shex?raw';
 
+// Phase 13 v0.2 (ADR-0037 / plan 13-04b): the hello.csvw.json sidecar was
+// removed — the playground's `useInferredDescriptors` hook infers the schema
+// at compile time via host-side DuckDB-WASM DESCRIBE. v0.1 .fossil files
+// with explicit `schema = "..."` args still compile (deprecated path).
 export const helloExample: Example = {
   id: 'hello',
   title: 'Hello, Fossil',
   description:
     'The canonical 10-second example — CSV → typed triples via implicit closure synthesis.',
   mapping: helloMapping,
-  csvw: helloCsvw,
   shex: helloShex,
   dataFiles: [{ path: 'hello.csv', contents: helloCsv, format: 'csv' }],
 };

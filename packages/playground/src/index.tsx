@@ -135,22 +135,11 @@ export type { TurtleTabProps } from './turtle/index.js';
 export { CompiledSqlPanel, DuckDB } from './compiled-sql/index.js';
 export type { CompiledSqlPanelProps } from './compiled-sql/index.js';
 
-// CSVW inference (PLAY-09 + PLAY-11) — DuckDB DESCRIBE → minimal CSVW JSON-LD.
-// The pure type-map (duckdbTypeToCsvw) is exported for callers that already
-// have a DESCRIBE result in hand and only need the type translation.
-// `applyCsvw` / `parseCsvw` are the JSON round-trip helpers consumed by the
-// editable preview AND by advanced consumers that want to validate persisted
-// descriptors before round-tripping through their own state machine.
-// `CsvwPreview` is the editable React panel (PLAY-09) that mounts inside the
-// playground component but is also exported standalone for advanced layouts.
-export {
-  inferCsvw,
-  duckdbTypeToCsvw,
-  applyCsvw,
-  parseCsvw,
-  CsvwPreview,
-} from './csvw/index.js';
-export type { CsvwTable, CsvwColumn, CsvwPreviewProps } from './csvw/index.js';
+// Phase 13 v0.2 (ADR-0037 / plan 13-04b): the CSVW inference + editable
+// preview surface (`inferCsvw`, `duckdbTypeToCsvw`, `applyCsvw`, `parseCsvw`,
+// `CsvwPreview`, `CsvwTable`, `CsvwColumn`, `CsvwPreviewProps`) is removed.
+// The host-side InferredDescriptor flow (useInferredDescriptors hook +
+// FossilPlayground.registerInferredDescriptor WASM API) replaces it.
 
 // BibTeX modal (PLAY-08) — cite modal triggered from the playground toolbar.
 // Embeds the current permalink URL so the cite round-trips state; pre-bundled
