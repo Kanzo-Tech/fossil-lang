@@ -34,7 +34,6 @@ import { fossil } from '@fossil-lang/codemirror-fossil';
 import {
   initFossilWasm,
   FossilPlayground as FossilPlaygroundWasm,
-  type FileHandle,
 } from '@fossil-lang/wasm';
 import { helloExample } from '@fossil-lang/examples';
 import { languageServerSupport } from '@codemirror/lsp-client';
@@ -379,7 +378,7 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
   });
 
   /**
-   * Main-thread `FossilPlayground` instance + opened file handle.
+   * Main-thread `FossilPlayground` instance.
    *
    * Why component-scope (not module-singleton like the LSP Worker):
    *   - The LSP Worker is the long-lived language-features instance per
@@ -396,17 +395,45 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
    *     spirit — recreating the compile instance is cheap, ~hundreds of
    *     μs, vs the ~hundreds of ms DuckDB-WASM cold-start).
    *
-   * The handle is lazy: first Run mints the instance + openFile, every
-   * subsequent Run updateFiles the same handle so Salsa benefits from
-   * incremental memoisation (ADR-0022 — set_text bumps the revision,
-   * downstream tracked queries invalidate incrementally).
+   * BUG-01 fix (Phase 15 plan 15-01): pre-fix design held a long-lived
+   * `FileHandle` alongside the instance and called `compileFile(handle)` per
+   * Run for Salsa's incremental memoisation. The wasm-bindgen-generated
+   * `compile_file(handle)` JS wrapper, however, calls
+   * `handle.__destroy_into_raw()` and consumes the JS-side handle wrapper —
+   * even though `FileHandle` is `Copy` in Rust. After the first call the
+   * handle's `__wbg_ptr` is zero; a second `compileFile(handle)` (or any
+   * `updateFile(handle, …)` chained after it) throws
+   * `Error: null pointer passed to rust`. This surfaced not just on the
+   * documented second-Run regression but on the FIRST Run too once Phase 14
+   * plan 14-01 added `inferredDescriptors.introspectAndRegister(...)` as a
+   * pre-compile step (handle-using paths cross-trip even on the first click).
+   *
+   * The minimal closed-form fix that requires zero Rust changes is to drop
+   * the handle entirely and use `instance.compile(source)` — the ad-hoc
+   * compile API documented as returning the SAME `{ sql, manifest_yaml }`
+   * shape as `compileFile(handle)`. We lose the Salsa incremental
+   * memoisation benefit across re-Runs (each Run mints a fresh ad-hoc
+   * `SourceFile` inside the Rust instance), but correctness > a ~hundreds-of-
+   * μs second-Run speed-up. The instance itself is still reused across
+   * Runs so the WASM module isn't re-instantiated; only the per-file Salsa
+   * inputs are short-lived.
+   *
+   * Phase 16+ may reintroduce a handle-based path if/when wasm-bindgen
+   * grows a `&FileHandle`-style reference-passing affordance (or if we add
+   * a custom `compile_file_keep` Rust API that takes `handle: &FileHandle`
+   * — out of scope for this fix per CONTEXT.md "NO toca compiler Rust").
    */
   const compileInstanceRef = useRef<{
     instance: FossilPlaygroundWasm | null;
-    handle: FileHandle | null;
-  }>({ instance: null, handle: null });
+  }>({ instance: null });
 
-  /** Stable URI the LSP client + the main-thread compile instance both key on. */
+  /**
+   * Stable URI the LSP client keys on. The Run path no longer threads a
+   * `FileHandle` through openFile/updateFile/compileFile after the BUG-01
+   * fix (see `compileInstanceRef` comment block); the URI is now used
+   * exclusively by the `@codemirror/lsp-client` extension below, which keys
+   * its document-version cache on this string.
+   */
   const documentUri = 'file:///playground/main.fossil';
 
   /**
@@ -423,47 +450,53 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
         // free() on an already-freed instance throws — swallow.
       }
     }
-    compileInstanceRef.current = { instance: null, handle: null };
+    compileInstanceRef.current = { instance: null };
   }, []);
 
   /**
-   * Ensure the main-thread `FossilPlaygroundWasm` instance + opened file
-   * exist; mint on first call, `updateFile` on subsequent calls so Salsa's
-   * incremental memoisation kicks in across re-Runs of the same mapping
-   * (the byte-identical-edit case = zero recompute).
+   * Ensure the main-thread `FossilPlaygroundWasm` instance exists; mint on
+   * first call, reuse thereafter. Returns the live instance so the caller can
+   * drive pre-compile orchestration (Phase 14 plan 14-01:
+   * `inferredDescriptors.introspectAndRegister(...)` is awaited against this
+   * instance BEFORE the `compile` callback is invoked via `runPipeline`).
    *
-   * Returns the live instance so the caller can drive pre-compile orchestration
-   * (Phase 14 plan 14-01: `inferredDescriptors.introspectAndRegister(...)`
-   * is awaited against this instance BEFORE the `compile` callback is invoked
-   * via `runPipeline`).
+   * BUG-01 fix (Phase 15 plan 15-01): the pre-fix path also called
+   * `openFile`/`updateFile` here to mint+maintain a `FileHandle` for the
+   * later `compileFile(handle)` invocation. Both `openFile` and `updateFile`
+   * take or consume `FileHandle`-shaped wasm-bindgen objects, and the
+   * generated JS calls `__destroy_into_raw()` on handle parameters —
+   * destroying the JS-side wrapper. We've dropped the file-lifecycle
+   * threading from the Run path entirely; the `compile` callback now uses
+   * the ad-hoc `instance.compile(source)` API which interns a per-call
+   * `SourceFile` internally without leaking handles across the wasm-bindgen
+   * boundary.
    */
-  const ensureCompileInstance = useCallback(
-    (mappingText: string): FossilPlaygroundWasm => {
-      const r = compileInstanceRef.current;
-      if (!r.instance) {
-        const instance = new FossilPlaygroundWasm();
-        const handle = instance.openFile(documentUri, mappingText);
-        compileInstanceRef.current = { instance, handle };
-        return instance;
-      }
-      if (r.handle !== null) {
-        r.instance.updateFile(r.handle, mappingText);
-      }
-      return r.instance;
-    },
-    [],
-  );
+  const ensureCompileInstance = useCallback((): FossilPlaygroundWasm => {
+    const r = compileInstanceRef.current;
+    if (!r.instance) {
+      const instance = new FossilPlaygroundWasm();
+      compileInstanceRef.current = { instance };
+      return instance;
+    }
+    return r.instance;
+  }, []);
 
   /**
    * Compile callback handed to runPipeline. Reuses `ensureCompileInstance`
-   * so the lazy-mint logic + Salsa-incremental-memoisation contract live in
-   * a single place.
+   * so the lazy-mint logic lives in a single place.
+   *
+   * BUG-01 fix (Phase 15 plan 15-01): switched from `compileFile(handle)` to
+   * the ad-hoc `compile(source)` overload — the former destroyed the
+   * `FileHandle` JS-side wrapper on every call (wasm-bindgen consumes class
+   * parameters), turning the second compile into a `null pointer passed to
+   * rust` throw. The ad-hoc form mints a fresh `SourceFile` per call inside
+   * the instance, avoiding the handle-lifecycle problem entirely. Return
+   * shape is identical (`{ sql, manifest_yaml }`).
    */
   const compile = useCallback(
     async (mappingText: string): Promise<string> => {
-      const instance = ensureCompileInstance(mappingText);
-      const handle = compileInstanceRef.current.handle!;
-      return instance.compileFile(handle).sql;
+      const instance = ensureCompileInstance();
+      return instance.compile(mappingText).sql;
     },
     [ensureCompileInstance],
   );
@@ -627,7 +660,12 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
       //
       // Phase 14 plan 14-03: the hook also returns the captured schemas so
       // the Source tab's preview can render without a second DESCRIBE pass.
-      const instance = ensureCompileInstance(mapping);
+      //
+      // BUG-01 fix (Phase 15 plan 15-01): `ensureCompileInstance` no longer
+      // takes the mapping text — the pre-fix `openFile`/`updateFile`
+      // threading is gone, and `compile()` uses the ad-hoc form which
+      // ingests the source string per call.
+      const instance = ensureCompileInstance();
       setSourceLoading(true);
       let schemas: SourceSchema[] = [];
       try {

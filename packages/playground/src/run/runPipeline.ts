@@ -207,9 +207,36 @@ export async function runPipeline(
   }
 
   // Step 4: execute on ONE connection then read back.
+  //
+  // BUG-01 fix (Phase 15 plan 15-01): the DuckDB-WASM Worker is module-
+  // singleton (per ADR-0026 — recreated only on Reset). Views + tables
+  // created during the first Run persist into the second Run on the same
+  // worker. The Rust codegen emits plain `CREATE VIEW` / `CREATE TABLE`
+  // (not `CREATE OR REPLACE`) — which DuckDB rejects on re-execution
+  // with `Catalog Error: View with name "<name>" already exists`.
+  //
+  // We can't change the Rust codegen (per 15-CONTEXT.md "NO toca compiler
+  // Rust"), so the playground patches the executable SQL stream on the
+  // way to the DuckDB Worker: rewrite each `CREATE VIEW <name>` /
+  // `CREATE TABLE <name>` into the idempotent `CREATE OR REPLACE …`
+  // form. The rewriter is intentionally narrow — it only matches
+  // statement-prefix `CREATE (VIEW|TABLE)` (no `OR REPLACE` already
+  // present, no `TEMP`/`TEMPORARY` qualifier), which is the exact shape
+  // codegen-emits in v0.2. If codegen ever grows a `TEMP VIEW` path, the
+  // regex will need an additional alternation.
+  //
+  // `rewriteCopyToCreateTable` (called inside transformSql) already emits
+  // `CREATE OR REPLACE TABLE` for the COPY→TABLE rewrite, so the second
+  // Run's vertex/edge/output tables are safe. Only the upstream `CREATE
+  // VIEW <source>` statements need this fix.
+  const idempotentSql = transformed.executableSql.replace(
+    /\bCREATE\s+(VIEW|TABLE)\b(?!\s+OR\s+REPLACE)/gi,
+    'CREATE OR REPLACE $1',
+  );
+
   const conn = await db.connect();
   try {
-    const statements = splitSqlStatements(transformed.executableSql);
+    const statements = splitSqlStatements(idempotentSql);
     for (const stmt of statements) {
       await conn.query(stmt);
     }
