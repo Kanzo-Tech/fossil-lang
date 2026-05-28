@@ -20,7 +20,7 @@
  * (no copied CSS).
  */
 
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import styles from './keasy-shell.module.css';
 
 export interface KeasyShellProps {
@@ -42,6 +42,12 @@ export interface KeasyShellProps {
   viewerPane: ReactNode;
   /** Optional title rendered in the header. Defaults to "Hello mapping". */
   title?: string;
+  /** Inline style applied at the shell root — used by the page-level
+   *  container to inject the resolved `--fossil-*` CSS vars
+   *  (`cssVarsToStyle(useTheme(theme).cssVars)`) so the keasy-shell
+   *  CSS module's `var(--fossil-colors-*)` lookups resolve to the
+   *  correct light/dark palette. */
+  rootStyle?: CSSProperties;
 }
 
 /**
@@ -55,12 +61,14 @@ export function KeasyShell({
   editorPane,
   viewerPane,
   title = 'Hello mapping',
+  rootStyle,
 }: KeasyShellProps): JSX.Element {
   return (
     <div
       data-testid="multi-host-shell"
       data-theme={theme}
       className={styles.shell}
+      style={rootStyle}
     >
       <aside className={styles.sidebar} aria-label="Workspace navigation">
         <div className={styles.sidebarLogo} aria-label="Embedded host">

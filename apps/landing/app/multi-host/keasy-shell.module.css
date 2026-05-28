@@ -1,14 +1,16 @@
 /*
  * Keasy-shaped host shell — REL-03 multi-host fixture.
  *
- * NOT a copy of Keasy's CSS — a visual mimic using the shadcn token
- * vocabulary (the same `var(--background)`, `var(--foreground)`, `var(--border)`,
- * `var(--muted)`, `var(--primary)`, `var(--accent)`, etc. that
- * `<KanzoThemeProvider/>` from `@kanzo/theme` cascades into descendant
- * subtrees on the kanzo-branded reference host).
+ * NOT a copy of Keasy's CSS — a visual mimic using the canonical
+ * `--fossil-*` CSS-var vocabulary that the `<FossilEditor/>` +
+ * `<FossilViewer/>` packages already consume internally. The page-level
+ * container resolves `light` / `dark` via `useTheme()` from
+ * `@fossil-lang/playground` and applies the resulting cssVars at the
+ * shell root via inline style — every descendant (this CSS module +
+ * the editor + the viewer) reads through the same cascade.
  *
- * Per 17-CONTEXT.md (locked decision): "It does NOT contain Keasy source
- * code — only Keasy's *visual look*."
+ * Per 17-CONTEXT.md (locked decision): "It does NOT contain Keasy
+ * source code — only Keasy's *visual look*."
  *
  * Layout shape (mimics Phase 16 commit 5fcdccf Zed-style discovery
  * workspace):
@@ -21,6 +23,14 @@
  *
  * Spacing/typography mimics Keasy's IDE-style chrome: tighter padding
  * than the playground's default; 13-14 px font-size body; small radii.
+ *
+ * Token mapping (light fallbacks shown — dark variants are emitted by
+ * `darkTheme` from @fossil-lang/playground via `themeToCssVars`):
+ *   --fossil-colors-background   → app chrome background
+ *   --fossil-colors-foreground   → primary text
+ *   --fossil-colors-muted        → de-emphasised text + sidebar bg shading
+ *   --fossil-colors-border       → dividers
+ *   --fossil-colors-accent       → primary action + selected nav item
  */
 
 .shell {
@@ -33,20 +43,34 @@
     "sidebar content";
   height: 100vh;
   width: 100%;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
-  font-size: 14px;
-  color: hsl(var(--foreground, 222 47% 11%));
-  background: hsl(var(--background, 0 0% 100%));
+  font-family: var(
+    --fossil-fonts-sansSerif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif
+  );
+  font-size: var(--fossil-fonts-sizeBase, 14px);
+  color: var(--fossil-colors-foreground, #0f172a);
+  background: var(--fossil-colors-background, #ffffff);
 }
 
 /* ─────────────────────────── Sidebar ─────────────────────────── */
 
 .sidebar {
   grid-area: sidebar;
-  background: hsl(var(--muted, 210 40% 96%));
-  border-right: 1px solid hsl(var(--border, 214 32% 91%));
+  /* Use a 6% alpha tint of the foreground for the sidebar background
+     so it reads as a slightly recessed plane against the main content
+     area on both light + dark palettes. color-mix() is widely supported
+     since 2023; if the browser doesn't understand it, the keyword falls
+     through to the var(--fossil-colors-muted) fallback below. */
+  background: color-mix(
+    in srgb,
+    var(--fossil-colors-foreground, #0f172a) 5%,
+    var(--fossil-colors-background, #ffffff)
+  );
+  border-right: 1px solid var(--fossil-colors-border, #e2e8f0);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
@@ -56,22 +80,25 @@
 
 .sidebarLogo {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fossil-fonts-sizeSmall, 13px);
   letter-spacing: 0.04em;
   padding: 10px 12px;
   text-align: left;
-  background: hsl(var(--primary, 222 47% 11%));
-  color: hsl(var(--primary-foreground, 210 40% 98%));
-  border-radius: 6px;
+  background: var(--fossil-colors-accent, #4f46e5);
+  /* Foreground-on-accent: pick white for legibility; both light and
+     dark accents in @fossil-lang/playground are blue-/indigo-class
+     hues with adequate contrast against pure white. */
+  color: #ffffff;
+  border-radius: var(--fossil-radii-md, 6px);
   user-select: none;
 }
 
 .sidebarSectionLabel {
-  font-size: 11px;
+  font-size: var(--fossil-fonts-sizeXs, 11px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: hsl(var(--muted-foreground, 215 16% 47%));
+  color: var(--fossil-colors-muted, #64748b);
   padding: 0 8px;
   margin-bottom: 4px;
 }
@@ -84,23 +111,31 @@
 
 .sidebarNavItem {
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: var(--fossil-fonts-sizeSmall, 13px);
   line-height: 1.2;
   cursor: pointer;
-  color: hsl(var(--muted-foreground, 215 16% 47%));
-  border-radius: 5px;
+  color: var(--fossil-colors-muted, #64748b);
+  border-radius: var(--fossil-radii-sm, 5px);
   text-decoration: none;
   user-select: none;
 }
 
 .sidebarNavItem:hover {
-  background: hsl(var(--accent, 210 40% 96%) / 0.6);
-  color: hsl(var(--foreground, 222 47% 11%));
+  background: color-mix(
+    in srgb,
+    var(--fossil-colors-foreground, #0f172a) 8%,
+    transparent
+  );
+  color: var(--fossil-colors-foreground, #0f172a);
 }
 
 .sidebarNavItem[aria-current='page'] {
-  background: hsl(var(--accent, 210 40% 96%));
-  color: hsl(var(--accent-foreground, 222 47% 11%));
+  background: color-mix(
+    in srgb,
+    var(--fossil-colors-accent, #4f46e5) 18%,
+    transparent
+  );
+  color: var(--fossil-colors-foreground, #0f172a);
   font-weight: 500;
 }
 
@@ -108,29 +143,29 @@
 
 .header {
   grid-area: header;
-  border-bottom: 1px solid hsl(var(--border, 214 32% 91%));
+  border-bottom: 1px solid var(--fossil-colors-border, #e2e8f0);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  background: hsl(var(--background, 0 0% 100%));
+  background: var(--fossil-colors-background, #ffffff);
 }
 
 .headerTitle {
   font-weight: 600;
-  font-size: 14px;
-  color: hsl(var(--foreground, 222 47% 11%));
+  font-size: var(--fossil-fonts-sizeBase, 14px);
+  color: var(--fossil-colors-foreground, #0f172a);
 }
 
 .headerRunButton {
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: var(--fossil-fonts-sizeSmall, 13px);
   font-weight: 500;
   font-family: inherit;
-  background: hsl(var(--primary, 222 47% 11%));
-  color: hsl(var(--primary-foreground, 210 40% 98%));
-  border: 1px solid hsl(var(--primary, 222 47% 11%));
-  border-radius: 5px;
+  background: var(--fossil-colors-accent, #4f46e5);
+  color: #ffffff;
+  border: 1px solid var(--fossil-colors-accent, #4f46e5);
+  border-radius: var(--fossil-radii-sm, 5px);
   cursor: pointer;
   user-select: none;
 }
@@ -151,12 +186,12 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1px;
-  background: hsl(var(--border, 214 32% 91%));
+  background: var(--fossil-colors-border, #e2e8f0);
   overflow: hidden;
 }
 
 .pane {
-  background: hsl(var(--background, 0 0% 100%));
+  background: var(--fossil-colors-background, #ffffff);
   min-width: 0;
   overflow: hidden;
   display: flex;
@@ -166,13 +201,17 @@
 .paneHeader {
   flex: 0 0 auto;
   padding: 6px 12px;
-  font-size: 11px;
+  font-size: var(--fossil-fonts-sizeXs, 11px);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: hsl(var(--muted-foreground, 215 16% 47%));
-  background: hsl(var(--muted, 210 40% 96%) / 0.5);
-  border-bottom: 1px solid hsl(var(--border, 214 32% 91%));
+  color: var(--fossil-colors-muted, #64748b);
+  background: color-mix(
+    in srgb,
+    var(--fossil-colors-foreground, #0f172a) 4%,
+    var(--fossil-colors-background, #ffffff)
+  );
+  border-bottom: 1px solid var(--fossil-colors-border, #e2e8f0);
 }
 
 .paneBody {
@@ -186,13 +225,23 @@
   height: 100%;
 }
 
-/* Error banner mimics Keasy's destructive-token alert style. */
+/* Error banner — uses the canonical error token from the @fossil-lang
+   palette; falls back to red-500 if the var isn't installed (e.g. a
+   future host that ships only a partial theme). */
 .errorBanner {
   margin: 8px;
   padding: 8px 12px;
-  font-size: 12px;
-  background: hsl(var(--destructive, 0 84% 60%) / 0.1);
-  border: 1px solid hsl(var(--destructive, 0 84% 60%) / 0.4);
-  color: hsl(var(--destructive, 0 84% 60%));
-  border-radius: 4px;
+  font-size: var(--fossil-fonts-sizeXs, 12px);
+  background: color-mix(
+    in srgb,
+    var(--fossil-colors-error, #ef4444) 12%,
+    transparent
+  );
+  border: 1px solid color-mix(
+    in srgb,
+    var(--fossil-colors-error, #ef4444) 40%,
+    transparent
+  );
+  color: var(--fossil-colors-error, #ef4444);
+  border-radius: var(--fossil-radii-sm, 4px);
 }

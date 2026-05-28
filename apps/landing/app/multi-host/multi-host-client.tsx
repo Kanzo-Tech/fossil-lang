@@ -37,6 +37,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { fossil } from '@fossil-lang/codemirror-fossil';
 import {
   initFossilWasm,
@@ -51,6 +52,8 @@ import {
   runPipeline,
   getDuckDb,
   useLspWorker,
+  useTheme,
+  cssVarsToStyle,
   type VertexRow,
   type EdgeRow,
 } from '@fossil-lang/playground';
@@ -67,24 +70,26 @@ import { KeasyShell } from './keasy-shell';
 const WASM_URL = '/wasm/fossil_wasm_bg.wasm';
 const MAX_RESOLVED_BYTES = 10 * 1024 * 1024;
 
-/**
- * Read the `?theme=` URL param at mount time. Mirrors PlaygroundHost.tsx
- * convention so the Phase 15 visual-baselines spec can drive both routes
- * with the same `?theme=dark` URL parameter.
- *
- * The `useSearchParams` hook from `next/navigation` would also work, but
- * a one-shot read at mount time matches PlaygroundHost's behaviour: the
- * theme is captured on first paint and survives until reload — a
- * route-level URL convention, not a runtime toggle.
- */
-function readThemeFromUrl(): 'light' | 'dark' {
-  if (typeof window === 'undefined') return 'light';
-  const params = new URLSearchParams(window.location.search);
-  return params.get('theme') === 'dark' ? 'dark' : 'light';
-}
-
 export default function MultiHostClient(): JSX.Element {
-  const [theme] = useState<'light' | 'dark'>(() => readThemeFromUrl());
+  // Read `?theme=` via Next.js's useSearchParams — mirrors
+  // PlaygroundHost.tsx exactly so both routes respond to the same URL
+  // convention the Phase 15 visual-baselines spec drives. The hook
+  // returns a ReadonlyURLSearchParams (or null during SSR — but this
+  // component is dynamic-imported with ssr: false so the null branch
+  // is unreachable in practice; the `?? null` guard is cheap insurance).
+  const searchParams = useSearchParams();
+  const theme: 'light' | 'dark' =
+    searchParams?.get('theme') === 'dark' ? 'dark' : 'light';
+  // Resolve theme → CSS vars. `useTheme('light' | 'dark')` returns the
+  // canonical lightTheme/darkTheme cssVars + editorTheme. We apply the
+  // cssVars to the shell root so descendants (including the keasy-shell
+  // CSS module) read `--fossil-colors-background`, `--fossil-colors-
+  // foreground`, etc. and switch palette on `?theme=dark`. The
+  // `<KanzoThemeProvider/>` parent installs the brand defaults
+  // (kanzoTheme = light only); this hook OVERRIDES them on the shell
+  // subtree for the dark case. Mirrors PlaygroundHost.tsx + useTheme.ts
+  // L96-108: explicit `theme` prop wins over the Provider cascade.
+  const { cssVars, editorTheme } = useTheme(theme);
   const [mapping, setMapping] = useState<string>(helloExample.mapping);
   const [vertices, setVertices] = useState<VertexRow[]>([]);
   const [edges, setEdges] = useState<EdgeRow[]>([]);
@@ -141,6 +146,11 @@ export default function MultiHostClient(): JSX.Element {
   // is provided (per the EDIT-02 composition rule).
   const extensions = useMemo<Extension[]>(() => {
     const exts: Extension[] = fossil({ resolver });
+    // Apply the theme's editor extension so CodeMirror's chrome
+    // (gutters, cursor, selection) tracks light/dark. Goes BEFORE LSP
+    // support so semantic-tokens overlay refinements layer on top —
+    // same ordering FossilPlayground.tsx uses.
+    exts.push(editorTheme);
     if (lspClient) {
       exts.push(
         languageServerSupport(
@@ -151,7 +161,7 @@ export default function MultiHostClient(): JSX.Element {
       );
     }
     return exts;
-  }, [resolver, lspClient]);
+  }, [resolver, lspClient, editorTheme]);
 
   // Main-thread compile instance — lazy-minted on the first Run, reused on
   // subsequent Runs (Salsa-stable). Freed on unmount so the WASM linear
@@ -203,6 +213,12 @@ export default function MultiHostClient(): JSX.Element {
   return (
     <KeasyShell
       theme={theme}
+      // Apply the resolved theme's CSS vars at the shell root —
+      // cascades into the keasy-shell.module.css `var(--fossil-colors-*)`
+      // lookups + into the FossilEditor + FossilViewer subtrees. Mirrors
+      // FossilPlayground.tsx's own `style={cssVarsToStyle(cssVars)}`
+      // application at its root.
+      rootStyle={cssVarsToStyle(cssVars)}
       onRun={() => {
         void onRun();
       }}
