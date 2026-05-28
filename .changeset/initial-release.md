@@ -1,11 +1,13 @@
 ---
-"@fossil-lang/playground": minor
-"@fossil-lang/codemirror-fossil": minor
-"@fossil-lang/wasm": minor
-"@fossil-lang/types": minor
-"@fossil-lang/resolvers": minor
-"@fossil-lang/examples": minor
+"@fossil-lang/playground": patch
+"@fossil-lang/codemirror-fossil": patch
+"@fossil-lang/wasm": patch
+"@fossil-lang/types": patch
+"@fossil-lang/resolvers": patch
+"@fossil-lang/examples": patch
 ---
+
+_Bump-level downgraded from `minor` to `patch` as part of Phase 17 REL-01 release squash (this changeset's narrative is preserved; the v0.2.0 minor bump is carried by `release-v0-2-0.md`)._
 
 Initial public release of the Fossil playground React library family.
 

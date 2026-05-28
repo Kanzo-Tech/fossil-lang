@@ -1,7 +1,9 @@
 ---
-"@fossil-lang/viewer": minor
-"@fossil-lang/playground": minor
+"@fossil-lang/viewer": patch
+"@fossil-lang/playground": patch
 ---
+
+_Bump-level downgraded from `minor` to `patch` as part of Phase 17 REL-01 release squash (this changeset's narrative is preserved; the v0.2.0 minor bump is carried by `release-v0-2-0.md`)._
 
 Phase 12 — `@fossil-lang/viewer` Cosmos.gl port.
 

@@ -1,7 +1,9 @@
 ---
-'@fossil-lang/playground': minor
-'@fossil-lang/wasm': minor
+'@fossil-lang/playground': patch
+'@fossil-lang/wasm': patch
 ---
+
+_Bump-level downgraded from `minor` to `patch` as part of Phase 17 REL-01 release squash (this changeset's narrative is preserved; the v0.2.0 minor bump is carried by `release-v0-2-0.md`)._
 
 Phase 13 — input-model simplification (ADR-0037): drop user-facing CSVW; infer types from runtime files.
 
