@@ -11,7 +11,8 @@
     "size": "pnpm -r size",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm -r build && changeset publish"
+    "release": "pnpm -r build && changeset publish",
+    "bless-baselines": "bash scripts/bless-baselines.sh"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",
