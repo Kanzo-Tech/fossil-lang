@@ -453,6 +453,138 @@ test.describe('Visual baselines — playground v2 (post-Phase-14)', () => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 17 plan 17-04 (REL-03 part B) — multi-host fixture baselines
+//
+// The `/multi-host` route renders `<FossilEditor/>` + `<FossilViewer/>`
+// inside a Keasy-styled host shell (sidebar + header + content frame).
+// Per 17-CONTEXT.md (locked decision): visually mimics Keasy WITHOUT
+// copying Keasy source code; baselines captured here as REL-03 part B.
+//
+// Matrix: 2 themes × 2 states = 4 cells. Brings the spec's total cell
+// count from 20 (Phase 15) → 24 (Phase 17).
+//
+// Why EXTEND the existing spec (rather than create a sibling
+// `multi-host-baselines.spec.ts`):
+//   - Zero changes needed to the 17-03 visual-regression.yml workflow
+//     (it already runs THIS spec; a sibling would need a workflow edit
+//     to be picked up).
+//   - The helpers (disableAnimations, waitForViewerReady, VIEWPORT) are
+//     in-file already; a sibling would either re-import them across the
+//     file boundary OR duplicate them (the export block at the bottom
+//     of this file anticipated sibling reuse, but in-file reuse is
+//     friction-free).
+//   - The `pnpm bless-baselines` default arg points at THIS spec; new
+//     cells land under the same snapshot directory + commit naturally
+//     alongside the existing 20.
+//
+// State surfaces captured per cell:
+//   - default: the route mounted, editor + viewer panes visible, no Run.
+//     The viewer shows its empty-state (Cosmos.gl canvas with no nodes).
+//   - after-Run: clicked the header's "Run mapping" button; viewer pane
+//     re-rendered with the hello example's vertices/edges populated.
+//     Mirrors the cosmos.gl settle wait pattern from the playground
+//     after-Run cells above (500 ms post-mount).
+// ─────────────────────────────────────────────────────────────────────────
+
+test.describe('Visual baselines — multi-host fixture (REL-03)', () => {
+  // Same serial-mode + WASM-Worker-contention rationale as the playground
+  // baselines block above — the LSP Worker boot + the DuckDB Worker boot +
+  // the main-thread FossilPlaygroundWasm init race under fullyParallel=true.
+  // Serial keeps the gate REPRODUCIBLE (correctness > speed).
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(VIEWPORT);
+    // disableAnimations uses addInitScript — MUST install BEFORE the
+    // first navigation so it survives a possible Service Worker
+    // controlled reload (OFFLINE-01 — the multi-host route is served by
+    // the same Next.js app + same SW as the playground route).
+    await disableAnimations(page);
+  });
+
+  /**
+   * Navigate to /multi-host with the theme URL param and wait for the
+   * Keasy-shell + the editor + the viewer to mount.
+   *
+   * The fixture is intentionally simpler than the playground's full
+   * Phase 14 IDE tabs layout: no example-selector remount, no permalink
+   * decode, no left/right tab switching. So the readiness gates collapse
+   * to: shell visible + editor pane visible + "Loading editor…" overlay
+   * gone (mirrors waitForReady's WASM-init gate) + fonts loaded.
+   */
+  async function gotoMultiHost(
+    page: Page,
+    theme: 'light' | 'dark',
+  ): Promise<void> {
+    const path = theme === 'dark' ? '/multi-host?theme=dark' : '/multi-host';
+    await page.goto(path);
+    // Service Worker activation + any controlled reload settle gate —
+    // same OFFLINE-01 protection as gotoLandingWithTheme.
+    await page.waitForLoadState('networkidle');
+    // Shell mount gate.
+    await expect(page.getByTestId('multi-host-shell')).toBeVisible({
+      timeout: 15_000,
+    });
+    // Editor mount gate — keasy-shell.tsx renders "Loading editor…"
+    // while wasmReady is false; once initFossilWasm resolves the gate
+    // flips and <FossilEditor/> mounts.
+    await expect(page.getByText('Loading editor…')).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    // Fonts loaded (avoid FOIT/FOUT noise) — waitForFunction auto-retries
+    // through any mid-flight navigation per the visual-baselines spec's
+    // documented technique.
+    await page.waitForFunction(
+      () => document.fonts && document.fonts.status === 'loaded',
+      null,
+      { timeout: 5_000 },
+    );
+  }
+
+  for (const theme of THEMES) {
+    test(`SC#REL-03: multi-host — ${theme} theme, default state`, async ({
+      page,
+    }) => {
+      await gotoMultiHost(page, theme);
+      // Screenshot the shell root (NOT page.screenshot() — the shell IS
+      // the fixture; capturing the page would include any future
+      // landing-app chrome that wraps it).
+      await expect(page.getByTestId('multi-host-shell')).toHaveScreenshot(
+        `multi-host-${theme}-default.png`,
+      );
+    });
+
+    test(`SC#REL-03: multi-host — ${theme} theme, after Run`, async ({
+      page,
+    }) => {
+      await gotoMultiHost(page, theme);
+      // Click the header's "Run mapping" button. The button is disabled
+      // while running OR while WASM hasn't initialised; the gotoMultiHost
+      // helper waits for "Loading editor…" to clear which is the same
+      // gate as wasmReady=true, so the button is enabled by the time we
+      // get here.
+      const runButton = page.getByRole('button', { name: 'Run mapping' });
+      await expect(runButton).toBeEnabled({ timeout: 10_000 });
+      await runButton.click();
+      // Wait for the Run to complete: the button label flips back from
+      // "Running…" to "Run mapping" inside the KeasyShell. Wait for the
+      // enabled state to resume (the running flag becomes false either
+      // on success or on caught error).
+      await expect(runButton).toBeEnabled({ timeout: 30_000 });
+      // The viewer renders inside the right pane. The Cosmos.gl WebGL
+      // canvas needs a settle window after the data update — mirror
+      // the visual-baselines.spec.ts's after-Run Output cell technique
+      // (500 ms for the simulation tick to settle).
+      await waitForViewerReady(page);
+      await page.waitForTimeout(500);
+      await expect(page.getByTestId('multi-host-shell')).toHaveScreenshot(
+        `multi-host-${theme}-after-run.png`,
+      );
+    });
+  }
+});
+
 // Re-exported as named exports so future specs (e.g. Phase 17 REL-03
 // cross-host suite) can import and reuse the helpers without redeclaring.
 export {
