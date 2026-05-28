@@ -1,0 +1,198 @@
+/*
+ * Keasy-shaped host shell — REL-03 multi-host fixture.
+ *
+ * NOT a copy of Keasy's CSS — a visual mimic using the shadcn token
+ * vocabulary (the same `var(--background)`, `var(--foreground)`, `var(--border)`,
+ * `var(--muted)`, `var(--primary)`, `var(--accent)`, etc. that
+ * `<KanzoThemeProvider/>` from `@kanzo/theme` cascades into descendant
+ * subtrees on the kanzo-branded reference host).
+ *
+ * Per 17-CONTEXT.md (locked decision): "It does NOT contain Keasy source
+ * code — only Keasy's *visual look*."
+ *
+ * Layout shape (mimics Phase 16 commit 5fcdccf Zed-style discovery
+ * workspace):
+ *   - Left sidebar (240 px) carrying a brand-mark logo + a navigation
+ *     stack (5 items, one `aria-current="page"` highlighted).
+ *   - Top header (48 px) carrying a page title on the left + a primary
+ *     action (Run mapping) on the right.
+ *   - Main content area: split into editor pane (left half) + viewer
+ *     pane (right half), separated by a thin border.
+ *
+ * Spacing/typography mimics Keasy's IDE-style chrome: tighter padding
+ * than the playground's default; 13-14 px font-size body; small radii.
+ */
+
+.shell {
+  /* CSS grid: 2 cols × 2 rows; sidebar spans both rows on the left. */
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 48px 1fr;
+  grid-template-areas:
+    "sidebar header"
+    "sidebar content";
+  height: 100vh;
+  width: 100%;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  font-size: 14px;
+  color: hsl(var(--foreground, 222 47% 11%));
+  background: hsl(var(--background, 0 0% 100%));
+}
+
+/* ─────────────────────────── Sidebar ─────────────────────────── */
+
+.sidebar {
+  grid-area: sidebar;
+  background: hsl(var(--muted, 210 40% 96%));
+  border-right: 1px solid hsl(var(--border, 214 32% 91%));
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow: hidden;
+}
+
+.sidebarLogo {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  padding: 10px 12px;
+  text-align: left;
+  background: hsl(var(--primary, 222 47% 11%));
+  color: hsl(var(--primary-foreground, 210 40% 98%));
+  border-radius: 6px;
+  user-select: none;
+}
+
+.sidebarSectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground, 215 16% 47%));
+  padding: 0 8px;
+  margin-bottom: 4px;
+}
+
+.sidebarNav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebarNavItem {
+  padding: 7px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground, 215 16% 47%));
+  border-radius: 5px;
+  text-decoration: none;
+  user-select: none;
+}
+
+.sidebarNavItem:hover {
+  background: hsl(var(--accent, 210 40% 96%) / 0.6);
+  color: hsl(var(--foreground, 222 47% 11%));
+}
+
+.sidebarNavItem[aria-current='page'] {
+  background: hsl(var(--accent, 210 40% 96%));
+  color: hsl(var(--accent-foreground, 222 47% 11%));
+  font-weight: 500;
+}
+
+/* ─────────────────────────── Header ─────────────────────────── */
+
+.header {
+  grid-area: header;
+  border-bottom: 1px solid hsl(var(--border, 214 32% 91%));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: hsl(var(--background, 0 0% 100%));
+}
+
+.headerTitle {
+  font-weight: 600;
+  font-size: 14px;
+  color: hsl(var(--foreground, 222 47% 11%));
+}
+
+.headerRunButton {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  background: hsl(var(--primary, 222 47% 11%));
+  color: hsl(var(--primary-foreground, 210 40% 98%));
+  border: 1px solid hsl(var(--primary, 222 47% 11%));
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.headerRunButton:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.headerRunButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─────────────────────────── Content area ─────────────────────────── */
+
+.contentArea {
+  grid-area: content;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: hsl(var(--border, 214 32% 91%));
+  overflow: hidden;
+}
+
+.pane {
+  background: hsl(var(--background, 0 0% 100%));
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.paneHeader {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-foreground, 215 16% 47%));
+  background: hsl(var(--muted, 210 40% 96%) / 0.5);
+  border-bottom: 1px solid hsl(var(--border, 214 32% 91%));
+}
+
+.paneBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Editor pane gets explicit fill so CodeMirror's scroller stretches. */
+.paneBody > .editorMount {
+  height: 100%;
+}
+
+/* Error banner mimics Keasy's destructive-token alert style. */
+.errorBanner {
+  margin: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  background: hsl(var(--destructive, 0 84% 60%) / 0.1);
+  border: 1px solid hsl(var(--destructive, 0 84% 60%) / 0.4);
+  color: hsl(var(--destructive, 0 84% 60%));
+  border-radius: 4px;
+}

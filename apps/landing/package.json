@@ -17,6 +17,8 @@
     "@fossil-lang/examples": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
     "@fossil-lang/codemirror-fossil": "workspace:*",
+    "@fossil-lang/editor": "workspace:*",
+    "@fossil-lang/viewer": "workspace:*",
     "@fossil-lang/types": "workspace:*",
     "@kanzo/theme": "workspace:*",
     "@codemirror/state": "^6.0.0",

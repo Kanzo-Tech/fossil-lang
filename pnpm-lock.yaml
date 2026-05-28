@@ -53,6 +53,9 @@ importers:
       '@fossil-lang/codemirror-fossil':
         specifier: workspace:*
         version: link:../../packages/codemirror-fossil
+      '@fossil-lang/editor':
+        specifier: workspace:*
+        version: link:../../packages/editor
       '@fossil-lang/examples':
         specifier: workspace:*
         version: link:../../packages/examples
@@ -65,6 +68,9 @@ importers:
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@fossil-lang/viewer':
+        specifier: workspace:*
+        version: link:../../packages/viewer
       '@fossil-lang/wasm':
         specifier: workspace:*
         version: link:../../packages/wasm

@@ -73,6 +73,8 @@ const nextConfig = {
     '@fossil-lang/wasm',
     '@fossil-lang/resolvers',
     '@fossil-lang/examples',
+    '@fossil-lang/editor',
+    '@fossil-lang/viewer',
     '@fossil-lang/types',
   ],
   webpack(config) {
