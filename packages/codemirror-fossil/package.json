@@ -36,15 +36,15 @@
   "sideEffects": false,
   "dependencies": {
     "@fossil-lang/types": "workspace:*",
-    "@lezer/highlight": "^1.2.0"
+    "@lezer/highlight": "^1.2.0",
+    "@fossil-lang/wasm": "workspace:*"
   },
   "peerDependencies": {
     "@codemirror/autocomplete": "^6.0.0",
     "@codemirror/language": "^6.0.0",
     "@codemirror/lint": "^6.0.0",
     "@codemirror/state": "^6.0.0",
-    "@codemirror/view": "^6.0.0",
-    "@fossil-lang/wasm": "workspace:*"
+    "@codemirror/view": "^6.0.0"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.18.0",

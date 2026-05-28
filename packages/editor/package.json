@@ -37,7 +37,9 @@
   "sideEffects": false,
   "dependencies": {
     "@fossil-lang/types": "workspace:*",
-    "@fossil-lang/ui": "workspace:*"
+    "@fossil-lang/ui": "workspace:*",
+    "@fossil-lang/codemirror-fossil": "workspace:*",
+    "@fossil-lang/wasm": "workspace:*"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
@@ -48,9 +50,7 @@
     "@codemirror/autocomplete": "^6.0.0",
     "@codemirror/lint": "^6.0.0",
     "@codemirror/lsp-client": "^6.2.4",
-    "@lezer/highlight": "^1.0.0",
-    "@fossil-lang/codemirror-fossil": "workspace:*",
-    "@fossil-lang/wasm": "workspace:*"
+    "@lezer/highlight": "^1.0.0"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.18.0",

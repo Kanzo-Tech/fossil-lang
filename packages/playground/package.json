@@ -47,7 +47,9 @@
     "@fossil-lang/ui": "workspace:*",
     "@fossil-lang/viewer": "workspace:*",
     "fflate": "^0.8.3",
-    "n3": "~1.17"
+    "n3": "~1.17",
+    "@fossil-lang/codemirror-fossil": "workspace:*",
+    "@fossil-lang/wasm": "workspace:*"
   },
   "peerDependencies": {
     "@codemirror/autocomplete": "^6.0.0",
@@ -56,8 +58,6 @@
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
     "@duckdb/duckdb-wasm": "1.32.0",
-    "@fossil-lang/codemirror-fossil": "workspace:*",
-    "@fossil-lang/wasm": "workspace:*",
     "@lezer/highlight": "^1.0.0",
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0"
