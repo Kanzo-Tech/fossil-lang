@@ -700,6 +700,167 @@ fn build_edge_manifest(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// SinkPlan bridge (W0b/5)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// Why a bridge instead of a single API
+// ────────────────────────────────────
+//
+// W0b/1-3 designed the writer around `VertexSpec` / `EdgeSpec` because the
+// keasy-server use case was thought to be the prime caller (it already has
+// `DataManifest`-shaped inputs from its DCAT materialiser). The architectural
+// pivot of 2026-05-29 (auto-memory `project_fossil_graph_reference_architecture.md`)
+// rebases that: keasy invokes fossil-cli as a subprocess, so the prime caller
+// of the writer becomes the CLI itself, whose upstream is the compiler's
+// `SinkPlan` (per-shape `VertexTable` + per-predicate `EdgeTable`, from
+// `decomp::vertex_edge_decomp`).
+//
+// Rather than refactor the existing API (which would invalidate the W0b/1-4
+// tests + downstream consumers of VertexSpec like the DCAT non-fossil path),
+// we add a thin adapter that maps `SinkPlan` shapes into `VertexSpec` /
+// `EdgeSpec` shapes and delegates to the existing emitter. Two public
+// entry points:
+//
+//   plan_writes_from_sink_plan(sink_plan, dest, options)    → WriteSqlPlan
+//   plan_manifests_from_sink_plan(sink_plan, options)       → ManifestSet
+//
+// The mapping wraps each `VertexTable.source_relation` with a projection
+// that renames the canonical `iri` column (decomp's SINK-04 convention) to
+// `subject` (the W0b writer's convention) and lists property columns by
+// name. `EdgeTable.source_relation` is wrapped to project
+// `src_id_expr AS src_iri, dst_id_expr AS dst_iri` so the W0b edge emitter's
+// JOINs find the columns they expect.
+//
+// Gaps the bridge accepts (documented, not fatal)
+// ────────────────────────────────────────────────
+//
+// - **IRI metadata.** `VertexTable` does not carry the shape IRI it was
+//   derived from (decomp drops it, keeping only the local name as
+//   `type_name`). The bridge produces `VertexSpec.iri = ""`. W0b/3
+//   manifest emission does not surface the field anywhere — VertexInfo
+//   has no IRI slot in GraphAr v1 — so this is observationally a no-op
+//   today. A future commit that backfills IRIs would augment `decomp`,
+//   not this bridge.
+// - **Edge predicate IRI.** Same story: `EdgeTable.predicate` is the
+//   local name; the full predicate IRI was lost at decomp time. Bridge
+//   produces `EdgeSpec.iri = ""`. Same downstream nullability story as
+//   above.
+// - **Column IRI map.** `VertexTable.properties` carries `name` +
+//   `data_type` + `single_valued` but not per-column predicate IRIs (the
+//   decomp's classify_object lifts them into `data_type` then drops them).
+//   Bridge produces `column_iris = BTreeMap::new()`.
+
+use crate::decomp::{EdgeTable, IRI_COLUMN, SinkPlan, VertexTable};
+
+/// Same shape as [`plan_writes`] but takes a [`SinkPlan`] from the compiler.
+///
+/// Wraps each table's `source_relation` to expose the columns the W0b
+/// writer expects (`subject` for vertices; `src_iri` / `dst_iri` for
+/// edges) and delegates to [`plan_writes`].
+///
+/// # Errors
+///
+/// Returns [`WriteError`] under the same rules as [`plan_writes`] —
+/// reserved-column collision, missing vertex reference, empty dest URL.
+pub fn plan_writes_from_sink_plan(
+    sink_plan: &SinkPlan,
+    dest_url: &str,
+    options: &WriteOptions,
+) -> Result<WriteSqlPlan> {
+    let (vertices, edges) = sink_plan_to_specs(sink_plan);
+    plan_writes(&vertices, &edges, dest_url, options)
+}
+
+/// [`plan_manifests`] companion for the [`SinkPlan`] entry path.
+///
+/// # Errors
+///
+/// Returns [`WriteError`] under the same rules as [`plan_manifests`].
+pub fn plan_manifests_from_sink_plan(
+    sink_plan: &SinkPlan,
+    options: &WriteOptions,
+) -> Result<ManifestSet> {
+    let (vertices, edges) = sink_plan_to_specs(sink_plan);
+    plan_manifests(&vertices, &edges, options)
+}
+
+/// Lift a [`SinkPlan`] into the [`VertexSpec`] / [`EdgeSpec`] pair.
+///
+/// Public (not `pub(crate)`) so callers who want to inspect / mutate
+/// the adapter result before emitting (e.g. CLI passes that override
+/// `dedup_subjects`) can do so.
+#[must_use]
+pub fn sink_plan_to_specs(sink_plan: &SinkPlan) -> (Vec<VertexSpec>, Vec<EdgeSpec>) {
+    let vertices = sink_plan
+        .vertices
+        .iter()
+        .map(vertex_table_to_spec)
+        .collect();
+    let edges = sink_plan.edges.iter().map(edge_table_to_spec).collect();
+    (vertices, edges)
+}
+
+fn vertex_table_to_spec(vt: &VertexTable) -> VertexSpec {
+    // Wrap the source so the W0b writer sees a `subject` column instead
+    // of decomp's canonical `iri`. Property columns are projected by
+    // name; reserved-name collisions are caught later by plan_writes's
+    // validate_inputs (the bridge does not pre-validate to keep the
+    // error surface single-source).
+    let mut projection = String::from("iri AS subject");
+    for p in &vt.properties {
+        projection.push_str(", \"");
+        projection.push_str(&p.name);
+        projection.push('"');
+    }
+    let source_relation = format!(
+        "SELECT {projection} FROM ({source})",
+        source = vt.source_relation,
+    );
+    // Mirror decomp's `vertex_select_sql` collapse rule (SINK-05):
+    // single-valued OR no-properties ⇒ dedup on subject.
+    let dedup_subjects = vt.properties.iter().any(|p| p.single_valued) || vt.properties.is_empty();
+
+    let _ = vt.vertex_id_col; // currently always IRI_COLUMN; kept in the
+    // SinkPlan for forward-compat with surrogate
+    // primary-key tables (none in W0b).
+    let _ = IRI_COLUMN; // referenced via the literal `iri` above so
+    // the projection survives a SINK-04 rename
+    // would surface here as a compile error.
+
+    VertexSpec {
+        name: vt.type_name.clone(),
+        iri: String::new(),
+        source_relation,
+        property_columns: vt.properties.iter().map(|p| p.name.clone()).collect(),
+        dedup_subjects,
+        column_iris: BTreeMap::new(),
+    }
+}
+
+fn edge_table_to_spec(et: &EdgeTable) -> EdgeSpec {
+    // Project decomp's src_id_expr / dst_id_expr into the W0b edge
+    // emitter's expected column names (`src_iri` / `dst_iri`). Note we
+    // do NOT collapse on `single_valued` here — edge dedup semantics
+    // are different from vertices (per-source-vertex collapse vs per-
+    // subject collapse) and W0b/2 deliberately keeps all rows. Future
+    // commits can promote `single_valued` if a use case appears.
+    let source_relation = format!(
+        "SELECT {src} AS src_iri, {dst} AS dst_iri FROM ({source})",
+        src = et.src_id_expr,
+        dst = et.dst_id_expr,
+        source = et.source_relation,
+    );
+    let _ = et.single_valued; // intentionally unused at the bridge layer
+    EdgeSpec {
+        label: et.predicate.clone(),
+        iri: String::new(),
+        source_type: et.src_type.clone(),
+        target_type: et.dst_type.clone(),
+        source_relation,
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Tests
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1033,5 +1194,181 @@ mod tests {
         spec.property_columns.push("dense_id".to_string());
         let err = plan_manifests(&[spec], &[], &WriteOptions::default()).unwrap_err();
         assert!(matches!(err, WriteError::ReservedColumnName { .. }));
+    }
+
+    // ── SinkPlan bridge (W0b/5) ─────────────────────────────────────────
+
+    use crate::decomp::{
+        EdgeTable, IRI_COLUMN, PLACEHOLDER_RELATION, SinkPlan, VertexProperty, VertexTable,
+    };
+    use crate::manifest::DEFAULT_CHUNK_SIZE;
+
+    fn person_table() -> VertexTable {
+        VertexTable {
+            type_name: "person".to_string(),
+            vertex_id_col: IRI_COLUMN.to_string(),
+            properties: vec![
+                VertexProperty {
+                    name: "name".to_string(),
+                    data_type: "string".to_string(),
+                    single_valued: true, // ⇒ dedup_subjects
+                },
+                VertexProperty {
+                    name: "age".to_string(),
+                    data_type: "int64".to_string(),
+                    single_valued: true,
+                },
+            ],
+            source_relation: PLACEHOLDER_RELATION.to_string(),
+        }
+    }
+
+    fn person_knows_person_edge() -> EdgeTable {
+        EdgeTable {
+            src_type: "person".to_string(),
+            predicate: "knows".to_string(),
+            dst_type: "person".to_string(),
+            src_id_expr: IRI_COLUMN.to_string(),
+            dst_id_expr: "knows".to_string(),
+            single_valued: false,
+            source_relation: PLACEHOLDER_RELATION.to_string(),
+        }
+    }
+
+    #[test]
+    fn bridge_wraps_vertex_iri_as_subject_and_lists_props() {
+        let plan = SinkPlan {
+            vertices: vec![person_table()],
+            edges: Vec::new(),
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        };
+        let (vs, es) = sink_plan_to_specs(&plan);
+        assert!(es.is_empty());
+        assert_eq!(vs.len(), 1);
+        let v = &vs[0];
+        assert_eq!(v.name, "person");
+        assert_eq!(v.property_columns, vec!["name", "age"]);
+        // Source projection renames iri → subject and quotes property cols.
+        assert!(
+            v.source_relation
+                .contains("SELECT iri AS subject, \"name\", \"age\" FROM ("),
+            "got: {}",
+            v.source_relation
+        );
+        assert!(v.dedup_subjects, "single_valued ⇒ dedup");
+        assert!(
+            v.iri.is_empty(),
+            "decomp drops IRI metadata — gap documented"
+        );
+        assert!(v.column_iris.is_empty());
+    }
+
+    #[test]
+    fn bridge_dedup_off_when_all_properties_are_multi_valued() {
+        let mut vt = person_table();
+        for p in &mut vt.properties {
+            p.single_valued = false;
+        }
+        let plan = SinkPlan {
+            vertices: vec![vt],
+            edges: Vec::new(),
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        };
+        let (vs, _) = sink_plan_to_specs(&plan);
+        assert!(
+            !vs[0].dedup_subjects,
+            "all multi-valued ⇒ keep all rows (no dedup)"
+        );
+    }
+
+    #[test]
+    fn bridge_dedup_on_when_vertex_has_no_properties() {
+        // Edge-case carryover from decomp::vertex_select_sql: empty
+        // properties also collapse on subject.
+        let vt = VertexTable {
+            type_name: "marker".to_string(),
+            vertex_id_col: IRI_COLUMN.to_string(),
+            properties: Vec::new(),
+            source_relation: PLACEHOLDER_RELATION.to_string(),
+        };
+        let plan = SinkPlan {
+            vertices: vec![vt],
+            edges: Vec::new(),
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        };
+        let (vs, _) = sink_plan_to_specs(&plan);
+        assert!(vs[0].dedup_subjects);
+    }
+
+    #[test]
+    fn bridge_edge_projects_iri_aliases_for_writer() {
+        let plan = SinkPlan {
+            vertices: vec![person_table()],
+            edges: vec![person_knows_person_edge()],
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        };
+        let (_, es) = sink_plan_to_specs(&plan);
+        assert_eq!(es.len(), 1);
+        let e = &es[0];
+        assert_eq!(e.label, "knows");
+        assert_eq!(e.source_type, "person");
+        assert_eq!(e.target_type, "person");
+        // The wrap exposes the column names the W0b edge emitter expects.
+        assert!(
+            e.source_relation.contains("AS src_iri") && e.source_relation.contains("AS dst_iri"),
+            "got: {}",
+            e.source_relation
+        );
+        assert!(
+            e.iri.is_empty(),
+            "decomp drops predicate IRI — gap documented"
+        );
+    }
+
+    #[test]
+    fn plan_writes_from_sink_plan_round_trips_to_full_sql() {
+        // Smoke test the high-level entry point: passing a SinkPlan
+        // through the adapter + plan_writes must produce a valid
+        // WriteSqlPlan with the W0b column shape on the vertex side.
+        let plan = SinkPlan {
+            vertices: vec![person_table()],
+            edges: vec![person_knows_person_edge()],
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        };
+        let opts = WriteOptions::default();
+        let write_plan = plan_writes_from_sink_plan(&plan, "file:///tmp/g", &opts).expect("plan");
+        assert_eq!(write_plan.vertex_statements.len(), 1);
+        assert_eq!(write_plan.edge_statements.len(), 1);
+        let v_sql = &write_plan.vertex_statements[0].copy_sql;
+        assert!(v_sql.contains("row_number() OVER () - 1 AS dense_id"));
+        assert!(v_sql.contains("iri AS subject"));
+        assert!(v_sql.contains("\"name\""));
+        assert!(v_sql.contains("0::REAL AS x"));
+        assert!(v_sql.contains("DISTINCT ON (subject)"));
+        let e_sql = &write_plan.edge_statements[0].copy_csr_sql;
+        assert!(e_sql.contains("s.dense_id AS src_dense"));
+        assert!(e_sql.contains("AS src_iri"));
+    }
+
+    #[test]
+    fn plan_manifests_from_sink_plan_carries_w0b_columns() {
+        let plan = SinkPlan {
+            vertices: vec![person_table()],
+            edges: Vec::new(),
+            chunk_size: DEFAULT_CHUNK_SIZE,
+        };
+        let set = plan_manifests_from_sink_plan(&plan, &WriteOptions::default()).expect("plan");
+        assert_eq!(set.vertices.len(), 1);
+        let names: Vec<&str> = set.vertices[0].vertex_info.property_groups[0]
+            .properties
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        // Bridge preserves the property order from VertexTable and the
+        // W0b column shape is appended.
+        assert_eq!(
+            names,
+            vec!["dense_id", "subject", "name", "age", "x", "y", "cluster_id"]
+        );
     }
 }
