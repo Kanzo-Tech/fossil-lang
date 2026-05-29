@@ -236,7 +236,11 @@ pub struct EdgeStatement {
 
 /// Planning errors. Pure data validation — no I/O failures (those live in
 /// the runtime side that executes the plan).
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+///
+/// Note: not `PartialEq` because `ManifestYaml` wraps the upstream
+/// `serde_yaml_ng::Error` which doesn't implement `Eq`. Tests pattern-
+/// match instead.
+#[derive(Debug, thiserror::Error)]
 pub enum WriteError {
     /// A `VertexSpec::property_columns` entry collides with a reserved
     /// column name the writer emits itself.
@@ -263,6 +267,12 @@ pub enum WriteError {
     /// The destination URL is empty.
     #[error("destination URL must not be empty")]
     EmptyDestUrl,
+    /// `serde_yaml_ng` failed to serialize a `VertexInfo` / `EdgeInfo`
+    /// (W0b/3 manifest emission). Cannot fail in practice — the structs
+    /// are plain data — but the variant exists so [`plan_manifests`]
+    /// surfaces the error type honestly instead of unwrapping.
+    #[error("manifest YAML serialisation failed: {0}")]
+    ManifestYaml(#[from] serde_yaml_ng::Error),
 }
 
 pub type Result<T> = std::result::Result<T, WriteError>;
@@ -488,6 +498,205 @@ fn emit_edge_statement(
         copy_csr_sql: csr_copy,
         copy_csc_sql: csc_copy,
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Manifest emission (W0b/3)
+// ──────────────────────────────────────────────────────────────────────────
+
+use crate::manifest::{
+    AdjList, EdgeInfo, GRAPHAR_VERSION, Property, PropertyGroup, VertexInfo, data_type_name,
+};
+use arrow_schema::DataType;
+
+/// The `GraphAr` manifest set for a single write batch.
+///
+/// Companion to [`WriteSqlPlan`] — the runtime executes the SQL plan AND
+/// writes these manifests as YAML next to the Parquet output. The two
+/// sides live in distinct types because the runtime's responsibilities
+/// for them are different (one is `conn.execute_batch(sql)`, the other
+/// is `host.write_file(yaml)`); coupling them would force runtime callers
+/// to handle both side-effects together when they may have different
+/// host integrations (e.g. native CLI writes to filesystem; future
+/// browser host writes to OPFS).
+#[derive(Debug, Clone)]
+pub struct ManifestSet {
+    pub vertices: Vec<ManifestForVertex>,
+    pub edges: Vec<ManifestForEdge>,
+}
+
+/// One vertex type's manifest pair: the structured `VertexInfo` (for tests
+/// and future inspection) and the YAML string the runtime writes next to
+/// the vertex Parquet.
+#[derive(Debug, Clone)]
+pub struct ManifestForVertex {
+    pub vertex_info: VertexInfo,
+    pub yaml: String,
+    /// Where the YAML should land — `vertex/<name>.vertex.yml` by default.
+    /// Mirrors the predecessor's convention (`fossil-stdlib::rdf::parquet_writer::write_yaml_metadata`).
+    pub rel_path: String,
+}
+
+/// One edge type's manifest pair (analogous to [`ManifestForVertex`]).
+#[derive(Debug, Clone)]
+pub struct ManifestForEdge {
+    pub edge_info: EdgeInfo,
+    pub yaml: String,
+    /// `edge/<dir>/<dir>.edge.yml` by default.
+    pub rel_path: String,
+}
+
+/// Build the manifest set for a write batch, including the W0b vertex
+/// column shape (`dense_id` + `subject` + caller properties + `x`, `y`,
+/// `cluster_id` layout placeholders).
+///
+/// # Errors
+///
+/// Returns [`WriteError`] under the same validation rules as
+/// [`plan_writes`] — reserved column collisions, missing vertex
+/// references, empty dest URL. Manifest construction itself is
+/// infallible once validation passes.
+pub fn plan_manifests(
+    vertices: &[VertexSpec],
+    edges: &[EdgeSpec],
+    options: &WriteOptions,
+) -> Result<ManifestSet> {
+    validate_inputs(vertices, edges)?;
+    let vertex_manifests = vertices
+        .iter()
+        .map(|spec| build_vertex_manifest(spec, options))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let edge_manifests = edges
+        .iter()
+        .map(|spec| build_edge_manifest(spec, options))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(ManifestSet {
+        vertices: vertex_manifests,
+        edges: edge_manifests,
+    })
+}
+
+fn build_vertex_manifest(
+    spec: &VertexSpec,
+    options: &WriteOptions,
+) -> std::result::Result<ManifestForVertex, serde_yaml_ng::Error> {
+    let mut properties = Vec::with_capacity(spec.property_columns.len() + 5);
+
+    // The W0b vertex column shape (declared in src/lib.rs module doc):
+    //   dense_id    UINTEGER  — primary key, the cosmos.gl dense index
+    //   subject     VARCHAR   — IRI (GraphAr's canonical vertex identifier)
+    //   <caller properties>
+    //   x, y        REAL      — layout placeholder (W3 fills)
+    //   cluster_id  UINTEGER  — Leiden cluster placeholder (W3 fills)
+    properties.push(Property {
+        name: "dense_id".to_string(),
+        // arrow-schema has no UInt32 → graphar mapping rule in
+        // data_type_name's match arms (it falls through to "binary").
+        // We hard-code "uint32" here because GraphAr v1 admits the
+        // spelling and downstream readers (fossil-graph viewport verb +
+        // cosmograph.gl Float32Array consumers) decode by exact name.
+        data_type: "uint32".to_string(),
+        is_primary: true,
+        is_nullable: Some(false),
+    });
+    properties.push(Property {
+        name: "subject".to_string(),
+        data_type: data_type_name(&DataType::Utf8),
+        is_primary: false,
+        is_nullable: Some(false),
+    });
+    for col in &spec.property_columns {
+        // The writer doesn't see arrow datatypes for caller property
+        // columns at plan time (they come from the source SQL's runtime
+        // schema). Declare them as `string` here — the predecessor's
+        // permissive default. W0b/4 can promote this to a per-column
+        // datatype when the executor surfaces the COPY-time schema.
+        properties.push(Property {
+            name: col.clone(),
+            data_type: data_type_name(&DataType::Utf8),
+            is_primary: false,
+            is_nullable: None,
+        });
+    }
+    for layout_col in ["x", "y"] {
+        properties.push(Property {
+            name: layout_col.to_string(),
+            data_type: data_type_name(&DataType::Float32),
+            is_primary: false,
+            is_nullable: Some(false),
+        });
+    }
+    properties.push(Property {
+        name: "cluster_id".to_string(),
+        data_type: "uint32".to_string(),
+        is_primary: false,
+        is_nullable: Some(false),
+    });
+
+    let vertex_info = VertexInfo::new(
+        spec.name.clone(),
+        options.row_group_size,
+        format!("{}{}/", options.vertex_prefix, spec.name),
+        vec![PropertyGroup {
+            file_type: "parquet".to_string(),
+            properties,
+        }],
+    );
+    let yaml = vertex_info.to_yaml()?;
+    let rel_path = format!("{}{}.vertex.yml", options.vertex_prefix, spec.name);
+    Ok(ManifestForVertex {
+        vertex_info,
+        yaml,
+        rel_path,
+    })
+}
+
+fn build_edge_manifest(
+    spec: &EdgeSpec,
+    options: &WriteOptions,
+) -> std::result::Result<ManifestForEdge, serde_yaml_ng::Error> {
+    let edge_dir_name = format!("{}_{}_{}", spec.source_type, spec.label, spec.target_type);
+    let edge_info = EdgeInfo {
+        src_type: spec.source_type.clone(),
+        edge_type: spec.label.clone(),
+        dst_type: spec.target_type.clone(),
+        chunk_size: options.row_group_size,
+        src_chunk_size: options.row_group_size,
+        dst_chunk_size: options.row_group_size,
+        directed: true,
+        prefix: format!("{}{}/", options.edge_prefix, edge_dir_name),
+        // CSR + CSC both ordered (we emit ORDER BY in both COPY
+        // statements, see emit_edge_statement).
+        adj_lists: vec![
+            AdjList {
+                ordered: true,
+                aligned_by: "src".to_string(),
+                file_type: "parquet".to_string(),
+            },
+            AdjList {
+                ordered: true,
+                aligned_by: "dst".to_string(),
+                file_type: "parquet".to_string(),
+            },
+        ],
+        // No edge properties in W0b (edges carry only src_dense /
+        // dst_dense). Predecessor's edge predicate IRI metadata lives
+        // off the manifest in a separate registry; will revisit when
+        // fossil-graph::operations::describe_field needs per-edge
+        // properties.
+        property_groups: vec![],
+        version: GRAPHAR_VERSION.to_string(),
+    };
+    let yaml = edge_info.to_yaml()?;
+    let rel_path = format!(
+        "{}{}/{}.edge.yml",
+        options.edge_prefix, edge_dir_name, edge_dir_name
+    );
+    Ok(ManifestForEdge {
+        edge_info,
+        yaml,
+        rel_path,
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -733,5 +942,96 @@ mod tests {
         let e = &plan.edge_statements[0];
         assert!(e.copy_csr_sql.contains("ROW_GROUP_SIZE 50000"));
         assert!(e.copy_csc_sql.contains("ROW_GROUP_SIZE 50000"));
+    }
+
+    // ── Manifest emission (W0b/3) ───────────────────────────────────────
+
+    #[test]
+    fn vertex_manifest_declares_w0b_columns() {
+        let set = plan_manifests(&[spec_person()], &[], &WriteOptions::default()).unwrap();
+        assert_eq!(set.vertices.len(), 1);
+        let v = &set.vertices[0];
+        assert_eq!(v.rel_path, "vertex/person.vertex.yml");
+        assert_eq!(v.vertex_info.vertex_type, "person");
+        let pg = &v.vertex_info.property_groups[0];
+        let names: Vec<&str> = pg.properties.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["dense_id", "subject", "name", "age", "x", "y", "cluster_id"],
+            "W0b column order: dense_id + subject + caller props + x,y + cluster_id",
+        );
+    }
+
+    #[test]
+    fn vertex_manifest_marks_dense_id_primary_uint32() {
+        let set = plan_manifests(&[spec_person()], &[], &WriteOptions::default()).unwrap();
+        let dense_id = set.vertices[0].vertex_info.property_groups[0]
+            .properties
+            .iter()
+            .find(|p| p.name == "dense_id")
+            .expect("dense_id present");
+        assert_eq!(dense_id.data_type, "uint32");
+        assert!(dense_id.is_primary, "dense_id must be flagged primary");
+        assert_eq!(dense_id.is_nullable, Some(false));
+    }
+
+    #[test]
+    fn vertex_manifest_yaml_contains_dense_id_and_layout_cols() {
+        let set = plan_manifests(&[spec_person()], &[], &WriteOptions::default()).unwrap();
+        let yaml = &set.vertices[0].yaml;
+        // Spot-checks on the rendered YAML — names appear, primary
+        // flag round-trips, layout placeholder columns are present so
+        // any GraphAr reader sees them declared even when the values
+        // are constant in W0b.
+        assert!(yaml.contains("name: dense_id"), "yaml: {yaml}");
+        assert!(yaml.contains("is_primary: true"));
+        assert!(yaml.contains("name: subject"));
+        assert!(yaml.contains("name: x"));
+        assert!(yaml.contains("name: y"));
+        assert!(yaml.contains("name: cluster_id"));
+        assert!(yaml.contains("version: gar/v1"));
+    }
+
+    #[test]
+    fn edge_manifest_declares_both_csr_and_csc_adj_lists() {
+        let set = plan_manifests(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            &WriteOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(set.edges.len(), 1);
+        let e = &set.edges[0];
+        assert_eq!(
+            e.rel_path,
+            "edge/person_works_at_org/person_works_at_org.edge.yml"
+        );
+        assert_eq!(e.edge_info.src_type, "person");
+        assert_eq!(e.edge_info.dst_type, "org");
+        assert_eq!(e.edge_info.edge_type, "works_at");
+        assert_eq!(
+            e.edge_info.adj_lists.len(),
+            2,
+            "both CSR (aligned_by: src) and CSC (aligned_by: dst) must be declared"
+        );
+        let aligned: Vec<&str> = e
+            .edge_info
+            .adj_lists
+            .iter()
+            .map(|a| a.aligned_by.as_str())
+            .collect();
+        assert!(aligned.contains(&"src"));
+        assert!(aligned.contains(&"dst"));
+        assert!(e.edge_info.adj_lists.iter().all(|a| a.ordered));
+    }
+
+    #[test]
+    fn manifest_validation_rejects_same_errors_as_plan_writes() {
+        // Same validation as the SQL plan emitter — keeps the two
+        // entry points consistent.
+        let mut spec = spec_person();
+        spec.property_columns.push("dense_id".to_string());
+        let err = plan_manifests(&[spec], &[], &WriteOptions::default()).unwrap_err();
+        assert!(matches!(err, WriteError::ReservedColumnName { .. }));
     }
 }
