@@ -192,6 +192,68 @@ pub fn codegen_sql_with_descriptor<'db>(
     (sql, manifest)
 }
 
+/// Decompose a mapping's `MirGraph` under a target descriptor and
+/// expose the two pieces the W0b writer path needs.
+///
+/// Returns `(prelude_sql, sink_plan)`:
+///
+/// - `prelude_sql` is the `CREATE VIEW ...` statements that wire every
+///   `Op::Source` URI into a `DuckDB` view. The W0b runtime executes
+///   these BEFORE running the COPY plan returned by
+///   `fossil_sinks::writer::plan_writes_from_sink_plan` — those COPY
+///   statements reference the views by name.
+/// - `sink_plan` is the per-shape `VertexTable` + per-predicate
+///   `EdgeTable` decomposition. Its `source_relation` field is the
+///   base relation SQL (same as the existing
+///   [`codegen_sql_with_descriptor`] flat-emission path uses).
+///
+/// `AcceptAll` callers (no `ShEx` target) get a [`SinkPlan`] with a
+/// single flat-triple passthrough vertex per
+/// [`fossil_sinks::decomp::vertex_edge_decomp_from_kind`] — usable but
+/// not the typical W0b-shape case; the existing
+/// [`codegen_sql_with_descriptor`] flat path remains the
+/// recommended entry for that case to preserve the
+/// walking-skeleton invariant byte-for-byte.
+///
+/// This is the W0b/6 seam: it splits `codegen_sql_with_descriptor`'s
+/// monolithic `(sql, manifest)` return into two independently
+/// composable pieces so the W0b writer can build its own SQL on top of
+/// the same decomposition.
+#[allow(clippy::elidable_lifetime_names)]
+pub fn decompose_for_writer<'db>(
+    db: &'db dyn fossil_base::Db,
+    mir: MirGraph<'db>,
+    kind: &OutputDescriptorKind,
+    chunk_size: u64,
+) -> (String, fossil_sinks::decomp::SinkPlan) {
+    let ops = mir.ops(db);
+
+    // Same prelude block as `codegen_sql_with_descriptor` — extracted to
+    // a sibling function to keep the two entry points sharing one source
+    // of truth for the CREATE VIEW shape.
+    let mut prelude = String::new();
+    for op in ops {
+        if let Op::Source {
+            uri,
+            format,
+            row_type: _,
+        } = op
+        {
+            let view_name = derive_view_name(uri);
+            let reader = source_reader(*format, uri);
+            writeln!(
+                prelude,
+                "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};"
+            )
+            .expect("writing to a String never fails");
+        }
+    }
+
+    let base = base_relation_sql(db, ops);
+    let plan = vertex_edge_decomp_from_kind(kind, &base, chunk_size);
+    (prelude, plan)
+}
+
 /// Convenience entry: lower a mapping then run [`codegen_sql_with_descriptor`].
 /// The descriptor seam stays plain-Rust (NOT tracked) — see that function's doc.
 #[allow(clippy::elidable_lifetime_names)]

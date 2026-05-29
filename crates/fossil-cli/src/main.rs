@@ -133,8 +133,17 @@ enum Commands {
         #[arg(long)]
         shape: Option<PathBuf>,
     },
-    /// Compile + execute a `.fossil` file via native `DuckDB`, then print a
-    /// result summary (row counts).
+    /// Compile + execute a `.fossil` file via native `DuckDB`.
+    ///
+    /// Two modes:
+    ///   - Legacy (no `--dest`, no `--shape`): writes a single
+    ///     `output.parquet` + `manifest.yaml` to cwd and prints a triple-count
+    ///     summary. Walking-skeleton invariant; bit-for-bit unchanged.
+    ///   - W0b (`--dest <url>` + `--shape <file>`): runs the new vertex/edge
+    ///     decomposition writer, materialising `GraphAr` Parquet with the W0b
+    ///     column shape (`dense_id`, `subject`, `x`, `y`, `cluster_id` on
+    ///     vertices; CSR + CSC on edges) under `<url>`. With `--output-json`
+    ///     emits a status JSON on stdout (consumed by keasy via subprocess).
     Run {
         /// Path to the `.fossil` source file.
         file: PathBuf,
@@ -142,6 +151,17 @@ enum Commands {
         /// `compile --shape`).
         #[arg(long)]
         shape: Option<PathBuf>,
+        /// W0b: destination URL for `GraphAr` output (`file:///path`,
+        /// `s3://bucket/prefix`, …). Triggers the W0b writer path when set
+        /// AND a `--shape` is provided. Without it, the legacy cwd flat-write
+        /// path runs.
+        #[arg(long)]
+        dest: Option<String>,
+        /// W0b: emit a machine-readable status JSON on stdout instead of the
+        /// human triple-count summary. Used by keasy when invoking
+        /// `fossil run` via subprocess.
+        #[arg(long)]
+        output_json: bool,
     },
 }
 
@@ -157,7 +177,12 @@ fn main() -> miette::Result<()> {
             out_dir,
             shape,
         } => cmd_compile(&file, out_dir.as_deref(), shape.as_deref()),
-        Commands::Run { file, shape } => cmd_run(&file, shape.as_deref()),
+        Commands::Run {
+            file,
+            shape,
+            dest,
+            output_json,
+        } => cmd_run(&file, shape.as_deref(), dest.as_deref(), output_json),
     }
 }
 
@@ -523,40 +548,177 @@ fn cmd_compile(path: &Path, out_dir: Option<&Path>, shape: Option<&Path>) -> mie
     Ok(())
 }
 
-/// `fossil run`: compile + execute via native `DuckDB`, then read the produced
-/// Parquet back to print a row-count summary (CLI-03 / RESEARCH Pitfall 6).
+/// `fossil run`: compile + execute via native `DuckDB`.
 ///
-/// The v0.1 flat-triple output is a single `output.parquet`; the summary counts
-/// its rows (= emitted triples). Vertex/edge decomposition under a `ShEx`
-/// descriptor produces per-table chunk files — those are summarised once the
-/// CLI drives the descriptor path; for the `AcceptAll` case the triple count is
-/// the minimal, honest summary.
-fn cmd_run(path: &Path, shape: Option<&Path>) -> miette::Result<()> {
-    tracing::debug!(?path, "fossil run");
+/// Two modes — see the `Commands::Run` doc on the clap struct:
+/// - Legacy (no `--dest`): writes `output.parquet` + `manifest.yaml` to cwd
+///   and prints a triple-count summary. Walking-skeleton invariant.
+/// - W0b (`--dest <url>` + `--shape <file>`): runs the W0b writer +
+///   materializer (the path keasy invokes via subprocess). The vertex
+///   Parquets carry the W0b column shape (`dense_id`, `subject`, `x`, `y`,
+///   `cluster_id`); edges write both CSR + CSC.
+fn cmd_run(
+    path: &Path,
+    shape: Option<&Path>,
+    dest: Option<&str>,
+    output_json: bool,
+) -> miette::Result<()> {
+    tracing::debug!(?path, ?dest, "fossil run");
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
-    let _descriptor = load_descriptor(path, shape)?;
+    let descriptor = load_descriptor(path, shape)?;
 
-    let out_dir = std::env::current_dir().expect("cwd is readable");
     let (db, file) = open_db(text.clone(), path);
-
-    // Phase 13 v0.2 (ADR-0037): pre-introspect before run-path lowering too.
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
     pre_introspect_and_register(db.system(), &text, source_dir);
 
-    let plan = lower_to_plan(&db, file, path)?;
+    // Dispatch to the W0b path when `--dest` is set AND a ShEx descriptor
+    // is present. Without `--shape` the decomposition is AcceptAll (a
+    // single flat-triple passthrough vertex) — the W0b writer would still
+    // emit something, but the legacy cwd flat-write is a cleaner default
+    // for the no-shape walking-skeleton case, so we keep it.
+    if let Some(dest_url) = dest
+        && shape.is_some() {
+            return cmd_run_w0b(&db, file, path, &descriptor, dest_url, output_json);
+        }
 
-    std::fs::write(out_dir.join("manifest.yaml"), plan.manifest_yaml(&db))
+    cmd_run_legacy(&db, file, path)
+}
+
+/// W0b path — decompose, materialise to `dest_url` via the W0b writer.
+fn cmd_run_w0b(
+    db: &fossil_base::FossilDb,
+    file: fossil_base::SourceFile,
+    path: &Path,
+    descriptor: &fossil_descriptors_output::OutputDescriptorKind,
+    dest_url: &str,
+    output_json: bool,
+) -> miette::Result<()> {
+    let def_map = fossil_hir::def_map::def_map(db, file);
+    let mapping = def_map
+        .mappings(db)
+        .first()
+        .copied()
+        .ok_or_else(|| miette::miette!("no mapping found in {}", path.display()))?;
+    let mir = fossil_mir::lower_to_mir(db, mapping);
+
+    // Drive the W0b/5 SinkPlan bridge.
+    let chunk_size = fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
+    let (prelude_sql, sink_plan) =
+        fossil_codegen::decompose_for_writer(db, mir, descriptor, chunk_size);
+
+    let write_options = fossil_sinks::writer::WriteOptions::default();
+    let write_plan =
+        fossil_sinks::writer::plan_writes_from_sink_plan(&sink_plan, dest_url, &write_options)
+            .map_err(|e| miette::miette!("plan_writes: {e}"))?;
+    let manifests = fossil_sinks::writer::plan_manifests_from_sink_plan(&sink_plan, &write_options)
+        .map_err(|e| miette::miette!("plan_manifests: {e}"))?;
+
+    let conn =
+        duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
+    conn.execute_batch(&prelude_sql)
+        .map_err(|e| miette::miette!("create source views: {e}"))?;
+
+    let dest_local = local_path_from_url(dest_url)?;
+    let resolved = fossil_resolver::ResolvedPath::new(dest_url);
+
+    // Local-fs YAML writer. Cloud destinations need an uploader — W0b/7.
+    let write_yaml = |rel_path: &str, content: &str| -> Result<(), String> {
+        let full = dest_local.join(rel_path);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&full, content).map_err(|e| e.to_string())
+    };
+
+    // Pre-create the vertex + edge directories so DuckDB COPY doesn't
+    // need its own mkdir (DuckDB writes the file but won't create
+    // intermediate dirs). Same contract as the W0b/4 integration test.
+    for s in &write_plan.vertex_statements {
+        if let Some(parent) = dest_local.join(&s.rel_path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| miette::miette!("create vertex dir: {e}"))?;
+        }
+    }
+    for s in &write_plan.edge_statements {
+        if let Some(parent) = dest_local.join(&s.csr_rel_path).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| miette::miette!("create edge dir: {e}"))?;
+        }
+    }
+
+    fossil_runtime::materialize_graph_ar(&conn, &write_plan, &manifests, &resolved, write_yaml)
+        .map_err(|e| miette::miette!("materialize: {e}"))?;
+
+    if output_json {
+        // Machine-readable status — keasy parses this when invoking the CLI
+        // as a subprocess. Kept deliberately minimal: types/edges names +
+        // their rel_paths under `dest_url`. Row counts can be derived by
+        // the caller via DuckDB on the resulting files; the CLI doesn't
+        // count to keep the run fast.
+        let vertex_paths: Vec<&str> = write_plan
+            .vertex_statements
+            .iter()
+            .map(|s| s.rel_path.as_str())
+            .collect();
+        let edge_paths: Vec<(&str, &str)> = write_plan
+            .edge_statements
+            .iter()
+            .map(|s| (s.csr_rel_path.as_str(), s.csc_rel_path.as_str()))
+            .collect();
+        let status = serde_json::json!({
+            "dest": dest_url,
+            "vertices": vertex_paths,
+            "edges": edge_paths,
+        });
+        println!("{status}");
+    } else {
+        println!(
+            "ran {}: wrote {} vertex type(s), {} edge type(s) to {}",
+            path.display(),
+            write_plan.vertex_statements.len(),
+            write_plan.edge_statements.len(),
+            dest_url,
+        );
+    }
+    Ok(())
+}
+
+/// Legacy path — preserves walking-skeleton invariant byte-for-byte.
+fn cmd_run_legacy(
+    db: &fossil_base::FossilDb,
+    file: fossil_base::SourceFile,
+    path: &Path,
+) -> miette::Result<()> {
+    let out_dir = std::env::current_dir().expect("cwd is readable");
+    let plan = lower_to_plan(db, file, path)?;
+    std::fs::write(out_dir.join("manifest.yaml"), plan.manifest_yaml(db))
         .map_err(|e| miette::miette!("write manifest.yaml: {e}"))?;
-
-    let (sql, parquet_path) = retarget_output(plan.sql(&db), &out_dir);
+    let (sql, parquet_path) = retarget_output(plan.sql(db), &out_dir);
     fossil_runtime::execute(&sql).map_err(|e| miette::miette!("execute: {e}"))?;
-
-    // Read the produced Parquet back for the result summary (Pitfall 6): the
-    // runtime already links DuckDB, so a follow-up count query is cheap.
     let triples = count_parquet_rows(&parquet_path)?;
     println!("ran {}: wrote {triples} triples", path.display());
     Ok(())
+}
+
+/// Translate a `file://` URL to a local filesystem path. Other URL schemes
+/// (s3://, az://, https://) are rejected — cloud destinations require an
+/// uploader the CLI does not yet ship (W0b/7).
+fn local_path_from_url(url: &str) -> miette::Result<PathBuf> {
+    url.strip_prefix("file://").map_or_else(
+        || {
+            if url.contains("://") {
+                Err(miette::miette!(
+                    "destination URL `{url}`: only `file://` paths supported in the W0b CLI; \
+                     cloud destinations require the uploader landing in W0b/7"
+                ))
+            } else {
+                // Bare paths treated as local for ergonomics
+                // (`fossil run x.fossil --dest /tmp/g`).
+                Ok(PathBuf::from(url))
+            }
+        },
+        |rest| Ok(PathBuf::from(rest)),
+    )
 }
 
 /// Count rows in a produced Parquet file via an in-memory `DuckDB` connection.

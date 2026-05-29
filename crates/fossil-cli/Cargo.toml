@@ -27,6 +27,14 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str = { workspace = true }
 regex = { workspace = true }
 
+# W0b/6: the `fossil run --dest <url>` path uses the W0b writer +
+# materializer instead of the legacy flat-COPY chain.
+fossil-sinks    = { path = "../fossil-sinks" }
+fossil-resolver = { path = "../fossil-resolver" }
+fossil-mir      = { path = "../fossil-mir" }
+# Status JSON on stdout (via --output-json) for keasy subprocess consumption.
+serde_json = { workspace = true }
+
 clap = { workspace = true }
 # `fancy` ONLY in this crate (not workspace-level): pulls native-only
 # `terminal_size` + `supports-color` which would break the WASM gate per
