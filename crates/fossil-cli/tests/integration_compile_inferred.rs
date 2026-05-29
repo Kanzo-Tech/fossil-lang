@@ -70,10 +70,8 @@ fn hello_fossil_with_sidecar_still_compiles_byte_identical() {
         status.success(),
         "compile failed for examples/hello.fossil (sidecar path)"
     );
-    let manifest =
-        std::fs::metadata(out.join("manifest.yaml")).expect("manifest.yaml exists");
-    let parquet =
-        std::fs::metadata(out.join("output.parquet")).expect("output.parquet exists");
+    let manifest = std::fs::metadata(out.join("manifest.yaml")).expect("manifest.yaml exists");
+    let parquet = std::fs::metadata(out.join("output.parquet")).expect("output.parquet exists");
     assert_eq!(
         manifest.len(),
         283,
@@ -95,8 +93,11 @@ fn no_sidecar_fossil_compiles_via_inferred_descriptor_path() {
     let dir = unique_tempdir("no-sidecar-fixture");
     // CSV fixture — same shape as examples/users.csv:
     let csv_path = dir.join("u.csv");
-    std::fs::write(&csv_path, "id,name\n1,Alice\n2,Bob\n3,Carol\n4,Dani\n5,Eli\n")
-        .expect("write csv");
+    std::fs::write(
+        &csv_path,
+        "id,name\n1,Alice\n2,Bob\n3,Carol\n4,Dani\n5,Eli\n",
+    )
+    .expect("write csv");
     // .fossil with NO sidecar .csvw.json; uses io.csv() without a `schema=` arg.
     // The Fossil source uses `${...}` template-interpolation syntax — the
     // `uninlined_format_args` clippy lint is silenced by the `#[allow]` attr
@@ -129,10 +130,8 @@ fn no_sidecar_fossil_compiles_via_inferred_descriptor_path() {
         status.success(),
         "compile failed for no-sidecar fixture (inferred path)"
     );
-    let manifest =
-        std::fs::metadata(out.join("manifest.yaml")).expect("manifest.yaml exists");
-    let parquet =
-        std::fs::metadata(out.join("output.parquet")).expect("output.parquet exists");
+    let manifest = std::fs::metadata(out.join("manifest.yaml")).expect("manifest.yaml exists");
+    let parquet = std::fs::metadata(out.join("output.parquet")).expect("output.parquet exists");
     assert_eq!(
         manifest.len(),
         283,
