@@ -1,0 +1,25 @@
+[package]
+name = "fossil-resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Host-injected cloud path resolution — PathResolver trait + ResolvedPath. NATIVE-only: cloud auth carries credentials (secrecy::SecretString) and DuckDB SET configuration; not WASM-buildable."
+
+[lints]
+workspace = true
+
+[dependencies]
+# Typed resolution errors so callers don't depend on stringified messages.
+thiserror = { workspace = true }
+# Provider-specific cloud-auth values (account keys, access tokens, …) are
+# wrapped in secrecy::SecretString — never logged, zeroed on drop.
+# Cross-project rule (keasy + rmlext both adopt secrecy for credentials).
+secrecy = { workspace = true }
+
+# NATIVE-only by intent. The cfg-tripwire in src/lib.rs enforces it — cloud
+# credential handling needs OS-level fetch / IO that doesn't compile to wasm32
+# (and shouldn't, per the threat model — credentials must NOT cross the
+# wasm boundary).

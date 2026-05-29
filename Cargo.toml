@@ -116,6 +116,15 @@ uuid = { version = "1", features = ["js"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
 
+# === Credentials ===
+# `secrecy` zeroes its inner memory on drop and forbids `Debug`/`Display` from
+# leaking the wrapped value. Adopted in `fossil-resolver` (the resolver
+# carries provider-specific cloud-auth keys: `azure_storage_account_key`,
+# `aws_access_key_secret`, etc.) per the cross-project secrecy-always rule.
+# Same pin as keasy/server (0.10 + `serde` feature) so the auth values
+# round-trip through the keasy config layer without a version mismatch.
+secrecy = { version = "0.10", features = ["serde"] }
+
 # === Dev / testing ===
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
