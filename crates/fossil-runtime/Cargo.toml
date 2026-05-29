@@ -29,6 +29,17 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 
+# W0b/4 — GraphAr materialiser. fossil-sinks emits the WriteSqlPlan +
+# ManifestSet (WASM-clean planning side); this crate (native) runs the
+# COPY against DuckDB and threads the resolver's cloud-config into SET
+# statements. fossil-resolver is itself native-only by intent (cloud
+# credentials must not cross the wasm boundary). thiserror gives the
+# materialise step typed errors so CLI hosts can render them via miette
+# without substring-matching.
+fossil-sinks = { path = "../fossil-sinks" }
+fossil-resolver = { path = "../fossil-resolver" }
+thiserror = { workspace = true }
+
 [dev-dependencies]
 # SC#1 cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
 # the canonical ordered result-set serialization + JSON writer for
@@ -52,6 +63,11 @@ fossil-hir = { path = "../fossil-hir" }
 fossil-mir = { path = "../fossil-mir" }
 fossil-codegen = { path = "../fossil-codegen" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-fossil-sinks = { path = "../fossil-sinks" }
+# NOTE: fossil-sinks was a dev-dep here (real-files fixture in
+# graphar_decomp.rs); W0b/4 promotes it to a regular dep above for the
+# `materialize` module, so the dev-dep entry is dropped to avoid
+# duplication. graphar_decomp.rs continues to compile via the regular
+# fossil_sinks::manifest re-export.
 salsa = { workspace = true }
 smol_str = { workspace = true }
+tempfile = { workspace = true }

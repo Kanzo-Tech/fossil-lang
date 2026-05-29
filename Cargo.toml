@@ -129,6 +129,10 @@ secrecy = { version = "0.10", features = ["serde"] }
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
 wasm-bindgen-test = "0.3"
+# Native temp dirs for fossil-runtime W0b/4 integration tests that
+# write GraphAr Parquet to disk and read back via duckdb. Native-only
+# (uses real filesystem); not in the WASM gate.
+tempfile = "3"
 
 [workspace.lints.rust]
 unsafe_code = "deny"   # per ADR-0004 — per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
