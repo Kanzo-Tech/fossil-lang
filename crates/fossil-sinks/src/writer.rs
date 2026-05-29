@@ -295,15 +295,24 @@ pub fn plan_writes(
     }
     validate_inputs(vertices, edges)?;
 
-    let vertex_statements = vertices
+    let vertex_statements: Vec<VertexStatement> = vertices
         .iter()
         .map(|spec| emit_vertex_statement(spec, dest_url, options))
         .collect();
 
-    // W0b/2 will populate this. Reserving the surface here so the public
-    // shape (and downstream tests like fossil-graph snapshot consumers)
-    // doesn't shift on each sub-commit.
-    let edge_statements = Vec::new();
+    // Lookup so the edge emitter finds each vertex type's freshly-written
+    // Parquet path without re-deriving the naming convention — the
+    // convention lives in `emit_vertex_statement`; the edge emitter
+    // consumes the result, not the rule.
+    let vertex_paths: std::collections::HashMap<&str, &str> = vertex_statements
+        .iter()
+        .map(|s| (s.type_name.as_str(), s.rel_path.as_str()))
+        .collect();
+
+    let edge_statements: Vec<EdgeStatement> = edges
+        .iter()
+        .map(|spec| emit_edge_statement(spec, &vertex_paths, dest_url, options))
+        .collect();
 
     Ok(WriteSqlPlan {
         vertex_statements,
@@ -399,6 +408,85 @@ fn emit_vertex_statement(
         type_name: spec.name.clone(),
         rel_path,
         copy_sql,
+    }
+}
+
+// CSR / CSC are graph-storage canon (Compressed Sparse Row / Compressed
+// Sparse Column — GraphAr v1 adjacency conventions); the `_copy` SQL
+// bindings paired by row/column ordering keep their canonical names.
+#[allow(clippy::similar_names)]
+/// Emit the two `COPY ... TO ... (FORMAT PARQUET, ...)` statements (CSR
+/// + CSC) for one edge type.
+///
+/// The body resolves `src_iri` / `dst_iri` → `dense_id` via JOINs against
+/// the freshly-written vertex Parquets. The naming convention
+/// `{src}_{label}_{dst}` drives the edge directory and matches
+/// `fossil-graph::operations::schema::EdgeTypeSummary::table_name` — the
+/// read side (fossil-graph schema verb) and the write side (this emitter)
+/// share the same naming rule by convention; if the rule changes either
+/// side, both must move together.
+fn emit_edge_statement(
+    spec: &EdgeSpec,
+    vertex_paths: &std::collections::HashMap<&str, &str>,
+    dest_url: &str,
+    options: &WriteOptions,
+) -> EdgeStatement {
+    let dest = dest_url.trim_end_matches('/');
+
+    // Vertex paths come from `vertex_statements` so they're guaranteed
+    // present (validate_inputs rejected missing references before this
+    // point). `expect` on a programmer-error invariant — not a runtime
+    // failure mode.
+    let src_vertex_rel = vertex_paths
+        .get(spec.source_type.as_str())
+        .copied()
+        .expect("source_type validated against vertex_paths");
+    let dst_vertex_rel = vertex_paths
+        .get(spec.target_type.as_str())
+        .copied()
+        .expect("target_type validated against vertex_paths");
+
+    let edge_dir_name = format!("{}_{}_{}", spec.source_type, spec.label, spec.target_type);
+    let csr_rel_path = format!("{}{}/by_source.parquet", options.edge_prefix, edge_dir_name);
+    let csc_rel_path = format!("{}{}/by_target.parquet", options.edge_prefix, edge_dir_name);
+
+    // Shared inner SELECT — the JOIN cost is paid once per edge type
+    // (DuckDB executes the COPY query body twice; row-group caches on
+    // the vertex Parquets keep the second JOIN cheap). The alternative
+    // (CREATE TEMP TABLE __edges + two COPYs) saves the JOIN but adds a
+    // temp-table lifecycle the runtime executor must clean up — kept
+    // simple here, revisit if benchmark warrants.
+    let inner = format!(
+        "SELECT s.dense_id AS src_dense, t.dense_id AS dst_dense \
+         FROM ({src_relation}) e \
+         JOIN read_parquet('{dest}/{src_v}') s ON e.src_iri = s.subject \
+         JOIN read_parquet('{dest}/{dst_v}') t ON e.dst_iri = t.subject",
+        src_relation = spec.source_relation,
+        src_v = src_vertex_rel,
+        dst_v = dst_vertex_rel,
+    );
+
+    let csr_copy = format!(
+        "COPY ({inner} ORDER BY src_dense, dst_dense) \
+         TO '{dest}/{csr}' \
+         (FORMAT PARQUET, ROW_GROUP_SIZE {rgs})",
+        csr = csr_rel_path,
+        rgs = options.row_group_size,
+    );
+    let csc_copy = format!(
+        "COPY ({inner} ORDER BY dst_dense, src_dense) \
+         TO '{dest}/{csc}' \
+         (FORMAT PARQUET, ROW_GROUP_SIZE {rgs})",
+        csc = csc_rel_path,
+        rgs = options.row_group_size,
+    );
+
+    EdgeStatement {
+        edge_dir_name,
+        csr_rel_path,
+        csc_rel_path,
+        copy_csr_sql: csr_copy,
+        copy_csc_sql: csc_copy,
     }
 }
 
@@ -517,5 +605,133 @@ mod tests {
                 .copy_sql
                 .contains("file:///tmp/g//vertex")
         );
+    }
+
+    // ── Edge emission (W0b/2) ───────────────────────────────────────────
+
+    fn spec_org() -> VertexSpec {
+        VertexSpec {
+            name: "org".to_string(),
+            iri: "http://example.org/Org".to_string(),
+            source_relation: "SELECT subject, legal_name FROM raw_org".to_string(),
+            property_columns: vec!["legal_name".to_string()],
+            dedup_subjects: true,
+            column_iris: BTreeMap::new(),
+        }
+    }
+
+    fn spec_works_at_edge() -> EdgeSpec {
+        EdgeSpec {
+            label: "works_at".to_string(),
+            iri: "http://example.org/worksAt".to_string(),
+            source_type: "person".to_string(),
+            target_type: "org".to_string(),
+            source_relation: "SELECT subject AS src_iri, employer AS dst_iri FROM raw_person"
+                .to_string(),
+        }
+    }
+
+    #[test]
+    fn edge_emits_csr_and_csc_with_canonical_dir() {
+        let plan = plan_writes(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            "s3://bucket/job-42",
+            &WriteOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(plan.edge_statements.len(), 1);
+        let e = &plan.edge_statements[0];
+        assert_eq!(e.edge_dir_name, "person_works_at_org");
+        assert_eq!(e.csr_rel_path, "edge/person_works_at_org/by_source.parquet");
+        assert_eq!(e.csc_rel_path, "edge/person_works_at_org/by_target.parquet");
+    }
+
+    #[test]
+    fn edge_csr_orders_by_src_dst_and_csc_by_dst_src() {
+        let plan = plan_writes(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            "s3://bucket/job-42",
+            &WriteOptions::default(),
+        )
+        .unwrap();
+        let e = &plan.edge_statements[0];
+        assert!(
+            e.copy_csr_sql.contains("ORDER BY src_dense, dst_dense"),
+            "CSR must sort src-first for CSR layout: {}",
+            e.copy_csr_sql
+        );
+        assert!(
+            e.copy_csc_sql.contains("ORDER BY dst_dense, src_dense"),
+            "CSC must sort dst-first for CSC layout: {}",
+            e.copy_csc_sql
+        );
+    }
+
+    #[test]
+    fn edge_joins_against_vertex_parquets_under_dest() {
+        let plan = plan_writes(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            "s3://bucket/job-42",
+            &WriteOptions::default(),
+        )
+        .unwrap();
+        let csr = &plan.edge_statements[0].copy_csr_sql;
+        assert!(
+            csr.contains("read_parquet('s3://bucket/job-42/vertex/person.parquet') s"),
+            "CSR must join against the source-type vertex Parquet: {csr}"
+        );
+        assert!(
+            csr.contains("read_parquet('s3://bucket/job-42/vertex/org.parquet') t"),
+            "CSR must join against the target-type vertex Parquet: {csr}"
+        );
+        assert!(csr.contains("e.src_iri = s.subject"));
+        assert!(csr.contains("e.dst_iri = t.subject"));
+        assert!(csr.contains("s.dense_id AS src_dense"));
+        assert!(csr.contains("t.dense_id AS dst_dense"));
+    }
+
+    #[test]
+    fn edge_destinations_are_written_under_dest_url() {
+        let plan = plan_writes(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            "file:///tmp/g/",
+            &WriteOptions::default(),
+        )
+        .unwrap();
+        let e = &plan.edge_statements[0];
+        assert!(
+            e.copy_csr_sql
+                .contains("TO 'file:///tmp/g/edge/person_works_at_org/by_source.parquet'"),
+        );
+        assert!(
+            e.copy_csc_sql
+                .contains("TO 'file:///tmp/g/edge/person_works_at_org/by_target.parquet'"),
+        );
+        // No double slash on the dest portion (the trim_end_matches on
+        // dest_url is shared with vertex emission — regression guard
+        // duplicated here in case the implementations diverge).
+        assert!(!e.copy_csr_sql.contains("file:///tmp/g//edge"));
+    }
+
+    #[test]
+    fn edge_emission_respects_row_group_size_override() {
+        let opts = WriteOptions {
+            row_group_size: 50_000,
+            ..WriteOptions::default()
+        };
+        let plan = plan_writes(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            "file:///tmp/g",
+            &opts,
+        )
+        .unwrap();
+        let e = &plan.edge_statements[0];
+        assert!(e.copy_csr_sql.contains("ROW_GROUP_SIZE 50000"));
+        assert!(e.copy_csc_sql.contains("ROW_GROUP_SIZE 50000"));
     }
 }
