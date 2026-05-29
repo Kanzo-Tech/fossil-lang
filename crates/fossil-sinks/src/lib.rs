@@ -19,6 +19,7 @@
 
 pub mod decomp;
 pub mod manifest;
+pub mod writer;
 
 use decomp::{SinkPlan, vertex_edge_decomp};
 use fossil_descriptors_output::OutputDescriptorKind;

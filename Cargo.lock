@@ -1325,6 +1325,7 @@ dependencies = [
  "serde",
  "serde_yaml_ng",
  "shex_ast",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

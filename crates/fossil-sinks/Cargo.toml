@@ -42,6 +42,10 @@ fossil-base = { path = "../fossil-base" }
 # via the already-WASM-green fossil-descriptors-output; we name them directly for the AST match).
 shex_ast = { workspace = true }
 prefixmap = { workspace = true }
+# Typed validation errors for the `writer` module (W0b — see ADR-0039 +
+# auto-memory project_fossil_graph_reference_architecture.md). Pure-Rust,
+# WASM-clean, no IO side-effects.
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # Test-only Parquet schema read-back. `default-features = false` drops parquet's `arrow`
