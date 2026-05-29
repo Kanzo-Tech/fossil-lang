@@ -1,0 +1,83 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (viewport::ViewportResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: ViewportResult
+type: object
+required:
+  - edges
+  - mode
+  - n
+  - vertices
+properties:
+  edges:
+    type: array
+    items:
+      $ref: "#/definitions/ViewportEdge"
+  mode:
+    $ref: "#/definitions/ViewportMode"
+  n:
+    type: integer
+    format: uint32
+    minimum: 0
+  vertices:
+    description: "Always present; in aggregate mode the entries are super-nodes (cluster centroids) with `cluster_id` populated."
+    type: array
+    items:
+      $ref: "#/definitions/ViewportVertex"
+definitions:
+  ViewportEdge:
+    type: object
+    required:
+      - dst_dense
+      - src_dense
+    properties:
+      dst_dense:
+        type: integer
+        format: uint32
+        minimum: 0
+      src_dense:
+        type: integer
+        format: uint32
+        minimum: 0
+  ViewportMode:
+    type: string
+    enum:
+      - detail
+      - aggregate
+  ViewportVertex:
+    type: object
+    required:
+      - dense_id
+      - type_idx
+      - x
+      - y
+    properties:
+      cluster_id:
+        type:
+          - integer
+          - "null"
+        format: uint32
+        minimum: 0
+      cluster_size:
+        description: "Aggregate mode only: cluster size + cluster_id."
+        type:
+          - integer
+          - "null"
+        format: uint32
+        minimum: 0
+      dense_id:
+        type: integer
+        format: uint32
+        minimum: 0
+      type_idx:
+        type: integer
+        format: uint8
+        minimum: 0
+      x:
+        type: number
+        format: float
+      y:
+        type: number
+        format: float

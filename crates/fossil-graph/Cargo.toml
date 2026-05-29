@@ -1,0 +1,42 @@
+[package]
+name = "fossil-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Graph query surface over GraphAr+DuckDB. Verb-level operations (schema, discovery, aggregate, GraphRAG, viewport, sql) with JSON Schema contracts. Transport-agnostic — bindings live in fossil-mcp, fossil-http, fossil-cli, @fossil-lang/graph."
+
+[lints]
+workspace = true
+
+[dependencies]
+# Verb contracts: each operation's params/result derives serde + JsonSchema
+# (ADR-0039). The same schema is emitted by every transport binding so the
+# wire contract stays single-source — no hand-written JSON Schema files, no
+# divergence between fossil-mcp and @fossil-lang/graph.
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+thiserror = { workspace = true }
+
+# GraphAr manifest types (vertex/edge info) live in fossil-sinks::manifest as
+# the writer's source of truth (ADR-0016). fossil-graph reads the YAML on the
+# query side via the same structs — single-source schema for write AND read.
+fossil-sinks = { path = "../fossil-sinks" }
+serde_yaml_ng = { workspace = true }
+
+# NOTE: smol_str is intentionally NOT a dep here. Verbs are request-scoped
+# (one allocation per call, dropped after dispatch) so the interning that
+# smol_str buys elsewhere in the workspace has zero value, and schemars 0.8
+# does not derive JsonSchema for SmolStr (no upstream feature in workspace
+# pin 0.8). The manifest reader (`manifest.rs`) imports SmolStr-shaped
+# structs transitively via fossil-sinks; they're not re-exported on the
+# verb surface.
+
+[dev-dependencies]
+# Snapshot the generated JSON Schemas so a hand-edit to a Params/Result struct
+# triggers a visible diff against the canonical wire contract. The bindings
+# (fossil-mcp, @fossil-lang/graph) consume the same snapshots — see ADR-0039.
+insta = { workspace = true }

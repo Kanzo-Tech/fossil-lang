@@ -1,0 +1,25 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (aggregate::AggregateResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: AggregateResult
+type: object
+required:
+  - rows
+properties:
+  rows:
+    type: array
+    items:
+      $ref: "#/definitions/AggregateRow"
+definitions:
+  AggregateRow:
+    type: object
+    required:
+      - group
+      - value
+    properties:
+      group: true
+      value:
+        type: number
+        format: double

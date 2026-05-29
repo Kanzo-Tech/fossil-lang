@@ -1,0 +1,53 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (discovery::FindPathResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: FindPathResult
+type: object
+required:
+  - edges
+  - vertices
+properties:
+  edges:
+    type: array
+    items:
+      $ref: "#/definitions/NeighborEdge"
+  vertices:
+    description: "Ordered path vertices including endpoints. Empty when no path exists within `max_hops`."
+    type: array
+    items:
+      $ref: "#/definitions/NeighborVertex"
+definitions:
+  NeighborEdge:
+    type: object
+    required:
+      - predicate
+      - source
+      - target
+    properties:
+      predicate:
+        type: string
+      source:
+        type: string
+      target:
+        type: string
+  NeighborVertex:
+    type: object
+    required:
+      - hop
+      - iri
+      - label
+      - vertex_type
+    properties:
+      hop:
+        description: Hop count from the origin (0 = origin itself).
+        type: integer
+        format: uint8
+        minimum: 0
+      iri:
+        type: string
+      label:
+        type: string
+      vertex_type:
+        type: string

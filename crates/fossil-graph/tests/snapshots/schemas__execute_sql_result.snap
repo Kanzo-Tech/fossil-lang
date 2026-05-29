@@ -1,0 +1,33 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (sql::ExecuteSqlResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: ExecuteSqlResult
+type: object
+required:
+  - columns
+  - rows
+  - truncated
+properties:
+  columns:
+    type: array
+    items:
+      $ref: "#/definitions/ColumnDescriptor"
+  rows:
+    type: array
+    items: true
+  truncated:
+    description: "True when the result was truncated by `row_cap`."
+    type: boolean
+definitions:
+  ColumnDescriptor:
+    type: object
+    required:
+      - duckdb_type
+      - name
+    properties:
+      duckdb_type:
+        type: string
+      name:
+        type: string

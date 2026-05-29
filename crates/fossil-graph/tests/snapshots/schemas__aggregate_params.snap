@@ -1,0 +1,39 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (aggregate::AggregateParams)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: AggregateParams
+type: object
+required:
+  - agg
+  - group_by
+  - vertex_type
+properties:
+  agg:
+    $ref: "#/definitions/Aggregation"
+  group_by:
+    type: string
+  limit:
+    default: 1000
+    type: integer
+    format: uint32
+    minimum: 0
+  measure:
+    description: "Optional measure column for `sum`/`avg`/`min`/`max` aggregations. Ignored when `agg` is `count`."
+    default: ~
+    type:
+      - string
+      - "null"
+  vertex_type:
+    type: string
+additionalProperties: false
+definitions:
+  Aggregation:
+    type: string
+    enum:
+      - count
+      - sum
+      - avg
+      - min
+      - max

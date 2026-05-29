@@ -1,0 +1,15 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (viewport::SetSelectionResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: SetSelectionResult
+type: object
+required:
+  - matching_count
+properties:
+  matching_count:
+    description: Echo of how many vertices the new selection would yield against the last viewport bbox. Lets the caller decide whether to repaint.
+    type: integer
+    format: uint32
+    minimum: 0

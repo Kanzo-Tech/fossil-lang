@@ -1,0 +1,23 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (graphrag::SummarizeClusterResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: SummarizeClusterResult
+type: object
+required:
+  - dominant_type
+  - summary
+  - vertex_count
+properties:
+  dominant_type:
+    description: "Dominant vertex type (mode of `type_idx` inside the cluster)."
+    type: string
+  summary:
+    description: Writer-emitted summary text.
+    type: string
+  vertex_count:
+    description: Cluster size for caller context.
+    type: integer
+    format: uint64
+    minimum: 0
