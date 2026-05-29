@@ -812,8 +812,16 @@ fn vertex_table_to_spec(vt: &VertexTable) -> VertexSpec {
         projection.push_str(&p.name);
         projection.push('"');
     }
+    // `FROM <source>` without extra parens — matches the
+    // `vertex_select_sql` / `edge_select_sql` convention in `decomp`. The
+    // SinkPlan's `source_relation` arrives already as a complete
+    // FROM-clause expression — typically `(SELECT ...) AS base` from
+    // `fossil_codegen::base_relation_sql`. Wrapping that in another
+    // `({source})` would produce `FROM ((SELECT ...) AS base)`, the
+    // illegal "extra parens around an aliased derived table" form
+    // DuckDB rejects with "syntax error at or near ')'".
     let source_relation = format!(
-        "SELECT {projection} FROM ({source})",
+        "SELECT {projection} FROM {source}",
         source = vt.source_relation,
     );
     // Mirror decomp's `vertex_select_sql` collapse rule (SINK-05):
@@ -844,8 +852,12 @@ fn edge_table_to_spec(et: &EdgeTable) -> EdgeSpec {
     // are different from vertices (per-source-vertex collapse vs per-
     // subject collapse) and W0b/2 deliberately keeps all rows. Future
     // commits can promote `single_valued` if a use case appears.
+    //
+    // `FROM <source>` without extra parens — same rationale as
+    // `vertex_table_to_spec`: SinkPlan's `source_relation` is already a
+    // complete FROM-clause expression (`(SELECT ...) AS base`).
     let source_relation = format!(
-        "SELECT {src} AS src_iri, {dst} AS dst_iri FROM ({source})",
+        "SELECT {src} AS src_iri, {dst} AS dst_iri FROM {source}",
         src = et.src_id_expr,
         dst = et.dst_id_expr,
         source = et.source_relation,
@@ -1249,9 +1261,12 @@ mod tests {
         assert_eq!(v.name, "person");
         assert_eq!(v.property_columns, vec!["name", "age"]);
         // Source projection renames iri → subject and quotes property cols.
+        // FROM <source> (no extra parens) — matches decomp's convention so
+        // SinkPlan's `(SELECT...) AS base` source stays a valid derived
+        // table reference. See `vertex_table_to_spec` for the rationale.
         assert!(
             v.source_relation
-                .contains("SELECT iri AS subject, \"name\", \"age\" FROM ("),
+                .contains("SELECT iri AS subject, \"name\", \"age\" FROM "),
             "got: {}",
             v.source_relation
         );
