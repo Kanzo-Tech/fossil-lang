@@ -40,13 +40,21 @@ fossil-sinks = { path = "../fossil-sinks" }
 fossil-resolver = { path = "../fossil-resolver" }
 thiserror = { workspace = true }
 
+# W2-06 — native DuckExecutor: fossil-graph owns the verb→SQL (WASM-clean); this
+# crate runs that SQL against bundled DuckDB and converts rows to JSON. serde_json
+# is promoted from a dev-dep to a regular dep for the row→Value conversion.
+fossil-graph = { path = "../fossil-graph" }
+serde_json = { workspace = true }
+
 [dev-dependencies]
+# W2-06 integration (tests/graph_verbs.rs): deserialise dispatch JSON into the
+# verb result structs.
+serde = { workspace = true }
 # SC#1 cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
 # the canonical ordered result-set serialization + JSON writer for
 # native_baseline.json. Both are native-only test deps (the runtime crate is
 # native-only anyway via the wasm32 cfg-tripwire).
 sha2 = { workspace = true }
-serde_json = { workspace = true }
 # SC#1 native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
 # per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
 # builtin fails CI on native DuckDB (Pitfall 4). fossil-registry is WASM-clean; it

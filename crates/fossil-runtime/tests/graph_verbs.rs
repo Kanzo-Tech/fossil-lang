@@ -1,0 +1,311 @@
+//! W2-06 — integration: dispatch every implemented fossil-graph verb against a
+//! real bundled `DuckDB`, validating the verb→SQL the unit tests only exercise
+//! with fake executors.
+
+use std::collections::HashMap;
+
+use duckdb::Connection;
+use fossil_graph::manifest::{Manifest, ManifestSource};
+use fossil_graph::operations::aggregate::{
+    AggregateParams, AggregateResult, Aggregation, HistogramParams, HistogramResult, TopKParams,
+    TopKResult,
+};
+use fossil_graph::operations::discovery::{
+    FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult,
+};
+use fossil_graph::operations::schema::{
+    DescribeFieldParams, DescribeFieldResult, FieldRole, ListVertexTypesParams,
+    ListVertexTypesResult,
+};
+use fossil_graph::{GraphError, Operation, Result, dispatch};
+use fossil_runtime::DuckRuntime;
+use fossil_sinks::manifest::{
+    DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+};
+
+/// In-memory manifest source mirroring the writer's on-disk layout.
+struct MapSource(HashMap<String, Vec<u8>>);
+impl ManifestSource for MapSource {
+    fn fetch(&self, rel_path: &str) -> Result<Vec<u8>> {
+        self.0
+            .get(rel_path)
+            .cloned()
+            .ok_or_else(|| GraphError::InvalidManifest(format!("missing {rel_path}")))
+    }
+}
+
+fn prop(name: &str, ty: &str, primary: bool) -> Property {
+    Property {
+        name: name.to_string(),
+        data_type: ty.to_string(),
+        is_primary: primary,
+        is_nullable: Some(false),
+    }
+}
+
+/// Manifest for a single `Person` vertex type (fields age, name) + a
+/// `Person knows Person` edge — matching the `DuckDB` tables created below.
+fn manifest() -> Manifest {
+    let mut person = VertexInfo::new(
+        "Person",
+        DEFAULT_CHUNK_SIZE,
+        "vertex/Person/",
+        vec![PropertyGroup {
+            file_type: "parquet".into(),
+            properties: vec![
+                prop("dense_id", "uint32", true),
+                prop("subject", "string", false),
+                prop("age", "int64", false),
+                prop("name", "string", false),
+                prop("x", "float", false),
+                prop("y", "float", false),
+                prop("cluster_id", "uint32", false),
+            ],
+        }],
+    );
+    person.iri = "http://example.org/Person".into();
+    let edge = EdgeInfo {
+        src_type: "Person".into(),
+        edge_type: "knows".into(),
+        iri: "http://example.org/knows".into(),
+        dst_type: "Person".into(),
+        chunk_size: DEFAULT_CHUNK_SIZE,
+        src_chunk_size: DEFAULT_CHUNK_SIZE,
+        dst_chunk_size: DEFAULT_CHUNK_SIZE,
+        directed: true,
+        prefix: "edge/Person_knows_Person/".into(),
+        adj_lists: vec![],
+        property_groups: vec![],
+        version: "gar/v1".into(),
+    };
+    let graph = GraphInfo::new(
+        "graph",
+        "",
+        vec!["vertex/Person.vertex.yml".into()],
+        vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
+    );
+    let mut map = HashMap::new();
+    map.insert("graph.graph.yml".into(), graph.to_yaml().unwrap().into_bytes());
+    map.insert(
+        "vertex/Person.vertex.yml".into(),
+        person.to_yaml().unwrap().into_bytes(),
+    );
+    map.insert(
+        "edge/Person_knows_Person/Person_knows_Person.edge.yml".into(),
+        edge.to_yaml().unwrap().into_bytes(),
+    );
+    Manifest::load(&MapSource(map)).expect("manifest loads")
+}
+
+/// A connection with the GraphAr-shaped vertex/edge tables registered under the
+/// names the verbs query (`"Person"`, `"Person_knows_Person"`). Path a→b→c.
+fn connection() -> Connection {
+    let conn = Connection::open_in_memory().expect("open duckdb");
+    conn.execute_batch(
+        r#"
+        CREATE TABLE "Person" (
+            dense_id UINTEGER, subject VARCHAR, age BIGINT, name VARCHAR,
+            x REAL, y REAL, cluster_id UINTEGER
+        );
+        INSERT INTO "Person" VALUES
+            (0, 'urn:a', 30, 'Ann', 0, 0, 0),
+            (1, 'urn:b', 41, 'Bob', 0, 0, 0),
+            (2, 'urn:c', 25, 'Cy',  0, 0, 0);
+        CREATE TABLE "Person_knows_Person" (src_dense UINTEGER, dst_dense UINTEGER);
+        INSERT INTO "Person_knows_Person" VALUES (0, 1), (1, 2);
+        "#,
+    )
+    .expect("seed tables");
+    conn
+}
+
+fn run<T: serde::de::DeserializeOwned>(conn: &Connection, m: &Manifest, op: &Operation) -> T {
+    let exec = DuckRuntime::new(conn);
+    let value = dispatch(op, m, &exec).expect("verb dispatch");
+    serde_json::from_value(value).expect("result deserialises")
+}
+
+#[test]
+fn list_vertex_types_counts_and_fields() {
+    let (conn, m) = (connection(), manifest());
+    let r: ListVertexTypesResult = run(
+        &conn,
+        &m,
+        &Operation::ListVertexTypes(ListVertexTypesParams {}),
+    );
+    assert_eq!(r.types.len(), 1);
+    let t = &r.types[0];
+    assert_eq!(t.name, "Person");
+    assert_eq!(t.iri, "http://example.org/Person");
+    assert_eq!(t.count, 3);
+    assert_eq!(t.fields, vec!["age", "name"]); // reserved cols hidden
+}
+
+#[test]
+fn describe_field_age_is_a_measure() {
+    let (conn, m) = (connection(), manifest());
+    let r: DescribeFieldResult = run(
+        &conn,
+        &m,
+        &Operation::DescribeField(DescribeFieldParams {
+            vertex_type: "Person".into(),
+            field: "age".into(),
+        }),
+    );
+    assert_eq!(r.datatype, "int64");
+    assert_eq!(r.role, FieldRole::Measure);
+    assert_eq!(r.distinct, Some(3));
+    assert_eq!(r.samples.len(), 3);
+}
+
+#[test]
+fn aggregate_count_by_name() {
+    let (conn, m) = (connection(), manifest());
+    let r: AggregateResult = run(
+        &conn,
+        &m,
+        &Operation::Aggregate(AggregateParams {
+            vertex_type: "Person".into(),
+            group_by: "name".into(),
+            agg: Aggregation::Count,
+            measure: None,
+            limit: 100,
+        }),
+    );
+    assert_eq!(r.rows.len(), 3);
+    assert!(r.rows.iter().all(|row| (row.value - 1.0).abs() < f64::EPSILON));
+}
+
+#[test]
+fn aggregate_avg_requires_and_uses_measure() {
+    let (conn, m) = (connection(), manifest());
+    let r: AggregateResult = run(
+        &conn,
+        &m,
+        &Operation::Aggregate(AggregateParams {
+            vertex_type: "Person".into(),
+            group_by: "name".into(),
+            agg: Aggregation::Avg,
+            measure: Some("age".into()),
+            limit: 100,
+        }),
+    );
+    // one row per name, value == that person's age.
+    assert_eq!(r.rows.len(), 3);
+    let max = r.rows.iter().map(|row| row.value).fold(0.0_f64, f64::max);
+    assert!((max - 41.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn histogram_age_numeric() {
+    let (conn, m) = (connection(), manifest());
+    let r: HistogramResult = run(
+        &conn,
+        &m,
+        &Operation::Histogram(HistogramParams {
+            vertex_type: "Person".into(),
+            field: "age".into(),
+            bins: 4,
+        }),
+    );
+    assert_eq!(r.edges.len(), 5); // bins + 1
+    assert!((r.edges[0] - 25.0).abs() < 1e-6);
+    assert!((r.edges[4] - 41.0).abs() < 1e-6);
+    assert_eq!(r.counts.iter().sum::<u64>(), 3);
+}
+
+#[test]
+fn top_k_oldest_first() {
+    let (conn, m) = (connection(), manifest());
+    let r: TopKResult = run(
+        &conn,
+        &m,
+        &Operation::TopK(TopKParams {
+            vertex_type: "Person".into(),
+            order_by: "age".into(),
+            k: 2,
+            descending: true,
+        }),
+    );
+    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows[0]["name"], serde_json::json!("Bob")); // 41
+    assert_eq!(r.rows[1]["name"], serde_json::json!("Ann")); // 30
+}
+
+#[test]
+fn find_neighbors_one_hop() {
+    let (conn, m) = (connection(), manifest());
+    let r: FindNeighborsResult = run(
+        &conn,
+        &m,
+        &Operation::FindNeighbors(FindNeighborsParams {
+            iri: "urn:a".into(),
+            depth: 1,
+            edge_types: Vec::new(),
+            limit: 100,
+        }),
+    );
+    assert_eq!(r.edges.len(), 1);
+    assert_eq!(r.edges[0].source, "urn:a");
+    assert_eq!(r.edges[0].target, "urn:b");
+    assert_eq!(r.edges[0].predicate, "knows");
+    // origin (hop 0) + neighbour (hop 1).
+    assert_eq!(r.vertices.len(), 2);
+    assert_eq!(r.vertices[0].iri, "urn:a");
+    assert_eq!(r.vertices[0].vertex_type, "Person");
+    assert_eq!(r.vertices[1].iri, "urn:b");
+    assert_eq!(r.vertices[1].hop, 1);
+}
+
+#[test]
+fn find_neighbors_two_hops_reaches_c() {
+    let (conn, m) = (connection(), manifest());
+    let r: FindNeighborsResult = run(
+        &conn,
+        &m,
+        &Operation::FindNeighbors(FindNeighborsParams {
+            iri: "urn:a".into(),
+            depth: 2,
+            edge_types: Vec::new(),
+            limit: 100,
+        }),
+    );
+    let reached: Vec<&str> = r.vertices.iter().map(|v| v.iri.as_str()).collect();
+    assert!(reached.contains(&"urn:b"));
+    assert!(reached.contains(&"urn:c"));
+}
+
+#[test]
+fn find_path_a_to_c() {
+    let (conn, m) = (connection(), manifest());
+    let r: FindPathResult = run(
+        &conn,
+        &m,
+        &Operation::FindPath(FindPathParams {
+            source_iri: "urn:a".into(),
+            target_iri: "urn:c".into(),
+            max_hops: 5,
+        }),
+    );
+    let path: Vec<&str> = r.vertices.iter().map(|v| v.iri.as_str()).collect();
+    assert_eq!(path, vec!["urn:a", "urn:b", "urn:c"]);
+    assert_eq!(r.edges.len(), 2);
+    assert_eq!(r.edges[0].source, "urn:a");
+    assert_eq!(r.edges[1].target, "urn:c");
+}
+
+#[test]
+fn find_path_unreachable_is_empty() {
+    let (conn, m) = (connection(), manifest());
+    let r: FindPathResult = run(
+        &conn,
+        &m,
+        &Operation::FindPath(FindPathParams {
+            source_iri: "urn:c".into(), // c has no outgoing edges
+            target_iri: "urn:a".into(),
+            max_hops: 5,
+        }),
+    );
+    assert!(r.vertices.is_empty());
+    assert!(r.edges.is_empty());
+}

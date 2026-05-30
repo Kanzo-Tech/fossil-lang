@@ -25,9 +25,11 @@ compile_error!(
 
 use duckdb::Connection;
 
+pub mod graph_exec;
 pub mod materialize;
 pub mod udf;
 
+pub use graph_exec::DuckRuntime;
 pub use materialize::{MaterializeError, materialize as materialize_graph_ar};
 
 /// Execute a batch of SQL statements (semicolon-delimited) on a fresh

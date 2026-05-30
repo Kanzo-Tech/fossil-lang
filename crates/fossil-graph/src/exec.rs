@@ -407,7 +407,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             .iter()
             .map(|v| {
                 format!(
-                    "SELECT '{}' AS t FROM {} WHERE subject = {lit} LIMIT 1",
+                    "SELECT '{}' AS t FROM {} WHERE subject = {lit}",
                     v.vertex_type,
                     quote_ident(&v.vertex_type)
                 )
@@ -417,6 +417,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         if probe.is_empty() {
             return None;
         }
+        // One outer LIMIT over the whole union (subjects are unique).
         let rows = self.exec.query_json(&format!("{probe} LIMIT 1")).ok()?;
         rows.first()
             .and_then(|r| r.get("t"))
