@@ -39,6 +39,7 @@ fn knows_edge() -> EdgeInfo {
     EdgeInfo {
         src_type: "Person".to_string(),
         edge_type: "knows".to_string(),
+        iri: String::new(),
         dst_type: "Person".to_string(),
         chunk_size: DEFAULT_CHUNK_SIZE,
         src_chunk_size: DEFAULT_CHUNK_SIZE,

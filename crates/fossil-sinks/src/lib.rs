@@ -24,7 +24,6 @@ pub mod writer;
 use decomp::{SinkPlan, vertex_edge_decomp};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_mir::MirGraph;
-use manifest::{EdgeInfo, Property, PropertyGroup, VertexInfo};
 
 /// Output sink trait. Phase 1 surface is `name()` + `manifest_template()`.
 /// Phase 5 SINK-01..06 adds programmatic decomposition + manifest + SQL emission.
@@ -63,82 +62,6 @@ pub trait Sink: Send + Sync + std::fmt::Debug {
     ) -> SinkPlan {
         vertex_edge_decomp(plan, db, kind, chunk_size)
     }
-
-    /// Phase 5 (SINK-02): build one `GraphAr` vertex-info / edge-info YAML manifest per decomposed
-    /// table in a [`SinkPlan`], returning `(filename, yaml_bytes)` pairs.
-    ///
-    /// Uses the 05-05 [`crate::manifest`] structs. The default impl builds a `VertexInfo` per
-    /// vertex table (one `PropertyGroup` holding all properties, the `iri` primary key) and an
-    /// `EdgeInfo` per edge table. Returns an empty `Vec` only if the plan is empty.
-    fn manifest_for(&self, plan: &SinkPlan) -> Vec<(String, Vec<u8>)> {
-        manifest_for_plan(plan)
-    }
-}
-
-/// Build the per-table `GraphAr` manifest YAML for a [`SinkPlan`] (the [`Sink::manifest_for`]
-/// default body, factored out so it can be unit-tested directly).
-#[must_use]
-fn manifest_for_plan(plan: &SinkPlan) -> Vec<(String, Vec<u8>)> {
-    let mut out = Vec::new();
-    for v in &plan.vertices {
-        let mut properties = vec![Property {
-            name: v.vertex_id_col.clone(),
-            data_type: "string".to_string(),
-            is_primary: true,
-            is_nullable: Some(false),
-        }];
-        for p in &v.properties {
-            properties.push(Property {
-                name: p.name.clone(),
-                data_type: p.data_type.clone(),
-                is_primary: false,
-                is_nullable: None,
-            });
-        }
-        let info = VertexInfo::new(
-            v.type_name.clone(),
-            plan.chunk_size,
-            format!("vertex/{}/", v.type_name.to_lowercase()),
-            vec![PropertyGroup {
-                file_type: "parquet".to_string(),
-                properties,
-            }],
-        );
-        if let Ok(yaml) = info.to_yaml() {
-            out.push((format!("{}.vertex.yml", v.type_name), yaml.into_bytes()));
-        }
-    }
-    for e in &plan.edges {
-        let info = EdgeInfo {
-            src_type: e.src_type.clone(),
-            edge_type: e.predicate.clone(),
-            dst_type: e.dst_type.clone(),
-            chunk_size: plan.chunk_size,
-            src_chunk_size: plan.chunk_size,
-            dst_chunk_size: plan.chunk_size,
-            directed: true,
-            prefix: format!(
-                "edge/{}_{}_{}/",
-                e.src_type.to_lowercase(),
-                e.predicate.to_lowercase(),
-                e.dst_type.to_lowercase()
-            ),
-            adj_lists: vec![manifest::AdjList {
-                ordered: true,
-                aligned_by: "src".to_string(),
-                file_type: "parquet".to_string(),
-            }],
-            property_groups: vec![],
-            version: manifest::GRAPHAR_VERSION.to_string(),
-        };
-        if let Ok(yaml) = info.to_yaml() {
-            out.push((
-                format!("{}_{}_{}.edge.yml", e.src_type, e.predicate, e.dst_type),
-                yaml.into_bytes(),
-            ));
-        }
-    }
-    out
 }
 
 /// `GraphAr` sink (Apache `GraphAr` v1.0.0 manifest + Parquet vertex/edge chunks).

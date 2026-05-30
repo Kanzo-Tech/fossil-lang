@@ -505,7 +505,8 @@ fn emit_edge_statement(
 // ──────────────────────────────────────────────────────────────────────────
 
 use crate::manifest::{
-    AdjList, EdgeInfo, GRAPHAR_VERSION, Property, PropertyGroup, VertexInfo, data_type_name,
+    AdjList, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property, PropertyGroup, VertexInfo,
+    data_type_name,
 };
 use arrow_schema::DataType;
 
@@ -521,8 +522,22 @@ use arrow_schema::DataType;
 /// browser host writes to OPFS).
 #[derive(Debug, Clone)]
 pub struct ManifestSet {
+    /// The `GraphAr` top-level graph info (`graph.graph.yml`) — the aggregate
+    /// index the query side reads first to discover every type. Listed before
+    /// the per-type manifests because it references them.
+    pub graph: ManifestForGraph,
     pub vertices: Vec<ManifestForVertex>,
     pub edges: Vec<ManifestForEdge>,
+}
+
+/// The top-level graph manifest: the structured [`GraphInfo`] plus the YAML
+/// string the runtime writes at the dataset root.
+#[derive(Debug, Clone)]
+pub struct ManifestForGraph {
+    pub graph_info: GraphInfo,
+    pub yaml: String,
+    /// Where the YAML should land — `graph.graph.yml` at the dataset root.
+    pub rel_path: String,
 }
 
 /// One vertex type's manifest pair: the structured `VertexInfo` (for tests
@@ -570,9 +585,33 @@ pub fn plan_manifests(
         .iter()
         .map(|spec| build_edge_manifest(spec, options))
         .collect::<std::result::Result<Vec<_>, _>>()?;
+    let graph = build_graph_manifest(&vertex_manifests, &edge_manifests)?;
     Ok(ManifestSet {
+        graph,
         vertices: vertex_manifests,
         edges: edge_manifests,
+    })
+}
+
+/// Build the `GraphAr` top-level [`GraphInfo`] referencing every per-type
+/// manifest by its rel_path. The default graph name is `"graph"`, so the
+/// aggregate index lands at `graph.graph.yml` — the single file the query
+/// side (fossil-graph) fetches first to enumerate all vertex/edge types.
+fn build_graph_manifest(
+    vertices: &[ManifestForVertex],
+    edges: &[ManifestForEdge],
+) -> std::result::Result<ManifestForGraph, serde_yaml_ng::Error> {
+    let graph_info = GraphInfo::new(
+        "graph",
+        "",
+        vertices.iter().map(|m| m.rel_path.clone()).collect(),
+        edges.iter().map(|m| m.rel_path.clone()).collect(),
+    );
+    let yaml = graph_info.to_yaml()?;
+    Ok(ManifestForGraph {
+        graph_info,
+        yaml,
+        rel_path: "graph.graph.yml".to_string(),
     })
 }
 
@@ -633,7 +672,7 @@ fn build_vertex_manifest(
         is_nullable: Some(false),
     });
 
-    let vertex_info = VertexInfo::new(
+    let mut vertex_info = VertexInfo::new(
         spec.name.clone(),
         options.row_group_size,
         format!("{}{}/", options.vertex_prefix, spec.name),
@@ -642,6 +681,7 @@ fn build_vertex_manifest(
             properties,
         }],
     );
+    vertex_info.iri = spec.iri.clone();
     let yaml = vertex_info.to_yaml()?;
     let rel_path = format!("{}{}.vertex.yml", options.vertex_prefix, spec.name);
     Ok(ManifestForVertex {
@@ -659,6 +699,7 @@ fn build_edge_manifest(
     let edge_info = EdgeInfo {
         src_type: spec.source_type.clone(),
         edge_type: spec.label.clone(),
+        iri: spec.iri.clone(),
         dst_type: spec.target_type.clone(),
         chunk_size: options.row_group_size,
         src_chunk_size: options.row_group_size,
@@ -1163,6 +1204,30 @@ mod tests {
         assert!(yaml.contains("name: y"));
         assert!(yaml.contains("name: cluster_id"));
         assert!(yaml.contains("version: gar/v1"));
+    }
+
+    #[test]
+    fn graph_manifest_indexes_every_type() {
+        let set = plan_manifests(
+            &[spec_person(), spec_org()],
+            &[spec_works_at_edge()],
+            &WriteOptions::default(),
+        )
+        .unwrap();
+        let gi = &set.graph.graph_info;
+        assert_eq!(set.graph.rel_path, "graph.graph.yml");
+        // The aggregate index references every per-type manifest by rel_path,
+        // so an httpfs reader fetches one file and discovers all types.
+        assert_eq!(
+            gi.vertices,
+            vec!["vertex/person.vertex.yml", "vertex/org.vertex.yml"],
+        );
+        assert_eq!(gi.edges, vec![set.edges[0].rel_path.clone()]);
+        assert_eq!(gi.version, "gar/v1");
+        // Round-trips so the query side parses what the writer emits.
+        let parsed: crate::manifest::GraphInfo =
+            serde_yaml_ng::from_str(&set.graph.yaml).expect("graph info round-trips");
+        assert_eq!(&parsed, gi);
     }
 
     #[test]

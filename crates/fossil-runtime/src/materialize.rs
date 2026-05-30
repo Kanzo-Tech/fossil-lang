@@ -130,6 +130,14 @@ where
             })?;
     }
 
+    // Graph info first — it's the aggregate index the query side reads to
+    // discover the per-type manifests it then resolves.
+    write_yaml(&manifests.graph.rel_path, &manifests.graph.yaml).map_err(|message| {
+        MaterializeError::YamlWrite {
+            rel_path: manifests.graph.rel_path.clone(),
+            message,
+        }
+    })?;
     for m in &manifests.vertices {
         write_yaml(&m.rel_path, &m.yaml).map_err(|message| MaterializeError::YamlWrite {
             rel_path: m.rel_path.clone(),
@@ -366,7 +374,9 @@ mod tests {
         .unwrap_err();
         match err {
             MaterializeError::YamlWrite { rel_path, message } => {
-                assert_eq!(rel_path, "vertex/person.vertex.yml");
+                // Graph info is written first (the aggregate index), so it's
+                // the first write_yaml call and thus the one that fails here.
+                assert_eq!(rel_path, "graph.graph.yml");
                 assert!(message.contains("disk full"));
             }
             other => panic!("expected YamlWrite, got {other:?}"),

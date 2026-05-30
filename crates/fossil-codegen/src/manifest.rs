@@ -24,6 +24,7 @@ use std::fmt::Write as _;
 
 use fossil_sinks::Sink;
 use fossil_sinks::decomp::SinkPlan;
+use fossil_sinks::writer::{WriteOptions, plan_manifests_from_sink_plan};
 
 /// Return the Phase-1 hand-templated `GraphAr` manifest for the flat-triple
 /// (`AcceptAll` / walking-skeleton) path.
@@ -40,23 +41,27 @@ pub fn manifest_template() -> String {
 /// Render the concatenated `GraphAr` v1.0.0 manifest YAML for a decomposed
 /// [`SinkPlan`] (the descriptor / `ShEx` path — SINK-02).
 ///
-/// Delegates to `fossil_sinks`'s default [`Sink::manifest_for`], which builds one
-/// `VertexInfo` per vertex table + one `EdgeInfo` per edge table (05-05 structs).
-/// The per-table YAML documents are concatenated with a `---` separator so a
-/// single emitted manifest file carries the whole graph; each document is itself
-/// valid `GraphAr` v1.0.0 (`version: gar/v1`).
+/// Single source: delegates to the canonical W0b writer
+/// ([`plan_manifests_from_sink_plan`]) — the same path `fossil run --dest`
+/// materialises, so the `fossil compile` manifest carries the identical
+/// `dense_id` + layout column shape and the top-level `GraphInfo` aggregate
+/// index. The per-file YAML documents (graph info, then each vertex/edge) are
+/// concatenated with a `---` separator and a `# rel_path` comment so a single
+/// emitted manifest file stays self-describing without a directory listing.
 #[must_use]
 pub fn manifest_yaml_for_plan(plan: &SinkPlan) -> String {
-    let parts = fossil_sinks::GraphArSink.manifest_for(plan);
+    let set = plan_manifests_from_sink_plan(plan, &WriteOptions::default())
+        .expect("a decomposed SinkPlan always yields a valid manifest");
+    let parts = std::iter::once((&set.graph.rel_path, &set.graph.yaml))
+        .chain(set.vertices.iter().map(|m| (&m.rel_path, &m.yaml)))
+        .chain(set.edges.iter().map(|m| (&m.rel_path, &m.yaml)));
     let mut out = String::new();
-    for (name, bytes) in parts {
+    for (rel_path, yaml) in parts {
         if !out.is_empty() {
             out.push_str("---\n");
         }
-        // The filename is recorded as a YAML comment so a single concatenated
-        // manifest stays self-describing without a directory listing.
-        writeln!(out, "# {name}").expect("writing to a String never fails");
-        out.push_str(&String::from_utf8_lossy(&bytes));
+        writeln!(out, "# {rel_path}").expect("writing to a String never fails");
+        out.push_str(yaml);
     }
     out
 }

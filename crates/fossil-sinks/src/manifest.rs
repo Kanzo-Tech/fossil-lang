@@ -17,7 +17,7 @@
 //! emit bytes.
 
 use arrow_schema::DataType;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The `GraphAr` manifest format version string. Emitted as `version: gar/v1`.
 pub const GRAPHAR_VERSION: &str = "gar/v1";
@@ -25,11 +25,17 @@ pub const GRAPHAR_VERSION: &str = "gar/v1";
 /// `GraphAr` vertex-info manifest (one per vertex/shape type).
 ///
 /// Serializes with the spec field names; `vertex_type` renames to `type`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VertexInfo {
     /// Shape label, e.g. `"Person"`. Emitted as the spec key `type`.
     #[serde(rename = "type")]
     pub vertex_type: String,
+    /// Full RDF type IRI (empty for non-RDF graphs). Carried into the manifest
+    /// so the query side's schema verbs surface it without a separate registry
+    /// ([[`feedback_no_duplicate_logic_across_crates`]]). Omitted from YAML when
+    /// empty so non-RDF graphs keep the canonical `GraphAr` shape.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub iri: String,
     /// Rows per Parquet chunk (configurable; default [`DEFAULT_CHUNK_SIZE`]).
     pub chunk_size: u64,
     /// Output path prefix for this vertex's chunks, e.g. `"vertex/person/"`.
@@ -41,12 +47,16 @@ pub struct VertexInfo {
 }
 
 /// `GraphAr` edge-info manifest (one per `(src_type, edge_type, dst_type)` triple).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EdgeInfo {
     /// Source vertex type label.
     pub src_type: String,
     /// Edge type label (the relationship name).
     pub edge_type: String,
+    /// Full predicate IRI (empty for non-RDF graphs). Omitted from YAML when
+    /// empty. See [`VertexInfo::iri`].
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub iri: String,
     /// Destination vertex type label.
     pub dst_type: String,
     /// Rows per edge chunk.
@@ -67,8 +77,33 @@ pub struct EdgeInfo {
     pub version: String,
 }
 
+/// `GraphAr` top-level **graph info** (`<name>.graph.yml`) — the aggregate
+/// index that references every vertex-info and edge-info file in the graph.
+///
+/// Required for serverless consumption: an httpfs reader (fossil-graph,
+/// DuckDB-WASM) cannot list a directory over HTTP, so the graph info is the
+/// single entry point a binding fetches to discover all types and their
+/// per-type YAML paths. This supersedes keasy's server-built `DataManifest`
+/// (the query side now reads the same artifact the writer emits — single
+/// source, [[`feedback_no_duplicate_logic_across_crates`]]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphInfo {
+    /// Graph label, e.g. `"graph"`. Emitted as the spec key `name`.
+    pub name: String,
+    /// Prefix the `vertices`/`edges` entries are relative to. Usually `""`
+    /// — the entries are already `<dest>`-relative rel_paths.
+    pub prefix: String,
+    /// Relative paths to each vertex-info YAML, e.g. `vertex/Person.vertex.yml`.
+    pub vertices: Vec<String>,
+    /// Relative paths to each edge-info YAML, e.g.
+    /// `edge/Person_knows_Person/Person_knows_Person.edge.yml`.
+    pub edges: Vec<String>,
+    /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
+    pub version: String,
+}
+
 /// A group of properties stored together in one file type per chunk.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyGroup {
     /// Storage file type for this group, e.g. `"parquet"`.
     pub file_type: String,
@@ -77,7 +112,7 @@ pub struct PropertyGroup {
 }
 
 /// A single property (column) of a vertex or edge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Property {
     /// Property (column) name.
     pub name: String,
@@ -87,12 +122,12 @@ pub struct Property {
     /// Whether this property is (part of) the primary key.
     pub is_primary: bool,
     /// Nullability, omitted from the YAML when `None` (`GraphAr` treats it as optional).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub is_nullable: Option<bool>,
 }
 
 /// An adjacency-list ordering descriptor for an edge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdjList {
     /// Whether the adjacency list is sorted.
     pub ordered: bool,
@@ -117,6 +152,7 @@ impl VertexInfo {
     ) -> Self {
         Self {
             vertex_type: vertex_type.into(),
+            iri: String::new(),
             chunk_size,
             prefix: prefix.into(),
             property_groups,
@@ -136,6 +172,33 @@ impl VertexInfo {
 
 impl EdgeInfo {
     /// Serialize this edge-info to `GraphAr` v1.0.0 YAML.
+    ///
+    /// # Errors
+    /// Returns the underlying `serde_yaml_ng` error if serialization fails.
+    pub fn to_yaml(&self) -> Result<String, serde_yaml_ng::Error> {
+        serde_yaml_ng::to_string(self)
+    }
+}
+
+impl GraphInfo {
+    /// Construct a `GraphInfo` with the [`GRAPHAR_VERSION`] preset.
+    #[must_use]
+    pub fn new(
+        name: impl Into<String>,
+        prefix: impl Into<String>,
+        vertices: Vec<String>,
+        edges: Vec<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            prefix: prefix.into(),
+            vertices,
+            edges,
+            version: GRAPHAR_VERSION.to_string(),
+        }
+    }
+
+    /// Serialize this graph-info to `GraphAr` v1.0.0 YAML.
     ///
     /// # Errors
     /// Returns the underlying `serde_yaml_ng` error if serialization fails.
@@ -199,6 +262,7 @@ mod tests {
         EdgeInfo {
             src_type: "Person".to_string(),
             edge_type: "knows".to_string(),
+            iri: String::new(),
             dst_type: "Person".to_string(),
             chunk_size: DEFAULT_CHUNK_SIZE,
             src_chunk_size: DEFAULT_CHUNK_SIZE,
@@ -246,6 +310,24 @@ mod tests {
         assert!(yaml.contains("is_nullable: false"), "{yaml}");
         // Exactly one occurrence (only id), proving skip_serializing_if works for name.
         assert_eq!(yaml.matches("is_nullable").count(), 1, "{yaml}");
+    }
+
+    #[test]
+    fn vertex_info_round_trips_through_yaml() {
+        // The query side (fossil-graph) deserialises the same structs the
+        // writer serialises — single source, no parallel reader structs.
+        let original = person_vertex();
+        let yaml = original.to_yaml().expect("serialize");
+        let parsed: VertexInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn edge_info_round_trips_through_yaml() {
+        let original = knows_edge();
+        let yaml = original.to_yaml().expect("serialize");
+        let parsed: EdgeInfo = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(original, parsed);
     }
 
     #[test]
