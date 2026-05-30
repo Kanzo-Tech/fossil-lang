@@ -273,7 +273,7 @@ mod tests {
         }
     }
 
-    /// Two vertex types + one edge, serialised to YAML and indexed by rel_path
+    /// Two vertex types + one edge, serialised to YAML and indexed by `rel_path`
     /// exactly as the writer would lay them out under a dataset root.
     fn fixture() -> MapSource {
         let person = vinfo("Person", &["name", "age"]);
