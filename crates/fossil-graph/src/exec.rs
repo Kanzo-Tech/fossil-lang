@@ -20,12 +20,17 @@ use crate::operations::discovery::{
     FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, NeighborEdge,
     NeighborVertex,
 };
+use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::operations::viewport::{ViewportMode, ViewportParams, ViewportResult, ViewportVertex};
 use crate::operations::schema::{
     DescribeFieldParams, DescribeFieldResult, EdgeTypeSummary, FieldRole, ListEdgeTypesResult,
     ListVertexTypesResult, VertexTypeSummary,
 };
 use crate::{GraphError, Operation, Result};
+
+/// `(column_name, column_type)` descriptors paired with the JSON result rows —
+/// the return of [`DuckExecutor::query_columns`].
+pub type ColumnedRows = (Vec<(String, String)>, Vec<Value>);
 
 /// The thin `DuckDB` seam (ADR-0003 thin-DB-trait). A binding implements
 /// exactly this — run a query, hand back rows as JSON objects — and inherits
@@ -38,6 +43,28 @@ pub trait DuckExecutor {
     /// Returns [`GraphError::Execution`] (carrying the binding's stringified
     /// DB error) when the query fails.
     fn query_json(&self, sql: &str) -> Result<Vec<Value>>;
+
+    /// Run `sql`, returning `(column_name, column_type)` descriptors alongside
+    /// the rows. Only [`Operation::ExecuteSql`] needs column types; the default
+    /// derives them best-effort from the JSON value kinds, and a binding with
+    /// access to real `DuckDB` column types (the native runtime) overrides this.
+    ///
+    /// # Errors
+    ///
+    /// As [`DuckExecutor::query_json`].
+    fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
+        let rows = self.query_json(sql)?;
+        let columns = rows
+            .first()
+            .and_then(Value::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .map(|(name, value)| (name.clone(), json_kind(value).to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok((columns, rows))
+    }
 }
 
 /// Everything a verb needs to execute: the parsed [`Manifest`] + a `DuckDB`
@@ -74,6 +101,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p)?),
             Operation::FindPath(p) => to_json(&self.find_path(p)?),
             Operation::Viewport(p) => to_json(&self.viewport(p)?),
+            Operation::ExecuteSql(p) => to_json(&self.execute_sql(p)?),
             other => Err(GraphError::NotImplemented(other.verb_name())),
         }
     }
@@ -261,6 +289,27 @@ impl<E: DuckExecutor> Context<'_, E> {
                 })
             }
         }
+    }
+
+    // ── Escape hatch ──────────────────────────────────────────────────────
+
+    fn execute_sql(&self, p: &ExecuteSqlParams) -> Result<ExecuteSqlResult> {
+        let cap = u64::from(p.row_cap);
+        // Wrap so the row cap is enforced regardless of the user's own LIMIT;
+        // fetch one extra row to detect truncation. (timeout_ms is enforced by
+        // bindings that can set a statement timeout — the native runtime does.)
+        let wrapped = format!("SELECT * FROM ({}) AS _q LIMIT {}", p.sql, cap + 1);
+        let (columns, mut rows) = self.exec.query_columns(&wrapped)?;
+        let truncated = u64::try_from(rows.len()).unwrap_or(u64::MAX) > cap;
+        rows.truncate(usize::try_from(cap).unwrap_or(usize::MAX));
+        Ok(ExecuteSqlResult {
+            columns: columns
+                .into_iter()
+                .map(|(name, duckdb_type)| ColumnDescriptor { name, duckdb_type })
+                .collect(),
+            rows,
+            truncated,
+        })
     }
 
     // ── Viewport verb ─────────────────────────────────────────────────────
@@ -567,6 +616,20 @@ fn quote_ident(name: &str) -> String {
 /// A `DuckDB` single-quoted string literal, doubling embedded quotes.
 fn sql_str_lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Best-effort `DuckDB` type name from a JSON value kind — the default
+/// [`DuckExecutor::query_columns`] fallback when real column types aren't
+/// available (the native runtime overrides with exact types).
+const fn json_kind(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "NULL",
+        Value::Bool(_) => "BOOLEAN",
+        Value::Number(_) => "DOUBLE",
+        Value::String(_) => "VARCHAR",
+        Value::Array(_) => "LIST",
+        Value::Object(_) => "STRUCT",
+    }
 }
 
 /// Extract a row column as `f32` (layout coordinates), defaulting to 0.0.
@@ -1079,6 +1142,34 @@ mod tests {
         assert_eq!(r.vertices.len(), 2);
         assert_eq!(r.vertices[0].dense_id, 0);
         assert!((r.vertices[1].x - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn execute_sql_caps_rows_and_reports_columns() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            // row_cap 2 → fetch 3 (cap + 1) to detect truncation.
+            assert!(sql.contains("LIMIT 3"));
+            vec![
+                serde_json::json!({ "a": 1, "b": "x" }),
+                serde_json::json!({ "a": 2, "b": "y" }),
+                serde_json::json!({ "a": 3, "b": "z" }),
+            ]
+        });
+        let v = dispatch(
+            &Operation::ExecuteSql(ExecuteSqlParams {
+                sql: "SELECT * FROM t".into(),
+                row_cap: 2,
+                timeout_ms: 10_000,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: ExecuteSqlResult = serde_json::from_value(v).unwrap();
+        assert!(r.truncated);
+        assert_eq!(r.rows.len(), 2);
+        assert_eq!(r.columns.len(), 2);
     }
 
     #[test]

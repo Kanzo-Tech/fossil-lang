@@ -70,5 +70,5 @@ pub mod manifest;
 pub mod operations;
 
 pub use error::{GraphError, Result};
-pub use exec::{DuckExecutor, dispatch};
+pub use exec::{ColumnedRows, DuckExecutor, dispatch};
 pub use operations::Operation;

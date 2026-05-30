@@ -8,7 +8,7 @@
 
 use duckdb::Connection;
 use duckdb::types::Value as DuckValue;
-use fossil_graph::{DuckExecutor, GraphError, Result};
+use fossil_graph::{ColumnedRows, DuckExecutor, GraphError, Result};
 use serde_json::{Map, Value};
 
 /// A [`DuckExecutor`] backed by a native `DuckDB` [`Connection`]. The caller
@@ -30,29 +30,40 @@ impl<'c> DuckRuntime<'c> {
 impl DuckExecutor for DuckRuntime<'_> {
     fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
         self.run(sql)
+            .map(|(_, rows)| rows)
             .map_err(|e| GraphError::Execution(e.to_string()))
+    }
+
+    fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
+        self.run(sql).map_err(|e| GraphError::Execution(e.to_string()))
     }
 }
 
 impl DuckRuntime<'_> {
-    fn run(&self, sql: &str) -> duckdb::Result<Vec<Value>> {
+    /// Run `sql`, returning real `(column_name, type)` descriptors + JSON rows.
+    /// Column metadata is only populated once the query has executed, so it is
+    /// read from the executed statement (via `rows`), not the prepared one. The
+    /// type string is the Arrow logical-type spelling `DuckDB` exposes.
+    fn run(&self, sql: &str) -> duckdb::Result<ColumnedRows> {
         let mut stmt = self.conn.prepare(sql)?;
         let mut rows = stmt.query([])?;
-        // Column metadata is only populated once the query has executed, so it
-        // is read from the executed statement (via `rows`), not the prepared one.
-        let columns: Vec<String> = rows
-            .as_ref()
-            .map_or_else(Vec::new, duckdb::Statement::column_names);
+        let columns: Vec<(String, String)> = rows.as_ref().map_or_else(Vec::new, |stmt| {
+            stmt.column_names()
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| (name, format!("{:?}", stmt.column_type(i))))
+                .collect()
+        });
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
             let mut obj = Map::with_capacity(columns.len());
-            for (i, name) in columns.iter().enumerate() {
+            for (i, (name, _)) in columns.iter().enumerate() {
                 let value: DuckValue = row.get(i)?;
                 obj.insert(name.clone(), duck_to_json(value));
             }
             out.push(Value::Object(obj));
         }
-        Ok(out)
+        Ok((columns, out))
     }
 }
 

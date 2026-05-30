@@ -342,6 +342,41 @@ fn viewport_bbox_filters_by_layout() {
 }
 
 #[test]
+fn execute_sql_real_columns_and_cap() {
+    use fossil_graph::operations::sql::{ExecuteSqlParams, ExecuteSqlResult};
+    let (conn, m) = (connection(), manifest());
+
+    // Real column types come from DuckDB (Arrow logical-type spelling).
+    let r: ExecuteSqlResult = run(
+        &conn,
+        &m,
+        &Operation::ExecuteSql(ExecuteSqlParams {
+            sql: "SELECT name, age FROM \"Person\" ORDER BY age".into(),
+            row_cap: 100,
+            timeout_ms: 10_000,
+        }),
+    );
+    assert!(!r.truncated);
+    assert_eq!(r.rows.len(), 3);
+    assert_eq!(r.columns.len(), 2);
+    assert_eq!(r.columns[0].name, "name");
+    assert!(r.columns[1].duckdb_type.contains("Int")); // age BIGINT → Int64
+
+    // row_cap truncates and reports it.
+    let capped: ExecuteSqlResult = run(
+        &conn,
+        &m,
+        &Operation::ExecuteSql(ExecuteSqlParams {
+            sql: "SELECT * FROM \"Person\"".into(),
+            row_cap: 2,
+            timeout_ms: 10_000,
+        }),
+    );
+    assert!(capped.truncated);
+    assert_eq!(capped.rows.len(), 2);
+}
+
+#[test]
 fn find_path_unreachable_is_empty() {
     let (conn, m) = (connection(), manifest());
     let r: FindPathResult = run(
