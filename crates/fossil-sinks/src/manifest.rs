@@ -91,7 +91,7 @@ pub struct GraphInfo {
     /// Graph label, e.g. `"graph"`. Emitted as the spec key `name`.
     pub name: String,
     /// Prefix the `vertices`/`edges` entries are relative to. Usually `""`
-    /// — the entries are already `<dest>`-relative rel_paths.
+    /// — the entries are already `<dest>`-relative `rel_path`s.
     pub prefix: String,
     /// Relative paths to each vertex-info YAML, e.g. `vertex/Person.vertex.yml`.
     pub vertices: Vec<String>,

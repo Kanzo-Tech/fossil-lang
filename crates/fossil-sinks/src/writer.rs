@@ -594,7 +594,7 @@ pub fn plan_manifests(
 }
 
 /// Build the `GraphAr` top-level [`GraphInfo`] referencing every per-type
-/// manifest by its rel_path. The default graph name is `"graph"`, so the
+/// manifest by its `rel_path`. The default graph name is `"graph"`, so the
 /// aggregate index lands at `graph.graph.yml` — the single file the query
 /// side (fossil-graph) fetches first to enumerate all vertex/edge types.
 fn build_graph_manifest(
@@ -681,7 +681,7 @@ fn build_vertex_manifest(
             properties,
         }],
     );
-    vertex_info.iri = spec.iri.clone();
+    vertex_info.iri.clone_from(&spec.iri);
     let yaml = vertex_info.to_yaml()?;
     let rel_path = format!("{}{}.vertex.yml", options.vertex_prefix, spec.name);
     Ok(ManifestForVertex {
