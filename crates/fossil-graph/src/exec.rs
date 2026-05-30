@@ -20,6 +20,7 @@ use crate::operations::discovery::{
     FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, NeighborEdge,
     NeighborVertex,
 };
+use crate::operations::viewport::{ViewportMode, ViewportParams, ViewportResult, ViewportVertex};
 use crate::operations::schema::{
     DescribeFieldParams, DescribeFieldResult, EdgeTypeSummary, FieldRole, ListEdgeTypesResult,
     ListVertexTypesResult, VertexTypeSummary,
@@ -72,6 +73,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             Operation::TopK(p) => to_json(&self.top_k(p)?),
             Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p)?),
             Operation::FindPath(p) => to_json(&self.find_path(p)?),
+            Operation::Viewport(p) => to_json(&self.viewport(p)?),
             other => Err(GraphError::NotImplemented(other.verb_name())),
         }
     }
@@ -259,6 +261,79 @@ impl<E: DuckExecutor> Context<'_, E> {
                 })
             }
         }
+    }
+
+    // ── Viewport verb ─────────────────────────────────────────────────────
+
+    fn viewport(&self, p: &ViewportParams) -> Result<ViewportResult> {
+        // W0b detail mode: a bbox scan over each vertex type's layout columns,
+        // returning typed-array-ready dense indices. Aggregate (LOD) mode and a
+        // meaningful spatial result depend on writer-W3 (it fills x/y from a real
+        // layout + morton-sorts the Parquet for predicate pushdown); until then
+        // x/y are 0.0 placeholders and every node sits at the origin.
+        let bbox = &p.bbox;
+        let parts: Vec<String> = self
+            .manifest
+            .vertices()
+            .iter()
+            .filter(|v| {
+                p.vertex_types.is_empty() || p.vertex_types.iter().any(|t| t == &v.vertex_type)
+            })
+            .filter_map(|v| {
+                self.manifest
+                    .vertex_type_idx(&v.vertex_type)
+                    .map(|idx| (v, idx))
+            })
+            .map(|(v, idx)| {
+                format!(
+                    "SELECT dense_id, x, y, {idx} AS type_idx FROM {tbl} \
+                     WHERE x BETWEEN {xmin} AND {xmax} AND y BETWEEN {ymin} AND {ymax}",
+                    tbl = quote_ident(&v.vertex_type),
+                    xmin = bbox.x_min,
+                    xmax = bbox.x_max,
+                    ymin = bbox.y_min,
+                    ymax = bbox.y_max,
+                )
+            })
+            .collect();
+
+        if parts.is_empty() {
+            return Ok(ViewportResult {
+                mode: ViewportMode::Detail,
+                n: 0,
+                vertices: Vec::new(),
+                edges: Vec::new(),
+            });
+        }
+
+        let sql = format!("{} LIMIT {}", parts.join(" UNION ALL "), p.limit);
+        let vertices: Vec<ViewportVertex> = self
+            .exec
+            .query_json(&sql)?
+            .iter()
+            .map(|r| ViewportVertex {
+                dense_id: r
+                    .get("dense_id")
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok())
+                    .unwrap_or(0),
+                x: json_f32(r, "x"),
+                y: json_f32(r, "y"),
+                type_idx: r
+                    .get("type_idx")
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u8::try_from(n).ok())
+                    .unwrap_or(0),
+                cluster_size: None,
+                cluster_id: None,
+            })
+            .collect();
+        Ok(ViewportResult {
+            mode: ViewportMode::Detail,
+            n: u32::try_from(vertices.len()).unwrap_or(u32::MAX),
+            vertices,
+            edges: Vec::new(),
+        })
     }
 
     // ── Discovery verbs ───────────────────────────────────────────────────
@@ -492,6 +567,17 @@ fn quote_ident(name: &str) -> String {
 /// A `DuckDB` single-quoted string literal, doubling embedded quotes.
 fn sql_str_lit(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Extract a row column as `f32` (layout coordinates), defaulting to 0.0.
+///
+/// f64→f32 is an intentional narrowing: the viewport contract carries layout
+/// coordinates as f32 so the consumer can ship them straight to a GPU buffer.
+#[allow(clippy::cast_possible_truncation)]
+fn json_f32(row: &Value, key: &str) -> f32 {
+    row.get(key)
+        .and_then(Value::as_f64)
+        .map_or(0.0, |v| v as f32)
 }
 
 /// Extract a row column that is a JSON array of strings (a `DuckDB` `VARCHAR[]`).
@@ -958,6 +1044,41 @@ mod tests {
         assert_eq!(r.edges.len(), 2);
         assert_eq!(r.edges[1].source, "urn:b");
         assert_eq!(r.edges[1].target, "urn:c");
+    }
+
+    #[test]
+    fn viewport_detail_maps_dense_indices() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            assert!(sql.contains("x BETWEEN") && sql.contains("y BETWEEN"));
+            vec![
+                serde_json::json!({ "dense_id": 0, "x": 1.5, "y": 2.0, "type_idx": 0 }),
+                serde_json::json!({ "dense_id": 1, "x": 3.0, "y": 4.0, "type_idx": 0 }),
+            ]
+        });
+        let v = dispatch(
+            &Operation::Viewport(crate::operations::viewport::ViewportParams {
+                bbox: crate::operations::viewport::BoundingBox {
+                    x_min: 0.0,
+                    y_min: 0.0,
+                    x_max: 10.0,
+                    y_max: 10.0,
+                },
+                zoom: 1.0,
+                lod_threshold: 0.5,
+                limit: 1000,
+                vertex_types: Vec::new(),
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: ViewportResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.mode, ViewportMode::Detail);
+        assert_eq!(r.n, 2);
+        assert_eq!(r.vertices.len(), 2);
+        assert_eq!(r.vertices[0].dense_id, 0);
+        assert!((r.vertices[1].x - 3.0).abs() < f32::EPSILON);
     }
 
     #[test]
