@@ -16,6 +16,10 @@ use crate::operations::aggregate::{
     AggregateParams, AggregateResult, AggregateRow, Aggregation, HistogramKind, HistogramParams,
     HistogramResult, TopKParams, TopKResult,
 };
+use crate::operations::discovery::{
+    FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, NeighborEdge,
+    NeighborVertex,
+};
 use crate::operations::schema::{
     DescribeFieldParams, DescribeFieldResult, EdgeTypeSummary, FieldRole, ListEdgeTypesResult,
     ListVertexTypesResult, VertexTypeSummary,
@@ -66,6 +70,8 @@ impl<E: DuckExecutor> Context<'_, E> {
             Operation::Aggregate(p) => to_json(&self.aggregate(p)?),
             Operation::Histogram(p) => to_json(&self.histogram(p)?),
             Operation::TopK(p) => to_json(&self.top_k(p)?),
+            Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p)?),
+            Operation::FindPath(p) => to_json(&self.find_path(p)?),
             other => Err(GraphError::NotImplemented(other.verb_name())),
         }
     }
@@ -255,6 +261,201 @@ impl<E: DuckExecutor> Context<'_, E> {
         }
     }
 
+    // ── Discovery verbs ───────────────────────────────────────────────────
+
+    fn find_neighbors(&self, p: &FindNeighborsParams) -> Result<FindNeighborsResult> {
+        let Some(edge_relation) = self.edge_relation_sql(&p.edge_types) else {
+            // No edge types match → the origin has no reachable neighbours.
+            return Ok(FindNeighborsResult {
+                vertices: self.origin_only(&p.iri),
+                edges: Vec::new(),
+            });
+        };
+
+        let root = sql_str_lit(&p.iri);
+        let depth = u32::from(p.depth.max(1));
+        // Breadth-first walk over the resolved (src, dst, predicate) relation,
+        // bounded by depth and an outer LIMIT so a hub can't explode the result.
+        let sql = format!(
+            "WITH RECURSIVE edge_rel AS ({edge_relation}), \
+             walk(src, dst, dst_type, predicate, hop) AS ( \
+                 SELECT src, dst, dst_type, predicate, 1 FROM edge_rel WHERE src = {root} \
+                 UNION ALL \
+                 SELECT e.src, e.dst, e.dst_type, e.predicate, w.hop + 1 \
+                 FROM edge_rel e JOIN walk w ON e.src = w.dst WHERE w.hop < {depth} \
+             ) \
+             SELECT src, dst, dst_type, predicate, min(hop) AS hop \
+             FROM walk GROUP BY src, dst, dst_type, predicate LIMIT {}",
+            p.limit
+        );
+
+        let rows = self.exec.query_json(&sql)?;
+        let mut edges = Vec::with_capacity(rows.len());
+        let mut vertices = self.origin_only(&p.iri);
+        let mut seen: std::collections::HashSet<String> =
+            vertices.iter().map(|v| v.iri.clone()).collect();
+        for r in &rows {
+            let (Some(src), Some(dst), Some(predicate)) = (
+                r.get("src").and_then(Value::as_str),
+                r.get("dst").and_then(Value::as_str),
+                r.get("predicate").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            edges.push(NeighborEdge {
+                source: src.to_string(),
+                target: dst.to_string(),
+                predicate: predicate.to_string(),
+            });
+            if seen.insert(dst.to_string()) {
+                vertices.push(NeighborVertex {
+                    iri: dst.to_string(),
+                    label: dst.to_string(),
+                    vertex_type: r
+                        .get("dst_type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    hop: r
+                        .get("hop")
+                        .and_then(Value::as_u64)
+                        .and_then(|h| u8::try_from(h).ok())
+                        .unwrap_or(u8::MAX),
+                });
+            }
+        }
+        Ok(FindNeighborsResult { vertices, edges })
+    }
+
+    fn find_path(&self, p: &FindPathParams) -> Result<FindPathResult> {
+        let empty = FindPathResult {
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        };
+        let Some(edge_relation) = self.edge_relation_sql(&[]) else {
+            return Ok(empty);
+        };
+
+        let source = sql_str_lit(&p.source_iri);
+        let target = sql_str_lit(&p.target_iri);
+        let max_hops = u32::from(p.max_hops.max(1));
+        let src_type = sql_str_lit(&self.vertex_type_of(&p.source_iri).unwrap_or_default());
+
+        // BFS accumulating the node / predicate / type lists, pruning cycles via
+        // `list_contains`; the shortest path to `target` is the min-depth row.
+        let sql = format!(
+            "WITH RECURSIVE edge_rel AS ({edge_relation}), \
+             walk(node, depth, nodes, preds, types) AS ( \
+                 SELECT {source}, 0, [{source}], []::VARCHAR[], [{src_type}] \
+                 UNION ALL \
+                 SELECT e.dst, w.depth + 1, list_append(w.nodes, e.dst), \
+                        list_append(w.preds, e.predicate), list_append(w.types, e.dst_type) \
+                 FROM edge_rel e JOIN walk w ON e.src = w.node \
+                 WHERE w.depth < {max_hops} AND NOT list_contains(w.nodes, e.dst) \
+             ) \
+             SELECT nodes, preds, types FROM walk WHERE node = {target} ORDER BY depth LIMIT 1"
+        );
+
+        let rows = self.exec.query_json(&sql)?;
+        let Some(row) = rows.first() else {
+            return Ok(empty);
+        };
+        let nodes = json_str_array(row, "nodes");
+        let preds = json_str_array(row, "preds");
+        let types = json_str_array(row, "types");
+
+        let vertices = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, iri)| NeighborVertex {
+                iri: iri.clone(),
+                label: iri.clone(),
+                vertex_type: types.get(i).cloned().unwrap_or_default(),
+                hop: u8::try_from(i).unwrap_or(u8::MAX),
+            })
+            .collect();
+        let edges = nodes
+            .windows(2)
+            .enumerate()
+            .map(|(i, pair)| NeighborEdge {
+                source: pair[0].clone(),
+                target: pair[1].clone(),
+                predicate: preds.get(i).cloned().unwrap_or_default(),
+            })
+            .collect();
+        Ok(FindPathResult { vertices, edges })
+    }
+
+    /// The origin vertex alone (hop 0), with its type resolved from whichever
+    /// vertex table holds the subject. Used as the seed of a neighbour result.
+    fn origin_only(&self, iri: &str) -> Vec<NeighborVertex> {
+        vec![NeighborVertex {
+            iri: iri.to_string(),
+            label: iri.to_string(),
+            vertex_type: self.vertex_type_of(iri).unwrap_or_default(),
+            hop: 0,
+        }]
+    }
+
+    /// Resolve which vertex type holds `iri` by probing each type's `subject`
+    /// column. Returns the first match (subjects are unique across the graph).
+    fn vertex_type_of(&self, iri: &str) -> Option<String> {
+        let lit = sql_str_lit(iri);
+        let probe = self
+            .manifest
+            .vertices()
+            .iter()
+            .map(|v| {
+                format!(
+                    "SELECT '{}' AS t FROM {} WHERE subject = {lit} LIMIT 1",
+                    v.vertex_type,
+                    quote_ident(&v.vertex_type)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ");
+        if probe.is_empty() {
+            return None;
+        }
+        let rows = self.exec.query_json(&format!("{probe} LIMIT 1")).ok()?;
+        rows.first()
+            .and_then(|r| r.get("t"))
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+    }
+
+    /// The resolved-subject edge relation: every edge table joined to its src
+    /// and dst vertex tables so `(src, dst)` are IRIs, not dense ids. `None`
+    /// when no edge table survives the `edge_types` filter. Built once and used
+    /// as the recursive-CTE base for [`find_neighbors`].
+    fn edge_relation_sql(&self, edge_types: &[String]) -> Option<String> {
+        let parts: Vec<String> = self
+            .manifest
+            .edges()
+            .iter()
+            .filter(|e| edge_types.is_empty() || edge_types.iter().any(|t| t == &e.edge_type))
+            .map(|e| {
+                format!(
+                    "SELECT s.subject AS src, d.subject AS dst, '{et}' AS predicate, \
+                     '{dt}' AS dst_type \
+                     FROM {tbl} e \
+                     JOIN {src} s ON e.src_dense = s.dense_id \
+                     JOIN {dst} d ON e.dst_dense = d.dense_id",
+                    et = e.edge_type,
+                    dt = e.dst_type,
+                    tbl = quote_ident(&edge_table_name(e)),
+                    src = quote_ident(&e.src_type),
+                    dst = quote_ident(&e.dst_type),
+                )
+            })
+            .collect();
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" UNION ALL "))
+        }
+    }
+
     /// The `GraphAr` `data_type` of a vertex field, or `UnknownEntity` if the
     /// field is not declared on that vertex type.
     fn field_datatype(&self, vertex_type: &str, field: &str) -> Result<String> {
@@ -285,6 +486,24 @@ impl<E: DuckExecutor> Context<'_, E> {
 /// Quote a `DuckDB` identifier, doubling embedded quotes.
 fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// A `DuckDB` single-quoted string literal, doubling embedded quotes.
+fn sql_str_lit(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Extract a row column that is a JSON array of strings (a `DuckDB` `VARCHAR[]`).
+fn json_str_array(row: &Value, key: &str) -> Vec<String> {
+    row.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn to_json<T: serde::Serialize>(value: &T) -> Result<Value> {
@@ -664,18 +883,98 @@ mod tests {
     }
 
     #[test]
+    fn find_neighbors_walks_resolved_edges() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            if sql.contains("WITH RECURSIVE") {
+                // depth-1 out-neighbours of the origin.
+                vec![serde_json::json!({
+                    "src": "urn:a",
+                    "dst": "urn:b",
+                    "dst_type": "Person",
+                    "predicate": "knows",
+                    "hop": 1,
+                })]
+            } else {
+                // vertex_type_of probe for the origin.
+                vec![serde_json::json!({ "t": "Person" })]
+            }
+        });
+        let v = dispatch(
+            &Operation::FindNeighbors(FindNeighborsParams {
+                iri: "urn:a".into(),
+                depth: 1,
+                edge_types: Vec::new(),
+                limit: 500,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: crate::operations::discovery::FindNeighborsResult =
+            serde_json::from_value(v).unwrap();
+        assert_eq!(r.edges.len(), 1);
+        assert_eq!(r.edges[0].source, "urn:a");
+        assert_eq!(r.edges[0].target, "urn:b");
+        assert_eq!(r.edges[0].predicate, "knows");
+        // origin (hop 0) + neighbour (hop 1).
+        assert_eq!(r.vertices.len(), 2);
+        assert_eq!(r.vertices[0].iri, "urn:a");
+        assert_eq!(r.vertices[0].hop, 0);
+        assert_eq!(r.vertices[1].iri, "urn:b");
+        assert_eq!(r.vertices[1].hop, 1);
+        assert_eq!(r.vertices[1].vertex_type, "Person");
+    }
+
+    #[test]
+    fn find_path_reconstructs_ordered_path() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            if sql.contains("WITH RECURSIVE") {
+                vec![serde_json::json!({
+                    "nodes": ["urn:a", "urn:b", "urn:c"],
+                    "preds": ["knows", "knows"],
+                    "types": ["Person", "Person", "Person"],
+                })]
+            } else {
+                vec![serde_json::json!({ "t": "Person" })]
+            }
+        });
+        let v = dispatch(
+            &Operation::FindPath(FindPathParams {
+                source_iri: "urn:a".into(),
+                target_iri: "urn:c".into(),
+                max_hops: 5,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: FindPathResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.vertices.len(), 3);
+        assert_eq!(r.vertices[2].iri, "urn:c");
+        assert_eq!(r.vertices[2].hop, 2);
+        assert_eq!(r.edges.len(), 2);
+        assert_eq!(r.edges[1].source, "urn:b");
+        assert_eq!(r.edges[1].target, "urn:c");
+    }
+
+    #[test]
     fn unimplemented_verb_reports_its_name() {
         let m = fixture();
         let err = dispatch(
-            &Operation::FindPath(crate::operations::discovery::FindPathParams {
-                source_iri: "a".into(),
-                target_iri: "b".into(),
-                max_hops: 3,
+            &Operation::SearchByLabel(crate::operations::discovery::SearchByLabelParams {
+                query: "x".into(),
+                vertex_types: Vec::new(),
+                top_k: 20,
             }),
             &m,
             &FakeExec,
         )
         .unwrap_err();
-        assert!(matches!(err, GraphError::NotImplemented("find_path")));
+        assert!(matches!(
+            err,
+            GraphError::NotImplemented("search_by_label")
+        ));
     }
 }
