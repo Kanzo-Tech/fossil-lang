@@ -61,7 +61,7 @@ definitions:
         format: uint32
         minimum: 0
       cluster_size:
-        description: "Aggregate mode only: cluster size + cluster_id."
+        description: "Aggregate mode only: cluster size + `cluster_id`."
         type:
           - integer
           - "null"

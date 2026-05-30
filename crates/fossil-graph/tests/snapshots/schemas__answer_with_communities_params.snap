@@ -9,7 +9,7 @@ required:
   - question
 properties:
   max_communities:
-    description: Cap on how many cluster summaries the LLM may pull as context. The Microsoft GraphRAG paper recommends 5–10; defaulting low to match.
+    description: "Cap on how many cluster summaries the LLM may pull as context. The Microsoft `GraphRAG` paper recommends 5–10; defaulting low to match."
     default: 8
     type: integer
     format: uint8

@@ -34,7 +34,7 @@ definitions:
       source_type:
         type: string
       table_name:
-        description: "Convenience: DuckDB view name `{source}_{name}_{target}`. Pre-computed here so bindings don't reimplement the GraphAr edge naming convention."
+        description: "Convenience: `DuckDB` view name `{source}_{name}_{target}`. Pre-computed here so bindings don't reimplement the `GraphAr` edge naming convention."
         type: string
       target_type:
         type: string

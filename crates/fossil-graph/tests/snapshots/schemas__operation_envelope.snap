@@ -4,7 +4,7 @@ expression: schema_for! (Operation)
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
 title: Operation
-description: "All graph operations dispatchable on the surface. The `tag = \"verb\"` representation makes the wire form `{ \"verb\": \"list_vertex_types\", \"params\": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args."
+description: "All graph operations dispatchable on the surface.\n\nThe `tag = \"verb\"` serde representation makes the wire form `{ \"verb\": \"list_vertex_types\", \"params\": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args."
 oneOf:
   - type: object
     required:
@@ -200,7 +200,7 @@ definitions:
       - question
     properties:
       max_communities:
-        description: Cap on how many cluster summaries the LLM may pull as context. The Microsoft GraphRAG paper recommends 5–10; defaulting low to match.
+        description: "Cap on how many cluster summaries the LLM may pull as context. The Microsoft `GraphRAG` paper recommends 5–10; defaulting low to match."
         default: 8
         type: integer
         format: uint8

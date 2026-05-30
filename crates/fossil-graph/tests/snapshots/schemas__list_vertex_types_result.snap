@@ -35,5 +35,5 @@ definitions:
         description: Full RDF type IRI.
         type: string
       name:
-        description: "Short local name as used in DuckDB table identifier (e.g. `\"Person\"`)."
+        description: "Short local name as used in `DuckDB` table identifier (e.g. `\"Person\"`)."
         type: string
