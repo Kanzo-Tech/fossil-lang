@@ -1,0 +1,28 @@
+[package]
+name = "fossil-graph-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "wasm-bindgen binding for the fossil-graph verb surface — the WASM core of @fossil-lang/graph. Runs verb→SQL in WASM and delegates SQL execution to a host-provided DuckDB-WASM async callback."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The verb surface (WASM-clean). This crate adds only the wasm-bindgen glue:
+# the verb→SQL logic and dispatch live in fossil-graph, single-source.
+fossil-graph = { path = "../fossil-graph" }
+
+# WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
+# wasm-bindgen-cli. The async dispatch awaits a JS Promise via JsFuture.
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+serde_json = { workspace = true }
