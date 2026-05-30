@@ -119,9 +119,22 @@ fn connection() -> Connection {
     conn
 }
 
+/// Drive the async dispatch to completion synchronously. The native runtime
+/// never suspends, so a noop-waker poll returns on the first poll.
+fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+    use std::task::{Context as TaskContext, Poll};
+    let mut fut = std::pin::pin!(fut);
+    let mut cx = TaskContext::from_waker(std::task::Waker::noop());
+    loop {
+        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+            return v;
+        }
+    }
+}
+
 fn run<T: serde::de::DeserializeOwned>(conn: &Connection, m: &Manifest, op: &Operation) -> T {
     let exec = DuckRuntime::new(conn);
-    let value = dispatch(op, m, &exec).expect("verb dispatch");
+    let value = block_on(dispatch(op, m, &exec)).expect("verb dispatch");
     serde_json::from_value(value).expect("result deserialises")
 }
 

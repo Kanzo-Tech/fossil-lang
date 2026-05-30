@@ -8,6 +8,13 @@
 //!
 //! [`dispatch`] matches the [`Operation`] enum and returns the verb's `Result`
 //! serialised to JSON — the transport-agnostic wire form every binding ships.
+//!
+//! The verb futures are intentionally not `Send`: the two hosts are
+//! single-threaded — DuckDB-WASM runs on one browser thread and the native
+//! runtime drives the future with a single-thread `block_on`. Requiring `Send`
+//! would force the bound onto every executor (and DuckDB-WASM, which is not
+//! `Send`) for zero benefit, so `future_not_send` is allowed crate-wide here.
+#![allow(clippy::future_not_send)]
 
 use serde_json::Value;
 
@@ -42,7 +49,10 @@ pub trait DuckExecutor {
     ///
     /// Returns [`GraphError::Execution`] (carrying the binding's stringified
     /// DB error) when the query fails.
-    fn query_json(&self, sql: &str) -> Result<Vec<Value>>;
+    fn query_json(
+        &self,
+        sql: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Value>>>;
 
     /// Run `sql`, returning `(column_name, column_type)` descriptors alongside
     /// the rows. Only [`Operation::ExecuteSql`] needs column types; the default
@@ -52,18 +62,23 @@ pub trait DuckExecutor {
     /// # Errors
     ///
     /// As [`DuckExecutor::query_json`].
-    fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
-        let rows = self.query_json(sql)?;
-        let columns = rows
-            .first()
-            .and_then(Value::as_object)
-            .map(|obj| {
-                obj.iter()
-                    .map(|(name, value)| (name.clone(), json_kind(value).to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok((columns, rows))
+    fn query_columns(
+        &self,
+        sql: &str,
+    ) -> impl std::future::Future<Output = Result<ColumnedRows>> {
+        async move {
+            let rows = self.query_json(sql).await?;
+            let columns = rows
+                .first()
+                .and_then(Value::as_object)
+                .map(|obj| {
+                    obj.iter()
+                        .map(|(name, value)| (name.clone(), json_kind(value).to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok((columns, rows))
+        }
     }
 }
 
@@ -85,47 +100,51 @@ struct Context<'a, E: DuckExecutor> {
 ///
 /// Propagates verb execution errors; returns [`GraphError::NotImplemented`]
 /// for verbs without a W2 implementation.
-pub fn dispatch<E: DuckExecutor>(op: &Operation, manifest: &Manifest, exec: &E) -> Result<Value> {
-    Context { manifest, exec }.dispatch(op)
+pub async fn dispatch<E: DuckExecutor>(
+    op: &Operation,
+    manifest: &Manifest,
+    exec: &E,
+) -> Result<Value> {
+    Context { manifest, exec }.dispatch(op).await
 }
 
 impl<E: DuckExecutor> Context<'_, E> {
-    fn dispatch(&self, op: &Operation) -> Result<Value> {
+    async fn dispatch(&self, op: &Operation) -> Result<Value> {
         match op {
-            Operation::ListVertexTypes(_) => to_json(&self.list_vertex_types()?),
-            Operation::ListEdgeTypes(_) => to_json(&self.list_edge_types()?),
-            Operation::DescribeField(p) => to_json(&self.describe_field(p)?),
-            Operation::Aggregate(p) => to_json(&self.aggregate(p)?),
-            Operation::Histogram(p) => to_json(&self.histogram(p)?),
-            Operation::TopK(p) => to_json(&self.top_k(p)?),
-            Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p)?),
-            Operation::FindPath(p) => to_json(&self.find_path(p)?),
-            Operation::Viewport(p) => to_json(&self.viewport(p)?),
-            Operation::ExecuteSql(p) => to_json(&self.execute_sql(p)?),
+            Operation::ListVertexTypes(_) => to_json(&self.list_vertex_types().await?),
+            Operation::ListEdgeTypes(_) => to_json(&self.list_edge_types().await?),
+            Operation::DescribeField(p) => to_json(&self.describe_field(p).await?),
+            Operation::Aggregate(p) => to_json(&self.aggregate(p).await?),
+            Operation::Histogram(p) => to_json(&self.histogram(p).await?),
+            Operation::TopK(p) => to_json(&self.top_k(p).await?),
+            Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p).await?),
+            Operation::FindPath(p) => to_json(&self.find_path(p).await?),
+            Operation::Viewport(p) => to_json(&self.viewport(p).await?),
+            Operation::ExecuteSql(p) => to_json(&self.execute_sql(p).await?),
             other => Err(GraphError::NotImplemented(other.verb_name())),
         }
     }
 
     // ── Schema verbs ──────────────────────────────────────────────────────
 
-    fn list_vertex_types(&self) -> Result<ListVertexTypesResult> {
+    async fn list_vertex_types(&self) -> Result<ListVertexTypesResult> {
         let mut types = Vec::with_capacity(self.manifest.vertices().len());
         for info in self.manifest.vertices() {
             types.push(VertexTypeSummary {
                 name: info.vertex_type.clone(),
                 iri: info.iri.clone(),
-                count: self.count_rows(&info.vertex_type)?,
+                count: self.count_rows(&info.vertex_type).await?,
                 fields: self.manifest.vertex_fields(&info.vertex_type)?,
             });
         }
         Ok(ListVertexTypesResult { types })
     }
 
-    fn list_edge_types(&self) -> Result<ListEdgeTypesResult> {
+    async fn list_edge_types(&self) -> Result<ListEdgeTypesResult> {
         let mut edges = Vec::with_capacity(self.manifest.edges().len());
         for info in self.manifest.edges() {
             let table_name = edge_table_name(info);
-            let count = self.count_rows(&table_name)?;
+            let count = self.count_rows(&table_name).await?;
             edges.push(EdgeTypeSummary {
                 source_type: info.src_type.clone(),
                 name: info.edge_type.clone(),
@@ -138,22 +157,28 @@ impl<E: DuckExecutor> Context<'_, E> {
         Ok(ListEdgeTypesResult { edges })
     }
 
-    fn describe_field(&self, p: &DescribeFieldParams) -> Result<DescribeFieldResult> {
+    async fn describe_field(&self, p: &DescribeFieldParams) -> Result<DescribeFieldResult> {
         let datatype = self.field_datatype(&p.vertex_type, &p.field)?;
 
         let table = quote_ident(&p.vertex_type);
         let field = quote_ident(&p.field);
 
         let distinct = scalar_u64(
-            &self.exec.query_json(&format!(
-                "SELECT count(DISTINCT {field}) AS distinct_count FROM {table}"
-            ))?,
+            &self
+                .exec
+                .query_json(&format!(
+                    "SELECT count(DISTINCT {field}) AS distinct_count FROM {table}"
+                ))
+                .await?,
             "distinct_count",
         );
 
-        let sample_rows = self.exec.query_json(&format!(
-            "SELECT {field} AS sample FROM {table} WHERE {field} IS NOT NULL LIMIT 8"
-        ))?;
+        let sample_rows = self
+            .exec
+            .query_json(&format!(
+                "SELECT {field} AS sample FROM {table} WHERE {field} IS NOT NULL LIMIT 8"
+            ))
+            .await?;
         let samples = sample_rows
             .iter()
             .filter_map(|row| row.get("sample"))
@@ -170,7 +195,7 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Aggregation verbs ─────────────────────────────────────────────────
 
-    fn aggregate(&self, p: &AggregateParams) -> Result<AggregateResult> {
+    async fn aggregate(&self, p: &AggregateParams) -> Result<AggregateResult> {
         self.manifest.lookup_vertex(&p.vertex_type)?;
         let table = quote_ident(&p.vertex_type);
         let group = quote_ident(&p.group_by);
@@ -192,7 +217,8 @@ impl<E: DuckExecutor> Context<'_, E> {
         );
         let rows = self
             .exec
-            .query_json(&sql)?
+            .query_json(&sql)
+            .await?
             .iter()
             .map(|r| AggregateRow {
                 group: r.get("grp").cloned().unwrap_or(Value::Null),
@@ -202,18 +228,18 @@ impl<E: DuckExecutor> Context<'_, E> {
         Ok(AggregateResult { rows })
     }
 
-    fn top_k(&self, p: &TopKParams) -> Result<TopKResult> {
+    async fn top_k(&self, p: &TopKParams) -> Result<TopKResult> {
         self.manifest.lookup_vertex(&p.vertex_type)?;
         let table = quote_ident(&p.vertex_type);
         let order = quote_ident(&p.order_by);
         let dir = if p.descending { "DESC" } else { "ASC" };
         let sql = format!("SELECT * FROM {table} ORDER BY {order} {dir} LIMIT {}", p.k);
         Ok(TopKResult {
-            rows: self.exec.query_json(&sql)?,
+            rows: self.exec.query_json(&sql).await?,
         })
     }
 
-    fn histogram(&self, p: &HistogramParams) -> Result<HistogramResult> {
+    async fn histogram(&self, p: &HistogramParams) -> Result<HistogramResult> {
         let field_kind = histogram_kind(&self.field_datatype(&p.vertex_type, &p.field)?);
         let table = quote_ident(&p.vertex_type);
         let field = quote_ident(&p.field);
@@ -224,10 +250,13 @@ impl<E: DuckExecutor> Context<'_, E> {
                 // No numeric axis: return the top-`bins` category counts. Labels
                 // aren't representable in the f64 `edges` contract, so edges carry
                 // the bin ordinals; callers pair them with a separate label query.
-                let rows = self.exec.query_json(&format!(
-                    "SELECT count(*) AS n FROM {table} WHERE {field} IS NOT NULL \
-                     GROUP BY {field} ORDER BY n DESC LIMIT {bins}"
-                ))?;
+                let rows = self
+                    .exec
+                    .query_json(&format!(
+                        "SELECT count(*) AS n FROM {table} WHERE {field} IS NOT NULL \
+                         GROUP BY {field} ORDER BY n DESC LIMIT {bins}"
+                    ))
+                    .await?;
                 let counts: Vec<u64> = rows
                     .iter()
                     .map(|r| r.get("n").and_then(Value::as_u64).unwrap_or(0))
@@ -242,9 +271,12 @@ impl<E: DuckExecutor> Context<'_, E> {
                 })
             }
             HistogramKind::Numeric | HistogramKind::Temporal => {
-                let bounds = self.exec.query_json(&format!(
-                    "SELECT min({field})::DOUBLE AS lo, max({field})::DOUBLE AS hi FROM {table}"
-                ))?;
+                let bounds = self
+                    .exec
+                    .query_json(&format!(
+                        "SELECT min({field})::DOUBLE AS lo, max({field})::DOUBLE AS hi FROM {table}"
+                    ))
+                    .await?;
                 let (Some(lo), Some(hi)) = (
                     scalar_f64(&bounds, "lo"),
                     scalar_f64(&bounds, "hi"),
@@ -260,11 +292,14 @@ impl<E: DuckExecutor> Context<'_, E> {
                 let edges = (0..=bins).map(|i| f64::from(i).mul_add(width, lo)).collect();
                 let mut counts = vec![0u64; bins as usize];
                 if width > 0.0 {
-                    let rows = self.exec.query_json(&format!(
-                        "SELECT least({bins} - 1, floor(({field}::DOUBLE - {lo}) / {width}))::BIGINT \
-                         AS bin, count(*) AS n FROM {table} WHERE {field} IS NOT NULL \
-                         GROUP BY bin ORDER BY bin"
-                    ))?;
+                    let rows = self
+                        .exec
+                        .query_json(&format!(
+                            "SELECT least({bins} - 1, floor(({field}::DOUBLE - {lo}) / {width}))::BIGINT \
+                             AS bin, count(*) AS n FROM {table} WHERE {field} IS NOT NULL \
+                             GROUP BY bin ORDER BY bin"
+                        ))
+                        .await?;
                     for r in &rows {
                         let (Some(bin), Some(n)) = (
                             r.get("bin").and_then(Value::as_u64),
@@ -280,7 +315,7 @@ impl<E: DuckExecutor> Context<'_, E> {
                     }
                 } else {
                     // All values equal → one populated bin.
-                    counts[0] = self.count_rows(&p.vertex_type)?;
+                    counts[0] = self.count_rows(&p.vertex_type).await?;
                 }
                 Ok(HistogramResult {
                     edges,
@@ -293,13 +328,13 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Escape hatch ──────────────────────────────────────────────────────
 
-    fn execute_sql(&self, p: &ExecuteSqlParams) -> Result<ExecuteSqlResult> {
+    async fn execute_sql(&self, p: &ExecuteSqlParams) -> Result<ExecuteSqlResult> {
         let cap = u64::from(p.row_cap);
         // Wrap so the row cap is enforced regardless of the user's own LIMIT;
         // fetch one extra row to detect truncation. (timeout_ms is enforced by
         // bindings that can set a statement timeout — the native runtime does.)
         let wrapped = format!("SELECT * FROM ({}) AS _q LIMIT {}", p.sql, cap + 1);
-        let (columns, mut rows) = self.exec.query_columns(&wrapped)?;
+        let (columns, mut rows) = self.exec.query_columns(&wrapped).await?;
         let truncated = u64::try_from(rows.len()).unwrap_or(u64::MAX) > cap;
         rows.truncate(usize::try_from(cap).unwrap_or(usize::MAX));
         Ok(ExecuteSqlResult {
@@ -314,7 +349,7 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Viewport verb ─────────────────────────────────────────────────────
 
-    fn viewport(&self, p: &ViewportParams) -> Result<ViewportResult> {
+    async fn viewport(&self, p: &ViewportParams) -> Result<ViewportResult> {
         // W0b detail mode: a bbox scan over each vertex type's layout columns,
         // returning typed-array-ready dense indices. Aggregate (LOD) mode and a
         // meaningful spatial result depend on writer-W3 (it fills x/y from a real
@@ -358,7 +393,8 @@ impl<E: DuckExecutor> Context<'_, E> {
         let sql = format!("{} LIMIT {}", parts.join(" UNION ALL "), p.limit);
         let vertices: Vec<ViewportVertex> = self
             .exec
-            .query_json(&sql)?
+            .query_json(&sql)
+            .await?
             .iter()
             .map(|r| ViewportVertex {
                 dense_id: r
@@ -387,11 +423,11 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Discovery verbs ───────────────────────────────────────────────────
 
-    fn find_neighbors(&self, p: &FindNeighborsParams) -> Result<FindNeighborsResult> {
+    async fn find_neighbors(&self, p: &FindNeighborsParams) -> Result<FindNeighborsResult> {
         let Some(edge_relation) = self.edge_relation_sql(&p.edge_types) else {
             // No edge types match → the origin has no reachable neighbours.
             return Ok(FindNeighborsResult {
-                vertices: self.origin_only(&p.iri),
+                vertices: self.origin_only(&p.iri).await,
                 edges: Vec::new(),
             });
         };
@@ -413,9 +449,9 @@ impl<E: DuckExecutor> Context<'_, E> {
             p.limit
         );
 
-        let rows = self.exec.query_json(&sql)?;
+        let rows = self.exec.query_json(&sql).await?;
         let mut edges = Vec::with_capacity(rows.len());
-        let mut vertices = self.origin_only(&p.iri);
+        let mut vertices = self.origin_only(&p.iri).await;
         let mut seen: std::collections::HashSet<String> =
             vertices.iter().map(|v| v.iri.clone()).collect();
         for r in &rows {
@@ -451,7 +487,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         Ok(FindNeighborsResult { vertices, edges })
     }
 
-    fn find_path(&self, p: &FindPathParams) -> Result<FindPathResult> {
+    async fn find_path(&self, p: &FindPathParams) -> Result<FindPathResult> {
         let empty = FindPathResult {
             vertices: Vec::new(),
             edges: Vec::new(),
@@ -463,7 +499,8 @@ impl<E: DuckExecutor> Context<'_, E> {
         let source = sql_str_lit(&p.source_iri);
         let target = sql_str_lit(&p.target_iri);
         let max_hops = u32::from(p.max_hops.max(1));
-        let src_type = sql_str_lit(&self.vertex_type_of(&p.source_iri).unwrap_or_default());
+        let src_type =
+            sql_str_lit(&self.vertex_type_of(&p.source_iri).await.unwrap_or_default());
 
         // BFS accumulating the node / predicate / type lists, pruning cycles via
         // `list_contains`; the shortest path to `target` is the min-depth row.
@@ -480,7 +517,7 @@ impl<E: DuckExecutor> Context<'_, E> {
              SELECT nodes, preds, types FROM walk WHERE node = {target} ORDER BY depth LIMIT 1"
         );
 
-        let rows = self.exec.query_json(&sql)?;
+        let rows = self.exec.query_json(&sql).await?;
         let Some(row) = rows.first() else {
             return Ok(empty);
         };
@@ -512,18 +549,18 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     /// The origin vertex alone (hop 0), with its type resolved from whichever
     /// vertex table holds the subject. Used as the seed of a neighbour result.
-    fn origin_only(&self, iri: &str) -> Vec<NeighborVertex> {
+    async fn origin_only(&self, iri: &str) -> Vec<NeighborVertex> {
         vec![NeighborVertex {
             iri: iri.to_string(),
             label: iri.to_string(),
-            vertex_type: self.vertex_type_of(iri).unwrap_or_default(),
+            vertex_type: self.vertex_type_of(iri).await.unwrap_or_default(),
             hop: 0,
         }]
     }
 
     /// Resolve which vertex type holds `iri` by probing each type's `subject`
     /// column. Returns the first match (subjects are unique across the graph).
-    fn vertex_type_of(&self, iri: &str) -> Option<String> {
+    async fn vertex_type_of(&self, iri: &str) -> Option<String> {
         let lit = sql_str_lit(iri);
         let probe = self
             .manifest
@@ -542,7 +579,11 @@ impl<E: DuckExecutor> Context<'_, E> {
             return None;
         }
         // One outer LIMIT over the whole union (subjects are unique).
-        let rows = self.exec.query_json(&format!("{probe} LIMIT 1")).ok()?;
+        let rows = self
+            .exec
+            .query_json(&format!("{probe} LIMIT 1"))
+            .await
+            .ok()?;
         rows.first()
             .and_then(|r| r.get("t"))
             .and_then(Value::as_str)
@@ -601,9 +642,9 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     /// Cheap row count — `DuckDB` answers from the Parquet footer metadata
     /// (O(1), no full scan) for `read_parquet`-backed views.
-    fn count_rows(&self, table: &str) -> Result<u64> {
+    async fn count_rows(&self, table: &str) -> Result<u64> {
         let sql = format!("SELECT count(*) AS n FROM {}", quote_ident(table));
-        scalar_u64(&self.exec.query_json(&sql)?, "n")
+        scalar_u64(&self.exec.query_json(&sql).await?, "n")
             .ok_or_else(|| GraphError::Execution(format!("count(*) on `{table}` returned no row")))
     }
 }
@@ -805,9 +846,28 @@ mod tests {
     /// Canned executor: matches the verb SQL shapes by substring so the verb
     /// wiring is testable without a real `DuckDB` (SQL correctness is covered by
     /// the fossil-runtime integration test, W2-06).
+    /// Drive a future to completion synchronously. Our test executors never
+    /// suspend (they return ready values), so a noop-waker poll loop returns on
+    /// the first poll — no runtime dependency needed.
+    fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+        use std::task::{Context as TaskContext, Poll};
+        let mut fut = std::pin::pin!(fut);
+        let mut cx = TaskContext::from_waker(std::task::Waker::noop());
+        loop {
+            if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
+                return v;
+            }
+        }
+    }
+
+    /// Block on [`dispatch`] — the tests are sync.
+    fn run<E: DuckExecutor>(op: &Operation, m: &Manifest, exec: &E) -> Result<Value> {
+        block_on(dispatch(op, m, exec))
+    }
+
     struct FakeExec;
     impl DuckExecutor for FakeExec {
-        fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
+        async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
             let row = if sql.contains("count(*)") {
                 serde_json::json!({ "n": 3 })
             } else if sql.contains("count(DISTINCT") {
@@ -828,7 +888,7 @@ mod tests {
     /// (SQL correctness is the fossil-runtime integration test's job, W2-06).
     struct FnExec<F: Fn(&str) -> Vec<Value>>(F);
     impl<F: Fn(&str) -> Vec<Value>> DuckExecutor for FnExec<F> {
-        fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
+        async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
             Ok(self.0(sql))
         }
     }
@@ -844,7 +904,7 @@ mod tests {
                 serde_json::json!({ "grp": "b", "val": 1.0 }),
             ]
         });
-        let v = dispatch(
+        let v = run(
             &Operation::Aggregate(AggregateParams {
                 vertex_type: "Person".into(),
                 group_by: "name".into(),
@@ -865,7 +925,7 @@ mod tests {
     #[test]
     fn aggregate_sum_requires_measure() {
         let m = fixture();
-        let err = dispatch(
+        let err = run(
             &Operation::Aggregate(AggregateParams {
                 vertex_type: "Person".into(),
                 group_by: "name".into(),
@@ -887,7 +947,7 @@ mod tests {
             assert!(sql.contains("ORDER BY") && sql.contains("DESC") && sql.contains("LIMIT 5"));
             vec![serde_json::json!({ "name": "x", "age": 9 })]
         });
-        let v = dispatch(
+        let v = run(
             &Operation::TopK(TopKParams {
                 vertex_type: "Person".into(),
                 order_by: "age".into(),
@@ -916,7 +976,7 @@ mod tests {
                 ]
             }
         });
-        let v = dispatch(
+        let v = run(
             &Operation::Histogram(HistogramParams {
                 vertex_type: "Person".into(),
                 field: "age".into(),
@@ -943,7 +1003,7 @@ mod tests {
                 serde_json::json!({ "n": 2 }),
             ]
         });
-        let v = dispatch(
+        let v = run(
             &Operation::Histogram(HistogramParams {
                 vertex_type: "Person".into(),
                 field: "name".into(),
@@ -962,7 +1022,7 @@ mod tests {
     #[test]
     fn list_vertex_types_carries_iri_count_and_user_fields() {
         let m = fixture();
-        let v = dispatch(
+        let v = run(
             &Operation::ListVertexTypes(crate::operations::schema::ListVertexTypesParams {}),
             &m,
             &FakeExec,
@@ -981,7 +1041,7 @@ mod tests {
     #[test]
     fn list_edge_types_builds_table_name_and_iri() {
         let m = fixture();
-        let v = dispatch(
+        let v = run(
             &Operation::ListEdgeTypes(crate::operations::schema::ListEdgeTypesParams {}),
             &m,
             &FakeExec,
@@ -998,7 +1058,7 @@ mod tests {
     #[test]
     fn describe_field_infers_measure_for_numeric() {
         let m = fixture();
-        let v = dispatch(
+        let v = run(
             &Operation::DescribeField(DescribeFieldParams {
                 vertex_type: "Person".into(),
                 field: "age".into(),
@@ -1017,7 +1077,7 @@ mod tests {
     #[test]
     fn describe_unknown_field_is_typed_error() {
         let m = fixture();
-        let err = dispatch(
+        let err = run(
             &Operation::DescribeField(DescribeFieldParams {
                 vertex_type: "Person".into(),
                 field: "ghost".into(),
@@ -1050,7 +1110,7 @@ mod tests {
                 vec![serde_json::json!({ "t": "Person" })]
             }
         });
-        let v = dispatch(
+        let v = run(
             &Operation::FindNeighbors(FindNeighborsParams {
                 iri: "urn:a".into(),
                 depth: 1,
@@ -1090,7 +1150,7 @@ mod tests {
                 vec![serde_json::json!({ "t": "Person" })]
             }
         });
-        let v = dispatch(
+        let v = run(
             &Operation::FindPath(FindPathParams {
                 source_iri: "urn:a".into(),
                 target_iri: "urn:c".into(),
@@ -1119,7 +1179,7 @@ mod tests {
                 serde_json::json!({ "dense_id": 1, "x": 3.0, "y": 4.0, "type_idx": 0 }),
             ]
         });
-        let v = dispatch(
+        let v = run(
             &Operation::Viewport(crate::operations::viewport::ViewportParams {
                 bbox: crate::operations::viewport::BoundingBox {
                     x_min: 0.0,
@@ -1156,7 +1216,7 @@ mod tests {
                 serde_json::json!({ "a": 3, "b": "z" }),
             ]
         });
-        let v = dispatch(
+        let v = run(
             &Operation::ExecuteSql(ExecuteSqlParams {
                 sql: "SELECT * FROM t".into(),
                 row_cap: 2,
@@ -1175,7 +1235,7 @@ mod tests {
     #[test]
     fn unimplemented_verb_reports_its_name() {
         let m = fixture();
-        let err = dispatch(
+        let err = run(
             &Operation::SearchByLabel(crate::operations::discovery::SearchByLabelParams {
                 query: "x".into(),
                 vertex_types: Vec::new(),

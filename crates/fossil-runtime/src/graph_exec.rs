@@ -5,6 +5,10 @@
 //! result row to a JSON object. The WASM counterpart (`fossil-wasm`, W5)
 //! implements the same seam against DuckDB-WASM — neither re-derives a verb's
 //! SQL.
+//!
+//! The executor futures are single-threaded by design (see `fossil_graph::exec`),
+//! so `future_not_send` is allowed here too.
+#![allow(clippy::future_not_send)]
 
 use duckdb::Connection;
 use duckdb::types::Value as DuckValue;
@@ -28,13 +32,16 @@ impl<'c> DuckRuntime<'c> {
 }
 
 impl DuckExecutor for DuckRuntime<'_> {
-    fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
+    // Native execution is synchronous; the `async fn` just wraps it in an
+    // immediately-ready future so the verb surface stays single-source across
+    // the native runtime and the async DuckDB-WASM binding.
+    async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
         self.run(sql)
             .map(|(_, rows)| rows)
             .map_err(|e| GraphError::Execution(e.to_string()))
     }
 
-    fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
+    async fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
         self.run(sql).map_err(|e| GraphError::Execution(e.to_string()))
     }
 }
