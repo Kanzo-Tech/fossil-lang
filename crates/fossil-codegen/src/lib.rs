@@ -7,8 +7,8 @@
 //! parenthesised options form).
 //!
 //! Phase 4 (CORE-10) extends codegen to all 11 operators + R1-R10-rewritten
-//! MIR. Phase 5 (SINK-01..06) replaces [`manifest::manifest_template`] with
-//! programmatic generation via `serde_yaml_ng`.
+//! MIR. Phase 5 (SINK-01..06) renders every manifest programmatically via the
+//! canonical `fossil_sinks::manifest` structs (see [`manifest`]).
 //!
 //! # Phase 2-9 contract (locked)
 //!
@@ -25,7 +25,7 @@ pub mod sql;
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`
 // and `fossil-mir`: types at the crate root, query functions stay under
 // their module path (`fossil_codegen::sql::codegen_sql`).
-pub use manifest::{manifest_template, manifest_yaml_for_plan};
+pub use manifest::{flat_triple_manifest, manifest_yaml_for_plan};
 pub use sql::{
     SINK_DEFAULT_CHUNK_SIZE, SqlPlan, codegen_graph, codegen_graph_for_test, codegen_sql,
     codegen_sql_with_descriptor, codegen_sql_with_descriptor_for_mapping, decompose_for_writer,

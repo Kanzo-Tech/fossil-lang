@@ -43,7 +43,7 @@ use fossil_sinks::decomp::{
 use fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
 
 use crate::ast;
-use crate::manifest::{manifest_template, manifest_yaml_for_plan};
+use crate::manifest::{flat_triple_manifest, manifest_yaml_for_plan};
 
 /// The stdlib classification catalog (05-01), read by [`render_expr`]'s
 /// [`Expr::Call`] arm to lower a scalar call to its `DuckDB` builtin / inline
@@ -712,7 +712,7 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
         }
     }
 
-    SqlPlan::new(db, sql, manifest_template())
+    SqlPlan::new(db, sql, flat_triple_manifest())
 }
 
 /// Test-only entry point into the codegen seam.

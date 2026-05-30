@@ -3,15 +3,30 @@ source: crates/fossil-codegen/tests/compile_hello.rs
 assertion_line: 55
 expression: plan.manifest_yaml(&db)
 ---
-# GraphAr manifest — Phase 1 skeletal form.
-graphar_version: 1.0.0
-prefix: https://example.org/
-vertex_types:
-  - name: Person
-    chunk_size: 1024
-    properties:
-      - name: name
-        data_type: string
-        nullable: false
-    parquet_path: output.parquet
-edge_types: []
+# graph.graph.yml
+name: graph
+prefix: ''
+vertices:
+- _triples.vertex.yml
+edges: []
+version: gar/v1
+---
+# _triples.vertex.yml
+type: _triples
+chunk_size: 1024
+prefix: ''
+property_groups:
+- file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+    is_nullable: false
+  - name: predicate
+    data_type: string
+    is_primary: false
+    is_nullable: false
+  - name: object
+    data_type: string
+    is_primary: false
+version: gar/v1

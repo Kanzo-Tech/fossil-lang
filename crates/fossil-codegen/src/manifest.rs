@@ -1,60 +1,32 @@
 //! `GraphAr` manifest emission.
 //!
-//! ## The descriptor (`ShEx`) path — programmatic `GraphAr` v1.0.0 (05-08, SINK-02)
+//! Both compile paths render their manifest through ONE mechanism: the canonical
+//! `fossil_sinks::manifest` structs serialised to `GraphAr` v1.0.0 YAML, joined
+//! by [`concat_manifest`]. There is no hand-templated YAML — the manifest always
+//! honestly describes the columns the SQL actually emits.
 //!
-//! [`manifest_yaml_for_plan`] renders the real `GraphAr` v1.0.0 vertex-info /
-//! edge-info YAML for a decomposed [`SinkPlan`] by delegating to
-//! `fossil_sinks`'s `manifest_for_plan` (the 05-05 / 05-06 `VertexInfo` /
-//! `EdgeInfo` structs, `version: gar/v1`). This is what the descriptor seam
-//! ([`crate::sql::codegen_sql_with_descriptor`]) emits alongside the chunked
-//! COPY SQL.
-//!
-//! ## The flat-triple (`AcceptAll` / walking-skeleton) path — Phase-1 template
-//!
-//! [`manifest_template`] is the Phase-1 hand-templated skeletal manifest used by
-//! the descriptor-LESS flat-COPY path (`hello.fossil`). The duplicated constant
-//! that previously lived inline here is collapsed: it now delegates to
-//! `fossil_sinks`'s `GraphArSink::manifest_template` — one source of truth (05-08
-//! manifest-dup collapse). The string is byte-identical, so the walking-skeleton
-//! snapshot stays green. Superseded by the programmatic path for any real `ShEx`
-//! target; retained because the `AcceptAll` demo emits a flat triple Parquet that
-//! does not yet conform to the `GraphAr` per-vertex chunk layout.
+//! - [`manifest_yaml_for_plan`] — the descriptor (`ShEx`) path: a decomposed
+//!   [`SinkPlan`] → per-type vertex/edge manifests + the `GraphInfo` index, via
+//!   the canonical W0b writer (`plan_manifests_from_sink_plan`). Identical to
+//!   what `fossil run --dest` materialises.
+//! - [`flat_triple_manifest`] — the schemaless (`AcceptAll` / walking-skeleton)
+//!   path: the flat `(subject, predicate, object)` triple `output.parquet` has no
+//!   shape to decompose against, so its honest manifest is a single `_triples`
+//!   vertex type describing those three columns. Built from the same structs.
 
 use std::fmt::Write as _;
 
-use fossil_sinks::Sink;
 use fossil_sinks::decomp::SinkPlan;
+use fossil_sinks::manifest::{
+    DEFAULT_CHUNK_SIZE, GraphInfo, Property, PropertyGroup, VertexInfo,
+};
 use fossil_sinks::writer::{WriteOptions, plan_manifests_from_sink_plan};
 
-/// Return the Phase-1 hand-templated `GraphAr` manifest for the flat-triple
-/// (`AcceptAll` / walking-skeleton) path.
-///
-/// Collapsed (05-08): delegates to `fossil_sinks`'s `GraphArSink::manifest_template`
-/// rather than re-declaring the constant, so the codegen-side and sink-side
-/// copies can never drift. Byte-identical to the prior inline constant — the
-/// `compile_hello` snapshot stays green.
-#[must_use]
-pub fn manifest_template() -> String {
-    fossil_sinks::GraphArSink.manifest_template()
-}
-
-/// Render the concatenated `GraphAr` v1.0.0 manifest YAML for a decomposed
-/// [`SinkPlan`] (the descriptor / `ShEx` path — SINK-02).
-///
-/// Single source: delegates to the canonical W0b writer
-/// ([`plan_manifests_from_sink_plan`]) — the same path `fossil run --dest`
-/// materialises, so the `fossil compile` manifest carries the identical
-/// `dense_id` + layout column shape and the top-level `GraphInfo` aggregate
-/// index. The per-file YAML documents (graph info, then each vertex/edge) are
-/// concatenated with a `---` separator and a `# rel_path` comment so a single
-/// emitted manifest file stays self-describing without a directory listing.
-#[must_use]
-pub fn manifest_yaml_for_plan(plan: &SinkPlan) -> String {
-    let set = plan_manifests_from_sink_plan(plan, &WriteOptions::default())
-        .expect("a decomposed SinkPlan always yields a valid manifest");
-    let parts = std::iter::once((&set.graph.rel_path, &set.graph.yaml))
-        .chain(set.vertices.iter().map(|m| (&m.rel_path, &m.yaml)))
-        .chain(set.edges.iter().map(|m| (&m.rel_path, &m.yaml)));
+/// Join `(rel_path, yaml)` documents into one self-describing manifest file: a
+/// `# rel_path` comment per document, `---` separators between them. The single
+/// place this concatenation lives so the descriptor and schemaless paths share
+/// byte-for-byte the same envelope.
+fn concat_manifest<'a>(parts: impl Iterator<Item = (&'a str, &'a str)>) -> String {
     let mut out = String::new();
     for (rel_path, yaml) in parts {
         if !out.is_empty() {
@@ -64,4 +36,82 @@ pub fn manifest_yaml_for_plan(plan: &SinkPlan) -> String {
         out.push_str(yaml);
     }
     out
+}
+
+/// Render the concatenated `GraphAr` v1.0.0 manifest YAML for a decomposed
+/// [`SinkPlan`] (the descriptor / `ShEx` path — SINK-02).
+///
+/// Single source: delegates to the canonical W0b writer
+/// ([`plan_manifests_from_sink_plan`]) — the same path `fossil run --dest`
+/// materialises, so the `fossil compile` manifest carries the identical
+/// `dense_id` + layout column shape and the top-level `GraphInfo` aggregate index.
+#[must_use]
+pub fn manifest_yaml_for_plan(plan: &SinkPlan) -> String {
+    let set = plan_manifests_from_sink_plan(plan, &WriteOptions::default())
+        .expect("a decomposed SinkPlan always yields a valid manifest");
+    let parts = std::iter::once((set.graph.rel_path.as_str(), set.graph.yaml.as_str()))
+        .chain(
+            set.vertices
+                .iter()
+                .map(|m| (m.rel_path.as_str(), m.yaml.as_str())),
+        )
+        .chain(set.edges.iter().map(|m| (m.rel_path.as_str(), m.yaml.as_str())));
+    concat_manifest(parts)
+}
+
+/// Render the honest `GraphAr` v1.0.0 manifest for the schemaless flat-triple
+/// `output.parquet` (the `AcceptAll` / walking-skeleton path).
+///
+/// With no shape target there is nothing to decompose, so the output is a flat
+/// `(subject, predicate, object)` triple table. The manifest describes exactly
+/// those three columns as a single `_triples` vertex type — built from the same
+/// canonical structs as the descriptor path (no hand-templated YAML), so it can
+/// never claim columns the SQL does not emit.
+#[must_use]
+pub fn flat_triple_manifest() -> String {
+    let triples = VertexInfo::new(
+        "_triples",
+        DEFAULT_CHUNK_SIZE,
+        // The schemaless output is the single `output.parquet` at the dataset
+        // root, not a per-type chunk directory.
+        String::new(),
+        vec![PropertyGroup {
+            file_type: "parquet".to_string(),
+            properties: vec![
+                Property {
+                    name: "subject".to_string(),
+                    data_type: "string".to_string(),
+                    is_primary: true,
+                    is_nullable: Some(false),
+                },
+                Property {
+                    name: "predicate".to_string(),
+                    data_type: "string".to_string(),
+                    is_primary: false,
+                    is_nullable: Some(false),
+                },
+                Property {
+                    name: "object".to_string(),
+                    data_type: "string".to_string(),
+                    is_primary: false,
+                    is_nullable: None,
+                },
+            ],
+        }],
+    );
+    let graph = GraphInfo::new(
+        "graph",
+        String::new(),
+        vec!["_triples.vertex.yml".to_string()],
+        Vec::new(),
+    );
+    let triples_yaml = triples.to_yaml().expect("VertexInfo serialises");
+    let graph_yaml = graph.to_yaml().expect("GraphInfo serialises");
+    concat_manifest(
+        [
+            ("graph.graph.yml", graph_yaml.as_str()),
+            ("_triples.vertex.yml", triples_yaml.as_str()),
+        ]
+        .into_iter(),
+    )
 }

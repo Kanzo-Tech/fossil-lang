@@ -122,23 +122,26 @@ fn walking_skeleton_compile_writes_5_triples_with_expected_content() {
         manifest.display()
     );
 
-    // 2. Manifest shape sanity — the Phase 1 hand-templated GraphAr manifest
-    //    from `fossil-codegen::manifest::manifest_template`. Phase 5 SINK-02
-    //    will promote this to programmatic generation; until then we assert
-    //    the three lexically-stable anchors.
+    // 2. Manifest shape sanity — the honest programmatic GraphAr v1.0.0 manifest
+    //    for the schemaless flat-triple output (`fossil_codegen::flat_triple_manifest`).
+    //    It conforms to the spec (`version: gar/v1`) and describes the actual
+    //    `output.parquet` columns as a single `_triples` vertex type — no
+    //    hand-templated YAML claiming columns the SQL never emits.
     let manifest_text = std::fs::read_to_string(&manifest).expect("read manifest.yaml");
     assert!(
-        manifest_text.contains("graphar_version: 1.0.0"),
-        "manifest missing graphar_version anchor; got:\n{manifest_text}",
+        manifest_text.contains("version: gar/v1"),
+        "manifest missing GraphAr v1 version anchor; got:\n{manifest_text}",
     );
     assert!(
-        manifest_text.contains("vertex_types:"),
-        "manifest missing vertex_types anchor; got:\n{manifest_text}",
+        manifest_text.contains("type: _triples"),
+        "manifest missing _triples vertex type; got:\n{manifest_text}",
     );
-    assert!(
-        manifest_text.contains("Person"),
-        "manifest missing Person vertex; got:\n{manifest_text}",
-    );
+    for col in ["subject", "predicate", "object"] {
+        assert!(
+            manifest_text.contains(col),
+            "manifest missing `{col}` column; got:\n{manifest_text}",
+        );
+    }
 
     // 3. Parquet content — RESEARCH.md Example 3 verbatim. Open via DuckDB
     //    native (the WASM half is Phase 7 PLAY-02). Build the path as a
