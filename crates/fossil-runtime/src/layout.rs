@@ -205,32 +205,46 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
 
         let clusters = weakly_connected_components(vertex_count, &edges);
         let positions = cluster_layout(&clusters);
+        let morton = morton_codes(&positions);
 
-        // Stage (dense_id, x, y, cluster_id) in a temp table via the Appender.
+        // Stage (dense_id, x, y, cluster_id, morton) in a temp table via the
+        // Appender. `morton` is used only for ORDER BY — it is NOT carried into
+        // the output Parquet (the rewrite SELECTs the vertex columns only).
         conn.execute_batch(
             "CREATE OR REPLACE TEMP TABLE __fossil_layout \
-             (dense_id UINTEGER, x REAL, y REAL, cluster_id UINTEGER)",
+             (dense_id UINTEGER, x REAL, y REAL, cluster_id UINTEGER, morton UINTEGER)",
         )
         .map_err(duck)?;
         {
             let mut appender = conn.appender("__fossil_layout").map_err(duck)?;
-            for (dense_id, (&(x, y), &cluster_id)) in
-                positions.iter().zip(clusters.iter()).enumerate()
+            for (dense_id, (&(x, y), (&cluster_id, &morton_code))) in positions
+                .iter()
+                .zip(clusters.iter().zip(morton.iter()))
+                .enumerate()
             {
                 appender
-                    .append_row(duckdb::params![dense_id as u32, x, y, cluster_id])
+                    .append_row(duckdb::params![
+                        dense_id as u32,
+                        x,
+                        y,
+                        cluster_id,
+                        morton_code
+                    ])
                     .map_err(duck)?;
             }
             // appender flushes on drop (end of this block) before the COPY reads it.
         }
 
-        // Rewrite: same columns, x/y/cluster_id replaced from the temp table.
-        // Row order preserved (no ORDER BY) → dense_id values unchanged → edges
-        // stay valid. Write to a sibling `.tmp` then rename over the original.
+        // Rewrite: same columns, x/y/cluster_id replaced from the temp table,
+        // rows reordered by Morton(x,y) so a bbox viewport query prunes via
+        // row-group stats. `dense_id` VALUES are unchanged (only the row order),
+        // so every edge stays valid. Write a sibling `.tmp` then rename over the
+        // original (never read + write the same file in one statement).
         let tmp = vpath.with_extension("parquet.tmp");
         conn.execute_batch(&format!(
             "COPY (SELECT v.* REPLACE (l.x AS x, l.y AS y, l.cluster_id AS cluster_id) \
-             FROM read_parquet('{}') v JOIN __fossil_layout l USING (dense_id)) \
+             FROM read_parquet('{}') v JOIN __fossil_layout l USING (dense_id) \
+             ORDER BY l.morton) \
              TO '{}' (FORMAT PARQUET)",
             sql_lit(vpath),
             sql_lit(&tmp),
@@ -248,6 +262,51 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
 /// (`read_parquet('…')` / `COPY … TO '…'` take literals, not bind params).
 fn sql_lit(path: &Path) -> String {
     path.to_string_lossy().replace('\'', "''")
+}
+
+/// Interleave the low 16 bits of `x` and `y` into a 32-bit Morton (Z-order)
+/// code (`x` in even bits, `y` in odd). Spatially-near points get
+/// near-sequential codes, so sorting vertices by it groups nearby ones into the
+/// same Parquet row group — a bbox viewport query then prunes via row-group
+/// min/max stats (the larger-than-RAM predicate-pushdown contract).
+fn morton2(x: u16, y: u16) -> u32 {
+    fn spread(n: u16) -> u32 {
+        let mut n = u32::from(n);
+        n = (n | (n << 8)) & 0x00ff_00ff;
+        n = (n | (n << 4)) & 0x0f0f_0f0f;
+        n = (n | (n << 2)) & 0x3333_3333;
+        n = (n | (n << 1)) & 0x5555_5555;
+        n
+    }
+    spread(x) | (spread(y) << 1)
+}
+
+/// Morton codes for a position list — quantises each coordinate to `u16` over
+/// the list's bounding box (a degenerate axis maps to 0). Index-aligned with
+/// `positions`.
+#[must_use]
+fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
+    if positions.is_empty() {
+        return Vec::new();
+    }
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for &(x, y) in positions {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    let quantize = |v: f32, lo: f32, hi: f32| -> u16 {
+        if hi <= lo {
+            return 0;
+        }
+        let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+        (t * f32::from(u16::MAX)).round() as u16
+    };
+    positions
+        .iter()
+        .map(|&(x, y)| morton2(quantize(x, min_x, max_x), quantize(y, min_y, max_y)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -319,5 +378,31 @@ mod tests {
     #[test]
     fn layout_empty_input() {
         assert!(cluster_layout(&[]).is_empty());
+    }
+
+    #[test]
+    fn morton2_interleaves_bits() {
+        // x bits in even positions, y bits in odd. (1,0)→0b01=1; (0,1)→0b10=2;
+        // (1,1)→0b11=3; (3,0)→0b0101=5.
+        assert_eq!(morton2(0, 0), 0);
+        assert_eq!(morton2(1, 0), 1);
+        assert_eq!(morton2(0, 1), 2);
+        assert_eq!(morton2(1, 1), 3);
+        assert_eq!(morton2(3, 0), 5);
+    }
+
+    #[test]
+    fn morton_codes_quantize_and_order_spatially() {
+        // Two points near the origin get closer codes than a far one.
+        let codes = morton_codes(&[(0.0, 0.0), (1.0, 1.0), (100.0, 100.0)]);
+        assert_eq!(codes.len(), 3);
+        assert!(codes[0] < codes[2] && codes[1] < codes[2]);
+    }
+
+    #[test]
+    fn morton_codes_degenerate_axis_no_panic() {
+        // All same y (range 0 on that axis) → no div-by-zero.
+        let codes = morton_codes(&[(0.0, 5.0), (10.0, 5.0)]);
+        assert_eq!(codes.len(), 2);
     }
 }
