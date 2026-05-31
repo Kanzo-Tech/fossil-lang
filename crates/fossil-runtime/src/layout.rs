@@ -112,6 +112,144 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     out
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// W3.1b — integration: apply the pure layout to the written GraphAr vertices.
+// ──────────────────────────────────────────────────────────────────────────
+
+use std::path::{Path, PathBuf};
+
+use duckdb::Connection;
+
+/// One vertex type's layout target: its on-disk vertex Parquet plus the CSR
+/// Parquets of its **self-edges** (`src_type == dst_type == this type`), whose
+/// `src_dense`/`dst_dense` live in this type's `dense_id` space. Cross-type
+/// edges are excluded here — a global cross-type layout is a later slice.
+#[derive(Debug, Clone)]
+pub struct VertexLayoutTarget {
+    /// Local path to the vertex Parquet (e.g. `<dest>/vertex/Person.parquet`).
+    pub vertex_parquet: PathBuf,
+    /// Local paths to this type's self-edge CSR Parquets.
+    pub self_edge_csr: Vec<PathBuf>,
+}
+
+/// Failure modes of [`enrich_layout`].
+#[derive(Debug, thiserror::Error)]
+pub enum LayoutError {
+    /// A `DuckDB` query (count, edge read, rewrite COPY) failed.
+    #[error("layout DuckDB op on `{target}` failed: {source}")]
+    Duck {
+        target: String,
+        #[source]
+        source: duckdb::Error,
+    },
+    /// Renaming the rewritten temp Parquet over the original failed.
+    #[error("layout rename for `{target}` failed: {source}")]
+    Rename {
+        target: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Replace the W0b placeholder `x`/`y`/`cluster_id` columns of each vertex
+/// Parquet with a real WCC partition + deterministic placement.
+///
+/// Per target: count vertices (`max(dense_id)+1`), read self-edges, run
+/// [`weakly_connected_components`] + [`cluster_layout`], stage the result in a
+/// temp table, and rewrite the Parquet via `SELECT * REPLACE (...)`. Row ORDER
+/// is preserved (no morton sort yet — a later slice), so `dense_id` values are
+/// unchanged and every edge stays valid. The COPY writes a sibling `.tmp` then
+/// renames over the original (never reads + writes the same file in one stmt).
+///
+/// # Errors
+///
+/// Returns [`LayoutError`] on the first failing `DuckDB` op or rename.
+pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Result<(), LayoutError> {
+    for target in targets {
+        let vpath = target.vertex_parquet.as_path();
+        let vname = vpath.display().to_string();
+        let duck = |source: duckdb::Error| LayoutError::Duck {
+            target: vname.clone(),
+            source,
+        };
+
+        let vertex_count: u32 = conn
+            .query_row(
+                &format!(
+                    "SELECT coalesce(max(dense_id) + 1, 0)::UINTEGER FROM read_parquet('{}')",
+                    sql_lit(vpath)
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(duck)?;
+        if vertex_count == 0 {
+            continue;
+        }
+
+        let mut edges: Vec<(u32, u32)> = Vec::new();
+        for csr in &target.self_edge_csr {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT src_dense, dst_dense FROM read_parquet('{}')",
+                    sql_lit(csr)
+                ))
+                .map_err(duck)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, u32>(1)?)))
+                .map_err(duck)?;
+            for row in rows {
+                edges.push(row.map_err(duck)?);
+            }
+        }
+
+        let clusters = weakly_connected_components(vertex_count, &edges);
+        let positions = cluster_layout(&clusters);
+
+        // Stage (dense_id, x, y, cluster_id) in a temp table via the Appender.
+        conn.execute_batch(
+            "CREATE OR REPLACE TEMP TABLE __fossil_layout \
+             (dense_id UINTEGER, x REAL, y REAL, cluster_id UINTEGER)",
+        )
+        .map_err(duck)?;
+        {
+            let mut appender = conn.appender("__fossil_layout").map_err(duck)?;
+            for (dense_id, (&(x, y), &cluster_id)) in
+                positions.iter().zip(clusters.iter()).enumerate()
+            {
+                appender
+                    .append_row(duckdb::params![dense_id as u32, x, y, cluster_id])
+                    .map_err(duck)?;
+            }
+            // appender flushes on drop (end of this block) before the COPY reads it.
+        }
+
+        // Rewrite: same columns, x/y/cluster_id replaced from the temp table.
+        // Row order preserved (no ORDER BY) → dense_id values unchanged → edges
+        // stay valid. Write to a sibling `.tmp` then rename over the original.
+        let tmp = vpath.with_extension("parquet.tmp");
+        conn.execute_batch(&format!(
+            "COPY (SELECT v.* REPLACE (l.x AS x, l.y AS y, l.cluster_id AS cluster_id) \
+             FROM read_parquet('{}') v JOIN __fossil_layout l USING (dense_id)) \
+             TO '{}' (FORMAT PARQUET)",
+            sql_lit(vpath),
+            sql_lit(&tmp),
+        ))
+        .map_err(duck)?;
+        std::fs::rename(&tmp, vpath).map_err(|source| LayoutError::Rename {
+            target: vname.clone(),
+            source,
+        })?;
+    }
+    Ok(())
+}
+
+/// Escape a path for embedding in a single-quoted `DuckDB` SQL string literal
+/// (`read_parquet('…')` / `COPY … TO '…'` take literals, not bind params).
+fn sql_lit(path: &Path) -> String {
+    path.to_string_lossy().replace('\'', "''")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

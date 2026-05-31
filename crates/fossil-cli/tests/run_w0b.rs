@@ -99,6 +99,25 @@ fn run_w0b_writes_graph_ar_under_dest() {
         vertex_parquet.display()
     );
 
+    // W3.1b: the layout pass must have replaced the placeholder x/y (0 for every
+    // vertex) with real coordinates — at least one vertex now carries a non-zero
+    // coordinate.
+    let conn = duckdb::Connection::open_in_memory().expect("open duckdb");
+    let nonzero: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT count(*) FROM read_parquet('{}') WHERE x <> 0 OR y <> 0",
+                vertex_parquet.display().to_string().replace('\'', "''")
+            ),
+            [],
+            |r| r.get(0),
+        )
+        .expect("query layout x/y");
+    assert!(
+        nonzero > 0,
+        "W3.1b layout must populate non-zero x/y (placeholder was 0); got {nonzero} non-zero rows",
+    );
+
     let vertex_yaml = dest.join("vertex/Person.vertex.yml");
     assert!(
         vertex_yaml.exists(),

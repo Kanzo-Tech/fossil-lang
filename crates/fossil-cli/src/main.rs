@@ -578,9 +578,10 @@ fn cmd_run(
     // emit something, but the legacy cwd flat-write is a cleaner default
     // for the no-shape walking-skeleton case, so we keep it.
     if let Some(dest_url) = dest
-        && shape.is_some() {
-            return cmd_run_w0b(&db, file, path, &descriptor, dest_url, output_json);
-        }
+        && shape.is_some()
+    {
+        return cmd_run_w0b(&db, file, path, &descriptor, dest_url, output_json);
+    }
 
     cmd_run_legacy(&db, file, path)
 }
@@ -648,6 +649,32 @@ fn cmd_run_w0b(
 
     fossil_runtime::materialize_graph_ar(&conn, &write_plan, &manifests, &resolved, write_yaml)
         .map_err(|e| miette::miette!("materialize: {e}"))?;
+
+    // W3.1b — replace the placeholder x/y/cluster_id with a real WCC partition +
+    // deterministic layout, per vertex type using its self-edges. Local-fs dest
+    // only (the COPY rewrite + rename need a real path; cloud is W0b/7).
+    // `edge_statements` and `manifests.edges` are parallel (both from the same
+    // SinkPlan edge order), so zipping correlates each edge to its src/dst type.
+    let layout_targets: Vec<fossil_runtime::layout::VertexLayoutTarget> = write_plan
+        .vertex_statements
+        .iter()
+        .map(|vstmt| {
+            let vtype = vstmt.type_name.as_str();
+            let self_edge_csr = write_plan
+                .edge_statements
+                .iter()
+                .zip(&manifests.edges)
+                .filter(|(_, em)| em.edge_info.src_type == vtype && em.edge_info.dst_type == vtype)
+                .map(|(es, _)| dest_local.join(&es.csr_rel_path))
+                .collect();
+            fossil_runtime::layout::VertexLayoutTarget {
+                vertex_parquet: dest_local.join(&vstmt.rel_path),
+                self_edge_csr,
+            }
+        })
+        .collect();
+    fossil_runtime::layout::enrich_layout(&conn, &layout_targets)
+        .map_err(|e| miette::miette!("layout: {e}"))?;
 
     if output_json {
         // Machine-readable status — keasy parses this when invoking the CLI
