@@ -39,6 +39,10 @@ lsp-types = { workspace = true }
 # drive the target-side render path end-to-end (a host-wiring stand-in). Needs
 # `OutputDescriptorKind` + `ShExDescriptor`, plus `salsa` for the custom db.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Source-field completion (4th source) test: builds an `InferredDescriptor` and
+# registers it on the test `System`, driving the `.<field>` completion path
+# end-to-end the way the host (browser DuckDB-WASM / native CLI) would.
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # Plan 06-07 (SC#4 / SC#5): semantic-tokens + outline snapshot tests render the
 # (decoded) token stream / document-symbol tree into a stable, reviewable
 # golden file (Research test-map). insta is the workspace snapshot dev-dep.

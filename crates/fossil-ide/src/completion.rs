@@ -41,12 +41,13 @@ use fossil_hir::HirDb;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
+use fossil_hir::ty::TyKind;
 use fossil_ide_db::{PrefixIndex, WELL_KNOWN_PREFIXES, WorkspaceIndex};
 use fossil_registry::{FunctionRegistry, WasmClass};
 use fossil_syntax::SyntaxKind;
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag, Position, Range, TextEdit};
 
-use crate::position::node_at_position;
+use crate::position::{node_at_position, token_at_position};
 
 /// Compute completion items at an LSP position, merging the three SC#4 sources.
 ///
@@ -72,6 +73,7 @@ pub fn completions(
     stdlib_completions(&prefixes, &mut items);
     prefix_completions(db, files, &prefixes, &mut items);
     shape_property_completions(db, file, line, character, &mut items);
+    source_field_completions(db, file, line, character, &mut items);
 
     items
 }
@@ -184,6 +186,67 @@ fn shape_property_completions(
             ..Default::default()
         });
     }
+}
+
+/// Source 4: source-row field names, when the cursor is at a field reference
+/// (`.<field>`) inside a mapping whose `from` source has a host-registered
+/// `InferredDescriptor`. The fields + their inferred types come from
+/// [`fossil_hir::infer::source_row_inferred`] — the same forward-typed record
+/// the checker reads. Contributes nothing when no descriptor is registered (the
+/// host did not pre-introspect the source): the editor stays quiet rather than
+/// guessing field names.
+fn source_field_completions(
+    db: &dyn HirDb,
+    file: SourceFile,
+    line: u32,
+    character: u32,
+    items: &mut Vec<CompletionItem>,
+) {
+    if !at_field_ref_context(db, file, line, character) {
+        return;
+    }
+    let Some(mapping) = enclosing_mapping_loc(db, file, line, character) else {
+        return;
+    };
+    let Some(row) = fossil_hir::infer::source_row_inferred(db, mapping) else {
+        return;
+    };
+    let TyKind::Record(record) = row.kind(db) else {
+        return;
+    };
+    for field in record.fields(db) {
+        items.push(CompletionItem {
+            label: field.name.to_string(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail: Some(format!(
+                "source field : {}",
+                render_ty_kind(db, field.ty.kind(db))
+            )),
+            ..Default::default()
+        });
+    }
+}
+
+/// True when the cursor sits at a field reference — the `.` token itself
+/// (completion triggered right after typing `.`) or anywhere inside a
+/// `FIELD_REF` / `FIELD_REF_EXPR`. Bounded by the enclosing `MAPPING` so a stray
+/// dot elsewhere does not fire source-field completion.
+fn at_field_ref_context(db: &dyn HirDb, file: SourceFile, line: u32, character: u32) -> bool {
+    let Some(token) = token_at_position(db, file, line, character) else {
+        return false;
+    };
+    if token.kind() == SyntaxKind::DOT {
+        return true;
+    }
+    let mut current = token.parent();
+    while let Some(node) = current {
+        match node.kind() {
+            SyntaxKind::FIELD_REF_EXPR | SyntaxKind::FIELD_REF => return true,
+            SyntaxKind::MAPPING => return false,
+            _ => current = node.parent(),
+        }
+    }
+    false
 }
 
 /// Resolve the cursor's enclosing mapping to its [`def_map`] `MappingLoc`
@@ -410,6 +473,65 @@ mod tests {
             edits[0].new_text.contains("prefix xsd:"),
             "well-known prefix auto-import must insert the prefix decl; got {:?}",
             edits[0].new_text,
+        );
+    }
+
+    /// Source 4: with a host-registered `InferredDescriptor`, a `.` field
+    /// reference offers the source's columns as Field completions.
+    #[test]
+    fn offers_source_fields_after_dot_when_descriptor_registered() {
+        use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+        let db = db();
+        db.system.register_inferred_descriptor(InferredDescriptor {
+            source_name: "u".into(),
+            columns: vec![
+                InferredColumn {
+                    name: "name".into(),
+                    primitive: "String".into(),
+                },
+                InferredColumn {
+                    name: "age".into(),
+                    primitive: "Integer".into(),
+                },
+            ],
+            content_hash: String::new(),
+        });
+        // `ex:` must be declared so the mapping lowers (lower_mapping resolves
+        // the shape prefix); the `.name` field ref sits on line 2.
+        let src =
+            "prefix ex: <https://example.org/>\nUser : ex:Person from u\n    ex:name = .name\n";
+        let f = file(&db, src);
+        // Cursor right after the `.` on line 2 → token_at_position picks the DOT.
+        let dot = u32::try_from(src.lines().nth(2).unwrap().find('.').unwrap()).unwrap();
+        let items = completions(&db, &[f], f, 2, dot + 1);
+        let fields: Vec<&str> = items
+            .iter()
+            .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
+            .map(|i| i.label.as_str())
+            .collect();
+        assert!(
+            fields.contains(&"name"),
+            "source field `name` must be offered at `.`; got {fields:?}",
+        );
+        assert!(
+            fields.contains(&"age"),
+            "source field `age` must be offered at `.`; got {fields:?}",
+        );
+    }
+
+    /// Without a registered descriptor the source-field source stays quiet — no
+    /// guessing field names (the editor degrades, not invents).
+    #[test]
+    fn no_source_fields_without_descriptor() {
+        let db = db();
+        let src =
+            "prefix ex: <https://example.org/>\nUser : ex:Person from u\n    ex:name = .name\n";
+        let f = file(&db, src);
+        let dot = u32::try_from(src.lines().nth(2).unwrap().find('.').unwrap()).unwrap();
+        let items = completions(&db, &[f], f, 2, dot + 1);
+        assert!(
+            !items.iter().any(|i| i.label == "name" || i.label == "age"),
+            "no source fields should be offered without a descriptor",
         );
     }
 

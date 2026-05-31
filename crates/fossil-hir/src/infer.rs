@@ -59,6 +59,55 @@ use smol_str::SmolStr;
 use crate::def_map::{MappingLoc, def_map};
 use crate::ty::{Primitive, Record, RecordField, Ty, TyKind};
 
+/// The source-row [`Ty`] (a `Record`) for a mapping as known from the
+/// host-registered [`fossil_descriptors_input::InferredDescriptor`] ONLY.
+///
+/// Side-effect-free: no diagnostics, no CSVW fallback, no filesystem reads —
+/// the descriptor-branch of [`resolve_source_row`] without the type-check's
+/// `delay_span_bug` / `D-CSVW-DEPRECATED` emission. For IDE features
+/// (completion, hover) that want the source schema OUTSIDE a tracked query.
+/// Returns `None` when no descriptor is registered for the mapping's source
+/// binding (e.g. the host did not pre-introspect, or the legacy CSVW path is
+/// in use — those callers want [`resolve_source_row`] inside type-check).
+#[must_use]
+pub fn source_row_inferred<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> Option<Ty<'db>> {
+    let file = mapping.file(db);
+    let mappings = crate::lower::lower_to_hir(db, file);
+    let hir_mapping = mappings.mappings(db).get(mapping.index(db))?;
+    let source_name = hir_mapping.source_binding.clone();
+    let inferred = db.system().inferred_descriptor(source_name.as_str())?;
+    // Build the Record directly (NOT via `record_from_inferred`): IDE callers
+    // run OUTSIDE a tracked query, where salsa diagnostic accumulation panics.
+    // The Record VALUE is identical — only the `D-INFERRED-UNKNOWN-DATATYPE`
+    // warning is skipped, which belongs to type-check, not completion. Shares
+    // the per-column mapping via `field_from_inferred` (no duplicated logic).
+    let fields: Vec<RecordField<'db>> = inferred
+        .columns
+        .iter()
+        .map(|col| field_from_inferred(db, col))
+        .collect();
+    Some(Ty::new(db, TyKind::Record(Record::new(db, fields))))
+}
+
+/// Map one [`InferredColumn`] to a [`RecordField`] — the column→field lowering
+/// shared by [`record_from_inferred`] (type-check, which ALSO warns on
+/// non-canonical primitives) and [`source_row_inferred`] (IDE, no diagnostics).
+fn field_from_inferred<'db>(
+    db: &'db dyn fossil_base::Db,
+    col: &fossil_descriptors_input::InferredColumn,
+) -> RecordField<'db> {
+    RecordField {
+        name: col.name.clone(),
+        ty: Ty::new(
+            db,
+            TyKind::Primitive(primitive_from_name(col.primitive.as_str())),
+        ),
+    }
+}
+
 /// Resolve the source-row [`Ty`] (a `Record`) for a mapping, if its source
 /// binding declared a CSVW `schema` argument.
 ///
@@ -228,15 +277,7 @@ fn primitive_from_name(name: &str) -> Primitive {
 fn is_canonical_primitive_name(name: &str) -> bool {
     matches!(
         name,
-        "Integer"
-            | "Float"
-            | "String"
-            | "Bool"
-            | "Date"
-            | "DateTime"
-            | "Time"
-            | "GYear"
-            | "AnyURI"
+        "Integer" | "Float" | "String" | "Bool" | "Date" | "DateTime" | "Time" | "GYear" | "AnyURI"
     )
 }
 
@@ -269,12 +310,7 @@ pub(crate) fn record_from_inferred<'db>(
                 ),
             );
         }
-        let prim = primitive_from_name(col.primitive.as_str());
-        let field_ty = Ty::new(db, TyKind::Primitive(prim));
-        fields.push(RecordField {
-            name: col.name.clone(),
-            ty: field_ty,
-        });
+        fields.push(field_from_inferred(db, col));
     }
     let rec = Record::new(db, fields);
     Ty::new(db, TyKind::Record(rec))

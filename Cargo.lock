@@ -1233,6 +1233,7 @@ name = "fossil-ide"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
+ "fossil-descriptors-input",
  "fossil-descriptors-output",
  "fossil-hir",
  "fossil-ide-db",
