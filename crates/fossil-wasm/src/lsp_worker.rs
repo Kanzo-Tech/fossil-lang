@@ -219,6 +219,7 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
         "fossil/compileFile" => handle_compile_file(pg, params),
         "fossil/checkAll" => handle_check_all(pg),
         "fossil/setTargetShex" => handle_set_target_shex(pg, params),
+        "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(pg, &params),
         other => Err(LspError {
             code: -32601, // MethodNotFound
             message: format!("method not found: {other}"),
@@ -568,6 +569,27 @@ fn handle_set_target_shex(
     Ok(serde_json::Value::Null)
 }
 
+/// `fossil/registerInferredDescriptor` — host-injected source schema (the
+/// connection's catalog). Mirrors [`handle_set_target_shex`]: the symmetric
+/// input-side counterpart to the output-side target-shape. `params` IS the
+/// `InferredDescriptorJson` object (`{ source_name, columns, content_hash }`);
+/// the native API takes the JSON string, so we re-serialise the already-parsed
+/// value rather than threading a second param shape. Once registered on the
+/// worker's `FossilPlayground`, source-field completion + forward type-check
+/// see the source's columns.
+fn handle_register_inferred_descriptor(
+    pg: &FossilPlayground,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, LspError> {
+    let json = serde_json::to_string(params).map_err(|e| invalid_params(&e))?;
+    pg.register_inferred_descriptor_native(&json)
+        .map_err(|e| LspError {
+            code: -32000,
+            message: e.to_string(),
+        })?;
+    Ok(serde_json::Value::Null)
+}
+
 // ---------- Helpers ----------
 
 fn invalid_params(e: &serde_json::Error) -> LspError {
@@ -602,5 +624,38 @@ fn uri_from_str_maybe(s: &str) -> Option<lsp_types::Uri> {
         lsp_types::Uri::from_str(&format!("file:///{rest}")).ok()
     } else {
         lsp_types::Uri::from_str(&format!("file://{s}")).ok()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::FossilPlayground;
+
+    /// `fossil/registerInferredDescriptor` dispatch registers the catalog on
+    /// the worker's own `FossilPlayground` — the instance that drives editor
+    /// completion (layer 2 of decision (b)).
+    #[test]
+    fn register_inferred_descriptor_dispatch_registers_on_worker_pg() {
+        let pg = FossilPlayground::new();
+        let params = serde_json::json!({
+            "source_name": "u",
+            "columns": [{ "name": "name", "primitive": "String" }],
+            "content_hash": ""
+        });
+        handle_register_inferred_descriptor(&pg, &params).expect("dispatch ok");
+        let desc = pg
+            .inferred_descriptor_native("u")
+            .expect("descriptor registered on the worker's playground");
+        assert_eq!(desc.source_name.as_str(), "u");
+        assert_eq!(desc.columns.len(), 1);
+    }
+
+    /// Malformed params surface as an LSP error, not a panic.
+    #[test]
+    fn register_inferred_descriptor_dispatch_rejects_malformed() {
+        let pg = FossilPlayground::new();
+        let bad = serde_json::json!({ "source_name": "u" }); // missing `columns`
+        assert!(handle_register_inferred_descriptor(&pg, &bad).is_err());
     }
 }
