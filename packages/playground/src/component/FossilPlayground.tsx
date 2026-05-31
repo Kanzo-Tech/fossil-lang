@@ -672,6 +672,10 @@ export function FossilPlayground(props: FossilPlaygroundProps): JSX.Element {
         schemas = await inferredDescriptors.introspectAndRegister(
           mapping,
           instance,
+          // Push the catalog to the LSP worker too, so editor source-field
+          // completion (fossil-ide source 4) sees the source's columns. The
+          // worker's FossilPlayground is distinct from `instance` (ADR-0026).
+          (descriptor) => lspClient?.notification('fossil/registerInferredDescriptor', descriptor),
         );
       } finally {
         setSourceLoading(false);

@@ -204,6 +204,30 @@ describe('useInferredDescriptors.introspectAndRegister', () => {
     expect(conn.closed).toBe(true);
   });
 
+  it('forwards each descriptor to the onDescriptor callback (LSP-worker push)', async () => {
+    const conn = makeMockConnection([
+      { column_name: 'id', column_type: 'INTEGER' },
+      { column_name: 'name', column_type: 'VARCHAR' },
+    ]);
+    const pg = makeMockPlayground();
+    const resolver = makeMockResolver();
+    const onDescriptor = vi.fn();
+    const { result } = renderHook(() =>
+      useInferredDescriptors({ resolver, connectionFactory: async () => conn }),
+    );
+    await act(async () => {
+      await result.current.introspectAndRegister(
+        'users := io.csv("@examples/u.csv")',
+        pg as unknown as FossilPlayground,
+        onDescriptor,
+      );
+    });
+    // The worker push receives the SAME descriptor as the main-thread register —
+    // this is the 3c pattern keasy mirrors (lspClient.notification(...)).
+    expect(onDescriptor).toHaveBeenCalledTimes(1);
+    expect(onDescriptor).toHaveBeenCalledWith(pg.calls[0]);
+  });
+
   it('skips when there are no source refs (returns empty SourceSchema[])', async () => {
     const conn = makeMockConnection([]);
     const pg = makeMockPlayground();

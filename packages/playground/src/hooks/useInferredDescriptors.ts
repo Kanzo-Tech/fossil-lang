@@ -92,6 +92,7 @@ export interface InferredDescriptorsApi {
   introspectAndRegister(
     mappingText: string,
     playground: FossilPlayground,
+    onDescriptor?: (descriptor: InferredDescriptorJson) => void,
   ): Promise<SourceSchema[]>;
 }
 
@@ -110,6 +111,7 @@ export function useInferredDescriptors(
     async (
       mappingText: string,
       playground: FossilPlayground,
+      onDescriptor?: (descriptor: InferredDescriptorJson) => void,
     ): Promise<SourceSchema[]> => {
       const refs = extractSourceRefs(mappingText);
       if (refs.length === 0) return [];
@@ -152,6 +154,13 @@ export function useInferredDescriptors(
               content_hash: '',
             };
             playground.registerInferredDescriptor(descriptor);
+            // Also push the SAME descriptor to the LSP worker's FossilPlayground
+            // (via `lspClient.notification('fossil/registerInferredDescriptor', …)`,
+            // wired by the caller) so editor source-field completion sees the
+            // source's columns — the worker instance is distinct from this
+            // main-thread one (ADR-0026). Best-effort: a missing callback (no LSP
+            // worker) simply skips it.
+            onDescriptor?.(descriptor);
             // Phase 14 plan 14-03: capture the schema for the SourcePanel
             // preview. Same shape as the Rust-side InferredDescriptor minus
             // the content_hash (the panel only displays name + primitive).
