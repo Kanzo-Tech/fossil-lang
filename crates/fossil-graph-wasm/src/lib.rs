@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 use fossil_graph::manifest::{Manifest, ManifestSource};
 use fossil_graph::{DuckExecutor, GraphError, Operation};
+use serde::Serialize;
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -94,5 +95,10 @@ pub async fn dispatch_graph(
     let result = fossil_graph::dispatch(&op, &manifest, &exec)
         .await
         .map_err(|e| to_js_error(&e))?;
-    serde_wasm_bindgen::to_value(&result).map_err(JsError::from)
+    // `json_compatible()` serialises structs/maps as plain JS objects (not the
+    // default `Map`), so the TS side reads `result.types` etc. matching the
+    // codegen'd interfaces. Large ints surface as JS numbers (counts fit).
+    result
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(JsError::from)
 }

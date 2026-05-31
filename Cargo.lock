@@ -1197,6 +1197,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-graph-wasm"
+version = "0.1.0"
+dependencies = [
+ "fossil-graph",
+ "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "fossil-hir"
 version = "0.1.0"
 dependencies = [
@@ -1300,6 +1313,7 @@ dependencies = [
  "fossil-base",
  "fossil-codegen",
  "fossil-descriptors-output",
+ "fossil-graph",
  "fossil-hir",
  "fossil-mir",
  "fossil-registry",
@@ -1307,6 +1321,7 @@ dependencies = [
  "fossil-sinks",
  "hmac",
  "salsa",
+ "serde",
  "serde_json",
  "sha2",
  "slug",

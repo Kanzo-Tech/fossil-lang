@@ -1,0 +1,49 @@
+{
+  "name": "@fossil-lang/graph",
+  "version": "0.1.0",
+  "description": "In-process TS binding for the fossil-graph verb surface. Runs verb→SQL in WASM (fossil-graph-wasm) and delegates execution to a host-provided DuckDB-WASM query callback (e.g. keasy's Mosaic coordinator). The larger-than-RAM query layer for @fossil-lang/viewer.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/graph"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pkg/fossil_graph_wasm_bg.wasm": "./pkg/fossil_graph_wasm_bg.wasm"
+  },
+  "files": [
+    "dist/",
+    "pkg/fossil_graph_wasm.js",
+    "pkg/fossil_graph_wasm.d.ts",
+    "pkg/fossil_graph_wasm_bg.wasm",
+    "pkg/fossil_graph_wasm_bg.wasm.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "gen:types": "bash scripts/gen-types.sh",
+    "build": "pnpm run build:wasm && pnpm run gen:types && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "json-schema-to-typescript": "^15.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

@@ -1,0 +1,393 @@
+/* eslint-disable */
+/**
+ * GENERATED — do not edit by hand.
+ * Source: crates/fossil-graph JSON Schemas (schemars). Regenerate with
+ *   pnpm --filter @fossil-lang/graph gen:types
+ */
+
+export type Aggregation = "count" | "sum" | "avg" | "min" | "max";
+export type FieldRole = "identifier" | "dimension" | "measure";
+export type HistogramKind = "numeric" | "temporal" | "categorical";
+/**
+ * All graph operations dispatchable on the surface.
+ *
+ * The `tag = "verb"` serde representation makes the wire form `{ "verb": "list_vertex_types", "params": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args.
+ */
+export type Operation =
+  | {
+      params: ListVertexTypesParams;
+      verb: "list_vertex_types";
+    }
+  | {
+      params: ListEdgeTypesParams;
+      verb: "list_edge_types";
+    }
+  | {
+      params: DescribeFieldParams;
+      verb: "describe_field";
+    }
+  | {
+      params: SearchByLabelParams;
+      verb: "search_by_label";
+    }
+  | {
+      params: FindNeighborsParams;
+      verb: "find_neighbors";
+    }
+  | {
+      params: FindPathParams;
+      verb: "find_path";
+    }
+  | {
+      params: AggregateParams;
+      verb: "aggregate";
+    }
+  | {
+      params: HistogramParams;
+      verb: "histogram";
+    }
+  | {
+      params: TopKParams;
+      verb: "top_k";
+    }
+  | {
+      params: SummarizeClusterParams;
+      verb: "summarize_cluster";
+    }
+  | {
+      params: AnswerWithCommunitiesParams;
+      verb: "answer_with_communities";
+    }
+  | {
+      params: ViewportParams;
+      verb: "viewport";
+    }
+  | {
+      params: SetSelectionParams;
+      verb: "set_selection";
+    }
+  | {
+      params: ExecuteSqlParams;
+      verb: "execute_sql";
+    };
+export type ViewportMode = "detail" | "aggregate";
+
+export interface FossilGraphSchemas {
+  AggregateParams?: AggregateParams;
+  AggregateResult?: AggregateResult;
+  AggregateRow?: AggregateRow;
+  Aggregation?: Aggregation;
+  AnswerWithCommunitiesParams?: AnswerWithCommunitiesParams;
+  AnswerWithCommunitiesResult?: AnswerWithCommunitiesResult;
+  BoundingBox?: BoundingBox;
+  ColumnDescriptor?: ColumnDescriptor;
+  DescribeFieldParams?: DescribeFieldParams;
+  DescribeFieldResult?: DescribeFieldResult;
+  EdgeTypeSummary?: EdgeTypeSummary;
+  ExecuteSqlParams?: ExecuteSqlParams;
+  ExecuteSqlResult?: ExecuteSqlResult;
+  FieldRole?: FieldRole;
+  FindNeighborsParams?: FindNeighborsParams;
+  FindNeighborsResult?: FindNeighborsResult;
+  FindPathParams?: FindPathParams;
+  FindPathResult?: FindPathResult;
+  HistogramKind?: HistogramKind;
+  HistogramParams?: HistogramParams;
+  HistogramResult?: HistogramResult;
+  ListEdgeTypesParams?: ListEdgeTypesParams;
+  ListEdgeTypesResult?: ListEdgeTypesResult;
+  ListVertexTypesParams?: ListVertexTypesParams;
+  ListVertexTypesResult?: ListVertexTypesResult;
+  NeighborEdge?: NeighborEdge;
+  NeighborVertex?: NeighborVertex;
+  Operation?: Operation;
+  SearchByLabelParams?: SearchByLabelParams;
+  SearchByLabelResult?: SearchByLabelResult;
+  SearchHit?: SearchHit;
+  SetSelectionParams?: SetSelectionParams;
+  SetSelectionResult?: SetSelectionResult;
+  SummarizeClusterParams?: SummarizeClusterParams;
+  SummarizeClusterResult?: SummarizeClusterResult;
+  TopKParams?: TopKParams;
+  TopKResult?: TopKResult;
+  VertexTypeSummary?: VertexTypeSummary;
+  ViewportEdge?: ViewportEdge;
+  ViewportMode?: ViewportMode;
+  ViewportParams?: ViewportParams;
+  ViewportResult?: ViewportResult;
+  ViewportVertex?: ViewportVertex;
+}
+export interface AggregateParams {
+  agg: Aggregation;
+  group_by: string;
+  limit?: number;
+  /**
+   * Optional measure column for `sum`/`avg`/`min`/`max` aggregations. Ignored when `agg` is `count`.
+   */
+  measure?: string | null;
+  vertex_type: string;
+}
+export interface AggregateResult {
+  rows: AggregateRow[];
+}
+export interface AggregateRow {
+  group: unknown;
+  value: number;
+}
+export interface AnswerWithCommunitiesParams {
+  /**
+   * Cap on how many cluster summaries the LLM may pull as context. The Microsoft `GraphRAG` paper recommends 5–10; defaulting low to match.
+   */
+  max_communities?: number;
+  question: string;
+}
+export interface AnswerWithCommunitiesResult {
+  answer: string;
+  /**
+   * Clusters the answer was derived from. The binding renders these as "sources" / citations.
+   */
+  cited_clusters: number[];
+}
+export interface BoundingBox {
+  x_max: number;
+  x_min: number;
+  y_max: number;
+  y_min: number;
+}
+export interface ColumnDescriptor {
+  duckdb_type: string;
+  name: string;
+}
+export interface DescribeFieldParams {
+  field: string;
+  vertex_type: string;
+}
+export interface DescribeFieldResult {
+  datatype: string;
+  /**
+   * Distinct value count when known from manifest stats.
+   */
+  distinct?: number | null;
+  /**
+   * Inferred role for chart-axis defaults: `identifier`, `dimension`, `measure`. Mirrors keasy `lib/graph-schema.ts::inferRole` — promoted here to be authoritative.
+   */
+  role: "identifier" | "dimension" | "measure";
+  /**
+   * Up to 8 sample values surfaced by the writer.
+   */
+  samples: string[];
+}
+export interface EdgeTypeSummary {
+  count: number;
+  iri: string;
+  name: string;
+  source_type: string;
+  /**
+   * Convenience: `DuckDB` view name `{source}_{name}_{target}`. Pre-computed here so bindings don't reimplement the `GraphAr` edge naming convention.
+   */
+  table_name: string;
+  target_type: string;
+}
+export interface ExecuteSqlParams {
+  /**
+   * Hard cap on rows returned to the caller. The executor MUST apply an outer `LIMIT` regardless of what the user's SQL contains.
+   */
+  row_cap?: number;
+  sql: string;
+  /**
+   * Hard cap on wall-clock execution time, milliseconds.
+   */
+  timeout_ms?: number;
+}
+export interface ExecuteSqlResult {
+  columns: ColumnDescriptor[];
+  rows: unknown[];
+  /**
+   * True when the result was truncated by `row_cap`.
+   */
+  truncated: boolean;
+}
+export interface FindNeighborsParams {
+  depth?: number;
+  /**
+   * Restrict traversal to a subset of edge names. Empty = all.
+   */
+  edge_types?: string[];
+  iri: string;
+  limit?: number;
+}
+export interface FindNeighborsResult {
+  edges: NeighborEdge[];
+  vertices: NeighborVertex[];
+}
+export interface NeighborEdge {
+  predicate: string;
+  source: string;
+  target: string;
+}
+export interface NeighborVertex {
+  /**
+   * Hop count from the origin (0 = origin itself).
+   */
+  hop: number;
+  iri: string;
+  label: string;
+  vertex_type: string;
+}
+export interface FindPathParams {
+  max_hops?: number;
+  source_iri: string;
+  target_iri: string;
+}
+export interface FindPathResult {
+  edges: NeighborEdge[];
+  /**
+   * Ordered path vertices including endpoints. Empty when no path exists within `max_hops`.
+   */
+  vertices: NeighborVertex[];
+}
+export interface HistogramParams {
+  bins?: number;
+  field: string;
+  vertex_type: string;
+}
+export interface HistogramResult {
+  /**
+   * Per-bin counts.
+   */
+  counts: number[];
+  /**
+   * Bin edges (length `bins + 1` for numeric, `bins` for categorical).
+   */
+  edges: number[];
+  /**
+   * Field role echoed back so the caller can pick the right chart.
+   */
+  field_kind: "numeric" | "temporal" | "categorical";
+}
+export interface ListEdgeTypesParams {}
+export interface ListEdgeTypesResult {
+  edges: EdgeTypeSummary[];
+}
+export interface ListVertexTypesParams {}
+export interface ListVertexTypesResult {
+  types: VertexTypeSummary[];
+}
+export interface VertexTypeSummary {
+  /**
+   * Vertex count from the manifest.
+   */
+  count: number;
+  /**
+   * Field names for downstream calls to `describe_field`.
+   */
+  fields: string[];
+  /**
+   * Full RDF type IRI.
+   */
+  iri: string;
+  /**
+   * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
+   */
+  name: string;
+}
+export interface SearchByLabelParams {
+  query: string;
+  top_k?: number;
+  /**
+   * Restrict the vector search to a subset of vertex types. Empty = all.
+   */
+  vertex_types?: string[];
+}
+export interface TopKParams {
+  descending?: boolean;
+  k?: number;
+  order_by: string;
+  vertex_type: string;
+}
+export interface SummarizeClusterParams {
+  cluster_id: number;
+}
+export interface ViewportParams {
+  bbox: BoundingBox;
+  limit?: number;
+  lod_threshold?: number;
+  /**
+   * Restrict to a subset of vertex types. Empty = all.
+   */
+  vertex_types?: string[];
+  /**
+   * Current zoom level. Above [`Self::lod_threshold`] the executor swaps to aggregate mode (`GROUP BY cluster_id`) returning ≤ 10k super-nodes regardless of total N.
+   */
+  zoom: number;
+}
+export interface SetSelectionParams {
+  /**
+   * Mosaic-Selection-compatible filter expression. `None` clears the current selection so the next viewport call returns the full bbox.
+   */
+  selection?: {
+    [k: string]: unknown;
+  };
+}
+export interface SearchByLabelResult {
+  hits: SearchHit[];
+}
+export interface SearchHit {
+  iri: string;
+  label: string;
+  /**
+   * Cosine similarity in [0, 1].
+   */
+  score: number;
+  vertex_type: string;
+}
+export interface SetSelectionResult {
+  /**
+   * Echo of how many vertices the new selection would yield against the last viewport bbox. Lets the caller decide whether to repaint.
+   */
+  matching_count: number;
+}
+export interface SummarizeClusterResult {
+  /**
+   * Dominant vertex type (mode of `type_idx` inside the cluster).
+   */
+  dominant_type: string;
+  /**
+   * Writer-emitted summary text.
+   */
+  summary: string;
+  /**
+   * Cluster size for caller context.
+   */
+  vertex_count: number;
+}
+export interface TopKResult {
+  /**
+   * Rows as opaque JSON objects so the verb stays generic across arbitrary vertex shapes. Bindings render to their UI of choice.
+   */
+  rows: unknown[];
+}
+export interface ViewportEdge {
+  dst_dense: number;
+  src_dense: number;
+}
+export interface ViewportResult {
+  edges: ViewportEdge[];
+  mode: ViewportMode;
+  n: number;
+  /**
+   * Always present; in aggregate mode the entries are super-nodes (cluster centroids) with `cluster_id` populated.
+   */
+  vertices: ViewportVertex[];
+}
+export interface ViewportVertex {
+  cluster_id?: number | null;
+  /**
+   * Aggregate mode only: cluster size + `cluster_id`.
+   */
+  cluster_size?: number | null;
+  dense_id: number;
+  type_idx: number;
+  x: number;
+  y: number;
+}
