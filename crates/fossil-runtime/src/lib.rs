@@ -26,6 +26,7 @@ compile_error!(
 use duckdb::Connection;
 
 pub mod graph_exec;
+pub mod layout;
 pub mod materialize;
 pub mod udf;
 
