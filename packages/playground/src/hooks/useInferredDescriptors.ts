@@ -1,53 +1,33 @@
 /**
  * Phase 13 v0.2 (ADR-0037) — host-side `InferredDescriptor` orchestration.
  *
- * This hook is the TS sibling of `fossil-cli`'s `pre_introspect_and_register`
- * helper (plan 13-04a, `crates/fossil-cli/src/main.rs`):
+ * Now a thin React adapter over `@fossil-lang/introspect` (the canonical home;
+ * see .planning/EDITOR-SCHEMA-AWARE-PLAN.md). The package owns the parsing +
+ * DuckDB→Fossil type table + DESCRIBE SQL + descriptor shape; this hook injects
+ * the playground's data plane — the `ConnectionResolver` (→ URL) and a
+ * DuckDB-WASM connection (→ DESCRIBE rows) — then registers the resulting
+ * descriptors on the main-thread `FossilPlayground` instance + forwards each to
+ * the LSP worker via the `onDescriptor` callback.
  *
- *   1. Scrape `io.csv("...")` / `io.json("...")` source-binding references
- *      from the editor mapping text.
- *   2. For each ref, resolve the URL via the host's `ConnectionResolver`
- *      (Tier-1 bundled examples or Tier-2 host-mediated).
- *   3. Open a `DuckDB-WASM` connection + run
- *      `DESCRIBE read_csv_auto('<resolved-url>')`.
- *   4. Map each DuckDB column type to a canonical Fossil `Primitive` name
- *      (`Integer | Float | String | Bool | Date | DateTime | Time | GYear |
- *      AnyURI`) — the same table the Rust `fossil-hir::infer::primitive_from_name`
- *      lookup uses.
- *   5. Call `FossilPlayground.registerInferredDescriptor({source_name,
- *      columns, content_hash: ''})` via the `@fossil-lang/wasm` API
- *      (plan 13-03's `#[wasm_bindgen(js_name = registerInferredDescriptor)]`).
- *
- * Called BEFORE every `compile()` / `compileFile()` invocation. Replaces the
- * Phase 9 CSVW inference + editable-preview flow (plan 09-07's
- * `<CsvwPreview/>` + `inferCsvw` + `applyCsvw`).
- *
- * Failures per-source are non-fatal: log via `console.warn` + skip the
- * source. The compile may still succeed (legacy CSVW path if explicit
- * `schema=` arg present; otherwise no forward propagation for that
- * source).
+ * Called BEFORE every `compile()` / `compileFile()` invocation. Failures per
+ * source are non-fatal (logged + skipped by `introspect`).
  */
 
 import { useCallback } from 'react';
 import { parseSourceRef } from '@fossil-lang/resolvers';
+import { introspect } from '@fossil-lang/introspect';
 import type { FossilPlayground, InferredDescriptorJson } from '@fossil-lang/wasm';
 import type { ConnectionResolver } from '@fossil-lang/types';
 import type { SourceSchema } from '../component/SourcePanel.js';
 
-// Phase 14 plan 14-02 (COMP-02): the pure source-binding introspection
-// helpers (`extractSourceRefs` + `duckdbTypeToFossilPrimitive`) moved into
-// the `run/` namespace per CONTEXT.md target layout. The hook keeps a
-// transitive re-export so existing imports (incl. the vitest spec) survive
-// byte-for-byte.
+// Re-export the pure helpers from the canonical package so existing imports
+// (`run/` barrel + the vitest spec that imports them from this hook) survive.
 export {
   extractSourceRefs,
   duckdbTypeToFossilPrimitive,
-} from '../run/introspection.js';
+} from '@fossil-lang/introspect';
 
-import {
-  extractSourceRefs,
-  duckdbTypeToFossilPrimitive,
-} from '../run/introspection.js';
+import { extractSourceRefs } from '@fossil-lang/introspect';
 
 /** Minimal `DuckDB-WASM` connection shape this hook needs. Compatible with
  *  the async connection returned by `AsyncDuckDB.connect()`. */
@@ -77,17 +57,10 @@ export interface InferredDescriptorsApi {
   /**
    * Introspect every `io.csv("...")` / `io.json("...")` reference in
    * `mappingText` and register the resulting `InferredDescriptor` on
-   * `playground` via `playground.registerInferredDescriptor(...)`.
-   *
-   * Failures per-source are non-fatal — log via `console.warn` + skip.
-   * Resolves when ALL sources have been processed (registered or skipped).
-   *
-   * Phase 14 plan 14-03 widens the return type from `void` to
-   * `Promise<SourceSchema[]>` so the caller (typically `<FossilPlayground/>`
-   * for the Source tab) can render the captured schemas without a second
-   * DuckDB DESCRIBE round-trip. The array is empty when there are no source
-   * refs OR the DuckDB connection failed; partial when individual sources
-   * fail (the failed sources are omitted, the successful ones included).
+   * `playground`. Forwards each descriptor to `onDescriptor` (the LSP-worker
+   * push). Resolves to the captured `SourceSchema[]` (empty when there are no
+   * refs or the DuckDB connection failed; partial when individual sources
+   * fail). Per-source failures are non-fatal (logged + skipped).
    */
   introspectAndRegister(
     mappingText: string,
@@ -97,10 +70,8 @@ export interface InferredDescriptorsApi {
 }
 
 /**
- * React hook returning a stable `introspectAndRegister` callback that the
- * playground component awaits BEFORE invoking WASM `compile()`. Mirrors the
- * `fossil-cli` pre-introspection step (13-04a) so playground + CLI behave
- * identically on the same source.
+ * React hook returning a stable `introspectAndRegister` callback the playground
+ * awaits BEFORE invoking WASM `compile()`.
  */
 export function useInferredDescriptors(
   args: UseInferredDescriptorsArgs,
@@ -113,15 +84,14 @@ export function useInferredDescriptors(
       playground: FossilPlayground,
       onDescriptor?: (descriptor: InferredDescriptorJson) => void,
     ): Promise<SourceSchema[]> => {
-      const refs = extractSourceRefs(mappingText);
-      if (refs.length === 0) return [];
+      // Guard: do not open a DuckDB connection when there's nothing to read.
+      if (extractSourceRefs(mappingText).length === 0) return [];
+
       let conn: DescribingConnection | null = null;
       try {
         conn = await connectionFactory();
       } catch (err) {
-        // DuckDB-WASM didn't boot — non-fatal (the legacy CSVW path may still
-        // produce a working compile, or there's no forward-propagated
-        // .field access on the source binding).
+        // DuckDB-WASM didn't boot — non-fatal; skip pre-introspection.
         // eslint-disable-next-line no-console
         console.warn(
           '[useInferredDescriptors] DuckDB connection failed; skipping pre-introspection:',
@@ -129,68 +99,43 @@ export function useInferredDescriptors(
         );
         return [];
       }
-      const captured: SourceSchema[] = [];
+
       try {
-        for (const { sourceName, url } of refs) {
-          try {
-            const ref = parseSourceRef(url);
-            const resolved = await resolver.resolve(ref);
-            // Single-quote escape for the SQL literal — read_csv_auto takes a
-            // SQL string, not a prepared-statement parameter.
-            const escapedUrl = resolved.url.replace(/'/g, "''");
-            const result = await conn.query(
-              `DESCRIBE SELECT * FROM read_csv_auto('${escapedUrl}')`,
-            );
-            const rows = result.toArray();
-            const columns: InferredDescriptorJson['columns'] = rows
-              .map((r) => ({
-                name: String(r.column_name ?? ''),
-                primitive: duckdbTypeToFossilPrimitive(String(r.column_type ?? '')),
-              }))
-              .filter((c) => c.name.length > 0) as InferredDescriptorJson['columns'];
-            const descriptor: InferredDescriptorJson = {
-              source_name: sourceName,
-              columns,
-              content_hash: '',
-            };
-            playground.registerInferredDescriptor(descriptor);
-            // Also push the SAME descriptor to the LSP worker's FossilPlayground
-            // (via `lspClient.notification('fossil/registerInferredDescriptor', …)`,
-            // wired by the caller) so editor source-field completion sees the
-            // source's columns — the worker instance is distinct from this
-            // main-thread one (ADR-0026). Best-effort: a missing callback (no LSP
-            // worker) simply skips it.
-            onDescriptor?.(descriptor);
-            // Phase 14 plan 14-03: capture the schema for the SourcePanel
-            // preview. Same shape as the Rust-side InferredDescriptor minus
-            // the content_hash (the panel only displays name + primitive).
-            captured.push({
-              sourceName,
-              columns: columns.map((c) => ({
-                name: c.name,
-                primitive: c.primitive,
-              })),
-            });
-          } catch (err) {
-            // Per-source failure: log + skip (matches the Rust side's
-            // tracing::warn convention). The captured array silently
-            // drops failed sources — the SourcePanel shows the successful
-            // subset only.
-            // eslint-disable-next-line no-console
-            console.warn(
-              `[useInferredDescriptors] introspection failed for source \`${sourceName}\` (url=\`${url}\`):`,
-              err,
-            );
-          }
+        // The package owns parsing + DESCRIBE + type-mapping; we inject the
+        // playground's data plane (ConnectionResolver + this DuckDB connection).
+        const descriptors = await introspect(mappingText, {
+          resolve: async (ref) => {
+            const resolved = await resolver.resolve(parseSourceRef(ref.url));
+            return resolved.url;
+          },
+          query: async (sql) => (await conn!.query(sql)).toArray(),
+          // eslint-disable-next-line no-console
+          onWarn: (message, err) => console.warn(message, err),
+        });
+
+        const captured: SourceSchema[] = [];
+        for (const descriptor of descriptors) {
+          playground.registerInferredDescriptor(descriptor);
+          // Push the SAME descriptor to the LSP worker's FossilPlayground (the
+          // worker instance is distinct from this main-thread one, ADR-0026) so
+          // editor source-field completion sees the columns.
+          onDescriptor?.(descriptor);
+          captured.push({
+            sourceName: descriptor.source_name,
+            columns: descriptor.columns.map((c) => ({
+              name: c.name,
+              primitive: c.primitive,
+            })),
+          });
         }
+        return captured;
       } finally {
         try {
           await conn.close();
         } catch {
-          // Swallow — the connection failure path already logged if any.
+          // Swallow — connection-failure path already logged if any.
         }
       }
-      return captured;
     },
     [resolver, connectionFactory],
   );

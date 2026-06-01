@@ -398,6 +398,9 @@ importers:
       '@fossil-lang/examples':
         specifier: workspace:*
         version: link:../examples
+      '@fossil-lang/introspect':
+        specifier: workspace:*
+        version: link:../introspect
       '@fossil-lang/resolvers':
         specifier: workspace:*
         version: link:../resolvers
