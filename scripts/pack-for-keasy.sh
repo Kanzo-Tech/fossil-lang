@@ -35,6 +35,7 @@ fi
 # cleanly (transitive first). Eight packages, matching ADR-0038's enumeration:
 PACKAGES=(
   types               # zero deps — leaf
+  introspect          # zero @fossil-lang deps — leaf (schema introspection)
   resolvers           # depends on types
   codemirror-fossil   # depends on types + wasm (tokenize)
   wasm                # depends on types

@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/types" },
     { "path": "packages/resolvers" },
+    { "path": "packages/introspect" },
     { "path": "packages/wasm" },
     { "path": "packages/examples" },
     { "path": "packages/codemirror-fossil" },

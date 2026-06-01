@@ -1,0 +1,38 @@
+{
+  "name": "@fossil-lang/introspect",
+  "version": "0.3.0-alpha.0",
+  "description": "Source-binding schema introspection for the Fossil editor — the canonical TS home for extractSourceRefs + DuckDB type mapping + InferredDescriptor construction. Host injects the data plane (URL resolve + DuckDB query).",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/introspect"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist/", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0",
+    "happy-dom": "^15.0.0"
+  }
+}
