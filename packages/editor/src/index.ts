@@ -24,3 +24,23 @@ export type { WorkerTransportOpts } from './transports/Worker.js';
 export { NullTransport } from './transports/Null.js';
 export { HttpTransport } from './transports/Http.js';
 export type { HttpTransportOpts } from './transports/Http.js';
+
+// === Schema introspection — re-export the canonical @fossil-lang/introspect ===
+// so a host (keasy, playground) imports the editor + the introspection helpers
+// from one place. The `descriptors` prop on <FossilEditor/> consumes the
+// `InferredDescriptor[]` these produce.
+export {
+  introspect,
+  extractSourceRefs,
+  duckdbTypeToFossilPrimitive,
+  describeSql,
+  buildDescriptor,
+} from '@fossil-lang/introspect';
+export type {
+  InferredDescriptor,
+  InferredColumn,
+  InferredPrimitive,
+  SourceRef,
+  DescribeRow,
+  IntrospectIO,
+} from '@fossil-lang/introspect';

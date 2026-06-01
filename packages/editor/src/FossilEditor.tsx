@@ -33,8 +33,10 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { EditorState, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import type { LSPClient } from '@codemirror/lsp-client';
 import { fossil } from '@fossil-lang/codemirror-fossil';
 import type { ConnectionResolver } from '@fossil-lang/types';
+import type { InferredDescriptor } from '@fossil-lang/introspect';
 import type { Transport } from './transports/types.js';
 import { buildLspExtension } from './lsp/buildLspExtension.js';
 
@@ -55,6 +57,12 @@ export interface FossilEditorProps {
   lspTransport: Transport | null;
   /** Connection resolver for `@`-prefix autocomplete (CONN-01..03 carryover). */
   resolver?: ConnectionResolver;
+  /** Inferred source descriptors to register with the LSP server (drives
+   *  source-field completion). Produced by `@fossil-lang/introspect`; on change
+   *  the editor sends one `fossil/registerInferredDescriptor` notification per
+   *  descriptor. Auto-compose path only (when `extensions` is omitted) — the
+   *  `extensions` path's host owns its own client + registration. */
+  descriptors?: InferredDescriptor[];
   /** Optional class for theming hooks. Defaults to `'fossil-editor'`. */
   className?: string;
 }
@@ -65,10 +73,15 @@ export function FossilEditor({
   extensions,
   lspTransport,
   resolver,
+  descriptors,
   className,
 }: FossilEditorProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  // The LSP client the auto-compose path creates — held so the descriptor
+  // effect can push `fossil/registerInferredDescriptor` notifications. `null`
+  // on the `extensions` path (that host owns its own client).
+  const lspClientRef = useRef<LSPClient | null>(null);
   // Stash the latest onChange in a ref so the mount-effect doesn't re-run when
   // the host passes a fresh closure on every render.
   const onChangeRef = useRef(onChange);
@@ -80,11 +93,16 @@ export function FossilEditor({
   //                            + buildLspExtension(transport) when transport != null
   const composed = useMemo<Extension[]>(() => {
     if (extensions) {
+      lspClientRef.current = null;
       return extensions;
     }
     const exts: Extension[] = fossil({ resolver });
     if (lspTransport) {
-      exts.push(buildLspExtension(lspTransport));
+      const { extension, client } = buildLspExtension(lspTransport);
+      lspClientRef.current = client;
+      exts.push(extension);
+    } else {
+      lspClientRef.current = null;
     }
     return exts;
   }, [extensions, lspTransport, resolver]);
@@ -126,6 +144,18 @@ export function FossilEditor({
       view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
     }
   }, [value]);
+
+  // Register inferred source descriptors with the LSP server (auto-compose path).
+  // Fires on descriptor change AND on `composed` change (the latter recreates
+  // the client, so descriptors must be re-pushed to the new one). Best-effort +
+  // idempotent: the worker queues pre-boot messages, and register overwrites.
+  useEffect(() => {
+    const client = lspClientRef.current;
+    if (!client || !descriptors) return;
+    for (const descriptor of descriptors) {
+      client.notification('fossil/registerInferredDescriptor', descriptor);
+    }
+  }, [descriptors, composed]);
 
   return <div ref={hostRef} className={className ?? 'fossil-editor'} />;
 }

@@ -242,6 +242,9 @@ importers:
       '@fossil-lang/codemirror-fossil':
         specifier: workspace:*
         version: link:../codemirror-fossil
+      '@fossil-lang/introspect':
+        specifier: workspace:*
+        version: link:../introspect
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types

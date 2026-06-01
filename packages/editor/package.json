@@ -39,6 +39,7 @@
     "@fossil-lang/types": "workspace:*",
     "@fossil-lang/ui": "workspace:*",
     "@fossil-lang/codemirror-fossil": "workspace:*",
+    "@fossil-lang/introspect": "workspace:*",
     "@fossil-lang/wasm": "workspace:*"
   },
   "peerDependencies": {

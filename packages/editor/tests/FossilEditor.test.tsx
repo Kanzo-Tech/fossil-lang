@@ -81,6 +81,69 @@ describe('FossilEditor', () => {
     expect(container.querySelector('.fossil-editor')).toBeNull();
   });
 
+  it('pushes fossil/registerInferredDescriptor for each descriptor (auto-compose path)', async () => {
+    // Mock Transport that captures sends + auto-acks `initialize` so the
+    // LSPClient flushes its queued notifications (the LSP lifecycle holds
+    // notifications until the initialize handshake completes).
+    const sent: string[] = [];
+    let onMessage: ((msg: string) => void) | null = null;
+    const transport = {
+      send(msg: string) {
+        sent.push(msg);
+        try {
+          const parsed = JSON.parse(msg) as { method?: string; id?: number };
+          if (parsed.method === 'initialize' && parsed.id !== undefined) {
+            const reply = JSON.stringify({
+              jsonrpc: '2.0',
+              id: parsed.id,
+              result: { capabilities: {} },
+            });
+            queueMicrotask(() => onMessage?.(reply));
+          }
+        } catch {
+          /* non-JSON — ignore */
+        }
+      },
+      subscribe(h: (msg: string) => void) {
+        onMessage = h;
+      },
+      unsubscribe() {
+        onMessage = null;
+      },
+    };
+
+    const descriptor = {
+      source_name: 'users',
+      columns: [{ name: 'id', primitive: 'Integer' as const }],
+      content_hash: '',
+    };
+
+    render(
+      <FossilEditor
+        value={'users := io.csv("u.csv")'}
+        lspTransport={transport}
+        descriptors={[descriptor]}
+      />,
+    );
+
+    await vi.waitFor(
+      () => {
+        const reg = sent
+          .map((m) => {
+            try {
+              return JSON.parse(m) as { method?: string; params?: unknown };
+            } catch {
+              return null;
+            }
+          })
+          .find((m) => m?.method === 'fossil/registerInferredDescriptor');
+        expect(reg).toBeTruthy();
+        expect(reg?.params).toEqual(descriptor);
+      },
+      { timeout: 1000 },
+    );
+  });
+
   it('fires onChange when the editor doc is mutated', () => {
     const onChange = vi.fn();
     const { container } = render(

@@ -23,10 +23,19 @@ import type { Transport } from '../transports/types.js';
  * carryover composition (see packages/playground/src/component/FossilPlayground.tsx
  * — `languageServerSupport(lspClient, documentUri, 'fossil')`).
  */
-export function buildLspExtension(transport: Transport): Extension {
+export interface BuiltLspExtension {
+  /** The CM6 extension wiring the editor to the LSP server. */
+  extension: Extension;
+  /** The connected client — exposed so the host can send custom notifications
+   *  (e.g. `fossil/registerInferredDescriptor`) without re-creating a client. */
+  client: LSPClient;
+}
+
+export function buildLspExtension(transport: Transport): BuiltLspExtension {
   const client = new LSPClient();
   // Structural typing: our Transport is a strict superset of CM6's narrower
   // Transport (per ADR-0036). LSPClient.connect accepts our shape directly.
   client.connect(transport);
-  return languageServerSupport(client, 'file:///editor.fossil', 'fossil');
+  const extension = languageServerSupport(client, 'file:///editor.fossil', 'fossil');
+  return { extension, client };
 }
