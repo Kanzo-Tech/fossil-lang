@@ -33,12 +33,17 @@ use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_hir::MappingLoc;
+use fossil_hir::body::body;
+use fossil_hir::check::typecheck_mapping;
+use fossil_hir::def_map::def_map;
+use fossil_hir::lower::lower_to_hir;
+use fossil_hir::{HirExpr, MappingLoc, Primitive, PropertyKey, Ty, TyKind};
 use fossil_mir::op::{AggFn, CmpOp, JoinKind, SourceFormat};
 use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
 use fossil_registry::{FunctionRegistry, InlineForm, LoweringKind};
 use fossil_sinks::decomp::{
-    EdgeTable, VertexTable, edge_select_sql, vertex_edge_decomp_from_kind, vertex_select_sql,
+    EdgeTable, IRI_COLUMN, SinkPlan, VertexProperty, VertexTable, edge_select_sql, local_name,
+    vertex_edge_decomp_from_kind, vertex_select_sql,
 };
 use fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
 
@@ -222,10 +227,11 @@ pub fn codegen_sql_with_descriptor<'db>(
 #[allow(clippy::elidable_lifetime_names)]
 pub fn decompose_for_writer<'db>(
     db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
     mir: MirGraph<'db>,
     kind: &OutputDescriptorKind,
     chunk_size: u64,
-) -> (String, fossil_sinks::decomp::SinkPlan) {
+) -> (String, SinkPlan) {
     let ops = mir.ops(db);
 
     // Same prelude block as `codegen_sql_with_descriptor` — extracted to
@@ -250,8 +256,123 @@ pub fn decompose_for_writer<'db>(
     }
 
     let base = base_relation_sql(db, ops);
-    let plan = vertex_edge_decomp_from_kind(kind, &base, chunk_size);
+    // No explicit output shape (`AcceptAll`): instead of the flat `_triples`
+    // passthrough, SYNTHESISE the vertex decomposition from the typed mapping —
+    // the mapping already declares the output (subject type + predicates +
+    // forward-propagated datatypes). The shape "lives in fossil"; the host
+    // authors no ShEx. An explicit `ShEx` descriptor still wins when supplied.
+    let plan = match kind {
+        OutputDescriptorKind::AcceptAll(_) => {
+            synthesize_sink_plan(db, mapping, &base, chunk_size)
+        }
+        OutputDescriptorKind::ShEx(_) => vertex_edge_decomp_from_kind(kind, &base, chunk_size),
+    };
     (prelude, plan)
+}
+
+/// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
+/// vocabulary [`fossil_sinks::manifest::data_type_name`] emits.
+const fn primitive_to_graphar(p: Primitive) -> &'static str {
+    match p {
+        Primitive::Integer => "int64",
+        Primitive::Float => "double",
+        Primitive::Bool => "bool",
+        Primitive::Date => "date",
+        Primitive::DateTime => "timestamp",
+        Primitive::Time => "time",
+        // String / AnyURI / GYear have no narrower GraphAr spelling.
+        Primitive::String | Primitive::AnyURI | Primitive::GYear => "string",
+    }
+}
+
+/// Peel `Optional`/`Seq` wrappers to the inner [`Primitive`], if any.
+fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Primitive> {
+    match ty.kind(db) {
+        TyKind::Primitive(p) => Some(*p),
+        TyKind::Optional(inner) | TyKind::Seq(inner) => inner_primitive(db, *inner),
+        _ => None,
+    }
+}
+
+/// Synthesise a single-vertex [`SinkPlan`] from a typed mapping when no explicit
+/// output shape was supplied (`AcceptAll`). Mirrors [`lower_to_mir`]'s
+/// header/body/source-row reads (so it never widens the per-mapping fan-out)
+/// and reuses [`local_name`] for IRI localisation.
+///
+/// Phase A — literal properties only: a property whose RHS is a `FieldRef`
+/// (column → its forward-propagated datatype) or a `StringLit` becomes a
+/// [`VertexProperty`]. Template / IRI-valued objects are edges and are deferred
+/// (Phase B); skipping them is safe — the base relation simply carries unused
+/// columns. The result is a typed vertex table instead of the flat `_triples`
+/// dump.
+#[allow(clippy::elidable_lifetime_names)]
+fn synthesize_sink_plan<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+    source_relation: &str,
+    chunk_size: u64,
+) -> SinkPlan {
+    let empty = SinkPlan {
+        vertices: Vec::new(),
+        edges: Vec::new(),
+        chunk_size,
+    };
+
+    let file = mapping.file(db);
+    let dm = def_map(db, file);
+    let Some(idx) = dm.mappings(db).iter().position(|loc| *loc == mapping) else {
+        return empty;
+    };
+    let hir = lower_to_hir(db, file);
+    let Some(m) = hir.mappings(db).get(idx) else {
+        return empty;
+    };
+    let type_name = local_name(m.shape_iri.as_str());
+
+    // Source Record (forward-propagated field types) for datatype resolution.
+    let source_row = typecheck_mapping(db, mapping)
+        .ok()
+        .and_then(|out| out.source_row(db));
+    let field_datatype = |field: &str| -> &'static str {
+        let Some(row) = source_row else { return "string" };
+        let TyKind::Record(rec) = row.kind(db) else {
+            return "string";
+        };
+        rec.fields(db)
+            .iter()
+            .find(|f| f.name == field)
+            .and_then(|f| inner_primitive(db, f.ty))
+            .map_or("string", primitive_to_graphar)
+    };
+
+    let mut properties = Vec::new();
+    for prop in body(db, mapping).properties(db) {
+        let PropertyKey::PrefixedName { iri } = &prop.key else {
+            continue; // the `iri = ...` subject template is the vertex_id, not a property
+        };
+        let data_type = match &prop.value {
+            HirExpr::FieldRef(field) => field_datatype(field.as_str()),
+            HirExpr::StringLit(_) => "string",
+            // Template / PrefixedName objects are IRIs → edges (Phase B).
+            HirExpr::Template(_) | HirExpr::PrefixedName { .. } => continue,
+        };
+        properties.push(VertexProperty {
+            name: local_name(iri.as_str()),
+            data_type: data_type.to_string(),
+            single_valued: true,
+        });
+    }
+
+    SinkPlan {
+        vertices: vec![VertexTable {
+            type_name,
+            vertex_id_col: IRI_COLUMN.to_string(),
+            properties,
+            source_relation: source_relation.to_string(),
+        }],
+        edges: Vec::new(),
+        chunk_size,
+    }
 }
 
 /// Convenience entry: lower a mapping then run [`codegen_sql_with_descriptor`].

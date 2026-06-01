@@ -362,7 +362,9 @@ fn shape_label_iri(label: &shex_ast::ShapeExprLabel) -> String {
 /// Extract the local name from an IRI (the segment after the last `/`, `#`, or `:`).
 ///
 /// `"http://example.org/Person"` ⇒ `"Person"`; `"ex:knows"` ⇒ `"knows"`.
-fn local_name(iri: &str) -> String {
+/// Public so the codegen synthesis pass (mapping → `SinkPlan`) reuses the one
+/// IRI-localisation rule instead of duplicating it.
+pub fn local_name(iri: &str) -> String {
     iri.rsplit_once(['/', '#', ':'])
         .map_or(iri, |(_, tail)| tail)
         .to_string()

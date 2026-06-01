@@ -606,7 +606,7 @@ fn cmd_run_w0b(
     // Drive the W0b/5 SinkPlan bridge.
     let chunk_size = fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
     let (prelude_sql, sink_plan) =
-        fossil_codegen::decompose_for_writer(db, mir, descriptor, chunk_size);
+        fossil_codegen::decompose_for_writer(db, mapping, mir, descriptor, chunk_size);
 
     let write_options = fossil_sinks::writer::WriteOptions::default();
     let write_plan =
