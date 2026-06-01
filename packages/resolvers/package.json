@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/resolvers",
-  "version": "0.1.0",
+  "version": "0.3.0-alpha.0",
   "description": "Default + mock + public-HTTP ConnectionResolver implementations for the @fossil-lang/playground React component (Tier 1 per ADR-0029).",
   "license": "Apache-2.0",
   "repository": {

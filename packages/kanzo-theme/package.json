@@ -1,6 +1,6 @@
 {
   "name": "@kanzo/theme",
-  "version": "0.1.0",
+  "version": "0.3.0-alpha.0",
   "description": "Kanzo brand tokens + KanzoThemeProvider React component. Consumed by kanzo-branded hosts (apps/landing, Keasy) wrapping @fossil-lang/* React surface. Per ADR-0035 (visual ownership separation) — @fossil-lang/ui primitives are theme-less and consume the --fossil-* CSS-var contract; this package is the brand-owned theme.",
   "license": "Apache-2.0",
   "repository": {

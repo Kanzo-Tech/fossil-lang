@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/viewer",
-  "version": "0.1.0",
+  "version": "0.3.0-alpha.0",
   "description": "Cosmos.gl WebGL graph viewer + IDE-style tabs composition (Graph / Turtle / Vertices / Edges) for Fossil — promoted from Keasy's discovery view. Per Phase 12 of v0.2 (see .planning/phases/12-fossil-lang-viewer-port/12-CONTEXT.md for locked decisions).",
   "license": "Apache-2.0",
   "repository": {
