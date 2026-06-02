@@ -1139,6 +1139,8 @@ dependencies = [
  "insta",
  "miette",
  "regex",
+ "secrecy",
+ "serde",
  "serde_json",
  "smol_str",
  "thiserror 1.0.69",

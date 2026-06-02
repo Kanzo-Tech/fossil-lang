@@ -40,6 +40,8 @@ use miette::{NamedSource, SourceSpan};
 use smol_str::SmolStr;
 use tracing_subscriber::EnvFilter;
 
+mod creds;
+
 /// CLI host's [`System`] impl — a thin `NativeSystem`-style wrapper that
 /// ALSO implements [`SystemWithDescriptors`] so the bidirectional checker
 /// (plan 03-05) can reach the output-descriptor accessor via the extension
@@ -162,6 +164,12 @@ enum Commands {
         /// `fossil run` via subprocess.
         #[arg(long)]
         output_json: bool,
+        /// Read a JSON cloud-credentials payload from stdin (see [`creds`]).
+        /// Secrets must not ride argv/env on a shared host, so a multi-tenant
+        /// caller pipes the dest + per-`@conn` `DuckDB` cloud-config in this way.
+        /// Omit for local / public-URL runs.
+        #[arg(long)]
+        creds_stdin: bool,
     },
 }
 
@@ -182,7 +190,8 @@ fn main() -> miette::Result<()> {
             shape,
             dest,
             output_json,
-        } => cmd_run(&file, shape.as_deref(), dest.as_deref(), output_json),
+            creds_stdin,
+        } => cmd_run(&file, shape.as_deref(), dest.as_deref(), output_json, creds_stdin),
     }
 }
 
@@ -562,11 +571,21 @@ fn cmd_run(
     shape: Option<&Path>,
     dest: Option<&str>,
     output_json: bool,
+    creds_stdin: bool,
 ) -> miette::Result<()> {
-    tracing::debug!(?path, ?dest, "fossil run");
+    tracing::debug!(?path, ?dest, creds_stdin, "fossil run");
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
     let descriptor = load_descriptor(path, shape)?;
+
+    // Cloud credentials (if any) arrive on stdin — never argv/env (secrets on a
+    // shared host). Absent `--creds-stdin` ⇒ empty config ⇒ local/public-URL
+    // behaviour is byte-identical to before.
+    let creds = if creds_stdin {
+        creds::RunCreds::from_stdin().map_err(|e| miette::miette!("{e}"))?
+    } else {
+        creds::RunCreds::default()
+    };
 
     let (db, file) = open_db(text.clone(), path);
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -580,7 +599,7 @@ fn cmd_run(
     if let Some(dest_url) = dest
         && shape.is_some()
     {
-        return cmd_run_w0b(&db, file, path, &descriptor, dest_url, output_json);
+        return cmd_run_w0b(&db, file, path, &descriptor, dest_url, output_json, &creds);
     }
 
     cmd_run_legacy(&db, file, path)
@@ -594,6 +613,7 @@ fn cmd_run_w0b(
     descriptor: &fossil_descriptors_output::OutputDescriptorKind,
     dest_url: &str,
     output_json: bool,
+    creds: &creds::RunCreds,
 ) -> miette::Result<()> {
     let def_map = fossil_hir::def_map::def_map(db, file);
     let mapping = def_map
@@ -621,7 +641,11 @@ fn cmd_run_w0b(
         .map_err(|e| miette::miette!("create source views: {e}"))?;
 
     let dest_local = local_path_from_url(dest_url)?;
-    let resolved = fossil_resolver::ResolvedPath::new(dest_url);
+    // Thread the dest's cloud config (DuckDB SET keys → secrets) supplied on
+    // stdin into the resolved path; `materialize` applies it via the SET dance
+    // before the COPY. Empty config (local/public dest) ⇒ no SET ⇒ unchanged.
+    let resolved =
+        fossil_resolver::ResolvedPath::with_config(dest_url, creds.dest.config.clone());
 
     // Local-fs YAML writer. Cloud destinations need an uploader — W0b/7.
     let write_yaml = |rel_path: &str, content: &str| -> Result<(), String> {

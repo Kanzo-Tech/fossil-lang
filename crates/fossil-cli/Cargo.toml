@@ -34,6 +34,11 @@ fossil-resolver = { path = "../fossil-resolver" }
 fossil-mir      = { path = "../fossil-mir" }
 # Status JSON on stdout (via --output-json) for keasy subprocess consumption.
 serde_json = { workspace = true }
+# `--creds-stdin`: deserialize the cloud-config payload (DuckDB SET keys →
+# SecretString values) a multi-tenant host pipes in. serde derive for the wire
+# structs; secrecy keeps the values off Debug/argv/env.
+serde = { workspace = true, features = ["derive"] }
+secrecy = { workspace = true }
 
 clap = { workspace = true }
 # `fancy` ONLY in this crate (not workspace-level): pulls native-only
