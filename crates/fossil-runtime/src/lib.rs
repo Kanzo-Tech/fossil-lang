@@ -62,6 +62,44 @@ pub fn execute(sql: &str) -> Result<(), duckdb::Error> {
     Ok(())
 }
 
+/// Apply optional `DuckDB` resource limits from the environment, so a host
+/// running many fossil subprocesses on a small machine can bound each run's
+/// memory + CPU footprint. No-op when the vars are unset (preserves `DuckDB`
+/// defaults, which target ~80% of physical RAM — unsafe for multi-instance
+/// hosts). Recognised:
+///
+/// - `FOSSIL_DUCKDB_MEMORY_LIMIT` — e.g. `256MB`. When a query exceeds it,
+///   `DuckDB` spills to `temp_directory` instead of OOM-ing (set the temp dir
+///   too, else large queries error rather than spill).
+/// - `FOSSIL_DUCKDB_THREADS` — worker thread cap (e.g. `2`).
+/// - `FOSSIL_DUCKDB_TEMP_DIR` — spill directory used once `memory_limit` is hit.
+///
+/// Call right after opening a connection used for a run/materialize.
+///
+/// # Errors
+///
+/// Returns the underlying [`duckdb::Error`] if a `SET` statement fails.
+pub fn apply_resource_limits(conn: &Connection) -> Result<(), duckdb::Error> {
+    // Values are host-supplied (env); strip quotes defensively before interpolating.
+    if let Ok(mem) = std::env::var("FOSSIL_DUCKDB_MEMORY_LIMIT")
+        && !mem.is_empty()
+    {
+        conn.execute_batch(&format!("SET memory_limit='{}';", mem.replace('\'', "")))?;
+    }
+    if let Ok(threads) = std::env::var("FOSSIL_DUCKDB_THREADS")
+        && let Ok(n) = threads.parse::<u32>()
+        && n > 0
+    {
+        conn.execute_batch(&format!("SET threads={n};"))?;
+    }
+    if let Ok(tmp) = std::env::var("FOSSIL_DUCKDB_TEMP_DIR")
+        && !tmp.is_empty()
+    {
+        conn.execute_batch(&format!("SET temp_directory='{}';", tmp.replace('\'', "")))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

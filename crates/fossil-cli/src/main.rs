@@ -370,6 +370,7 @@ fn pre_introspect_and_register(
             return;
         }
     };
+    let _ = fossil_runtime::apply_resource_limits(&conn);
     // Cloud `@conn` sources need their read creds applied before DESCRIBE.
     // Best-effort: a creds failure just degrades this source to no forward
     // propagation (same contract as a DESCRIBE failure below).
@@ -652,6 +653,10 @@ fn cmd_run_w0b(
 
     let conn =
         duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
+    // Bound memory/CPU from the host's env (multi-instance OOM protection) before
+    // any heavy COPY/materialize runs on this connection.
+    fossil_runtime::apply_resource_limits(&conn)
+        .map_err(|e| miette::miette!("apply duckdb resource limits: {e}"))?;
     // Apply every source connection's read cloud-config BEFORE the prelude runs
     // its read_csv_auto over cloud `@conn` sources.
     apply_source_creds(&conn, &creds.connections)?;
