@@ -116,38 +116,33 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 // W3.1b — integration: apply the pure layout to the written GraphAr vertices.
 // ──────────────────────────────────────────────────────────────────────────
 
-use std::path::{Path, PathBuf};
-
 use duckdb::Connection;
 
-/// One vertex type's layout target: its on-disk vertex Parquet plus the CSR
-/// Parquets of its **self-edges** (`src_type == dst_type == this type`), whose
+/// One vertex type's layout target: its vertex Parquet URL plus the CSR Parquet
+/// URLs of its **self-edges** (`src_type == dst_type == this type`), whose
 /// `src_dense`/`dst_dense` live in this type's `dense_id` space. Cross-type
 /// edges are excluded here — a global cross-type layout is a later slice.
+///
+/// URLs (not paths) so the same enrichment runs against `file://` and cloud
+/// (`s3://`, `az://`) destinations alike — `read_parquet` / `COPY … TO` take the
+/// URL verbatim and DuckDB's httpfs/object-store extension dereferences it.
 #[derive(Debug, Clone)]
 pub struct VertexLayoutTarget {
-    /// Local path to the vertex Parquet (e.g. `<dest>/vertex/Person.parquet`).
-    pub vertex_parquet: PathBuf,
-    /// Local paths to this type's self-edge CSR Parquets.
-    pub self_edge_csr: Vec<PathBuf>,
+    /// Vertex Parquet URL (e.g. `file://…/vertex/Person.parquet`, `s3://…`).
+    pub vertex_parquet: String,
+    /// This type's self-edge CSR Parquet URLs.
+    pub self_edge_csr: Vec<String>,
 }
 
 /// Failure modes of [`enrich_layout`].
 #[derive(Debug, thiserror::Error)]
 pub enum LayoutError {
-    /// A `DuckDB` query (count, edge read, rewrite COPY) failed.
+    /// A `DuckDB` query (count, edge read, stage, rewrite COPY) failed.
     #[error("layout DuckDB op on `{target}` failed: {source}")]
     Duck {
         target: String,
         #[source]
         source: duckdb::Error,
-    },
-    /// Renaming the rewritten temp Parquet over the original failed.
-    #[error("layout rename for `{target}` failed: {source}")]
-    Rename {
-        target: String,
-        #[source]
-        source: std::io::Error,
     },
 }
 
@@ -166,8 +161,8 @@ pub enum LayoutError {
 /// Returns [`LayoutError`] on the first failing `DuckDB` op or rename.
 pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Result<(), LayoutError> {
     for target in targets {
-        let vpath = target.vertex_parquet.as_path();
-        let vname = vpath.display().to_string();
+        let vurl = target.vertex_parquet.as_str();
+        let vname = vurl.to_string();
         let duck = |source: duckdb::Error| LayoutError::Duck {
             target: vname.clone(),
             source,
@@ -177,7 +172,7 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
             .query_row(
                 &format!(
                     "SELECT coalesce(max(dense_id) + 1, 0)::UINTEGER FROM read_parquet('{}')",
-                    sql_lit(vpath)
+                    sql_lit(vurl)
                 ),
                 [],
                 |r| r.get(0),
@@ -235,33 +230,44 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
             // appender flushes on drop (end of this block) before the COPY reads it.
         }
 
+        // Stage the vertices in a temp table so the rewrite COPY reads from
+        // memory, not from the very Parquet it overwrites. This replaces the
+        // earlier `.tmp` sibling + `std::fs::rename` dance: a rename is a
+        // local-filesystem primitive cloud object stores (`s3://`, `az://`)
+        // don't offer, and the dataset is freshly written with no concurrent
+        // readers, so an in-place overwrite is safe. One code path, local + cloud.
+        conn.execute_batch(&format!(
+            "CREATE OR REPLACE TEMP TABLE __fossil_vertices AS \
+             SELECT * FROM read_parquet('{}')",
+            sql_lit(vurl)
+        ))
+        .map_err(duck)?;
+
         // Rewrite: same columns, x/y/cluster_id replaced from the temp table,
         // rows reordered by Morton(x,y) so a bbox viewport query prunes via
         // row-group stats. `dense_id` VALUES are unchanged (only the row order),
-        // so every edge stays valid. Write a sibling `.tmp` then rename over the
-        // original (never read + write the same file in one statement).
-        let tmp = vpath.with_extension("parquet.tmp");
+        // so every edge stays valid.
         conn.execute_batch(&format!(
             "COPY (SELECT v.* REPLACE (l.x AS x, l.y AS y, l.cluster_id AS cluster_id) \
-             FROM read_parquet('{}') v JOIN __fossil_layout l USING (dense_id) \
+             FROM __fossil_vertices v JOIN __fossil_layout l USING (dense_id) \
              ORDER BY l.morton) \
              TO '{}' (FORMAT PARQUET)",
-            sql_lit(vpath),
-            sql_lit(&tmp),
+            sql_lit(vurl),
         ))
         .map_err(duck)?;
-        std::fs::rename(&tmp, vpath).map_err(|source| LayoutError::Rename {
-            target: vname.clone(),
-            source,
-        })?;
+
+        // Free the staged vertices before the next target (each type can be
+        // large; the temp table is single-use per iteration).
+        conn.execute_batch("DROP TABLE IF EXISTS __fossil_vertices")
+            .map_err(duck)?;
     }
     Ok(())
 }
 
-/// Escape a path for embedding in a single-quoted `DuckDB` SQL string literal
+/// Escape a URL for embedding in a single-quoted `DuckDB` SQL string literal
 /// (`read_parquet('…')` / `COPY … TO '…'` take literals, not bind params).
-fn sql_lit(path: &Path) -> String {
-    path.to_string_lossy().replace('\'', "''")
+fn sql_lit(url: &str) -> String {
+    url.replace('\'', "''")
 }
 
 /// Interleave the low 16 bits of `x` and `y` into a 32-bit Morton (Z-order)

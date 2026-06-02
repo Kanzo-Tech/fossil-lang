@@ -640,44 +640,55 @@ fn cmd_run_w0b(
     conn.execute_batch(&prelude_sql)
         .map_err(|e| miette::miette!("create source views: {e}"))?;
 
-    let dest_local = local_path_from_url(dest_url)?;
     // Thread the dest's cloud config (DuckDB SET keys → secrets) supplied on
     // stdin into the resolved path; `materialize` applies it via the SET dance
-    // before the COPY. Empty config (local/public dest) ⇒ no SET ⇒ unchanged.
+    // before every COPY. Empty config (local/public dest) ⇒ no SET ⇒ unchanged.
     let resolved =
         fossil_resolver::ResolvedPath::with_config(dest_url, creds.dest.config.clone());
 
-    // Local-fs YAML writer. Cloud destinations need an uploader — W0b/7.
-    let write_yaml = |rel_path: &str, content: &str| -> Result<(), String> {
-        let full = dest_local.join(rel_path);
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    // Local dests need their directory tree pre-created — DuckDB COPY writes a
+    // file but won't `mkdir -p`. Cloud object stores are flat and need none.
+    if let Some(dest_dir) = local_dest_dir(dest_url) {
+        std::fs::create_dir_all(&dest_dir)
+            .map_err(|e| miette::miette!("create dest dir: {e}"))?;
+        for s in &write_plan.vertex_statements {
+            if let Some(parent) = dest_dir.join(&s.rel_path).parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| miette::miette!("create vertex dir: {e}"))?;
+            }
         }
-        std::fs::write(&full, content).map_err(|e| e.to_string())
-    };
+        for s in &write_plan.edge_statements {
+            if let Some(parent) = dest_dir.join(&s.csr_rel_path).parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| miette::miette!("create edge dir: {e}"))?;
+            }
+        }
+    }
 
-    // Pre-create the vertex + edge directories so DuckDB COPY doesn't
-    // need its own mkdir (DuckDB writes the file but won't create
-    // intermediate dirs). Same contract as the W0b/4 integration test.
-    for s in &write_plan.vertex_statements {
-        if let Some(parent) = dest_local.join(&s.rel_path).parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| miette::miette!("create vertex dir: {e}"))?;
-        }
-    }
-    for s in &write_plan.edge_statements {
-        if let Some(parent) = dest_local.join(&s.csr_rel_path).parent() {
-            std::fs::create_dir_all(parent).map_err(|e| miette::miette!("create edge dir: {e}"))?;
-        }
-    }
+    // YAML manifests go through DuckDB too, making it the SINGLE byte-writer for
+    // both Parquet and YAML — the manifest write inherits the same cloud SET
+    // config and needs no second storage stack / credential vocabulary. A
+    // single-column row with `QUOTE ''` writes the value verbatim; DuckDB adds
+    // one row-terminator `\n`, so strip the content's trailing newline for a
+    // byte-exact file. (Validated against DuckDB 1.3.0, 2026-06-02.)
+    let write_yaml = |rel_path: &str, content: &str| -> Result<(), String> {
+        let url = resolved.join(rel_path);
+        let body = content.strip_suffix('\n').unwrap_or(content);
+        let sql = format!(
+            "COPY (SELECT '{}' AS x) TO '{}' (FORMAT csv, HEADER false, QUOTE '', DELIMITER ',')",
+            body.replace('\'', "''"),
+            url.url().replace('\'', "''"),
+        );
+        conn.execute_batch(&sql).map_err(|e| e.to_string())
+    };
 
     fossil_runtime::materialize_graph_ar(&conn, &write_plan, &manifests, &resolved, write_yaml)
         .map_err(|e| miette::miette!("materialize: {e}"))?;
 
     // W3.1b — replace the placeholder x/y/cluster_id with a real WCC partition +
-    // deterministic layout, per vertex type using its self-edges. Local-fs dest
-    // only (the COPY rewrite + rename need a real path; cloud is W0b/7).
-    // `edge_statements` and `manifests.edges` are parallel (both from the same
+    // deterministic layout, per vertex type using its self-edges. Destination-
+    // agnostic: targets are URLs (`file://` or cloud), so the enrichment runs the
+    // same on both. `edge_statements` and `manifests.edges` are parallel (same
     // SinkPlan edge order), so zipping correlates each edge to its src/dst type.
     let layout_targets: Vec<fossil_runtime::layout::VertexLayoutTarget> = write_plan
         .vertex_statements
@@ -689,10 +700,10 @@ fn cmd_run_w0b(
                 .iter()
                 .zip(&manifests.edges)
                 .filter(|(_, em)| em.edge_info.src_type == vtype && em.edge_info.dst_type == vtype)
-                .map(|(es, _)| dest_local.join(&es.csr_rel_path))
+                .map(|(es, _)| resolved.join(&es.csr_rel_path).url().to_string())
                 .collect();
             fossil_runtime::layout::VertexLayoutTarget {
-                vertex_parquet: dest_local.join(&vstmt.rel_path),
+                vertex_parquet: resolved.join(&vstmt.rel_path).url().to_string(),
                 self_edge_csr,
             }
         })
@@ -751,25 +762,20 @@ fn cmd_run_legacy(
     Ok(())
 }
 
-/// Translate a `file://` URL to a local filesystem path. Other URL schemes
-/// (s3://, az://, https://) are rejected — cloud destinations require an
-/// uploader the CLI does not yet ship (W0b/7).
-fn local_path_from_url(url: &str) -> miette::Result<PathBuf> {
-    url.strip_prefix("file://").map_or_else(
-        || {
-            if url.contains("://") {
-                Err(miette::miette!(
-                    "destination URL `{url}`: only `file://` paths supported in the W0b CLI; \
-                     cloud destinations require the uploader landing in W0b/7"
-                ))
-            } else {
-                // Bare paths treated as local for ergonomics
-                // (`fossil run x.fossil --dest /tmp/g`).
-                Ok(PathBuf::from(url))
-            }
-        },
-        |rest| Ok(PathBuf::from(rest)),
-    )
+/// The local filesystem directory a dest URL writes under, or `None` when the
+/// dest is a cloud object store (`s3://`, `az://`, `https://`, …) that needs no
+/// directory pre-creation. `file://` URLs and bare paths
+/// (`fossil run x.fossil --dest /tmp/g`) are local; the parquet/YAML COPYs
+/// themselves target the URL verbatim (DuckDB dereferences `file://` and cloud
+/// schemes alike), so this is used ONLY to `mkdir -p` the local tree.
+fn local_dest_dir(url: &str) -> Option<PathBuf> {
+    if let Some(rest) = url.strip_prefix("file://") {
+        return Some(PathBuf::from(rest));
+    }
+    if url.contains("://") {
+        return None; // cloud scheme — flat namespace, no mkdir
+    }
+    Some(PathBuf::from(url))
 }
 
 /// Count rows in a produced Parquet file via an in-memory `DuckDB` connection.
