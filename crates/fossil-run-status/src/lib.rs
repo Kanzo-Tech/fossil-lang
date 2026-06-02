@@ -42,6 +42,12 @@ pub struct VertexStatus {
     /// The vertex type / `GraphAr` `type` (e.g. `Person`).
     #[serde(rename = "type")]
     pub vertex_type: String,
+    /// The full RDF type IRI the mapping declares for this vertex (the shape IRI,
+    /// e.g. `https://example.org/Person`); `None` when the output has no RDF
+    /// type. This is the output *spec* fossil owns — the governance layer (DCAT)
+    /// reads it from the manifest instead of re-deriving it from the program.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rdf_type: Option<String>,
     /// Dataset-relative Parquet path, e.g. `vertex/Person.parquet`.
     pub file: String,
     /// Row count (Parquet footer metadata); `None` if the count query failed.
@@ -58,6 +64,15 @@ pub struct ColumnStatus {
     pub name: String,
     /// `GraphAr` data-type spelling (`string`, `int64`, `double`, …).
     pub data_type: String,
+    /// The full RDF predicate IRI this column maps (e.g.
+    /// `https://example.org/name`); `None` when the output has no RDF predicate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rdf_uri: Option<String>,
+    /// The XSD datatype IRI of the literal value (e.g.
+    /// `http://www.w3.org/2001/XMLSchema#string`); `None` when not an RDF
+    /// literal. Part of the output spec the governance layer (DCAT) consumes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xsd_datatype: Option<String>,
 }
 
 /// One edge type — its CSR/CSC Parquet pair and endpoints.

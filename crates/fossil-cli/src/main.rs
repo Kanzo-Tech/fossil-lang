@@ -191,7 +191,13 @@ fn main() -> miette::Result<()> {
             dest,
             output_json,
             creds_stdin,
-        } => cmd_run(&file, shape.as_deref(), dest.as_deref(), output_json, creds_stdin),
+        } => cmd_run(
+            &file,
+            shape.as_deref(),
+            dest.as_deref(),
+            output_json,
+            creds_stdin,
+        ),
     }
 }
 
@@ -682,8 +688,7 @@ fn cmd_run_w0b(
     // Local dests need their directory tree pre-created — DuckDB COPY writes a
     // file but won't `mkdir -p`. Cloud object stores are flat and need none.
     if let Some(dest_dir) = local_dest_dir(dest_url) {
-        std::fs::create_dir_all(&dest_dir)
-            .map_err(|e| miette::miette!("create dest dir: {e}"))?;
+        std::fs::create_dir_all(&dest_dir).map_err(|e| miette::miette!("create dest dir: {e}"))?;
         for s in &write_plan.vertex_statements {
             if let Some(parent) = dest_dir.join(&s.rel_path).parent() {
                 std::fs::create_dir_all(parent)
@@ -773,6 +778,7 @@ fn cmd_run_w0b(
             .zip(&sink_plan.vertices)
             .map(|(vstmt, vtable)| fossil_run_status::VertexStatus {
                 vertex_type: vstmt.type_name.clone(),
+                rdf_type: vtable.rdf_type.clone(),
                 file: vstmt.rel_path.clone(),
                 count: count_rows(&vstmt.rel_path),
                 columns: vtable
@@ -781,6 +787,8 @@ fn cmd_run_w0b(
                     .map(|p| fossil_run_status::ColumnStatus {
                         name: p.name.clone(),
                         data_type: p.data_type.clone(),
+                        rdf_uri: p.rdf_uri.clone(),
+                        xsd_datatype: p.xsd_datatype.clone(),
                     })
                     .collect(),
             })
@@ -852,7 +860,8 @@ fn apply_source_creds(
 ) -> miette::Result<()> {
     for (i, c) in connections.values().enumerate() {
         if let Some(spec) = &c.secret {
-            let resolved = fossil_resolver::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
+            let resolved =
+                fossil_resolver::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
             fossil_runtime::install_secret(conn, &resolved, &format!("__fossil_src_{i}"))
                 .map_err(|e| miette::miette!("install source secret: {e}"))?;
         }
@@ -951,7 +960,10 @@ mod tests {
             resolve_source_uri("s3://other/x.csv", &c),
             "s3://other/x.csv"
         );
-        assert_eq!(resolve_source_uri("examples/users.csv", &c), "examples/users.csv");
+        assert_eq!(
+            resolve_source_uri("examples/users.csv", &c),
+            "examples/users.csv"
+        );
     }
 
     #[test]

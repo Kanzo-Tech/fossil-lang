@@ -50,7 +50,12 @@ pub fn merge_decomposed(parts: &[(String, SinkPlan)]) -> (String, SinkPlan) {
 
     for (_, plan) in parts {
         for v in &plan.vertices {
-            push_grouped(&mut vtype_order, &mut vgroups, v.type_name.clone(), v.clone());
+            push_grouped(
+                &mut vtype_order,
+                &mut vgroups,
+                v.type_name.clone(),
+                v.clone(),
+            );
         }
         for e in &plan.edges {
             let key = (e.src_type.clone(), e.predicate.clone(), e.dst_type.clone());
@@ -161,6 +166,9 @@ fn merge_vertex_group(mut group: Vec<VertexTable>) -> VertexTable {
 
     VertexTable {
         type_name,
+        // Same-type mappings share one RDF type (the shape IRI); the property
+        // RDF spec (rdf_uri / xsd_datatype) rides each cloned VertexProperty.
+        rdf_type: group[0].rdf_type.clone(),
         vertex_id_col: IRI_COLUMN.to_string(),
         properties,
         source_relation,
@@ -213,12 +221,15 @@ mod tests {
     fn vtable(type_name: &str, props: &[&str], rel: &str) -> VertexTable {
         VertexTable {
             type_name: type_name.to_string(),
+            rdf_type: Some(format!("https://ex.org/{type_name}")),
             vertex_id_col: IRI_COLUMN.to_string(),
             properties: props
                 .iter()
                 .map(|n| VertexProperty {
                     name: (*n).to_string(),
                     data_type: "string".to_string(),
+                    rdf_uri: Some(format!("https://ex.org/{n}")),
+                    xsd_datatype: Some("http://www.w3.org/2001/XMLSchema#string".to_string()),
                     single_valued: true,
                 })
                 .collect(),

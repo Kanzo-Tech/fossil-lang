@@ -1283,16 +1283,21 @@ mod tests {
     fn person_table() -> VertexTable {
         VertexTable {
             type_name: "person".to_string(),
+            rdf_type: None,
             vertex_id_col: IRI_COLUMN.to_string(),
             properties: vec![
                 VertexProperty {
                     name: "name".to_string(),
                     data_type: "string".to_string(),
+                    rdf_uri: None,
+                    xsd_datatype: None,
                     single_valued: true, // ⇒ dedup_subjects
                 },
                 VertexProperty {
                     name: "age".to_string(),
                     data_type: "int64".to_string(),
+                    rdf_uri: None,
+                    xsd_datatype: None,
                     single_valued: true,
                 },
             ],
@@ -1367,6 +1372,7 @@ mod tests {
         // properties also collapse on subject.
         let vt = VertexTable {
             type_name: "marker".to_string(),
+            rdf_type: None,
             vertex_id_col: IRI_COLUMN.to_string(),
             properties: Vec::new(),
             source_relation: PLACEHOLDER_RELATION.to_string(),

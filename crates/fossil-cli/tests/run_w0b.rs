@@ -266,13 +266,7 @@ Order : ex:Order from orders
     let dest_url = format!("file://{}", dest.display());
 
     let output = Command::new(bin)
-        .args([
-            "run",
-            "prog.fossil",
-            "--dest",
-            &dest_url,
-            "--output-json",
-        ])
+        .args(["run", "prog.fossil", "--dest", &dest_url, "--output-json"])
         .current_dir(&workdir)
         .output()
         .expect("spawn fossil run");
@@ -325,10 +319,44 @@ Order : ex:Order from orders
         .iter()
         .filter_map(|c| c["name"].as_str())
         .collect();
-    assert!(cols.contains(&"amount"), "amount is a property; got: {cols:?}");
+    assert!(
+        cols.contains(&"amount"),
+        "amount is a property; got: {cols:?}"
+    );
     assert!(
         !cols.contains(&"placedBy"),
         "placedBy is an edge, not a property column; got: {cols:?}"
+    );
+
+    // #5a: the manifest carries the RDF output spec the governance layer (DCAT)
+    // consumes — full shape IRI per vertex, predicate IRI + XSD datatype per
+    // column — derived from the mapping alone (no ShEx, no host re-derivation).
+    let person_v = parsed["vertices"]
+        .as_array()
+        .expect("vertices array")
+        .iter()
+        .find(|v| v["type"] == "Person")
+        .expect("Person vertex in status");
+    assert_eq!(
+        person_v["rdf_type"].as_str(),
+        Some("https://example.org/Person"),
+        "vertex carries its full RDF type IRI; got: {person_v}"
+    );
+    let name_col = person_v["columns"]
+        .as_array()
+        .expect("columns array")
+        .iter()
+        .find(|c| c["name"] == "name")
+        .expect("name column on Person");
+    assert_eq!(
+        name_col["rdf_uri"].as_str(),
+        Some("https://example.org/name"),
+        "column carries its full predicate IRI; got: {name_col}"
+    );
+    assert_eq!(
+        name_col["xsd_datatype"].as_str(),
+        Some("http://www.w3.org/2001/XMLSchema#string"),
+        "column carries its XSD datatype IRI; got: {name_col}"
     );
 }
 

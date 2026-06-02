@@ -297,6 +297,30 @@ const fn primitive_to_graphar(p: Primitive) -> &'static str {
     }
 }
 
+/// The canonical XSD datatype IRI for a Fossil [`Primitive`] — the output spec's
+/// literal datatype, carried into the manifest for the host's governance layer
+/// (DCAT). Mirrors [`primitive_to_graphar`] but in the RDF/XSD vocabulary.
+fn primitive_to_xsd(p: Primitive) -> String {
+    let local = match p {
+        Primitive::Integer => "integer",
+        Primitive::Float => "double",
+        Primitive::Bool => "boolean",
+        Primitive::Date => "date",
+        Primitive::DateTime => "dateTime",
+        Primitive::Time => "time",
+        Primitive::AnyURI => "anyURI",
+        Primitive::GYear => "gYear",
+        Primitive::String => "string",
+    };
+    format!("http://www.w3.org/2001/XMLSchema#{local}")
+}
+
+/// The XSD `string` IRI — the fallback datatype when a field's primitive is
+/// unknown or the value is a string literal.
+fn default_xsd_string() -> String {
+    "http://www.w3.org/2001/XMLSchema#string".to_string()
+}
+
 /// Peel `Optional`/`Seq` wrappers to the inner [`Primitive`], if any.
 fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Primitive> {
     match ty.kind(db) {
@@ -354,18 +378,15 @@ fn synthesize_sink_plan<'db>(
     let source_row = typecheck_mapping(db, mapping)
         .ok()
         .and_then(|out| out.source_row(db));
-    let field_datatype = |field: &str| -> &'static str {
-        let Some(row) = source_row else {
-            return "string";
-        };
+    let field_primitive = |field: &str| -> Option<Primitive> {
+        let row = source_row?;
         let TyKind::Record(rec) = row.kind(db) else {
-            return "string";
+            return None;
         };
         rec.fields(db)
             .iter()
             .find(|f| f.name == field)
             .and_then(|f| inner_primitive(db, f.ty))
-            .map_or("string", primitive_to_graphar)
     };
 
     // Edge dst-type resolution registry: every mapping's subject-template
@@ -388,14 +409,21 @@ fn synthesize_sink_plan<'db>(
         };
         let pred_local = local_name(iri.as_str());
         match &prop.value {
-            HirExpr::FieldRef(field) => properties.push(VertexProperty {
-                name: pred_local,
-                data_type: field_datatype(field.as_str()).to_string(),
-                single_valued: true,
-            }),
+            HirExpr::FieldRef(field) => {
+                let prim = field_primitive(field.as_str());
+                properties.push(VertexProperty {
+                    name: pred_local,
+                    data_type: prim.map_or("string", primitive_to_graphar).to_string(),
+                    rdf_uri: Some(iri.to_string()),
+                    xsd_datatype: Some(prim.map_or_else(default_xsd_string, primitive_to_xsd)),
+                    single_valued: true,
+                });
+            }
             HirExpr::StringLit(_) => properties.push(VertexProperty {
                 name: pred_local,
                 data_type: "string".to_string(),
+                rdf_uri: Some(iri.to_string()),
+                xsd_datatype: Some(default_xsd_string()),
                 single_valued: true,
             }),
             HirExpr::Template(t) => {
@@ -424,6 +452,7 @@ fn synthesize_sink_plan<'db>(
     SinkPlan {
         vertices: vec![VertexTable {
             type_name,
+            rdf_type: Some(m.shape_iri.to_string()),
             vertex_id_col: IRI_COLUMN.to_string(),
             properties,
             source_relation: source_relation.to_string(),

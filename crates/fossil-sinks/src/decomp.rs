@@ -72,6 +72,11 @@ pub struct SinkPlan {
 pub struct VertexTable {
     /// The shape's local type name (e.g. `"Person"`), used as the `GraphAr` vertex `type`.
     pub type_name: String,
+    /// The full RDF type IRI (the shape IRI, e.g. `"https://example.org/Person"`);
+    /// `None` when no RDF type is known (the flat-triple passthrough). Carried
+    /// into the manifest so the host's governance layer reads the output spec
+    /// instead of re-deriving it.
+    pub rdf_type: Option<String>,
     /// The column used verbatim as the primary `vertex_id` — always [`IRI_COLUMN`] (SINK-04).
     pub vertex_id_col: String,
     /// Literal-object properties: `(name, data_type, single_valued)`.
@@ -90,6 +95,12 @@ pub struct VertexProperty {
     pub name: String,
     /// `GraphAr` data-type spelling derived from the constraint's datatype IRI.
     pub data_type: String,
+    /// The full RDF predicate IRI (e.g. `"https://example.org/name"`); `None`
+    /// when not known. Part of the output spec the governance layer consumes.
+    pub rdf_uri: Option<String>,
+    /// The XSD datatype IRI of the literal (e.g.
+    /// `"http://www.w3.org/2001/XMLSchema#string"`); `None` when not known.
+    pub xsd_datatype: Option<String>,
     /// `true` ⇒ single-valued (`Exact`/`ZeroOrOne`) ⇒ collapse duplicate subjects;
     /// `false` ⇒ multi-valued ⇒ keep all rows.
     pub single_valued: bool,
@@ -217,6 +228,7 @@ pub fn vertex_edge_decomp_from_kind(
             // flat-COPY behavior so non-ShEx compiles (the walking-skeleton) are unaffected.
             vertices: vec![VertexTable {
                 type_name: "_triples".to_string(),
+                rdf_type: None,
                 vertex_id_col: IRI_COLUMN.to_string(),
                 properties: Vec::new(),
                 source_relation: source_relation.to_string(),
@@ -247,12 +259,15 @@ pub fn vertex_edge_decomp_from_kind(
                 constraints.sort_by(|a, b| a.predicate.to_string().cmp(&b.predicate.to_string()));
 
                 for c in constraints {
-                    let pred_local = local_name(&c.predicate.to_string());
+                    let pred_iri = c.predicate.to_string();
+                    let pred_local = local_name(&pred_iri);
                     let single = is_single_valued(c.cardinality);
                     match classify_object(c, &shape_iris) {
                         ObjectKind::Literal(dt) => properties.push(VertexProperty {
                             name: pred_local,
                             data_type: data_type_name(&dt),
+                            rdf_uri: Some(pred_iri),
+                            xsd_datatype: Some(arrow_to_xsd(&dt)),
                             single_valued: single,
                         }),
                         ObjectKind::Edge(dst_iri) => edges.push(EdgeTable {
@@ -273,6 +288,7 @@ pub fn vertex_edge_decomp_from_kind(
 
                 vertices.push(VertexTable {
                     type_name: src_type,
+                    rdf_type: Some(binding.iri.to_string()),
                     vertex_id_col: IRI_COLUMN.to_string(),
                     properties,
                     source_relation: source_relation.to_string(),
@@ -330,6 +346,24 @@ fn classify_object(c: &ResolvedConstraint, shape_iris: &[String]) -> ObjectKind 
         // ShapeOr / ShapeAnd / ShapeNot / External / Shape are unsupported value exprs in v0.1.
         Some(_) => ObjectKind::Skip,
     }
+}
+
+/// Map an [`arrow_schema::DataType`] back to its canonical XSD datatype IRI.
+///
+/// The inverse of [`datatype_iri_to_arrow`], used to carry the literal's RDF
+/// datatype into the manifest's output spec (the governance layer reads it).
+#[must_use]
+pub fn arrow_to_xsd(dt: &DataType) -> String {
+    let local = match dt {
+        DataType::Int64 => "integer",
+        DataType::Float64 => "double",
+        DataType::Boolean => "boolean",
+        DataType::Date32 => "date",
+        DataType::Timestamp(..) => "dateTime",
+        // Utf8 + everything else is an XSD string.
+        _ => "string",
+    };
+    format!("http://www.w3.org/2001/XMLSchema#{local}")
 }
 
 /// Map an XSD datatype IRI string to the closest [`arrow_schema::DataType`] so the manifest's
