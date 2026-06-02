@@ -93,6 +93,86 @@ pub struct EdgeStatus {
     pub count: Option<i64>,
 }
 
+// ── Catalog input (host → `fossil catalog`) ──────────────────────────────────
+//
+// The DCAT-AP catalog is "just another output graph": fossil materialises it via
+// the same writer as a run. The host (keasy) owns the governance VALUES and the
+// output structure; it pipes this [`CatalogInput`] to `fossil catalog`, which
+// builds the DCAT-AP vertex/edge graph and writes GraphAr. (Host boundary: the
+// DCAT-AP *shape* lives in fossil, not re-implemented in the host.)
+
+/// The governance values + dataset structure a host supplies to materialise a
+/// DCAT-AP catalog graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct CatalogInput {
+    /// Stable job identifier — the catalog/dataset/distribution URN namespace.
+    pub job_id: String,
+    /// Human title for the catalog (defaults to a generic label when absent).
+    pub job_name: Option<String>,
+    /// ISO-8601 issue timestamp (`dct:issued`).
+    pub completed_at: String,
+    /// Catalog language tag (`dct:language`); defaults to `en`.
+    pub language: Option<String>,
+    /// Publisher display name (`foaf:name`).
+    pub publisher_name: String,
+    /// Publisher homepage / IRI (`foaf:homepage`); also the Agent subject IRI.
+    pub publisher_uri: Option<String>,
+    /// Catalog description (`dct:description`).
+    pub catalog_description: Option<String>,
+    /// License IRI (`dct:license`).
+    pub license_uri: Option<String>,
+    /// Contact email — emits a `vcard:Kind` contact when present.
+    pub contact_email: Option<String>,
+    /// One entry per output dataset (vertex type) in the run.
+    pub datasets: Vec<CatalogDataset>,
+}
+
+/// One DCAT dataset — an output vertex type plus its governance metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct CatalogDataset {
+    /// The vertex type / dataset title (e.g. `Person`).
+    pub type_name: String,
+    /// Source binding name (`dct:source`), if known.
+    pub source_name: Option<String>,
+    /// The dataset's RDF type IRI (`dct:conformsTo`), if known.
+    pub rdf_type: Option<String>,
+    /// Free-text keywords (`dcat:keyword`).
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// Row count of the executed dataset (from the run manifest), if known.
+    pub entity_count: Option<i64>,
+    /// The dataset's columns (schema metadata).
+    #[serde(default)]
+    pub fields: Vec<CatalogField>,
+    /// The dataset's distributions (one per materialised Parquet location).
+    #[serde(default)]
+    pub distributions: Vec<CatalogDistribution>,
+}
+
+/// A column of a [`CatalogDataset`] — schema metadata, not an RDF property.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct CatalogField {
+    /// Column name.
+    pub name: String,
+    /// The column's RDF predicate IRI, if any.
+    pub rdf_uri: Option<String>,
+    /// The column's XSD datatype IRI, if any.
+    pub datatype: Option<String>,
+}
+
+/// A DCAT distribution — an accessible location of a dataset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct CatalogDistribution {
+    /// Access URL (`dcat:accessURL`).
+    pub destination: String,
+    /// Media type (`dcat:mediaType`).
+    pub media_type: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

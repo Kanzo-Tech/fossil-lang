@@ -1355,6 +1355,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-output",
  "fossil-mir",
+ "fossil-run-status",
  "insta",
  "parquet",
  "prefixmap",

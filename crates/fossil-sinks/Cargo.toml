@@ -46,6 +46,10 @@ prefixmap = { workspace = true }
 # auto-memory project_fossil_graph_reference_architecture.md). Pure-Rust,
 # WASM-clean, no IO side-effects.
 thiserror = { workspace = true }
+# `fossil-run-status` carries the host↔fossil wire contracts; the `catalog`
+# builder consumes `CatalogInput` from it. Dependency-light (serde + schemars),
+# WASM-clean — keeps fossil-sinks in the WASM gate.
+fossil-run-status = { path = "../fossil-run-status" }
 
 [dev-dependencies]
 # Test-only Parquet schema read-back. `default-features = false` drops parquet's `arrow`
