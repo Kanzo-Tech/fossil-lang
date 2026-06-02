@@ -1134,6 +1134,7 @@ dependencies = [
  "fossil-hir",
  "fossil-mir",
  "fossil-resolver",
+ "fossil-run-status",
  "fossil-runtime",
  "fossil-sinks",
  "insta",
@@ -1306,6 +1307,15 @@ version = "0.1.0"
 dependencies = [
  "secrecy",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fossil-run-status"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

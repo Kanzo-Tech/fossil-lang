@@ -754,47 +754,48 @@ fn cmd_run_w0b(
             .ok()
         };
 
-        let vertices: Vec<serde_json::Value> = write_plan
+        let vertices: Vec<fossil_run_status::VertexStatus> = write_plan
             .vertex_statements
             .iter()
             .zip(&sink_plan.vertices)
-            .map(|(vstmt, vtable)| {
-                let columns: Vec<serde_json::Value> = vtable
+            .map(|(vstmt, vtable)| fossil_run_status::VertexStatus {
+                vertex_type: vstmt.type_name.clone(),
+                file: vstmt.rel_path.clone(),
+                count: count_rows(&vstmt.rel_path),
+                columns: vtable
                     .properties
                     .iter()
-                    .map(|p| serde_json::json!({ "name": p.name, "data_type": p.data_type }))
-                    .collect();
-                serde_json::json!({
-                    "type": vstmt.type_name,
-                    "file": vstmt.rel_path,
-                    "count": count_rows(&vstmt.rel_path),
-                    "columns": columns,
-                })
+                    .map(|p| fossil_run_status::ColumnStatus {
+                        name: p.name.clone(),
+                        data_type: p.data_type.clone(),
+                    })
+                    .collect(),
             })
             .collect();
 
-        let edges: Vec<serde_json::Value> = write_plan
+        let edges: Vec<fossil_run_status::EdgeStatus> = write_plan
             .edge_statements
             .iter()
             .zip(&manifests.edges)
-            .map(|(estmt, em)| {
-                serde_json::json!({
-                    "edge_type": em.edge_info.edge_type,
-                    "src_type": em.edge_info.src_type,
-                    "dst_type": em.edge_info.dst_type,
-                    "by_source": estmt.csr_rel_path,
-                    "by_target": estmt.csc_rel_path,
-                    "count": count_rows(&estmt.csr_rel_path),
-                })
+            .map(|(estmt, em)| fossil_run_status::EdgeStatus {
+                edge_type: em.edge_info.edge_type.clone(),
+                src_type: em.edge_info.src_type.clone(),
+                dst_type: em.edge_info.dst_type.clone(),
+                by_source: estmt.csr_rel_path.clone(),
+                by_target: estmt.csc_rel_path.clone(),
+                count: count_rows(&estmt.csr_rel_path),
             })
             .collect();
 
-        let status = serde_json::json!({
-            "dest": dest_url,
-            "vertices": vertices,
-            "edges": edges,
-        });
-        println!("{status}");
+        let status = fossil_run_status::RunStatus {
+            dest: dest_url.to_string(),
+            vertices,
+            edges,
+        };
+        println!(
+            "{}",
+            serde_json::to_string(&status).expect("RunStatus serialises")
+        );
     } else {
         println!(
             "ran {}: wrote {} vertex type(s), {} edge type(s) to {}",

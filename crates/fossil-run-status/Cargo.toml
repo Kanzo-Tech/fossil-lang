@@ -1,0 +1,23 @@
+[package]
+name = "fossil-run-status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The `fossil run --output-json` wire contract — RunStatus (dest + vertex/edge structure a host persists). One source of truth: the CLI emits it, host consumers (keasy) deserialize it, and `JsonSchema` derives the TS type. Dependency-light + WASM-clean."
+
+[lints]
+workspace = true
+
+[dependencies]
+# The wire contract is `serde`-(de)serialized JSON on the CLI's stdout.
+serde = { workspace = true, features = ["derive"] }
+# `JsonSchema` publishes the contract for TS codegen (same pipeline as
+# `fossil-graph`'s verb result types — packages/graph `gen:types`).
+schemars = { workspace = true }
+
+[dev-dependencies]
+# Round-trip the wire contract in tests.
+serde_json = { workspace = true }

@@ -32,8 +32,10 @@ regex = { workspace = true }
 fossil-sinks    = { path = "../fossil-sinks" }
 fossil-resolver = { path = "../fossil-resolver" }
 fossil-mir      = { path = "../fossil-mir" }
-# Status JSON on stdout (via --output-json) for keasy subprocess consumption.
+# Status JSON on stdout (via --output-json) for keasy subprocess consumption —
+# the typed `RunStatus` contract (one source of truth; keasy reuses it).
 serde_json = { workspace = true }
+fossil-run-status = { path = "../fossil-run-status" }
 # `--creds-stdin`: deserialize the cloud-config payload (DuckDB SET keys →
 # SecretString values) a multi-tenant host pipes in. serde derive for the wire
 # structs; secrecy keeps the values off Debug/argv/env.
