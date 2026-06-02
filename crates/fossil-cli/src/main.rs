@@ -712,25 +712,67 @@ fn cmd_run_w0b(
         .map_err(|e| miette::miette!("layout: {e}"))?;
 
     if output_json {
-        // Machine-readable status — keasy parses this when invoking the CLI
-        // as a subprocess. Kept deliberately minimal: types/edges names +
-        // their rel_paths under `dest_url`. Row counts can be derived by
-        // the caller via DuckDB on the resulting files; the CLI doesn't
-        // count to keep the run fast.
-        let vertex_paths: Vec<&str> = write_plan
+        // Machine-readable status for the keasy subprocess host. Carries the
+        // output graph's STRUCTURE — per vertex type: file + row count + property
+        // columns; per edge type: the CSR/CSC file pair + endpoints + count — so
+        // the host (which has no DuckDB of its own) need not re-introspect the
+        // dataset. Column-value statistics (n_unique/min/max/samples) are
+        // deliberately absent: the browser data plane computes them on demand via
+        // DuckDB-WASM over the mounted Parquet. (Host-boundary: the server ships
+        // structure, the browser owns stats.) `count(*)` reads the Parquet footer
+        // metadata — fast, and cloud-safe (the conn still carries the SET config).
+        let count_rows = |rel_path: &str| -> Option<i64> {
+            let url = resolved.join(rel_path);
+            conn.query_row(
+                &format!(
+                    "SELECT count(*) FROM read_parquet('{}')",
+                    url.url().replace('\'', "''")
+                ),
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .ok()
+        };
+
+        let vertices: Vec<serde_json::Value> = write_plan
             .vertex_statements
             .iter()
-            .map(|s| s.rel_path.as_str())
+            .zip(&sink_plan.vertices)
+            .map(|(vstmt, vtable)| {
+                let columns: Vec<serde_json::Value> = vtable
+                    .properties
+                    .iter()
+                    .map(|p| serde_json::json!({ "name": p.name, "data_type": p.data_type }))
+                    .collect();
+                serde_json::json!({
+                    "type": vstmt.type_name,
+                    "file": vstmt.rel_path,
+                    "count": count_rows(&vstmt.rel_path),
+                    "columns": columns,
+                })
+            })
             .collect();
-        let edge_paths: Vec<(&str, &str)> = write_plan
+
+        let edges: Vec<serde_json::Value> = write_plan
             .edge_statements
             .iter()
-            .map(|s| (s.csr_rel_path.as_str(), s.csc_rel_path.as_str()))
+            .zip(&manifests.edges)
+            .map(|(estmt, em)| {
+                serde_json::json!({
+                    "edge_type": em.edge_info.edge_type,
+                    "src_type": em.edge_info.src_type,
+                    "dst_type": em.edge_info.dst_type,
+                    "by_source": estmt.csr_rel_path,
+                    "by_target": estmt.csc_rel_path,
+                    "count": count_rows(&estmt.csr_rel_path),
+                })
+            })
             .collect();
+
         let status = serde_json::json!({
             "dest": dest_url,
-            "vertices": vertex_paths,
-            "edges": edge_paths,
+            "vertices": vertices,
+            "edges": edges,
         });
         println!("{status}");
     } else {

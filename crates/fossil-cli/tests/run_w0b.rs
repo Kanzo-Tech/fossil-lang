@@ -183,11 +183,29 @@ fn run_w0b_output_json_is_parseable() {
         parsed["vertices"].is_array(),
         "json.vertices must be an array; got: {parsed}"
     );
-    let first_vertex = parsed["vertices"][0]
-        .as_str()
-        .expect("at least one vertex path");
+    // Each vertex carries its type, file, row count, and property columns — the
+    // structure the keasy host consumes (it has no DuckDB to re-introspect with).
+    let first = &parsed["vertices"][0];
+    assert_eq!(
+        first["type"].as_str(),
+        Some("Person"),
+        "vertex.type expected; got: {first}"
+    );
     assert!(
-        first_vertex.starts_with("vertex/"),
-        "vertex rel_path expected; got: {first_vertex}"
+        first["file"]
+            .as_str()
+            .is_some_and(|f| f.starts_with("vertex/")),
+        "vertex.file rel_path expected; got: {first}"
+    );
+    assert_eq!(
+        first["count"].as_i64(),
+        Some(5),
+        "hello.fossil writes 5 Persons (examples/users.csv); got: {first}"
+    );
+    assert!(
+        first["columns"]
+            .as_array()
+            .is_some_and(|c| c.iter().any(|col| col["name"] == "name")),
+        "vertex.columns must include the `name` property; got: {first}"
     );
 }
