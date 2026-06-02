@@ -6,9 +6,9 @@
 //! things to actually read it:
 //!
 //! 1. A concrete URL the underlying `DuckDB` reader can dereference.
-//! 2. Provider-specific configuration (account keys, access tokens,
-//!    region) that `DuckDB` applies via `SET <key>=<value>` before the
-//!    `read_parquet(url)` call.
+//! 2. A provider-typed [`CloudSecret`] (account keys, tokens, region) that
+//!    `DuckDB` installs via a scoped `CREATE SECRET` before the
+//!    `read_parquet(url)` / `COPY … TO url` call.
 //!
 //! Fossil itself does NOT know about clouds — the [`PathResolver`] trait is
 //! the host-injection seam (same pattern as `fossil-base::System` for the
@@ -27,13 +27,10 @@
 //! - **No Polars.** The predecessor exposed `polars::prelude::PlPath` +
 //!   `CloudOptions` because the angelip2303 runtime drove I/O via Polars
 //!   `LazyFrame::scan_parquet`. The rmlext runtime drives `DuckDB` directly,
-//!   which speaks plain URL strings + a `SET <key>=<value>` dance. Dropping
-//!   the Polars dep keeps the resolver dependency-light and out of the
-//!   workspace WASM gate consideration entirely (this crate is native-only
-//!   on its own merits anyway). Callers still on Polars during the W0d
-//!   transition build their own [`CloudOptions`] from
-//!   [`ResolvedPath::cloud_config`] — one helper in the keasy-side adapter,
-//!   not a transitive Polars dep across every consumer.
+//!   which authenticates via a scoped `CREATE SECRET` (typed per provider —
+//!   s3/azure/gcs — and matched to a URL by longest-prefix scope, so distinct
+//!   per-connection secrets never collide the way a global `SET` dance would).
+//!   Dropping the Polars dep keeps the resolver dependency-light and native.
 //! - **`secrecy::SecretString` values.** Cloud config keys
 //!   (`azure_storage_account_key`, `aws_access_key_secret`, …) are
 //!   secrets. The predecessor used raw `String`, leaking into log frames
@@ -59,5 +56,5 @@ pub mod resolved;
 pub mod resolver;
 
 pub use error::ResolveError;
-pub use resolved::ResolvedPath;
+pub use resolved::{CloudSecret, ResolvedPath};
 pub use resolver::{DefaultPathResolver, PathResolver};

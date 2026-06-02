@@ -26,14 +26,12 @@
 //!
 //! ## Larger-than-RAM honesty (W0b/4)
 //!
-//! The materialiser threads `dest.for_each_setting(|k, v| SET k='v')`
-//! into the connection BEFORE the COPY statements run. For cloud
-//! destinations the SET dance configures `DuckDB`'s HTTP/S3/Azure
-//! extension; the COPY then streams data directly cloud↔cloud without
-//! ever materialising the Parquet in the runtime process's memory.
-//! Local-file destinations skip the SET dance entirely (the resolver
-//! returns an empty `cloud_config`) and `DuckDB` writes through its native
-//! filesystem path.
+//! The materialiser installs the dest's scoped `CREATE SECRET` into the
+//! connection BEFORE the COPY statements run. For cloud destinations the
+//! secret configures `DuckDB`'s HTTP/S3/Azure extension; the COPY then
+//! streams data directly cloud↔cloud without ever materialising the Parquet
+//! in the runtime process's memory. Local-file destinations carry no secret
+//! and `DuckDB` writes through its native filesystem path.
 
 use duckdb::Connection;
 use fossil_resolver::ResolvedPath;
@@ -46,11 +44,11 @@ use fossil_sinks::writer::{ManifestSet, WriteSqlPlan};
 /// error shape without depending on this crate's underlying types.
 #[derive(Debug, thiserror::Error)]
 pub enum MaterializeError {
-    /// A `SET <key>=<value>` statement failed before any COPY ran.
-    /// Usually means a cloud-config key the resolver supplied is
-    /// rejected by `DuckDB` (typo, missing extension).
-    #[error("cloud-config apply failed for key `{key}`: {source}")]
-    CloudConfig { key: String, source: duckdb::Error },
+    /// Installing the scoped `CREATE SECRET` failed before any COPY ran.
+    /// Usually means a secret parameter the resolver supplied is rejected by
+    /// `DuckDB` (typo, missing extension).
+    #[error("installing cloud secret `{name}` failed: {source}")]
+    Secret { name: String, source: duckdb::Error },
     /// A vertex COPY statement failed.
     #[error("vertex `{type_name}` COPY failed: {source}")]
     VertexCopy {
@@ -78,8 +76,8 @@ pub enum MaterializeError {
 /// the companion manifests via `write_yaml`.
 ///
 /// Execution order:
-///   1. Apply `dest.cloud_config()` via `SET <k>='<v>'` (skipped when
-///      the resolver supplied no cloud config — local-file destinations).
+///   1. Install the dest's scoped `CREATE SECRET` (skipped when the resolver
+///      supplied no secret — local-file destinations).
 ///   2. Run each `vertex_statements[i].copy_sql` in declared order.
 ///   3. Run each `edge_statements[i].copy_csr_sql` then `copy_csc_sql`.
 ///   4. Call `write_yaml(manifest.rel_path, &manifest.yaml)` for every
@@ -105,7 +103,7 @@ pub fn materialize<F>(
 where
     F: FnMut(&str, &str) -> Result<(), String>,
 {
-    apply_cloud_config(conn, dest)?;
+    install_secret(conn, dest, "__fossil_dest")?;
 
     for stmt in &plan.vertex_statements {
         conn.execute_batch(&stmt.copy_sql)
@@ -154,40 +152,33 @@ where
     Ok(())
 }
 
-/// Apply a [`ResolvedPath`]'s cloud config to a `DuckDB` connection via the
-/// `SET <key>='<value>'` dance, BEFORE any `read_*`/`COPY` that dereferences a
-/// cloud URL under it. Shared by [`materialize`] (dest writes) and host callers
-/// that read cloud sources (e.g. the CLI's `@conn/path` source resolution), so
-/// the SET-escape logic lives in exactly one place.
+/// Install a [`ResolvedPath`]'s scoped `CREATE SECRET` on a `DuckDB` connection
+/// under the given `name`, BEFORE any `read_*`/`COPY` that dereferences a cloud
+/// URL under it. A no-op when the path carries no secret (local / public URLs).
+/// Shared by [`materialize`] (dest writes) and host callers that read cloud
+/// sources (e.g. the CLI's `@conn/path` source resolution), so secret rendering
+/// lives in exactly one place ([`ResolvedPath::create_secret_sql`]).
 ///
-/// `SET` is connection-global: applying two paths whose configs share a key
-/// (e.g. two S3 accounts both setting `s3_access_key_id`) is last-writer-wins.
-/// Single-account orgs are unaffected; true multi-account jobs want scoped
-/// `CREATE SECRET` (a later reference upgrade).
+/// The secret is scoped to the path's URL, so installing one per connection
+/// lets a single job span distinct cloud accounts with no collision — DuckDB
+/// applies each by longest-prefix scope match.
 ///
 /// # Errors
 ///
-/// Returns [`MaterializeError::CloudConfig`] if `DuckDB` rejects a `SET`.
-pub fn apply_cloud_config(conn: &Connection, dest: &ResolvedPath) -> Result<(), MaterializeError> {
-    let mut result: Result<(), MaterializeError> = Ok(());
-    dest.for_each_setting(|k, v| {
-        if result.is_err() {
-            return;
-        }
-        // DuckDB `SET` syntax requires escaping single quotes in the
-        // value. The resolver's SecretString contents are arbitrary
-        // strings supplied by the host — escape defensively even though
-        // typical cloud-auth values are alphanumeric+base64+/.
-        let escaped = v.replace('\'', "''");
-        let sql = format!("SET {k} = '{escaped}'");
-        if let Err(source) = conn.execute_batch(&sql) {
-            result = Err(MaterializeError::CloudConfig {
-                key: k.to_string(),
+/// Returns [`MaterializeError::Secret`] if `DuckDB` rejects the statement.
+pub fn install_secret(
+    conn: &Connection,
+    path: &ResolvedPath,
+    name: &str,
+) -> Result<(), MaterializeError> {
+    if let Some(sql) = path.create_secret_sql(name) {
+        conn.execute_batch(&sql)
+            .map_err(|source| MaterializeError::Secret {
+                name: name.to_string(),
                 source,
-            });
-        }
-    });
-    result
+            })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

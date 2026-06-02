@@ -1,74 +1,113 @@
-//! [`ResolvedPath`] — a URL + secret-bearing cloud config the runtime
-//! threads from `PathResolver::resolve` to `DuckDB`.
+//! [`ResolvedPath`] — a URL plus the optional [`CloudSecret`] the runtime
+//! installs (via DuckDB `CREATE SECRET`) so a `read_*`/`COPY` under that URL
+//! authenticates.
 //!
-//! Sub-path derivation ([`ResolvedPath::join`]) inherits credentials so
-//! a single resolver call against `s3://bucket/prefix` can spawn many
-//! per-vertex / per-edge file paths without re-resolving.
+//! Sub-path derivation ([`ResolvedPath::join`]) inherits the secret so a single
+//! resolver call against `s3://bucket/prefix` can spawn many per-vertex /
+//! per-edge file paths; one scoped secret (installed once for the prefix URL)
+//! covers them all by longest-prefix match.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use secrecy::{ExposeSecret, SecretString};
 
-/// A resolved external path — physical URL + per-provider auth/config the
-/// runtime needs to actually open it.
+/// A DuckDB cloud secret: its provider `TYPE` plus the typed parameters DuckDB
+/// `CREATE SECRET` takes (`KEY_ID`, `SECRET`, `REGION`, `ENDPOINT`, `URL_STYLE`,
+/// `USE_SSL`, `CONNECTION_STRING`, …). The host owns the provider→parameter
+/// projection; this crate stays provider-agnostic and just renders the
+/// statement. Secret-bearing values ride [`SecretString`] so they cannot leak
+/// through `Debug`.
 ///
-/// The `cloud_config` map keys are provider-specific (`DuckDB` documents the
-/// shape for each storage backend — e.g. `s3_access_key_id`,
-/// `azure_storage_account_key`, `gcs_hmac_key_id`). Values are wrapped in
-/// [`SecretString`] so they cannot accidentally land in a `Debug`-formatted
-/// log line.
+/// Replaces the earlier global `SET <key>='<value>'` dance: `CREATE SECRET` is
+/// typed (s3/azure/gcs all clean), and **scoped** — installing one secret per
+/// connection (scope = its URL prefix) lets a single job read/write across
+/// distinct cloud accounts with no last-writer-wins collision.
+#[derive(Clone)]
+pub struct CloudSecret {
+    secret_type: String,
+    params: HashMap<String, SecretString>,
+}
+
+impl CloudSecret {
+    /// Construct a secret of provider `secret_type` (`"s3"`, `"azure"`, `"gcs"`)
+    /// with DuckDB `CREATE SECRET` parameters (`"KEY_ID"` → value, …).
+    #[must_use]
+    pub fn new(secret_type: impl Into<String>, params: HashMap<String, SecretString>) -> Self {
+        Self {
+            secret_type: secret_type.into(),
+            params,
+        }
+    }
+}
+
+impl std::fmt::Debug for CloudSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Parameter VALUES are secret — print the provider type + parameter
+        // KEYS only (useful for diagnostics, leaks no auth material).
+        let mut keys: Vec<&String> = self.params.keys().collect();
+        keys.sort();
+        f.debug_struct("CloudSecret")
+            .field("secret_type", &self.secret_type)
+            .field("param_keys", &keys)
+            .finish()
+    }
+}
+
+/// A resolved external path — physical URL + the cloud secret (if any) the
+/// runtime needs to open it.
 #[derive(Clone)]
 pub struct ResolvedPath {
     url: String,
-    cloud_config: HashMap<String, SecretString>,
+    secret: Option<CloudSecret>,
+}
+
+/// `TYPE`/parameter identifiers are interpolated UNQUOTED into the `CREATE
+/// SECRET` statement, so guard them — they cross the host boundary (stdin) and
+/// must be plain identifiers, never SQL. Values are single-quoted + escaped and
+/// are safe regardless.
+fn is_ident(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 impl ResolvedPath {
-    /// New resolved path with no cloud credentials (the standalone /
-    /// public-URL / local-file case).
+    /// New resolved path with no cloud secret (the standalone / public-URL /
+    /// local-file case).
     #[must_use]
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
-            cloud_config: HashMap::new(),
+            secret: None,
         }
     }
 
-    /// New resolved path carrying provider-specific cloud configuration.
-    /// Secrets ride in [`SecretString`] from the call site so the resolver
-    /// crate never sees a raw `String` for them.
+    /// New resolved path carrying a [`CloudSecret`]. The secret is scoped to
+    /// this path's URL when installed (see [`create_secret_sql`]).
+    ///
+    /// [`create_secret_sql`]: Self::create_secret_sql
     #[must_use]
-    pub fn with_config(
-        url: impl Into<String>,
-        cloud_config: HashMap<String, SecretString>,
-    ) -> Self {
+    pub fn with_secret(url: impl Into<String>, secret: CloudSecret) -> Self {
         Self {
             url: url.into(),
-            cloud_config,
+            secret: Some(secret),
         }
     }
 
-    /// Derive a sub-path that inherits the parent's credentials.
-    ///
-    /// `rel` is **always relative** — it is appended to the parent URL with
-    /// exactly one separating `/`, regardless of whether either side has
-    /// leading/trailing slashes. (Unix-style absolute semantics where
-    /// `/x` overrides the base path are deliberately NOT supported — they
-    /// produce surprises against `s3://` / `az://` URLs whose authority
-    /// segment is part of the prefix.) The URL scheme is preserved
-    /// verbatim — no encoding — because cloud URLs admit characters
-    /// (path-style container names, `+` in S3 keys) that a generic
-    /// `url::Url` parser would mangle.
+    /// Derive a sub-path that inherits the parent's secret. `rel` is **always
+    /// relative** — appended with exactly one separating `/` regardless of
+    /// surrounding slashes. (Unix-absolute semantics where `/x` overrides are
+    /// deliberately NOT supported — they surprise against `s3://`/`az://` URLs
+    /// whose authority is part of the prefix.) The scheme is preserved verbatim.
     #[must_use]
     pub fn join(&self, rel: &str) -> Self {
         let base = self.url.trim_end_matches('/');
         let tail = rel.trim_start_matches('/');
-        let url = format!("{base}/{tail}");
         Self {
-            url,
-            // Clone the SecretString map — each clone holds its own zero-on-drop
-            // copy, so a downstream Drop doesn't invalidate the parent's secrets.
-            cloud_config: self.cloud_config.clone(),
+            url: format!("{base}/{tail}"),
+            secret: self.secret.clone(),
         }
     }
 
@@ -78,47 +117,62 @@ impl ResolvedPath {
         &self.url
     }
 
-    /// Provider-specific cloud configuration. Keys are DuckDB-spelt
-    /// (`azure_storage_account_name`, `s3_region`, …); values are kept
-    /// secret-shaped. Callers that need to apply them via `DuckDB`'s
-    /// `SET key='value'` use [`for_each_setting`] which controls the
-    /// expose-and-format dance in one place.
+    /// Whether a cloud secret is attached (i.e. [`create_secret_sql`] will
+    /// yield a statement).
     ///
-    /// [`for_each_setting`]: Self::for_each_setting
+    /// [`create_secret_sql`]: Self::create_secret_sql
     #[must_use]
-    pub const fn cloud_config(&self) -> &HashMap<String, SecretString> {
-        &self.cloud_config
+    pub const fn has_secret(&self) -> bool {
+        self.secret.is_some()
     }
 
-    /// Visit each `(key, exposed_value)` pair exactly once for a
-    /// configuration apply step — typically the `DuckDB` `SET` loop in the
-    /// runtime. Callers do not see the raw `SecretString` map; they
-    /// receive a borrowed `&str` for the value that lives only for the
-    /// callback duration, after which it is no longer referenced.
+    /// Render the `CREATE OR REPLACE SECRET <name> (...)` statement DuckDB
+    /// installs before any `read_*`/`COPY` under this path's URL — `None` when
+    /// no secret is attached (local / public). The secret is **scoped** to this
+    /// path's URL, so DuckDB applies it by longest-prefix match and distinct
+    /// per-connection secrets never collide.
     ///
-    /// This is the recommended consumption path. Direct access via
-    /// [`cloud_config`](Self::cloud_config) is exposed for callers that
-    /// must own the map (e.g. the keasy-side helper that builds Polars
-    /// `CloudOptions` during the W0d transition).
-    pub fn for_each_setting<F>(&self, mut f: F)
-    where
-        F: FnMut(&str, &str),
-    {
-        for (k, v) in &self.cloud_config {
-            f(k, v.expose_secret());
+    /// `CREATE OR REPLACE` so re-installing under the same `name` (e.g. a retry)
+    /// is idempotent. Parameter values are single-quoted with `''` escaping;
+    /// the `TYPE` and parameter identifiers are validated as plain identifiers
+    /// (host-supplied over stdin) and a non-conforming one drops that parameter
+    /// rather than emit injectable SQL.
+    #[must_use]
+    pub fn create_secret_sql(&self, name: &str) -> Option<String> {
+        let secret = self.secret.as_ref()?;
+        if !is_ident(&secret.secret_type) || !is_ident(name) {
+            return None;
         }
+        let mut sql = format!("CREATE OR REPLACE SECRET {name} (TYPE {}", secret.secret_type);
+        // Sorted for a deterministic statement (tests, logs).
+        let mut keys: Vec<&String> = secret.params.keys().collect();
+        keys.sort();
+        for k in keys {
+            if !is_ident(k) {
+                continue;
+            }
+            let v = secret.params[k].expose_secret().replace('\'', "''");
+            write!(sql, ", {k} '{v}'").expect("writing to a String never fails");
+        }
+        let scope = self.url.replace('\'', "''");
+        write!(sql, ", SCOPE '{scope}')").expect("writing to a String never fails");
+        Some(sql)
     }
 }
 
 impl std::fmt::Debug for ResolvedPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Never print the cloud_config values — even via Debug — because the
-        // map's keys alone are useful for diagnostics (you see WHICH provider
-        // shape the resolver returned) without leaking the auth material.
-        let redacted_keys: Vec<&String> = self.cloud_config.keys().collect();
+        // Never print secret values. The provider type + parameter KEYS are
+        // useful for diagnostics (which secret shape the resolver returned)
+        // without leaking the auth material.
+        let secret = self.secret.as_ref().map(|s| {
+            let mut keys: Vec<&String> = s.params.keys().collect();
+            keys.sort();
+            format!("{} {keys:?}", s.secret_type)
+        });
         f.debug_struct("ResolvedPath")
             .field("url", &self.url)
-            .field("cloud_config_keys", &redacted_keys)
+            .field("secret", &secret)
             .finish()
     }
 }
@@ -127,100 +181,72 @@ impl std::fmt::Debug for ResolvedPath {
 mod tests {
     use super::*;
 
-    fn secret_map(pairs: &[(&str, &str)]) -> HashMap<String, SecretString> {
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), SecretString::from((*v).to_string())))
-            .collect()
+    fn s3_secret() -> CloudSecret {
+        let mut params = HashMap::new();
+        params.insert("KEY_ID".to_string(), SecretString::from("AKIA"));
+        params.insert("SECRET".to_string(), SecretString::from("shh"));
+        params.insert("REGION".to_string(), SecretString::from("eu-west-1"));
+        CloudSecret::new("s3", params)
     }
 
     #[test]
-    fn new_carries_url_and_no_config() {
+    fn new_has_no_secret() {
         let r = ResolvedPath::new("file:///tmp/users.csv");
         assert_eq!(r.url(), "file:///tmp/users.csv");
-        assert!(r.cloud_config().is_empty());
+        assert!(!r.has_secret());
+        assert!(r.create_secret_sql("x").is_none());
     }
 
     #[test]
-    fn join_appends_slash_when_missing() {
-        let base = ResolvedPath::new("s3://bucket/prefix");
+    fn create_secret_sql_is_typed_scoped_and_deterministic() {
+        let r = ResolvedPath::with_secret("s3://bucket/prefix", s3_secret());
+        let sql = r.create_secret_sql("__fossil_dest").expect("secret sql");
         assert_eq!(
-            base.join("file.parquet").url(),
-            "s3://bucket/prefix/file.parquet"
-        );
-    }
-
-    #[test]
-    fn join_does_not_double_slash() {
-        // Trailing slash on base + plain rel → exactly one separator.
-        let base = ResolvedPath::new("s3://bucket/prefix/");
-        assert_eq!(
-            base.join("file.parquet").url(),
-            "s3://bucket/prefix/file.parquet"
-        );
-        // Leading slash on rel is stripped (NOT treated as absolute — see
-        // the `join` doc comment for why the unix semantics are rejected).
-        let base = ResolvedPath::new("s3://bucket/prefix");
-        assert_eq!(
-            base.join("/file.parquet").url(),
-            "s3://bucket/prefix/file.parquet"
-        );
-        // Both sides loaded with slashes still collapses to one.
-        let base = ResolvedPath::new("s3://bucket/prefix/");
-        assert_eq!(
-            base.join("/file.parquet").url(),
-            "s3://bucket/prefix/file.parquet"
+            sql,
+            "CREATE OR REPLACE SECRET __fossil_dest (TYPE s3, KEY_ID 'AKIA', \
+             REGION 'eu-west-1', SECRET 'shh', SCOPE 's3://bucket/prefix')"
         );
     }
 
     #[test]
-    fn join_inherits_cloud_config() {
-        let r = ResolvedPath::with_config(
-            "s3://bucket/prefix",
-            secret_map(&[("s3_region", "eu-west-1")]),
-        );
-        let child = r.join("v.parquet");
-        assert_eq!(child.url(), "s3://bucket/prefix/v.parquet");
-        // The child holds the same key set (we don't assert value equality
-        // because that would require expose_secret() in the assertion).
-        assert!(child.cloud_config().contains_key("s3_region"));
+    fn join_inherits_secret_and_scope_stays_on_the_parent_prefix() {
+        let r = ResolvedPath::with_secret("s3://bucket/prefix", s3_secret());
+        let child = r.join("vertex/Person.parquet");
+        assert_eq!(child.url(), "s3://bucket/prefix/vertex/Person.parquet");
+        assert!(child.has_secret());
     }
 
     #[test]
-    fn for_each_setting_visits_all_keys_with_exposed_values() {
-        let r = ResolvedPath::with_config(
-            "s3://bucket",
-            secret_map(&[
-                ("s3_access_key_id", "AKIA..."),
-                ("s3_secret_access_key", "very-secret"),
-            ]),
-        );
-        let mut seen: Vec<(String, String)> = Vec::new();
-        r.for_each_setting(|k, v| seen.push((k.to_string(), v.to_string())));
-        seen.sort();
+    fn join_collapses_slashes() {
+        let base = ResolvedPath::with_secret("s3://bucket/prefix/", s3_secret());
         assert_eq!(
-            seen,
-            vec![
-                ("s3_access_key_id".to_string(), "AKIA...".to_string()),
-                (
-                    "s3_secret_access_key".to_string(),
-                    "very-secret".to_string()
-                ),
-            ]
+            base.join("/v.parquet").url(),
+            "s3://bucket/prefix/v.parquet"
         );
+    }
+
+    #[test]
+    fn escapes_single_quotes_in_values() {
+        let mut params = HashMap::new();
+        params.insert("SECRET".to_string(), SecretString::from("a'b"));
+        let r = ResolvedPath::with_secret("s3://b", CloudSecret::new("s3", params));
+        let sql = r.create_secret_sql("s").expect("sql");
+        assert!(sql.contains("SECRET 'a''b'"), "value not escaped: {sql}");
+    }
+
+    #[test]
+    fn rejects_non_identifier_type_or_name() {
+        let r = ResolvedPath::with_secret("s3://b", CloudSecret::new("s3; DROP", HashMap::new()));
+        assert!(r.create_secret_sql("ok").is_none(), "injected TYPE not rejected");
+        let r2 = ResolvedPath::with_secret("s3://b", s3_secret());
+        assert!(r2.create_secret_sql("bad name").is_none(), "injected name not rejected");
     }
 
     #[test]
     fn debug_redacts_values() {
-        let r = ResolvedPath::with_config(
-            "s3://bucket",
-            secret_map(&[("s3_secret_access_key", "should-not-appear")]),
-        );
-        let s = format!("{r:?}");
-        assert!(s.contains("s3_secret_access_key"), "key visible: {s}");
-        assert!(
-            !s.contains("should-not-appear"),
-            "value leaked in Debug: {s}",
-        );
+        let s = format!("{:?}", ResolvedPath::with_secret("s3://b", s3_secret()));
+        assert!(s.contains("KEY_ID"), "key visible: {s}");
+        assert!(!s.contains("AKIA"), "value leaked: {s}");
+        assert!(!s.contains("shh"), "value leaked: {s}");
     }
 }

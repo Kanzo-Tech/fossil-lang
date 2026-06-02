@@ -658,11 +658,13 @@ fn cmd_run_w0b(
     conn.execute_batch(&prelude_sql)
         .map_err(|e| miette::miette!("create source views: {e}"))?;
 
-    // Thread the dest's cloud config (DuckDB SET keys → secrets) supplied on
-    // stdin into the resolved path; `materialize` applies it via the SET dance
-    // before every COPY. Empty config (local/public dest) ⇒ no SET ⇒ unchanged.
-    let resolved =
-        fossil_resolver::ResolvedPath::with_config(dest_url, creds.dest.config.clone());
+    // Thread the dest's cloud secret (supplied on stdin) into the resolved path;
+    // `materialize` installs it via a scoped `CREATE SECRET` before every COPY.
+    // No secret (local/public dest) ⇒ no statement ⇒ unchanged.
+    let resolved = match &creds.dest.secret {
+        Some(spec) => fossil_resolver::ResolvedPath::with_secret(dest_url, spec.to_cloud_secret()),
+        None => fossil_resolver::ResolvedPath::new(dest_url),
+    };
 
     // Local dests need their directory tree pre-created — DuckDB COPY writes a
     // file but won't `mkdir -p`. Cloud object stores are flat and need none.
@@ -825,18 +827,21 @@ fn resolve_source_uri(raw: &str, connections: &HashMap<String, creds::Connection
     )
 }
 
-/// Apply every source connection's read cloud-config to `conn` via the shared
-/// `SET` dance ([`fossil_runtime::apply_cloud_config`]), so a `read_csv_auto`
-/// over a cloud `@conn` source authenticates. No-op when no connection carries
-/// config (local / public-URL sources).
+/// Install each source connection's scoped read secret on `conn` (via
+/// [`fossil_runtime::install_secret`], scope = the connection URL), so a
+/// `read_csv_auto` over a cloud `@conn` source authenticates. No-op for
+/// connections without a secret (local / public-URL sources). Secret names are
+/// per-connection-unique (scope, not name, drives DuckDB's match).
 fn apply_source_creds(
     conn: &duckdb::Connection,
     connections: &HashMap<String, creds::ConnectionCreds>,
 ) -> miette::Result<()> {
-    for c in connections.values() {
-        let resolved = fossil_resolver::ResolvedPath::with_config(&c.url, c.config.clone());
-        fossil_runtime::apply_cloud_config(conn, &resolved)
-            .map_err(|e| miette::miette!("apply source creds: {e}"))?;
+    for (i, c) in connections.values().enumerate() {
+        if let Some(spec) = &c.secret {
+            let resolved = fossil_resolver::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
+            fossil_runtime::install_secret(conn, &resolved, &format!("__fossil_src_{i}"))
+                .map_err(|e| miette::miette!("install source secret: {e}"))?;
+        }
     }
     Ok(())
 }
@@ -890,8 +895,6 @@ fn count_parquet_rows(parquet: &Path) -> miette::Result<i64> {
 mod tests {
     use std::collections::HashMap;
 
-    use secrecy::SecretString;
-
     use super::*;
 
     fn conns(pairs: &[(&str, &str)]) -> HashMap<String, creds::ConnectionCreds> {
@@ -902,7 +905,7 @@ mod tests {
                     (*name).to_string(),
                     creds::ConnectionCreds {
                         url: (*url).to_string(),
-                        config: HashMap::<String, SecretString>::new(),
+                        secret: None,
                     },
                 )
             })
