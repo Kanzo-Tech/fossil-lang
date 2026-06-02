@@ -171,6 +171,19 @@ enum Commands {
         #[arg(long)]
         creds_stdin: bool,
     },
+    /// Materialise a DCAT-AP catalog graph (`GraphAr`) from a `CatalogInput`
+    /// piped on stdin. The catalog is "just another output graph": the host
+    /// supplies governance values + the run's dataset structure, fossil owns
+    /// the DCAT-AP shape and writes it via the same W0b writer as `run`.
+    Catalog {
+        /// Destination URL for the `GraphAr` catalog output (`file://…`,
+        /// `s3://…`). The dest cloud secret (if any) rides the stdin payload.
+        #[arg(long)]
+        dest: String,
+        /// Emit the `RunStatus` JSON on stdout (consumed by the keasy host).
+        #[arg(long)]
+        output_json: bool,
+    },
 }
 
 fn main() -> miette::Result<()> {
@@ -198,6 +211,10 @@ fn main() -> miette::Result<()> {
             output_json,
             creds_stdin,
         ),
+        Commands::Catalog { dest, output_json } => {
+            let req = creds::CatalogRequest::from_stdin().map_err(|e| miette::miette!(e))?;
+            cmd_catalog(&dest, output_json, &req)
+        }
     }
 }
 
@@ -658,11 +675,66 @@ fn cmd_run_w0b(
         .collect();
     let (prelude_sql, sink_plan) = fossil_codegen::merge_decomposed(&parts);
 
+    materialize_and_report(
+        &prelude_sql,
+        &sink_plan,
+        dest_url,
+        creds
+            .dest
+            .secret
+            .as_ref()
+            .map(creds::SecretSpec::to_cloud_secret),
+        &creds.connections,
+        output_json,
+    )
+}
+
+/// `fossil catalog` — materialise a DCAT-AP catalog graph from a `CatalogInput`.
+///
+/// The catalog's shape lives in fossil (`fossil_sinks::catalog`); the host only
+/// supplies governance values + the run's dataset structure. The resulting
+/// `SinkPlan` is written by the same path as a run (no `@conn` sources — the
+/// catalog's relations are inline `VALUES` — so the source-creds map is empty).
+fn cmd_catalog(
+    dest_url: &str,
+    output_json: bool,
+    req: &creds::CatalogRequest,
+) -> miette::Result<()> {
+    let (prelude_sql, sink_plan) = fossil_sinks::catalog::build_catalog_sink_plan(&req.catalog);
+    materialize_and_report(
+        &prelude_sql,
+        &sink_plan,
+        dest_url,
+        req.dest
+            .secret
+            .as_ref()
+            .map(creds::SecretSpec::to_cloud_secret),
+        &HashMap::new(),
+        output_json,
+    )
+}
+
+/// Materialise a [`SinkPlan`] to `dest_url` via the W0b writer, then run the
+/// layout pass and emit the status (`--output-json` `RunStatus` or a human
+/// summary). The single `GraphAr` write path shared by `fossil run` (data graph)
+/// and `fossil catalog` (DCAT-AP graph) — the only difference upstream is how
+/// the `SinkPlan` is built. `source_creds` install per-`@conn` read secrets
+/// before the prelude (empty for the catalog, whose sources are inline VALUES);
+/// `dest_secret` scopes the destination `CREATE SECRET`.
+#[allow(clippy::too_many_lines)] // one linear write→layout→report path; clearer whole
+fn materialize_and_report(
+    prelude_sql: &str,
+    sink_plan: &fossil_sinks::decomp::SinkPlan,
+    dest_url: &str,
+    dest_secret: Option<fossil_resolver::CloudSecret>,
+    source_creds: &HashMap<String, creds::ConnectionCreds>,
+    output_json: bool,
+) -> miette::Result<()> {
     let write_options = fossil_sinks::writer::WriteOptions::default();
     let write_plan =
-        fossil_sinks::writer::plan_writes_from_sink_plan(&sink_plan, dest_url, &write_options)
+        fossil_sinks::writer::plan_writes_from_sink_plan(sink_plan, dest_url, &write_options)
             .map_err(|e| miette::miette!("plan_writes: {e}"))?;
-    let manifests = fossil_sinks::writer::plan_manifests_from_sink_plan(&sink_plan, &write_options)
+    let manifests = fossil_sinks::writer::plan_manifests_from_sink_plan(sink_plan, &write_options)
         .map_err(|e| miette::miette!("plan_manifests: {e}"))?;
 
     let conn =
@@ -673,17 +745,17 @@ fn cmd_run_w0b(
         .map_err(|e| miette::miette!("apply duckdb resource limits: {e}"))?;
     // Apply every source connection's read cloud-config BEFORE the prelude runs
     // its read_csv_auto over cloud `@conn` sources.
-    apply_source_creds(&conn, &creds.connections)?;
-    conn.execute_batch(&prelude_sql)
+    apply_source_creds(&conn, source_creds)?;
+    conn.execute_batch(prelude_sql)
         .map_err(|e| miette::miette!("create source views: {e}"))?;
 
-    // Thread the dest's cloud secret (supplied on stdin) into the resolved path;
-    // `materialize` installs it via a scoped `CREATE SECRET` before every COPY.
-    // No secret (local/public dest) ⇒ no statement ⇒ unchanged.
-    let resolved = match &creds.dest.secret {
-        Some(spec) => fossil_resolver::ResolvedPath::with_secret(dest_url, spec.to_cloud_secret()),
-        None => fossil_resolver::ResolvedPath::new(dest_url),
-    };
+    // Thread the dest's cloud secret into the resolved path; `materialize`
+    // installs it via a scoped `CREATE SECRET` before every COPY. No secret
+    // (local/public dest) ⇒ no statement ⇒ unchanged.
+    let resolved = dest_secret.map_or_else(
+        || fossil_resolver::ResolvedPath::new(dest_url),
+        |secret| fossil_resolver::ResolvedPath::with_secret(dest_url, secret),
+    );
 
     // Local dests need their directory tree pre-created — DuckDB COPY writes a
     // file but won't `mkdir -p`. Cloud object stores are flat and need none.
@@ -819,8 +891,7 @@ fn cmd_run_w0b(
         );
     } else {
         println!(
-            "ran {}: wrote {} vertex type(s), {} edge type(s) to {}",
-            path.display(),
+            "wrote {} vertex type(s), {} edge type(s) to {}",
             write_plan.vertex_statements.len(),
             write_plan.edge_statements.len(),
             dest_url,
