@@ -62,7 +62,7 @@ fn compile_hello_fossil_produces_expected_sql() {
 /// synthesises the vertex decomposition from the typed mapping — `hello.fossil`
 /// produces a proper `Person` vertex with a `name` property, NOT the legacy flat
 /// `_triples` passthrough. This is the "shape lives in fossil" default: the
-/// mapping already declares the output, so the host authors no ShEx.
+/// mapping already declares the output, so the host authors no `ShEx`.
 #[test]
 fn accept_all_synthesises_typed_vertex_from_mapping() {
     let (db, file) = db_with_hello();
@@ -99,4 +99,98 @@ fn accept_all_synthesises_typed_vertex_from_mapping() {
         !name.data_type.is_empty(),
         "property carries a GraphAr datatype spelling"
     );
+}
+
+/// A two-mapping program whose `Order` mapping references `Person` by reusing
+/// `Person`'s subject template as the value of `ex:placedBy` — the foreign key
+/// the synthesised descriptor turns into an edge (Phase B, HOST-BOUNDARY §4).
+/// `ex:external` reuses a template no mapping emits → a dangling IRI, no edge.
+const EDGES_FOSSIL: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"users.csv\")
+orders := io.csv(\"orders.csv\")
+
+Person : ex:Person from users
+    iri = `${ex:}person/${.id}`
+    ex:name = .name
+
+Order : ex:Order from orders
+    iri = `${ex:}order/${.order_id}`
+    ex:placedBy = `${ex:}person/${.user_id}`
+    ex:total = .amount
+    ex:external = `${ex:}widget/${.wid}`
+";
+
+fn decompose_at(db: &FossilDb, file: SourceFile, idx: usize) -> fossil_sinks::decomp::SinkPlan {
+    let mapping = *def_map(db, file)
+        .mappings(db)
+        .get(idx)
+        .expect("mapping index in range");
+    let mir = lower_to_mir(db, mapping);
+    let kind = OutputDescriptorKind::AcceptAll(AcceptAllDescriptor);
+    decompose_for_writer(
+        db,
+        mapping,
+        mir,
+        &kind,
+        DEFAULT_CHUNK_SIZE,
+        &fossil_codegen::identity_source_uri,
+    )
+    .1
+}
+
+/// The `Order` mapping's IRI-template `ex:placedBy` resolves to the `Person`
+/// vertex (same subject skeleton) and becomes an edge; the literal `ex:total`
+/// stays a property; the dangling `ex:external` produces no edge.
+#[test]
+fn accept_all_synthesises_edge_from_iri_template_foreign_key() {
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, EDGES_FOSSIL.to_string(), "edges.fossil".to_string());
+
+    let order = decompose_at(&db, file, 1);
+    assert_eq!(order.vertices.len(), 1, "one Order vertex");
+    assert_eq!(order.vertices[0].type_name, "Order");
+
+    // `ex:total` literal stays a property; the two IRI templates do not.
+    let prop_names: Vec<&str> = order.vertices[0]
+        .properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(
+        prop_names,
+        ["total"],
+        "only the literal property is a column"
+    );
+
+    assert_eq!(
+        order.edges.len(),
+        1,
+        "placedBy → Person edge only (external is dangling)"
+    );
+    let edge = &order.edges[0];
+    assert_eq!(edge.src_type, "Order");
+    assert_eq!(edge.predicate, "placedBy");
+    assert_eq!(edge.dst_type, "Person");
+    assert_eq!(edge.src_id_expr, "iri");
+    assert_eq!(edge.dst_id_expr, "placedBy");
+    assert!(
+        edge.single_valued,
+        "synthesised edges are single-valued (D-A)"
+    );
+}
+
+/// A mapping with only literal properties (the `Person` head) synthesises no
+/// edges — the Phase-A behaviour is preserved when no FK template is present.
+#[test]
+fn accept_all_literal_only_mapping_has_no_edges() {
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, EDGES_FOSSIL.to_string(), "edges.fossil".to_string());
+
+    let person = decompose_at(&db, file, 0);
+    assert_eq!(person.vertices[0].type_name, "Person");
+    assert!(person.edges.is_empty(), "literal-only mapping has no edges");
 }

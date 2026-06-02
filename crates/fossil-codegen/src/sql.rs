@@ -276,9 +276,7 @@ pub fn decompose_for_writer<'db>(
     // forward-propagated datatypes). The shape "lives in fossil"; the host
     // authors no ShEx. An explicit `ShEx` descriptor still wins when supplied.
     let plan = match kind {
-        OutputDescriptorKind::AcceptAll(_) => {
-            synthesize_sink_plan(db, mapping, &base, chunk_size)
-        }
+        OutputDescriptorKind::AcceptAll(_) => synthesize_sink_plan(db, mapping, &base, chunk_size),
         OutputDescriptorKind::ShEx(_) => vertex_edge_decomp_from_kind(kind, &base, chunk_size),
     };
     (prelude, plan)
@@ -313,12 +311,21 @@ fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Pri
 /// header/body/source-row reads (so it never widens the per-mapping fan-out)
 /// and reuses [`local_name`] for IRI localisation.
 ///
-/// Phase A — literal properties only: a property whose RHS is a `FieldRef`
-/// (column → its forward-propagated datatype) or a `StringLit` becomes a
-/// [`VertexProperty`]. Template / IRI-valued objects are edges and are deferred
-/// (Phase B); skipping them is safe — the base relation simply carries unused
-/// columns. The result is a typed vertex table instead of the flat `_triples`
-/// dump.
+/// Literal properties: a property whose RHS is a `FieldRef` (column → its
+/// forward-propagated datatype) or a `StringLit` becomes a [`VertexProperty`].
+///
+/// Phase B — IRI-template edges: a property whose RHS is a backtick `Template`
+/// computes another resource's subject IRI, i.e. a foreign key. It becomes an
+/// [`EdgeTable`] whose destination type is resolved by matching the template's
+/// SKELETON (field placeholders wildcarded) against every mapping's subject
+/// template — the program states the FK by reusing the target's subject shape
+/// (`${ex:}person/${.user_id}` → the mapping whose subject is
+/// `${ex:}person/${.id}`). This is the single datum a `ShEx` `@ref` would
+/// otherwise supply, recovered from the mapping alone (HOST-BOUNDARY-MODEL §4).
+/// A template matching no vertex type is a dangling/external IRI → no edge;
+/// a bare prefixed-name object (`ex:Foo`, a constant IRI with no per-row FK
+/// column) is not an edge in v0.1. The result is a typed vertex table (+ its
+/// edges) instead of the flat `_triples` dump.
 #[allow(clippy::elidable_lifetime_names)]
 fn synthesize_sink_plan<'db>(
     db: &'db dyn fossil_base::Db,
@@ -348,7 +355,9 @@ fn synthesize_sink_plan<'db>(
         .ok()
         .and_then(|out| out.source_row(db));
     let field_datatype = |field: &str| -> &'static str {
-        let Some(row) = source_row else { return "string" };
+        let Some(row) = source_row else {
+            return "string";
+        };
         let TyKind::Record(rec) = row.kind(db) else {
             return "string";
         };
@@ -359,22 +368,57 @@ fn synthesize_sink_plan<'db>(
             .map_or("string", primitive_to_graphar)
     };
 
+    // Edge dst-type resolution registry: every mapping's subject-template
+    // skeleton → its vertex type (see this fn's doc + [`template_skeleton`]).
+    let subject_skeletons: Vec<(String, String)> = dm
+        .mappings(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(i, loc)| {
+            let ty = local_name(hir.mappings(db).get(i)?.shape_iri.as_str());
+            Some((subject_template_skeleton(db, *loc)?, ty))
+        })
+        .collect();
+
     let mut properties = Vec::new();
+    let mut edges = Vec::new();
     for prop in body(db, mapping).properties(db) {
         let PropertyKey::PrefixedName { iri } = &prop.key else {
             continue; // the `iri = ...` subject template is the vertex_id, not a property
         };
-        let data_type = match &prop.value {
-            HirExpr::FieldRef(field) => field_datatype(field.as_str()),
-            HirExpr::StringLit(_) => "string",
-            // Template / PrefixedName objects are IRIs → edges (Phase B).
-            HirExpr::Template(_) | HirExpr::PrefixedName { .. } => continue,
-        };
-        properties.push(VertexProperty {
-            name: local_name(iri.as_str()),
-            data_type: data_type.to_string(),
-            single_valued: true,
-        });
+        let pred_local = local_name(iri.as_str());
+        match &prop.value {
+            HirExpr::FieldRef(field) => properties.push(VertexProperty {
+                name: pred_local,
+                data_type: field_datatype(field.as_str()).to_string(),
+                single_valued: true,
+            }),
+            HirExpr::StringLit(_) => properties.push(VertexProperty {
+                name: pred_local,
+                data_type: "string".to_string(),
+                single_valued: true,
+            }),
+            HirExpr::Template(t) => {
+                let skel = template_skeleton(t.as_str());
+                if let Some((_, dst_type)) = subject_skeletons.iter().find(|(s, _)| *s == skel) {
+                    edges.push(EdgeTable {
+                        src_type: type_name.clone(),
+                        predicate: pred_local.clone(),
+                        dst_type: dst_type.clone(),
+                        src_id_expr: IRI_COLUMN.to_string(),
+                        // The object column carries the predicate's local name in
+                        // the base relation (`base_relation_sql`); used verbatim
+                        // as the destination IRI to join on (SINK-04).
+                        dst_id_expr: pred_local,
+                        single_valued: true,
+                        source_relation: source_relation.to_string(),
+                    });
+                }
+            }
+            // A bare prefixed-name object is a constant IRI with no per-row FK
+            // column → not an edge in v0.1.
+            HirExpr::PrefixedName { .. } => {}
+        }
     }
 
     SinkPlan {
@@ -384,9 +428,58 @@ fn synthesize_sink_plan<'db>(
             properties,
             source_relation: source_relation.to_string(),
         }],
-        edges: Vec::new(),
+        edges,
         chunk_size,
     }
+}
+
+/// The IRI-template skeleton of a mapping's `iri = ...` subject property, or
+/// `None` when there is no subject or it is not a backtick template.
+#[allow(clippy::elidable_lifetime_names)]
+fn subject_template_skeleton<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> Option<String> {
+    for prop in body(db, mapping).properties(db) {
+        if matches!(prop.key, PropertyKey::Iri) {
+            return match &prop.value {
+                HirExpr::Template(t) => Some(template_skeleton(t.as_str())),
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
+/// Replace dynamic field placeholders (`${.field}`) in a backtick-template's raw
+/// text with a uniform marker, keeping static prefix expansions (`${pfx:}`) and
+/// literal segments verbatim. Two templates that interpolate different columns at
+/// the same positions therefore share a skeleton — the basis for resolving an
+/// IRI-template property to its target vertex type (the `${...}` inner of a field
+/// reference begins with `.`; a prefix expansion does not).
+fn template_skeleton(text: &str) -> String {
+    const FIELD_MARKER: char = '\u{1}';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find("${") {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 2..];
+        let Some(close) = after.find('}') else {
+            out.push_str(&rest[open..]); // unterminated — keep verbatim
+            return out;
+        };
+        let inner = &after[..close];
+        if inner.trim_start().starts_with('.') {
+            out.push(FIELD_MARKER); // dynamic per-row field → wildcard
+        } else {
+            out.push_str("${"); // static prefix expansion → keep verbatim
+            out.push_str(inner);
+            out.push('}');
+        }
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Convenience entry: lower a mapping then run [`codegen_sql_with_descriptor`].
