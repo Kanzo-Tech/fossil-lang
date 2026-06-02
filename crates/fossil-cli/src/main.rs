@@ -603,14 +603,13 @@ fn cmd_run(
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
     pre_introspect_and_register(db.system(), &text, source_dir, &creds.connections);
 
-    // Dispatch to the W0b path when `--dest` is set AND a ShEx descriptor
-    // is present. Without `--shape` the decomposition is AcceptAll (a
-    // single flat-triple passthrough vertex) — the W0b writer would still
-    // emit something, but the legacy cwd flat-write is a cleaner default
-    // for the no-shape walking-skeleton case, so we keep it.
-    if let Some(dest_url) = dest
-        && shape.is_some()
-    {
+    // `--dest` present ⇒ the W0b writer path, regardless of `--shape`: the
+    // output descriptor is program-resident (a `ShEx` refines it when supplied,
+    // otherwise AcceptAll synthesises the vertex decomposition from the typed
+    // mapping). This is the path keasy drives via subprocess — it passes a dest
+    // and NO shape (the shape lives in the program). No `--dest` keeps the
+    // legacy cwd flat-write walking-skeleton ("5 triples") unchanged.
+    if let Some(dest_url) = dest {
         return cmd_run_w0b(&db, file, path, &descriptor, dest_url, output_json, &creds);
     }
 
