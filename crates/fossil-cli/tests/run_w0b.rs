@@ -13,8 +13,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 fn repo_root() -> PathBuf {
@@ -207,5 +208,91 @@ fn run_w0b_output_json_is_parseable() {
             .as_array()
             .is_some_and(|c| c.iter().any(|col| col["name"] == "name")),
         "vertex.columns must include the `name` property; got: {first}"
+    );
+}
+
+/// End-to-end cloud write (W0 subprocess slices 1+2): pipe DuckDB cloud-config
+/// on stdin (`--creds-stdin`), write GraphAr to an `s3://` destination, and
+/// prove the round-trip — the `--output-json` `count` is computed by reading the
+/// just-written *cloud* Parquet back, so a successful `count == 5` exercises the
+/// full creds-stdin → SET dance → cloud COPY → cloud read path.
+///
+/// Env-gated: skips unless an S3-compatible endpoint is configured (a MinIO /
+/// LocalStack fixture), so the hermetic suite stays runnable everywhere. Set:
+///   FOSSIL_TEST_S3_ENDPOINT  e.g. `localhost:9000`
+///   FOSSIL_TEST_S3_BUCKET    a writable bucket
+///   FOSSIL_TEST_S3_KEY / FOSSIL_TEST_S3_SECRET
+///   FOSSIL_TEST_S3_REGION    (optional, default `us-east-1`)
+#[test]
+fn run_w0b_writes_to_cloud_dest_with_stdin_creds() {
+    let Ok(endpoint) = std::env::var("FOSSIL_TEST_S3_ENDPOINT") else {
+        eprintln!("skipping cloud e2e: FOSSIL_TEST_S3_ENDPOINT unset");
+        return;
+    };
+    let bucket = std::env::var("FOSSIL_TEST_S3_BUCKET").expect("FOSSIL_TEST_S3_BUCKET");
+    let key = std::env::var("FOSSIL_TEST_S3_KEY").expect("FOSSIL_TEST_S3_KEY");
+    let secret = std::env::var("FOSSIL_TEST_S3_SECRET").expect("FOSSIL_TEST_S3_SECRET");
+    let region = std::env::var("FOSSIL_TEST_S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+
+    let bin = fossil_binary();
+    let workdir = fresh_workdir("cloud");
+    let dest_url = format!("s3://{bucket}/fossil-cli-test/w0b");
+
+    // DuckDB-spelt cloud config — the vocabulary keasy will project from its
+    // provider schema. `s3_url_style=path` + `s3_use_ssl=false` suit a local
+    // MinIO over http; a real AWS fixture overrides via env as needed.
+    let creds = serde_json::json!({
+        "dest": { "config": {
+            "s3_endpoint": endpoint,
+            "s3_access_key_id": key,
+            "s3_secret_access_key": secret,
+            "s3_region": region,
+            "s3_url_style": "path",
+            "s3_use_ssl": "false",
+        }}
+    })
+    .to_string();
+
+    let mut child = Command::new(bin)
+        .args([
+            "run",
+            "examples/hello.fossil",
+            "--shape",
+            "hello.shex",
+            "--dest",
+            &dest_url,
+            "--output-json",
+            "--creds-stdin",
+        ])
+        .current_dir(&workdir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn fossil run");
+    child
+        .stdin
+        .take()
+        .expect("child stdin")
+        .write_all(creds.as_bytes())
+        .expect("write creds to stdin");
+    let output = child.wait_with_output().expect("wait fossil run");
+
+    assert!(
+        output.status.success(),
+        "cloud run exit {}: stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("--output-json parseable");
+    assert_eq!(parsed["dest"], serde_json::Value::String(dest_url));
+    // count is read back FROM the cloud Parquet just written → proves the
+    // write+read round-trip through the object store.
+    assert_eq!(
+        parsed["vertices"][0]["count"].as_i64(),
+        Some(5),
+        "cloud round-trip count mismatch; got: {parsed}"
     );
 }
