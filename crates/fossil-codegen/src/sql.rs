@@ -224,6 +224,14 @@ pub fn codegen_sql_with_descriptor<'db>(
 /// monolithic `(sql, manifest)` return into two independently
 /// composable pieces so the W0b writer can build its own SQL on top of
 /// the same decomposition.
+/// Identity source-URI rewriter — preserves the literal `io.csv(...)` URI.
+/// The default for hosts that read only local / public-URL sources; a
+/// multi-tenant host passes its own (e.g. `@conn/path` → cloud URL).
+#[must_use]
+pub fn identity_source_uri(uri: &str) -> String {
+    uri.to_string()
+}
+
 #[allow(clippy::elidable_lifetime_names)]
 pub fn decompose_for_writer<'db>(
     db: &'db dyn fossil_base::Db,
@@ -231,12 +239,17 @@ pub fn decompose_for_writer<'db>(
     mir: MirGraph<'db>,
     kind: &OutputDescriptorKind,
     chunk_size: u64,
+    resolve_source_uri: &dyn Fn(&str) -> String,
 ) -> (String, SinkPlan) {
     let ops = mir.ops(db);
 
     // Same prelude block as `codegen_sql_with_descriptor` — extracted to
     // a sibling function to keep the two entry points sharing one source
     // of truth for the CREATE VIEW shape.
+    //
+    // The view NAME is derived from the literal URI (an opaque identifier the
+    // sink-plan SELECTs reference); only the READER is resolved — so a host can
+    // map `@conn/path` to a cloud URL without perturbing the rest of the SQL.
     let mut prelude = String::new();
     for op in ops {
         if let Op::Source {
@@ -246,7 +259,8 @@ pub fn decompose_for_writer<'db>(
         } = op
         {
             let view_name = derive_view_name(uri);
-            let reader = source_reader(*format, uri);
+            let resolved = resolve_source_uri(uri);
+            let reader = source_reader(*format, &resolved);
             writeln!(
                 prelude,
                 "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};"

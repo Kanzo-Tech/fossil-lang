@@ -29,4 +29,5 @@ pub use manifest::{flat_triple_manifest, manifest_yaml_for_plan};
 pub use sql::{
     SINK_DEFAULT_CHUNK_SIZE, SqlPlan, codegen_graph, codegen_graph_for_test, codegen_sql,
     codegen_sql_with_descriptor, codegen_sql_with_descriptor_for_mapping, decompose_for_writer,
+    identity_source_uri,
 };

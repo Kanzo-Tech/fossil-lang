@@ -154,7 +154,21 @@ where
     Ok(())
 }
 
-fn apply_cloud_config(conn: &Connection, dest: &ResolvedPath) -> Result<(), MaterializeError> {
+/// Apply a [`ResolvedPath`]'s cloud config to a `DuckDB` connection via the
+/// `SET <key>='<value>'` dance, BEFORE any `read_*`/`COPY` that dereferences a
+/// cloud URL under it. Shared by [`materialize`] (dest writes) and host callers
+/// that read cloud sources (e.g. the CLI's `@conn/path` source resolution), so
+/// the SET-escape logic lives in exactly one place.
+///
+/// `SET` is connection-global: applying two paths whose configs share a key
+/// (e.g. two S3 accounts both setting `s3_access_key_id`) is last-writer-wins.
+/// Single-account orgs are unaffected; true multi-account jobs want scoped
+/// `CREATE SECRET` (a later reference upgrade).
+///
+/// # Errors
+///
+/// Returns [`MaterializeError::CloudConfig`] if `DuckDB` rejects a `SET`.
+pub fn apply_cloud_config(conn: &Connection, dest: &ResolvedPath) -> Result<(), MaterializeError> {
     let mut result: Result<(), MaterializeError> = Ok(());
     dest.for_each_setting(|k, v| {
         if result.is_err() {

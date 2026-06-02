@@ -31,18 +31,33 @@ use std::io::Read;
 use secrecy::SecretString;
 use serde::Deserialize;
 
-/// The `--creds-stdin` payload. Defaults to empty so an absent `dest` section
-/// is the no-cloud-config case (local / public URLs).
+/// The `--creds-stdin` payload. Defaults to empty so an absent `dest`/
+/// `connections` section is the no-cloud-config case (local / public URLs).
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct RunCreds {
     /// Cloud config for the `--dest` URL (addressed out-of-band on the CLI).
     #[serde(default)]
     pub(crate) dest: EndpointCreds,
+    /// Per-`@conn-name` source resolution: base URL + read cloud config. A
+    /// `.fossil` source `io.csv("@sales/x.csv")` resolves against `connections`
+    /// — `<url>/x.csv` for the read, `config` applied via the same SET dance.
+    #[serde(default)]
+    pub(crate) connections: HashMap<String, ConnectionCreds>,
 }
 
 /// Cloud config for an endpoint whose URL is supplied separately (the dest).
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct EndpointCreds {
+    /// `DuckDB`-spelt cloud config keys → secret values.
+    #[serde(default)]
+    pub(crate) config: HashMap<String, SecretString>,
+}
+
+/// A resolvable `@conn-name` source: its base URL plus the read cloud config.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ConnectionCreds {
+    /// Base URL the connection name resolves to (e.g. `s3://bucket/prefix`).
+    pub(crate) url: String,
     /// `DuckDB`-spelt cloud config keys → secret values.
     #[serde(default)]
     pub(crate) config: HashMap<String, SecretString>,
@@ -92,14 +107,15 @@ mod tests {
     }
 
     #[test]
-    fn unknown_sections_are_ignored() {
-        // A `connections` section (slice 3) parses today as an ignored unknown
-        // field — forward-compatible with the host sending the full payload.
+    fn connections_carry_url_and_read_config() {
         let creds = RunCreds::from_json(
-            r#"{ "dest": { "config": {} }, "connections": { "x": { "url": "s3://b" } } }"#,
+            r#"{ "connections": { "sales": { "url": "s3://bucket/prefix",
+                                             "config": { "s3_access_key_id": "AKIA" } } } }"#,
         )
-        .expect("unknown section ignored");
-        assert!(creds.dest.config.is_empty());
+        .expect("connections parse");
+        let sales = &creds.connections["sales"];
+        assert_eq!(sales.url, "s3://bucket/prefix");
+        assert_eq!(sales.config["s3_access_key_id"].expose_secret(), "AKIA");
     }
 
     #[test]

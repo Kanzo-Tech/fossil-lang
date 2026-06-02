@@ -361,6 +361,7 @@ fn pre_introspect_and_register(
     system: &dyn fossil_base::System,
     source_text: &str,
     source_dir: &Path,
+    connections: &HashMap<String, creds::ConnectionCreds>,
 ) {
     let conn = match duckdb::Connection::open_in_memory() {
         Ok(c) => c,
@@ -369,7 +370,16 @@ fn pre_introspect_and_register(
             return;
         }
     };
+    // Cloud `@conn` sources need their read creds applied before DESCRIBE.
+    // Best-effort: a creds failure just degrades this source to no forward
+    // propagation (same contract as a DESCRIBE failure below).
+    if let Err(e) = apply_source_creds(&conn, connections) {
+        tracing::warn!("applying source creds for pre-introspection failed: {e}");
+    }
     for (source_name, url) in extract_source_refs(source_text) {
+        // Resolve `@conn/path` → cloud URL via the connection map; other URIs
+        // pass through to the existing pass-through / relative-path handling.
+        let url = resolve_source_uri(url.as_str(), connections);
         // Resolve URL:
         // - URL with http(s):// / s3:// / absolute path → pass through (DuckDB
         //   read_csv_auto handles network IO via the httpfs extension per
@@ -448,8 +458,10 @@ fn cmd_check(path: &Path, shape: Option<&Path>) -> miette::Result<()> {
 
     // Phase 13 v0.2 (ADR-0037): same pre-introspection as `cmd_compile` so
     // `fossil check` sees the same forward-propagated types the compiler will.
+    // No `--creds-stdin` on `check` — `@conn` cloud sources degrade to no
+    // forward propagation (the empty connection map resolves nothing).
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    pre_introspect_and_register(db.system(), &text, source_dir);
+    pre_introspect_and_register(db.system(), &text, source_dir, &HashMap::new());
 
     let def_map = fossil_hir::def_map::def_map(&db, file);
     let mappings = def_map.mappings(&db);
@@ -538,7 +550,7 @@ fn cmd_compile(path: &Path, out_dir: Option<&Path>, shape: Option<&Path>) -> mie
     // the System BEFORE typecheck/codegen. Mirrors the browser-side flow
     // orchestrated by plan 13-04b.
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    pre_introspect_and_register(db.system(), &text, source_dir);
+    pre_introspect_and_register(db.system(), &text, source_dir, &HashMap::new());
 
     let plan = lower_to_plan(&db, file, path)?;
 
@@ -589,7 +601,7 @@ fn cmd_run(
 
     let (db, file) = open_db(text.clone(), path);
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    pre_introspect_and_register(db.system(), &text, source_dir);
+    pre_introspect_and_register(db.system(), &text, source_dir, &creds.connections);
 
     // Dispatch to the W0b path when `--dest` is set AND a ShEx descriptor
     // is present. Without `--shape` the decomposition is AcceptAll (a
@@ -623,10 +635,14 @@ fn cmd_run_w0b(
         .ok_or_else(|| miette::miette!("no mapping found in {}", path.display()))?;
     let mir = fossil_mir::lower_to_mir(db, mapping);
 
-    // Drive the W0b/5 SinkPlan bridge.
+    // Drive the W0b/5 SinkPlan bridge. The source-URI resolver maps `@conn/path`
+    // bindings to their cloud URL via the stdin connection map; the view READER
+    // gets the resolved URL while the view NAME stays the literal (see
+    // `decompose_for_writer`).
     let chunk_size = fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
+    let resolve = |uri: &str| resolve_source_uri(uri, &creds.connections);
     let (prelude_sql, sink_plan) =
-        fossil_codegen::decompose_for_writer(db, mapping, mir, descriptor, chunk_size);
+        fossil_codegen::decompose_for_writer(db, mapping, mir, descriptor, chunk_size, &resolve);
 
     let write_options = fossil_sinks::writer::WriteOptions::default();
     let write_plan =
@@ -637,6 +653,9 @@ fn cmd_run_w0b(
 
     let conn =
         duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
+    // Apply every source connection's read cloud-config BEFORE the prelude runs
+    // its read_csv_auto over cloud `@conn` sources.
+    apply_source_creds(&conn, &creds.connections)?;
     conn.execute_batch(&prelude_sql)
         .map_err(|e| miette::miette!("create source views: {e}"))?;
 
@@ -787,6 +806,42 @@ fn cmd_run_w0b(
     Ok(())
 }
 
+/// Resolve a `.fossil` source URI through the `--creds-stdin` connection map.
+/// `@conn/path` → `<connection url>/path`; any other URI (a direct `s3://`/
+/// `https://` URL or a local path) is returned verbatim. Mirrors the keasy
+/// host resolver, sourced from stdin instead of an in-process registry.
+fn resolve_source_uri(raw: &str, connections: &HashMap<String, creds::ConnectionCreds>) -> String {
+    let Some((conn_name, path)) = raw.strip_prefix('@').and_then(|r| r.split_once('/')) else {
+        return raw.to_string(); // not an @conn reference — pass through
+    };
+    connections.get(conn_name).map_or_else(
+        || raw.to_string(),
+        |c| {
+            format!(
+                "{}/{}",
+                c.url.trim_end_matches('/'),
+                path.trim_start_matches('/')
+            )
+        },
+    )
+}
+
+/// Apply every source connection's read cloud-config to `conn` via the shared
+/// `SET` dance ([`fossil_runtime::apply_cloud_config`]), so a `read_csv_auto`
+/// over a cloud `@conn` source authenticates. No-op when no connection carries
+/// config (local / public-URL sources).
+fn apply_source_creds(
+    conn: &duckdb::Connection,
+    connections: &HashMap<String, creds::ConnectionCreds>,
+) -> miette::Result<()> {
+    for c in connections.values() {
+        let resolved = fossil_resolver::ResolvedPath::with_config(&c.url, c.config.clone());
+        fossil_runtime::apply_cloud_config(conn, &resolved)
+            .map_err(|e| miette::miette!("apply source creds: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Legacy path — preserves walking-skeleton invariant byte-for-byte.
 fn cmd_run_legacy(
     db: &fossil_base::FossilDb,
@@ -830,4 +885,64 @@ fn count_parquet_rows(parquet: &Path) -> miette::Result<i64> {
         |row| row.get(0),
     )
     .map_err(|e| miette::miette!("count rows in {}: {e}", parquet.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use secrecy::SecretString;
+
+    use super::*;
+
+    fn conns(pairs: &[(&str, &str)]) -> HashMap<String, creds::ConnectionCreds> {
+        pairs
+            .iter()
+            .map(|(name, url)| {
+                (
+                    (*name).to_string(),
+                    creds::ConnectionCreds {
+                        url: (*url).to_string(),
+                        config: HashMap::<String, SecretString>::new(),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resolves_at_conn_to_connection_url() {
+        let c = conns(&[("sales", "s3://bucket/prefix")]);
+        assert_eq!(
+            resolve_source_uri("@sales/2024/orders.csv", &c),
+            "s3://bucket/prefix/2024/orders.csv"
+        );
+    }
+
+    #[test]
+    fn collapses_slashes_at_the_join() {
+        let c = conns(&[("sales", "s3://bucket/prefix/")]);
+        assert_eq!(
+            resolve_source_uri("@sales/x.csv", &c),
+            "s3://bucket/prefix/x.csv"
+        );
+    }
+
+    #[test]
+    fn passes_through_direct_urls_and_paths() {
+        let c = conns(&[("sales", "s3://bucket")]);
+        assert_eq!(
+            resolve_source_uri("s3://other/x.csv", &c),
+            "s3://other/x.csv"
+        );
+        assert_eq!(resolve_source_uri("examples/users.csv", &c), "examples/users.csv");
+    }
+
+    #[test]
+    fn unknown_connection_passes_through_verbatim() {
+        // Unresolved `@conn` stays literal — the downstream read_csv_auto then
+        // fails loudly rather than the CLI silently inventing a URL.
+        let c = conns(&[("sales", "s3://bucket")]);
+        assert_eq!(resolve_source_uri("@missing/x.csv", &c), "@missing/x.csv");
+    }
 }

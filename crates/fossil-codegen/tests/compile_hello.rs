@@ -73,7 +73,14 @@ fn accept_all_synthesises_typed_vertex_from_mapping() {
 
     let mir = lower_to_mir(&db, mapping);
     let kind = OutputDescriptorKind::AcceptAll(AcceptAllDescriptor);
-    let (_prelude, plan) = decompose_for_writer(&db, mapping, mir, &kind, DEFAULT_CHUNK_SIZE);
+    let (_prelude, plan) = decompose_for_writer(
+        &db,
+        mapping,
+        mir,
+        &kind,
+        DEFAULT_CHUNK_SIZE,
+        &fossil_codegen::identity_source_uri,
+    );
 
     // One synthesised vertex table for the mapping's subject shape `ex:Person`.
     assert_eq!(plan.vertices.len(), 1, "one synthesised vertex table");
