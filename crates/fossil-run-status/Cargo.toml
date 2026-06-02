@@ -17,6 +17,13 @@ serde = { workspace = true, features = ["derive"] }
 # `JsonSchema` publishes the contract for TS codegen (same pipeline as
 # `fossil-graph`'s verb result types — packages/graph `gen:types`).
 schemars = { workspace = true }
+# Optional: lets a host (keasy) derive utoipa OpenAPI schemas for `RunStatus`.
+# Off by default — rmlext's CLI/WASM builds never enable it (WASM-clean).
+utoipa = { workspace = true, optional = true }
+
+[features]
+# Host-only: derive `utoipa::ToSchema` on the wire types.
+utoipa = ["dep:utoipa"]
 
 [dev-dependencies]
 # Round-trip the wire contract in tests.

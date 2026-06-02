@@ -39,6 +39,11 @@ serde_yaml_ng = "0.10"
 # because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
 # JSON Schema draft-07 dialect for openapi-typescript interop.
 schemars = { version = "0.8" }
+# `utoipa` derives OpenAPI schemas. Optional + off by default — only the keasy
+# host enables it (on `fossil-run-status`) so `RunStatus` lands in keasy's
+# openapi.json for openapi-typescript codegen. rmlext's own CLI/WASM builds
+# never enable it, so the crate stays dependency-light + WASM-clean.
+utoipa = { version = "5" }
 # Pure-Rust SHA-256 for the SC#1 cross-engine parity digest (native_baseline.json
 # producer in fossil-runtime tests). Already a transitive dep via duckdb/parquet;
 # WASM-safe (no C/FFI) though only used in a native-only dev dependency here.

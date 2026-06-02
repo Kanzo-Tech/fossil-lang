@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 /// The status object `fossil run --output-json` writes to stdout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RunStatus {
     /// Destination URL the `GraphAr` dataset was written under (echoes `--dest`).
     pub dest: String,
@@ -36,6 +37,7 @@ pub struct RunStatus {
 /// One vertex type — its dataset-relative Parquet, row count, and property
 /// columns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VertexStatus {
     /// The vertex type / `GraphAr` `type` (e.g. `Person`).
     #[serde(rename = "type")]
@@ -50,6 +52,7 @@ pub struct VertexStatus {
 
 /// A property column of a [`VertexStatus`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ColumnStatus {
     /// Column / predicate local name.
     pub name: String,
@@ -59,6 +62,7 @@ pub struct ColumnStatus {
 
 /// One edge type — its CSR/CSC Parquet pair and endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct EdgeStatus {
     /// The edge type / predicate local name.
     pub edge_type: String,
