@@ -20,12 +20,14 @@
 
 pub(crate) mod ast;
 pub mod manifest;
+pub mod merge;
 pub mod sql;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`
 // and `fossil-mir`: types at the crate root, query functions stay under
 // their module path (`fossil_codegen::sql::codegen_sql`).
 pub use manifest::{flat_triple_manifest, manifest_yaml_for_plan};
+pub use merge::merge_decomposed;
 pub use sql::{
     SINK_DEFAULT_CHUNK_SIZE, SqlPlan, codegen_graph, codegen_graph_for_test, codegen_sql,
     codegen_sql_with_descriptor, codegen_sql_with_descriptor_for_mapping, decompose_for_writer,

@@ -211,6 +211,127 @@ fn run_w0b_output_json_is_parseable() {
     );
 }
 
+/// A workdir seeded with arbitrary `(rel_path, contents)` files (for the
+/// multi-mapping fixture below, which is not part of the canonical examples).
+fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let tmp = std::env::temp_dir().join(format!("fossil-cli-w0b-{test_name}"));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).expect("create workdir");
+    for (rel, contents) in files {
+        let path = tmp.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture subdir");
+        }
+        std::fs::write(&path, contents).unwrap_or_else(|e| panic!("write {rel}: {e}"));
+    }
+    tmp
+}
+
+/// Slice 8 end-to-end: a TWO-mapping program with NO `--shape`. The synthesised
+/// (AcceptAll) descriptor must (a) materialise BOTH vertex types and (b) turn
+/// `Order.ex:placedBy = ${ex:}person/${.user_id}` into a cross-type edge to the
+/// `Person` mapping (same subject-template skeleton `${ex:}person/${.id}`), whose
+/// CSR Parquet joins the order subjects to the person subjects. Proves Phase B
+/// edge synthesis (8a) + multi-mapping merge/materialisation (8b) on real DuckDB.
+#[test]
+fn run_no_shape_writes_cross_type_edge_from_two_mappings() {
+    let bin = fossil_binary();
+    let program = "\
+prefix ex: <https://example.org/>
+
+people := io.csv(\"people.csv\")
+orders := io.csv(\"orders.csv\")
+
+Person : ex:Person from people
+    iri = `${ex:}person/${.id}`
+    ex:name = .name
+
+Order : ex:Order from orders
+    iri = `${ex:}order/${.order_id}`
+    ex:placedBy = `${ex:}person/${.user_id}`
+    ex:amount = .amount
+";
+    let workdir = workdir_with_files(
+        "cross-type-edge",
+        &[
+            ("prog.fossil", program),
+            ("people.csv", "id,name\n1,Ada\n2,Linus\n3,Grace\n"),
+            (
+                "orders.csv",
+                "order_id,user_id,amount\no1,1,10\no2,2,20\no3,1,30\n",
+            ),
+        ],
+    );
+    let dest = workdir.join("graph");
+    let dest_url = format!("file://{}", dest.display());
+
+    let output = Command::new(bin)
+        .args([
+            "run",
+            "prog.fossil",
+            "--dest",
+            &dest_url,
+            "--output-json",
+        ])
+        .current_dir(&workdir)
+        .output()
+        .expect("spawn fossil run");
+
+    assert!(
+        output.status.success(),
+        "no-shape multi-mapping run exited {}: stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    // Both vertex types materialised.
+    assert!(
+        dest.join("vertex/Person.parquet").exists(),
+        "Person vertex Parquet missing"
+    );
+    assert!(
+        dest.join("vertex/Order.parquet").exists(),
+        "Order vertex Parquet missing"
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("--output-json parseable");
+
+    // The cross-type edge Order--placedBy-->Person is present with one edge per
+    // order (3 orders, each referencing a real person → 3 CSR rows).
+    let edges = parsed["edges"].as_array().expect("edges array");
+    let placed_by = edges
+        .iter()
+        .find(|e| e["src_type"] == "Order" && e["dst_type"] == "Person")
+        .unwrap_or_else(|| panic!("no Order→Person edge in status: {parsed}"));
+    assert_eq!(
+        placed_by["count"].as_i64(),
+        Some(3),
+        "3 orders join to persons; got: {placed_by}"
+    );
+
+    // The literal `ex:amount` stayed a property on Order; `ex:placedBy` did NOT.
+    let order_v = parsed["vertices"]
+        .as_array()
+        .expect("vertices array")
+        .iter()
+        .find(|v| v["type"] == "Order")
+        .expect("Order vertex in status");
+    let cols: Vec<&str> = order_v["columns"]
+        .as_array()
+        .expect("columns array")
+        .iter()
+        .filter_map(|c| c["name"].as_str())
+        .collect();
+    assert!(cols.contains(&"amount"), "amount is a property; got: {cols:?}");
+    assert!(
+        !cols.contains(&"placedBy"),
+        "placedBy is an edge, not a property column; got: {cols:?}"
+    );
+}
+
 /// End-to-end cloud write (W0 subprocess slices 1+2): pipe DuckDB cloud-config
 /// on stdin (`--creds-stdin`), write GraphAr to an `s3://` destination, and
 /// prove the round-trip — the `--output-json` `count` is computed by reading the

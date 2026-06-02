@@ -628,21 +628,29 @@ fn cmd_run_w0b(
     creds: &creds::RunCreds,
 ) -> miette::Result<()> {
     let def_map = fossil_hir::def_map::def_map(db, file);
-    let mapping = def_map
-        .mappings(db)
-        .first()
-        .copied()
-        .ok_or_else(|| miette::miette!("no mapping found in {}", path.display()))?;
-    let mir = fossil_mir::lower_to_mir(db, mapping);
+    let mappings = def_map.mappings(db);
+    if mappings.is_empty() {
+        return Err(miette::miette!("no mapping found in {}", path.display()));
+    }
 
-    // Drive the W0b/5 SinkPlan bridge. The source-URI resolver maps `@conn/path`
-    // bindings to their cloud URL via the stdin connection map; the view READER
-    // gets the resolved URL while the view NAME stays the literal (see
-    // `decompose_for_writer`).
+    // Drive the W0b/5 SinkPlan bridge for EVERY mapping, then merge into one
+    // writable plan: a program's mappings share sources (de-duplicate the
+    // `CREATE VIEW` prelude) and may target the same vertex type or emit the same
+    // edge signature (union them), which the writer — one Parquet set per type —
+    // cannot get from naive concatenation. The source-URI resolver maps
+    // `@conn/path` bindings to their cloud URL via the stdin connection map; the
+    // view READER gets the resolved URL while the view NAME stays the literal
+    // (see `decompose_for_writer`).
     let chunk_size = fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
     let resolve = |uri: &str| resolve_source_uri(uri, &creds.connections);
-    let (prelude_sql, sink_plan) =
-        fossil_codegen::decompose_for_writer(db, mapping, mir, descriptor, chunk_size, &resolve);
+    let parts: Vec<(String, fossil_sinks::decomp::SinkPlan)> = mappings
+        .iter()
+        .map(|m| {
+            let mir = fossil_mir::lower_to_mir(db, *m);
+            fossil_codegen::decompose_for_writer(db, *m, mir, descriptor, chunk_size, &resolve)
+        })
+        .collect();
+    let (prelude_sql, sink_plan) = fossil_codegen::merge_decomposed(&parts);
 
     let write_options = fossil_sinks::writer::WriteOptions::default();
     let write_plan =
