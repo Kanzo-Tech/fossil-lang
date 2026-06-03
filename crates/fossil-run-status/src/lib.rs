@@ -173,6 +173,39 @@ pub struct CatalogDistribution {
     pub media_type: String,
 }
 
+// ── `fossil providers` contract ─────────────────────────────────────────
+//
+// The host (keasy) lists the data-source constructors fossil supports so its UI
+// can offer them + filter files by extension. fossil owns this set (host
+// boundary): the `providers` subcommand enumerates the registry and emits this
+// contract; keasy reads it over the subprocess and serves `/v1/providers`.
+
+/// What a provider can appear as in a program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    /// Only defines a type (e.g. a schema descriptor).
+    Schema,
+    /// Loads data (the `io.*` source constructors).
+    Data,
+    /// Usable in both positions.
+    Both,
+}
+
+/// One data-source provider fossil exposes: its short name, the file extensions
+/// it reads, and how it can be used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ProviderInfo {
+    /// Short provider name (e.g. `csv`, `json`, `parquet`).
+    pub name: String,
+    /// File extensions this provider reads (no leading dot).
+    pub extensions: Vec<String>,
+    /// Whether the provider defines a type, loads data, or both.
+    pub kind: ProviderKind,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

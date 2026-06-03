@@ -184,6 +184,14 @@ enum Commands {
         #[arg(long)]
         output_json: bool,
     },
+    /// List the data-source providers fossil supports (the `io.*` source
+    /// constructors). The host (keasy) reads this to populate its connector UI
+    /// and filter files by extension — fossil owns the set, not the host.
+    Providers {
+        /// Emit the `Vec<ProviderInfo>` JSON on stdout (consumed by keasy).
+        #[arg(long)]
+        output_json: bool,
+    },
 }
 
 fn main() -> miette::Result<()> {
@@ -215,7 +223,52 @@ fn main() -> miette::Result<()> {
             let req = creds::CatalogRequest::from_stdin().map_err(|e| miette::miette!(e))?;
             cmd_catalog(&dest, output_json, &req)
         }
+        Commands::Providers { output_json } => cmd_providers(output_json),
     }
+}
+
+/// List the data-source providers fossil supports, derived from the function
+/// registry's `io.*` source constructors (the single source of truth). Each
+/// `LoweringKind::Plan(PlanOp::Source(fmt))` entry becomes a [`ProviderInfo`];
+/// the constructor's short name doubles as its file extension. Sorted for a
+/// deterministic stdout (the registry is a `HashMap`).
+fn cmd_providers(output_json: bool) -> miette::Result<()> {
+    use fossil_registry::{FunctionRegistry, LoweringKind, PlanOp, SourceFormatTag};
+    use fossil_run_status::{ProviderInfo, ProviderKind};
+
+    let ext = |fmt: SourceFormatTag| match fmt {
+        SourceFormatTag::Csv => "csv",
+        SourceFormatTag::Json => "json",
+        SourceFormatTag::Parquet => "parquet",
+    };
+
+    let mut providers: Vec<ProviderInfo> = FunctionRegistry::stdlib_default()
+        .iter()
+        .filter_map(|e| match e.lowering {
+            LoweringKind::Plan(PlanOp::Source(fmt)) => {
+                let name = e.name.strip_prefix("io.").unwrap_or(&e.name).to_string();
+                Some(ProviderInfo {
+                    name,
+                    extensions: vec![ext(fmt).to_string()],
+                    // `io.*` constructors load data; schema-defining providers
+                    // (descriptors) are a separate surface.
+                    kind: ProviderKind::Data,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    providers.sort_by(|a, b| a.name.cmp(&b.name));
+
+    if output_json {
+        let json = serde_json::to_string(&providers).map_err(|e| miette::miette!(e))?;
+        println!("{json}");
+    } else {
+        for p in &providers {
+            println!("{} ({})", p.name, p.extensions.join(", "));
+        }
+    }
+    Ok(())
 }
 
 /// Initialise `tracing-subscriber` with `EnvFilter`. `RUST_LOG` overrides the

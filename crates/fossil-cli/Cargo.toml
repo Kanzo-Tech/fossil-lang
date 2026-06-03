@@ -15,6 +15,7 @@ workspace = true
 fossil-base    = { path = "../fossil-base" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-codegen = { path = "../fossil-codegen" }
+fossil-registry = { path = "../fossil-registry" }
 fossil-runtime = { path = "../fossil-runtime" }
 # Plan 03-03 Task 2 step 5: CLI host wires `SystemWithDescriptors` impl on
 # its concrete `CliSystem` struct. Default `output_descriptor_kind()`

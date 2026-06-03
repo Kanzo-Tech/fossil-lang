@@ -1133,6 +1133,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-hir",
  "fossil-mir",
+ "fossil-registry",
  "fossil-resolver",
  "fossil-run-status",
  "fossil-runtime",
