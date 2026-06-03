@@ -45,7 +45,9 @@ use std::fmt::Write as _;
 
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
-use shex_ast::{Schema, Shape, ShapeDecl, ShapeExpr, ShapeExprLabel, TripleExpr, TripleExprLabel};
+use shex_ast::{
+    NodeKind, Schema, Shape, ShapeDecl, ShapeExpr, ShapeExprLabel, TripleExpr, TripleExprLabel,
+};
 
 #[cfg(test)]
 use shex_ast::TripleExprWrapper;
@@ -129,6 +131,73 @@ impl Cardinality {
                 max: Some(to_u32(lo)),
             },
         }
+    }
+}
+
+/// The Fossil-relevant narrowing of a [`ResolvedConstraint`]'s `ShEx` `valueExpr`.
+///
+/// `ShEx`'s `valueExpr` is a full `ShapeExpr` lattice; Fossil only needs to know,
+/// per property, whether the value is a typed literal (→ a scalar column of a
+/// known primitive), an IRI / object reference (→ an edge / IRI-valued column),
+/// or something it cannot narrow yet. This is the single decode of that
+/// question, shared by the INPUT descriptor (deriving source column types,
+/// compile-time) and the OUTPUT bidirectional checker (plan 03-05).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConstraintValue {
+    /// A literal constrained to this datatype IRI (e.g.
+    /// `http://www.w3.org/2001/XMLSchema#integer`). The consumer maps the IRI
+    /// to its own type lattice.
+    Datatype(String),
+    /// An IRI-valued node (`nodeKind IRI`) or a reference to another shape — an
+    /// object property. The value is the referenced subject's IRI.
+    Iri,
+    /// Could not be narrowed (`ShapeAnd`/`ShapeOr`/`ShapeNot`/external, or no
+    /// `valueExpr` at all). Consumers treat this as an opaque string.
+    Unknown,
+}
+
+impl ResolvedConstraint {
+    /// The local name of the predicate IRI — the field/column name a mapping
+    /// references (`http://xmlns.com/foaf/0.1/name` / `foaf:name` → `name`).
+    #[must_use]
+    pub fn predicate_local_name(&self) -> String {
+        local_name(&self.predicate.to_string()).to_string()
+    }
+
+    /// Narrow this constraint's `ShEx` `valueExpr` to the Fossil-relevant value
+    /// kind. See [`ConstraintValue`].
+    #[must_use]
+    pub fn value(&self) -> ConstraintValue {
+        match &self.value_expr {
+            Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
+                || {
+                    if matches!(nc.node_kind(), Some(NodeKind::Iri)) {
+                        ConstraintValue::Iri
+                    } else {
+                        ConstraintValue::Unknown
+                    }
+                },
+                |dt| ConstraintValue::Datatype(iri_ref_to_string(&dt)),
+            ),
+            // A reference to another shape, or an inline nested shape, is an
+            // object property: its value is the referenced subject's IRI.
+            Some(ShapeExpr::Ref(_) | ShapeExpr::Shape(_)) => ConstraintValue::Iri,
+            _ => ConstraintValue::Unknown,
+        }
+    }
+}
+
+/// The local name of an IRI — the substring after the last `#` or `/`.
+fn local_name(iri: &str) -> &str {
+    iri.rsplit(['#', '/']).next().unwrap_or(iri)
+}
+
+/// Render an [`IriRef`] to its IRI string. Parsed `ShExJ` datatypes are full IRIs
+/// (`IriRef::Iri`); a `Prefixed` form (rare in JSON) falls back to `prefix:local`.
+fn iri_ref_to_string(iri_ref: &IriRef) -> String {
+    match iri_ref {
+        IriRef::Iri(iri) => iri.to_string(),
+        IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
     }
 }
 
@@ -237,6 +306,14 @@ impl ShExDescriptor {
     #[must_use]
     pub fn lookup_shape(&self, iri: &IriS) -> Option<&ShapeBinding> {
         self.shapes.get(&iri.to_string())
+    }
+
+    /// Look up a shape by its resolved IRI string — for callers that hold the
+    /// shape IRI as a `&str` (e.g. the input descriptor) and don't want to
+    /// construct an [`IriS`].
+    #[must_use]
+    pub fn lookup_shape_str(&self, iri: &str) -> Option<&ShapeBinding> {
+        self.shapes.get(iri)
     }
 
     /// Iterator over every resolved shape binding.

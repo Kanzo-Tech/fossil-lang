@@ -12,7 +12,7 @@
 //! UI listing loaded descriptors).
 
 use crate::AcceptAllDescriptor;
-use crate::shex::ShExDescriptor;
+use fossil_shex::ShExDescriptor;
 
 /// Concrete-type dispatch surface for the bidirectional checker.
 ///

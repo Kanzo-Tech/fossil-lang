@@ -33,9 +33,11 @@
 
 pub mod csvw;
 pub mod inferred;
+pub mod shex;
 
 pub use csvw::{CsvwDescriptor, CsvwMetadata, datatype_to_primitive_name};
 pub use inferred::{InferredColumn, InferredDescriptor};
+pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 
 /// Input-side schema descriptor.
 ///

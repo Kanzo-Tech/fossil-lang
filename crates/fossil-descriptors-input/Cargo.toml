@@ -27,3 +27,9 @@ serde_json = { workspace = true }
 # unaffected — Cargo feature unification merges features additively.
 smol_str = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
+
+# The ShEx decode (parse + resolved constraint table + valueExpr narrowing)
+# lives in the neutral `fossil-shex` crate, shared with the output descriptor.
+# Used to derive RDF source column types from a declared shape at compile time
+# (`io.rdf(path, schema: "x.shex")`). AST-only — no runtime ShEx validation.
+fossil-shex = { path = "../fossil-shex" }
