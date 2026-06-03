@@ -225,9 +225,14 @@ fn resolve_source<'db>(
     let format = match constructor.as_deref() {
         Some("io.json") => SourceFormat::Json,
         Some("io.parquet") => SourceFormat::Parquet,
-        // `io.csv`, an unknown constructor, or no constructor → Csv (the
-        // Phase-1 default; keeps malformed sources lowering rather than
-        // panicking).
+        Some("io.csv") => SourceFormat::Csv,
+        // Any other `io.<name>` is a provider-backed source (e.g. `io.rdf`): the
+        // core stays format-agnostic, an external provider materialises the rows.
+        Some(c) if c.starts_with("io.") => SourceFormat::Provider {
+            name: SmolStr::new(&c["io.".len()..]),
+        },
+        // No / non-`io.` constructor → Csv (the Phase-1 default; keeps malformed
+        // sources lowering rather than panicking).
         _ => SourceFormat::Csv,
     };
     let uri = uri.unwrap_or_else(|| SmolStr::new_static("examples/users.csv"));

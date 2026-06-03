@@ -17,6 +17,9 @@ fossil-hir     = { path = "../fossil-hir" }
 fossil-codegen = { path = "../fossil-codegen" }
 fossil-registry = { path = "../fossil-registry" }
 fossil-runtime = { path = "../fossil-runtime" }
+# The RDF source provider — registered into the runtime so `io.rdf(...)` sources
+# materialise. Lives outside the core; the CLI is the wiring edge.
+fossil-provider-rdf = { path = "../fossil-provider-rdf" }
 # Plan 03-03 Task 2 step 5: CLI host wires `SystemWithDescriptors` impl on
 # its concrete `CliSystem` struct. Default `output_descriptor_kind()`
 # returns AcceptAll for Phase 3 v0.1; Phase 6 LSP-01 will override here.

@@ -60,6 +60,10 @@ roxmltree = "0.20"
 shex_ast = "0.3"
 rudof_iri = "0.3"
 prefixmap = "0.3"
+# Turtle/N-Triples parsing for the RDF source provider (the oxigraph parser
+# rudof's srdf wraps; already resolved transitively via the ShEx crates).
+oxttl = "0.2"
+oxrdf = "0.3"
 
 # === Did-you-mean diagnostics (Phase 3 CORE-05) ===
 strsim = "0.11"

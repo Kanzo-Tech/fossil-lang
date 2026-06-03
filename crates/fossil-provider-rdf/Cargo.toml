@@ -1,0 +1,25 @@
+[package]
+name = "fossil-provider-rdf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "RDF source provider for Fossil — turtle/N-Triples → entity rows via a ShEx shape. Lives OUTSIDE the language core (the core never sees RDF)."
+
+[lints]
+workspace = true
+
+[dependencies]
+# The seam (native runtime) + the ShEx-driven schema (compile-time, shared with
+# the output descriptor). All RDF/decode detail lives here, never in the core.
+fossil-runtime = { path = "../fossil-runtime" }
+fossil-shex = { path = "../fossil-shex" }
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+duckdb = { workspace = true }
+# Turtle/N-Triples parsing — the oxigraph parser that rudof's `srdf` wraps;
+# already in the resolved graph (transitive via the rudof ShEx crates). Kept
+# isolated to this crate so swapping to `srdf` later touches nothing else.
+oxttl = { workspace = true }
+oxrdf = { workspace = true }

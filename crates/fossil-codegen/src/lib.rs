@@ -31,5 +31,5 @@ pub use merge::merge_decomposed;
 pub use sql::{
     SINK_DEFAULT_CHUNK_SIZE, SqlPlan, codegen_graph, codegen_graph_for_test, codegen_sql,
     codegen_sql_with_descriptor, codegen_sql_with_descriptor_for_mapping, decompose_for_writer,
-    identity_source_uri,
+    identity_source_uri, provider_relation,
 };

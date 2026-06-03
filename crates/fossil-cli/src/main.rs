@@ -728,6 +728,44 @@ fn cmd_run_w0b(
         .collect();
     let (prelude_sql, sink_plan) = fossil_codegen::merge_decomposed(&parts);
 
+    // Register the external source providers and collect this program's
+    // provider-backed sources (`io.<name>`). The core never sees these decode —
+    // the provider materialises a relation the prelude scans.
+    let mut providers = fossil_runtime::SourceProviderRegistry::new();
+    providers.register(std::sync::Arc::new(fossil_provider_rdf::RdfProvider));
+
+    let provider_sources: Vec<ProviderSource> = def_map
+        .sources(db)
+        .iter()
+        .filter_map(|s| {
+            let provider = s.constructor.as_deref()?.strip_prefix("io.")?;
+            if providers.get(provider).is_none() {
+                return None;
+            }
+            let raw_uri = s.uri.as_deref()?;
+            let uri = resolve_source_uri(raw_uri, &creds.connections).to_string();
+            let relation = fossil_codegen::provider_relation(&uri);
+            Some(ProviderSource {
+                provider: provider.to_string(),
+                uri,
+                schema_arg: s.schema_arg.as_ref().map(SmolStr::to_string),
+                relation,
+            })
+        })
+        .collect();
+
+    let before_prelude = |conn: &duckdb::Connection| -> miette::Result<()> {
+        for src in &provider_sources {
+            let provider = providers
+                .get(&src.provider)
+                .ok_or_else(|| miette::miette!("no source provider `{}`", src.provider))?;
+            provider
+                .materialize(&src.uri, src.schema_arg.as_deref(), &src.relation, conn)
+                .map_err(|e| miette::miette!("source provider `{}`: {e}", src.provider))?;
+        }
+        Ok(())
+    };
+
     materialize_and_report(
         &prelude_sql,
         &sink_plan,
@@ -739,7 +777,17 @@ fn cmd_run_w0b(
             .map(creds::SecretSpec::to_cloud_secret),
         &creds.connections,
         output_json,
+        before_prelude,
     )
+}
+
+/// A provider-backed source resolved from the program (`io.<name>(uri, schema =
+/// …)`), ready for the runtime to materialise before the prelude.
+struct ProviderSource {
+    provider: String,
+    uri: String,
+    schema_arg: Option<String>,
+    relation: String,
 }
 
 /// `fossil catalog` — materialise a DCAT-AP catalog graph from a `CatalogInput`.
@@ -764,6 +812,8 @@ fn cmd_catalog(
             .map(creds::SecretSpec::to_cloud_secret),
         &HashMap::new(),
         output_json,
+        // The catalog's sources are inline VALUES — no external providers.
+        |_conn| Ok(()),
     )
 }
 
@@ -775,6 +825,7 @@ fn cmd_catalog(
 /// before the prelude (empty for the catalog, whose sources are inline VALUES);
 /// `dest_secret` scopes the destination `CREATE SECRET`.
 #[allow(clippy::too_many_lines)] // one linear write→layout→report path; clearer whole
+#[allow(clippy::too_many_arguments)] // each arg is a distinct write input
 fn materialize_and_report(
     prelude_sql: &str,
     sink_plan: &fossil_sinks::decomp::SinkPlan,
@@ -782,6 +833,11 @@ fn materialize_and_report(
     dest_secret: Option<fossil_resolver::CloudSecret>,
     source_creds: &HashMap<String, creds::ConnectionCreds>,
     output_json: bool,
+    // Runs on the connection AFTER source creds, BEFORE the `CREATE VIEW`
+    // prelude — the seam where external source providers materialise the
+    // relations the prelude scans (keeps RDF/provider detail out of this
+    // generic write path). The catalog path passes a no-op.
+    before_prelude: impl FnOnce(&duckdb::Connection) -> miette::Result<()>,
 ) -> miette::Result<()> {
     let write_options = fossil_sinks::writer::WriteOptions::default();
     let write_plan =
@@ -799,6 +855,9 @@ fn materialize_and_report(
     // Apply every source connection's read cloud-config BEFORE the prelude runs
     // its read_csv_auto over cloud `@conn` sources.
     apply_source_creds(&conn, source_creds)?;
+    // External source providers (e.g. RDF) materialise their relations here, so
+    // the prelude's `CREATE VIEW … SELECT * FROM <relation>` finds them.
+    before_prelude(&conn)?;
     conn.execute_batch(prelude_sql)
         .map_err(|e| miette::miette!("create source views: {e}"))?;
 

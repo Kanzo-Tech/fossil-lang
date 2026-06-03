@@ -1133,6 +1133,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-hir",
  "fossil-mir",
+ "fossil-provider-rdf",
  "fossil-registry",
  "fossil-resolver",
  "fossil-run-status",
@@ -1289,6 +1290,18 @@ dependencies = [
  "insta",
  "salsa",
  "smol_str",
+]
+
+[[package]]
+name = "fossil-provider-rdf"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "fossil-descriptors-input",
+ "fossil-runtime",
+ "fossil-shex",
+ "oxrdf",
+ "oxttl",
 ]
 
 [[package]]

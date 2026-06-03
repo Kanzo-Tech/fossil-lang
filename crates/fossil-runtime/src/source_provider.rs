@@ -29,7 +29,7 @@ use duckdb::Connection;
 pub trait SourceProvider: Send + Sync {
     /// Provider name — matches the `io.<name>` source constructor and the MIR
     /// `SourceFormat::Provider { name }` the core lowered the source to.
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// File extensions this provider reads (no leading dot). Surfaced by the
     /// host's provider listing (e.g. keasy's `/v1/providers`).
@@ -111,7 +111,7 @@ mod tests {
     struct DummyProvider;
 
     impl SourceProvider for DummyProvider {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "dummy"
         }
 

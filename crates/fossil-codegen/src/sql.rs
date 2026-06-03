@@ -1321,7 +1321,7 @@ fn source_reader(format: &SourceFormat, uri: &str) -> String {
 /// `uri` — derived from the same view stem the prelude uses, so codegen and the
 /// runtime agree without threading a name. `examples/people.ttl` →
 /// `__fossil_src_people`.
-pub(crate) fn provider_relation(uri: &str) -> String {
+pub fn provider_relation(uri: &str) -> String {
     format!("__fossil_src_{}", derive_view_name(uri))
 }
 
