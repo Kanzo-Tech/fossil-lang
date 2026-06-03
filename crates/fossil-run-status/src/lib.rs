@@ -22,10 +22,32 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// The version of this wire contract. Bumped on any breaking change to
+/// [`RunStatus`] / [`CatalogInput`] (a removed/renamed field, a changed
+/// meaning). Producers stamp it; consumers check it with [`is_compatible`].
+pub const WIRE_VERSION: u32 = 1;
+
+/// serde default for the `version` field — lets a legacy payload that predates
+/// versioning deserialize as `WIRE_VERSION` (it is, by construction, v1).
+const fn wire_version() -> u32 {
+    WIRE_VERSION
+}
+
+/// Whether a payload stamped with `version` can be read by this build. v0.1
+/// rule: exact match — a host on contract vN refuses a producer on vM≠N rather
+/// than silently misreading it. Widen to a range once the contract is stable.
+#[must_use]
+pub const fn is_compatible(version: u32) -> bool {
+    version == WIRE_VERSION
+}
+
 /// The status object `fossil run --output-json` writes to stdout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RunStatus {
+    /// Wire-contract version this payload was produced with (see [`WIRE_VERSION`]).
+    #[serde(default = "wire_version")]
+    pub version: u32,
     /// Destination URL the `GraphAr` dataset was written under (echoes `--dest`).
     pub dest: String,
     /// One entry per emitted vertex type.
@@ -106,6 +128,9 @@ pub struct EdgeStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CatalogInput {
+    /// Wire-contract version this payload was produced with (see [`WIRE_VERSION`]).
+    #[serde(default = "wire_version")]
+    pub version: u32,
     /// Stable job identifier — the catalog/dataset/distribution URN namespace.
     pub job_id: String,
     /// Human title for the catalog (defaults to a generic label when absent).
