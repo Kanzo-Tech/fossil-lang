@@ -65,7 +65,7 @@ fn erase_op<'db>(op: &Op<'db>, s: Ty<'db>) -> Op<'db> {
             row_type: _,
         } => Op::Source {
             uri: uri.clone(),
-            format: *format,
+            format: format.clone(),
             row_type: s,
         },
         // These ops carry NO `Ty` themselves; only their `Expr` fields might.

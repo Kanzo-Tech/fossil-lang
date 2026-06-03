@@ -149,7 +149,7 @@ pub fn codegen_sql_with_descriptor<'db>(
         } = op
         {
             let view_name = derive_view_name(uri);
-            let reader = source_reader(*format, uri);
+            let reader = source_reader(format, uri);
             writeln!(sql, "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};")
                 .expect("writing to a String never fails");
         }
@@ -260,7 +260,7 @@ pub fn decompose_for_writer<'db>(
         {
             let view_name = derive_view_name(uri);
             let resolved = resolve_source_uri(uri);
-            let reader = source_reader(*format, &resolved);
+            let reader = source_reader(format, &resolved);
             writeln!(
                 prelude,
                 "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};"
@@ -779,7 +779,7 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                 // own readers. All three run identically on native DuckDB and
                 // DuckDB-WASM (SC#2 — codegen emits the SQL text; execution is
                 // DuckDB's job).
-                let reader = source_reader(*format, uri);
+                let reader = source_reader(format, uri);
                 writeln!(sql, "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};")
                     .expect("writing to a String never fails");
                 rel_ref[idx] = Some(view_name.clone());
@@ -1298,16 +1298,31 @@ const fn cmp_op_sql(op: CmpOp) -> &'static str {
 /// - [`SourceFormat::Json`] → `read_json_auto('{uri}')`.
 /// - [`SourceFormat::Parquet`] → `read_parquet('{uri}')`.
 ///
-/// All three are DuckDB-portable table functions that behave identically on
-/// native DuckDB and DuckDB-WASM (SC#2 — native↔WASM byte-identity is verified
-/// end-to-end by plan 05-09's parity test).
+/// The native three are DuckDB-portable table functions that behave identically
+/// on native DuckDB and DuckDB-WASM (SC#2 — native↔WASM byte-identity is
+/// verified end-to-end by plan 05-09's parity test).
+///
+/// [`SourceFormat::Provider`] scans `"__fossil_src_<view>"` — a relation the
+/// external provider materialises before the prelude runs (the runtime invokes
+/// it). The core stays format-agnostic: it emits a scan, never the decode.
 #[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names
-fn source_reader(format: SourceFormat, uri: &str) -> String {
+fn source_reader(format: &SourceFormat, uri: &str) -> String {
     match format {
         SourceFormat::Csv => format!("read_csv_auto('{uri}', sample_size=-1)"),
         SourceFormat::Json => format!("read_json_auto('{uri}')"),
         SourceFormat::Parquet => format!("read_parquet('{uri}')"),
+        SourceFormat::Provider { .. } => {
+            format!("\"{}\"", provider_relation(uri))
+        }
     }
+}
+
+/// The relation name an external source provider materialises for the source at
+/// `uri` — derived from the same view stem the prelude uses, so codegen and the
+/// runtime agree without threading a name. `examples/people.ttl` →
+/// `__fossil_src_people`.
+pub(crate) fn provider_relation(uri: &str) -> String {
+    format!("__fossil_src_{}", derive_view_name(uri))
 }
 
 /// Derive a SQL view name from a source URI: `examples/users.csv` → `users`.
@@ -1321,4 +1336,33 @@ fn derive_view_name(uri: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or("source")
         .to_string()
+}
+
+#[cfg(test)]
+mod source_reader_tests {
+    use super::*;
+    use fossil_mir::op::SourceFormat;
+
+    #[test]
+    fn native_formats_lower_to_duckdb_readers() {
+        assert_eq!(
+            source_reader(&SourceFormat::Csv, "a.csv"),
+            "read_csv_auto('a.csv', sample_size=-1)"
+        );
+        assert_eq!(source_reader(&SourceFormat::Json, "a.json"), "read_json_auto('a.json')");
+        assert_eq!(
+            source_reader(&SourceFormat::Parquet, "a.parquet"),
+            "read_parquet('a.parquet')"
+        );
+    }
+
+    #[test]
+    fn provider_source_scans_the_external_relation() {
+        // The core stays format-agnostic: a provider source lowers to a scan of
+        // the relation the provider materialises — no decode, no RDF here. The
+        // relation name is derived from the same stem the prelude view uses.
+        let fmt = SourceFormat::Provider { name: "rdf".into() };
+        assert_eq!(source_reader(&fmt, "examples/people.ttl"), "\"__fossil_src_people\"");
+        assert_eq!(provider_relation("examples/people.ttl"), "__fossil_src_people");
+    }
 }

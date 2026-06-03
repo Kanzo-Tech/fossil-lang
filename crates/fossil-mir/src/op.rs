@@ -160,12 +160,17 @@ pub enum AggFn {
     Avg,
 }
 
-/// Source formats — the three `io/` source constructors (STDL-06).
+/// Source formats.
 ///
-/// Each maps to a `DuckDB` table function in codegen (`read_csv_auto` /
-/// `read_json_auto` / `read_parquet`) that runs identically on native DuckDB
-/// and DuckDB-WASM.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+/// The three native `io/` constructors (STDL-06) map to a `DuckDB` table
+/// function in codegen (`read_csv_auto` / `read_json_auto` / `read_parquet`)
+/// that runs identically on native DuckDB and DuckDB-WASM.
+///
+/// [`Provider`](Self::Provider) covers formats DuckDB can't read natively: the
+/// core stays format-agnostic — codegen scans a relation an external provider
+/// materialises, and the decode lives outside the core. Carrying the provider
+/// name makes this non-`Copy`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 #[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names
 pub enum SourceFormat {
     /// `io.csv(...)` → `read_csv_auto`.
@@ -174,6 +179,11 @@ pub enum SourceFormat {
     Json,
     /// `io.parquet(...)` → `read_parquet`.
     Parquet,
+    /// A format DuckDB cannot read natively (e.g. RDF), backed by an external
+    /// source provider named `name` (`io.<name>(...)`). Codegen scans the
+    /// relation the provider materialises; the runtime invokes the provider
+    /// before the source prelude. The core never sees the format's internals.
+    Provider { name: SmolStr },
 }
 
 /// Sink references. Phase 1 ships `GraphAr`; Phase 9+ adds `Turtle`, `JsonLd`,

@@ -664,7 +664,7 @@ User : ex:Person from users
         let mapping = *dm.mappings(&db).first().expect("one mapping");
         let mir = lower_to_mir(&db, mapping);
         match &mir.ops(&db)[0] {
-            Op::Source { uri, format, .. } => (uri.clone(), *format),
+            Op::Source { uri, format, .. } => (uri.clone(), format.clone()),
             other => panic!("expected Source at index 0, got {other:?}"),
         }
     }
