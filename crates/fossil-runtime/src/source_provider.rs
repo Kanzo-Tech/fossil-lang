@@ -41,7 +41,9 @@ pub trait SourceProvider: Send + Sync {
     /// pivot), producing rows that match the source's declared column schema.
     ///
     /// `schema_arg` is the source constructor's `schema:` argument (e.g. a
-    /// `ShEx` path), if present.
+    /// `ShEx` path), if present. `select_arg` is the constructor's `select:`
+    /// argument (e.g. a ShEx ShapeMap path) declaring which nodes/entities the
+    /// source yields, if present.
     ///
     /// # Errors
     ///
@@ -51,6 +53,7 @@ pub trait SourceProvider: Send + Sync {
         &self,
         uri: &str,
         schema_arg: Option<&str>,
+        select_arg: Option<&str>,
         relation: &str,
         conn: &Connection,
     ) -> Result<(), String>;
@@ -123,6 +126,7 @@ mod tests {
             &self,
             _uri: &str,
             _schema_arg: Option<&str>,
+            _select_arg: Option<&str>,
             relation: &str,
             conn: &Connection,
         ) -> Result<(), String> {
@@ -156,7 +160,7 @@ mod tests {
         // The runtime would do this before executing the CREATE VIEW prelude.
         let provider = reg.get("dummy").expect("registered");
         provider
-            .materialize("ignored://x.dummy", None, "__fossil_src_people", &conn)
+            .materialize("ignored://x.dummy", None, None, "__fossil_src_people", &conn)
             .expect("materialise");
 
         // The core's prelude (`CREATE VIEW people AS SELECT * FROM

@@ -297,6 +297,95 @@ pub enum SourceFormatTag {
     Parquet,
 }
 
+// ── Source dispatch: the single source of truth (W1) ───────────────────────
+//
+// Every `io.<name>` source constructor the language recognises is described by
+// exactly one [`SourceKind`] in [`SOURCE_KINDS`]. `fossil-mir`'s `resolve_source`
+// reads it to pick the [`fossil_mir::SourceFormat`]; the CLI's `providers`
+// listing iterates it; the provider-registry invariant test pins every runtime
+// `SourceProvider` to its `Provider`-lowered entry. Adding a source format is
+// ONE edit here — no string-matching scattered across crates.
+//
+// This mirrors DataFusion's split: built-in `FileFormat`s (read natively) vs.
+// the `TableProvider` trait (external), both indexed by one catalog.
+
+/// A recognised `io.<name>` source constructor: how its URI is read and which
+/// file shapes it accepts. The single source of truth for source dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceKind {
+    /// Fully-qualified constructor name, e.g. `"io.csv"`, `"io.rdf"`.
+    pub constructor: &'static str,
+    /// Short name (the constructor without the `io.` prefix), e.g. `"csv"`,
+    /// `"rdf"` — the provider key and the `providers` listing name.
+    pub short_name: &'static str,
+    /// File extensions this source reads (no leading dot).
+    pub extensions: &'static [&'static str],
+    /// How the source's bytes become scannable rows.
+    pub lowering: SourceLowering,
+}
+
+/// How a [`SourceKind`]'s bytes become rows a `DuckDB` plan can scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceLowering {
+    /// A native `DuckDB` table function (`read_csv_auto`, …) — portable
+    /// native↔WASM, no custom decode.
+    NativeReader(NativeReader),
+    /// An external `SourceProvider` (RDF, …) materialises the relation; the
+    /// core only scans it. The provider impl lives outside the core
+    /// (`fossil-provider-rdf`); the runtime registers it by `short_name`.
+    Provider,
+}
+
+/// The native `DuckDB` readers a [`SourceLowering::NativeReader`] maps to.
+/// `fossil-mir` exhaustively maps each to a `SourceFormat`, so a new reader is a
+/// compile error until handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeReader {
+    /// `read_csv_auto`.
+    CsvAuto,
+    /// `read_json_auto`.
+    JsonAuto,
+    /// `read_parquet`.
+    Parquet,
+}
+
+/// Every source constructor the language recognises (W1 single source of truth).
+pub const SOURCE_KINDS: &[SourceKind] = &[
+    SourceKind {
+        constructor: "io.csv",
+        short_name: "csv",
+        extensions: &["csv"],
+        lowering: SourceLowering::NativeReader(NativeReader::CsvAuto),
+    },
+    SourceKind {
+        constructor: "io.json",
+        short_name: "json",
+        extensions: &["json"],
+        lowering: SourceLowering::NativeReader(NativeReader::JsonAuto),
+    },
+    SourceKind {
+        constructor: "io.parquet",
+        short_name: "parquet",
+        extensions: &["parquet"],
+        lowering: SourceLowering::NativeReader(NativeReader::Parquet),
+    },
+    SourceKind {
+        constructor: "io.rdf",
+        short_name: "rdf",
+        // Kept in lockstep with `RdfProvider::extensions` (the source_kinds
+        // invariant test pins them equal).
+        extensions: &["ttl", "nt", "n3", "rdf"],
+        lowering: SourceLowering::Provider,
+    },
+];
+
+/// Look up a [`SourceKind`] by its constructor name (`"io.csv"`). `None` when the
+/// name is not a recognised source constructor.
+#[must_use]
+pub fn source_kind(constructor: &str) -> Option<&'static SourceKind> {
+    SOURCE_KINDS.iter().find(|k| k.constructor == constructor)
+}
+
 /// STDL-07 / SC#1 classification: does this function compile to pure `DuckDB` SQL
 /// (OK in the browser playground), or does it require a native Rust UDF
 /// (native-only, disabled in `DuckDB`-WASM)?

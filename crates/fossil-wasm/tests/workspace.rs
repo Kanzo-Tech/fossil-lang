@@ -92,8 +92,9 @@ fn workspace_lifecycle_smoke() {
         result.sql
     );
     assert!(
-        result.manifest_yaml.contains("graphar_version"),
-        "manifest_yaml must contain graphar_version"
+        result.manifest_yaml.contains("version: gar/v1"),
+        "manifest_yaml must carry the GraphAr format version: {}",
+        result.manifest_yaml
     );
 
     // close_file_native removes the handle from the map.

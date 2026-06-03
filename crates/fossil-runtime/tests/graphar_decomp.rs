@@ -143,6 +143,7 @@ fn fixture_ops<'db>(db: &'db dyn fossil_base::Db, csv_uri: &str) -> Vec<Op<'db>>
             uri: SmolStr::from(csv_uri),
             format: SourceFormat::Csv,
             row_type: string_record(db, &["id", "name", "friend", "legalname"]),
+            binding: SmolStr::from(csv_uri),
         },
         Op::Extend {
             input: 0,

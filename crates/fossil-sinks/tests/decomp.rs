@@ -87,7 +87,7 @@ fn two_shape_kind() -> OutputDescriptorKind {
 #[test]
 fn two_shapes_decompose_to_two_vertices_and_one_edge() {
     let kind = two_shape_kind();
-    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE);
+    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE, None, false);
 
     // Exactly 2 vertex tables (sorted by IRI: Company, Person).
     assert_eq!(plan.vertices.len(), 2, "{plan:#?}");
@@ -133,13 +133,46 @@ fn two_shapes_decompose_to_two_vertices_and_one_edge() {
     assert_eq!(edge.dst_id_expr, "knows");
 }
 
+/// A provider-backed source (`unnest_multivalued = true`) pivots `ex:knows +` into a `LIST`
+/// column, so the multi-valued edge unrolls its destination IRI with `UNNEST` — one edge row
+/// per list element. Single-valued constraints are untouched. The native scalar path
+/// (`false`, asserted above) keeps the column verbatim, so this is the only place UNNEST appears.
+#[test]
+fn multivalued_edge_unnests_under_provider_source() {
+    let kind = two_shape_kind();
+    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE, None, true);
+
+    let edge = &plan.edges[0];
+    assert!(!edge.single_valued, "ex:knows + is multi-valued");
+    assert_eq!(
+        edge.dst_id_expr, "UNNEST(\"knows\")",
+        "a multi-valued provider edge column is a LIST -> UNNEST unrolls it"
+    );
+    let sql = edge_select_sql(edge);
+    assert!(
+        sql.contains("UNNEST(\"knows\") AS dst_id"),
+        "edge SELECT unrolls the LIST: {sql}"
+    );
+
+    // Single-valued literal properties are NOT unnested (the flag only touches multi-valued edges).
+    let person = plan
+        .vertices
+        .iter()
+        .find(|v| v.type_name == "Person")
+        .expect("Person vertex");
+    assert!(
+        person.properties.iter().all(|p| !p.name.contains("UNNEST")),
+        "single-valued properties stay verbatim"
+    );
+}
+
 /// Named snapshot of the Person vertex inner SELECT — proves the deterministic `ORDER BY`
 /// (Pitfall 5) against the actual generated SQL. Snapshot file:
 /// `tests/snapshots/decomp__decomp_person_vertex_select.snap`.
 #[test]
 fn person_vertex_select_snapshot() {
     let kind = two_shape_kind();
-    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE);
+    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE, None, false);
     let person = plan
         .vertices
         .iter()
@@ -161,7 +194,7 @@ fn person_vertex_select_snapshot() {
 #[test]
 fn person_knows_edge_select_snapshot() {
     let kind = two_shape_kind();
-    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE);
+    let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE, None, false);
     let edge = &plan.edges[0];
     let sql = edge_select_sql(edge);
     assert!(

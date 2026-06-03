@@ -34,9 +34,7 @@
 //! unaffected.
 
 use arrow_schema::DataType;
-use fossil_descriptors_output::{
-    Cardinality, OutputDescriptorKind, ResolvedConstraint, ShapeBinding,
-};
+use fossil_descriptors_output::{OutputDescriptorKind, ResolvedConstraint, ShapeBinding};
 use fossil_mir::MirGraph;
 use shex_ast::{NodeKind, ShapeExpr};
 
@@ -126,19 +124,6 @@ pub struct EdgeTable {
     pub source_relation: String,
 }
 
-/// `true` iff a [`Cardinality`] is single-valued — `Exact(_)` or `ZeroOrOne` (SINK-05).
-///
-/// Single-valued predicates collapse duplicate subjects (`DISTINCT ON (iri)` / `GROUP BY`);
-/// `OneOrMore` / `ZeroOrMore` / `Range { max > 1 }` keep every row. A `Range { max: Some(1) }`
-/// also collapses (at most one value).
-#[must_use]
-pub const fn is_single_valued(card: Cardinality) -> bool {
-    match card {
-        Cardinality::Exact(_) | Cardinality::ZeroOrOne => true,
-        Cardinality::OneOrMore | Cardinality::ZeroOrMore => false,
-        Cardinality::Range { max, .. } => matches!(max, Some(m) if m <= 1),
-    }
-}
 
 /// Render the inner vertex SELECT for a [`VertexTable`] (the body 05-08 wraps in `COPY ... TO`).
 ///
@@ -208,7 +193,7 @@ pub fn vertex_edge_decomp<'db>(
     // placeholder relation name (the real relation subquery is wired by 05-08's codegen seam);
     // reading `plan.ops(db)` here keeps the signature honest and the Phase-6 wiring identical.
     let _ops = plan.ops(db);
-    vertex_edge_decomp_from_kind(kind, PLACEHOLDER_RELATION, chunk_size)
+    vertex_edge_decomp_from_kind(kind, PLACEHOLDER_RELATION, chunk_size, None, false)
 }
 
 /// Descriptor-only decomposition core — the `db`-free seam shared by [`vertex_edge_decomp`] and the
@@ -216,11 +201,24 @@ pub fn vertex_edge_decomp<'db>(
 ///
 /// `source_relation` is the SQL relation (subquery body or view name) the generated SELECTs read
 /// `FROM`; the unit tests pass [`PLACEHOLDER_RELATION`], 05-08 passes the real MIR relation.
+/// `target_shape`: when `Some(iri)`, emit ONLY the vertex (+ its edges) for the
+/// shape whose IRI equals `iri` — used per mapping so a multi-shape descriptor
+/// doesn't apply every shape to every mapping's relation. `None` emits all
+/// shapes (the descriptor-only fixture path). Edge classification still sees ALL
+/// shape IRIs so `@ref`s to other shapes are recognised as edges.
+///
+/// `unnest_multivalued`: when `true`, a multi-valued edge's IRI-object column is
+/// a `LIST` (the RDF provider pivots `*`-cardinality predicates with
+/// `list(object) FILTER (...)`), so the destination IRI is unrolled with
+/// `UNNEST(...)` — one edge row per list element. Native scalar sources (CSV,
+/// where each row already carries a single object) leave it `false`.
 #[must_use]
 pub fn vertex_edge_decomp_from_kind(
     kind: &OutputDescriptorKind,
     source_relation: &str,
     chunk_size: u64,
+    target_shape: Option<&str>,
+    unnest_multivalued: bool,
 ) -> SinkPlan {
     match kind {
         OutputDescriptorKind::AcceptAll(_) => SinkPlan {
@@ -248,6 +246,12 @@ pub fn vertex_edge_decomp_from_kind(
             // regardless of HashMap iteration order.
             let mut bindings: Vec<&ShapeBinding> = desc.shapes().collect();
             bindings.sort_by(|a, b| a.iri.to_string().cmp(&b.iri.to_string()));
+            // Per-mapping scoping: keep only the shape this mapping outputs, so a
+            // multi-shape descriptor doesn't project every shape onto this
+            // mapping's relation (which carries only its own columns).
+            if let Some(target) = target_shape {
+                bindings.retain(|b| b.iri.to_string() == target);
+            }
 
             for binding in bindings {
                 let src_type = local_name(&binding.iri.to_string());
@@ -261,7 +265,7 @@ pub fn vertex_edge_decomp_from_kind(
                 for c in constraints {
                     let pred_iri = c.predicate.to_string();
                     let pred_local = local_name(&pred_iri);
-                    let single = is_single_valued(c.cardinality);
+                    let single = c.cardinality.is_single_valued();
                     match classify_object(c, &shape_iris) {
                         ObjectKind::Literal(dt) => properties.push(VertexProperty {
                             name: pred_local,
@@ -277,8 +281,13 @@ pub fn vertex_edge_decomp_from_kind(
                             src_id_expr: IRI_COLUMN.to_string(),
                             // The IRI-object column conventionally carries the predicate's local
                             // name as its Extend column (e.g. `knows` → the `knows` column holds
-                            // the object IRI). Used verbatim as dst_id (SINK-04).
-                            dst_id_expr: pred_local,
+                            // the object IRI). Used verbatim as dst_id (SINK-04). A multi-valued
+                            // provider column is a LIST → UNNEST unrolls it to one edge per element.
+                            dst_id_expr: if unnest_multivalued && !single {
+                                format!("UNNEST(\"{pred_local}\")")
+                            } else {
+                                pred_local.clone()
+                            },
                             single_valued: single,
                             source_relation: source_relation.to_string(),
                         }),
@@ -408,23 +417,25 @@ pub fn local_name(iri: &str) -> String {
 mod tests {
     use super::*;
     use crate::manifest::DEFAULT_CHUNK_SIZE;
-    use fossil_descriptors_output::{AcceptAllDescriptor, ShExDescriptor};
+    use fossil_descriptors_output::{AcceptAllDescriptor, Cardinality, ShExDescriptor};
 
     #[test]
     fn is_single_valued_drives_collapse() {
-        assert!(is_single_valued(Cardinality::Exact(1)));
-        assert!(is_single_valued(Cardinality::ZeroOrOne));
-        assert!(!is_single_valued(Cardinality::OneOrMore));
-        assert!(!is_single_valued(Cardinality::ZeroOrMore));
-        assert!(is_single_valued(Cardinality::Range {
+        assert!(Cardinality::Exact(1).is_single_valued());
+        assert!(Cardinality::ZeroOrOne.is_single_valued());
+        assert!(!Cardinality::OneOrMore.is_single_valued());
+        assert!(!Cardinality::ZeroOrMore.is_single_valued());
+        assert!(Cardinality::Range {
             min: 0,
             max: Some(1)
-        }));
-        assert!(!is_single_valued(Cardinality::Range {
+        }
+        .is_single_valued());
+        assert!(!Cardinality::Range {
             min: 1,
             max: Some(5)
-        }));
-        assert!(!is_single_valued(Cardinality::Range { min: 1, max: None }));
+        }
+        .is_single_valued());
+        assert!(!Cardinality::Range { min: 1, max: None }.is_single_valued());
     }
 
     #[test]
@@ -449,7 +460,7 @@ mod tests {
     #[test]
     fn accept_all_falls_back_to_flat_passthrough() {
         let kind = OutputDescriptorKind::AcceptAll(AcceptAllDescriptor);
-        let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE);
+        let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE, None, false);
         assert_eq!(plan.vertices.len(), 1);
         assert!(plan.edges.is_empty());
         assert_eq!(plan.vertices[0].vertex_id_col, IRI_COLUMN);
@@ -481,7 +492,7 @@ mod tests {
         }"#;
         let desc = ShExDescriptor::from_reader(SCHEMA.as_bytes()).expect("schema parses");
         let kind = OutputDescriptorKind::ShEx(desc);
-        let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE);
+        let plan = vertex_edge_decomp_from_kind(&kind, PLACEHOLDER_RELATION, DEFAULT_CHUNK_SIZE, None, false);
         assert_eq!(plan.vertices.len(), 1);
         assert!(plan.edges.is_empty());
         let person = &plan.vertices[0];

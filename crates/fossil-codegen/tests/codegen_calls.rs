@@ -139,6 +139,7 @@ fn call_graph<'db>(db: &'db dyn fossil_base::Db, call_expr: Expr<'db>) -> Vec<Op
             uri: SmolStr::new_static("examples/users.csv"),
             format: SourceFormat::Csv,
             row_type: string_record(db, &["id", "name", "raw"]),
+            binding: SmolStr::new_static("examples/users.csv"),
         },
         Op::Extend {
             input: 0,

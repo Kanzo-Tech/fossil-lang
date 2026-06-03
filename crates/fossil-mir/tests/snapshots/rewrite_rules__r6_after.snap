@@ -9,6 +9,7 @@ expression: "format!(\"{:#?}\", rewritten.ops(&db))"
         row_type: Ty(
             Id(401),
         ),
+        binding: "users.csv",
     },
     Extend {
         input: 3,

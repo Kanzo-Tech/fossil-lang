@@ -103,6 +103,7 @@ fn source<'db>(db: &'db dyn fossil_base::Db, uri: &str, cols: &[&str]) -> Op<'db
         uri: SmolStr::from(uri),
         format: SourceFormat::Csv,
         row_type: string_record(db, cols),
+        binding: SmolStr::from(uri),
     }
 }
 

@@ -9,6 +9,7 @@ expression: "format!(\"{:#?}\", graph.ops(&db))"
         row_type: Ty(
             Id(401),
         ),
+        binding: "users.csv",
     },
     Source {
         uri: "orders.csv",
@@ -16,6 +17,7 @@ expression: "format!(\"{:#?}\", graph.ops(&db))"
         row_type: Ty(
             Id(402),
         ),
+        binding: "orders.csv",
     },
     Join {
         left: 0,

@@ -1286,6 +1286,7 @@ version = "0.1.0"
 dependencies = [
  "fossil-base",
  "fossil-hir",
+ "fossil-registry",
  "fossil-syntax",
  "insta",
  "salsa",
@@ -1302,6 +1303,7 @@ dependencies = [
  "fossil-shex",
  "oxrdf",
  "oxttl",
+ "shex_ast",
 ]
 
 [[package]]

@@ -438,6 +438,7 @@ mod tests {
 
     fn sample() -> CatalogInput {
         CatalogInput {
+            version: fossil_run_status::WIRE_VERSION,
             job_id: "job-1".to_string(),
             job_name: Some("My Run".to_string()),
             completed_at: "2026-06-02T00:00:00Z".to_string(),

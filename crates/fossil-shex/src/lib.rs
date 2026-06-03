@@ -132,6 +132,21 @@ impl Cardinality {
             },
         }
     }
+
+    /// `true` iff at most one value is allowed — `Exact(_)` / `ZeroOrOne`
+    /// (or a `Range` with `max <= 1`). Single-valued constraints collapse
+    /// duplicate subjects; `OneOrMore` / `ZeroOrMore` keep every value (and, for
+    /// the RDF provider, become a `LIST` column). The single source of this
+    /// truth, shared by the input pivot (`fossil-provider-rdf`) and the output
+    /// decomposition (`fossil-sinks`).
+    #[must_use]
+    pub const fn is_single_valued(self) -> bool {
+        match self {
+            Self::Exact(_) | Self::ZeroOrOne => true,
+            Self::OneOrMore | Self::ZeroOrMore => false,
+            Self::Range { max, .. } => matches!(max, Some(m) if m <= 1),
+        }
+    }
 }
 
 /// The Fossil-relevant narrowing of a [`ResolvedConstraint`]'s `ShEx` `valueExpr`.

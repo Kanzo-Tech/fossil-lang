@@ -177,6 +177,7 @@ mod tests {
                 uri: SmolStr::new_static("users.csv"),
                 format: SourceFormat::Csv,
                 row_type,
+                binding: SmolStr::new_static("users"),
             },
             Op::Extend {
                 input: 0,
@@ -230,6 +231,7 @@ mod tests {
                 uri: SmolStr::new_static("u.csv"),
                 format: SourceFormat::Csv,
                 row_type,
+                binding: SmolStr::new_static("u"),
             },
             Op::Rename {
                 input: 0,

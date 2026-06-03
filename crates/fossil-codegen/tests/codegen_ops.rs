@@ -108,6 +108,7 @@ fn source_with_format<'db>(
         uri: SmolStr::from(uri),
         format,
         row_type: string_record(db, cols),
+        binding: SmolStr::from(uri),
     }
 }
 

@@ -121,6 +121,7 @@ fn person_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
             uri: SmolStr::new_static("people.csv"),
             format: SourceFormat::Csv,
             row_type: string_record(db, &["id", "name", "friend"]),
+            binding: SmolStr::new_static("people.csv"),
         },
         Op::Extend {
             input: 0,
@@ -173,6 +174,7 @@ fn single_property_ops<'db>(db: &'db dyn fossil_base::Db) -> Vec<Op<'db>> {
             uri: SmolStr::new_static("people.csv"),
             format: SourceFormat::Csv,
             row_type: string_record(db, &["id", "name"]),
+            binding: SmolStr::new_static("people.csv"),
         },
         Op::Extend {
             input: 0,

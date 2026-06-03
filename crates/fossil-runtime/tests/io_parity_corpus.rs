@@ -123,6 +123,7 @@ fn io_ops<'db>(db: &'db dyn fossil_base::Db, case: u8) -> Vec<Op<'db>> {
                     uri: SmolStr::from(CSV_URI),
                     format: SourceFormat::Csv,
                     row_type: string_record(db, &["id", "name", "age"]),
+                    binding: SmolStr::from(CSV_URI),
                 },
                 // clean.trim(name) — pure_sql Builtin → `trim(...)` (05-02).
                 Op::Extend {
@@ -173,6 +174,7 @@ fn io_ops<'db>(db: &'db dyn fossil_base::Db, case: u8) -> Vec<Op<'db>> {
                 uri: SmolStr::from(JSON_URI),
                 format: SourceFormat::Json,
                 row_type: string_record(db, &["id", "org"]),
+                binding: SmolStr::from(JSON_URI),
             }];
             ops.extend(emit_and_sink(0, "io_orgs", "org"));
             ops
@@ -182,6 +184,7 @@ fn io_ops<'db>(db: &'db dyn fossil_base::Db, case: u8) -> Vec<Op<'db>> {
                 uri: SmolStr::from(PARQUET_URI),
                 format: SourceFormat::Parquet,
                 row_type: string_record(db, &["id", "dept"]),
+                binding: SmolStr::from(PARQUET_URI),
             }];
             ops.extend(emit_and_sink(0, "io_depts", "dept"));
             ops
@@ -192,11 +195,13 @@ fn io_ops<'db>(db: &'db dyn fossil_base::Db, case: u8) -> Vec<Op<'db>> {
                     uri: SmolStr::from(CSV_URI),
                     format: SourceFormat::Csv,
                     row_type: string_record(db, &["id", "name", "age"]),
+                    binding: SmolStr::from(CSV_URI),
                 },
                 Op::Source {
                     uri: SmolStr::from(CSV_URI),
                     format: SourceFormat::Csv,
                     row_type: string_record(db, &["id", "name", "age"]),
+                    binding: SmolStr::from(CSV_URI),
                 },
                 // a seq op (Op::Union) — direct construction (ADR-0009).
                 Op::Union { left: 0, right: 1 },

@@ -227,35 +227,22 @@ fn main() -> miette::Result<()> {
     }
 }
 
-/// List the data-source providers fossil supports, derived from the function
-/// registry's `io.*` source constructors (the single source of truth). Each
-/// `LoweringKind::Plan(PlanOp::Source(fmt))` entry becomes a [`ProviderInfo`];
-/// the constructor's short name doubles as its file extension. Sorted for a
-/// deterministic stdout (the registry is a `HashMap`).
+/// List the data-source providers fossil supports, derived from
+/// [`fossil_registry::SOURCE_KINDS`] (the W1 single source of truth — native
+/// readers AND external providers like `rdf`). Each [`SourceKind`] becomes a
+/// [`ProviderInfo`]. Sorted for a deterministic stdout.
 fn cmd_providers(output_json: bool) -> miette::Result<()> {
-    use fossil_registry::{FunctionRegistry, LoweringKind, PlanOp, SourceFormatTag};
+    use fossil_registry::SOURCE_KINDS;
     use fossil_run_status::{ProviderInfo, ProviderKind};
 
-    let ext = |fmt: SourceFormatTag| match fmt {
-        SourceFormatTag::Csv => "csv",
-        SourceFormatTag::Json => "json",
-        SourceFormatTag::Parquet => "parquet",
-    };
-
-    let mut providers: Vec<ProviderInfo> = FunctionRegistry::stdlib_default()
+    let mut providers: Vec<ProviderInfo> = SOURCE_KINDS
         .iter()
-        .filter_map(|e| match e.lowering {
-            LoweringKind::Plan(PlanOp::Source(fmt)) => {
-                let name = e.name.strip_prefix("io.").unwrap_or(&e.name).to_string();
-                Some(ProviderInfo {
-                    name,
-                    extensions: vec![ext(fmt).to_string()],
-                    // `io.*` constructors load data; schema-defining providers
-                    // (descriptors) are a separate surface.
-                    kind: ProviderKind::Data,
-                })
-            }
-            _ => None,
+        .map(|k| ProviderInfo {
+            name: k.short_name.to_string(),
+            extensions: k.extensions.iter().map(|e| (*e).to_string()).collect(),
+            // `io.*` constructors load data; schema-defining providers
+            // (descriptors) are a separate surface.
+            kind: ProviderKind::Data,
         })
         .collect();
     providers.sort_by(|a, b| a.name.cmp(&b.name));
@@ -738,17 +725,28 @@ fn cmd_run_w0b(
         .sources(db)
         .iter()
         .filter_map(|s| {
-            let provider = s.constructor.as_deref()?.strip_prefix("io.")?;
+            // A source is provider-backed iff SOURCE_KINDS says so (W1 single
+            // source of truth) — not by string-stripping `io.`. Native readers
+            // (csv/json/parquet) fall through here; the runtime must also have
+            // the provider registered to materialise it.
+            let kind = s.constructor.as_deref().and_then(fossil_registry::source_kind)?;
+            if kind.lowering != fossil_registry::SourceLowering::Provider {
+                return None;
+            }
+            let provider = kind.short_name;
             if providers.get(provider).is_none() {
                 return None;
             }
             let raw_uri = s.uri.as_deref()?;
             let uri = resolve_source_uri(raw_uri, &creds.connections).to_string();
-            let relation = fossil_codegen::provider_relation(&uri);
+            // Keyed on the binding (NOT the URI) so two `io.rdf` on the same file
+            // materialise into distinct relations — matches codegen's view naming.
+            let relation = fossil_codegen::provider_relation(&s.name);
             Some(ProviderSource {
                 provider: provider.to_string(),
                 uri,
                 schema_arg: s.schema_arg.as_ref().map(SmolStr::to_string),
+                select_arg: s.select_arg.as_ref().map(SmolStr::to_string),
                 relation,
             })
         })
@@ -760,7 +758,13 @@ fn cmd_run_w0b(
                 .get(&src.provider)
                 .ok_or_else(|| miette::miette!("no source provider `{}`", src.provider))?;
             provider
-                .materialize(&src.uri, src.schema_arg.as_deref(), &src.relation, conn)
+                .materialize(
+                    &src.uri,
+                    src.schema_arg.as_deref(),
+                    src.select_arg.as_deref(),
+                    &src.relation,
+                    conn,
+                )
                 .map_err(|e| miette::miette!("source provider `{}`: {e}", src.provider))?;
         }
         Ok(())
@@ -787,6 +791,7 @@ struct ProviderSource {
     provider: String,
     uri: String,
     schema_arg: Option<String>,
+    select_arg: Option<String>,
     relation: String,
 }
 
@@ -993,6 +998,7 @@ fn materialize_and_report(
             .collect();
 
         let status = fossil_run_status::RunStatus {
+            version: fossil_run_status::WIRE_VERSION,
             dest: dest_url.to_string(),
             vertices,
             edges,

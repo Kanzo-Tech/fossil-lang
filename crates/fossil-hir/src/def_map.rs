@@ -58,6 +58,11 @@ pub struct SourceEntry<'db> {
     /// `def_map` query is file-keyed and structurally stable across
     /// body-only edits (verified by `tests/invalidation_regression.rs`).
     pub schema_arg: Option<SmolStr>,
+    /// Value of the source constructor's `select = "<path>"` NAMED argument, if
+    /// present (e.g. `data := io.rdf("g.ttl", schema = "s.shex", select = "m.smap")`).
+    /// A ShEx ShapeMap path declaring which RDF nodes the source yields. Like
+    /// [`Self::schema_arg`] it is a SIGNATURE-only `SOURCE_DEF`-header datum.
+    pub select_arg: Option<SmolStr>,
     /// Dotted name of the source constructor (`io.csv` / `io.json` /
     /// `io.parquet`), if a `CALL_EXPR`-shaped RHS could be parsed. The
     /// constructor name selects the source FORMAT downstream
@@ -175,12 +180,14 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
             }
             SyntaxKind::SOURCE_DEF => {
                 if let Some(name) = parse_source_name(&item) {
-                    let schema_arg = parse_source_schema_arg(&item);
+                    let schema_arg = parse_source_named_arg(&item, "schema");
+                    let select_arg = parse_source_named_arg(&item, "select");
                     let (constructor, uri) = parse_source_call(&item);
                     sources.push(SourceEntry {
                         name,
                         loc: SourceLoc::new(db, file, source_idx),
                         schema_arg,
+                        select_arg,
                         constructor,
                         uri,
                     });
@@ -227,8 +234,8 @@ fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
     Some(SmolStr::from(ident.text()))
 }
 
-/// Extract the `schema = "<path>"` NAMED argument from a `SOURCE_DEF` node's
-/// call expression, if present.
+/// Extract a named `<arg_name> = "<path>"` argument from a `SOURCE_DEF` node's
+/// call expression, if present (e.g. `schema` or `select`).
 ///
 /// This reads ONLY the `SOURCE_DEF` header tokens (the call expression on the
 /// right of `:=`), never any mapping body — so it stays signatures-only per
@@ -237,9 +244,9 @@ fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 ///
 /// Heuristic token scan (the parser's `NAMED_ARG` / `CALL_EXPR` surface is not
 /// yet a stable structured node in Phase 3 v0.1): find an `IDENT` whose text is
-/// `schema`, immediately followed (skipping trivia) by an `=`/assignment token
+/// `arg_name`, immediately followed (skipping trivia) by an `=`/assignment token
 /// and then a `STRING` literal. Returns the unquoted string contents.
-fn parse_source_schema_arg(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
+fn parse_source_named_arg(node: &fossil_syntax::SyntaxNode, arg_name: &str) -> Option<SmolStr> {
     use fossil_syntax::SyntaxKind;
     let toks: Vec<_> = node
         .descendants_with_tokens()
@@ -252,7 +259,7 @@ fn parse_source_schema_arg(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> 
         })
         .collect();
     for (i, t) in toks.iter().enumerate() {
-        if t.kind() == SyntaxKind::IDENT && t.text() == "schema" {
+        if t.kind() == SyntaxKind::IDENT && t.text() == arg_name {
             // Look ahead for a STRING within the next two non-trivia tokens
             // (covers both `schema = "x"` and a degenerate `schema "x"` form).
             if let Some(s) = toks
@@ -275,7 +282,7 @@ fn parse_source_schema_arg(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> 
 /// `users := io.csv("examples/users.csv")` → `(Some("io.csv"),
 /// Some("examples/users.csv"))`.
 ///
-/// Like [`parse_source_schema_arg`] this reads ONLY the `SOURCE_DEF` header
+/// Like [`parse_source_named_arg`] this reads ONLY the `SOURCE_DEF` header
 /// tokens (the `CALL_EXPR` on the right of `:=`), never any mapping body, so it
 /// is signatures-only per ADR-0005 and does NOT widen the per-mapping `body()`
 /// fan-out. The `def_map` query is file-keyed and structurally stable across

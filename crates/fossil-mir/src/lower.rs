@@ -132,6 +132,7 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
         uri,
         format,
         row_type,
+        binding: m.source_binding.clone(),
     });
 
     // 1: Extend — attach the IRI template result as a column named "iri".
@@ -204,18 +205,20 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
 /// binding (STDL-06).
 ///
 /// Reads the `(constructor, uri)` pair off the already-loaded [`DefMap`]
-/// (file-keyed — NO new per-mapping fan-out, RESEARCH Pitfall 3). The
-/// constructor name selects the format:
-/// - `io.csv` → [`SourceFormat::Csv`] (DuckDB `read_csv_auto`)
-/// - `io.json` → [`SourceFormat::Json`] (DuckDB `read_json_auto`)
-/// - `io.parquet` → [`SourceFormat::Parquet`] (DuckDB `read_parquet`)
+/// (file-keyed — NO new per-mapping fan-out, RESEARCH Pitfall 3). The format is
+/// resolved by looking the constructor up in [`fossil_registry::SOURCE_KINDS`]
+/// (W1 single source of truth) — no string-matching here. A
+/// [`SourceLowering::NativeReader`] maps exhaustively to a [`SourceFormat`] (a
+/// new reader variant is a compile error until handled); a
+/// [`SourceLowering::Provider`] becomes `SourceFormat::Provider { name }`.
 ///
-/// A binding with no recognisable `io.*("...")` call, or an unknown
-/// constructor, degrades to the Phase-1 `examples/users.csv` / `Csv` so
-/// `lower_to_mir` never panics on a malformed source. When the binding IS
-/// `io.csv("examples/users.csv")` (the walking-skeleton `hello.fossil`) the
-/// resolved value equals the old hardcode → byte-identical SQL.
-#[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names, not Rust items
+/// A binding with no recognisable `io.*("...")` call degrades to the Phase-1
+/// `examples/users.csv` / `Csv` so `lower_to_mir` never panics on a malformed
+/// source. An `io.<name>` not in `SOURCE_KINDS` still resolves to
+/// `Provider { name }` so the runtime reports "unknown provider" rather than
+/// silently mis-reading it. When the binding IS `io.csv("examples/users.csv")`
+/// (the walking-skeleton `hello.fossil`) the resolved value equals the old
+/// hardcode → byte-identical SQL.
 fn resolve_source<'db>(
     dm: DefMap<'db>,
     db: &'db dyn fossil_base::Db,
@@ -223,20 +226,37 @@ fn resolve_source<'db>(
 ) -> (SmolStr, SourceFormat) {
     let (constructor, uri) = dm.lookup_source_call(db, binding).unwrap_or((None, None));
     let format = match constructor.as_deref() {
-        Some("io.json") => SourceFormat::Json,
-        Some("io.parquet") => SourceFormat::Parquet,
-        Some("io.csv") => SourceFormat::Csv,
-        // Any other `io.<name>` is a provider-backed source (e.g. `io.rdf`): the
-        // core stays format-agnostic, an external provider materialises the rows.
-        Some(c) if c.starts_with("io.") => SourceFormat::Provider {
-            name: SmolStr::new(&c["io.".len()..]),
+        Some(c) => match fossil_registry::source_kind(c) {
+            Some(kind) => match kind.lowering {
+                fossil_registry::SourceLowering::NativeReader(r) => native_reader_format(r),
+                fossil_registry::SourceLowering::Provider => SourceFormat::Provider {
+                    name: SmolStr::new(kind.short_name),
+                },
+            },
+            // Unrecognised `io.<name>` → a provider the runtime will reject by
+            // name (clearer than silently reading it as CSV); anything else →
+            // the Phase-1 Csv default so malformed sources still lower.
+            None => c.strip_prefix("io.").map_or(SourceFormat::Csv, |name| {
+                SourceFormat::Provider {
+                    name: SmolStr::new(name),
+                }
+            }),
         },
-        // No / non-`io.` constructor → Csv (the Phase-1 default; keeps malformed
-        // sources lowering rather than panicking).
-        _ => SourceFormat::Csv,
+        None => SourceFormat::Csv,
     };
     let uri = uri.unwrap_or_else(|| SmolStr::new_static("examples/users.csv"));
     (uri, format)
+}
+
+/// Exhaustive [`NativeReader`](fossil_registry::NativeReader) → [`SourceFormat`]
+/// map. A new native reader is a compile error here until handled (the W1
+/// invariant: source dispatch can't silently forget a format).
+const fn native_reader_format(r: fossil_registry::NativeReader) -> SourceFormat {
+    match r {
+        fossil_registry::NativeReader::CsvAuto => SourceFormat::Csv,
+        fossil_registry::NativeReader::JsonAuto => SourceFormat::Json,
+        fossil_registry::NativeReader::Parquet => SourceFormat::Parquet,
+    }
 }
 
 /// Phase 1 fallback row type: `Record({id: String, name: String})`.
@@ -568,6 +588,7 @@ User : ex:Person from users
                 uri,
                 format,
                 row_type: _,
+                ..
             } => {
                 assert_eq!(uri.as_str(), "examples/users.csv");
                 assert_eq!(*format, SourceFormat::Csv);

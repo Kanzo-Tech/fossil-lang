@@ -12,11 +12,14 @@ description = "Mid-level IR: typed operator algebra (Source, Project, Filter, Jo
 workspace = true
 
 [dependencies]
-fossil-base   = { path = "../fossil-base" }
-fossil-syntax = { path = "../fossil-syntax" }
-fossil-hir    = { path = "../fossil-hir" }
-salsa         = { workspace = true }
-smol_str      = { workspace = true }
+fossil-base     = { path = "../fossil-base" }
+fossil-syntax   = { path = "../fossil-syntax" }
+fossil-hir      = { path = "../fossil-hir" }
+# W1: source dispatch reads the single SOURCE_KINDS table (acyclic — registry's
+# dep closure is hir/base/syntax/descriptors/shex, none of which is fossil-mir).
+fossil-registry = { path = "../fossil-registry" }
+salsa           = { workspace = true }
+smol_str        = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

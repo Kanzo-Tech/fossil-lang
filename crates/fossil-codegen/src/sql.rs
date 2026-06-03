@@ -146,10 +146,11 @@ pub fn codegen_sql_with_descriptor<'db>(
             uri,
             format,
             row_type: _,
+            binding,
         } = op
         {
-            let view_name = derive_view_name(uri);
-            let reader = source_reader(format, uri);
+            let view_name = derive_view_name(binding);
+            let reader = source_reader(format, uri, binding);
             writeln!(sql, "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};")
                 .expect("writing to a String never fails");
         }
@@ -165,8 +166,11 @@ pub fn codegen_sql_with_descriptor<'db>(
     let base = base_relation_sql(db, ops);
 
     // Decompose under the descriptor (option (b) — the descriptor is an
-    // argument, never read via Db::system()).
-    let plan = vertex_edge_decomp_from_kind(kind, &base, chunk_size);
+    // argument, never read via Db::system()). This single-mapping path has no
+    // mapping handle to scope by, so it decomposes all shapes (unchanged); the
+    // multi-source W0b writer path (`decompose_for_writer`) does the per-mapping
+    // scoping.
+    let plan = vertex_edge_decomp_from_kind(kind, &base, chunk_size, None, ops_use_provider(ops));
 
     for v in &plan.vertices {
         // The inner vertex SELECT projects the id column as `id` (SINK-04), so
@@ -256,11 +260,12 @@ pub fn decompose_for_writer<'db>(
             uri,
             format,
             row_type: _,
+            binding,
         } = op
         {
-            let view_name = derive_view_name(uri);
+            let view_name = derive_view_name(binding);
             let resolved = resolve_source_uri(uri);
-            let reader = source_reader(format, &resolved);
+            let reader = source_reader(format, &resolved, binding);
             writeln!(
                 prelude,
                 "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};"
@@ -277,9 +282,53 @@ pub fn decompose_for_writer<'db>(
     // authors no ShEx. An explicit `ShEx` descriptor still wins when supplied.
     let plan = match kind {
         OutputDescriptorKind::AcceptAll(_) => synthesize_sink_plan(db, mapping, &base, chunk_size),
-        OutputDescriptorKind::ShEx(_) => vertex_edge_decomp_from_kind(kind, &base, chunk_size),
+        OutputDescriptorKind::ShEx(_) => {
+            // Scope to THIS mapping's declared output shape (its `: <type>` IRI), so
+            // a multi-shape descriptor doesn't project every shape onto this
+            // mapping's relation (which carries only its own columns). The shape's
+            // id must equal the mapping's type IRI to pair.
+            let target = mapping_shape_iri(db, mapping);
+            vertex_edge_decomp_from_kind(
+                kind,
+                &base,
+                chunk_size,
+                target.as_deref(),
+                ops_use_provider(ops),
+            )
+        }
     };
     (prelude, plan)
+}
+
+/// `true` when any `Op::Source` is backed by an external provider (e.g. the RDF
+/// provider). Provider relations pivot `*`-cardinality predicates into `LIST`
+/// columns, so the decomposition unrolls multi-valued edges with `UNNEST`;
+/// native readers (CSV/JSON/Parquet) carry one scalar object per row and don't.
+fn ops_use_provider(ops: &[Op<'_>]) -> bool {
+    ops.iter().any(|op| {
+        matches!(
+            op,
+            Op::Source {
+                format: SourceFormat::Provider { .. },
+                ..
+            }
+        )
+    })
+}
+
+/// The mapping's declared output-shape IRI (the `: <type>` in the header), used
+/// to scope the ShEx decomposition to this mapping's shape. `None` if the
+/// mapping can't be located (defensive — caller then decomposes all shapes).
+fn mapping_shape_iri<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Option<String> {
+    let file = mapping.file(db);
+    let idx = def_map(db, file)
+        .mappings(db)
+        .iter()
+        .position(|loc| *loc == mapping)?;
+    lower_to_hir(db, file)
+        .mappings(db)
+        .get(idx)
+        .map(|m| m.shape_iri.to_string())
 }
 
 /// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
@@ -563,8 +612,8 @@ fn base_relation_sql<'db>(db: &'db dyn fossil_base::Db, ops: &[Op<'db>]) -> Stri
 
     for (idx, op) in ops.iter().enumerate() {
         match op {
-            Op::Source { uri, .. } => {
-                let view = derive_view_name(uri);
+            Op::Source { binding, .. } => {
+                let view = derive_view_name(binding);
                 rel_ref[idx] = Some(view.clone());
                 qualifier[idx] = Some(view);
             }
@@ -771,15 +820,16 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                 uri,
                 format,
                 row_type: _,
+                binding,
             } => {
-                let view_name = derive_view_name(uri);
+                let view_name = derive_view_name(binding);
                 // STDL-06: the DuckDB table function is selected by the source
                 // FORMAT. `read_csv_auto('{uri}', sample_size=-1)` is UNCHANGED
                 // for Csv (byte-identical hello.fossil); Json/Parquet add their
                 // own readers. All three run identically on native DuckDB and
                 // DuckDB-WASM (SC#2 — codegen emits the SQL text; execution is
                 // DuckDB's job).
-                let reader = source_reader(format, uri);
+                let reader = source_reader(format, uri, binding);
                 writeln!(sql, "CREATE VIEW {view_name} AS\nSELECT * FROM {reader};")
                     .expect("writing to a String never fails");
                 rel_ref[idx] = Some(view_name.clone());
@@ -1306,32 +1356,34 @@ const fn cmp_op_sql(op: CmpOp) -> &'static str {
 /// external provider materialises before the prelude runs (the runtime invokes
 /// it). The core stays format-agnostic: it emits a scan, never the decode.
 #[allow(clippy::doc_markdown)] // read_csv_auto/read_json_auto/read_parquet are SQL fn names
-fn source_reader(format: &SourceFormat, uri: &str) -> String {
+fn source_reader(format: &SourceFormat, uri: &str, binding: &str) -> String {
     match format {
         SourceFormat::Csv => format!("read_csv_auto('{uri}', sample_size=-1)"),
         SourceFormat::Json => format!("read_json_auto('{uri}')"),
         SourceFormat::Parquet => format!("read_parquet('{uri}')"),
+        // Provider relations are keyed on the BINDING (not the URI stem), so two
+        // bindings reading the same file get distinct relations.
         SourceFormat::Provider { .. } => {
-            format!("\"{}\"", provider_relation(uri))
+            format!("\"{}\"", provider_relation(binding))
         }
     }
 }
 
-/// The relation name an external source provider materialises for the source at
-/// `uri` — derived from the same view stem the prelude uses, so codegen and the
-/// runtime agree without threading a name. `examples/people.ttl` →
-/// `__fossil_src_people`.
-pub fn provider_relation(uri: &str) -> String {
-    format!("__fossil_src_{}", derive_view_name(uri))
+/// The relation name an external source provider materialises for a source
+/// BINDING — derived from the same name the prelude's view uses, so codegen and
+/// the runtime agree without threading a name. Binding `people` →
+/// `__fossil_src_people`. Keyed on the binding (NOT the URI) so two bindings on
+/// the same file don't collide.
+pub fn provider_relation(binding: &str) -> String {
+    format!("__fossil_src_{}", derive_view_name(binding))
 }
 
-/// Derive a SQL view name from a source URI: `examples/users.csv` → `users`.
-///
-/// Phase 1 uses the filename stem. Phase 4 may add explicit binding-name
-/// overrides when multiple sources share a stem (`users.csv` from two
-/// directories, etc.).
-fn derive_view_name(uri: &str) -> String {
-    std::path::Path::new(uri)
+/// Sanitise a source BINDING name into a SQL view/relation identifier
+/// (`projects` → `projects`). Uses `file_stem` so a binding that happens to be a
+/// path-like string still reduces to a bare identifier; a plain binding is
+/// returned unchanged.
+fn derive_view_name(binding: &str) -> String {
+    std::path::Path::new(binding)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("source")
@@ -1346,12 +1398,12 @@ mod source_reader_tests {
     #[test]
     fn native_formats_lower_to_duckdb_readers() {
         assert_eq!(
-            source_reader(&SourceFormat::Csv, "a.csv"),
+            source_reader(&SourceFormat::Csv, "a.csv", "a"),
             "read_csv_auto('a.csv', sample_size=-1)"
         );
-        assert_eq!(source_reader(&SourceFormat::Json, "a.json"), "read_json_auto('a.json')");
+        assert_eq!(source_reader(&SourceFormat::Json, "a.json", "a"), "read_json_auto('a.json')");
         assert_eq!(
-            source_reader(&SourceFormat::Parquet, "a.parquet"),
+            source_reader(&SourceFormat::Parquet, "a.parquet", "a"),
             "read_parquet('a.parquet')"
         );
     }
@@ -1362,7 +1414,8 @@ mod source_reader_tests {
         // the relation the provider materialises — no decode, no RDF here. The
         // relation name is derived from the same stem the prelude view uses.
         let fmt = SourceFormat::Provider { name: "rdf".into() };
-        assert_eq!(source_reader(&fmt, "examples/people.ttl"), "\"__fossil_src_people\"");
-        assert_eq!(provider_relation("examples/people.ttl"), "__fossil_src_people");
+        // Provider relations are keyed on the binding (here `people`), not the URI.
+        assert_eq!(source_reader(&fmt, "examples/people.ttl", "people"), "\"__fossil_src_people\"");
+        assert_eq!(provider_relation("people"), "__fossil_src_people");
     }
 }

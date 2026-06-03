@@ -63,10 +63,12 @@ fn erase_op<'db>(op: &Op<'db>, s: Ty<'db>) -> Op<'db> {
             uri,
             format,
             row_type: _,
+            binding,
         } => Op::Source {
             uri: uri.clone(),
             format: format.clone(),
             row_type: s,
+            binding: binding.clone(),
         },
         // These ops carry NO `Ty` themselves; only their `Expr` fields might.
         Op::Project { input, cols } => Op::Project {
@@ -238,6 +240,7 @@ mod tests {
                     uri: SmolStr::new_static("examples/users.csv"),
                     format: SourceFormat::Csv,
                     row_type: row,
+                    binding: SmolStr::new_static("users"),
                 },
                 Op::Filter {
                     input: 0,
@@ -268,6 +271,7 @@ mod tests {
                         uri: u1,
                         format: f1,
                         row_type: rt,
+                        ..
                     },
                 ) => {
                     assert_eq!(u0, u1);
@@ -298,6 +302,7 @@ mod tests {
                 uri: SmolStr::new_static("examples/users.csv"),
                 format: SourceFormat::Csv,
                 row_type: string_ty,
+                binding: SmolStr::new_static("users"),
             }];
             let g = MirGraph::new(db, ops);
             let once = erase_types(db, g);

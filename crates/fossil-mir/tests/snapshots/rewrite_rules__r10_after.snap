@@ -9,6 +9,7 @@ expression: "format!(\"{:#?}\", rewritten.ops(&db))"
         row_type: Ty(
             Id(401),
         ),
+        binding: "sales.csv",
     },
     GroupBy {
         input: 0,
