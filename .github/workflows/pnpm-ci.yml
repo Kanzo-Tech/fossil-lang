@@ -20,6 +20,16 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      # `pnpm -r build` builds @fossil-lang/wasm + graph, whose `build:wasm` needs
+      # the Rust toolchain + wasm-bindgen-cli (same setup release.yml uses).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli (0.2.120, matches Cargo.toml pin)
+        run: cargo install --version 0.2.120 wasm-bindgen-cli
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
