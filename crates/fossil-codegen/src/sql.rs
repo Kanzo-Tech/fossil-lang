@@ -317,7 +317,7 @@ fn ops_use_provider(ops: &[Op<'_>]) -> bool {
 }
 
 /// The mapping's declared output-shape IRI (the `: <type>` in the header), used
-/// to scope the ShEx decomposition to this mapping's shape. `None` if the
+/// to scope the `ShEx` decomposition to this mapping's shape. `None` if the
 /// mapping can't be located (defensive — caller then decomposes all shapes).
 fn mapping_shape_iri<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Option<String> {
     let file = mapping.file(db);
@@ -609,6 +609,12 @@ fn base_relation_sql<'db>(db: &'db dyn fossil_base::Db, ops: &[Op<'db>]) -> Stri
     let mut extends: Vec<(String, String)> = Vec::new();
     // (iri_expr, predicate_local, object_expr, from)
     let mut emits: Vec<(String, String, String, String)> = Vec::new();
+    // The `iri` Extend's (rendered subject expr, source FROM), captured so a
+    // vertex mapping with NO property/edge emits (e.g. a leaf type that is only
+    // an edge target: `Phase : ex:Phase from src` + `iri = .subject`) still
+    // projects its real subject — not the NULL placeholder, which would null the
+    // `subject` column and silently drop every edge pointing at it.
+    let mut iri_base: Option<(String, String)> = None;
 
     for (idx, op) in ops.iter().enumerate() {
         match op {
@@ -621,6 +627,9 @@ fn base_relation_sql<'db>(db: &'db dyn fossil_base::Db, ops: &[Op<'db>]) -> Stri
                 let input_qual = input_qualifier(&qualifier, *input);
                 let from = input_relation(&rel_ref, *input);
                 let expr_sql = render_expr(expr, &input_qual);
+                if field.as_str() == fossil_sinks::decomp::IRI_COLUMN {
+                    iri_base = Some((expr_sql.clone(), from.clone()));
+                }
                 extends.push((field.to_string(), expr_sql.clone()));
                 let body = ast::select_extend(&from, field, &expr_sql);
                 rel_ref[idx] = Some(subquery(&body, idx));
@@ -659,6 +668,16 @@ fn base_relation_sql<'db>(db: &'db dyn fossil_base::Db, ops: &[Op<'db>]) -> Stri
     }
 
     if emits.is_empty() {
+        // No property/edge emits: a vertex that is purely an edge target. Still
+        // project its real subject from the `iri` Extend so `subject` is the IRI
+        // (not NULL) and edges resolve against it. Only the truly emit-less,
+        // iri-less malformed graph falls through to the placeholder.
+        if let Some((iri_expr, from)) = iri_base {
+            return format!(
+                "(SELECT {iri_expr} AS {iri} FROM {from}) AS base",
+                iri = fossil_sinks::decomp::IRI_COLUMN,
+            );
+        }
         return PLACEHOLDER_BASE.to_string();
     }
     // v0.1: all emits share one source relation. Project iri once + each

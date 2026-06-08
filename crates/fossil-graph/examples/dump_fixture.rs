@@ -1,4 +1,4 @@
-//! Emit a minimal GraphAr manifest fixture as `{ rel_path: yaml }` JSON to stdout.
+//! Emit a minimal `GraphAr` manifest fixture as `{ rel_path: yaml }` JSON to stdout.
 //!
 //! Mirrors the in-crate test `fixture()` (one `Person` vertex with `dense_id`/
 //! `age`/`name`, one `Person_knows_Person` edge), but reconstructed with the

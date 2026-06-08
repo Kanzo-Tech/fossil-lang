@@ -138,6 +138,10 @@ pub enum SyntaxKind {
     ANNOTATION_BLOCK,
     ANNOTATION_ITEM,
 
+    /// `{ A, B, ... } := io.rdf(uri, schema = shex)` — a destructuring source
+    /// definition binding N members (one per declared shape) to a single source.
+    MULTI_SOURCE_DEF,
+
     /// Sentinel — must be the last variant. Used for round-trip bounds checks.
     #[doc(hidden)]
     __LAST,
@@ -264,6 +268,7 @@ impl SyntaxKind {
             94 => Self::IN_CLAUSE,
             95 => Self::ANNOTATION_BLOCK,
             96 => Self::ANNOTATION_ITEM,
+            97 => Self::MULTI_SOURCE_DEF,
             _ => panic!("invalid SyntaxKind raw value: {v}"),
         }
     }

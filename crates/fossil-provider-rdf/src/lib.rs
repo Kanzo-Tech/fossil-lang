@@ -1,15 +1,18 @@
-//! RDF source provider — `io.rdf("data.ttl", schema = "shape.shex")`.
+//! RDF source provider — `{ A, B, ... } := io.rdf("data.ttl", schema = "x.shex")`.
 //!
 //! Implements the core's [`fossil_runtime::SourceProvider`] seam OUTSIDE the
-//! language core: the core only emits a scan of the relation this provider
+//! language core: the core only emits a scan of the relations this provider
 //! materialises and never sees a triple. A `ShEx` shape drives both halves —
-//! the column schema (compile-time, [`describe`]) and the pivot of triples into
-//! one wide row per subject (runtime, [`RdfProvider::materialize`]).
+//! the column schema (compile-time, in `fossil-hir`) and the pivot of triples
+//! into one wide row per subject (runtime,
+//! [`RdfProvider::materialize_shapes`]).
 //!
-//! v0.1 scope (documented, not hidden): a single-shape schema (the first shape
-//! is used), and single-valued properties (the first object per
-//! subject+predicate wins). Multi-valued (`*`) properties and multi-shape
-//! schemas are follow-ups.
+//! Single path: the `.ttl` is read + parsed ONCE per `io.rdf` call, yielding N
+//! typed relations (one per destructured member). Subject selection is ALWAYS by
+//! `rdf:type`: shape S's rows are the subjects with a triple `(s, rdf:type,
+//! <IRI of S>)`. Not configurable; there are NO `ShapeMaps`. Multi-valued (`*`/`+`)
+//! predicates pivot into a `DuckDB` `LIST` (the output edge decomposition
+//! `UNNEST`s them).
 
 use std::collections::BTreeSet;
 
@@ -17,7 +20,6 @@ use duckdb::Connection;
 use oxrdf::Term;
 use oxttl::TurtleParser;
 
-use fossil_descriptors_input::{InferredDescriptor, inferred_descriptor_from_shex};
 use fossil_runtime::SourceProvider;
 use fossil_shex::ShExDescriptor;
 
@@ -29,6 +31,10 @@ pub struct RdfProvider;
 /// it, so a mapping can do `iri = .subject`).
 const SUBJECT_COLUMN: &str = "subject";
 
+/// The `rdf:type` predicate — the SOLE subject selector (a shape's rows are the
+/// subjects typed with the shape's IRI). Not configurable.
+const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
 impl SourceProvider for RdfProvider {
     fn name(&self) -> &'static str {
         "rdf"
@@ -38,38 +44,32 @@ impl SourceProvider for RdfProvider {
         &["ttl", "nt", "n3", "rdf"]
     }
 
-    fn materialize(
+    fn materialize_shapes(
         &self,
         uri: &str,
         schema_arg: Option<&str>,
-        select_arg: Option<&str>,
-        relation: &str,
+        members: &[(String, String)],
         conn: &Connection,
     ) -> Result<(), String> {
-        let schema_path =
-            schema_arg.ok_or_else(|| "io.rdf requires a `schema = \"<shape>.shex\"` argument".to_string())?;
-        // Entity selection is DECLARED, not inferred: a ShEx ShapeMap states which
-        // RDF nodes become rows. Mandatory — no hidden engine rule (e.g. no implicit
-        // `rdf:type` match); `rdf:type` is just one selector the ShapeMap may declare.
-        let select_path = select_arg.ok_or_else(|| {
-            "io.rdf requires a `select = \"<shapemap>.smap\"` argument (a ShEx ShapeMap declaring which RDF nodes become entities)".to_string()
-        })?;
-        let shapemap_src = read_text_file(select_path)?;
+        // The schema arrives as a RESOLVED locator (the host resolved any `@conn`
+        // alias). Read through the SAME DuckDB `read_text` on the connection —
+        // never `std::fs` — so a cloud-hosted `@conn` schema works via the creds
+        // already applied to the conn, identical to the data URI below.
+        let schema_locator = schema_arg
+            .ok_or_else(|| "io.rdf requires a `schema = \"<shape>.shex\"` argument".to_string())?;
 
-        // The shape selects which predicates become columns (and their order).
-        let columns = shape_columns(schema_path)?;
+        // Parse the ShEx ONCE: it drives the columns (which shape → which columns).
+        let schema_text = read_source_text(conn, schema_locator)?;
+        let descriptor = ShExDescriptor::from_reader(schema_text.as_bytes())
+            .map_err(|e| format!("parse ShEx `{schema_locator}`: {e:?}"))?;
 
-        // Read the RDF bytes through DuckDB's `read_text` on the passed
-        // connection — NOT `std::fs` — so cloud `@conn` sources (Azure/S3) work
-        // via the read creds already applied to the conn (httpfs/azure), exactly
-        // like the native csv/parquet readers. Local paths + `file://` work too.
+        // The RDF data, read through the same `read_text` path as the schema —
+        // one cloud-capable reader for every reference. Parse it ONCE into a flat
+        // triple list, shared by every member's pivot below.
         let rdf_text = read_source_text(conn, uri)?;
-
-        // Parse the RDF into a flat triple list — both for evaluating the ShapeMap
-        // selectors and for the SQL pivot (loaded via the Appender, not hand-built
-        // SQL).
+        let mut parser = TurtleParser::new().for_reader(rdf_text.as_bytes());
         let mut triples: Vec<(String, String, String)> = Vec::new();
-        for triple in TurtleParser::new().for_reader(rdf_text.as_bytes()) {
+        for triple in parser.by_ref() {
             let t = triple.map_err(|e| format!("parse RDF `{uri}`: {e}"))?;
             triples.push((
                 subject_value(&t.subject),
@@ -78,39 +78,35 @@ impl SourceProvider for RdfProvider {
             ));
         }
 
-        // Keep only the subjects the ShapeMap selects — declared, not a magic
-        // `rdf:type` rule. A document with 1564 subjects but ~21 selected emits ~21.
-        let selected = select_subjects(&shapemap_src, &triples)?;
-
-        write_pivoted_relation(conn, relation, &columns, &triples, &selected)
+        // One relation per member: select its subjects by `rdf:type == shape`,
+        // derive its columns from the shape, pivot. The triple list is parsed
+        // once and reused across members.
+        for (relation, shape_iri) in members {
+            let columns = shape_columns(&descriptor, shape_iri)?;
+            let selected = select_by_type(&triples, shape_iri);
+            write_pivoted_relation(conn, relation, &columns, &triples, &selected)?;
+        }
+        Ok(())
     }
 }
 
-/// Derive the input [`InferredDescriptor`] for an `io.rdf` source from its `ShEx`
-/// shape — the compile-time column schema.
-///
-/// Predicate local name → column, `valueExpr` → primitive. Used by the host
-/// before type-checking. Uses the schema's first shape (v0.1 single-shape scope).
-///
-/// # Errors
-///
-/// Returns a message if the shape file is unreadable or has no shape.
-pub fn describe(source_name: &str, schema_path: &str) -> Result<InferredDescriptor, String> {
-    let bytes = read_shape(schema_path)?;
-    let shape_iri = first_shape_iri(&bytes)?;
-    inferred_descriptor_from_shex(source_name, &shape_iri, &bytes)
-        .map_err(|e| format!("derive schema from `{schema_path}`: {e}"))
+/// The subjects of a shape: every subject carrying `(s, rdf:type, shape_iri)`.
+/// The SOLE selection rule — not configurable, no `ShapeMaps`.
+fn select_by_type(triples: &[(String, String, String)], shape_iri: &str) -> BTreeSet<String> {
+    triples
+        .iter()
+        .filter(|(_, p, o)| p == RDF_TYPE && o == shape_iri)
+        .map(|(s, _, _)| s.clone())
+        .collect()
 }
 
-/// The ordered `(column_name, predicate_iri)` pairs for the shape's first shape.
-fn shape_columns(schema_path: &str) -> Result<Vec<ShapeColumn>, String> {
-    let bytes = read_shape(schema_path)?;
-    let descriptor = ShExDescriptor::from_reader(bytes.as_slice())
-        .map_err(|e| format!("parse ShEx `{schema_path}`: {e:?}"))?;
+/// The ordered `(column_name, predicate_iri)` pairs for `shape_iri` — the
+/// member's shape — so a multi-shape schema yields the columns of THIS member's
+/// class (shapes live in a `HashMap`, so `.next()` order is non-deterministic).
+fn shape_columns(descriptor: &ShExDescriptor, shape_iri: &str) -> Result<Vec<ShapeColumn>, String> {
     let shape = descriptor
-        .shapes()
-        .next()
-        .ok_or_else(|| format!("ShEx `{schema_path}` declares no shape"))?;
+        .lookup_shape_str(shape_iri)
+        .ok_or_else(|| format!("ShEx has no shape `{shape_iri}`"))?;
     Ok(shape
         .constraints
         .iter()
@@ -132,27 +128,7 @@ struct ShapeColumn {
     single_valued: bool,
 }
 
-/// Read a local text file (the ShapeMap `.smap`). Local-only in v0.1 (the shape
-/// + shapemap are program-side artifacts, like `read_shape`); cloud-hosted
-/// selection artifacts are a follow-up.
-fn read_text_file(path: &str) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| format!("read `{path}`: {e}"))
-}
-
-fn first_shape_iri(shex_json: &[u8]) -> Result<String, String> {
-    ShExDescriptor::from_reader(shex_json)
-        .map_err(|e| format!("parse ShEx: {e:?}"))?
-        .shapes()
-        .next()
-        .map(|s| s.iri.to_string())
-        .ok_or_else(|| "ShEx declares no shape".to_string())
-}
-
-fn read_shape(schema_path: &str) -> Result<Vec<u8>, String> {
-    std::fs::read(schema_path).map_err(|e| format!("read ShEx `{schema_path}`: {e}"))
-}
-
-/// Read an RDF source's full text via DuckDB's `read_text` on `conn`. This is
+/// Read an RDF source's full text via `DuckDB`'s `read_text` on `conn`. This is
 /// the cloud-capable read path: a `@conn` source resolved to `az://…` / `s3://…`
 /// is fetched through the read creds already installed on the connection (the
 /// same httpfs/azure path the native readers use); local paths + `file://` work
@@ -189,7 +165,7 @@ fn term_value(term: &Term) -> String {
 }
 
 /// Pivot the selected subjects' triples into one wide row per subject. Loads the
-/// triples into a DuckDB temp table via the **Appender** (parameterized — no
+/// triples into a `DuckDB` temp table via the **Appender** (parameterized — no
 /// hand-built `VALUES` SQL) then pivots with conditional aggregation: each shape
 /// predicate becomes a column, a predicate absent for a subject yields NULL. All
 /// columns are `VARCHAR` (the mapping casts as needed); the `subject` column
@@ -257,70 +233,6 @@ fn sql_str(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// Evaluate a ShEx **ShapeMap** (compact syntax) against the parsed triples to
-/// select which subjects become entity rows. The user declares the subset
-/// explicitly — `{FOCUS a <Class>}@<Shape>` or an explicit node — so `rdf:type`
-/// is one possible *declared* selector, not a hardcoded engine rule.
-///
-/// We use rudof's ShapeMap **parser** (`shex_ast::ShapeMapParser`, WASM-safe)
-/// for authoring fidelity, but evaluate the selectors ourselves against the
-/// oxttl triples: rudof 0.3.1's resolver (`node_shapes`) routes through
-/// SPARQL/oxigraph, which is unwired for in-memory graphs AND not WASM-safe.
-///
-/// v0.1 supports two selector forms (full IRIs; prefixes are a follow-up):
-/// an explicit node, and `{FOCUS <pred> <class>}` (including `a` = `rdf:type`).
-fn select_subjects(
-    shapemap_src: &str,
-    triples: &[(String, String, String)],
-) -> Result<BTreeSet<String>, String> {
-    use shex_ast::ObjectValue;
-    use shex_ast::ShapeMapParser;
-    use shex_ast::shapemap::{NodeSelector, Pattern, SHACLPathRef};
-
-    let qsm = ShapeMapParser::parse(shapemap_src, &None, &None, &None, &None)
-        .map_err(|e| format!("parse ShapeMap: {e}"))?;
-
-    let mut selected = BTreeSet::new();
-    for assoc in qsm.iter() {
-        match &assoc.node_selector {
-            // Explicit node: keep that subject if it occurs in the data.
-            NodeSelector::Node(ObjectValue::IriRef(iri)) => {
-                let node = iri_bare(&iri.to_string());
-                if triples.iter().any(|(s, _, _)| *s == node) {
-                    selected.insert(node);
-                }
-            }
-            // `{FOCUS <pred> <class>}` (incl. `{FOCUS a <Class>}`): keep every
-            // subject carrying the triple (subject, pred, class).
-            NodeSelector::TriplePattern {
-                subject: Pattern::Focus,
-                path: SHACLPathRef::Predicate { pred },
-                object: Pattern::Node(ObjectValue::IriRef(class)),
-            } => {
-                let p = iri_bare(&pred.to_string());
-                let c = iri_bare(&class.to_string());
-                for (s, tp, to) in triples {
-                    if *tp == p && *to == c {
-                        selected.insert(s.clone());
-                    }
-                }
-            }
-            other => {
-                return Err(format!(
-                    "unsupported ShapeMap selector in v0.1 (use an explicit node or `{{FOCUS <pred> <class>}}`): {other:?}"
-                ));
-            }
-        }
-    }
-    Ok(selected)
-}
-
-/// Strip the surrounding `<>` an IRI carries in its display form, leaving the
-/// bare IRI to compare against oxttl's `as_str()` subject/predicate/object text.
-fn iri_bare(s: &str) -> String {
-    s.trim_start_matches('<').trim_end_matches('>').to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,14 +273,12 @@ mod tests {
     }
 
     #[test]
-    fn shapemap_type_pattern_selects_only_that_class() {
-        // `{FOCUS a <Class>}` declared selector — rudof parses it, we evaluate it.
-        let smap = "{FOCUS a <http://example.org/Person>}@<http://example.org/PersonShape>";
-        let rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string();
+    fn select_by_type_keeps_only_subjects_typed_with_the_shape() {
+        // The SOLE selection rule: `(s, rdf:type, shape_iri)`. No ShapeMaps.
         let triples = vec![
             (
                 "http://example.org/p/1".to_string(),
-                rdf_type.clone(),
+                RDF_TYPE.to_string(),
                 "http://example.org/Person".to_string(),
             ),
             (
@@ -378,70 +288,41 @@ mod tests {
             ),
             (
                 "http://example.org/o/1".to_string(),
-                rdf_type,
+                RDF_TYPE.to_string(),
                 "http://example.org/Org".to_string(),
             ),
         ];
-        let sel = select_subjects(smap, &triples).expect("select");
+        let sel = select_by_type(&triples, "http://example.org/Person");
         assert!(sel.contains("http://example.org/p/1"), "Person selected");
         assert!(!sel.contains("http://example.org/o/1"), "Org excluded");
         assert_eq!(sel.len(), 1);
     }
 
     #[test]
-    fn shapemap_explicit_node_selects_that_subject() {
-        let smap = "<http://example.org/p/2>@<http://example.org/PersonShape>";
-        let triples = vec![
-            (
-                "http://example.org/p/2".to_string(),
-                "http://xmlns.com/foaf/0.1/name".to_string(),
-                "Bob".to_string(),
-            ),
-            (
-                "http://example.org/p/9".to_string(),
-                "http://xmlns.com/foaf/0.1/name".to_string(),
-                "Nobody".to_string(),
-            ),
-        ];
-        let sel = select_subjects(smap, &triples).expect("select");
-        assert_eq!(sel.len(), 1);
-        assert!(sel.contains("http://example.org/p/2"));
-    }
-
-    #[test]
-    fn describe_derives_columns_from_the_shape() {
-        let shex = write_tmp("describe.shex", PERSON_SHEX);
-        let d = describe("people", &shex).expect("describe");
-        let cols: Vec<&str> = d.columns.iter().map(|c| c.name.as_str()).collect();
-        assert!(cols.contains(&"name"));
-        assert!(cols.contains(&"age"));
-        let age = d.columns.iter().find(|c| c.name == "age").unwrap();
-        assert_eq!(age.primitive.as_str(), "Integer");
-    }
-
-    #[test]
-    fn materialize_pivots_triples_into_entity_rows() {
+    fn materialize_shapes_reads_once_and_pivots_each_shape() {
         let shex = write_tmp("mat.shex", PERSON_SHEX);
         let ttl = write_tmp("mat.ttl", PEOPLE_TTL);
-        // The ShapeMap declares the subset: nodes typed as Person.
-        let smap = write_tmp(
-            "mat.smap",
-            "{FOCUS a <http://example.org/Person>}@<http://example.org/Person>",
-        );
         let conn = Connection::open_in_memory().expect("duckdb");
 
+        // One io.rdf call, one member (`Person`) — selected by rdf:type.
         RdfProvider
-            .materialize(&ttl, Some(&shex), Some(&smap), "__fossil_src_people", &conn)
-            .expect("materialize");
+            .materialize_shapes(
+                &ttl,
+                Some(&shex),
+                &[(
+                    "__fossil_src_people".to_string(),
+                    "http://example.org/Person".to_string(),
+                )],
+                &conn,
+            )
+            .expect("materialize_shapes");
 
-        // One wide row per subject the ShapeMap selects — the `Org` subject is
-        // not selected, so 3 subjects yield 2 rows.
+        // 3 subjects in the doc, 2 typed Person → 2 rows; the Org is excluded.
         let n: i64 = conn
             .query_row("SELECT count(*) FROM \"__fossil_src_people\"", [], |r| r.get(0))
             .expect("count");
         assert_eq!(n, 2);
 
-        // The off-class subject (`o/1`, an Org) is excluded.
         let orgs: i64 = conn
             .query_row(
                 "SELECT count(*) FROM \"__fossil_src_people\" WHERE subject = 'http://example.org/o/1'",

@@ -58,11 +58,12 @@ pub struct SourceEntry<'db> {
     /// `def_map` query is file-keyed and structurally stable across
     /// body-only edits (verified by `tests/invalidation_regression.rs`).
     pub schema_arg: Option<SmolStr>,
-    /// Value of the source constructor's `select = "<path>"` NAMED argument, if
-    /// present (e.g. `data := io.rdf("g.ttl", schema = "s.shex", select = "m.smap")`).
-    /// A ShEx ShapeMap path declaring which RDF nodes the source yields. Like
-    /// [`Self::schema_arg`] it is a SIGNATURE-only `SOURCE_DEF`-header datum.
-    pub select_arg: Option<SmolStr>,
+    /// For a destructuring RDF source member (`{ IfcBeam, ... } := io.rdf(...,
+    /// schema = "x.shex")`), the shape IRI this member's local-name resolves to
+    /// in the schema (`IfcBeam` ↔ `http://ifcowl.../IfcBeam`), resolved at
+    /// COMPILE TIME against the `ShEx`. Subject selection is always by `rdf:type ==
+    /// shape_iri`. `None` for plain single-binding native sources (csv/json/…).
+    pub shape_iri: Option<SmolStr>,
     /// Dotted name of the source constructor (`io.csv` / `io.json` /
     /// `io.parquet`), if a `CALL_EXPR`-shaped RHS could be parsed. The
     /// constructor name selects the source FORMAT downstream
@@ -117,6 +118,23 @@ impl<'db> DefMap<'db> {
             .iter()
             .find(|e| e.name.as_str() == name)
             .and_then(|e| e.schema_arg.clone())
+    }
+
+    /// Look up the resolved shape IRI bound to a destructuring RDF source member
+    /// (`{ IfcBeam, ... } := io.rdf(..., schema = "x.shex")` → `IfcBeam`'s shape
+    /// IRI). `None` for native single-binding sources. Used by the input typing
+    /// ([`crate::infer::resolve_source_row`]) to resolve the member's
+    /// compile-time row type from the `ShEx` shape.
+    #[must_use]
+    pub fn lookup_source_shape_iri(
+        self,
+        db: &'db dyn fossil_base::Db,
+        name: &str,
+    ) -> Option<SmolStr> {
+        self.sources(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .and_then(|e| e.shape_iri.clone())
     }
 
     /// Look up the `(constructor, uri)` pair bound to a source name (e.g.
@@ -181,15 +199,37 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
             SyntaxKind::SOURCE_DEF => {
                 if let Some(name) = parse_source_name(&item) {
                     let schema_arg = parse_source_named_arg(&item, "schema");
-                    let select_arg = parse_source_named_arg(&item, "select");
                     let (constructor, uri) = parse_source_call(&item);
                     sources.push(SourceEntry {
                         name,
                         loc: SourceLoc::new(db, file, source_idx),
                         schema_arg,
-                        select_arg,
+                        shape_iri: None,
                         constructor,
                         uri,
+                    });
+                    source_idx += 1;
+                }
+            }
+            SyntaxKind::MULTI_SOURCE_DEF => {
+                // `{ A, B, ... } := io.rdf(uri, schema = "x.shex")`. Each member
+                // becomes its own `SourceEntry` sharing the one source's URI +
+                // constructor + schema; the member's local-name resolves to a
+                // shape IRI in the schema (COMPILE TIME). Each member then lowers
+                // to its own `Op::Source` and `from <member>` resolves uniformly
+                // via the existing per-source lookups.
+                let members = parse_multi_source_members(&item);
+                let schema_arg = parse_source_named_arg(&item, "schema");
+                let (constructor, uri) = parse_source_call(&item);
+                let shape_iris = resolve_member_shape_iris(db, file, schema_arg.as_deref(), &members);
+                for (member, shape_iri) in members.into_iter().zip(shape_iris) {
+                    sources.push(SourceEntry {
+                        name: member,
+                        loc: SourceLoc::new(db, file, source_idx),
+                        schema_arg: schema_arg.clone(),
+                        shape_iri,
+                        constructor: constructor.clone(),
+                        uri: uri.clone(),
                     });
                     source_idx += 1;
                 }
@@ -356,6 +396,91 @@ fn parse_source_call(node: &fossil_syntax::SyntaxNode) -> (Option<SmolStr>, Opti
     }
 
     (constructor, uri)
+}
+
+/// Extract the brace-list member names from a `MULTI_SOURCE_DEF` node — the
+/// IDENTs between `{` and `}` (before the `:=`). The constructor's callee IDENTs
+/// (`io` / `rdf`) come AFTER the `DEFINE`, so we stop at the first `DEFINE`.
+fn parse_multi_source_members(node: &fossil_syntax::SyntaxNode) -> Vec<SmolStr> {
+    use fossil_syntax::SyntaxKind;
+    let toks: Vec<_> = node
+        .descendants_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            )
+        })
+        .collect();
+    let define_pos = toks
+        .iter()
+        .position(|t| t.kind() == SyntaxKind::DEFINE)
+        .unwrap_or(toks.len());
+    toks[..define_pos]
+        .iter()
+        .filter(|t| t.kind() == SyntaxKind::IDENT)
+        .map(|t| SmolStr::from(t.text()))
+        .collect()
+}
+
+/// Resolve each destructuring member's local-name to its shape IRI in the
+/// schema, at COMPILE TIME. Reads the `ShEx` via the host filesystem (mirrors
+/// [`crate::infer::resolve_source_row`]'s CSVW read), parses it, and matches
+/// each member to the shape whose IRI local-name equals the member. A member
+/// with no matching shape yields `None` (the caller — type-check — emits the
+/// "unknown shape" diagnostic; this signatures-only query stays diagnostic-free).
+fn resolve_member_shape_iris(
+    db: &dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+    schema_arg: Option<&str>,
+    members: &[SmolStr],
+) -> Vec<Option<SmolStr>> {
+    let none = || members.iter().map(|_| None).collect::<Vec<_>>();
+    let Some(schema_path) = schema_arg else {
+        return none();
+    };
+    let resolved = resolve_relative(db, file, schema_path);
+    let Ok(bytes) = db.system().read_file(&resolved) else {
+        return none();
+    };
+    let Ok(desc) =
+        fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice())
+    else {
+        return none();
+    };
+    // shape-IRI local-name → full IRI, for member matching.
+    let by_local: std::collections::HashMap<String, SmolStr> = desc
+        .shapes()
+        .map(|b| {
+            let iri = b.iri.to_string();
+            (shape_local_name(&iri).to_string(), SmolStr::from(iri))
+        })
+        .collect();
+    members
+        .iter()
+        .map(|m| by_local.get(m.as_str()).cloned())
+        .collect()
+}
+
+/// The local name of a shape IRI — the substring after the last `#` or `/`
+/// (`http://ifcowl.../IfcBeam` → `IfcBeam`).
+fn shape_local_name(iri: &str) -> &str {
+    iri.rsplit(['#', '/']).next().unwrap_or(iri)
+}
+
+/// Resolve `schema_path` relative to the directory containing `file`'s path.
+/// Mirrors [`crate::infer`]'s resolver (kept local to avoid a cross-module pub).
+fn resolve_relative(
+    db: &dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+    schema_path: &str,
+) -> std::path::PathBuf {
+    let file_path = std::path::PathBuf::from(file.path(db));
+    file_path.parent().map_or_else(
+        || std::path::PathBuf::from(schema_path),
+        |dir| dir.join(schema_path),
+    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

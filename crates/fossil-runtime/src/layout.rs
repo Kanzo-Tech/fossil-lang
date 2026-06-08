@@ -14,11 +14,23 @@
 //!   later slice; the two answer different questions (reachability vs density).
 //! - [`cluster_layout`] — a deterministic community-grouped placement: clusters
 //!   on a grid, nodes phyllotaxis-packed within their cell. Same-cluster nodes
-//!   land near each other. ForceAtlas2 refinement is a later slice; this gives
+//!   land near each other. `ForceAtlas2` refinement is a later slice; this gives
 //!   the viewport real, stable coordinates without an iterative force sim.
 //!
-//! Both are pure (no DuckDB, no I/O, no RNG) so they unit-test in isolation and
+//! Both are pure (no `DuckDB`, no I/O, no RNG) so they unit-test in isolation and
 //! the `materialize` integration can wire them with confidence.
+
+// This is deliberate numeric code: dense ids / cluster counts cast to/from `f32`
+// coordinates and `f64` grid maths, and tight index loops over `dense_id` arrays.
+// The pedantic cast lints + the nursery loop/option rewrites read worse here than
+// the explicit arithmetic, so they are declined for this algorithmic core.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    clippy::needless_range_loop,
+    clippy::option_if_let_else
+)]
 
 /// Golden angle (radians) — the phyllotaxis constant `π(3−√5)`. Successive
 /// nodes placed at multiples of this angle pack a disc evenly with no RNG.
@@ -58,14 +70,11 @@ pub fn weakly_connected_components(vertex_count: u32, edges: &[(u32, u32)]) -> V
     let mut out = vec![0u32; n];
     for i in 0..n {
         let root = find(&mut parent, i as u32);
-        let id = match label[root as usize] {
-            Some(id) => id,
-            None => {
-                let id = next;
-                label[root as usize] = Some(id);
-                next += 1;
-                id
-            }
+        let id = if let Some(id) = label[root as usize] { id } else {
+            let id = next;
+            label[root as usize] = Some(id);
+            next += 1;
+            id
         };
         out[i] = id;
     }
@@ -125,7 +134,7 @@ use duckdb::Connection;
 ///
 /// URLs (not paths) so the same enrichment runs against `file://` and cloud
 /// (`s3://`, `az://`) destinations alike — `read_parquet` / `COPY … TO` take the
-/// URL verbatim and DuckDB's httpfs/object-store extension dereferences it.
+/// URL verbatim and `DuckDB`'s httpfs/object-store extension dereferences it.
 #[derive(Debug, Clone)]
 pub struct VertexLayoutTarget {
     /// Vertex Parquet URL (e.g. `file://…/vertex/Person.parquet`, `s3://…`).
@@ -320,7 +329,7 @@ mod tests {
     use super::*;
 
     fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
-        ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt()
+        (a.0 - b.0).hypot(a.1 - b.1)
     }
 
     #[test]

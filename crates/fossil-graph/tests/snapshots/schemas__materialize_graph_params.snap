@@ -1,0 +1,20 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (viewport::MaterializeGraphParams)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: MaterializeGraphParams
+type: object
+properties:
+  limit:
+    default: 50000
+    type: integer
+    format: uint32
+    minimum: 0
+  vertex_types:
+    description: Restrict to a subset of vertex types. Empty = all.
+    default: []
+    type: array
+    items:
+      type: string
+additionalProperties: false

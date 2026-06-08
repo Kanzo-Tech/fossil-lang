@@ -45,6 +45,17 @@ oneOf:
       - verb
     properties:
       params:
+        $ref: "#/definitions/DescribeVertexTypeParams"
+      verb:
+        type: string
+        enum:
+          - describe_vertex_type
+  - type: object
+    required:
+      - params
+      - verb
+    properties:
+      params:
         $ref: "#/definitions/SearchByLabelParams"
       verb:
         type: string
@@ -72,6 +83,17 @@ oneOf:
         type: string
         enum:
           - find_path
+  - type: object
+    required:
+      - params
+      - verb
+    properties:
+      params:
+        $ref: "#/definitions/GetVertexParams"
+      verb:
+        type: string
+        enum:
+          - get_vertex
   - type: object
     required:
       - params
@@ -149,6 +171,17 @@ oneOf:
         type: string
         enum:
           - set_selection
+  - type: object
+    required:
+      - params
+      - verb
+    properties:
+      params:
+        $ref: "#/definitions/MaterializeGraphParams"
+      verb:
+        type: string
+        enum:
+          - materialize_graph
   - type: object
     required:
       - params
@@ -239,6 +272,14 @@ definitions:
       vertex_type:
         type: string
     additionalProperties: false
+  DescribeVertexTypeParams:
+    type: object
+    required:
+      - vertex_type
+    properties:
+      vertex_type:
+        type: string
+    additionalProperties: false
   ExecuteSqlParams:
     type: object
     required:
@@ -299,6 +340,18 @@ definitions:
       target_iri:
         type: string
     additionalProperties: false
+  GetVertexParams:
+    type: object
+    required:
+      - subject
+      - vertex_type
+    properties:
+      subject:
+        description: "The vertex's `subject` IRI (unique across the graph)."
+        type: string
+      vertex_type:
+        type: string
+    additionalProperties: false
   HistogramParams:
     type: object
     required:
@@ -320,6 +373,21 @@ definitions:
     additionalProperties: false
   ListVertexTypesParams:
     type: object
+    additionalProperties: false
+  MaterializeGraphParams:
+    type: object
+    properties:
+      limit:
+        default: 50000
+        type: integer
+        format: uint32
+        minimum: 0
+      vertex_types:
+        description: Restrict to a subset of vertex types. Empty = all.
+        default: []
+        type: array
+        items:
+          type: string
     additionalProperties: false
   SearchByLabelParams:
     type: object

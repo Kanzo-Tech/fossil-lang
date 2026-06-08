@@ -164,7 +164,9 @@ pub enum ConstraintValue {
     /// to its own type lattice.
     Datatype(String),
     /// An IRI-valued node (`nodeKind IRI`) or a reference to another shape — an
-    /// object property. The value is the referenced subject's IRI.
+    /// object property. The value is the referenced subject's IRI. (The OUTPUT
+    /// decomposition's `classify_object` is what turns a shape-ref into a typed
+    /// `GraphAr` edge; this INPUT narrowing only needs "is it an IRI".)
     Iri,
     /// Could not be narrowed (`ShapeAnd`/`ShapeOr`/`ShapeNot`/external, or no
     /// `valueExpr` at all). Consumers treat this as an opaque string.

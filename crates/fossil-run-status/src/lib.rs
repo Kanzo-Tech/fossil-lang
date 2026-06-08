@@ -231,6 +231,39 @@ pub struct ProviderInfo {
     pub kind: ProviderKind,
 }
 
+// ----- `refs` (host boundary) -----------------------------------------------
+// The `refs` subcommand parses a program and emits its external references —
+// the TYPED lineage of what the program reads. keasy consumes this (instead of
+// regex-matching `@name/` in script text) to know a job's connections.
+
+/// The position a reference plays in an `io.*` source constructor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RefRole {
+    /// The positional data URI (`io.rdf("…")`).
+    Data,
+    /// The `schema = "…"` argument (a `ShEx` shape).
+    Schema,
+}
+
+/// One external reference a program makes. `connection` is the `@conn` alias the
+/// reference targets (`Some("cpi")` for `@cpi/graph.ttl`), or `None` for a direct
+/// URL / local path. `path` is the remainder after the alias (or the whole
+/// locator when there is no alias). This is the program's TYPED lineage — keasy
+/// derives a job's connection set from the distinct `connection`s, never from a
+/// regex over the script text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SourceRefInfo {
+    /// The `@conn` alias this reference targets, or `None` for a direct URL/path.
+    pub connection: Option<String>,
+    /// The path within the connection, or the whole locator when unaliased.
+    pub path: String,
+    /// Where this reference appears in the source constructor.
+    pub role: RefRole,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

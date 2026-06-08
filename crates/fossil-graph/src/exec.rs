@@ -16,6 +16,8 @@
 //! `Send`) for zero benefit, so `future_not_send` is allowed crate-wide here.
 #![allow(clippy::future_not_send)]
 
+use std::fmt::Write;
+
 use serde_json::Value;
 
 use crate::manifest::{Manifest, edge_table_name};
@@ -24,15 +26,20 @@ use crate::operations::aggregate::{
     HistogramResult, TopKParams, TopKResult,
 };
 use crate::operations::discovery::{
-    FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, NeighborEdge,
-    NeighborVertex,
+    FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, GetVertexParams,
+    GetVertexResult, NeighborEdge, NeighborVertex,
 };
 use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
-use crate::operations::viewport::{ViewportMode, ViewportParams, ViewportResult, ViewportVertex};
-use crate::operations::schema::{
-    DescribeFieldParams, DescribeFieldResult, EdgeTypeSummary, FieldRole, ListEdgeTypesResult,
-    ListVertexTypesResult, VertexTypeSummary,
+use crate::operations::viewport::{
+    MaterializeGraphParams, MaterializeGraphResult, MaterializedEdge, MaterializedVertex,
+    ViewportMode, ViewportParams, ViewportResult, ViewportVertex,
 };
+use crate::operations::schema::{
+    DescribeFieldParams, DescribeFieldResult, DescribeVertexTypeParams, DescribeVertexTypeResult,
+    EdgeTypeSummary, FieldRole, FieldStat, ListEdgeTypesResult, ListVertexTypesResult,
+    VertexTypeSummary,
+};
+use crate::manifest::RESERVED_VERTEX_COLUMNS;
 use crate::{GraphError, Operation, Result};
 
 /// `(column_name, column_type)` descriptors paired with the JSON result rows —
@@ -114,12 +121,15 @@ impl<E: DuckExecutor> Context<'_, E> {
             Operation::ListVertexTypes(_) => to_json(&self.list_vertex_types().await?),
             Operation::ListEdgeTypes(_) => to_json(&self.list_edge_types().await?),
             Operation::DescribeField(p) => to_json(&self.describe_field(p).await?),
+            Operation::DescribeVertexType(p) => to_json(&self.describe_vertex_type(p).await?),
             Operation::Aggregate(p) => to_json(&self.aggregate(p).await?),
             Operation::Histogram(p) => to_json(&self.histogram(p).await?),
             Operation::TopK(p) => to_json(&self.top_k(p).await?),
             Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p).await?),
             Operation::FindPath(p) => to_json(&self.find_path(p).await?),
+            Operation::GetVertex(p) => to_json(&self.get_vertex(p).await?),
             Operation::Viewport(p) => to_json(&self.viewport(p).await?),
+            Operation::MaterializeGraph(p) => to_json(&self.materialize_graph(p).await?),
             Operation::ExecuteSql(p) => to_json(&self.execute_sql(p).await?),
             other => Err(GraphError::NotImplemented(other.verb_name())),
         }
@@ -185,12 +195,80 @@ impl<E: DuckExecutor> Context<'_, E> {
             .map(value_to_string)
             .collect();
 
+        // count(*) is O(1) from the Parquet footer — cheap, and the denominator
+        // the cardinality arm of role inference needs.
+        let count = self.count_rows(&p.vertex_type).await?;
+
         Ok(DescribeFieldResult {
-            role: infer_role(&datatype),
+            role: infer_role(&p.field, &datatype, distinct, Some(count)),
             datatype,
             distinct,
             samples,
         })
+    }
+
+    /// Batched per-type field stats + authoritative roles in ONE query
+    /// (`COUNT(*)` + a `COUNT(DISTINCT)` per field) — the single source for what
+    /// keasy used to compute client-side (`computeColumnStats` + `inferRole`).
+    async fn describe_vertex_type(
+        &self,
+        p: &DescribeVertexTypeParams,
+    ) -> Result<DescribeVertexTypeResult> {
+        // User fields in manifest order, reserved (writer) columns filtered —
+        // same source as `list_vertex_types`' field list.
+        let fields: Vec<(String, String)> = self
+            .manifest
+            .lookup_vertex(&p.vertex_type)?
+            .property_groups
+            .iter()
+            .flat_map(|g| g.properties.iter())
+            .filter(|prop| !RESERVED_VERTEX_COLUMNS.contains(&prop.name.as_str()))
+            .map(|prop| (prop.name.clone(), prop.data_type.clone()))
+            .collect();
+
+        let table = quote_ident(&p.vertex_type);
+        if fields.is_empty() {
+            return Ok(DescribeVertexTypeResult {
+                count: self.count_rows(&p.vertex_type).await?,
+                fields: Vec::new(),
+            });
+        }
+
+        // ONE query: COUNT(*) AS n, COUNT(DISTINCT fieldI) AS dI — keasy parity.
+        let mut selects = String::from("count(*) AS n");
+        for (i, (name, _)) in fields.iter().enumerate() {
+            let _ = write!(selects, ", count(DISTINCT {}) AS d{i}", quote_ident(name));
+        }
+        let rows = self
+            .exec
+            .query_json(&format!("SELECT {selects} FROM {table}"))
+            .await?;
+        let row = rows.first().ok_or_else(|| {
+            GraphError::Execution(format!(
+                "describe_vertex_type on `{}` returned no row",
+                p.vertex_type
+            ))
+        })?;
+        let count = row.get("n").and_then(Value::as_u64).unwrap_or(0);
+
+        let out = fields
+            .iter()
+            .enumerate()
+            .map(|(i, (name, datatype))| {
+                let distinct = row
+                    .get(format!("d{i}"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                FieldStat {
+                    role: infer_role(name, datatype, Some(distinct), Some(count)),
+                    name: name.clone(),
+                    datatype: datatype.clone(),
+                    distinct,
+                }
+            })
+            .collect();
+
+        Ok(DescribeVertexTypeResult { count, fields: out })
     }
 
     // ── Aggregation verbs ─────────────────────────────────────────────────
@@ -421,6 +499,121 @@ impl<E: DuckExecutor> Context<'_, E> {
         })
     }
 
+    /// Canvas-ready whole-graph snapshot: vertices with resolved
+    /// `subject`/`label`/`type_name` + edges with dense→subject-mapped
+    /// endpoints, capped by `limit`. Owns the `GraphAr` column convention so the
+    /// host renders without hand-selecting `dense_id`/`src_dense`/`dst_dense`.
+    async fn materialize_graph(
+        &self,
+        p: &MaterializeGraphParams,
+    ) -> Result<MaterializeGraphResult> {
+        let cap = usize::try_from(p.limit).unwrap_or(usize::MAX);
+
+        // ── Vertices: one SELECT per type; label = first present of
+        //    name/label/title, else subject (keasy's display-label rule). ──
+        let parts: Vec<String> = self
+            .manifest
+            .vertices()
+            .iter()
+            .filter(|v| {
+                p.vertex_types.is_empty() || p.vertex_types.iter().any(|t| t == &v.vertex_type)
+            })
+            .map(|v| {
+                let has = |c: &str| {
+                    v.property_groups
+                        .iter()
+                        .flat_map(|g| g.properties.iter())
+                        .any(|prop| prop.name == c)
+                };
+                let label = ["name", "label", "title"]
+                    .into_iter()
+                    .find(|c| has(c))
+                    .map_or_else(|| "subject".to_string(), quote_ident);
+                format!(
+                    "SELECT subject, {label} AS label, '{ty}' AS type_name FROM {tbl}",
+                    ty = v.vertex_type,
+                    tbl = quote_ident(&v.vertex_type),
+                )
+            })
+            .collect();
+
+        if parts.is_empty() {
+            return Ok(MaterializeGraphResult {
+                vertices: Vec::new(),
+                edges: Vec::new(),
+                truncated: false,
+            });
+        }
+
+        // Fetch one extra row to detect truncation.
+        let vsql = format!(
+            "{} LIMIT {}",
+            parts.join(" UNION ALL "),
+            u64::from(p.limit).saturating_add(1)
+        );
+        let vrows = self.exec.query_json(&vsql).await?;
+        let truncated = vrows.len() > cap;
+
+        let mut vertices = Vec::with_capacity(vrows.len().min(cap));
+        let mut included: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for r in vrows.into_iter().take(cap) {
+            let Some(id) = r.get("subject").and_then(Value::as_str).map(ToString::to_string) else {
+                continue;
+            };
+            let label = r
+                .get("label")
+                .and_then(Value::as_str)
+                .map_or_else(|| id.clone(), ToString::to_string);
+            let type_name = r
+                .get("type_name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            included.insert(id.clone());
+            vertices.push(MaterializedVertex { id, label, type_name });
+        }
+
+        // ── Edges: dense→subject resolved (reuse edge_relation_sql), then drop
+        //    orphans whose endpoint fell outside the materialized vertex set
+        //    (mirrors the canvas's defensive orphan drop). ──
+        let edges = match self.edge_relation_sql(&[]) {
+            None => Vec::new(),
+            Some(edge_rel) => {
+                let esql = format!(
+                    "SELECT src, dst, predicate FROM ({edge_rel}) AS _e LIMIT {}",
+                    p.limit
+                );
+                self.exec
+                    .query_json(&esql)
+                    .await?
+                    .iter()
+                    .filter_map(|r| {
+                        let src = r.get("src").and_then(Value::as_str)?;
+                        let dst = r.get("dst").and_then(Value::as_str)?;
+                        if !included.contains(src) || !included.contains(dst) {
+                            return None;
+                        }
+                        Some(MaterializedEdge {
+                            source: src.to_string(),
+                            target: dst.to_string(),
+                            predicate: r
+                                .get("predicate")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string(),
+                        })
+                    })
+                    .collect()
+            }
+        };
+
+        Ok(MaterializeGraphResult {
+            vertices,
+            edges,
+            truncated,
+        })
+    }
+
     // ── Discovery verbs ───────────────────────────────────────────────────
 
     async fn find_neighbors(&self, p: &FindNeighborsParams) -> Result<FindNeighborsResult> {
@@ -545,6 +738,41 @@ impl<E: DuckExecutor> Context<'_, E> {
             })
             .collect();
         Ok(FindPathResult { vertices, edges })
+    }
+
+    /// Fetch one vertex's user-facing properties by subject IRI — the
+    /// member-safe single-entity read (no `execute_sql` escape hatch). Reserved
+    /// (writer) columns are filtered; `vertex` is `null` when no match.
+    async fn get_vertex(&self, p: &GetVertexParams) -> Result<GetVertexResult> {
+        let cols: Vec<String> = self
+            .manifest
+            .lookup_vertex(&p.vertex_type)?
+            .property_groups
+            .iter()
+            .flat_map(|g| g.properties.iter())
+            .map(|prop| prop.name.clone())
+            .filter(|n| !RESERVED_VERTEX_COLUMNS.contains(&n.as_str()))
+            .collect();
+
+        if cols.is_empty() {
+            return Ok(GetVertexResult {
+                vertex: Some(Value::Object(serde_json::Map::new())),
+            });
+        }
+
+        let select = cols
+            .iter()
+            .map(|c| quote_ident(c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT {select} FROM {table} WHERE subject = {subj} LIMIT 1",
+            table = quote_ident(&p.vertex_type),
+            subj = sql_str_lit(&p.subject),
+        );
+        Ok(GetVertexResult {
+            vertex: self.exec.query_json(&sql).await?.into_iter().next(),
+        })
     }
 
     /// The origin vertex alone (hop 0), with its type resolved from whichever
@@ -742,15 +970,71 @@ fn value_to_string(v: &Value) -> String {
     }
 }
 
-/// Infer a chart-axis role from the `GraphAr` `data_type` spelling. Numeric
-/// columns default to `measure`; everything else to `dimension`. The
-/// `identifier` role is reserved for the writer's `dense_id`/`subject`, which
-/// `Manifest::vertex_fields` already filters out of describable fields.
-fn infer_role(datatype: &str) -> FieldRole {
-    match datatype {
-        "int32" | "int64" | "float" | "double" => FieldRole::Measure,
-        _ => FieldRole::Dimension,
+/// Infer a chart-axis role from a field's name, `GraphAr` `data_type`, and
+/// cardinality. Authoritative port of keasy's former `lib/graph-schema.ts::
+/// inferRole` (this surface is now the single source — [[`feedback_one_idiom_per_concern`]]):
+/// an id/uri/iri name wins; then numeric→measure; then bool/temporal→dimension;
+/// then a high-cardinality column (distinct > 200 or > 80% unique) is an
+/// identifier; else dimension. Operating on `GraphAr` spellings natively fixes
+/// keasy's latent `int64`-misclassified-as-dimension bug by construction.
+fn infer_role(name: &str, datatype: &str, distinct: Option<u64>, count: Option<u64>) -> FieldRole {
+    if is_identifier_name(name) {
+        return FieldRole::Identifier;
     }
+    if is_numeric_datatype(datatype) {
+        return FieldRole::Measure;
+    }
+    match datatype {
+        "bool" | "boolean" | "date" | "timestamp" | "time" => return FieldRole::Dimension,
+        _ => {}
+    }
+    if let (Some(d), Some(c)) = (distinct, count) {
+        #[allow(clippy::cast_precision_loss)]
+        if c > 0 && (d > 200 || (d as f64) / (c as f64) > 0.8) {
+            return FieldRole::Identifier;
+        }
+    }
+    FieldRole::Dimension
+}
+
+/// keasy `IDENTIFIER_PATTERN` = `/(?:^|[_.])(id|uri|iri)(?:$|[_.])/i`, ported as
+/// a token-boundary scan (no regex dep — WASM-size-conscious). A token counts
+/// only at a `_`/`.`/string boundary, case-insensitive.
+fn is_identifier_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    for tok in ["id", "uri", "iri"] {
+        let mut from = 0;
+        while let Some(off) = lower[from..].find(tok) {
+            let i = from + off;
+            let end = i + tok.len();
+            let before_ok = i == 0 || matches!(bytes[i - 1], b'_' | b'.');
+            let after_ok = end == bytes.len() || matches!(bytes[end], b'_' | b'.');
+            if before_ok && after_ok {
+                return true;
+            }
+            from = i + 1;
+        }
+    }
+    false
+}
+
+/// `GraphAr` numeric datatype spellings (the writer's int/float family). The
+/// numeric arm of role + histogram classification.
+fn is_numeric_datatype(datatype: &str) -> bool {
+    matches!(
+        datatype,
+        "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "float"
+            | "double"
+    )
 }
 
 #[cfg(test)]
@@ -1072,6 +1356,134 @@ mod tests {
         assert_eq!(r.role, FieldRole::Measure);
         assert_eq!(r.distinct, Some(2));
         assert_eq!(r.samples, vec!["30", "41"]);
+    }
+
+    #[test]
+    fn infer_role_full_heuristic() {
+        // id/uri/iri name wins, case-insensitive, at token boundaries.
+        assert_eq!(infer_role("user_id", "string", None, None), FieldRole::Identifier);
+        assert_eq!(infer_role("IRI", "string", None, None), FieldRole::Identifier);
+        assert_eq!(infer_role("home.uri", "string", None, None), FieldRole::Identifier);
+        // "candid" contains "id" but not at a boundary → not an identifier.
+        assert_eq!(infer_role("candidate", "string", Some(1), Some(10)), FieldRole::Dimension);
+        // numeric → measure (GraphAr spellings, incl. the int64 bug-fix case).
+        assert_eq!(infer_role("age", "int64", None, None), FieldRole::Measure);
+        assert_eq!(infer_role("score", "double", None, None), FieldRole::Measure);
+        // bool / temporal → dimension.
+        assert_eq!(infer_role("active", "bool", None, None), FieldRole::Dimension);
+        assert_eq!(infer_role("born", "date", None, None), FieldRole::Dimension);
+        // high cardinality → identifier; low → dimension.
+        assert_eq!(infer_role("email", "string", Some(95), Some(100)), FieldRole::Identifier);
+        assert_eq!(infer_role("dept", "string", Some(3), Some(100)), FieldRole::Dimension);
+        assert_eq!(infer_role("huge", "string", Some(201), Some(100_000)), FieldRole::Identifier);
+    }
+
+    #[test]
+    fn describe_vertex_type_batches_fields_and_roles() {
+        let m = fixture();
+        // One batched query: COUNT(*) + COUNT(DISTINCT) per user field.
+        let exec = FnExec(|sql: &str| {
+            assert!(sql.contains("count(DISTINCT"), "batched stats query: {sql}");
+            vec![serde_json::json!({ "n": 3, "d0": 3, "d1": 2 })]
+        });
+        let v = run(
+            &Operation::DescribeVertexType(crate::operations::schema::DescribeVertexTypeParams {
+                vertex_type: "Person".into(),
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: crate::operations::schema::DescribeVertexTypeResult =
+            serde_json::from_value(v).unwrap();
+        assert_eq!(r.count, 3);
+        // dense_id filtered; age + name surfaced, in manifest order.
+        assert_eq!(r.fields.len(), 2);
+        assert_eq!(r.fields[0].name, "age");
+        assert_eq!(r.fields[0].role, FieldRole::Measure); // int64
+        assert_eq!(r.fields[0].distinct, 3);
+        assert_eq!(r.fields[1].name, "name");
+        assert_eq!(r.fields[1].role, FieldRole::Dimension); // string, 2/3 < 0.8
+        assert_eq!(r.fields[1].distinct, 2);
+    }
+
+    #[test]
+    fn get_vertex_returns_user_properties() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            assert!(sql.contains("WHERE subject ="), "lookup by subject: {sql}");
+            assert!(!sql.contains("dense_id"), "reserved cols filtered: {sql}");
+            vec![serde_json::json!({ "age": 30, "name": "Alice" })]
+        });
+        let v = run(
+            &Operation::GetVertex(GetVertexParams {
+                vertex_type: "Person".into(),
+                subject: "urn:a".into(),
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: GetVertexResult = serde_json::from_value(v).unwrap();
+        let obj = r.vertex.expect("matched vertex");
+        assert_eq!(obj.get("name").and_then(Value::as_str), Some("Alice"));
+        assert!(obj.get("subject").is_none());
+    }
+
+    #[test]
+    fn get_vertex_missing_subject_is_null() {
+        let m = fixture();
+        let exec = FnExec(|_sql: &str| Vec::new());
+        let v = run(
+            &Operation::GetVertex(GetVertexParams {
+                vertex_type: "Person".into(),
+                subject: "urn:nope".into(),
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: GetVertexResult = serde_json::from_value(v).unwrap();
+        assert!(r.vertex.is_none());
+    }
+
+    #[test]
+    fn materialize_graph_resolves_subjects_and_drops_orphans() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            if sql.contains("type_name") {
+                // vertex materialization: label = name column.
+                vec![
+                    serde_json::json!({ "subject": "urn:a", "label": "Alice", "type_name": "Person" }),
+                    serde_json::json!({ "subject": "urn:b", "label": "Bob", "type_name": "Person" }),
+                ]
+            } else {
+                // edge relation: one in-set edge + one orphan (urn:zzz not materialized).
+                vec![
+                    serde_json::json!({ "src": "urn:a", "dst": "urn:b", "predicate": "knows" }),
+                    serde_json::json!({ "src": "urn:a", "dst": "urn:zzz", "predicate": "knows" }),
+                ]
+            }
+        });
+        let v = run(
+            &Operation::MaterializeGraph(crate::operations::viewport::MaterializeGraphParams {
+                vertex_types: Vec::new(),
+                limit: 50_000,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: crate::operations::viewport::MaterializeGraphResult =
+            serde_json::from_value(v).unwrap();
+        assert_eq!(r.vertices.len(), 2);
+        assert_eq!(r.vertices[0].id, "urn:a");
+        assert_eq!(r.vertices[0].label, "Alice");
+        assert_eq!(r.vertices[0].type_name, "Person");
+        assert_eq!(r.edges.len(), 1, "orphan edge dropped");
+        assert_eq!(r.edges[0].source, "urn:a");
+        assert_eq!(r.edges[0].target, "urn:b");
+        assert!(!r.truncated);
     }
 
     #[test]

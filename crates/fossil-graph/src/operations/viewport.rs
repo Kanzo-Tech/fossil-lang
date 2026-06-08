@@ -88,6 +88,59 @@ pub struct ViewportEdge {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// materialize_graph — canvas-ready whole-graph snapshot (no layout dependency).
+//
+// Unlike `viewport` (bbox + morton pushdown, larger-than-RAM, needs W3 layout),
+// this returns the full vertex+edge set as renderable rows with resolved
+// `subject`/`label`/`type_name` and dense→subject-mapped edges — the shape the
+// keasy canvas materialises today. The verb owns the GraphAr column convention
+// (`dense_id`/`src_dense`/`dst_dense`) so the host never hand-selects columns.
+// Capped by `limit`; true viewport streaming is the W3 follow-up.
+// ──────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MaterializeGraphParams {
+    /// Restrict to a subset of vertex types. Empty = all.
+    #[serde(default)]
+    pub vertex_types: Vec<String>,
+    #[serde(default = "default_materialize_limit")]
+    pub limit: u32,
+}
+
+const fn default_materialize_limit() -> u32 {
+    50_000
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MaterializeGraphResult {
+    pub vertices: Vec<MaterializedVertex>,
+    pub edges: Vec<MaterializedEdge>,
+    /// True when the vertex set was capped by `limit` (edges to dropped
+    /// vertices are omitted, mirroring the canvas's orphan-edge drop).
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MaterializedVertex {
+    /// The vertex `subject` IRI — the canvas's string node id.
+    pub id: String,
+    /// Display label: first present of `name`/`label`/`title`, else the subject.
+    pub label: String,
+    /// Vertex type short name.
+    pub type_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MaterializedEdge {
+    /// Source vertex `subject` (dense→subject resolved).
+    pub source: String,
+    /// Target vertex `subject` (dense→subject resolved).
+    pub target: String,
+    pub predicate: String,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // set_selection
 // ──────────────────────────────────────────────────────────────────────────
 

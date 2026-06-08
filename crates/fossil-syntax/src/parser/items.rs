@@ -93,6 +93,11 @@ pub(crate) fn parse_program(p: &mut Parser) {
             Some(SyntaxKind::KW_USE) => parse_import(p),
             Some(SyntaxKind::KW_PREFIX) => parse_prefix_decl(p),
             Some(SyntaxKind::AT_EXPORT) => parse_exported_definition(p),
+            // `{ A, B, ... } := io.rdf(...)` — a destructuring source def. A
+            // top-level `{` is unambiguous: the selective-import `{` is inside
+            // `use`, and record/annotation `{` only appear inside expressions /
+            // mapping bodies — never at the program level.
+            Some(SyntaxKind::LBRACE) => parse_multi_source_def(p),
             Some(SyntaxKind::IDENT) => match p.peek_kind(1) {
                 // `IDENT :=` → source/value definition (Phase 1 SOURCE_DEF).
                 Some(SyntaxKind::DEFINE) => parse_source_def(p),
@@ -307,6 +312,46 @@ fn parse_source_def(p: &mut Parser) {
     p.bump(); // IDENT  (already verified by parse_program lookahead)
     p.skip_trivia();
     p.bump(); // DEFINE  (`:=`)
+    p.parse_expr();
+    p.finish();
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// MultiSourceDef (destructuring source): `{ A, B, ... } := io.rdf(...)`
+//   MultiSourceDef := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
+//
+// Each IDENT in the brace list names a member bound to the single source on
+// the right of `:=` (the local-name of a shape declared in the source's
+// schema). The brace/comma loop mirrors `parse_selective_import`; the `:= expr`
+// tail mirrors `parse_source_def`.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_multi_source_def(p: &mut Parser) {
+    p.start(SyntaxKind::MULTI_SOURCE_DEF);
+    p.bump(); // LBRACE
+    recover::expect_or_recover(
+        p,
+        SyntaxKind::IDENT,
+        &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
+    );
+    loop {
+        p.skip_trivia();
+        if p.current() != Some(SyntaxKind::COMMA) {
+            break;
+        }
+        p.bump(); // COMMA
+        p.skip_trivia();
+        if p.current() == Some(SyntaxKind::RBRACE) {
+            break; // trailing comma allowed
+        }
+        recover::expect_or_recover(
+            p,
+            SyntaxKind::IDENT,
+            &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
+        );
+    }
+    recover::expect_or_recover(p, SyntaxKind::RBRACE, TOP_LEVEL_ANCHORS);
+    p.skip_trivia();
+    recover::expect_or_recover(p, SyntaxKind::DEFINE, TOP_LEVEL_ANCHORS);
     p.parse_expr();
     p.finish();
 }

@@ -27,6 +27,10 @@ export type Operation =
       verb: "describe_field";
     }
   | {
+      params: DescribeVertexTypeParams;
+      verb: "describe_vertex_type";
+    }
+  | {
       params: SearchByLabelParams;
       verb: "search_by_label";
     }
@@ -37,6 +41,10 @@ export type Operation =
   | {
       params: FindPathParams;
       verb: "find_path";
+    }
+  | {
+      params: GetVertexParams;
+      verb: "get_vertex";
     }
   | {
       params: AggregateParams;
@@ -67,6 +75,10 @@ export type Operation =
       verb: "set_selection";
     }
   | {
+      params: MaterializeGraphParams;
+      verb: "materialize_graph";
+    }
+  | {
       params: ExecuteSqlParams;
       verb: "execute_sql";
     };
@@ -83,14 +95,19 @@ export interface FossilGraphSchemas {
   ColumnDescriptor?: ColumnDescriptor;
   DescribeFieldParams?: DescribeFieldParams;
   DescribeFieldResult?: DescribeFieldResult;
+  DescribeVertexTypeParams?: DescribeVertexTypeParams;
+  DescribeVertexTypeResult?: DescribeVertexTypeResult;
   EdgeTypeSummary?: EdgeTypeSummary;
   ExecuteSqlParams?: ExecuteSqlParams;
   ExecuteSqlResult?: ExecuteSqlResult;
   FieldRole?: FieldRole;
+  FieldStat?: FieldStat;
   FindNeighborsParams?: FindNeighborsParams;
   FindNeighborsResult?: FindNeighborsResult;
   FindPathParams?: FindPathParams;
   FindPathResult?: FindPathResult;
+  GetVertexParams?: GetVertexParams;
+  GetVertexResult?: GetVertexResult;
   HistogramKind?: HistogramKind;
   HistogramParams?: HistogramParams;
   HistogramResult?: HistogramResult;
@@ -98,6 +115,10 @@ export interface FossilGraphSchemas {
   ListEdgeTypesResult?: ListEdgeTypesResult;
   ListVertexTypesParams?: ListVertexTypesParams;
   ListVertexTypesResult?: ListVertexTypesResult;
+  MaterializeGraphParams?: MaterializeGraphParams;
+  MaterializeGraphResult?: MaterializeGraphResult;
+  MaterializedEdge?: MaterializedEdge;
+  MaterializedVertex?: MaterializedVertex;
   NeighborEdge?: NeighborEdge;
   NeighborVertex?: NeighborVertex;
   Operation?: Operation;
@@ -177,6 +198,34 @@ export interface DescribeFieldResult {
    */
   samples: string[];
 }
+export interface DescribeVertexTypeParams {
+  vertex_type: string;
+}
+export interface DescribeVertexTypeResult {
+  /**
+   * Total row count of the vertex table (`COUNT(*)`), the denominator role inference uses for the cardinality test.
+   */
+  count: number;
+  /**
+   * Every user-facing field (reserved columns filtered), in manifest order, with authoritative role + cardinality. One batched query computes all of it — the single source for what keasy used to derive client-side.
+   */
+  fields: FieldStat[];
+}
+export interface FieldStat {
+  /**
+   * `GraphAr` data-type spelling (`string`, `int64`, `double`, …).
+   */
+  datatype: string;
+  /**
+   * Distinct value count (`COUNT(DISTINCT field)`).
+   */
+  distinct: number;
+  name: string;
+  /**
+   * Authoritative chart-axis role.
+   */
+  role: "identifier" | "dimension" | "measure";
+}
 export interface EdgeTypeSummary {
   count: number;
   iri: string;
@@ -246,6 +295,21 @@ export interface FindPathResult {
    */
   vertices: NeighborVertex[];
 }
+export interface GetVertexParams {
+  /**
+   * The vertex's `subject` IRI (unique across the graph).
+   */
+  subject: string;
+  vertex_type: string;
+}
+export interface GetVertexResult {
+  /**
+   * The matched vertex's user-facing property columns (reserved columns filtered) as a JSON object; `null` when no vertex has that subject.
+   */
+  vertex?: {
+    [k: string]: unknown;
+  };
+}
 export interface HistogramParams {
   bins?: number;
   field: string;
@@ -290,6 +354,46 @@ export interface VertexTypeSummary {
    * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
    */
   name: string;
+}
+export interface MaterializeGraphParams {
+  limit?: number;
+  /**
+   * Restrict to a subset of vertex types. Empty = all.
+   */
+  vertex_types?: string[];
+}
+export interface MaterializeGraphResult {
+  edges: MaterializedEdge[];
+  /**
+   * True when the vertex set was capped by `limit` (edges to dropped vertices are omitted, mirroring the canvas's orphan-edge drop).
+   */
+  truncated: boolean;
+  vertices: MaterializedVertex[];
+}
+export interface MaterializedEdge {
+  predicate: string;
+  /**
+   * Source vertex `subject` (dense→subject resolved).
+   */
+  source: string;
+  /**
+   * Target vertex `subject` (dense→subject resolved).
+   */
+  target: string;
+}
+export interface MaterializedVertex {
+  /**
+   * The vertex `subject` IRI — the canvas's string node id.
+   */
+  id: string;
+  /**
+   * Display label: first present of `name`/`label`/`title`, else the subject.
+   */
+  label: string;
+  /**
+   * Vertex type short name.
+   */
+  type_name: string;
 }
 export interface SearchByLabelParams {
   query: string;

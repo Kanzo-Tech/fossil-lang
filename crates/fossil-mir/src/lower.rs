@@ -219,6 +219,9 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
 /// silently mis-reading it. When the binding IS `io.csv("examples/users.csv")`
 /// (the walking-skeleton `hello.fossil`) the resolved value equals the old
 /// hardcode → byte-identical SQL.
+// The nested `match` over the constructor + its lowering reads clearer than the
+// `map_or_else` the nursery lint suggests (the Some arm is itself a match).
+#[allow(clippy::option_if_let_else)]
 fn resolve_source<'db>(
     dm: DefMap<'db>,
     db: &'db dyn fossil_base::Db,

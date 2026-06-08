@@ -16,16 +16,9 @@ workspace = true
 # the output descriptor). All RDF/decode detail lives here, never in the core.
 fossil-runtime = { path = "../fossil-runtime" }
 fossil-shex = { path = "../fossil-shex" }
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 duckdb = { workspace = true }
 # Turtle/N-Triples parsing — the oxigraph parser that rudof's `srdf` wraps;
 # already in the resolved graph (transitive via the rudof ShEx crates). Kept
 # isolated to this crate so swapping to `srdf` later touches nothing else.
 oxttl = { workspace = true }
 oxrdf = { workspace = true }
-# ShapeMap PARSER only (`ShapeMapParser`, nom-based, WASM-safe). The user
-# declares which RDF nodes feed which shape via a standard ShEx ShapeMap; we
-# parse it with rudof for fidelity and evaluate the selectors ourselves against
-# the oxttl triples (rudof's 0.3.1 resolver routes through SPARQL/oxigraph,
-# which is unwired for in-memory graphs AND not WASM-safe — see decisions/).
-shex_ast = { workspace = true }

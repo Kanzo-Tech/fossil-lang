@@ -1,5 +1,5 @@
 //! [`ResolvedPath`] — a URL plus the optional [`CloudSecret`] the runtime
-//! installs (via DuckDB `CREATE SECRET`) so a `read_*`/`COPY` under that URL
+//! installs (via `DuckDB` `CREATE SECRET`) so a `read_*`/`COPY` under that URL
 //! authenticates.
 //!
 //! Sub-path derivation ([`ResolvedPath::join`]) inherits the secret so a single
@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 
 use secrecy::{ExposeSecret, SecretString};
 
-/// A DuckDB cloud secret: its provider `TYPE` plus the typed parameters DuckDB
+/// A `DuckDB` cloud secret: its provider `TYPE` plus the typed parameters `DuckDB`
 /// `CREATE SECRET` takes (`KEY_ID`, `SECRET`, `REGION`, `ENDPOINT`, `URL_STYLE`,
 /// `USE_SSL`, `CONNECTION_STRING`, …). The host owns the provider→parameter
 /// projection; this crate stays provider-agnostic and just renders the
@@ -31,7 +31,7 @@ pub struct CloudSecret {
 
 impl CloudSecret {
     /// Construct a secret of provider `secret_type` (`"s3"`, `"azure"`, `"gcs"`)
-    /// with DuckDB `CREATE SECRET` parameters (`"KEY_ID"` → value, …).
+    /// with `DuckDB` `CREATE SECRET` parameters (`"KEY_ID"` → value, …).
     #[must_use]
     pub fn new(secret_type: impl Into<String>, params: HashMap<String, SecretString>) -> Self {
         Self {
@@ -126,10 +126,10 @@ impl ResolvedPath {
         self.secret.is_some()
     }
 
-    /// Render the `CREATE OR REPLACE SECRET <name> (...)` statement DuckDB
+    /// Render the `CREATE OR REPLACE SECRET <name> (...)` statement `DuckDB`
     /// installs before any `read_*`/`COPY` under this path's URL — `None` when
     /// no secret is attached (local / public). The secret is **scoped** to this
-    /// path's URL, so DuckDB applies it by longest-prefix match and distinct
+    /// path's URL, so `DuckDB` applies it by longest-prefix match and distinct
     /// per-connection secrets never collide.
     ///
     /// `CREATE OR REPLACE` so re-installing under the same `name` (e.g. a retry)

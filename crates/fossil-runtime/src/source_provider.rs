@@ -35,26 +35,27 @@ pub trait SourceProvider: Send + Sync {
     /// host's provider listing (e.g. keasy's `/v1/providers`).
     fn extensions(&self) -> &[&str];
 
-    /// Materialise the source at `uri` into `conn` as a relation named
-    /// `relation` — a table the core's `CREATE VIEW` prelude then scans. The
-    /// provider does all format-specific work here (decode + any shape-directed
-    /// pivot), producing rows that match the source's declared column schema.
+    /// Materialise the source at `uri` into `conn` as N named relations — one
+    /// per `(relation_name, shape_iri)` member — reading + parsing the source
+    /// ONCE. The provider does all format-specific work here (decode + the
+    /// shape-directed pivot): each member's relation holds the subjects selected
+    /// by `rdf:type == shape_iri`, with one column per shape constraint.
     ///
-    /// `schema_arg` is the source constructor's `schema:` argument (e.g. a
-    /// `ShEx` path), if present. `select_arg` is the constructor's `select:`
-    /// argument (e.g. a ShEx ShapeMap path) declaring which nodes/entities the
-    /// source yields, if present.
+    /// `schema_arg` is the source constructor's `schema = "<shape>.shex"`
+    /// argument (mandatory for RDF; resolved at compile time and carried here as
+    /// a physical locator). `members` is the destructured `{ A, B, ... }` list,
+    /// each member paired with the relation name codegen expects + the shape IRI
+    /// its rows are typed by.
     ///
     /// # Errors
     ///
-    /// Returns a human-readable message if the source cannot be decoded or the
+    /// Returns a human-readable message if the source cannot be decoded or a
     /// relation cannot be created.
-    fn materialize(
+    fn materialize_shapes(
         &self,
         uri: &str,
         schema_arg: Option<&str>,
-        select_arg: Option<&str>,
-        relation: &str,
+        members: &[(String, String)],
         conn: &Connection,
     ) -> Result<(), String>;
 }
@@ -122,19 +123,21 @@ mod tests {
             &["dummy"]
         }
 
-        fn materialize(
+        fn materialize_shapes(
             &self,
             _uri: &str,
             _schema_arg: Option<&str>,
-            _select_arg: Option<&str>,
-            relation: &str,
+            members: &[(String, String)],
             conn: &Connection,
         ) -> Result<(), String> {
-            conn.execute_batch(&format!(
-                "CREATE TABLE \"{relation}\" AS \
-                 SELECT * FROM (VALUES (1, 'alice'), (2, 'bob')) t(id, name);"
-            ))
-            .map_err(|e| e.to_string())
+            for (relation, _shape) in members {
+                conn.execute_batch(&format!(
+                    "CREATE TABLE \"{relation}\" AS \
+                     SELECT * FROM (VALUES (1, 'alice'), (2, 'bob')) t(id, name);"
+                ))
+                .map_err(|e| e.to_string())?;
+            }
+            Ok(())
         }
     }
 
@@ -160,7 +163,12 @@ mod tests {
         // The runtime would do this before executing the CREATE VIEW prelude.
         let provider = reg.get("dummy").expect("registered");
         provider
-            .materialize("ignored://x.dummy", None, None, "__fossil_src_people", &conn)
+            .materialize_shapes(
+                "ignored://x.dummy",
+                None,
+                &[("__fossil_src_people".to_string(), "ex:Person".to_string())],
+                &conn,
+            )
             .expect("materialise");
 
         // The core's prelude (`CREATE VIEW people AS SELECT * FROM

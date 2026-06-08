@@ -1,0 +1,50 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (schema::DescribeVertexTypeResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: DescribeVertexTypeResult
+type: object
+required:
+  - count
+  - fields
+properties:
+  count:
+    description: "Total row count of the vertex table (`COUNT(*)`), the denominator role inference uses for the cardinality test."
+    type: integer
+    format: uint64
+    minimum: 0
+  fields:
+    description: "Every user-facing field (reserved columns filtered), in manifest order, with authoritative role + cardinality. One batched query computes all of it — the single source for what keasy used to derive client-side."
+    type: array
+    items:
+      $ref: "#/definitions/FieldStat"
+definitions:
+  FieldRole:
+    type: string
+    enum:
+      - identifier
+      - dimension
+      - measure
+  FieldStat:
+    type: object
+    required:
+      - datatype
+      - distinct
+      - name
+      - role
+    properties:
+      datatype:
+        description: "`GraphAr` data-type spelling (`string`, `int64`, `double`, …)."
+        type: string
+      distinct:
+        description: "Distinct value count (`COUNT(DISTINCT field)`)."
+        type: integer
+        format: uint64
+        minimum: 0
+      name:
+        type: string
+      role:
+        description: Authoritative chart-axis role.
+        allOf:
+          - $ref: "#/definitions/FieldRole"

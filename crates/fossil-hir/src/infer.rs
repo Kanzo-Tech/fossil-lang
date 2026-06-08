@@ -144,6 +144,59 @@ pub fn resolve_source_row<'db>(
         return Some(record_from_inferred(db, &inferred, source_name.as_str()));
     }
 
+    // RDF destructuring source member (`{ A, B } := io.rdf(..., schema =
+    // "x.shex")`): the member's shape, resolved at COMPILE TIME, IS the source
+    // row type. One column per shape constraint (literal datatype → typed
+    // Primitive, shape-ref → IRI String) plus the `subject` IRI column every
+    // pivoted RDF row carries (so `iri = .subject` types). This is the same
+    // "schema → Record at compile time" path CSV uses — no runtime column
+    // resolution in the provider.
+    if let Some(shape_iri) = dm.lookup_source_shape_iri(db, source_name.as_str()) {
+        let schema_path = dm.lookup_source_schema(db, source_name.as_str())?;
+        let resolved = resolve_relative(db, file, schema_path.as_str());
+        let bytes = match db.system().read_file(&resolved) {
+            Ok(b) => b,
+            Err(e) => {
+                let _eg = delay_span_bug(
+                    db,
+                    Span::new(0, 0),
+                    format!("cannot read ShEx `{schema_path}` for source `{source_name}`: {e}"),
+                );
+                return None;
+            }
+        };
+        let desc = match fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice()) {
+            Ok(d) => d,
+            Err(e) => {
+                let _eg = delay_span_bug(
+                    db,
+                    Span::new(0, 0),
+                    format!("ShEx `{schema_path}` failed to parse: {e:?}"),
+                );
+                return None;
+            }
+        };
+        return Some(record_from_shape(db, &desc, shape_iri.as_str()));
+    }
+
+    // A destructuring member with a schema but NO resolved shape IRI is a member
+    // name that matches no shape in the schema — a compile-time error (the single
+    // path requires each `{…}` name to be a declared shape's local-name).
+    if let Some((Some(ctor), _)) = dm.lookup_source_call(db, source_name.as_str())
+        && ctor.as_str() == "io.rdf"
+        && dm.lookup_source_schema(db, source_name.as_str()).is_some()
+    {
+        let _eg = delay_span_bug(
+            db,
+            Span::new(0, 0),
+            format!(
+                "io.rdf member `{source_name}` matches no shape in the schema; \
+                 each `{{…}}` name must be the local-name of a declared shape"
+            ),
+        );
+        return None;
+    }
+
     // Phase 13 v0.2 FALLBACK PATH — legacy CSVW (deprecated; still functional).
 
     // 2. Read the `schema = "<path>"` NAMED arg from the DefMap (signatures-
@@ -231,6 +284,63 @@ pub(crate) fn record_from_descriptor<'db>(
     }
     let rec = Record::new(db, fields);
     Ty::new(db, TyKind::Record(rec))
+}
+
+/// Build a `Record` [`Ty`] from a `ShEx` shape — the COMPILE-TIME source row type
+/// for an `io.rdf` destructuring member. Mirrors [`record_from_descriptor`]: one
+/// field per shape constraint plus the always-present `subject` IRI column (the
+/// pivoted RDF row carries the entity IRI there, so `iri = .subject` types).
+///
+/// Per-constraint typing mirrors the OUTPUT decomposition's literal-vs-shaperef
+/// rule (`fossil-sinks::decomp::classify_object`): a literal `datatype` IRI maps
+/// to its [`Primitive`] (via the XSD local name); a shape-ref / IRI-valued node
+/// is an edge — its source-side value is the referenced subject's IRI, a String
+/// column.
+#[must_use]
+pub(crate) fn record_from_shape<'db>(
+    db: &'db dyn fossil_base::Db,
+    desc: &fossil_descriptors_output::ShExDescriptor,
+    shape_iri: &str,
+) -> Ty<'db> {
+    use fossil_descriptors_output::ConstraintValue;
+
+    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+    // Every pivoted RDF row carries its entity IRI in `subject`.
+    let mut fields: Vec<RecordField<'db>> = vec![RecordField {
+        name: SmolStr::new_static("subject"),
+        ty: string_ty,
+    }];
+    if let Some(binding) = desc.lookup_shape_str(shape_iri) {
+        for c in &binding.constraints {
+            let prim = match c.value() {
+                ConstraintValue::Datatype(iri) => primitive_from_xsd(&iri),
+                // Shape-ref / IRI-valued node → the referenced subject's IRI.
+                ConstraintValue::Iri | ConstraintValue::Unknown => Primitive::String,
+            };
+            fields.push(RecordField {
+                name: SmolStr::from(c.predicate_local_name()),
+                ty: Ty::new(db, TyKind::Primitive(prim)),
+            });
+        }
+    }
+    Ty::new(db, TyKind::Record(Record::new(db, fields)))
+}
+
+/// Map an XSD datatype IRI to a Fossil [`Primitive`] via its local name. Unknown
+/// datatypes fall back to String (the conservative, column-producing choice).
+fn primitive_from_xsd(iri: &str) -> Primitive {
+    let local = iri.rsplit(['#', '/']).next().unwrap_or(iri);
+    match local {
+        "integer" | "int" | "long" => Primitive::Integer,
+        "decimal" | "double" | "float" => Primitive::Float,
+        "boolean" => Primitive::Bool,
+        "date" => Primitive::Date,
+        "dateTime" => Primitive::DateTime,
+        "time" => Primitive::Time,
+        "gYear" => Primitive::GYear,
+        "anyURI" => Primitive::AnyURI,
+        _ => Primitive::String,
+    }
 }
 
 /// Resolve `schema_path` relative to the directory containing `file`'s path.

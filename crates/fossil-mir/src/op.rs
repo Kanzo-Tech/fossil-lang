@@ -48,8 +48,8 @@ pub enum Op<'db> {
         row_type: Ty<'db>,
         /// The source BINDING name (`projects` in `projects := io.rdf(...)`).
         /// The relation/view name is derived from this, NOT the URI stem, so two
-        /// bindings reading the same file (`io.rdf("g.ttl", select=...)` twice)
-        /// get distinct relations instead of colliding on the stem.
+        /// bindings reading the same file (two destructuring members of one
+        /// `io.rdf`) get distinct relations instead of colliding on the stem.
         binding: SmolStr,
     },
 

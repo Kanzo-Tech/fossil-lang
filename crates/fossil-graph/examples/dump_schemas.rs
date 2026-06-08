@@ -29,9 +29,11 @@ fn main() {
     generator.subschema_for::<schema::ListVertexTypesResult>();
     generator.subschema_for::<schema::ListEdgeTypesResult>();
     generator.subschema_for::<schema::DescribeFieldResult>();
+    generator.subschema_for::<schema::DescribeVertexTypeResult>();
     generator.subschema_for::<discovery::SearchByLabelResult>();
     generator.subschema_for::<discovery::FindNeighborsResult>();
     generator.subschema_for::<discovery::FindPathResult>();
+    generator.subschema_for::<discovery::GetVertexResult>();
     generator.subschema_for::<aggregate::AggregateResult>();
     generator.subschema_for::<aggregate::HistogramResult>();
     generator.subschema_for::<aggregate::TopKResult>();
@@ -39,6 +41,7 @@ fn main() {
     generator.subschema_for::<graphrag::AnswerWithCommunitiesResult>();
     generator.subschema_for::<viewport::ViewportResult>();
     generator.subschema_for::<viewport::SetSelectionResult>();
+    generator.subschema_for::<viewport::MaterializeGraphResult>();
     generator.subschema_for::<sql::ExecuteSqlResult>();
 
     // The schemars 0.8 default puts named schemas under `#/definitions/<Ident>`.

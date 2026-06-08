@@ -35,6 +35,14 @@ fn schema_verbs() {
     snap!("list_edge_types_result", schema::ListEdgeTypesResult);
     snap!("describe_field_params", schema::DescribeFieldParams);
     snap!("describe_field_result", schema::DescribeFieldResult);
+    snap!(
+        "describe_vertex_type_params",
+        schema::DescribeVertexTypeParams
+    );
+    snap!(
+        "describe_vertex_type_result",
+        schema::DescribeVertexTypeResult
+    );
 }
 
 #[test]
@@ -45,6 +53,8 @@ fn discovery_verbs() {
     snap!("find_neighbors_result", discovery::FindNeighborsResult);
     snap!("find_path_params", discovery::FindPathParams);
     snap!("find_path_result", discovery::FindPathResult);
+    snap!("get_vertex_params", discovery::GetVertexParams);
+    snap!("get_vertex_result", discovery::GetVertexResult);
 }
 
 #[test]
@@ -77,6 +87,8 @@ fn viewport_verbs() {
     snap!("viewport_result", viewport::ViewportResult);
     snap!("set_selection_params", viewport::SetSelectionParams);
     snap!("set_selection_result", viewport::SetSelectionResult);
+    snap!("materialize_graph_params", viewport::MaterializeGraphParams);
+    snap!("materialize_graph_result", viewport::MaterializeGraphResult);
 }
 
 #[test]

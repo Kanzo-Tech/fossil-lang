@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/graph",
-  "version": "0.1.0",
+  "version": "0.3.0-alpha.1",
   "description": "In-process TS binding for the fossil-graph verb surface. Runs verb→SQL in WASM (fossil-graph-wasm) and delegates execution to a host-provided DuckDB-WASM query callback (e.g. keasy's Mosaic coordinator). The larger-than-RAM query layer for @fossil-lang/viewer.",
   "license": "Apache-2.0",
   "repository": {

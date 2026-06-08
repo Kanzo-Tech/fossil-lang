@@ -1,4 +1,4 @@
-//! The 14 verbs of the fossil-graph surface.
+//! The 17 verbs of the fossil-graph surface.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed
@@ -29,11 +29,13 @@ pub enum Operation {
     ListVertexTypes(schema::ListVertexTypesParams),
     ListEdgeTypes(schema::ListEdgeTypesParams),
     DescribeField(schema::DescribeFieldParams),
+    DescribeVertexType(schema::DescribeVertexTypeParams),
 
     // Discovery — semantic / structural lookups.
     SearchByLabel(discovery::SearchByLabelParams),
     FindNeighbors(discovery::FindNeighborsParams),
     FindPath(discovery::FindPathParams),
+    GetVertex(discovery::GetVertexParams),
 
     // Aggregation — bounded constant-memory queries.
     Aggregate(aggregate::AggregateParams),
@@ -49,6 +51,7 @@ pub enum Operation {
     // morton-sorted vertex Parquet so bbox + LIMIT = predicate pushdown).
     Viewport(viewport::ViewportParams),
     SetSelection(viewport::SetSelectionParams),
+    MaterializeGraph(viewport::MaterializeGraphParams),
 
     // Escape hatch — text2sql lives here. Bindings MAY hide this verb behind
     // a permission flag (keasy proxy disables it for participant users).
@@ -65,9 +68,11 @@ impl Operation {
             Self::ListVertexTypes(_) => "list_vertex_types",
             Self::ListEdgeTypes(_) => "list_edge_types",
             Self::DescribeField(_) => "describe_field",
+            Self::DescribeVertexType(_) => "describe_vertex_type",
             Self::SearchByLabel(_) => "search_by_label",
             Self::FindNeighbors(_) => "find_neighbors",
             Self::FindPath(_) => "find_path",
+            Self::GetVertex(_) => "get_vertex",
             Self::Aggregate(_) => "aggregate",
             Self::Histogram(_) => "histogram",
             Self::TopK(_) => "top_k",
@@ -75,6 +80,7 @@ impl Operation {
             Self::AnswerWithCommunities(_) => "answer_with_communities",
             Self::Viewport(_) => "viewport",
             Self::SetSelection(_) => "set_selection",
+            Self::MaterializeGraph(_) => "materialize_graph",
             Self::ExecuteSql(_) => "execute_sql",
         }
     }

@@ -87,3 +87,35 @@ pub enum FieldRole {
     Dimension,
     Measure,
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// describe_vertex_type — batched per-type field stats + roles (one SQL query).
+// ──────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DescribeVertexTypeParams {
+    pub vertex_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DescribeVertexTypeResult {
+    /// Total row count of the vertex table (`COUNT(*)`), the denominator role
+    /// inference uses for the cardinality test.
+    pub count: u64,
+    /// Every user-facing field (reserved columns filtered), in manifest order,
+    /// with authoritative role + cardinality. One batched query computes all of
+    /// it — the single source for what keasy used to derive client-side.
+    pub fields: Vec<FieldStat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FieldStat {
+    pub name: String,
+    /// `GraphAr` data-type spelling (`string`, `int64`, `double`, …).
+    pub datatype: String,
+    /// Distinct value count (`COUNT(DISTINCT field)`).
+    pub distinct: u64,
+    /// Authoritative chart-axis role.
+    pub role: FieldRole,
+}

@@ -6,8 +6,29 @@
 //! - `find_neighbors` walks the `GraphAr` edge tables breadth-first up to
 //!   `depth`. Bounded by `limit` so a hub vertex doesn't explode the result.
 //! - `find_path` returns the shortest path (BFS over reachable edges).
+//! - `get_vertex` fetches one vertex's user-facing properties by subject IRI —
+//!   the member-safe single-entity read (no `execute_sql` escape hatch needed).
 
 use serde::{Deserialize, Serialize};
+
+// ──────────────────────────────────────────────────────────────────────────
+// get_vertex
+// ──────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GetVertexParams {
+    pub vertex_type: String,
+    /// The vertex's `subject` IRI (unique across the graph).
+    pub subject: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct GetVertexResult {
+    /// The matched vertex's user-facing property columns (reserved columns
+    /// filtered) as a JSON object; `null` when no vertex has that subject.
+    pub vertex: Option<serde_json::Value>,
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // search_by_label

@@ -51,8 +51,8 @@ check — run it before any commit that touches a compiler-core crate.
 - **`RETURNING.md` ritual:** before stepping away from the project for >1 week, write/update
   `RETURNING.md` (gitignored, local-only) describing current state, what's broken, next 3 steps,
   what NOT to do because tried-it. Read on return before any code change. Mitigates P-SOLO-2.
-- **Walking-skeleton invariant** (post-Phase 1): at no point should `fossil compile examples/hello.fossil`
-  regress. A refactor that breaks the e2e demo for >3 days is reverted and broken into smaller steps.
+- **Walking-skeleton invariant** (post-Phase 1): at no point should `fossil run examples/hello.fossil --dest <tmp>`
+  regress (it must produce a valid GraphAr dataset — 5 `Person` vertices). A refactor that breaks the e2e demo for >3 days is reverted and broken into smaller steps.
 
 ## Stack Pins
 
@@ -88,7 +88,7 @@ crates/
   fossil-runtime/          DuckDB native execution    [NATIVE-ONLY]
   fossil-ide-db/           symbol indexes
   fossil-ide/              hover, completion, goto-def
-  fossil-cli/              `fossil compile/check/run` [NATIVE-ONLY]
+  fossil-cli/              `fossil run/check/catalog/providers` [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilPlayground API + tokenize export per ADR-0030)
 

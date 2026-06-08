@@ -31,8 +31,8 @@ pub use kind::OutputDescriptorKind;
 // The ShEx decode now lives in the neutral `fossil-shex` crate (shared with the
 // input descriptor). Re-exported here so this crate's public API is unchanged.
 pub use fossil_shex::{
-    Cardinality, OneOfRejection, ResolvedConstraint, ShExDescriptor, ShExLoweringError,
-    ShapeBinding, SuggestionSeed, generate_split_suggestion,
+    Cardinality, ConstraintValue, OneOfRejection, ResolvedConstraint, ShExDescriptor,
+    ShExLoweringError, ShapeBinding, SuggestionSeed, generate_split_suggestion,
 };
 pub use system_ext::SystemWithDescriptors;
 

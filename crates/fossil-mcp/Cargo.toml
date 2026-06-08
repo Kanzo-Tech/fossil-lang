@@ -1,0 +1,38 @@
+[package]
+name = "fossil-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "MCP server exposing the fossil-graph verb surface over native DuckDB."
+
+[lib]
+name = "fossil_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fossil-mcp"
+path = "src/main.rs"
+
+[dependencies]
+fossil-graph = { path = "../fossil-graph" }
+fossil-runtime = { path = "../fossil-runtime" }
+fossil-resolver = { path = "../fossil-resolver" }
+duckdb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+secrecy = { workspace = true }
+rmcp = { workspace = true }
+tokio = { workspace = true }
+# schemars 1.x — the version rmcp's `#[tool]` macro generates against (the
+# workspace pins 0.8 for fossil-graph; the two coexist, and we only cross the
+# boundary via serde_json, never JsonSchema, so the mismatch is inert).
+schemars = "1"
+
+[dev-dependencies]
+fossil-sinks = { path = "../fossil-sinks" }
+
+[lints]
+workspace = true

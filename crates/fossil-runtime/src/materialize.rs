@@ -160,7 +160,7 @@ where
 /// lives in exactly one place ([`ResolvedPath::create_secret_sql`]).
 ///
 /// The secret is scoped to the path's URL, so installing one per connection
-/// lets a single job span distinct cloud accounts with no collision — DuckDB
+/// lets a single job span distinct cloud accounts with no collision — `DuckDB`
 /// applies each by longest-prefix scope match.
 ///
 /// # Errors

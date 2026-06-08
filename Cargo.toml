@@ -8,8 +8,8 @@ edition = "2024"
 rust-version = "1.90"
 license = "Apache-2.0 OR MIT"
 authors = ["Angel Iglesias <angel.iglesias@kanzo.tech>"]
-repository = "https://github.com/<org>/fossil"
-homepage = "https://github.com/<org>/fossil"
+repository = "https://github.com/Kanzo-Tech/fossil-lang"
+homepage = "https://github.com/Kanzo-Tech/fossil-lang"
 description = "Fossil — a typed compiler for RDF graph construction"
 
 [workspace.dependencies]
@@ -134,6 +134,13 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["e
 # round-trip through the keasy config layer without a version mismatch.
 secrecy = { version = "0.10", features = ["serde"] }
 
+# `rmcp` — the official Rust MCP SDK. `fossil-mcp` exposes the verb surface as
+# MCP tools over stdio (server) and keasy invokes it as a subprocess (the host
+# uses the client side). Native-only (spawns a child + DuckDB); never WASM.
+rmcp = { version = "0.16", features = ["server", "macros", "transport-io"] }
+# Async runtime for the MCP server (rmcp is tokio-based).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+
 # === Dev / testing ===
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
@@ -158,6 +165,11 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# Length/structure style lints the codebase has deliberately not adopted: many
+# compiler functions are long-by-design (one linear pass), and the first-doc-
+# paragraph rule would force reflowing summaries across the whole tree.
+too_many_lines = "allow"
+too_long_first_doc_paragraph = "allow"
 
 [profile.release]
 lto = "thin"
