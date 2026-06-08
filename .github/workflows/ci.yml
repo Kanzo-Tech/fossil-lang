@@ -73,18 +73,11 @@ jobs:
         with:
           toolchain: "1.90"
           target: wasm32-unknown-unknown
-      - name: cargo check --target wasm32-unknown-unknown
-        run: |
-          cargo check --target wasm32-unknown-unknown \
-            -p fossil-base \
-            -p fossil-syntax \
-            -p fossil-hir \
-            -p fossil-mir \
-            -p fossil-codegen \
-            -p fossil-sinks \
-            -p fossil-ide \
-            -p fossil-ide-db \
-            -p fossil-wasm
+      # The wasm-safe crate set is DERIVED from the cdylib dependency closure by
+      # `cargo xtask wasm-check` (crates/xtask) — no hand-maintained `-p …` list
+      # to drift out of sync (it had: ci.yml listed 9, the .cargo alias 6).
+      - name: cargo xtask wasm-check
+        run: cargo xtask wasm-check
       - name: cargo build --release for fossil-wasm (smoke)
         run: cargo build --target wasm32-unknown-unknown --release -p fossil-wasm
 

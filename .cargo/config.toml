@@ -7,8 +7,11 @@ rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
 
 # Cargo aliases — type less, do more
 [alias]
-# WASM check shortcut: matches CI exactly
-wasm-check = "check --target wasm32-unknown-unknown -p fossil-base -p fossil-syntax -p fossil-hir -p fossil-mir -p fossil-codegen -p fossil-wasm"
+# Repository automation entrypoint.
+xtask = "run -q --package xtask --"
+# WASM check: the crate set is DERIVED from the cdylib dependency closure by xtask
+# (no hand-maintained `-p …` list to drift). CI runs the same command.
+wasm-check = "run -q --package xtask -- wasm-check"
 # WASM build for the playground shim
 wasm-build = "build --target wasm32-unknown-unknown --release -p fossil-wasm"
 # Lint everything the way CI does
