@@ -1,62 +1,51 @@
 /**
- * PLAY-07 E2E gate — the Compiled SQL panel reveals on toggle + tracks the
- * live mapping (debounced 200 ms).
+ * PLAY-07 E2E gate — the Compiled SQL panel surfaces live DuckDB codegen and
+ * tracks the live mapping (debounced 200 ms).
  *
- * Per 09-CONTEXT.md locked decision:
- *   - Collapsed by default (toolbar toggle "Show compiled SQL" reveals).
- *   - Live update: 200 ms debounce after the last keystroke; SQL panel
- *     reflects the new compile result within the budget (RESEARCH.md
- *     suggests a 500 ms full-budget so we add a generous safety margin
- *     here — first-paint compile time on cold DuckDB-WASM init is
- *     irrelevant since this panel reads from the Salsa-memoised path).
- *   - The `hello` example compiles to a DuckDB CREATE OR REPLACE TABLE
- *     + read_csv_auto SELECT (per CODEGEN-LOWERING-01 fix in 09-01); we
- *     assert both substrings to confirm the panel surfaces real codegen
- *     output, not a placeholder.
+ * v2 layout note: in the post-Phase-14 playground the compiled SQL is NO
+ * longer a toolbar toggle ("Show compiled SQL" button). It is a right-panel
+ * TAB ("Compiled SQL", sibling of "Output"). Activating the tab mounts the
+ * `data-testid="compiled-sql-panel"` view and arms the debounced recompile
+ * effect (which is a no-op while the tab is inactive). We load the
+ * hyphen-free `hello` example so the emitted SQL is deterministic
+ * (`CREATE VIEW hello AS … read_csv_auto(…)`) — the landing default
+ * `hello-no-csvw` trips the `derive_view_name` hyphen bug (see helpers §3).
  */
 import { expect, test } from '@playwright/test';
 
-test('PLAY-07: clicking Show compiled SQL reveals DuckDB SQL for the current mapping', async ({
+import { gotoPlayground, loadHelloExample } from './helpers';
+
+test('PLAY-07: the Compiled SQL tab reveals DuckDB SQL for the current mapping', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 20_000 });
-  // Wait for the editor mount gate (matches landing-run.spec.ts pattern).
-  await expect(page.getByText('Loading editor…')).toHaveCount(0, {
-    timeout: 15_000,
-  });
+  await gotoPlayground(page);
+  await loadHelloExample(page);
 
-  // Toggle the panel open (collapsed by default per CONTEXT.md).
-  await page
-    .getByRole('button', { name: /show compiled sql/i })
-    .click();
+  // Activate the right-panel Compiled SQL tab (arms the recompile effect).
+  await page.getByRole('tab', { name: 'Compiled SQL' }).click();
   const panel = page.getByTestId('compiled-sql-panel');
   await expect(panel).toBeVisible();
 
-  // The hello example compiles to DuckDB SQL containing `CREATE VIEW hello AS`
-  // + `read_csv_auto(...)` + a `COPY (...) TO 'output.parquet'` block. With
-  // CODEGEN-LOWERING-01 closed (09-01 Task 1), the emitted SQL references the
-  // view name `hello` rather than the source binding `users`. Generous
-  // timeout — the debounced compile fires within 200 ms of mount.
+  // The hello example compiles to a DuckDB CREATE VIEW over read_csv_auto.
+  // Generous timeout — the debounced compile fires within 200 ms of the
+  // tab activation.
   await expect(panel).toContainText(/CREATE VIEW\s+hello/i, { timeout: 5_000 });
   await expect(panel).toContainText(/read_csv_auto/i, { timeout: 2_000 });
 
-  // The toolbar toggle accessible name flips on activation.
-  await expect(
-    page.getByRole('button', { name: /hide compiled sql/i }),
-  ).toBeVisible();
+  // The tab is now the selected one in its tablist.
+  await expect(page.getByRole('tab', { name: 'Compiled SQL' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
 });
 
 test('PLAY-07: Compiled SQL panel updates within 1s after a mapping edit', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 20_000 });
-  await expect(page.getByText('Loading editor…')).toHaveCount(0, {
-    timeout: 15_000,
-  });
+  await gotoPlayground(page);
+  await loadHelloExample(page);
 
-  await page.getByRole('button', { name: /show compiled sql/i }).click();
+  await page.getByRole('tab', { name: 'Compiled SQL' }).click();
   const panel = page.getByTestId('compiled-sql-panel');
   await expect(panel).toBeVisible();
   // Let the initial debounced compile populate so we have a baseline.
@@ -65,15 +54,10 @@ test('PLAY-07: Compiled SQL panel updates within 1s after a mapping edit', async
   expect(baseline.length).toBeGreaterThan(0);
 
   // Focus the editor and type into the existing content. The exact caret
-  // position depends on where the `.click()` lands (Playwright's default
-  // is the element's geometric centre, which for the multi-line editor
-  // ends up mid-comment-block). We don't control the position precisely —
-  // and we don't need to: the goal is to assert the panel UPDATES on a
-  // keystroke (vs staying frozen at the initial-mount snapshot). The
-  // gate is "panel still holds non-empty SQL content" — even if the
-  // typed character lands inside a comment, the debounced recompile must
-  // produce SOME output (a successful re-compile OR the compile-error
-  // placeholder; both are valid "the effect fired" signals).
+  // position depends on where the `.click()` lands (Playwright's default is
+  // the element's geometric centre); we don't control it precisely and don't
+  // need to. The gate is "the debounced recompile fired" — a successful
+  // re-compile OR the compile-error placeholder, both non-empty.
   await page.locator('.cm-editor .cm-content').first().click();
   await page.keyboard.type(' ');
 
@@ -81,9 +65,5 @@ test('PLAY-07: Compiled SQL panel updates within 1s after a mapping edit', async
   await page.waitForTimeout(1_000);
   const updated = (await panel.textContent()) ?? '';
   expect(updated.length).toBeGreaterThan(0);
-  // The compile path either returns SQL (CREATE VIEW / SELECT / COPY) OR
-  // the compile-error placeholder. Both prove the debounced useEffect fired
-  // after our keystroke; an empty string would prove a regression in the
-  // recompile path.
   expect(updated).toMatch(/CREATE VIEW|SELECT|COPY|compile error/i);
 });

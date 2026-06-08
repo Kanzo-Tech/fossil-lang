@@ -53,8 +53,12 @@ jobs:
       - name: Install Playwright browsers (chromium only — CI saves time)
         run: pnpm --filter @fossil-lang/landing exec playwright install --with-deps chromium
 
+      # Functional E2E only — the visual-baselines matrix is owned by the
+      # dedicated visual-regression.yml workflow (golden screenshots + the
+      # `pnpm bless-baselines` human-inspect flow). Running it here too would
+      # duplicate the Linux-renderer-fragile gate inside the functional gate.
       - name: Run Playwright E2E (landing + multi-host + a11y + offline)
-        run: pnpm --filter @fossil-lang/landing test:e2e
+        run: pnpm --filter @fossil-lang/landing test:e2e:functional
         env:
           CI: '1'
 
