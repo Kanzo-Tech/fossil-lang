@@ -1,28 +1,21 @@
 //! Workspace-level walking-skeleton e2e integration test.
 //!
-//! Phase 1 success criterion #1 (ROADMAP.md): "`fossil compile
-//! examples/hello.fossil` produces `output.parquet` + `manifest.yaml` on disk
-//! with content readable by both native `DuckDB` and `DuckDB-WASM`."
+//! The canonical gate (ROADMAP.md sequencing rule #6): `fossil run
+//! examples/hello.fossil --dest <tmp>` produces a valid `GraphAr` dataset
+//! end-to-end through every compiler+runtime crate. The output descriptor is
+//! program-resident (synthesised from the typed mapping — no `--shape`).
 //!
-//! Plan 01-07's `cli_integration.rs` covers the existence + row-count half of
-//! that criterion. This test goes deeper — it asserts the **content** of the
-//! produced parquet matches `01-RESEARCH.md` Example 3 verbatim (5 triples
-//! with specific subject IRIs, the constant `https://example.org/name`
-//! predicate, and the five names from `examples/users.csv`). It is the
-//! strongest form of the walking-skeleton invariant: any regression that
-//! silently changes the produced triples (wrong template substitution, swapped
-//! subject/object columns, broken IRI prefix expansion, off-by-one row drop)
-//! is caught here before it can land.
+//! This test goes deeper than mere existence — it asserts the **content** of
+//! the produced `vertex/Person.parquet` matches the mapping verbatim (5 Person
+//! vertices with the expanded subject IRIs `https://example.org/user/{1..5}`
+//! and the five names from `examples/users.csv` on the `name` property column).
+//! It is the strongest form of the walking-skeleton invariant: any regression
+//! that silently changes the produced graph (wrong template substitution,
+//! dropped property, broken IRI prefix expansion, off-by-one row drop) is
+//! caught here before it can land.
 //!
-//! Plan 01-10 closing test. Lives in `fossil-cli/tests/` (option 2 from
-//! plan 01-10 `<interfaces>` — colocated with the existing CLI integration
-//! tests rather than a new top-level `tests/` crate, keeping the 15-crate
-//! workspace count locked per ADR-0002). Once this test passes, every
-//! subsequent commit must keep it green per the walking-skeleton invariant
-//! (CLAUDE.md "Hard Rules" + ROADMAP.md sequencing rule #6).
-//!
-//! The DuckDB-WASM half of SC #1 ("readable by ... DuckDB-WASM") is a Phase 7
-//! PLAY-02 deliverable — DuckDB-WASM is not in the Phase 1 dep tree.
+//! Once this test passes, every subsequent commit must keep it green per the
+//! walking-skeleton invariant (CLAUDE.md "Hard Rules" + ROADMAP.md rule #6).
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -31,8 +24,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 /// Locate the repo root from `CARGO_MANIFEST_DIR` (= `.../crates/fossil-cli`).
-/// Walks up two levels. Mirrors the pattern in `cli_integration.rs` so the two
-/// test files have identical filesystem-rooting semantics.
+/// Walks up two levels.
 fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
@@ -44,10 +36,8 @@ fn repo_root() -> PathBuf {
 
 /// Build the `fossil` binary once per test process via `cargo build`.
 /// Memoised through `OnceLock` so a future second test in this file does not
-/// pay the build cost. Mirrors `cli_integration.rs::fossil_binary` — the two
-/// test binaries are separate processes so they each pay the build once, but
-/// Cargo's `--quiet` no-op rebuild is cheap when the binary is already
-/// up-to-date from the sibling test run.
+/// pay the build cost. Cargo's `--quiet` no-op rebuild is cheap when the binary
+/// is already up-to-date from a sibling test run.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| {
@@ -69,8 +59,8 @@ fn fossil_binary() -> &'static PathBuf {
 
 /// Materialise a fresh per-test working directory containing
 /// `examples/hello.fossil` + `examples/users.csv`. Distinct test-name prefix
-/// so concurrent runs against `cli_integration.rs` do not stomp on each
-/// other's `output.parquet` / `manifest.yaml` in `std::env::temp_dir()`.
+/// so concurrent test runs do not stomp on each other's artefacts in
+/// `std::env::temp_dir()`.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
     let tmp = std::env::temp_dir().join(format!("fossil-walking-skeleton-{test_name}"));
@@ -90,67 +80,64 @@ fn fresh_workdir(test_name: &str) -> PathBuf {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // E2E test with three logical assertion blocks: file existence, parquet content, manifest content. Splitting hurts readability more than it helps.
-fn walking_skeleton_compile_writes_5_triples_with_expected_content() {
+#[allow(clippy::too_many_lines)] // E2E test with three logical assertion blocks: artefact existence, manifest shape, parquet content. Splitting hurts readability more than it helps.
+fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
     let bin = fossil_binary();
     let workdir = fresh_workdir("content");
+    let dest = workdir.join("graph");
+    let dest_url = format!("file://{}", dest.display());
 
-    // 1. Run `fossil compile examples/hello.fossil` in the isolated workdir.
+    // 1. Run `fossil run examples/hello.fossil --dest <tmp>` in the isolated
+    //    workdir — the canonical gate, GraphAr W0b output.
     let output = Command::new(bin)
-        .args(["compile", "examples/hello.fossil"])
+        .args(["run", "examples/hello.fossil", "--dest", &dest_url])
         .current_dir(&workdir)
         .output()
-        .expect("spawn fossil compile");
+        .expect("spawn fossil run");
     assert!(
         output.status.success(),
-        "fossil compile exited {}: stdout={} stderr={}",
+        "fossil run exited {}: stdout={} stderr={}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
 
-    let parquet = workdir.join("output.parquet");
-    let manifest = workdir.join("manifest.yaml");
+    // The `Person` vertex type name is derived from the mapping's shape IRI
+    // (`User : ex:Person` → local name `Person`), not the mapping name.
+    let parquet = dest.join("vertex/Person.parquet");
+    let manifest = dest.join("vertex/Person.vertex.yml");
     assert!(
         parquet.exists(),
-        "output.parquet missing at {}",
+        "vertex/Person.parquet missing at {}",
         parquet.display()
     );
     assert!(
         manifest.exists(),
-        "manifest.yaml missing at {}",
+        "vertex/Person.vertex.yml missing at {}",
         manifest.display()
     );
 
-    // 2. Manifest shape sanity — the honest programmatic GraphAr v1.0.0 manifest
-    //    for the schemaless flat-triple output (`fossil_codegen::flat_triple_manifest`).
-    //    It conforms to the spec (`version: gar/v1`) and describes the actual
-    //    `output.parquet` columns as a single `_triples` vertex type — no
-    //    hand-templated YAML claiming columns the SQL never emits.
-    let manifest_text = std::fs::read_to_string(&manifest).expect("read manifest.yaml");
+    // 2. Manifest shape sanity — the GraphAr v1 vertex manifest declares the W0b
+    //    column shape (`dense_id` + layout placeholders) plus the `name`
+    //    property derived from the typed mapping.
+    let manifest_text = std::fs::read_to_string(&manifest).expect("read vertex.yml");
     assert!(
         manifest_text.contains("version: gar/v1"),
         "manifest missing GraphAr v1 version anchor; got:\n{manifest_text}",
     );
-    assert!(
-        manifest_text.contains("type: _triples"),
-        "manifest missing _triples vertex type; got:\n{manifest_text}",
-    );
-    for col in ["subject", "predicate", "object"] {
+    for col in ["dense_id", "subject", "name"] {
         assert!(
-            manifest_text.contains(col),
+            manifest_text.contains(&format!("name: {col}")),
             "manifest missing `{col}` column; got:\n{manifest_text}",
         );
     }
 
-    // 3. Parquet content — RESEARCH.md Example 3 verbatim. Open via DuckDB
-    //    native (the WASM half is Phase 7 PLAY-02). Build the path as a
-    //    Display so platform-specific separators round-trip through the SQL
-    //    string literal.
+    // 3. Parquet content. Open via DuckDB native. Build the path as a Display so
+    //    platform-specific separators round-trip through the SQL string literal.
     let conn = duckdb::Connection::open_in_memory().expect("open in-memory duckdb");
-    let parquet_path = parquet.display().to_string();
+    let parquet_path = parquet.display().to_string().replace('\'', "''");
 
-    // 3a. Row count == 5 (one per row of users.csv).
+    // 3a. Row count == 5 (one Person per row of users.csv).
     let count: i64 = conn
         .query_row(
             &format!("SELECT COUNT(*) FROM read_parquet('{parquet_path}')"),
@@ -158,32 +145,10 @@ fn walking_skeleton_compile_writes_5_triples_with_expected_content() {
             |row| row.get(0),
         )
         .expect("query parquet row count");
-    assert_eq!(count, 5, "expected 5 triples, got {count}");
+    assert_eq!(count, 5, "expected 5 Person vertices, got {count}");
 
-    // 3b. Predicate column is the constant IRI from `ex:name` after prefix
-    //     expansion. `ex:` is bound to `<https://example.org/>` in
-    //     `examples/hello.fossil`, so `ex:name` expands to
-    //     `https://example.org/name`.
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT DISTINCT predicate FROM read_parquet('{parquet_path}')"
-        ))
-        .expect("prepare distinct predicate query");
-    let predicates: Vec<String> = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .expect("run distinct predicate query")
-        .map(|r| r.expect("read predicate row"))
-        .collect();
-    assert_eq!(
-        predicates,
-        vec!["https://example.org/name".to_string()],
-        "predicate column should be the single constant IRI ex:name",
-    );
-
-    // 3c. Subject column matches the IRI template
-    //     `${ex:}user/${.id}` = `https://example.org/user/{1..5}`. Order by
-    //     subject string so the assertion is deterministic regardless of
-    //     parquet row-group ordering.
+    // 3b. Subject column matches the IRI template `${ex:}user/${.id}` =
+    //     `https://example.org/user/{1..5}`. Order by subject for determinism.
     let mut stmt = conn
         .prepare(&format!(
             "SELECT subject FROM read_parquet('{parquet_path}') ORDER BY subject"
@@ -206,20 +171,20 @@ fn walking_skeleton_compile_writes_5_triples_with_expected_content() {
         "subjects should be the 5 expanded user IRIs",
     );
 
-    // 3d. Object column matches the `.name` field of users.csv. Order by
-    //     object alphabetically so Alice..Eve is the expected sequence.
+    // 3c. The `name` property column matches the `.name` field of users.csv.
+    //     Order by name alphabetically so Alice..Eve is the expected sequence.
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT object FROM read_parquet('{parquet_path}') ORDER BY object"
+            "SELECT name FROM read_parquet('{parquet_path}') ORDER BY name"
         ))
-        .expect("prepare ordered object query");
-    let objects: Vec<String> = stmt
+        .expect("prepare ordered name query");
+    let names: Vec<String> = stmt
         .query_map([], |row| row.get::<_, String>(0))
-        .expect("run ordered object query")
-        .map(|r| r.expect("read object row"))
+        .expect("run ordered name query")
+        .map(|r| r.expect("read name row"))
         .collect();
     assert_eq!(
-        objects,
+        names,
         vec![
             "Alice".to_string(),
             "Bob".to_string(),
@@ -227,6 +192,6 @@ fn walking_skeleton_compile_writes_5_triples_with_expected_content() {
             "Dave".to_string(),
             "Eve".to_string(),
         ],
-        "objects should be the 5 names from users.csv",
+        "name property should carry the 5 names from users.csv",
     );
 }

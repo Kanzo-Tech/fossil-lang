@@ -1,0 +1,45 @@
+[package]
+name = "fossil-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Native orchestration surface — compile + run + catalog + check + refs + providers. The fossil binaries are thin shells over this."
+
+[lints]
+workspace = true
+
+[dependencies]
+# Compiler core + IR + codegen.
+fossil-base     = { path = "../fossil-base" }
+fossil-hir      = { path = "../fossil-hir" }
+fossil-mir      = { path = "../fossil-mir" }
+fossil-codegen  = { path = "../fossil-codegen" }
+fossil-registry = { path = "../fossil-registry" }
+# Descriptors (input forward-propagation + output shape).
+fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Native runtime + sinks + the RDF source provider + cloud-path resolver.
+fossil-runtime      = { path = "../fossil-runtime" }
+fossil-sinks        = { path = "../fossil-sinks" }
+fossil-resolver     = { path = "../fossil-resolver" }
+fossil-provider-rdf = { path = "../fossil-provider-rdf" }
+# The `RunStatus` / `SourceRefInfo` / `ProviderInfo` / `CatalogInput` wire types
+# the engine produces (one source of truth; keasy reuses them).
+fossil-run-status = { path = "../fossil-run-status" }
+
+duckdb   = { workspace = true }
+regex    = { workspace = true }
+smol_str = { workspace = true }
+serde    = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# Credentials never ride argv/env — kept off Debug via SecretString.
+secrecy  = { workspace = true }
+# Error surface (no `fancy`/`derive` — the binary owns rustc-style rendering).
+miette   = { workspace = true }
+tracing  = { workspace = true }
+
+[dev-dependencies]
+secrecy = { workspace = true }

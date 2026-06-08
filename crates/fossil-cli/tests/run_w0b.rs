@@ -1,15 +1,18 @@
-//! `fossil run --dest <url> --shape <file>` W0b path integration test.
+// The embedded `.fossil` fixtures use template syntax (`${ex:}…/${.id}`) that
+// clippy mistakes for format args in a plain string literal — they are not.
+#![allow(clippy::literal_string_with_formatting_args)]
+
+//! `fossil run --dest <url>` W0b path integration test.
 //!
-//! Drives the canonical `examples/hello.fossil` + `packages/examples/src/hello/hello.shex`
-//! through the new W0b writer + materializer (commit chain
-//! `34dcd57..a41b97a` + bridge `6392bb7`). Asserts the resulting
-//! `GraphAr` layout matches the W0b column shape (`dense_id` /
-//! `subject` / `x` / `y` / `cluster_id` on vertices) and the
-//! `--output-json` switch emits a parseable status object on stdout.
+//! Drives the canonical `examples/hello.fossil` through the W0b writer +
+//! materializer. The output descriptor is program-resident (synthesised from
+//! the typed mapping — no `--shape`), so the run produces the W0b column shape
+//! (`dense_id` / `subject` / `x` / `y` / `cluster_id` on vertices) from the
+//! program alone, and the `--output-json` switch emits a parseable status
+//! object on stdout.
 //!
 //! The `DuckDB` bundled-build cost (~75-85s cold) is incurred once and
-//! amortised across the two test cases here + the existing
-//! `run_summary.rs` walking-skeleton check.
+//! amortised across the test cases here.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -40,7 +43,7 @@ fn fossil_binary() -> &'static PathBuf {
     })
 }
 
-/// Per-test workdir with the canonical hello.fossil + hello.csv + hello.shex.
+/// Per-test workdir with the canonical hello.fossil + users.csv.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
     let tmp = std::env::temp_dir().join(format!("fossil-cli-w0b-{test_name}"));
@@ -52,18 +55,13 @@ fn fresh_workdir(test_name: &str) -> PathBuf {
         std::fs::copy(root.join("examples").join(f), tmp.join("examples").join(f))
             .unwrap_or_else(|e| panic!("copy {f}: {e}"));
     }
-    // ShEx target lives under packages/examples/src/hello/.
-    std::fs::copy(
-        root.join("packages/examples/src/hello/hello.shex"),
-        tmp.join("hello.shex"),
-    )
-    .expect("copy hello.shex");
     tmp
 }
 
 /// Acceptance: the W0b path produces `GraphAr` Parquet + YAML manifests
 /// under --dest, with the W0b vertex column shape declared in the
-/// vertex.yml manifest.
+/// vertex.yml manifest. The vertex type `Person` is derived from the mapping's
+/// shape IRI (`ex:Person`) — no `--shape` needed.
 #[test]
 fn run_w0b_writes_graph_ar_under_dest() {
     let bin = fossil_binary();
@@ -72,14 +70,7 @@ fn run_w0b_writes_graph_ar_under_dest() {
     let dest_url = format!("file://{}", dest.display());
 
     let output = Command::new(bin)
-        .args([
-            "run",
-            "examples/hello.fossil",
-            "--shape",
-            "hello.shex",
-            "--dest",
-            &dest_url,
-        ])
+        .args(["run", "examples/hello.fossil", "--dest", &dest_url])
         .current_dir(&workdir)
         .output()
         .expect("spawn fossil run");
@@ -158,8 +149,6 @@ fn run_w0b_output_json_is_parseable() {
         .args([
             "run",
             "examples/hello.fossil",
-            "--shape",
-            "hello.shex",
             "--dest",
             &dest_url,
             "--output-json",
@@ -228,11 +217,11 @@ fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 /// Slice 8 end-to-end: a TWO-mapping program with NO `--shape`. The synthesised
-/// (AcceptAll) descriptor must (a) materialise BOTH vertex types and (b) turn
+/// (`AcceptAll`) descriptor must (a) materialise BOTH vertex types and (b) turn
 /// `Order.ex:placedBy = ${ex:}person/${.user_id}` into a cross-type edge to the
 /// `Person` mapping (same subject-template skeleton `${ex:}person/${.id}`), whose
 /// CSR Parquet joins the order subjects to the person subjects. Proves Phase B
-/// edge synthesis (8a) + multi-mapping merge/materialisation (8b) on real DuckDB.
+/// edge synthesis (8a) + multi-mapping merge/materialisation (8b) on real `DuckDB`.
 #[test]
 fn run_no_shape_writes_cross_type_edge_from_two_mappings() {
     let bin = fossil_binary();
@@ -360,18 +349,18 @@ Order : ex:Order from orders
     );
 }
 
-/// End-to-end cloud write (W0 subprocess slices 1+2): pipe DuckDB cloud-config
-/// on stdin (`--creds-stdin`), write GraphAr to an `s3://` destination, and
+/// End-to-end cloud write (W0 subprocess slices 1+2): pipe `DuckDB` cloud-config
+/// on stdin (`--creds-stdin`), write `GraphAr` to an `s3://` destination, and
 /// prove the round-trip — the `--output-json` `count` is computed by reading the
 /// just-written *cloud* Parquet back, so a successful `count == 5` exercises the
 /// full creds-stdin → SET dance → cloud COPY → cloud read path.
 ///
-/// Env-gated: skips unless an S3-compatible endpoint is configured (a MinIO /
-/// LocalStack fixture), so the hermetic suite stays runnable everywhere. Set:
-///   FOSSIL_TEST_S3_ENDPOINT  e.g. `localhost:9000`
-///   FOSSIL_TEST_S3_BUCKET    a writable bucket
-///   FOSSIL_TEST_S3_KEY / FOSSIL_TEST_S3_SECRET
-///   FOSSIL_TEST_S3_REGION    (optional, default `us-east-1`)
+/// Env-gated: skips unless an S3-compatible endpoint is configured (a `MinIO` /
+/// `LocalStack` fixture), so the hermetic suite stays runnable everywhere. Set:
+///   `FOSSIL_TEST_S3_ENDPOINT`  e.g. `localhost:9000`
+///   `FOSSIL_TEST_S3_BUCKET`    a writable bucket
+///   `FOSSIL_TEST_S3_KEY` / `FOSSIL_TEST_S3_SECRET`
+///   `FOSSIL_TEST_S3_REGION`    (optional, default `us-east-1`)
 #[test]
 fn run_w0b_writes_to_cloud_dest_with_stdin_creds() {
     let Ok(endpoint) = std::env::var("FOSSIL_TEST_S3_ENDPOINT") else {
@@ -406,8 +395,6 @@ fn run_w0b_writes_to_cloud_dest_with_stdin_creds() {
         .args([
             "run",
             "examples/hello.fossil",
-            "--shape",
-            "hello.shex",
             "--dest",
             &dest_url,
             "--output-json",
@@ -448,7 +435,7 @@ fn run_w0b_writes_to_cloud_dest_with_stdin_creds() {
 
 /// `fossil catalog` (#5-grande slice 2): a `CatalogInput` on stdin materialises
 /// the DCAT-AP graph through the same W0b writer. Proves the catalog vertex/edge
-/// shape lands on real DuckDB and the cross-type edges (Catalog→Dataset, etc.)
+/// shape lands on real `DuckDB` and the cross-type edges (Catalog→Dataset, etc.)
 /// resolve against the vertex subject URNs.
 #[test]
 fn catalog_subcommand_materialises_dcat_ap_graph() {

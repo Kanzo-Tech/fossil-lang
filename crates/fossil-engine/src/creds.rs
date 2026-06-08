@@ -4,7 +4,7 @@
 //! world-readable on a shared host via `ps` / `/proc/<pid>/{cmdline,environ}`.
 //! A multi-tenant host (keasy) instead pipes a single JSON document on **stdin**
 //! carrying a provider-typed cloud secret for the destination and for each
-//! `@conn` source. The CLI installs each via a scoped `DuckDB` `CREATE SECRET`
+//! `@conn` source. The engine installs each via a scoped `DuckDB` `CREATE SECRET`
 //! (scope = the dest / connection URL) — one mechanism for reading sources and
 //! writing the destination, with no global last-writer-wins collision across
 //! distinct cloud accounts.
@@ -24,12 +24,6 @@
 //! provider→parameter projection; fossil renders the statement. Values are
 //! [`SecretString`] so a stray `Debug` never leaks them.
 
-// `main.rs` declares this private `mod creds;`. Items `main` reads must be
-// `pub(crate)` to satisfy `unreachable_pub`; in a private module that trips the
-// inverse `redundant_pub_crate` nursery lint, which we silence here (same combo
-// as `fossil-syntax::parser::expr`). The visibility IS correct.
-#![allow(clippy::redundant_pub_crate)]
-
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -40,26 +34,26 @@ use serde::Deserialize;
 /// The `--creds-stdin` payload. Defaults to empty so an absent `dest`/
 /// `connections` section is the no-cloud-secret case (local / public URLs).
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct RunCreds {
+pub struct RunCreds {
     /// Cloud secret for the `--dest` URL (addressed out-of-band on the CLI).
     #[serde(default)]
-    pub(crate) dest: EndpointCreds,
+    pub dest: EndpointCreds,
     /// Per-`@conn-name` source resolution: base URL + read secret. A `.fossil`
     /// source `io.csv("@sales/x.csv")` resolves against `connections` —
     /// `<url>/x.csv` for the read, `secret` installed scoped to `<url>`.
     #[serde(default)]
-    pub(crate) connections: HashMap<String, ConnectionCreds>,
+    pub connections: HashMap<String, ConnectionCreds>,
 }
 
 /// The `fossil catalog` stdin payload: the DCAT-AP catalog data + the dest
 /// cloud secret (the catalog graph's destination is addressed on the CLI).
 #[derive(Debug, Deserialize)]
-pub(crate) struct CatalogRequest {
+pub struct CatalogRequest {
     /// Governance values + dataset structure the DCAT-AP graph is built from.
-    pub(crate) catalog: fossil_run_status::CatalogInput,
+    pub catalog: fossil_run_status::CatalogInput,
     /// Cloud secret for the `--dest` URL; `None` ⇒ local / public dest.
     #[serde(default)]
-    pub(crate) dest: EndpointCreds,
+    pub dest: EndpointCreds,
 }
 
 impl CatalogRequest {
@@ -69,7 +63,7 @@ impl CatalogRequest {
     ///
     /// Returns the stringified `io`/`serde_json` error if stdin is unreadable
     /// or the payload is not a [`CatalogRequest`].
-    pub(crate) fn from_stdin() -> Result<Self, String> {
+    pub fn from_stdin() -> Result<Self, String> {
         let mut buf = String::new();
         std::io::stdin()
             .read_to_string(&mut buf)
@@ -80,36 +74,36 @@ impl CatalogRequest {
 
 /// The cloud secret for an endpoint whose URL is supplied separately (the dest).
 #[derive(Debug, Default, Deserialize)]
-pub(crate) struct EndpointCreds {
+pub struct EndpointCreds {
     /// Provider-typed secret; `None` ⇒ local / public dest.
     #[serde(default)]
-    pub(crate) secret: Option<SecretSpec>,
+    pub secret: Option<SecretSpec>,
 }
 
 /// A resolvable `@conn-name` source: its base URL plus the read secret.
 #[derive(Debug, Deserialize)]
-pub(crate) struct ConnectionCreds {
+pub struct ConnectionCreds {
     /// Base URL the connection name resolves to (e.g. `s3://bucket/prefix`).
-    pub(crate) url: String,
+    pub url: String,
     /// Provider-typed secret; `None` ⇒ public-URL source.
     #[serde(default)]
-    pub(crate) secret: Option<SecretSpec>,
+    pub secret: Option<SecretSpec>,
 }
 
 /// A `DuckDB` `CREATE SECRET` spec: provider type + parameters.
 #[derive(Debug, Deserialize)]
-pub(crate) struct SecretSpec {
+pub struct SecretSpec {
     /// `DuckDB` secret provider — `"s3"`, `"azure"`, `"gcs"`.
     #[serde(rename = "type")]
-    pub(crate) secret_type: String,
+    pub secret_type: String,
     /// `CREATE SECRET` parameter names (`KEY_ID`, `SECRET`, `REGION`, …) → values.
     #[serde(default)]
-    pub(crate) params: HashMap<String, SecretString>,
+    pub params: HashMap<String, SecretString>,
 }
 
 impl SecretSpec {
     /// Convert to a [`CloudSecret`] the resolver renders into `CREATE SECRET`.
-    pub(crate) fn to_cloud_secret(&self) -> CloudSecret {
+    pub fn to_cloud_secret(&self) -> CloudSecret {
         CloudSecret::new(self.secret_type.clone(), self.params.clone())
     }
 }
@@ -123,7 +117,7 @@ impl RunCreds {
     ///
     /// Returns the stringified `io`/`serde_json` error if stdin is unreadable
     /// or the payload is not the documented shape.
-    pub(crate) fn from_stdin() -> Result<Self, String> {
+    pub fn from_stdin() -> Result<Self, String> {
         let mut buf = String::new();
         std::io::stdin()
             .read_to_string(&mut buf)
@@ -137,7 +131,7 @@ impl RunCreds {
     /// # Errors
     ///
     /// Returns the stringified `serde_json` error on a malformed payload.
-    pub(crate) fn from_json(s: &str) -> Result<Self, String> {
+    pub fn from_json(s: &str) -> Result<Self, String> {
         if s.trim().is_empty() {
             return Ok(Self::default());
         }

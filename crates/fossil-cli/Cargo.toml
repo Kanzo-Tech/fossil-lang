@@ -6,65 +6,39 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "`fossil compile/check/run` command-line interface"
+description = "`fossil compile/check/run` command-line interface — a thin shell over fossil-engine"
 
 [lints]
 workspace = true
 
 [dependencies]
-fossil-base    = { path = "../fossil-base" }
-fossil-hir     = { path = "../fossil-hir" }
-fossil-codegen = { path = "../fossil-codegen" }
-fossil-registry = { path = "../fossil-registry" }
-fossil-runtime = { path = "../fossil-runtime" }
-# The RDF source provider — registered into the runtime so `io.rdf(...)` sources
-# materialise. Lives outside the core; the CLI is the wiring edge.
-fossil-provider-rdf = { path = "../fossil-provider-rdf" }
-# Plan 03-03 Task 2 step 5: CLI host wires `SystemWithDescriptors` impl on
-# its concrete `CliSystem` struct. Default `output_descriptor_kind()`
-# returns AcceptAll for Phase 3 v0.1; Phase 6 LSP-01 will override here.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# Phase 13 INPUT-01 / plan 13-04a: native CLI pre-introspects io.csv("...")
-# source bindings via DuckDB DESCRIBE + registers InferredDescriptor on the
-# CliSystem ahead of typecheck. ADR-0037.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-smol_str = { workspace = true }
-regex = { workspace = true }
-
-# W0b/6: the `fossil run --dest <url>` path uses the W0b writer +
-# materializer instead of the legacy flat-COPY chain.
-fossil-sinks    = { path = "../fossil-sinks" }
-fossil-resolver = { path = "../fossil-resolver" }
-fossil-mir      = { path = "../fossil-mir" }
-# Status JSON on stdout (via --output-json) for keasy subprocess consumption —
-# the typed `RunStatus` contract (one source of truth; keasy reuses it).
-serde_json = { workspace = true }
+# All orchestration lives in the engine; the binary is a thin CLI + presentation shell.
+fossil-engine = { path = "../fossil-engine" }
+# `Diagnostic` / `Severity` for rustc-style `check` rendering, and the `RunStatus`
+# / `SourceRefInfo` / `ProviderInfo` wire types the commands format to stdout.
+fossil-base       = { path = "../fossil-base" }
 fossil-run-status = { path = "../fossil-run-status" }
-# `--creds-stdin`: deserialize the cloud-config payload (DuckDB SET keys →
-# SecretString values) a multi-tenant host pipes in. serde derive for the wire
-# structs; secrecy keeps the values off Debug/argv/env.
-serde = { workspace = true, features = ["derive"] }
-secrecy = { workspace = true }
+# Machine JSON on stdout (`--output-json`) for keasy subprocess consumption.
+serde_json = { workspace = true }
 
 clap = { workspace = true }
-# `fancy` ONLY in this crate (not workspace-level): pulls native-only
-# `terminal_size` + `supports-color` which would break the WASM gate per
-# RESEARCH.md Pitfall 3. fossil-cli is NATIVE-ONLY (cfg-tripwire below), so
-# the leak is contained.
+# `fancy` ONLY in this crate: pulls native-only `terminal_size` + `supports-color`.
+# fossil-cli is NATIVE-ONLY (cfg-tripwire), so the leak is contained.
 miette = { workspace = true, features = ["fancy", "derive"] }
-# CLI-02: the `CheckError` / `CheckReport` reports derive `thiserror::Error`
-# alongside `miette::Diagnostic` (the recommended miette derive shape).
+# CLI-02: `CheckError` / `CheckReport` derive `thiserror::Error` alongside `miette::Diagnostic`.
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-# CLI-03 result summary: `fossil run` reads the produced Parquet back through a
-# DuckDB count query (RESEARCH Pitfall 6). Cargo dedupes against
-# fossil-runtime's bundled DuckDB so the build cost is incurred once.
-duckdb = { workspace = true }
 
 [dev-dependencies]
-# Integration tests read produced parquet + snapshot rendered diagnostics.
+# Integration tests drive the `fossil` binary as a black box, then read the
+# produced parquet back + assert registry invariants. These crates are TEST-ONLY
+# (the binary itself links none of them — they live in fossil-engine now).
 insta = { workspace = true }
+duckdb = { workspace = true }
+fossil-registry     = { path = "../fossil-registry" }
+fossil-runtime      = { path = "../fossil-runtime" }
+fossil-provider-rdf = { path = "../fossil-provider-rdf" }
 
 [[bin]]
 name = "fossil"

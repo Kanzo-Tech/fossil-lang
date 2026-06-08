@@ -119,3 +119,28 @@ fn check_broken_field_renders_span_and_help_and_exits_nonzero() {
     );
     insta::assert_snapshot!(normalised);
 }
+
+/// Happy path: `fossil check` on the canonical clean program exits zero and
+/// prints `ok`. Runs from the repo root so the `io.csv("examples/users.csv")`
+/// binding resolves for pre-introspection; `check` writes nothing.
+#[test]
+fn check_hello_exits_zero_and_prints_ok() {
+    let bin = fossil_binary();
+    let output = Command::new(bin)
+        .args(["check", "examples/hello.fossil"])
+        .current_dir(repo_root())
+        .output()
+        .expect("spawn fossil check");
+
+    assert!(
+        output.status.success(),
+        "fossil check on a clean program must exit zero; stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("ok"),
+        "fossil check should print 'ok'; got: {}",
+        String::from_utf8_lossy(&output.stdout),
+    );
+}
