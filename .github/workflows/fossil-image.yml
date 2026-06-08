@@ -1,0 +1,79 @@
+name: fossil-image
+
+# Publishes the OCI image carrying the native `fossil` + `fossil-mcp` binaries to
+# GHCR. Tag-triggered (the build bundles DuckDB, ~3-5 min) so it runs on releases,
+# NOT every push — `ci.yml` already proves the binaries compile on PRs. The image
+# tag mirrors the npm release tag, so one rmlext release = npm packages + this image
+# at the SAME version. keasy consumes it via `COPY --from` (see keasy/server/Dockerfile).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (e.g. 0.3.0-rc.1)'
+        required: true
+
+concurrency:
+  group: fossil-image-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write       # push to GHCR
+  id-token: write       # keyless provenance attestation (OIDC)
+  attestations: write   # actions/attest-build-provenance
+
+env:
+  IMAGE: ghcr.io/kanzo-tech/fossil
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # From a `vX.Y.Z` tag, semver patterns emit `X.Y.Z` + `X.Y`. The raw tag
+          # covers the workflow_dispatch (ad-hoc rc) path. `latest` only on a stable
+          # (non-prerelease) release.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=sha,prefix=sha-
+          flavor: |
+            latest=auto
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64   # the VPS is amd64; add arm64 only when a consumer needs it
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the published image
+        run: docker run --rm ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} --help
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
