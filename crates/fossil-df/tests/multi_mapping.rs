@@ -42,7 +42,7 @@ async fn same_type_from_two_sources_merges_into_one_table() {
     // Exactly ONE Person vertex table (not one per mapping).
     assert_eq!(graph.vertices.len(), 1, "the two Person mappings merge into one table");
     let person = &graph.vertices[0];
-    assert_eq!(person.type_name, "Person");
+    assert_eq!(person.label, "Person");
 
     // 5 distinct subjects (person/3 deduped across the two sources), dense 0..4.
     let total: usize = person.batches.iter().map(|b| b.num_rows()).sum();

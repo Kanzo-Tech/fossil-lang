@@ -44,15 +44,21 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
         .expect("execute_graph runs both phases");
 
     // Two vertex types (source order: Person, Order); one edge (placedBy).
-    let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.type_name.as_str()).collect();
+    let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
     assert_eq!(vtypes, ["Person", "Order"]);
 
     assert_eq!(graph.edges.len(), 1, "only placedBy resolves to an edge");
     let edge = &graph.edges[0];
-    assert_eq!(edge.edge_type, "placedBy");
+    assert_eq!(edge.label, "placedBy");
     assert_eq!(edge.src_type, "Order");
     assert_eq!(edge.dst_type, "Person");
-    assert_eq!(edge.rdf_uri.as_deref(), Some("https://example.org/placedBy"));
+    // The edge's predicate IRI lives in the canonical schema, not the data table.
+    let schema_edge = graph.schema.edge("placedBy").expect("placedBy in schema");
+    assert_eq!(schema_edge.iri.as_deref(), Some("https://example.org/placedBy"));
+    assert_eq!(
+        (schema_edge.source.as_str(), schema_edge.destination.as_str()),
+        ("Order", "Person"),
+    );
 
     // dense ids (sorted by subject IRI):
     //   Person: person/1=0, person/2=1, person/3=2

@@ -32,10 +32,12 @@ use datafusion::datasource::MemTable;
 use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
 use datafusion::prelude::{col, lit, CsvReadOptions, DataFrame, SessionContext};
 use fossil_base::SourceFile;
-use fossil_hir::shapes::{
-    default_xsd_string, inner_primitive, primitive_to_graphar, primitive_to_xsd,
+use fossil_graph_schema::{
+    Cardinality, DataType as ScalarType, EdgeType as GraphEdge, GraphSchema, NodeType,
+    Property as NodeProp,
 };
-use fossil_hir::{def_map::def_map, MappingLoc};
+use fossil_hir::shapes::{inner_primitive, primitive_to_graphar, primitive_to_xsd};
+use fossil_hir::{def_map::def_map, MappingLoc, Primitive};
 use fossil_mir::{lower_to_mir_pg, Expr, Op, VProp};
 use fossil_sinks::manifest::{
     data_type_name, AdjList, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
@@ -43,28 +45,32 @@ use fossil_sinks::manifest::{
 };
 use fossil_run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus, WIRE_VERSION};
 
-/// The materialised GraphAr graph for a program: every vertex table and every
-/// edge table (CSR + CSC), all in memory as `RecordBatch`es. The WASM/keasy
-/// layer turns these into Parquet (`parquet-wasm`) + the manifests and uploads
-/// them by signed PUT (design §C4/§E). The manifests + `RunStatus` are a later
-/// increment.
+/// The materialised graph for a program: the canonical [`GraphSchema`] (the
+/// single source of all type/predicate/cardinality metadata) plus the relation
+/// data — vertex tables and edge tables (CSR + CSC) as in-memory `RecordBatch`es.
+///
+/// This is the universal substrate made concrete: **relations + a graph-schema**
+/// (`fossil-universal-substrate-architecture.md`). The GraphAr view (manifests +
+/// `RunStatus` + Parquet) is materialized *from* this; the data carriers hold no
+/// metadata of their own — it all lives in [`schema`](Self::schema).
 #[derive(Debug)]
 pub struct GraphArData {
+    pub schema: GraphSchema,
     pub vertices: Vec<VertexTable>,
     pub edges: Vec<EdgeTable>,
 }
 
-/// A materialised GraphAr edge type: the `<src>_<edge>_<dst>` adjacency in both
-/// orientations — `by_source` (CSR, `ORDER BY src_dense, dst_dense`) and
-/// `by_target` (CSC, `ORDER BY dst_dense, src_dense`). Both carry the same two
-/// `u32` columns (`src_dense`, `dst_dense`); only the row order differs (writer
-/// contract, design §A1).
+/// A materialised edge's adjacency data in both orientations — `by_source` (CSR,
+/// `ORDER BY src_dense, dst_dense`) and `by_target` (CSC). Both carry the same
+/// two `u32` columns (`src_dense`, `dst_dense`); only the row order differs. The
+/// `(src_type, label, dst_type)` triple identifies the edge in the schema and
+/// names its `<src>_<label>_<dst>` directory; all other metadata is in the
+/// [`GraphSchema`].
 #[derive(Debug)]
 pub struct EdgeTable {
-    pub edge_type: String,
+    pub label: String,
     pub src_type: String,
     pub dst_type: String,
-    pub rdf_uri: Option<String>,
     pub by_source: Vec<RecordBatch>,
     pub by_target: Vec<RecordBatch>,
 }
@@ -108,67 +114,64 @@ pub async fn execute_graph<'db>(
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
         let prepared = prepare_vertex(ctx, db, mapping).await?;
-        match groups.iter_mut().find(|(t, _)| *t == prepared.type_name) {
+        match groups.iter_mut().find(|(t, _)| *t == prepared.node.label) {
             Some((_, group)) => group.push(prepared),
-            None => groups.push((prepared.type_name.clone(), vec![prepared])),
+            None => groups.push((prepared.node.label.clone(), vec![prepared])),
         }
     }
     let mut vertices = Vec::with_capacity(groups.len());
+    let mut nodes = Vec::with_capacity(groups.len());
     for (_, group) in groups {
-        vertices.push(finalize_vertex(ctx, group).await?);
+        let (table, node) = finalize_vertex(ctx, group).await?;
+        vertices.push(table);
+        nodes.push(node);
     }
 
     // Phase 2: edges join the in-memory vertex tables (no Parquet re-read).
     let mut edges = Vec::new();
+    let mut edge_types = Vec::new();
     for &mapping in &mappings {
-        edges.extend(execute_edges(ctx, db, mapping).await?);
+        for (table, edge_type) in execute_edges(ctx, db, mapping).await? {
+            edges.push(table);
+            edge_types.push(edge_type);
+        }
     }
 
-    Ok(GraphArData { vertices, edges })
+    let schema = GraphSchema {
+        nodes,
+        edges: edge_types,
+    };
+    Ok(GraphArData {
+        schema,
+        vertices,
+        edges,
+    })
 }
 
-/// A materialised GraphAr vertex table: the `type_name`-named relation and its
+/// A materialised vertex relation: the `label`-named table and its
 /// `RecordBatch`es in the writer-W0b column shape (`dense_id`-prefixed). The
 /// batches are also registered in the executor's [`SessionContext`] under
-/// `type_name` so the edge phase joins them without re-reading Parquet.
+/// `label` so the edge phase joins them without re-reading Parquet. The node's
+/// type/property metadata lives in the [`GraphSchema`], keyed by this `label`.
 #[derive(Debug)]
 pub struct VertexTable {
-    pub type_name: String,
-    pub rdf_type: Option<String>,
-    /// The user property columns (predicate-mapped), in projection order. The
-    /// reserved columns (`dense_id`/`subject`/`x`/`y`/`cluster_id`) are NOT here
-    /// — they carry no predicate. Feeds the manifest property groups + the
-    /// `RunStatus` `ColumnStatus`es.
-    pub columns: Vec<VertexColumn>,
+    pub label: String,
     pub batches: Vec<RecordBatch>,
-}
-
-/// One user property column's output spec — the GraphAr `data_type` spelling +
-/// the RDF predicate/xsd the governance layer (DCAT) reads. Derived from the
-/// [`VProp`]'s canonical type via the shared `Primitive → {graphar, xsd}`
-/// authority (`fossil_hir::shapes`), identical to what the SQL engine emits.
-#[derive(Debug, Clone)]
-pub struct VertexColumn {
-    pub name: String,
-    pub data_type: String,
-    pub rdf_uri: Option<String>,
-    pub xsd_datatype: Option<String>,
 }
 
 /// A mapping's vertex projection before the dense-id barrier — the W0b columns
 /// (`subject` + props + `x`/`y`/`cluster_id`) as an un-collected [`DataFrame`],
-/// plus the metadata `finalize_vertex` needs. Several of these with the same
-/// `type_name` are UNIONed before dense ids are assigned (design §B4).
+/// plus the [`NodeType`] schema it contributes. Several of these with the same
+/// node `label` are UNIONed before dense ids are assigned (design §B4).
 struct PreparedVertex {
-    type_name: String,
-    rdf_type: Option<String>,
-    columns: Vec<VertexColumn>,
+    node: NodeType,
     dedup: bool,
     projected: DataFrame,
 }
 
-/// Materialise a single mapping's VERTEX on DataFusion and register it (the
-/// one-mapping convenience over [`prepare_vertex`] + [`finalize_vertex`]).
+/// Materialise a single mapping's VERTEX on DataFusion and register it — the
+/// one-mapping convenience over [`prepare_vertex`] + [`finalize_vertex`].
+/// Returns the table data plus the [`NodeType`] it contributes to the schema.
 ///
 /// # Errors
 /// Propagates DataFusion read/plan/execute errors.
@@ -176,7 +179,7 @@ pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-) -> datafusion::error::Result<VertexTable> {
+) -> datafusion::error::Result<(VertexTable, NodeType)> {
     let prepared = prepare_vertex(ctx, db, mapping).await?;
     finalize_vertex(ctx, vec![prepared]).await
 }
@@ -221,12 +224,14 @@ async fn prepare_vertex<'db>(
 
     let df = ctx.read_csv(uri.as_str(), csv_options()).await?;
     let projected = df.select(vertex_projection(render(&id), &props))?;
-    let columns = props.iter().map(|p| vertex_column(db, p)).collect();
+    let node = NodeType {
+        label: type_name,
+        iri: rdf_type,
+        properties: props.iter().map(|p| node_property(db, p)).collect(),
+    };
 
     Ok(PreparedVertex {
-        type_name,
-        rdf_type,
-        columns,
+        node,
         dedup,
         projected,
     })
@@ -237,17 +242,16 @@ async fn prepare_vertex<'db>(
 /// `subject` for a deterministic dense id (design §A1), `collect()`, prepend
 /// `dense_id`, and register the table once under its type name.
 ///
-/// The group's first member carries the canonical metadata (`rdf_type`,
-/// `columns`, `dedup`) — all mappings of one type share the same shape.
+/// Returns the materialised [`VertexTable`] plus the [`NodeType`] it contributes
+/// to the graph-schema — the group's first member carries the canonical schema
+/// (all mappings of one type share the same shape).
 async fn finalize_vertex(
     ctx: &SessionContext,
     group: Vec<PreparedVertex>,
-) -> datafusion::error::Result<VertexTable> {
+) -> datafusion::error::Result<(VertexTable, NodeType)> {
     let mut group = group.into_iter();
     let PreparedVertex {
-        type_name,
-        rdf_type,
-        columns,
+        node,
         dedup,
         projected,
     } = group.next().expect("a type group is never empty");
@@ -273,26 +277,31 @@ async fn finalize_vertex(
     };
 
     let batches = prepend_dense_id(sorted.collect().await?)?;
-    register_batches(ctx, &type_name, &batches)?;
-    Ok(VertexTable {
-        type_name,
-        rdf_type,
-        columns,
-        batches,
-    })
+    register_batches(ctx, &node.label, &batches)?;
+    Ok((
+        VertexTable {
+            label: node.label.clone(),
+            batches,
+        },
+        node,
+    ))
 }
 
-/// The output spec of one vertex property — its GraphAr `data_type` + RDF
-/// predicate/xsd, derived from the prop's canonical type exactly as the SQL
-/// engine derives `VertexProperty` (peel to a [`Primitive`], map to the graphar
-/// + xsd vocab; fall back to `string` when the type carries no primitive).
-fn vertex_column(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> VertexColumn {
-    let prim = inner_primitive(db, prop.ty);
-    VertexColumn {
+/// Build a schema [`Property`](NodeProp) for a vertex prop: peel its canonical
+/// type to a [`Primitive`] → the format-neutral [`ScalarType`] (the manifest/
+/// `RunStatus` derive graphar/xsd spellings from it); the predicate IRI + shape
+/// cardinality ride along. Falls back to `string` when the type carries no
+/// primitive (the legacy default).
+fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
+    NodeProp {
         name: prop.name.to_string(),
-        data_type: prim.map_or("string", primitive_to_graphar).to_string(),
-        rdf_uri: prop.rdf_uri.as_ref().map(ToString::to_string),
-        xsd_datatype: Some(prim.map_or_else(default_xsd_string, primitive_to_xsd)),
+        datatype: inner_primitive(db, prop.ty).map_or(ScalarType::String, primitive_to_scalar),
+        iri: prop.rdf_uri.as_ref().map(ToString::to_string),
+        cardinality: if prop.single_valued {
+            Cardinality::Single
+        } else {
+            Cardinality::Multi
+        },
     }
 }
 
@@ -349,13 +358,15 @@ fn register_batches(
     Ok(())
 }
 
-/// Resolve every [`Op::EmitEdge`] of one mapping into an [`EdgeTable`]. Reads
-/// the mapping's source once and joins it against the registered vertex tables.
+/// Resolve every [`Op::EmitEdge`] of one mapping into its adjacency data
+/// ([`EdgeTable`]) plus the [`EdgeType`](GraphEdge) it contributes to the
+/// schema. Reads the mapping's source once and joins it against the registered
+/// vertex tables.
 async fn execute_edges<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-) -> datafusion::error::Result<Vec<EdgeTable>> {
+) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     let ops = mir.ops(db);
 
@@ -376,22 +387,24 @@ async fn execute_edges<'db>(
             dst_type,
             src_id,
             dst_id,
+            single_valued,
             ..
         } = op
         {
-            out.push(
-                execute_edge(
-                    ctx,
-                    &uri,
-                    edge_type,
-                    rdf_uri.as_ref().map(ToString::to_string),
-                    src_type,
-                    dst_type,
-                    src_id,
-                    dst_id,
-                )
-                .await?,
-            );
+            let table =
+                execute_edge(ctx, &uri, edge_type, src_type, dst_type, src_id, dst_id).await?;
+            let edge_type = GraphEdge {
+                label: edge_type.to_string(),
+                iri: rdf_uri.as_ref().map(ToString::to_string),
+                source: src_type.to_string(),
+                destination: dst_type.to_string(),
+                cardinality: if *single_valued {
+                    Cardinality::Single
+                } else {
+                    Cardinality::Multi
+                },
+            };
+            out.push((table, edge_type));
         }
     }
     Ok(out)
@@ -406,8 +419,7 @@ async fn execute_edges<'db>(
 async fn execute_edge(
     ctx: &SessionContext,
     uri: &str,
-    edge_type: &str,
-    rdf_uri: Option<String>,
+    label: &str,
     src_type: &str,
     dst_type: &str,
     src_id: &Expr<'_>,
@@ -450,10 +462,9 @@ async fn execute_edge(
         .await?;
 
     Ok(EdgeTable {
-        edge_type: edge_type.to_string(),
+        label: label.to_string(),
         src_type: src_type.to_string(),
         dst_type: dst_type.to_string(),
-        rdf_uri,
         by_source,
         by_target,
     })
@@ -492,8 +503,8 @@ fn render(e: &Expr<'_>) -> DfExpr {
 // casing is preserved throughout.
 
 /// The `<src>_<label>_<dst>` adjacency directory name (writer convention).
-fn edge_dir_name(e: &EdgeTable) -> String {
-    format!("{}_{}_{}", e.src_type, e.edge_type, e.dst_type)
+fn edge_dir(src: &str, label: &str, dst: &str) -> String {
+    format!("{src}_{label}_{dst}")
 }
 
 /// Total rows across a set of batches — the `count` for the wire status.
@@ -502,25 +513,28 @@ fn count_rows(batches: &[RecordBatch]) -> i64 {
 }
 
 impl GraphArData {
-    /// Build the three GraphAr manifest YAMLs (design §C4 phase 3): the
-    /// top-level `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per
-    /// vertex type, and one `edge/<dir>/<dir>.edge.yml` per edge type. Reuses
-    /// the WASM-clean `fossil_sinks::manifest` structs.
+    /// Build the three GraphAr manifest YAMLs (design §C4 phase 3) — the GraphAr
+    /// *materializer*, a pure function of the [`GraphSchema`]: the top-level
+    /// `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per node type, and
+    /// one `edge/<dir>/<dir>.edge.yml` per edge type. Reuses the WASM-clean
+    /// `fossil_sinks::manifest` structs.
     ///
     /// # Errors
     /// Propagates `serde_yaml_ng` serialization errors (cannot fail for these
     /// plain structs, but the signature is honest).
     pub fn manifests(&self) -> Result<Vec<ManifestFile>, serde_yaml_ng::Error> {
         let vertex_paths: Vec<String> = self
-            .vertices
+            .schema
+            .nodes
             .iter()
-            .map(|v| format!("vertex/{}.vertex.yml", v.type_name))
+            .map(|n| format!("vertex/{}.vertex.yml", n.label))
             .collect();
         let edge_paths: Vec<String> = self
+            .schema
             .edges
             .iter()
             .map(|e| {
-                let dir = edge_dir_name(e);
+                let dir = edge_dir(&e.source, &e.label, &e.destination);
                 format!("edge/{dir}/{dir}.edge.yml")
             })
             .collect();
@@ -531,44 +545,40 @@ impl GraphArData {
             yaml: graph.to_yaml()?,
         }];
 
-        for (v, rel_path) in self.vertices.iter().zip(vertex_paths) {
+        for (node, rel_path) in self.schema.nodes.iter().zip(vertex_paths) {
             out.push(ManifestFile {
                 rel_path,
-                yaml: vertex_info(v).to_yaml()?,
+                yaml: vertex_info(node).to_yaml()?,
             });
         }
-        for (e, rel_path) in self.edges.iter().zip(edge_paths) {
+        for (edge, rel_path) in self.schema.edges.iter().zip(edge_paths) {
             out.push(ManifestFile {
                 rel_path,
-                yaml: edge_info(e).to_yaml()?,
+                yaml: edge_info(edge).to_yaml()?,
             });
         }
         Ok(out)
     }
 
     /// Build the [`RunStatus`] wire contract keasy consumes for DCAT (design
-    /// §A3/§E2). Counts come from the materialised batches (`num_rows()`); the
-    /// per-column `rdf_uri`/`xsd_datatype` ride from the vertex columns.
+    /// §A3/§E2) — the type/predicate metadata comes from the [`GraphSchema`], the
+    /// `count`s from the materialised batches (`num_rows()`).
     #[must_use]
     pub fn run_status(&self, dest: &str) -> RunStatus {
         let vertices = self
             .vertices
             .iter()
-            .map(|v| VertexStatus {
-                vertex_type: v.type_name.clone(),
-                rdf_type: v.rdf_type.clone(),
-                file: format!("vertex/{}.parquet", v.type_name),
-                count: Some(count_rows(&v.batches)),
-                columns: v
-                    .columns
-                    .iter()
-                    .map(|c| ColumnStatus {
-                        name: c.name.clone(),
-                        data_type: c.data_type.clone(),
-                        rdf_uri: c.rdf_uri.clone(),
-                        xsd_datatype: c.xsd_datatype.clone(),
-                    })
-                    .collect(),
+            .map(|v| {
+                let node = self.schema.node(&v.label);
+                VertexStatus {
+                    vertex_type: v.label.clone(),
+                    rdf_type: node.and_then(|n| n.iri.clone()),
+                    file: format!("vertex/{}.parquet", v.label),
+                    count: Some(count_rows(&v.batches)),
+                    columns: node
+                        .map(|n| n.properties.iter().map(column_status).collect())
+                        .unwrap_or_default(),
+                }
             })
             .collect();
 
@@ -576,9 +586,9 @@ impl GraphArData {
             .edges
             .iter()
             .map(|e| {
-                let dir = edge_dir_name(e);
+                let dir = edge_dir(&e.src_type, &e.label, &e.dst_type);
                 EdgeStatus {
-                    edge_type: e.edge_type.clone(),
+                    edge_type: e.label.clone(),
                     src_type: e.src_type.clone(),
                     dst_type: e.dst_type.clone(),
                     by_source: format!("edge/{dir}/by_source.parquet"),
@@ -597,12 +607,23 @@ impl GraphArData {
     }
 }
 
-/// The `VertexInfo` manifest for one materialised vertex table. Mirrors the
-/// writer's `build_vertex_manifest` (dense_id/subject/<props>/x/y/cluster_id),
-/// but with the **real** per-prop `data_type` the executor knows (the writer
-/// defaults caller props to `string`).
-fn vertex_info(v: &VertexTable) -> VertexInfo {
-    let mut properties = Vec::with_capacity(v.columns.len() + 5);
+/// A wire `ColumnStatus` for a schema property: the GraphAr `data_type` spelling
+/// with the RDF predicate/xsd the governance layer (DCAT) reads, derived from
+/// the format-neutral [`ScalarType`].
+fn column_status(p: &NodeProp) -> ColumnStatus {
+    ColumnStatus {
+        name: p.name.clone(),
+        data_type: graphar_spelling(p.datatype),
+        rdf_uri: p.iri.clone(),
+        xsd_datatype: Some(xsd_spelling(p.datatype)),
+    }
+}
+
+/// The `VertexInfo` manifest for one node type. Mirrors the writer's
+/// `build_vertex_manifest` (dense_id/subject/<props>/x/y/cluster_id), with the
+/// **real** per-prop `data_type` the schema carries.
+fn vertex_info(node: &NodeType) -> VertexInfo {
+    let mut properties = Vec::with_capacity(node.properties.len() + 5);
     properties.push(Property {
         name: "dense_id".to_string(),
         data_type: "uint32".to_string(),
@@ -615,10 +636,10 @@ fn vertex_info(v: &VertexTable) -> VertexInfo {
         is_primary: false,
         is_nullable: Some(false),
     });
-    for c in &v.columns {
+    for p in &node.properties {
         properties.push(Property {
-            name: c.name.clone(),
-            data_type: c.data_type.clone(),
+            name: p.name.clone(),
+            data_type: graphar_spelling(p.datatype),
             is_primary: false,
             is_nullable: None,
         });
@@ -639,32 +660,31 @@ fn vertex_info(v: &VertexTable) -> VertexInfo {
     });
 
     let mut info = VertexInfo::new(
-        v.type_name.clone(),
+        node.label.clone(),
         DEFAULT_CHUNK_SIZE,
-        format!("vertex/{}/", v.type_name),
+        format!("vertex/{}/", node.label),
         vec![PropertyGroup {
             file_type: "parquet".to_string(),
             properties,
         }],
     );
-    info.iri = v.rdf_type.clone().unwrap_or_default();
+    info.iri = node.iri.clone().unwrap_or_default();
     info
 }
 
-/// The `EdgeInfo` manifest for one materialised edge table. W0b edges carry no
-/// properties (only `src_dense`/`dst_dense`); both CSR + CSC adjacencies are
-/// ordered. Mirrors the writer's `build_edge_manifest`.
-fn edge_info(e: &EdgeTable) -> EdgeInfo {
+/// The `EdgeInfo` manifest for one edge type. W0b edges carry no properties
+/// (only `src_dense`/`dst_dense`); both CSR + CSC adjacencies are ordered.
+fn edge_info(edge: &GraphEdge) -> EdgeInfo {
     EdgeInfo {
-        src_type: e.src_type.clone(),
-        edge_type: e.edge_type.clone(),
-        iri: e.rdf_uri.clone().unwrap_or_default(),
-        dst_type: e.dst_type.clone(),
+        src_type: edge.source.clone(),
+        edge_type: edge.label.clone(),
+        iri: edge.iri.clone().unwrap_or_default(),
+        dst_type: edge.destination.clone(),
         chunk_size: DEFAULT_CHUNK_SIZE,
         src_chunk_size: DEFAULT_CHUNK_SIZE,
         dst_chunk_size: DEFAULT_CHUNK_SIZE,
         directed: true,
-        prefix: format!("edge/{}/", edge_dir_name(e)),
+        prefix: format!("edge/{}/", edge_dir(&edge.source, &edge.label, &edge.destination)),
         adj_lists: vec![
             AdjList {
                 ordered: true,
@@ -680,4 +700,46 @@ fn edge_info(e: &EdgeTable) -> EdgeInfo {
         property_groups: vec![],
         version: GRAPHAR_VERSION.to_string(),
     }
+}
+
+/// Adapt fossil's internal [`Primitive`] to the contract's [`ScalarType`] (1:1).
+fn primitive_to_scalar(p: Primitive) -> ScalarType {
+    match p {
+        Primitive::String => ScalarType::String,
+        Primitive::Integer => ScalarType::Integer,
+        Primitive::Float => ScalarType::Float,
+        Primitive::Bool => ScalarType::Bool,
+        Primitive::Date => ScalarType::Date,
+        Primitive::DateTime => ScalarType::DateTime,
+        Primitive::Time => ScalarType::Time,
+        Primitive::GYear => ScalarType::GYear,
+        Primitive::AnyURI => ScalarType::AnyUri,
+    }
+}
+
+/// Inverse of [`primitive_to_scalar`] — lets the GraphAr materializer reuse the
+/// `Primitive → {graphar, xsd}` spelling authority (`fossil_hir::shapes`) for a
+/// schema datatype, with no duplicate spelling tables.
+const fn scalar_to_primitive(s: ScalarType) -> Primitive {
+    match s {
+        ScalarType::String => Primitive::String,
+        ScalarType::Integer => Primitive::Integer,
+        ScalarType::Float => Primitive::Float,
+        ScalarType::Bool => Primitive::Bool,
+        ScalarType::Date => Primitive::Date,
+        ScalarType::DateTime => Primitive::DateTime,
+        ScalarType::Time => Primitive::Time,
+        ScalarType::GYear => Primitive::GYear,
+        ScalarType::AnyUri => Primitive::AnyURI,
+    }
+}
+
+/// The GraphAr `data_type` spelling (`string`/`int64`/…) of a schema datatype.
+fn graphar_spelling(s: ScalarType) -> String {
+    primitive_to_graphar(scalar_to_primitive(s)).to_string()
+}
+
+/// The xsd datatype IRI of a schema datatype.
+fn xsd_spelling(s: ScalarType) -> String {
+    primitive_to_xsd(scalar_to_primitive(s))
 }

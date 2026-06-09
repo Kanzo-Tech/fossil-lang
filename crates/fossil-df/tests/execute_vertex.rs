@@ -37,12 +37,15 @@ async fn execute_vertex_materialises_graphar_shape() {
         .expect("hello.fossil must contain one mapping");
 
     let ctx = SessionContext::new();
-    let vertex = fossil_df::execute_vertex(&ctx, &db, mapping)
+    let (vertex, node) = fossil_df::execute_vertex(&ctx, &db, mapping)
         .await
         .expect("execute_vertex runs the DataFusion plan");
 
-    assert_eq!(vertex.type_name, "Person");
-    assert_eq!(vertex.rdf_type.as_deref(), Some("https://example.org/Person"));
+    // The node's metadata is the graph-schema contract; the table holds the data.
+    assert_eq!(vertex.label, "Person");
+    assert_eq!(node.label, "Person");
+    assert_eq!(node.iri.as_deref(), Some("https://example.org/Person"));
+    assert_eq!(node.properties[0].name, "name");
 
     let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total, 3, "users.csv has 3 data rows");

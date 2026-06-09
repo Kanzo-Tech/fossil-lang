@@ -25,6 +25,9 @@ fossil-mir = { path = "../fossil-mir" }
 # only) — the backend reuses them instead of re-deriving the GraphAr layout.
 fossil-sinks = { path = "../fossil-sinks" }
 fossil-run-status = { path = "../fossil-run-status" }
+# The canonical graph-schema contract — the metadata fossil-df produces and the
+# manifest/RunStatus materialize from (the universal substrate's single source).
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 serde_yaml_ng = { workspace = true }
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
 # via the DataFrame/LogicalPlan API, not `ctx.sql()`), `parquet` (Parquet bytes

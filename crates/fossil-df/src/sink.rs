@@ -39,11 +39,11 @@ impl GraphArData {
     /// Filesystem or Parquet-encode failures, or manifest serialization.
     pub fn write_to_dir(&self, dest: &Path) -> Result<(), SinkError> {
         for v in &self.vertices {
-            let path = dest.join(format!("vertex/{}.parquet", v.type_name));
+            let path = dest.join(format!("vertex/{}.parquet", v.label));
             write_parquet(&path, &v.batches)?;
         }
         for e in &self.edges {
-            let dir = format!("edge/{}_{}_{}", e.src_type, e.edge_type, e.dst_type);
+            let dir = format!("edge/{}_{}_{}", e.src_type, e.label, e.dst_type);
             write_parquet(&dest.join(format!("{dir}/by_source.parquet")), &e.by_source)?;
             write_parquet(&dest.join(format!("{dir}/by_target.parquet")), &e.by_target)?;
         }

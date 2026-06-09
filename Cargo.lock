@@ -1863,6 +1863,7 @@ version = "0.1.0"
 dependencies = [
  "datafusion",
  "fossil-base",
+ "fossil-graph-schema",
  "fossil-hir",
  "fossil-mir",
  "fossil-run-status",
