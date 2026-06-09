@@ -216,7 +216,7 @@ async fn prepare_vertex<'db>(
         })
         .expect("lower_to_mir_pg always emits an EmitVertex");
 
-    let df = ctx.read_csv(uri.as_str(), CsvReadOptions::new()).await?;
+    let df = ctx.read_csv(uri.as_str(), csv_options()).await?;
     let projected = df.select(vertex_projection(render(&id), &props))?;
     let columns = props.iter().map(|p| vertex_column(db, p)).collect();
 
@@ -410,7 +410,7 @@ async fn execute_edge(
     src_id: &Expr<'_>,
     dst_id: &Expr<'_>,
 ) -> datafusion::error::Result<EdgeTable> {
-    let edge_src = ctx.read_csv(uri, CsvReadOptions::new()).await?.select(vec![
+    let edge_src = ctx.read_csv(uri, csv_options()).await?.select(vec![
         render(src_id).alias("src_iri"),
         render(dst_id).alias("dst_iri"),
     ])?;
@@ -454,6 +454,17 @@ async fn execute_edge(
         by_source,
         by_target,
     })
+}
+
+/// CSV read options matching the writer's whole-file schema inference (DuckDB
+/// `sample_size = -1`). DataFusion samples only the first ~1000 rows by default,
+/// which mis-types a column whose early values look numeric but later turn
+/// stringy (or vice-versa) — read every record so the inferred Arrow types (and
+/// thus the manifest/`RunStatus` `data_type`s) match the writer (design unknown
+/// #4). Trade-off: inference reads the file once before execution reads it
+/// again; acceptable for parity, revisit if it bites large remote sources.
+fn csv_options<'a>() -> CsvReadOptions<'a> {
+    CsvReadOptions::new().schema_infer_max_records(usize::MAX)
 }
 
 /// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Vertex-only covers
