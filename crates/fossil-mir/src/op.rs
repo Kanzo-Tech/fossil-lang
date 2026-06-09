@@ -129,7 +129,7 @@ pub enum Op<'db> {
     /// to a typed property-graph VERTEX. The property-graph-canonical model: one
     /// `EmitVertex` per shape carrying ALL its columns (map-only wide-row),
     /// instead of one `TripleEmit` per predicate + a triples→wide pivot. The
-    /// backend assigns the dense vertex id and materialises GraphAr; the PG model
+    /// backend assigns the dense vertex id and materialises `GraphAr`; the PG model
     /// lives here, not in triples. `id` is the subject IRI expression (typically a
     /// `Concat` template); `dedup` collapses duplicate ids (single-valued shape).
     EmitVertex {
@@ -191,7 +191,7 @@ pub struct AggSpec<'db> {
 ///
 /// The PG-canonical replacement for a per-predicate `TripleEmit`: a vertex's
 /// properties are carried together so the backend emits one wide row per source
-/// row. `ty` is fossil's canonical type — the backend derives the GraphAr/xsd
+/// row. `ty` is fossil's canonical type — the backend derives the `GraphAr`/xsd
 /// spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
 /// IRI the manifest/DCAT layer reads; `single_valued` (shape cardinality) drives
 /// duplicate collapse.
