@@ -1,0 +1,25 @@
+# DataFusion backend for the property-graph MIR (paso 3 — arranque vertex-only).
+# Nativo por ahora: default features (read_csv etc.); el zstd-C solo falla a
+# wasm32 — el recorte de features para wasm es un incremento posterior.
+[package]
+name = "fossil-df"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "DataFusion backend for the property-graph MIR (lower_to_mir_pg)"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+fossil-base = { path = "../fossil-base" }
+fossil-hir = { path = "../fossil-hir" }
+fossil-mir = { path = "../fossil-mir" }
+datafusion = "54"
+
+[dev-dependencies]
+tokio = { workspace = true }
