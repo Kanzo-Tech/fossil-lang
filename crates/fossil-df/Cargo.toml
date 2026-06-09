@@ -23,3 +23,5 @@ datafusion = "54"
 
 [dev-dependencies]
 tokio = { workspace = true }
+fossil-base = { path = "../fossil-base" }
+fossil-hir = { path = "../fossil-hir" }
