@@ -1035,6 +1035,13 @@ pub fn codegen_graph<'db>(db: &'db dyn fossil_base::Db, mir: MirGraph<'db>) -> S
                 rel_ref[idx] = Some(subquery(&body, idx));
                 qualifier[idx] = Some(step_alias(idx));
             }
+            // PG-canonical operators: lowered to the property-graph backend
+            // (DataFusion), NOT this legacy SQL codegen. The v0.1 lowering still
+            // emits the TripleEmit path, so these never reach this walk.
+            Op::EmitVertex { .. } | Op::EmitEdge { .. } => unreachable!(
+                "EmitVertex/EmitEdge are consumed by the property-graph backend, \
+                 not the legacy SQL codegen (TripleEmit path)"
+            ),
         }
     }
 

@@ -125,6 +125,38 @@ pub enum Op<'db> {
         graph: Option<SmolStr>,
     },
 
+    /// `EmitVertex(input, type_name, rdf_type?, id, dedup, props)` — project rows
+    /// to a typed property-graph VERTEX. The property-graph-canonical model: one
+    /// `EmitVertex` per shape carrying ALL its columns (map-only wide-row),
+    /// instead of one `TripleEmit` per predicate + a triples→wide pivot. The
+    /// backend assigns the dense vertex id and materialises GraphAr; the PG model
+    /// lives here, not in triples. `id` is the subject IRI expression (typically a
+    /// `Concat` template); `dedup` collapses duplicate ids (single-valued shape).
+    EmitVertex {
+        input: usize,
+        type_name: SmolStr,
+        rdf_type: Option<SmolStr>,
+        id: Expr<'db>,
+        dedup: bool,
+        props: Vec<VProp<'db>>,
+    },
+
+    /// `EmitEdge(input, edge_type, rdf_uri?, src_type, dst_type, src_id, dst_id,
+    /// single_valued)` — project rows to a property-graph EDGE. `src_id` / `dst_id`
+    /// are the endpoint subject IRIs; the backend resolves them to dense vertex ids
+    /// (join against the vertex tables) and emits the CSR/CSC adjacency files.
+    /// `single_valued` (shape cardinality) chooses one-edge-per-source vs keep-all.
+    EmitEdge {
+        input: usize,
+        edge_type: SmolStr,
+        rdf_uri: Option<SmolStr>,
+        src_type: SmolStr,
+        dst_type: SmolStr,
+        src_id: Expr<'db>,
+        dst_id: Expr<'db>,
+        single_valued: bool,
+    },
+
     /// `SinkOp(input, sink)` — terminal node; no operator may consume a `Sink`
     /// output (operator-algebra.md §2.12, typed-sink refinement).
     Sink { input: usize, sink: SinkRef },
@@ -153,6 +185,23 @@ pub struct AggSpec<'db> {
     pub agg_fn: AggFn,
     pub in_field: SmolStr,
     pub ty: Ty<'db>,
+}
+
+/// One property (column) of an [`Op::EmitVertex`] — `value AS name`, typed `ty`.
+///
+/// The PG-canonical replacement for a per-predicate `TripleEmit`: a vertex's
+/// properties are carried together so the backend emits one wide row per source
+/// row. `ty` is fossil's canonical type — the backend derives the GraphAr/xsd
+/// spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
+/// IRI the manifest/DCAT layer reads; `single_valued` (shape cardinality) drives
+/// duplicate collapse.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct VProp<'db> {
+    pub name: SmolStr,
+    pub value: Expr<'db>,
+    pub ty: Ty<'db>,
+    pub rdf_uri: Option<SmolStr>,
+    pub single_valued: bool,
 }
 
 /// Aggregation function (operator-algebra.md §2.9).

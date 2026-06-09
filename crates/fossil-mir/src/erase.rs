@@ -32,7 +32,7 @@
 use fossil_hir::{InferenceId, Ty, TyKind};
 
 use crate::graph::MirGraph;
-use crate::op::{AggSpec, Expr, Op};
+use crate::op::{AggSpec, Expr, Op, VProp};
 
 /// The interned erase sentinel — `TyKind::Unknown(InferenceId(u32::MAX))`.
 ///
@@ -133,6 +133,40 @@ fn erase_op<'db>(op: &Op<'db>, s: Ty<'db>) -> Op<'db> {
             object: erase_expr(object, s),
             graph: graph.clone(),
         },
+        Op::EmitVertex {
+            input,
+            type_name,
+            rdf_type,
+            id,
+            dedup,
+            props,
+        } => Op::EmitVertex {
+            input: *input,
+            type_name: type_name.clone(),
+            rdf_type: rdf_type.clone(),
+            id: erase_expr(id, s),
+            dedup: *dedup,
+            props: props.iter().map(|p| erase_vprop(p, s)).collect(),
+        },
+        Op::EmitEdge {
+            input,
+            edge_type,
+            rdf_uri,
+            src_type,
+            dst_type,
+            src_id,
+            dst_id,
+            single_valued,
+        } => Op::EmitEdge {
+            input: *input,
+            edge_type: edge_type.clone(),
+            rdf_uri: rdf_uri.clone(),
+            src_type: src_type.clone(),
+            dst_type: dst_type.clone(),
+            src_id: erase_expr(src_id, s),
+            dst_id: erase_expr(dst_id, s),
+            single_valued: *single_valued,
+        },
         Op::Sink { input, sink } => Op::Sink {
             input: *input,
             sink: *sink,
@@ -140,6 +174,18 @@ fn erase_op<'db>(op: &Op<'db>, s: Ty<'db>) -> Op<'db> {
         Op::Empty { schema } => Op::Empty {
             schema: schema.clone(),
         },
+    }
+}
+
+/// Erase the `ty` on a [`VProp`], preserving the name / predicate / cardinality
+/// and erasing the value expression's annotations.
+fn erase_vprop<'db>(p: &VProp<'db>, s: Ty<'db>) -> VProp<'db> {
+    VProp {
+        name: p.name.clone(),
+        value: erase_expr(&p.value, s),
+        ty: s,
+        rdf_uri: p.rdf_uri.clone(),
+        single_valued: p.single_valued,
     }
 }
 

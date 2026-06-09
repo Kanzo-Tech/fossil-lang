@@ -117,6 +117,8 @@ fn map_indices(ops: &mut [Op<'_>], f: impl Fn(usize) -> usize) {
             | Op::Aggregate { input, .. }
             | Op::Distinct { input, .. }
             | Op::TripleEmit { input, .. }
+            | Op::EmitVertex { input, .. }
+            | Op::EmitEdge { input, .. }
             | Op::Sink { input, .. } => *input = f(*input),
             Op::Join { left, right, .. } | Op::Union { left, right } => {
                 *left = f(*left);
@@ -177,6 +179,8 @@ fn redirect_consumers(ops: &mut [Op<'_>], from: usize, to: usize, except: usize)
             | Op::Aggregate { input, .. }
             | Op::Distinct { input, .. }
             | Op::TripleEmit { input, .. }
+            | Op::EmitVertex { input, .. }
+            | Op::EmitEdge { input, .. }
             | Op::Sink { input, .. } => {
                 if *input == from {
                     *input = to;
@@ -210,6 +214,8 @@ const fn references(op: &Op<'_>, node: usize) -> bool {
         | Op::Aggregate { input, .. }
         | Op::Distinct { input, .. }
         | Op::TripleEmit { input, .. }
+        | Op::EmitVertex { input, .. }
+        | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => *input == node,
         Op::Join { left, right, .. } | Op::Union { left, right } => *left == node || *right == node,
         Op::Source { .. } | Op::Empty { .. } => false,
