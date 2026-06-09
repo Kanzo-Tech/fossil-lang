@@ -11,9 +11,14 @@
 //! Column shape (writer-W0b contract, see design §A1):
 //! `dense_id(u32), subject(varchar IRI), <props…>, x(f32=0), y(f32=0), cluster_id(u32=0)`.
 //!
-//! Still TODO (next increments): the edge phase (`EmitEdge` → join vertex
-//! tables → CSR/CSC), the GraphAr manifests + `RunStatus`, the `Call` UDFs, and
-//! the wasm build (cut `arrow ipc_compression`/zstd).
+//! The crate compiles to `wasm32-unknown-unknown` (the whole executor runs in
+//! the browser, design §D). `zstd-sys` is an unavoidable C dep (datafusion 54
+//! hardcodes `arrow-ipc/zstd`), so the wasm build needs a wasm-capable clang —
+//! see the `datafusion` entry in `Cargo.toml`.
+//!
+//! Still TODO (next increments): the `Call`/`BinOp` UDFs (`ScalarUDF`),
+//! multi-valued (`single_valued = false`) cardinality, and the wasm-bindgen
+//! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
 
 use std::sync::Arc;
 
