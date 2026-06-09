@@ -271,6 +271,21 @@ pub fn lower_to_mir_pg<'db>(
     // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
     // IRI-template that resolves to another subject → edge; dangling template /
     // constant prefixed-name → neither (v0.1 — mirrors synthesize_sink_plan).
+    // (a) Type refinement: a FieldRef prop carries the source field's type
+    // (CSVW-refined when the source declares a `schema`; String otherwise — same
+    // as the legacy path, which types nothing). The backend derives the
+    // GraphAr/xsd spelling from `ty`. Cardinality stays `single_valued = true`
+    // here (the ShEx-descriptor refinement that would set multi-valued needs the
+    // descriptor wired into the lowering — a later increment).
+    let field_ty = |field: &str| -> Ty<'db> {
+        if let TyKind::Record(rec) = row_type.kind(db) {
+            if let Some(f) = rec.fields(db).iter().find(|f| f.name == field) {
+                return f.ty;
+            }
+        }
+        string_ty
+    };
+
     let mut props: Vec<VProp<'db>> = Vec::new();
     let mut edges: Vec<(SmolStr, SmolStr, SmolStr, Expr<'db>)> = Vec::new();
     for prop in body.properties(db) {
@@ -279,7 +294,14 @@ pub fn lower_to_mir_pg<'db>(
         };
         let pred_local = SmolStr::new(local_name(iri));
         match &prop.value {
-            HirExpr::FieldRef(_) | HirExpr::StringLit(_) => props.push(VProp {
+            HirExpr::FieldRef(field) => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
+                ty: field_ty(field.as_str()),
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            }),
+            HirExpr::StringLit(_) => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
                 ty: string_ty,
