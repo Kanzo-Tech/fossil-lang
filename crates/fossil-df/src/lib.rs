@@ -20,6 +20,9 @@
 //! multi-valued (`single_valued = false`) cardinality, and the wasm-bindgen
 //! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sink;
+
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, UInt32Array};

@@ -1,6 +1,7 @@
-# DataFusion backend for the property-graph MIR (paso 3 — arranque vertex-only).
-# Nativo por ahora: default features (read_csv etc.); el zstd-C solo falla a
-# wasm32 — el recorte de features para wasm es un incremento posterior.
+# DataFusion backend for the property-graph MIR: lowers `lower_to_mir_pg` to a
+# DataFusion plan and materialises the GraphAr graph (vertices + edges +
+# manifests + RunStatus). Compiles to wasm32 (browser executor); the native
+# Arrow→Parquet sink (`sink` module) is gated native-only.
 [package]
 name = "fossil-df"
 version.workspace = true
@@ -43,7 +44,15 @@ serde_yaml_ng = { workspace = true }
 # subcrates — deferred. The wasm CI job must install LLVM.
 datafusion = { version = "54", default-features = false }
 
+# Native-only: the Arrow→Parquet sink writes RecordBatches to the filesystem.
+# The browser path writes Parquet via parquet-wasm in JS, so these never reach
+# the wasm build (keeps it lean).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+parquet = { version = "58", default-features = false, features = ["arrow"] }
+thiserror = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
+tempfile = { workspace = true }
