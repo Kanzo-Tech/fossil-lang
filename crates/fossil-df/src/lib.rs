@@ -20,6 +20,8 @@
 //! multi-valued (`single_valued = false`) cardinality, and the wasm-bindgen
 //! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
 
+pub mod rdf;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sink;
 
