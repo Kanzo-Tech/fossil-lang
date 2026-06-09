@@ -163,7 +163,7 @@ pub fn primitive_from_xsd_iri(iri: &str) -> Option<Primitive> {
 /// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
 /// vocabulary [`fossil_sinks::manifest::data_type_name`] emits. The forward
 /// companion of [`primitive_from_xsd_iri`]; the single authority both the SQL
-/// codegen and the DataFusion backend derive a vertex column's `data_type` from.
+/// codegen and the `DataFusion` backend derive a vertex column's `data_type` from.
 #[must_use]
 pub const fn primitive_to_graphar(p: Primitive) -> &'static str {
     match p {

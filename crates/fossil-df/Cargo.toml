@@ -19,6 +19,12 @@ doctest = false
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
 fossil-mir = { path = "../fossil-mir" }
+# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name) and the
+# host↔fossil wire contract (RunStatus). Both WASM-clean (arrow-schema / serde
+# only) — the backend reuses them instead of re-deriving the GraphAr layout.
+fossil-sinks = { path = "../fossil-sinks" }
+fossil-run-status = { path = "../fossil-run-status" }
+serde_yaml_ng = { workspace = true }
 datafusion = "54"
 
 [dev-dependencies]
