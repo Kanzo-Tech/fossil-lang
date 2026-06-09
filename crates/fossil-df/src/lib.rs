@@ -27,7 +27,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
 use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
-use datafusion::prelude::{col, lit, CsvReadOptions, SessionContext};
+use datafusion::prelude::{col, lit, CsvReadOptions, DataFrame, SessionContext};
 use fossil_base::SourceFile;
 use fossil_hir::shapes::{
     default_xsd_string, inner_primitive, primitive_to_graphar, primitive_to_xsd,
@@ -92,10 +92,22 @@ pub async fn execute_graph<'db>(
     let ctx = SessionContext::new();
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
-    // Phase 1 (barrier): all vertices, dense ids assigned + tables registered.
-    let mut vertices = Vec::with_capacity(mappings.len());
+    // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
+    // the mappings that emit the SAME type (UNION) before assigning dense ids —
+    // a vertex type may be fed by several sources (design §B4). Each type is
+    // registered exactly once, so two mappings of one type can't clobber each
+    // other's `MemTable`.
+    let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
-        vertices.push(execute_vertex(&ctx, db, mapping).await?);
+        let prepared = prepare_vertex(&ctx, db, mapping).await?;
+        match groups.iter_mut().find(|(t, _)| *t == prepared.type_name) {
+            Some((_, group)) => group.push(prepared),
+            None => groups.push((prepared.type_name.clone(), vec![prepared])),
+        }
+    }
+    let mut vertices = Vec::with_capacity(groups.len());
+    for (_, group) in groups {
+        vertices.push(finalize_vertex(&ctx, group).await?);
     }
 
     // Phase 2: edges join the in-memory vertex tables (no Parquet re-read).
@@ -135,13 +147,20 @@ pub struct VertexColumn {
     pub xsd_datatype: Option<String>,
 }
 
-/// Materialise a mapping's VERTEX on DataFusion and register it in `ctx`.
-///
-/// Reads the CSV source, projects `id AS subject` + props + `x`/`y`/`cluster_id`
-/// placeholders, dedups when the shape is single-valued, sorts by `subject`
-/// (deterministic dense id — closes the writer's no-`ORDER BY` gap, design §A1),
-/// collects, and prepends `dense_id`. Registers the batches as a [`MemTable`]
-/// named after the vertex type for the edge phase.
+/// A mapping's vertex projection before the dense-id barrier — the W0b columns
+/// (`subject` + props + `x`/`y`/`cluster_id`) as an un-collected [`DataFrame`],
+/// plus the metadata `finalize_vertex` needs. Several of these with the same
+/// `type_name` are UNIONed before dense ids are assigned (design §B4).
+struct PreparedVertex {
+    type_name: String,
+    rdf_type: Option<String>,
+    columns: Vec<VertexColumn>,
+    dedup: bool,
+    projected: DataFrame,
+}
+
+/// Materialise a single mapping's VERTEX on DataFusion and register it (the
+/// one-mapping convenience over [`prepare_vertex`] + [`finalize_vertex`]).
 ///
 /// # Errors
 /// Propagates DataFusion read/plan/execute errors.
@@ -150,6 +169,17 @@ pub async fn execute_vertex<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
 ) -> datafusion::error::Result<VertexTable> {
+    let prepared = prepare_vertex(ctx, db, mapping).await?;
+    finalize_vertex(ctx, vec![prepared]).await
+}
+
+/// Project a mapping's source rows to the W0b vertex columns (no dedup/sort/
+/// dense-id yet — those wait for [`finalize_vertex`], after the per-type union).
+async fn prepare_vertex<'db>(
+    ctx: &SessionContext,
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     let ops = mir.ops(db);
 
@@ -182,27 +212,59 @@ pub async fn execute_vertex<'db>(
         .expect("lower_to_mir_pg always emits an EmitVertex");
 
     let df = ctx.read_csv(uri.as_str(), CsvReadOptions::new()).await?;
-
-    let subject = render(&id);
-    let exprs = vertex_projection(subject.clone(), &props);
-    let projected = if dedup {
-        // Single-valued shape: one vertex per subject IRI. `distinct_on` keeps the
-        // first row per IRI in sort order — deterministic, like the writer's
-        // `DISTINCT ON`. The `on`/`sort` exprs run on the SOURCE schema, so they
-        // reference the raw IRI expression, not the `subject` projection alias.
-        df.distinct_on(
-            vec![subject.clone()],
-            exprs,
-            Some(vec![subject.sort(true, false)]),
-        )?
-    } else {
-        df.select(exprs)?.sort(vec![col("subject").sort(true, false)])?
-    };
-
-    let batches = prepend_dense_id(projected.collect().await?)?;
-
+    let projected = df.select(vertex_projection(render(&id), &props))?;
     let columns = props.iter().map(|p| vertex_column(db, p)).collect();
 
+    Ok(PreparedVertex {
+        type_name,
+        rdf_type,
+        columns,
+        dedup,
+        projected,
+    })
+}
+
+/// Finalise one vertex type from the mappings that emit it: UNION their
+/// projections, dedup by `subject` when the shape is single-valued, sort by
+/// `subject` for a deterministic dense id (design §A1), `collect()`, prepend
+/// `dense_id`, and register the table once under its type name.
+///
+/// The group's first member carries the canonical metadata (`rdf_type`,
+/// `columns`, `dedup`) — all mappings of one type share the same shape.
+async fn finalize_vertex(
+    ctx: &SessionContext,
+    group: Vec<PreparedVertex>,
+) -> datafusion::error::Result<VertexTable> {
+    let mut group = group.into_iter();
+    let PreparedVertex {
+        type_name,
+        rdf_type,
+        columns,
+        dedup,
+        projected,
+    } = group.next().expect("a type group is never empty");
+
+    let mut df = projected;
+    for next in group {
+        df = df.union(next.projected)?; // UNION ALL — dedup (if any) happens below
+    }
+
+    let by_subject = vec![col("subject").sort(true, false)];
+    let sorted = if dedup {
+        // One vertex per subject IRI across all source mappings. `subject` now
+        // exists (post-projection), so dedup on the column, not the raw IRI expr.
+        let keep: Vec<DfExpr> = df
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| col(f.name().as_str()))
+            .collect();
+        df.distinct_on(vec![col("subject")], keep, Some(by_subject))?
+    } else {
+        df.sort(by_subject)?
+    };
+
+    let batches = prepend_dense_id(sorted.collect().await?)?;
     register_batches(ctx, &type_name, &batches)?;
     Ok(VertexTable {
         type_name,
