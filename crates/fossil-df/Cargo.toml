@@ -30,10 +30,10 @@ fossil-run-status = { path = "../fossil-run-status" }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 serde_yaml_ng = { workspace = true }
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
-# via the DataFrame/LogicalPlan API, not `ctx.sql()`), `parquet` (Parquet bytes
-# are written by parquet-wasm in JS, not here) and datafusion's own
-# `compression` feature — shrinking the wasm surface. CSV reading stays (core,
-# ungated). Re-add a feature here if a plan operator needs it.
+# via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`
+# feature — shrinking the wasm surface. We KEEP `parquet`: `io.parquet` sources
+# must be READ (locally and, in the browser, remotely by signed URL — design C2).
+# CSV/JSON reading is core (ungated). Re-add a feature here if a plan op needs it.
 #
 # ⚠️ This does NOT remove the `zstd` C dep: datafusion 54 HARDCODES
 # `arrow-ipc` with `features=["lz4","zstd"]` in datafusion-common /
@@ -45,7 +45,7 @@ serde_yaml_ng = { workspace = true }
 # (Apple's system clang lacks the wasm target; `brew install llvm` provides one.)
 # Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
 # subcrates — deferred. The wasm CI job must install LLVM.
-datafusion = { version = "54", default-features = false }
+datafusion = { version = "54", default-features = false, features = ["parquet"] }
 
 # Native-only: the Arrow→Parquet sink writes RecordBatches to the filesystem.
 # The browser path writes Parquet via parquet-wasm in JS, so these never reach

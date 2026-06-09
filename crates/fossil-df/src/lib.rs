@@ -29,8 +29,11 @@ use datafusion::arrow::array::{ArrayRef, UInt32Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
+use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
-use datafusion::prelude::{col, lit, CsvReadOptions, DataFrame, SessionContext};
+use datafusion::prelude::{
+    col, lit, CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext,
+};
 use fossil_base::SourceFile;
 use fossil_graph_schema::{
     Cardinality, DataType as ScalarType, EdgeType as GraphEdge, GraphSchema, NodeType,
@@ -38,7 +41,7 @@ use fossil_graph_schema::{
 };
 use fossil_hir::shapes::{inner_primitive, primitive_to_graphar, primitive_to_xsd};
 use fossil_hir::{def_map::def_map, MappingLoc, Primitive};
-use fossil_mir::{lower_to_mir_pg, Expr, Op, VProp};
+use fossil_mir::{lower_to_mir_pg, Expr, Op, SourceFormat, VProp};
 use fossil_sinks::manifest::{
     data_type_name, AdjList, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
     DEFAULT_CHUNK_SIZE, GRAPHAR_VERSION,
@@ -194,13 +197,7 @@ async fn prepare_vertex<'db>(
     let mir = lower_to_mir_pg(db, mapping);
     let ops = mir.ops(db);
 
-    let uri = ops
-        .iter()
-        .find_map(|o| match o {
-            Op::Source { uri, .. } => Some(uri.to_string()),
-            _ => None,
-        })
-        .expect("lower_to_mir_pg always emits a Source");
+    let (uri, format) = source_of(ops);
     let (type_name, rdf_type, id, dedup, props) = ops
         .iter()
         .find_map(|o| match o {
@@ -222,7 +219,7 @@ async fn prepare_vertex<'db>(
         })
         .expect("lower_to_mir_pg always emits an EmitVertex");
 
-    let df = ctx.read_csv(uri.as_str(), csv_options()).await?;
+    let df = read_source(ctx, &uri, &format).await?;
     let projected = df.select(vertex_projection(render(&id), &props))?;
     let node = NodeType {
         label: type_name,
@@ -370,13 +367,7 @@ async fn execute_edges<'db>(
     let mir = lower_to_mir_pg(db, mapping);
     let ops = mir.ops(db);
 
-    let uri = ops
-        .iter()
-        .find_map(|o| match o {
-            Op::Source { uri, .. } => Some(uri.to_string()),
-            _ => None,
-        })
-        .expect("lower_to_mir_pg always emits a Source");
+    let (uri, format) = source_of(ops);
 
     let mut out = Vec::new();
     for op in ops {
@@ -392,7 +383,8 @@ async fn execute_edges<'db>(
         } = op
         {
             let table =
-                execute_edge(ctx, &uri, edge_type, src_type, dst_type, src_id, dst_id).await?;
+                execute_edge(ctx, &uri, &format, edge_type, src_type, dst_type, src_id, dst_id)
+                    .await?;
             let edge_type = GraphEdge {
                 label: edge_type.to_string(),
                 iri: rdf_uri.as_ref().map(ToString::to_string),
@@ -419,13 +411,14 @@ async fn execute_edges<'db>(
 async fn execute_edge(
     ctx: &SessionContext,
     uri: &str,
+    format: &SourceFormat,
     label: &str,
     src_type: &str,
     dst_type: &str,
     src_id: &Expr<'_>,
     dst_id: &Expr<'_>,
 ) -> datafusion::error::Result<EdgeTable> {
-    let edge_src = ctx.read_csv(uri, csv_options()).await?.select(vec![
+    let edge_src = read_source(ctx, uri, format).await?.select(vec![
         render(src_id).alias("src_iri"),
         render(dst_id).alias("dst_iri"),
     ])?;
@@ -468,6 +461,44 @@ async fn execute_edge(
         by_source,
         by_target,
     })
+}
+
+/// The source URI + format of a lowered mapping (`lower_to_mir_pg` always emits
+/// exactly one `Source`).
+fn source_of<'db>(ops: &[Op<'db>]) -> (String, SourceFormat) {
+    ops.iter()
+        .find_map(|o| match o {
+            Op::Source { uri, format, .. } => Some((uri.to_string(), format.clone())),
+            _ => None,
+        })
+        .expect("lower_to_mir_pg always emits a Source")
+}
+
+/// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`]. The
+/// three native readers (`io.csv`/`io.json`/`io.parquet`) cover the formats
+/// DuckDB read natively; a [`SourceFormat::Provider`] (RDF and friends) is
+/// decoded by an external `TableProvider` the host registers — a separate
+/// increment, so it errors clearly here for now.
+///
+/// `uri` may be local or remote (`https://`/`s3://` via a registered
+/// `ObjectStore`) — the host owns that registration (design §C2).
+async fn read_source(
+    ctx: &SessionContext,
+    uri: &str,
+    format: &SourceFormat,
+) -> datafusion::error::Result<DataFrame> {
+    match format {
+        SourceFormat::Csv => ctx.read_csv(uri, csv_options()).await,
+        SourceFormat::Json => {
+            ctx.read_json(uri, JsonReadOptions::default().schema_infer_max_records(usize::MAX))
+                .await
+        }
+        SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
+        SourceFormat::Provider { name } => Err(DataFusionError::NotImplemented(format!(
+            "io.{name} source provider — provider sources (e.g. RDF) are decoded by a \
+             host-registered TableProvider, not yet wired in fossil-df"
+        ))),
+    }
 }
 
 /// CSV read options matching the writer's whole-file schema inference (DuckDB
