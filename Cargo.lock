@@ -1867,7 +1867,10 @@ dependencies = [
  "fossil-mir",
  "fossil-run-status",
  "fossil-sinks",
+ "parquet",
  "serde_yaml_ng",
+ "tempfile",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -1908,6 +1911,14 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fossil-graph-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3524,6 +3535,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5dafa7d01085b62a47dd0c1829550a0a36710ea9c4fe358a05a85477cec8a908"
 dependencies = [
  "ahash 0.8.12",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-ipc",
+ "arrow-schema",
+ "arrow-select",
+ "base64",
  "bytes",
  "chrono",
  "half",
