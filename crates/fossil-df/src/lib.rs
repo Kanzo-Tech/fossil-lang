@@ -21,10 +21,69 @@ use datafusion::arrow::array::{ArrayRef, UInt32Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::MemTable;
-use datafusion::logical_expr::{binary_expr, Expr as DfExpr, Operator};
+use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
 use datafusion::prelude::{col, lit, CsvReadOptions, SessionContext};
-use fossil_hir::MappingLoc;
+use fossil_base::SourceFile;
+use fossil_hir::{def_map::def_map, MappingLoc};
 use fossil_mir::{lower_to_mir_pg, Expr, Op, VProp};
+
+/// The materialised GraphAr graph for a program: every vertex table and every
+/// edge table (CSR + CSC), all in memory as `RecordBatch`es. The WASM/keasy
+/// layer turns these into Parquet (`parquet-wasm`) + the manifests and uploads
+/// them by signed PUT (design §C4/§E). The manifests + `RunStatus` are a later
+/// increment.
+#[derive(Debug)]
+pub struct GraphArData {
+    pub vertices: Vec<VertexTable>,
+    pub edges: Vec<EdgeTable>,
+}
+
+/// A materialised GraphAr edge type: the `<src>_<edge>_<dst>` adjacency in both
+/// orientations — `by_source` (CSR, `ORDER BY src_dense, dst_dense`) and
+/// `by_target` (CSC, `ORDER BY dst_dense, src_dense`). Both carry the same two
+/// `u32` columns (`src_dense`, `dst_dense`); only the row order differs (writer
+/// contract, design §A1).
+#[derive(Debug)]
+pub struct EdgeTable {
+    pub edge_type: String,
+    pub src_type: String,
+    pub dst_type: String,
+    pub rdf_uri: Option<String>,
+    pub by_source: Vec<RecordBatch>,
+    pub by_target: Vec<RecordBatch>,
+}
+
+/// Execute a whole program's mappings into the GraphAr graph (design §C4).
+///
+/// Two phases with a hard barrier between them: **(1)** materialise *every*
+/// vertex (assigning dense ids, registering each as a [`MemTable`]); **(2)**
+/// resolve *every* edge by joining its endpoint IRIs against the now-registered
+/// vertex tables in memory — an edge may point at a vertex owned by another
+/// mapping, so all vertices must exist before any edge.
+///
+/// # Errors
+/// Propagates DataFusion read/plan/execute errors.
+pub async fn execute_graph<'db>(
+    db: &'db dyn fossil_base::Db,
+    file: SourceFile,
+) -> datafusion::error::Result<GraphArData> {
+    let ctx = SessionContext::new();
+    let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
+
+    // Phase 1 (barrier): all vertices, dense ids assigned + tables registered.
+    let mut vertices = Vec::with_capacity(mappings.len());
+    for &mapping in &mappings {
+        vertices.push(execute_vertex(&ctx, db, mapping).await?);
+    }
+
+    // Phase 2: edges join the in-memory vertex tables (no Parquet re-read).
+    let mut edges = Vec::new();
+    for &mapping in &mappings {
+        edges.extend(execute_edges(&ctx, db, mapping).await?);
+    }
+
+    Ok(GraphArData { vertices, edges })
+}
 
 /// A materialised GraphAr vertex table: the `type_name`-named relation and its
 /// `RecordBatch`es in the writer-W0b column shape (`dense_id`-prefixed). The
@@ -162,6 +221,116 @@ fn register_batches(
     let table = MemTable::try_new(schema, vec![batches.to_vec()])?;
     ctx.register_table(name, Arc::new(table))?;
     Ok(())
+}
+
+/// Resolve every [`Op::EmitEdge`] of one mapping into an [`EdgeTable`]. Reads
+/// the mapping's source once and joins it against the registered vertex tables.
+async fn execute_edges<'db>(
+    ctx: &SessionContext,
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> datafusion::error::Result<Vec<EdgeTable>> {
+    let mir = lower_to_mir_pg(db, mapping);
+    let ops = mir.ops(db);
+
+    let uri = ops
+        .iter()
+        .find_map(|o| match o {
+            Op::Source { uri, .. } => Some(uri.to_string()),
+            _ => None,
+        })
+        .expect("lower_to_mir_pg always emits a Source");
+
+    let mut out = Vec::new();
+    for op in ops {
+        if let Op::EmitEdge {
+            edge_type,
+            rdf_uri,
+            src_type,
+            dst_type,
+            src_id,
+            dst_id,
+            ..
+        } = op
+        {
+            out.push(
+                execute_edge(
+                    ctx,
+                    &uri,
+                    edge_type,
+                    rdf_uri.as_ref().map(ToString::to_string),
+                    src_type,
+                    dst_type,
+                    src_id,
+                    dst_id,
+                )
+                .await?,
+            );
+        }
+    }
+    Ok(out)
+}
+
+/// Materialise one edge type. Projects the source rows to `src_iri`/`dst_iri`,
+/// joins both against the registered vertex tables to resolve endpoint IRIs to
+/// dense ids (inner join — dangling endpoints drop, like the writer), then sorts
+/// the `(src_dense, dst_dense)` pairs into CSR (`by_source`) and CSC
+/// (`by_target`). Mirrors the writer's edge SQL (writer.rs:469-492).
+#[allow(clippy::too_many_arguments)] // the edge spec is a flat tuple, not worth a struct here
+async fn execute_edge(
+    ctx: &SessionContext,
+    uri: &str,
+    edge_type: &str,
+    rdf_uri: Option<String>,
+    src_type: &str,
+    dst_type: &str,
+    src_id: &Expr<'_>,
+    dst_id: &Expr<'_>,
+) -> datafusion::error::Result<EdgeTable> {
+    let edge_src = ctx.read_csv(uri, CsvReadOptions::new()).await?.select(vec![
+        render(src_id).alias("src_iri"),
+        render(dst_id).alias("dst_iri"),
+    ])?;
+    // Pre-project each vertex table to (subject, dense) with disjoint names so
+    // the two joins never collide on `subject`/`dense_id`.
+    let src_v = ctx.table(src_type).await?.select(vec![
+        col("subject").alias("v_src_subject"),
+        col("dense_id").alias("src_dense"),
+    ])?;
+    let dst_v = ctx.table(dst_type).await?.select(vec![
+        col("subject").alias("v_dst_subject"),
+        col("dense_id").alias("dst_dense"),
+    ])?;
+
+    let resolved = edge_src
+        .join(src_v, JoinType::Inner, &["src_iri"], &["v_src_subject"], None)?
+        .join(dst_v, JoinType::Inner, &["dst_iri"], &["v_dst_subject"], None)?
+        .select(vec![col("src_dense"), col("dst_dense")])?;
+
+    let by_source = resolved
+        .clone()
+        .sort(vec![
+            col("src_dense").sort(true, false),
+            col("dst_dense").sort(true, false),
+        ])?
+        .collect()
+        .await?;
+    let by_target = resolved
+        .sort(vec![
+            col("dst_dense").sort(true, false),
+            col("src_dense").sort(true, false),
+        ])?
+        .collect()
+        .await?;
+
+    Ok(EdgeTable {
+        edge_type: edge_type.to_string(),
+        src_type: src_type.to_string(),
+        dst_type: dst_type.to_string(),
+        rdf_uri,
+        by_source,
+        by_target,
+    })
 }
 
 /// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Vertex-only covers
