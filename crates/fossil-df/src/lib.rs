@@ -83,13 +83,18 @@ pub struct ManifestFile {
 /// vertex tables in memory — an edge may point at a vertex owned by another
 /// mapping, so all vertices must exist before any edge.
 ///
+/// The caller owns the [`SessionContext`] so it can configure the source layer
+/// before execution — the browser host registers an `ObjectStore` per signed
+/// source URL and tunes schema inference (design §C2/§E2) — and so the
+/// registered vertex tables outlive the call for inspection.
+///
 /// # Errors
 /// Propagates DataFusion read/plan/execute errors.
 pub async fn execute_graph<'db>(
+    ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
 ) -> datafusion::error::Result<GraphArData> {
-    let ctx = SessionContext::new();
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
     // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
@@ -99,7 +104,7 @@ pub async fn execute_graph<'db>(
     // other's `MemTable`.
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
-        let prepared = prepare_vertex(&ctx, db, mapping).await?;
+        let prepared = prepare_vertex(ctx, db, mapping).await?;
         match groups.iter_mut().find(|(t, _)| *t == prepared.type_name) {
             Some((_, group)) => group.push(prepared),
             None => groups.push((prepared.type_name.clone(), vec![prepared])),
@@ -107,13 +112,13 @@ pub async fn execute_graph<'db>(
     }
     let mut vertices = Vec::with_capacity(groups.len());
     for (_, group) in groups {
-        vertices.push(finalize_vertex(&ctx, group).await?);
+        vertices.push(finalize_vertex(ctx, group).await?);
     }
 
     // Phase 2: edges join the in-memory vertex tables (no Parquet re-read).
     let mut edges = Vec::new();
     for &mapping in &mappings {
-        edges.extend(execute_edges(&ctx, db, mapping).await?);
+        edges.extend(execute_edges(ctx, db, mapping).await?);
     }
 
     Ok(GraphArData { vertices, edges })

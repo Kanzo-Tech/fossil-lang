@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::UInt32Array;
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::prelude::SessionContext;
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 
 const PROGRAM: &str = "\
@@ -37,7 +38,8 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
-    let graph = fossil_df::execute_graph(&db, file)
+    let ctx = SessionContext::new();
+    let graph = fossil_df::execute_graph(&ctx, &db, file)
         .await
         .expect("execute_graph runs both phases");
 
@@ -75,7 +77,10 @@ async fn execute_graph_emits_manifests_and_run_status() {
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
-    let graph = fossil_df::execute_graph(&db, file).await.expect("execute_graph");
+    let ctx = SessionContext::new();
+    let graph = fossil_df::execute_graph(&ctx, &db, file)
+        .await
+        .expect("execute_graph");
 
     // ── Manifests: graph index + per-type YAML, W0b paths (Type casing) ──
     let manifests = graph.manifests().expect("manifests serialize");

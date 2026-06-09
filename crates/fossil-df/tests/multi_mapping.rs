@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, StringArray};
+use datafusion::prelude::SessionContext;
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 
 // `users` = person/1,2,3 (Alice,Bob,Carol); `extra` = person/3,4,5 (Carol,Dave,
@@ -33,7 +34,10 @@ async fn same_type_from_two_sources_merges_into_one_table() {
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, PROGRAM.to_string(), "merge.fossil".to_string());
 
-    let graph = fossil_df::execute_graph(&db, file).await.expect("execute_graph");
+    let ctx = SessionContext::new();
+    let graph = fossil_df::execute_graph(&ctx, &db, file)
+        .await
+        .expect("execute_graph");
 
     // Exactly ONE Person vertex table (not one per mapping).
     assert_eq!(graph.vertices.len(), 1, "the two Person mappings merge into one table");
