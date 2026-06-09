@@ -27,7 +27,7 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 /// One pivoted column: the relation column `name` carries the object of
 /// `predicate` for each subject.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RdfColumn {
     pub name: String,
     pub predicate: String,

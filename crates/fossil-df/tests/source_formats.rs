@@ -1,6 +1,6 @@
 //! Source-format parity: the executor reads `io.json` (and `io.parquet`) the
 //! same as `io.csv`, dispatching on the MIR `SourceFormat`. A `Provider` source
-//! (RDF) errors clearly until its `TableProvider` is wired.
+//! (RDF) is host-decoded + scanned via the input seam — see `rdf_source.rs`.
 
 #![cfg(not(target_arch = "wasm32"))]
 

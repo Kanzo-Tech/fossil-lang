@@ -199,7 +199,7 @@ async fn prepare_vertex<'db>(
     let mir = lower_to_mir_pg(db, mapping);
     let ops = mir.ops(db);
 
-    let (uri, format) = source_of(ops);
+    let (uri, format, binding) = source_of(ops);
     let (type_name, rdf_type, id, dedup, props) = ops
         .iter()
         .find_map(|o| match o {
@@ -221,7 +221,7 @@ async fn prepare_vertex<'db>(
         })
         .expect("lower_to_mir_pg always emits an EmitVertex");
 
-    let df = read_source(ctx, &uri, &format).await?;
+    let df = read_source(ctx, &uri, &format, &binding).await?;
     let projected = df.select(vertex_projection(render(&id), &props))?;
     let node = NodeType {
         label: type_name,
@@ -369,7 +369,7 @@ async fn execute_edges<'db>(
     let mir = lower_to_mir_pg(db, mapping);
     let ops = mir.ops(db);
 
-    let (uri, format) = source_of(ops);
+    let (uri, format, binding) = source_of(ops);
 
     let mut out = Vec::new();
     for op in ops {
@@ -384,9 +384,10 @@ async fn execute_edges<'db>(
             ..
         } = op
         {
-            let table =
-                execute_edge(ctx, &uri, &format, edge_type, src_type, dst_type, src_id, dst_id)
-                    .await?;
+            let table = execute_edge(
+                ctx, &uri, &format, &binding, edge_type, src_type, dst_type, src_id, dst_id,
+            )
+            .await?;
             let edge_type = GraphEdge {
                 label: edge_type.to_string(),
                 iri: rdf_uri.as_ref().map(ToString::to_string),
@@ -414,13 +415,14 @@ async fn execute_edge(
     ctx: &SessionContext,
     uri: &str,
     format: &SourceFormat,
+    binding: &str,
     label: &str,
     src_type: &str,
     dst_type: &str,
     src_id: &Expr<'_>,
     dst_id: &Expr<'_>,
 ) -> datafusion::error::Result<EdgeTable> {
-    let edge_src = read_source(ctx, uri, format).await?.select(vec![
+    let edge_src = read_source(ctx, uri, format, binding).await?.select(vec![
         render(src_id).alias("src_iri"),
         render(dst_id).alias("dst_iri"),
     ])?;
@@ -465,29 +467,44 @@ async fn execute_edge(
     })
 }
 
-/// The source URI + format of a lowered mapping (`lower_to_mir_pg` always emits
-/// exactly one `Source`).
-fn source_of<'db>(ops: &[Op<'db>]) -> (String, SourceFormat) {
+/// The source URI + format + binding name of a lowered mapping
+/// (`lower_to_mir_pg` always emits exactly one `Source`). The `binding` is the
+/// table name a `Provider` source is registered under (the host pre-registers
+/// it; [`read_source`] scans it); object-store formats ignore it.
+fn source_of<'db>(ops: &[Op<'db>]) -> (String, SourceFormat, String) {
     ops.iter()
         .find_map(|o| match o {
-            Op::Source { uri, format, .. } => Some((uri.to_string(), format.clone())),
+            Op::Source {
+                uri,
+                format,
+                binding,
+                ..
+            } => Some((uri.to_string(), format.clone(), binding.to_string())),
             _ => None,
         })
         .expect("lower_to_mir_pg always emits a Source")
 }
 
-/// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`]. The
-/// three native readers (`io.csv`/`io.json`/`io.parquet`) cover the formats
-/// DuckDB read natively; a [`SourceFormat::Provider`] (RDF and friends) is
-/// decoded by an external `TableProvider` the host registers — a separate
-/// increment, so it errors clearly here for now.
+/// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`] — the
+/// two halves of the host input seam (design §C2):
 ///
-/// `uri` may be local or remote (`https://`/`s3://` via a registered
-/// `ObjectStore`) — the host owns that registration (design §C2).
+/// - **Object-store formats** (`io.csv`/`io.json`/`io.parquet`) stream through
+///   the [`SessionContext`]'s registered `ObjectStore` (the local filesystem by
+///   default; an HTTP/signed-URL/S3 store the host registers for remote `uri`s).
+///   `uri` may be local or remote — the host owns that registration, NOT this
+///   crate. Streaming reads preserve larger-than-RAM behaviour, so these are
+///   never pre-materialised.
+/// - **`Provider` formats** (RDF) are NOT DataFusion-native: the host reads the
+///   source bytes (fs natively, `fetch` in the browser) and registers the
+///   decoded relation as a `MemTable` under `binding` *before* this call (see
+///   [`register_rdf`] / [`provider_bindings`]). Here we simply scan that
+///   pre-registered table — RDF stays at the I/O border, the executor never
+///   parses it.
 async fn read_source(
     ctx: &SessionContext,
     uri: &str,
     format: &SourceFormat,
+    binding: &str,
 ) -> datafusion::error::Result<DataFrame> {
     match format {
         SourceFormat::Csv => ctx.read_csv(uri, csv_options()).await,
@@ -496,10 +513,12 @@ async fn read_source(
                 .await
         }
         SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
-        SourceFormat::Provider { name } => Err(DataFusionError::NotImplemented(format!(
-            "io.{name} source provider — provider sources (e.g. RDF) are decoded by a \
-             host-registered TableProvider, not yet wired in fossil-df"
-        ))),
+        SourceFormat::Provider { name } => ctx.table(binding).await.map_err(|e| {
+            DataFusionError::Execution(format!(
+                "io.{name} source `{binding}` is not registered — the host must decode it \
+                 (read the bytes of `{uri}` + register via `register_rdf`) before execute_graph: {e}"
+            ))
+        }),
     }
 }
 
@@ -512,6 +531,137 @@ async fn read_source(
 /// again; acceptable for parity, revisit if it bites large remote sources.
 fn csv_options<'a>() -> CsvReadOptions<'a> {
     CsvReadOptions::new().schema_infer_max_records(usize::MAX)
+}
+
+// ── Host input seam: provider (RDF) sources ─────────────────────────────────
+//
+// Object-store formats need no host help beyond the registered `ObjectStore`.
+// `Provider` formats (RDF) do: the decode is fossil's (pure, WASM-clean —
+// `rdf::rdf_to_batch`), but the *bytes* are the host's (fs natively, `fetch` in
+// the browser). So fossil enumerates what to read + how to pivot it
+// ([`provider_bindings`], derived from the MIR — the executor's single source of
+// truth), the host reads the bytes, and [`register_rdf`] puts the decoded
+// relation in the ctx for [`execute_graph`] to scan.
+
+/// A provider-backed source (`io.rdf`, …) the host must materialise into the
+/// [`SessionContext`] before [`execute_graph`]: register a table named `binding`
+/// holding the bytes at `uri`, decoded by selecting the subjects of `type_iri`
+/// and pivoting `columns` (predicate → relation column).
+///
+/// Derived from the **MIR**, so it carries exactly the columns the mapping reads
+/// (each prop's value `ColRef` → column name, its predicate IRI → the pivot
+/// predicate) — no ShEx re-parse here, and unused shape predicates are not
+/// materialised (the relation stays minimal). The ShEx descriptor's role is
+/// type inference at compile time, not the executor's pivot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBinding {
+    pub binding: String,
+    pub uri: String,
+    pub type_iri: String,
+    pub columns: Vec<rdf::RdfColumn>,
+}
+
+/// Enumerate every provider-backed source in `file` — one per mapping whose
+/// source lowers to [`SourceFormat::Provider`]. The host reads each `uri`'s
+/// bytes and calls [`register_rdf`] to put the pivoted relation in the ctx
+/// before running [`execute_graph`].
+#[must_use]
+pub fn provider_bindings(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<ProviderBinding> {
+    let mappings = def_map(db, file).mappings(db).clone();
+    let mut out = Vec::new();
+    for mapping in mappings {
+        let mir = lower_to_mir_pg(db, mapping);
+        let ops = mir.ops(db);
+
+        let Some((uri, binding)) = ops.iter().find_map(|o| match o {
+            Op::Source {
+                uri,
+                format: SourceFormat::Provider { .. },
+                binding,
+                ..
+            } => Some((uri.to_string(), binding.to_string())),
+            _ => None,
+        }) else {
+            continue; // object-store source — no host bytes seam
+        };
+
+        let Some((type_iri, columns)) = ops.iter().find_map(|o| match o {
+            Op::EmitVertex {
+                rdf_type, props, ..
+            } => Some((
+                rdf_type.as_ref().map(ToString::to_string).unwrap_or_default(),
+                rdf_columns(props),
+            )),
+            _ => None,
+        }) else {
+            continue;
+        };
+
+        out.push(ProviderBinding {
+            binding,
+            uri,
+            type_iri,
+            columns,
+        });
+    }
+    out
+}
+
+/// The RDF pivot columns a mapping reads: each prop whose value is a source
+/// `ColRef` contributes `{ name: <that column>, predicate: <the prop's IRI> }`.
+/// The column name is the value `ColRef` (what the projection reads), NOT the
+/// predicate's local name — so `foaf:name = .fullName` pivots `foaf:name` into a
+/// `fullName` column, exactly as the mapping expects.
+fn rdf_columns(props: &[VProp<'_>]) -> Vec<rdf::RdfColumn> {
+    props
+        .iter()
+        .filter_map(|p| match (&p.value, &p.rdf_uri) {
+            (Expr::ColRef { column, .. }, Some(predicate)) => Some(rdf::RdfColumn {
+                name: column.to_string(),
+                predicate: predicate.to_string(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Decode `turtle` for `binding`'s shape and register the result as a `MemTable`
+/// named `binding.binding` in `ctx`, so [`execute_graph`]'s `Provider` arm scans
+/// it. Target-agnostic — the host supplies the bytes, so native and browser
+/// share this exact path.
+///
+/// # Errors
+/// Turtle parse / Arrow construction errors, or table registration failure.
+pub fn register_rdf(
+    ctx: &SessionContext,
+    binding: &ProviderBinding,
+    turtle: &str,
+) -> datafusion::error::Result<()> {
+    let batch = rdf::rdf_to_batch(turtle, &binding.type_iri, &binding.columns)?;
+    register_batches(ctx, &binding.binding, &[batch])
+}
+
+/// Native host convenience: read every provider source's bytes from the local
+/// filesystem and register the decoded relations in `ctx`. The browser host
+/// reimplements this loop with `fetch` + [`register_rdf`] (same decode, async
+/// byte source), which is why the byte read — and only the byte read — is gated
+/// off wasm here.
+///
+/// # Errors
+/// Filesystem read errors or decode/registration failures.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn register_provider_sources(
+    ctx: &SessionContext,
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+) -> datafusion::error::Result<()> {
+    for binding in provider_bindings(db, file) {
+        let turtle = std::fs::read_to_string(&binding.uri).map_err(|e| {
+            DataFusionError::Execution(format!("read RDF source `{}`: {e}", binding.uri))
+        })?;
+        register_rdf(ctx, &binding, &turtle)?;
+    }
+    Ok(())
 }
 
 /// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Vertex-only covers
