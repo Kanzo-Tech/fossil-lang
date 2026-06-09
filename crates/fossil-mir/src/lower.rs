@@ -72,7 +72,7 @@ use fossil_hir::{HirExpr, HirMapping, MappingLoc, Primitive, PropertyKey, Record
 use smol_str::SmolStr;
 
 use crate::graph::MirGraph;
-use crate::op::{Expr, Op, SinkRef, SourceFormat};
+use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 
 /// Lower one [`fossil_hir::MappingLoc`] to a [`MirGraph`]:
 /// `Source → Extend(iri) → TripleEmit* → Sink(GraphAr)`.
@@ -199,6 +199,102 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
     // byte-identical.
     let graph = MirGraph::new(db, ops);
     crate::rewrite::rewrite(db, graph)
+}
+
+/// Property-graph-canonical lowering (paso 2): `Source → EmitVertex → Sink`.
+///
+/// Branch-by-abstraction alongside [`lower_to_mir`] (which still emits the
+/// `Source → Extend → TripleEmit* → Sink` triple path — UNCHANGED, so the legacy
+/// SQL codegen + corpus stay byte-identical). This increment covers the
+/// VERTEX-only shape: the `iri = ...` template becomes the vertex `id`, and every
+/// other property becomes a [`VProp`]. EDGE classification (a property whose
+/// value points at another shape → [`Op::EmitEdge`]) + the descriptor-driven
+/// cardinality/types refinement are the NEXT increment (they need the
+/// `OutputDescriptorKind` / skeleton-match the codegen `vertex_edge_decomp`
+/// already has). Reuses the same `resolve_source` / `lower_iri_property` /
+/// `lower_property_value` helpers so there is ZERO duplicated lowering logic.
+#[salsa::tracked]
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors lower_to_mir
+pub fn lower_to_mir_pg<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> MirGraph<'db> {
+    let file = mapping.file(db);
+    let dm = def_map(db, file);
+    let Some(dense_idx) = dm.mappings(db).iter().position(|loc| *loc == mapping) else {
+        return MirGraph::new(db, Vec::new());
+    };
+    let hir = lower_to_hir(db, file);
+    let Some(m) = hir.mappings(db).get(dense_idx) else {
+        return MirGraph::new(db, Vec::new());
+    };
+    let body = body(db, mapping);
+    let prefixes = dm.prefixes(db);
+    let row_type = typecheck_mapping(db, mapping).map_or_else(
+        |_| phase1_row_type(db),
+        |out| out.source_row(db).unwrap_or_else(|| phase1_row_type(db)),
+    );
+    // v0.1: every prop is typed String (the legacy path types nothing either —
+    // codegen ignores `Ty`). The descriptor-driven type refinement is the next
+    // increment; the backend derives the GraphAr/xsd spelling from `Ty`.
+    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+
+    let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
+
+    // 0: Source.
+    let (uri, format) = resolve_source(dm, db, &m.source_binding);
+    ops.push(Op::Source {
+        uri,
+        format,
+        row_type,
+        binding: m.source_binding.clone(),
+    });
+
+    // 1: EmitVertex — `id` = the IRI template (the same Expr the legacy Extend
+    // would carry); each non-`iri` property → a VProp.
+    let iri_span_line = iri_property_line(db, mapping, body);
+    let id = lower_iri_property(m, body, prefixes, db, iri_span_line)
+        .unwrap_or_else(|| Expr::LitString(SmolStr::default()));
+    let props: Vec<VProp<'db>> = body
+        .properties(db)
+        .iter()
+        .filter_map(|prop| {
+            let PropertyKey::PrefixedName { iri } = &prop.key else {
+                return None; // the `iri = ...` property is the vertex id
+            };
+            Some(VProp {
+                name: SmolStr::new(local_name(iri)),
+                value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
+                ty: string_ty,
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            })
+        })
+        .collect();
+    ops.push(Op::EmitVertex {
+        input: 0,
+        type_name: SmolStr::new(local_name(&m.shape_iri)),
+        rdf_type: Some(m.shape_iri.clone()),
+        id,
+        dedup: true,
+        props,
+    });
+
+    // 2: Sink.
+    ops.push(Op::Sink {
+        input: 1,
+        sink: SinkRef::GraphAr,
+    });
+
+    let graph = MirGraph::new(db, ops);
+    crate::rewrite::rewrite(db, graph)
+}
+
+/// Local name of an IRI: the segment after the last `#` or `/` (falls back to
+/// the whole string for a bare term). Used for the vertex `type_name` + prop
+/// names in [`lower_to_mir_pg`].
+fn local_name(iri: &str) -> &str {
+    iri.rsplit(['#', '/']).next().unwrap_or(iri)
 }
 
 /// Resolve the `Op::Source` URI + [`SourceFormat`] for a mapping's source
