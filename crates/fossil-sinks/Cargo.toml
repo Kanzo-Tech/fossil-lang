@@ -32,6 +32,10 @@ arrow-schema = { workspace = true }
 # `shex_ast::Schema::from_reader`, no reqwest/tokio — Pitfall 1 / `decisions/rudof-wasm.md`), so
 # adding it keeps `fossil-sinks` in the 7-crate WASM gate with NO cfg-fence required (ADR-0018).
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# The canonical graph-schema contract (universal substrate, sensitivity point #1).
+# `graph_schema` derives it from the same descriptor `decomp` reads; the contract
+# is dependency-free (serde only) so it adds no weight to the WASM gate.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `fossil-mir` provides the `MirGraph`/`Op`/`Expr` the decomposition routes into vertex/edge
 # tables. WASM-gated already (Phase 4) — no native leak.
 fossil-mir = { path = "../fossil-mir" }

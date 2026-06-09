@@ -124,6 +124,31 @@ pub enum Cardinality {
     Multi,
 }
 
+impl DataType {
+    /// Parse an XSD datatype IRI (full `http://www.w3.org/2001/XMLSchema#<name>`
+    /// or `xsd:<name>` prefixed) into the canonical lattice. The contract owns
+    /// this so the datatype layer is self-contained (no dependency on the type
+    /// system); `None` for an XSD type outside the lattice.
+    #[must_use]
+    pub fn from_xsd_iri(iri: &str) -> Option<Self> {
+        let local = iri.rsplit(['#', '/', ':']).next().unwrap_or(iri);
+        Some(match local {
+            "string" | "normalizedString" | "token" | "language" => Self::String,
+            "integer" | "long" | "int" | "short" | "byte" | "nonNegativeInteger"
+            | "positiveInteger" | "nonPositiveInteger" | "negativeInteger"
+            | "unsignedLong" | "unsignedInt" => Self::Integer,
+            "decimal" | "float" | "double" | "number" => Self::Float,
+            "boolean" => Self::Bool,
+            "date" => Self::Date,
+            "dateTime" | "dateTimeStamp" => Self::DateTime,
+            "time" => Self::Time,
+            "gYear" => Self::GYear,
+            "anyURI" => Self::AnyUri,
+            _ => return None,
+        })
+    }
+}
+
 impl GraphSchema {
     /// Look up a node type by label.
     #[must_use]
@@ -184,6 +209,15 @@ mod tests {
         assert_eq!(g.node("Person").unwrap().properties[0].name, "name");
         let e = g.edge("placedBy").expect("placedBy edge");
         assert_eq!((e.source.as_str(), e.destination.as_str()), ("Order", "Person"));
+    }
+
+    #[test]
+    fn datatype_parses_xsd_iris() {
+        assert_eq!(DataType::from_xsd_iri("http://www.w3.org/2001/XMLSchema#string"), Some(DataType::String));
+        assert_eq!(DataType::from_xsd_iri("xsd:integer"), Some(DataType::Integer));
+        assert_eq!(DataType::from_xsd_iri("http://www.w3.org/2001/XMLSchema#double"), Some(DataType::Float));
+        assert_eq!(DataType::from_xsd_iri("http://www.w3.org/2001/XMLSchema#anyURI"), Some(DataType::AnyUri));
+        assert_eq!(DataType::from_xsd_iri("http://example.org/Custom"), None);
     }
 
     #[test]

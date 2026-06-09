@@ -391,7 +391,7 @@ fn datatype_iri_to_arrow(iri: &str) -> DataType {
 }
 
 /// Resolve a `ShapeExprLabel` to its IRI string (the edge dst shape).
-fn shape_label_iri(label: &shex_ast::ShapeExprLabel) -> String {
+pub(crate) fn shape_label_iri(label: &shex_ast::ShapeExprLabel) -> String {
     match label {
         shex_ast::ShapeExprLabel::IriRef { value } => match value {
             prefixmap::IriRef::Iri(iri) => iri.to_string(),

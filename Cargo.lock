@@ -2114,6 +2114,7 @@ dependencies = [
  "arrow-schema",
  "fossil-base",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-mir",
  "fossil-run-status",
  "insta",

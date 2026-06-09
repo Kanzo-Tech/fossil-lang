@@ -13,6 +13,7 @@
 
 pub mod catalog;
 pub mod decomp;
+pub mod graph_schema;
 pub mod manifest;
 pub mod writer;
 
