@@ -67,3 +67,72 @@ fn lower_pg_emits_source_vertex_sink() {
         "prop carries its predicate IRI for the manifest/DCAT"
     );
 }
+
+const EDGES: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"users.csv\")
+orders := io.csv(\"orders.csv\")
+
+Person : ex:Person from users
+    iri = `${ex:}person/${.id}`
+    ex:name = .name
+
+Order : ex:Order from orders
+    iri = `${ex:}order/${.order_id}`
+    ex:placedBy = `${ex:}person/${.user_id}`
+    ex:total = .amount
+    ex:external = `${ex:}widget/${.wid}`
+";
+
+/// The `Order` mapping's `ex:placedBy` template resolves (skeleton-match) to the
+/// `Person` subject → `EmitEdge`; the literal `ex:total` → a vertex prop; the
+/// dangling `ex:external` (no matching subject) → neither. Same classification
+/// the codegen decomposition makes — now shared via `fossil_mir::skeleton`.
+#[test]
+fn lower_pg_classifies_edge_vs_prop() {
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, EDGES.to_string(), "edges.fossil".to_string());
+    let order = *def_map(&db, file)
+        .mappings(&db)
+        .get(1)
+        .expect("Order is the 2nd mapping");
+
+    let graph = lower_to_mir_pg(&db, order);
+    let ops = graph.ops(&db);
+
+    // EmitVertex(Order): `total` is the only literal prop.
+    let (vtype, prop_names) = ops
+        .iter()
+        .find_map(|o| match o {
+            Op::EmitVertex {
+                type_name, props, ..
+            } => Some((
+                type_name.to_string(),
+                props.iter().map(|p| p.name.to_string()).collect::<Vec<_>>(),
+            )),
+            _ => None,
+        })
+        .expect("an EmitVertex");
+    assert_eq!(vtype, "Order");
+    assert_eq!(prop_names, ["total"], "only the literal property is a vertex prop");
+
+    // placedBy → Person edge; external is dangling → no edge.
+    let edges: Vec<(String, String)> = ops
+        .iter()
+        .filter_map(|o| match o {
+            Op::EmitEdge {
+                edge_type,
+                dst_type,
+                ..
+            } => Some((edge_type.to_string(), dst_type.to_string())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        edges,
+        vec![("placedBy".to_string(), "Person".to_string())],
+        "placedBy → Person only (external is dangling)"
+    );
+}

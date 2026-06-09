@@ -27,6 +27,7 @@ pub mod lower;
 pub mod op;
 pub mod rewrite;
 pub mod schema;
+pub mod skeleton;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
 // types at the crate root, query functions stay under their module path
@@ -38,3 +39,4 @@ pub use lower::{lower_to_mir, lower_to_mir_pg};
 pub use op::{AggFn, AggSpec, CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
 pub use rewrite::rewrite;
 pub use schema::{free_cols, schema_of};
+pub use skeleton::{subject_template_skeleton, template_skeleton};

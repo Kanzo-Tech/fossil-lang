@@ -250,39 +250,86 @@ pub fn lower_to_mir_pg<'db>(
         binding: m.source_binding.clone(),
     });
 
-    // 1: EmitVertex — `id` = the IRI template (the same Expr the legacy Extend
-    // would carry); each non-`iri` property → a VProp.
+    // `id` = the IRI template (the same Expr the legacy Extend would carry).
     let iri_span_line = iri_property_line(db, mapping, body);
     let id = lower_iri_property(m, body, prefixes, db, iri_span_line)
         .unwrap_or_else(|| Expr::LitString(SmolStr::default()));
-    let props: Vec<VProp<'db>> = body
-        .properties(db)
+
+    // Subject-template skeleton of EVERY mapping in the file → its vertex type.
+    // A property whose backtick-template skeleton matches one of these is a
+    // foreign key → an edge to that type (reuses the shared skeleton-matching).
+    let subject_skeletons: Vec<(String, SmolStr)> = dm
+        .mappings(db)
         .iter()
-        .filter_map(|prop| {
-            let PropertyKey::PrefixedName { iri } = &prop.key else {
-                return None; // the `iri = ...` property is the vertex id
-            };
-            Some(VProp {
-                name: SmolStr::new(local_name(iri)),
+        .enumerate()
+        .filter_map(|(i, loc)| {
+            let ty = SmolStr::new(local_name(hir.mappings(db).get(i)?.shape_iri.as_str()));
+            Some((crate::skeleton::subject_template_skeleton(db, *loc)?, ty))
+        })
+        .collect();
+
+    // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
+    // IRI-template that resolves to another subject → edge; dangling template /
+    // constant prefixed-name → neither (v0.1 — mirrors synthesize_sink_plan).
+    let mut props: Vec<VProp<'db>> = Vec::new();
+    let mut edges: Vec<(SmolStr, SmolStr, SmolStr, Expr<'db>)> = Vec::new();
+    for prop in body.properties(db) {
+        let PropertyKey::PrefixedName { iri } = &prop.key else {
+            continue; // the `iri = ...` property is the vertex id
+        };
+        let pred_local = SmolStr::new(local_name(iri));
+        match &prop.value {
+            HirExpr::FieldRef(_) | HirExpr::StringLit(_) => props.push(VProp {
+                name: pred_local,
                 value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
                 ty: string_ty,
                 rdf_uri: Some(iri.clone()),
                 single_valued: true,
-            })
-        })
-        .collect();
+            }),
+            HirExpr::Template(t) => {
+                let skel = crate::skeleton::template_skeleton(t.as_str());
+                if let Some((_, dst_type)) = subject_skeletons.iter().find(|(s, _)| *s == skel) {
+                    let dst_id = lower_property_value(&prop.value, &m.source_binding, prefixes, None);
+                    edges.push((pred_local, dst_type.clone(), iri.clone(), dst_id));
+                }
+                // non-matching template → dangling, no edge (v0.1)
+            }
+            HirExpr::PrefixedName { .. } => {} // constant IRI → not an edge
+        }
+    }
+
+    let type_name = SmolStr::new(local_name(&m.shape_iri));
+
+    // 1: EmitVertex. All emit ops read the source relation at index 0 (the Sink
+    // is nominal — the backend walks every EmitVertex/EmitEdge op, as the legacy
+    // codegen walks every TripleEmit).
     ops.push(Op::EmitVertex {
         input: 0,
-        type_name: SmolStr::new(local_name(&m.shape_iri)),
+        type_name: type_name.clone(),
         rdf_type: Some(m.shape_iri.clone()),
-        id,
+        id: id.clone(),
         dedup: true,
         props,
     });
 
-    // 2: Sink.
+    // 2..N: one EmitEdge per resolved foreign-key template.
+    for (pred_local, dst_type, pred_iri, dst_id) in edges {
+        ops.push(Op::EmitEdge {
+            input: 0,
+            edge_type: pred_local,
+            rdf_uri: Some(pred_iri),
+            src_type: type_name.clone(),
+            dst_type,
+            src_id: id.clone(),
+            dst_id,
+            single_valued: true,
+        });
+    }
+
+    // Final: Sink consuming the last emit op.
+    let sink_input = ops.len() - 1;
     ops.push(Op::Sink {
-        input: 1,
+        input: sink_input,
         sink: SinkRef::GraphAr,
     });
 

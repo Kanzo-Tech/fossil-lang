@@ -446,7 +446,7 @@ fn synthesize_sink_plan<'db>(
         .enumerate()
         .filter_map(|(i, loc)| {
             let ty = local_name(hir.mappings(db).get(i)?.shape_iri.as_str());
-            Some((subject_template_skeleton(db, *loc)?, ty))
+            Some((fossil_mir::subject_template_skeleton(db, *loc)?, ty))
         })
         .collect();
 
@@ -476,7 +476,7 @@ fn synthesize_sink_plan<'db>(
                 single_valued: true,
             }),
             HirExpr::Template(t) => {
-                let skel = template_skeleton(t.as_str());
+                let skel = fossil_mir::template_skeleton(t.as_str());
                 if let Some((_, dst_type)) = subject_skeletons.iter().find(|(s, _)| *s == skel) {
                     edges.push(EdgeTable {
                         src_type: type_name.clone(),
@@ -511,54 +511,9 @@ fn synthesize_sink_plan<'db>(
     }
 }
 
-/// The IRI-template skeleton of a mapping's `iri = ...` subject property, or
-/// `None` when there is no subject or it is not a backtick template.
-#[allow(clippy::elidable_lifetime_names)]
-fn subject_template_skeleton<'db>(
-    db: &'db dyn fossil_base::Db,
-    mapping: MappingLoc<'db>,
-) -> Option<String> {
-    for prop in body(db, mapping).properties(db) {
-        if matches!(prop.key, PropertyKey::Iri) {
-            return match &prop.value {
-                HirExpr::Template(t) => Some(template_skeleton(t.as_str())),
-                _ => None,
-            };
-        }
-    }
-    None
-}
-
-/// Replace dynamic field placeholders (`${.field}`) in a backtick-template's raw
-/// text with a uniform marker, keeping static prefix expansions (`${pfx:}`) and
-/// literal segments verbatim. Two templates that interpolate different columns at
-/// the same positions therefore share a skeleton — the basis for resolving an
-/// IRI-template property to its target vertex type (the `${...}` inner of a field
-/// reference begins with `.`; a prefix expansion does not).
-fn template_skeleton(text: &str) -> String {
-    const FIELD_MARKER: char = '\u{1}';
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(open) = rest.find("${") {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 2..];
-        let Some(close) = after.find('}') else {
-            out.push_str(&rest[open..]); // unterminated — keep verbatim
-            return out;
-        };
-        let inner = &after[..close];
-        if inner.trim_start().starts_with('.') {
-            out.push(FIELD_MARKER); // dynamic per-row field → wildcard
-        } else {
-            out.push_str("${"); // static prefix expansion → keep verbatim
-            out.push_str(inner);
-            out.push('}');
-        }
-        rest = &after[close + 1..];
-    }
-    out.push_str(rest);
-    out
-}
+// `subject_template_skeleton` / `template_skeleton` moved to `fossil-mir`
+// (`crate::skeleton`) — one source of truth, reused here AND by
+// `lower_to_mir_pg` (fossil-codegen depends on fossil-mir).
 
 /// Convenience entry: lower a mapping then run [`codegen_sql_with_descriptor`].
 /// The descriptor seam stays plain-Rust (NOT tracked) — see that function's doc.
