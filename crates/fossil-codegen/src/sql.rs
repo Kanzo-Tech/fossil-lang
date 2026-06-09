@@ -37,7 +37,10 @@ use fossil_hir::body::body;
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
 use fossil_hir::lower::lower_to_hir;
-use fossil_hir::{HirExpr, MappingLoc, Primitive, PropertyKey, Ty, TyKind};
+use fossil_hir::shapes::{
+    default_xsd_string, inner_primitive, primitive_to_graphar, primitive_to_xsd,
+};
+use fossil_hir::{HirExpr, MappingLoc, Primitive, PropertyKey, TyKind};
 use fossil_mir::op::{AggFn, CmpOp, JoinKind, SourceFormat};
 use fossil_mir::{Expr, MirGraph, Op, lower_to_mir};
 use fossil_registry::{FunctionRegistry, InlineForm, LoweringKind};
@@ -329,54 +332,6 @@ fn mapping_shape_iri<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>
         .mappings(db)
         .get(idx)
         .map(|m| m.shape_iri.to_string())
-}
-
-/// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
-/// vocabulary [`fossil_sinks::manifest::data_type_name`] emits.
-const fn primitive_to_graphar(p: Primitive) -> &'static str {
-    match p {
-        Primitive::Integer => "int64",
-        Primitive::Float => "double",
-        Primitive::Bool => "bool",
-        Primitive::Date => "date",
-        Primitive::DateTime => "timestamp",
-        Primitive::Time => "time",
-        // String / AnyURI / GYear have no narrower GraphAr spelling.
-        Primitive::String | Primitive::AnyURI | Primitive::GYear => "string",
-    }
-}
-
-/// The canonical XSD datatype IRI for a Fossil [`Primitive`] — the output spec's
-/// literal datatype, carried into the manifest for the host's governance layer
-/// (DCAT). Mirrors [`primitive_to_graphar`] but in the RDF/XSD vocabulary.
-fn primitive_to_xsd(p: Primitive) -> String {
-    let local = match p {
-        Primitive::Integer => "integer",
-        Primitive::Float => "double",
-        Primitive::Bool => "boolean",
-        Primitive::Date => "date",
-        Primitive::DateTime => "dateTime",
-        Primitive::Time => "time",
-        Primitive::AnyURI => "anyURI",
-        Primitive::GYear => "gYear",
-        Primitive::String => "string",
-    };
-    format!("http://www.w3.org/2001/XMLSchema#{local}")
-}
-
-/// The XSD `string` IRI — the fallback datatype when a field's primitive is
-/// unknown or the value is a string literal.
-fn default_xsd_string() -> String {
-    "http://www.w3.org/2001/XMLSchema#string".to_string()
-}
-
-/// Peel `Optional`/`Seq` wrappers to the inner [`Primitive`], if any.
-fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Primitive> {
-    match ty.kind(db) {
-        TyKind::Primitive(p) => Some(*p),
-        TyKind::Optional(inner) | TyKind::Seq(inner) => inner_primitive(db, *inner),
-        _ => None,
-    }
 }
 
 /// Synthesise a single-vertex [`SinkPlan`] from a typed mapping when no explicit

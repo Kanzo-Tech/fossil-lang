@@ -160,6 +160,61 @@ pub fn primitive_from_xsd_iri(iri: &str) -> Option<Primitive> {
     }
 }
 
+/// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
+/// vocabulary [`fossil_sinks::manifest::data_type_name`] emits. The forward
+/// companion of [`primitive_from_xsd_iri`]; the single authority both the SQL
+/// codegen and the DataFusion backend derive a vertex column's `data_type` from.
+#[must_use]
+pub const fn primitive_to_graphar(p: Primitive) -> &'static str {
+    match p {
+        Primitive::Integer => "int64",
+        Primitive::Float => "double",
+        Primitive::Bool => "bool",
+        Primitive::Date => "date",
+        Primitive::DateTime => "timestamp",
+        Primitive::Time => "time",
+        // String / AnyURI / GYear have no narrower GraphAr spelling.
+        Primitive::String | Primitive::AnyURI | Primitive::GYear => "string",
+    }
+}
+
+/// The canonical XSD datatype IRI for a Fossil [`Primitive`] — the output spec's
+/// literal datatype, carried into the manifest for the host's governance layer
+/// (DCAT). Mirrors [`primitive_to_graphar`] but in the RDF/XSD vocabulary.
+#[must_use]
+pub fn primitive_to_xsd(p: Primitive) -> String {
+    let local = match p {
+        Primitive::Integer => "integer",
+        Primitive::Float => "double",
+        Primitive::Bool => "boolean",
+        Primitive::Date => "date",
+        Primitive::DateTime => "dateTime",
+        Primitive::Time => "time",
+        Primitive::AnyURI => "anyURI",
+        Primitive::GYear => "gYear",
+        Primitive::String => "string",
+    };
+    format!("http://www.w3.org/2001/XMLSchema#{local}")
+}
+
+/// The XSD `string` IRI — the fallback datatype when a field's primitive is
+/// unknown or the value is a string literal.
+#[must_use]
+pub fn default_xsd_string() -> String {
+    "http://www.w3.org/2001/XMLSchema#string".to_string()
+}
+
+/// Peel `Optional`/`Seq` wrappers to the inner [`Primitive`], if any — the
+/// datatype carried on a vertex property column.
+#[must_use]
+pub fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Primitive> {
+    match ty.kind(db) {
+        TyKind::Primitive(p) => Some(*p),
+        TyKind::Optional(inner) | TyKind::Seq(inner) => inner_primitive(db, *inner),
+        _ => None,
+    }
+}
+
 /// Extract the [`OneOfRejection`]s (and other lowering errors) from a
 /// descriptor's `lowering_errors()` for surfacing on the consuming mapping.
 ///
