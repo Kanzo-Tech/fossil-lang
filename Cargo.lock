@@ -1879,7 +1879,6 @@ dependencies = [
  "duckdb",
  "fossil-base",
  "fossil-engine",
- "fossil-provider-rdf",
  "fossil-registry",
  "fossil-run-status",
  "fossil-runtime",
@@ -1960,7 +1959,6 @@ dependencies = [
  "fossil-df",
  "fossil-hir",
  "fossil-mir",
- "fossil-provider-rdf",
  "fossil-registry",
  "fossil-resolver",
  "fossil-run-status",
@@ -2105,17 +2103,6 @@ dependencies = [
  "insta",
  "salsa",
  "smol_str",
-]
-
-[[package]]
-name = "fossil-provider-rdf"
-version = "0.1.0"
-dependencies = [
- "duckdb",
- "fossil-runtime",
- "fossil-shex",
- "oxrdf",
- "oxttl",
 ]
 
 [[package]]

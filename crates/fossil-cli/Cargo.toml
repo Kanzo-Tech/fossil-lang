@@ -38,7 +38,6 @@ insta = { workspace = true }
 duckdb = { workspace = true }
 fossil-registry     = { path = "../fossil-registry" }
 fossil-runtime      = { path = "../fossil-runtime" }
-fossil-provider-rdf = { path = "../fossil-provider-rdf" }
 
 [[bin]]
 name = "fossil"

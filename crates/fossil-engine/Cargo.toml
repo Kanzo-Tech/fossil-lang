@@ -25,11 +25,10 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # → write_to_dir). Re-exports `OutputDescriptorKind`. DuckDB now serves only the
 # layout post-pass + CSV type pre-introspection.
 fossil-df           = { path = "../fossil-df" }
-# Native runtime + sinks + the RDF source provider + cloud-path resolver.
+# Native runtime (layout + secrets) + sinks + cloud-path resolver.
 fossil-runtime      = { path = "../fossil-runtime" }
 fossil-sinks        = { path = "../fossil-sinks" }
 fossil-resolver     = { path = "../fossil-resolver" }
-fossil-provider-rdf = { path = "../fossil-provider-rdf" }
 # The `RunStatus` / `SourceRefInfo` / `ProviderInfo` / `CatalogInput` wire types
 # the engine produces (one source of truth; keasy reuses them).
 fossil-run-status = { path = "../fossil-run-status" }
