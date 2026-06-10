@@ -25,6 +25,9 @@ import { FossilExecutor as RawFossilExecutor } from '../pkg/fossil_df_wasm.js';
 export { initFossilExecutor } from './load.js';
 export type { InitFossilExecutorOpts } from './load.js';
 
+export { runJob } from './run-job.js';
+export type { JobTransport, CompletePayload, RunJobOptions } from './run-job.js';
+
 /** The fetch strategy for a source — how the host must stage its bytes. */
 export type SourceFormat = 'csv' | 'json' | 'parquet' | 'rdf';
 
