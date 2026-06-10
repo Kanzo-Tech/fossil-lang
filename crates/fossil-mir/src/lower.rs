@@ -279,11 +279,10 @@ pub fn lower_to_mir_pg<'db>(
     // here (the ShEx-descriptor refinement that would set multi-valued needs the
     // descriptor wired into the lowering — a later increment).
     let field_ty = |field: &str| -> Ty<'db> {
-        if let TyKind::Record(rec) = row_type.kind(db) {
-            if let Some(f) = rec.fields(db).iter().find(|f| f.name == field) {
+        if let TyKind::Record(rec) = row_type.kind(db)
+            && let Some(f) = rec.fields(db).iter().find(|f| f.name == field) {
                 return f.ty;
             }
-        }
         string_ty
     };
 
@@ -366,7 +365,7 @@ pub fn lower_to_mir_pg<'db>(
 ///
 /// The agnostic lowering types every property as a single-valued vertex column
 /// (it has no shape knowledge — `iri`-templates aside, an `ex:hasProject = .x`
-/// `FieldRef` looks like a column). The ShEx descriptor is what knows that
+/// `FieldRef` value looks like a column). The `ShEx` descriptor is what knows that
 /// `ex:hasProject` is a **shape-ref** (→ a typed edge) and that `*`/`+`
 /// cardinality is **multi-valued**. This is the same edge-vs-property decision
 /// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, sharing the

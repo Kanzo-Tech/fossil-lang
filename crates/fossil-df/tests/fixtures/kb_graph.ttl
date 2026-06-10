@@ -1,0 +1,5 @@
+@prefix ex: <https://ex.org/> .
+
+<https://ex.org/kb/1> a ex:KB ; ex:label "Main KB" ; ex:hasProject <https://ex.org/proj/1>, <https://ex.org/proj/2> .
+<https://ex.org/proj/1> a ex:Project ; ex:title "Alpha" .
+<https://ex.org/proj/2> a ex:Project ; ex:title "Beta" .

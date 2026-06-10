@@ -25,11 +25,17 @@ pub mod rdf;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sink;
 
+/// Re-exported so callers name the program-resident output descriptor that
+/// [`execute_graph`] / [`provider_bindings`] take (ADR-0018: passed as an
+/// argument, never read through `Db::system()`).
+pub use fossil_descriptors_output::OutputDescriptorKind;
+
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, UInt32Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::common::Column;
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
@@ -43,7 +49,7 @@ use fossil_graph_schema::{
 };
 use fossil_hir::shapes::{inner_primitive, primitive_to_graphar, primitive_to_xsd};
 use fossil_hir::{def_map::def_map, MappingLoc, Primitive};
-use fossil_mir::{lower_to_mir_pg, Expr, Op, SourceFormat, VProp};
+use fossil_mir::{apply_output_shape, lower_to_mir_pg, Expr, Op, SourceFormat, VProp};
 use fossil_sinks::manifest::{
     data_type_name, AdjList, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
     DEFAULT_CHUNK_SIZE, GRAPHAR_VERSION,
@@ -108,6 +114,7 @@ pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
+    descriptor: &OutputDescriptorKind,
 ) -> datafusion::error::Result<GraphArData> {
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
@@ -118,7 +125,7 @@ pub async fn execute_graph<'db>(
     // other's `MemTable`.
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
-        let prepared = prepare_vertex(ctx, db, mapping).await?;
+        let prepared = prepare_vertex(ctx, db, mapping, descriptor).await?;
         match groups.iter_mut().find(|(t, _)| *t == prepared.node.label) {
             Some((_, group)) => group.push(prepared),
             None => groups.push((prepared.node.label.clone(), vec![prepared])),
@@ -136,7 +143,7 @@ pub async fn execute_graph<'db>(
     let mut edges = Vec::new();
     let mut edge_types = Vec::new();
     for &mapping in &mappings {
-        for (table, edge_type) in execute_edges(ctx, db, mapping).await? {
+        for (table, edge_type) in execute_edges(ctx, db, mapping, descriptor).await? {
             edges.push(table);
             edge_types.push(edge_type);
         }
@@ -184,8 +191,9 @@ pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
+    descriptor: &OutputDescriptorKind,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let prepared = prepare_vertex(ctx, db, mapping).await?;
+    let prepared = prepare_vertex(ctx, db, mapping, descriptor).await?;
     finalize_vertex(ctx, vec![prepared]).await
 }
 
@@ -195,9 +203,11 @@ async fn prepare_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
+    descriptor: &OutputDescriptorKind,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
-    let ops = mir.ops(db);
+    let ops = apply_output_shape(mir.ops(db), descriptor);
+    let ops = ops.as_slice();
 
     let (uri, format, binding) = source_of(ops);
     let (type_name, rdf_type, id, dedup, props) = ops
@@ -268,7 +278,7 @@ async fn finalize_vertex(
             .schema()
             .fields()
             .iter()
-            .map(|f| col(f.name().as_str()))
+            .map(|f| DfExpr::Column(Column::new_unqualified(f.name().as_str())))
             .collect();
         df.distinct_on(vec![col("subject")], keep, Some(by_subject))?
     } else {
@@ -365,9 +375,11 @@ async fn execute_edges<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
+    descriptor: &OutputDescriptorKind,
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
-    let ops = mir.ops(db);
+    let ops = apply_output_shape(mir.ops(db), descriptor);
+    let ops = ops.as_slice();
 
     let (uri, format, binding) = source_of(ops);
 
@@ -386,6 +398,7 @@ async fn execute_edges<'db>(
         {
             let table = execute_edge(
                 ctx, &uri, &format, &binding, edge_type, src_type, dst_type, src_id, dst_id,
+                *single_valued,
             )
             .await?;
             let edge_type = GraphEdge {
@@ -421,11 +434,21 @@ async fn execute_edge(
     dst_type: &str,
     src_id: &Expr<'_>,
     dst_id: &Expr<'_>,
+    single_valued: bool,
 ) -> datafusion::error::Result<EdgeTable> {
     let edge_src = read_source(ctx, uri, format, binding).await?.select(vec![
         render(src_id).alias("src_iri"),
         render(dst_id).alias("dst_iri"),
     ])?;
+    // A multi-valued edge's `dst_iri` is a `List` (the RDF pivot kept every
+    // object); UNNEST expands it to one (src, dst) row per element — the
+    // DataFusion-native counterpart of the writer's `UNNEST(list(...))`. A
+    // single-valued edge's `dst_iri` is already scalar.
+    let edge_src = if single_valued {
+        edge_src
+    } else {
+        edge_src.unnest_columns(&["dst_iri"])?
+    };
     // Pre-project each vertex table to (subject, dense) with disjoint names so
     // the two joins never collide on `subject`/`dense_id`.
     let src_v = ctx.table(src_type).await?.select(vec![
@@ -513,12 +536,15 @@ async fn read_source(
                 .await
         }
         SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
-        SourceFormat::Provider { name } => ctx.table(binding).await.map_err(|e| {
-            DataFusionError::Execution(format!(
-                "io.{name} source `{binding}` is not registered — the host must decode it \
-                 (read the bytes of `{uri}` + register via `register_rdf`) before execute_graph: {e}"
-            ))
-        }),
+        SourceFormat::Provider { name } => {
+            let table = provider_table_name(binding);
+            ctx.table(&table).await.map_err(|e| {
+                DataFusionError::Execution(format!(
+                    "io.{name} source `{binding}` is not registered — the host must decode it \
+                     (read the bytes of `{uri}` + register via `register_rdf`) before execute_graph: {e}"
+                ))
+            })
+        }
     }
 }
 
@@ -566,12 +592,16 @@ pub struct ProviderBinding {
 /// bytes and calls [`register_rdf`] to put the pivoted relation in the ctx
 /// before running [`execute_graph`].
 #[must_use]
-pub fn provider_bindings(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<ProviderBinding> {
+pub fn provider_bindings(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    descriptor: &OutputDescriptorKind,
+) -> Vec<ProviderBinding> {
     let mappings = def_map(db, file).mappings(db).clone();
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
-        let ops = mir.ops(db);
+        let ops = apply_output_shape(mir.ops(db), descriptor);
 
         let Some((uri, binding)) = ops.iter().find_map(|o| match o {
             Op::Source {
@@ -585,13 +615,10 @@ pub fn provider_bindings(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Prov
             continue; // object-store source — no host bytes seam
         };
 
-        let Some((type_iri, columns)) = ops.iter().find_map(|o| match o {
-            Op::EmitVertex {
-                rdf_type, props, ..
-            } => Some((
-                rdf_type.as_ref().map(ToString::to_string).unwrap_or_default(),
-                rdf_columns(props),
-            )),
+        let Some(type_iri) = ops.iter().find_map(|o| match o {
+            Op::EmitVertex { rdf_type, .. } => {
+                Some(rdf_type.as_ref().map(ToString::to_string).unwrap_or_default())
+            }
             _ => None,
         }) else {
             continue;
@@ -601,28 +628,49 @@ pub fn provider_bindings(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Prov
             binding,
             uri,
             type_iri,
-            columns,
+            columns: rdf_columns(&ops),
         });
     }
     out
 }
 
-/// The RDF pivot columns a mapping reads: each prop whose value is a source
-/// `ColRef` contributes `{ name: <that column>, predicate: <the prop's IRI> }`.
-/// The column name is the value `ColRef` (what the projection reads), NOT the
-/// predicate's local name — so `foaf:name = .fullName` pivots `foaf:name` into a
-/// `fullName` column, exactly as the mapping expects.
-fn rdf_columns(props: &[VProp<'_>]) -> Vec<rdf::RdfColumn> {
-    props
-        .iter()
-        .filter_map(|p| match (&p.value, &p.rdf_uri) {
-            (Expr::ColRef { column, .. }, Some(predicate)) => Some(rdf::RdfColumn {
+/// The RDF pivot columns a mapping reads, derived from the descriptor-refined
+/// ops: each vertex prop AND each edge endpoint whose source value is a `ColRef`
+/// contributes `{ name: <that column>, predicate: <its IRI>, multi: <not single
+/// valued> }`. The column name is the value `ColRef` (what the projection / edge
+/// join reads), NOT the predicate's local name — so `foaf:name = .fullName`
+/// pivots `foaf:name` into a `fullName` column. A multi-valued constraint pivots
+/// into a `List` (a multi-valued vertex prop, or — after UNNEST — an edge per
+/// object); the vertex `subject` id needs no pivot column (`rdf_to_batch` always
+/// emits it).
+fn rdf_columns(ops: &[Op<'_>]) -> Vec<rdf::RdfColumn> {
+    let mut cols = Vec::new();
+    let mut push = |value: &Expr<'_>, rdf_uri: Option<&str>, single_valued: bool| {
+        if let (Expr::ColRef { column, .. }, Some(predicate)) = (value, rdf_uri) {
+            cols.push(rdf::RdfColumn {
                 name: column.to_string(),
                 predicate: predicate.to_string(),
-            }),
-            _ => None,
-        })
-        .collect()
+                multi: !single_valued,
+            });
+        }
+    };
+    for op in ops {
+        match op {
+            Op::EmitVertex { props, .. } => {
+                for p in props {
+                    push(&p.value, p.rdf_uri.as_deref(), p.single_valued);
+                }
+            }
+            Op::EmitEdge {
+                dst_id,
+                rdf_uri,
+                single_valued,
+                ..
+            } => push(dst_id, rdf_uri.as_deref(), *single_valued),
+            _ => {}
+        }
+    }
+    cols
 }
 
 /// Decode `turtle` for `binding`'s shape and register the result as a `MemTable`
@@ -638,7 +686,18 @@ pub fn register_rdf(
     turtle: &str,
 ) -> datafusion::error::Result<()> {
     let batch = rdf::rdf_to_batch(turtle, &binding.type_iri, &binding.columns)?;
-    register_batches(ctx, &binding.binding, &[batch])
+    register_batches(ctx, &provider_table_name(&binding.binding), &[batch])
+}
+
+/// The `SessionContext` table name a provider (RDF) source is registered under.
+/// Namespaced away from the vertex tables [`finalize_vertex`] registers
+/// (`node.label`): for an RDF shape the source binding *is* the shape local name
+/// (`{ KB } := io.rdf …` + `KB : ex:KB from KB`), so an un-namespaced source
+/// table `KB` would collide with the vertex table `KB` (DataFusion folds
+/// identifiers to lowercase, so even case wouldn't save it). Mirrors the legacy
+/// `fossil_codegen::provider_relation` indirection.
+fn provider_table_name(binding: &str) -> String {
+    format!("__rdf_src_{binding}")
 }
 
 /// Native host convenience: read every provider source's bytes from the local
@@ -654,8 +713,9 @@ pub fn register_provider_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,
     file: SourceFile,
+    descriptor: &OutputDescriptorKind,
 ) -> datafusion::error::Result<()> {
-    for binding in provider_bindings(db, file) {
+    for binding in provider_bindings(db, file, descriptor) {
         let turtle = std::fs::read_to_string(&binding.uri).map_err(|e| {
             DataFusionError::Execution(format!("read RDF source `{}`: {e}", binding.uri))
         })?;
@@ -671,7 +731,10 @@ pub fn register_provider_sources(
 fn render(e: &Expr<'_>) -> DfExpr {
     match e {
         Expr::LitString(s) => lit(s.to_string()),
-        Expr::ColRef { column, .. } => col(column.as_str()),
+        // `new_unqualified` (NOT `col()`): a bare `col("hasProject")` folds the
+        // identifier to lowercase, but the source columns (CSV headers, the RDF
+        // pivot's predicate-named columns) preserve case — reference them verbatim.
+        Expr::ColRef { column, .. } => DfExpr::Column(Column::new_unqualified(column.as_str())),
         Expr::Concat(a, b) => binary_expr(render(a), Operator::StringConcat, render(b)),
         Expr::Assert { inner, .. } => render(inner),
         other => unimplemented!("render MIR Expr → DataFusion (paso 3 full): {other:?}"),

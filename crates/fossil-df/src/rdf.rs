@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, StringArray};
+use datafusion::arrow::array::{ArrayRef, ListBuilder, StringArray, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
@@ -25,12 +25,16 @@ use oxttl::TurtleParser;
 /// subjects typed with the shape's IRI), matching `fossil-provider-rdf`.
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
-/// One pivoted column: the relation column `name` carries the object of
-/// `predicate` for each subject.
+/// One pivoted column: the relation column `name` carries the object(s) of
+/// `predicate` for each subject. `multi` (a `*`/`+` ShEx cardinality) pivots into
+/// an Arrow `List<Utf8>` of every object — the source of a multi-valued vertex
+/// property or, after UNNEST, a multi-valued edge; a single-valued column is a
+/// scalar `Utf8` (the deterministic minimum object).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RdfColumn {
     pub name: String,
     pub predicate: String,
+    pub multi: bool,
 }
 
 /// Parse `turtle` and pivot the subjects of `type_iri` (those with an
@@ -46,8 +50,9 @@ pub fn rdf_to_batch(
     type_iri: &str,
     columns: &[RdfColumn],
 ) -> datafusion::error::Result<RecordBatch> {
-    // subject → (predicate → first object). Single-valued: first object wins.
-    let mut rows: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    // subject → predicate → ALL objects. A single-valued column later takes the
+    // minimum (deterministic); a multi-valued one keeps them all as a List.
+    let mut rows: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
     let mut typed: BTreeSet<String> = BTreeSet::new();
 
     let mut parser = TurtleParser::new().for_reader(turtle.as_bytes());
@@ -62,7 +67,8 @@ pub fn rdf_to_batch(
         rows.entry(subject)
             .or_default()
             .entry(predicate.to_string())
-            .or_insert(object);
+            .or_default()
+            .push(object);
     }
 
     // The shape's subjects, sorted (BTreeSet iterates in order).
@@ -73,16 +79,38 @@ pub fn rdf_to_batch(
     let mut arrays: Vec<ArrayRef> = vec![Arc::new(subject_col)];
 
     for column in columns {
-        let values: StringArray = subjects
-            .iter()
-            .map(|s| {
-                rows.get(*s)
-                    .and_then(|preds| preds.get(&column.predicate))
-                    .map(String::as_str)
-            })
-            .collect();
-        fields.push(Field::new(&column.name, DataType::Utf8, true));
-        arrays.push(Arc::new(values));
+        let objects_of = |s: &String| rows.get(s).and_then(|preds| preds.get(&column.predicate));
+        if column.multi {
+            // List<Utf8> of every object (sorted per subject for determinism); a
+            // subject with no object for this predicate gets an empty list (→ no
+            // edges / no values after UNNEST).
+            let mut builder = ListBuilder::new(StringBuilder::new());
+            for s in &subjects {
+                if let Some(objs) = objects_of(s) {
+                    let mut objs: Vec<&String> = objs.iter().collect();
+                    objs.sort();
+                    for o in objs {
+                        builder.values().append_value(o);
+                    }
+                }
+                builder.append(true);
+            }
+            fields.push(Field::new(
+                &column.name,
+                DataType::List(Arc::new(Field::new_list_field(DataType::Utf8, true))),
+                true,
+            ));
+            arrays.push(Arc::new(builder.finish()));
+        } else {
+            // Single-valued: the minimum object (deterministic; for valid data
+            // there is exactly one per subject).
+            let values: StringArray = subjects
+                .iter()
+                .map(|s| objects_of(s).and_then(|v| v.iter().min()).map(String::as_str))
+                .collect();
+            fields.push(Field::new(&column.name, DataType::Utf8, true));
+            arrays.push(Arc::new(values));
+        }
     }
 
     RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(Into::into)
@@ -124,8 +152,8 @@ mod tests {
     #[test]
     fn pivots_a_shape_to_wide_rows() {
         let columns = [
-            RdfColumn { name: "name".into(), predicate: "http://xmlns.com/foaf/0.1/name".into() },
-            RdfColumn { name: "age".into(), predicate: "http://xmlns.com/foaf/0.1/age".into() },
+            RdfColumn { name: "name".into(), predicate: "http://xmlns.com/foaf/0.1/name".into(), multi: false },
+            RdfColumn { name: "age".into(), predicate: "http://xmlns.com/foaf/0.1/age".into(), multi: false },
         ];
         let batch = rdf_to_batch(TURTLE, "https://example.org/Person", &columns).expect("pivot");
 
@@ -148,5 +176,34 @@ mod tests {
         assert_eq!(col(1), [Some("Alice".into()), Some("Bob".into())]);
         // Bob has no foaf:age → null.
         assert_eq!(col(2), [Some("30".into()), None]);
+    }
+
+    const MULTI_TTL: &str = r#"@prefix ex: <https://ex.org/> .
+        <https://ex.org/kb/1> a ex:KB ; ex:hasProject <https://ex.org/proj/2>, <https://ex.org/proj/1> .
+        <https://ex.org/kb/2> a ex:KB .
+    "#;
+
+    #[test]
+    fn multi_valued_predicate_pivots_to_a_list() {
+        use datafusion::arrow::array::{Array, ListArray};
+
+        let columns = [RdfColumn {
+            name: "hasProject".into(),
+            predicate: "https://ex.org/hasProject".into(),
+            multi: true,
+        }];
+        let batch = rdf_to_batch(MULTI_TTL, "https://ex.org/KB", &columns).expect("pivot");
+
+        assert_eq!(batch.num_rows(), 2, "two KBs");
+        let list = batch.column(1).as_any().downcast_ref::<ListArray>().expect("List col");
+
+        // kb/1 → its two projects, sorted (proj/1 before proj/2 despite TTL order).
+        let row0 = list.value(0);
+        let row0 = row0.as_any().downcast_ref::<StringArray>().unwrap();
+        let got: Vec<&str> = (0..row0.len()).map(|i| row0.value(i)).collect();
+        assert_eq!(got, ["https://ex.org/proj/1", "https://ex.org/proj/2"]);
+
+        // kb/2 → empty list (no projects → no edges after UNNEST).
+        assert_eq!(list.value(1).len(), 0, "kb/2 has no projects");
     }
 }

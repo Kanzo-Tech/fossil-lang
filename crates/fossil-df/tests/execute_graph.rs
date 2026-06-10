@@ -39,7 +39,7 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file)
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT)
         .await
         .expect("execute_graph runs both phases");
 
@@ -84,7 +84,7 @@ async fn execute_graph_emits_manifests_and_run_status() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file)
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT)
         .await
         .expect("execute_graph");
 
