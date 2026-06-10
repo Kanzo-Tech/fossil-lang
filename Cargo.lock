@@ -2148,18 +2148,9 @@ name = "fossil-sinks"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
- "fossil-base",
- "fossil-descriptors-output",
- "fossil-graph-schema",
- "fossil-mir",
- "fossil-run-status",
  "insta",
- "parquet",
- "prefixmap",
  "serde",
  "serde_yaml_ng",
- "shex_ast",
- "thiserror 1.0.69",
 ]
 
 [[package]]
