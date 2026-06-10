@@ -62,6 +62,7 @@
 //! ) -> MirGraph<'db>;
 //! ```
 
+use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
@@ -357,6 +358,112 @@ pub fn lower_to_mir_pg<'db>(
 
     let graph = MirGraph::new(db, ops);
     crate::rewrite::rewrite(db, graph)
+}
+
+/// Refine an agnostic [`lower_to_mir_pg`] op list with the program-resident
+/// **output descriptor** (ShEx): reclassify the `EmitVertex`'s properties into
+/// edges + set their cardinality from the shape's constraints.
+///
+/// The agnostic lowering types every property as a single-valued vertex column
+/// (it has no shape knowledge — `iri`-templates aside, an `ex:hasProject = .x`
+/// `FieldRef` looks like a column). The ShEx descriptor is what knows that
+/// `ex:hasProject` is a **shape-ref** (→ a typed edge) and that `*`/`+`
+/// cardinality is **multi-valued**. This is the same edge-vs-property decision
+/// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, sharing the
+/// one authority ([`ResolvedConstraint::edge_target`] +
+/// [`Cardinality::is_single_valued`]).
+///
+/// Passed the descriptor as an **argument** (ADR-0018 — the descriptor is NEVER
+/// read through `Db::system()`), so this is a plain `Vec<Op>`→`Vec<Op>` pass: it
+/// never constructs a [`MirGraph`] (a Salsa tracked struct, illegal outside a
+/// tracked query) and never touches Salsa. `AcceptAll` (the walking-skeleton /
+/// no-shape case) returns the ops unchanged — the template-skeleton edges the
+/// agnostic lowering already produced stand.
+#[must_use]
+pub fn apply_output_shape<'db>(
+    ops: &[Op<'db>],
+    descriptor: &OutputDescriptorKind,
+) -> Vec<Op<'db>> {
+    let OutputDescriptorKind::ShEx(desc) = descriptor else {
+        return ops.to_vec();
+    };
+
+    // The vertex's shape IRI keys its constraint table; without it (or a shape
+    // the descriptor doesn't declare) there is nothing to refine.
+    let shape_iri = ops.iter().find_map(|o| match o {
+        Op::EmitVertex { rdf_type, .. } => rdf_type.as_ref().map(SmolStr::as_str),
+        _ => None,
+    });
+    let Some(binding) = shape_iri.and_then(|iri| desc.lookup_shape_str(iri)) else {
+        return ops.to_vec();
+    };
+    let constraint_for = |predicate: &str| {
+        binding
+            .constraints
+            .iter()
+            .find(|c| c.predicate.to_string() == predicate)
+    };
+
+    // Rebuild: Source(s) + the refined EmitVertex + existing edges + the new
+    // shape-ref edges, then the Sink (re-pointed at the new last op).
+    let mut head: Vec<Op<'db>> = Vec::with_capacity(ops.len());
+    let mut new_edges: Vec<Op<'db>> = Vec::new();
+    let mut sink: Option<Op<'db>> = None;
+
+    for op in ops {
+        match op {
+            Op::Sink { sink: kind, .. } => sink = Some(Op::Sink { input: 0, sink: *kind }),
+            Op::EmitVertex {
+                input,
+                type_name,
+                rdf_type,
+                id,
+                dedup,
+                props,
+            } => {
+                let mut kept: Vec<VProp<'db>> = Vec::with_capacity(props.len());
+                for p in props {
+                    let predicate = p.rdf_uri.as_deref().unwrap_or_default();
+                    match constraint_for(predicate) {
+                        Some(c) if c.edge_target().is_some() => {
+                            let dst = c.edge_target().expect("edge_target checked");
+                            new_edges.push(Op::EmitEdge {
+                                input: *input,
+                                edge_type: p.name.clone(),
+                                rdf_uri: p.rdf_uri.clone(),
+                                src_type: type_name.clone(),
+                                dst_type: SmolStr::new(local_name(&dst)),
+                                src_id: id.clone(),
+                                dst_id: p.value.clone(),
+                                single_valued: c.cardinality.is_single_valued(),
+                            });
+                        }
+                        Some(c) => kept.push(VProp {
+                            single_valued: c.cardinality.is_single_valued(),
+                            ..p.clone()
+                        }),
+                        None => kept.push(p.clone()),
+                    }
+                }
+                head.push(Op::EmitVertex {
+                    input: *input,
+                    type_name: type_name.clone(),
+                    rdf_type: rdf_type.clone(),
+                    id: id.clone(),
+                    dedup: *dedup,
+                    props: kept,
+                });
+            }
+            other => head.push(other.clone()),
+        }
+    }
+
+    head.extend(new_edges);
+    if let Some(Op::Sink { sink: kind, .. }) = sink {
+        let input = head.len().saturating_sub(1);
+        head.push(Op::Sink { input, sink: kind });
+    }
+    head
 }
 
 /// Local name of an IRI: the segment after the last `#` or `/` (falls back to

@@ -1,7 +1,7 @@
 //! E2E del lowering property-graph (paso 2, vertex-only): parse `hello.fossil`
 //! → [`lower_to_mir_pg`] → `Source → EmitVertex(Person) → Sink`.
 //!
-//! Branch-by-abstraction: el path legacy [`fossil_mir::lower_to_mir`] (TripleEmit)
+//! Branch-by-abstraction: el path legacy [`fossil_mir::lower_to_mir`] (`TripleEmit`)
 //! sigue intacto; este test fija el nuevo path PG-canónico para el caso de un
 //! vértice con propiedades literales (sin edges — esos llegan en el próximo
 //! incremento, con la clasificación descriptor-driven que ya tiene el codegen).
@@ -11,8 +11,9 @@
 use std::sync::Arc;
 
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
 use fossil_hir::def_map::def_map;
-use fossil_mir::{lower_to_mir_pg, Op};
+use fossil_mir::{apply_output_shape, lower_to_mir_pg, Op};
 
 const HELLO: &str = "\
 prefix ex: <https://example.org/>
@@ -135,4 +136,117 @@ fn lower_pg_classifies_edge_vs_prop() {
         vec![("placedBy".to_string(), "Person".to_string())],
         "placedBy → Person only (external is dangling)"
     );
+}
+
+// ── Descriptor-driven refinement (ShEx → edges + cardinality) ───────────────
+
+// An io.rdf mapping: the shape-ref property `ex:hasProject` is written as a
+// plain `FieldRef` (`.hasProject`), so the agnostic lowering CANNOT tell it from
+// a literal column — only the ShEx descriptor knows it's an edge to `Project`
+// (and multi-valued). This is the run_rdf.rs case at the MIR level.
+const KB_FOSSIL: &str = "\
+prefix ex: <https://ex.org/>
+
+kb := io.rdf(\"graph.ttl\")
+
+KB : ex:KB from kb
+    iri = .subject
+    ex:label = .label
+    ex:hasProject = .hasProject
+";
+
+// `KB`: a literal `label` + a multi-valued (`max:-1`) shape-ref `hasProject` →
+// `Project` (an edge); `Project`: a literal `title`.
+const KB_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type": "Schema", "shapes": [
+  {"type":"ShapeDecl","id":"https://ex.org/KB","shapeExpr":{"type":"Shape","expression":{"type":"EachOf","expressions":[
+     {"type":"TripleConstraint","predicate":"https://ex.org/label","valueExpr":{"type":"NodeConstraint","datatype":"http://www.w3.org/2001/XMLSchema#string"}},
+     {"type":"TripleConstraint","predicate":"https://ex.org/hasProject","valueExpr":"https://ex.org/Project","min":0,"max":-1}
+  ]}}},
+  {"type":"ShapeDecl","id":"https://ex.org/Project","shapeExpr":{"type":"Shape","expression":{
+     "type":"TripleConstraint","predicate":"https://ex.org/title","valueExpr":{"type":"NodeConstraint","datatype":"http://www.w3.org/2001/XMLSchema#string"}}}}
+] }"#;
+
+#[test]
+fn apply_output_shape_reclassifies_shape_ref_to_edge() {
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, KB_FOSSIL.to_string(), "kb.fossil".to_string());
+    let kb = *def_map(&db, file)
+        .mappings(&db)
+        .first()
+        .expect("KB is the first mapping");
+
+    // Agnostic: both `label` and `hasProject` look like literal columns.
+    let agnostic = lower_to_mir_pg(&db, kb);
+    let ops = agnostic.ops(&db);
+    let agnostic_props: Vec<String> = ops
+        .iter()
+        .find_map(|o| match o {
+            Op::EmitVertex { props, .. } => {
+                Some(props.iter().map(|p| p.name.to_string()).collect())
+            }
+            _ => None,
+        })
+        .expect("an EmitVertex");
+    assert_eq!(
+        agnostic_props,
+        ["label", "hasProject"],
+        "agnostic lowering can't tell the shape-ref from a literal"
+    );
+    assert!(
+        !ops.iter().any(|o| matches!(o, Op::EmitEdge { .. })),
+        "agnostic lowering synthesises no edge for a FieldRef value"
+    );
+
+    // The ShEx descriptor reclassifies `hasProject` into a typed, multi-valued edge.
+    let desc = OutputDescriptorKind::ShEx(
+        ShExDescriptor::from_reader(KB_SHEX.as_bytes()).expect("parse ShEx"),
+    );
+    let refined = apply_output_shape(ops, &desc);
+
+    // `label` stays a vertex prop (single-valued); `hasProject` is gone from props.
+    let Op::EmitVertex { props, .. } = refined
+        .iter()
+        .find(|o| matches!(o, Op::EmitVertex { .. }))
+        .expect("an EmitVertex")
+    else {
+        unreachable!()
+    };
+    let names: Vec<&str> = props.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["label"], "the shape-ref left the vertex props");
+    assert!(
+        props.iter().find(|p| p.name == "label").unwrap().single_valued,
+        "label is Exact(1) → single-valued"
+    );
+
+    // `hasProject` is now a typed edge KB→Project, multi-valued (max:-1).
+    let edge = refined
+        .iter()
+        .find_map(|o| match o {
+            Op::EmitEdge {
+                edge_type,
+                src_type,
+                dst_type,
+                single_valued,
+                ..
+            } => Some((
+                edge_type.to_string(),
+                src_type.to_string(),
+                dst_type.to_string(),
+                *single_valued,
+            )),
+            _ => None,
+        })
+        .expect("hasProject became an EmitEdge");
+    assert_eq!(
+        edge,
+        ("hasProject".into(), "KB".into(), "Project".into(), false),
+        "shape-ref → typed edge KB→Project, multi-valued (single_valued=false)"
+    );
+
+    // The Sink still consumes the last op (re-pointed past the new edge).
+    let Some(Op::Sink { input, .. }) = refined.last() else {
+        panic!("last op must be the Sink");
+    };
+    assert_eq!(*input, refined.len() - 2, "Sink consumes the op before it");
 }
