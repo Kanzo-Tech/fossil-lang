@@ -6,7 +6,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use fossil_df_wasm::{execute_core, SourceInput, SourceKind};
+use fossil_df_wasm::{execute_core, program_sources_core, SourceInput, SourceKind};
 
 const PROGRAM: &str = "\
 prefix ex: <https://example.org/>
@@ -54,4 +54,29 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     let v = &out.run_status.vertices[0];
     assert_eq!(v.vertex_type, "Person");
     assert_eq!(v.count, Some(3));
+}
+
+const TWO_SOURCE_PROGRAM: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"https://data.example.com/users.csv\")
+orders := io.csv(\"https://data.example.com/orders.csv\")
+
+Person : ex:Person from users
+    iri = `${ex:}person/${.id}`
+    ex:name = .name
+
+Order : ex:Order from orders
+    iri = `${ex:}order/${.order_id}`
+    ex:placedBy = `${ex:}person/${.user_id}`
+";
+
+#[test]
+fn program_sources_lists_each_distinct_source_with_its_format() {
+    let srcs = program_sources_core(TWO_SOURCE_PROGRAM, None).expect("sources enumerated");
+    let uris: Vec<&str> = srcs.iter().map(|(u, _)| u.as_str()).collect();
+    assert!(uris.contains(&"https://data.example.com/users.csv"));
+    assert!(uris.contains(&"https://data.example.com/orders.csv"));
+    assert_eq!(srcs.len(), 2);
+    assert!(srcs.iter().all(|(_, fmt)| *fmt == "csv"));
 }

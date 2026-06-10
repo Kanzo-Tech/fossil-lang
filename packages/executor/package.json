@@ -1,0 +1,47 @@
+{
+  "name": "@fossil-lang/executor",
+  "version": "0.3.0-alpha.0",
+  "description": "JS/TS wrapper around the fossil-df-wasm wasm-bindgen artifacts (--target web). The DataFusion executor that runs fossil mappings in the browser — lazy-loaded, separate from the LSP @fossil-lang/wasm.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/executor"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pkg/fossil_df_wasm_bg.wasm": "./pkg/fossil_df_wasm_bg.wasm"
+  },
+  "files": [
+    "dist/",
+    "pkg/fossil_df_wasm.js",
+    "pkg/fossil_df_wasm.d.ts",
+    "pkg/fossil_df_wasm_bg.wasm",
+    "pkg/fossil_df_wasm_bg.wasm.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "build": "pnpm run build:wasm && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

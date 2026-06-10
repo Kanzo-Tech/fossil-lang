@@ -32,6 +32,9 @@ pub mod sink;
 /// [`execute_graph`] / [`provider_bindings`] take (ADR-0018: passed as an
 /// argument, never read through `Db::system()`).
 pub use fossil_descriptors_output::OutputDescriptorKind;
+/// Re-exported so a host can classify a [`SourceRef`]'s format without depending
+/// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
+pub use fossil_mir::SourceFormat;
 
 use std::sync::Arc;
 
@@ -52,7 +55,7 @@ use fossil_graph_schema::{
 };
 use fossil_hir::shapes::{inner_primitive, primitive_to_graphar, primitive_to_xsd};
 use fossil_hir::{def_map::def_map, MappingLoc, Primitive};
-use fossil_mir::{apply_output_shape, lower_to_mir_pg, Expr, Op, SourceFormat, VProp};
+use fossil_mir::{apply_output_shape, lower_to_mir_pg, Expr, Op, VProp};
 use fossil_sinks::manifest::{
     data_type_name, AdjList, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
     DEFAULT_CHUNK_SIZE, GRAPHAR_VERSION,
@@ -633,6 +636,40 @@ pub fn provider_bindings(
             type_iri,
             columns: rdf_columns(&ops),
         });
+    }
+    out
+}
+
+/// A source the host must fetch before running the executor: its program URI
+/// (`io.csv("…")`) and format. The browser host enumerates these (via the wasm
+/// `sources()` wrapper) to know which signed URLs to request and how to stage the
+/// bytes — object-store formats into the `SessionContext`, `Provider` (RDF) via
+/// [`register_rdf`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceRef {
+    pub uri: String,
+    pub format: SourceFormat,
+}
+
+/// Enumerate every distinct source the program reads (one [`Op::Source`] per
+/// mapping, deduplicated by URI). Pure — no IO — so a host can call it to plan
+/// its fetches before [`execute_graph`]. Mirrors what [`execute_graph`] resolves
+/// internally, so the list is exactly the sources the run will read.
+#[must_use]
+pub fn program_sources(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    descriptor: &OutputDescriptorKind,
+) -> Vec<SourceRef> {
+    let mappings = def_map(db, file).mappings(db).clone();
+    let mut out: Vec<SourceRef> = Vec::new();
+    for mapping in mappings {
+        let mir = lower_to_mir_pg(db, mapping);
+        let ops = apply_output_shape(mir.ops(db), descriptor);
+        let (uri, format, _binding) = source_of(&ops);
+        if !out.iter().any(|s| s.uri == uri) {
+            out.push(SourceRef { uri, format });
+        }
     }
     out
 }

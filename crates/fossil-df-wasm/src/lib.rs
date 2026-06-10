@@ -39,6 +39,7 @@ use datafusion::prelude::SessionConfig;
 use fossil_base::{FossilDb, FsError, SourceFile, System};
 use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
 use fossil_df::files::GraphArFile;
+use fossil_df::SourceFormat;
 use fossil_run_status::RunStatus;
 use object_store::memory::InMemory;
 use object_store::path::Path as ObjPath;
@@ -121,17 +122,7 @@ pub async fn execute_core(
     sources: Vec<SourceInput>,
     dest: &str,
 ) -> Result<ExecOutput, String> {
-    let descriptor = match shex {
-        Some(text) => OutputDescriptorKind::ShEx(
-            ShExDescriptor::from_reader(text.as_bytes())
-                .map_err(|e| format!("ShEx parse error: {e:?}"))?,
-        ),
-        None => OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-    };
-
-    let system: Arc<dyn System> = Arc::new(ExecutorSystem);
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, program.to_string(), "program.fossil".to_string());
+    let (db, file, descriptor) = build_program(program, shex)?;
 
     // Single partition: no RepartitionExec, no detached `tokio::spawn` — the
     // whole plan is drivable by one top-level future, which is what makes
@@ -149,6 +140,53 @@ pub async fn execute_core(
     let files = graph.to_files().map_err(|e| format!("encode: {e}"))?;
     let run_status = graph.run_status(dest);
     Ok(ExecOutput { files, run_status })
+}
+
+/// Enumerate the program's sources as `(uri, format-kind)` — the target-agnostic
+/// core behind [`FossilExecutor::sources`]. Pure (no IO); the host uses it to
+/// plan its fetches before [`execute_core`]. `format` is the fetch-strategy
+/// string (`"csv"`/`"json"`/`"parquet"`/`"rdf"`).
+///
+/// # Errors
+/// `ShEx` parse failures.
+pub fn program_sources_core(
+    program: &str,
+    shex: Option<&str>,
+) -> Result<Vec<(String, &'static str)>, String> {
+    let (db, file, descriptor) = build_program(program, shex)?;
+    Ok(fossil_df::program_sources(&db, file, &descriptor)
+        .into_iter()
+        .map(|s| (s.uri, format_kind(&s.format)))
+        .collect())
+}
+
+/// Build the executor's db + interned program + output descriptor — shared by
+/// [`execute_core`] and [`program_sources_core`].
+fn build_program(
+    program: &str,
+    shex: Option<&str>,
+) -> Result<(FossilDb, SourceFile, OutputDescriptorKind), String> {
+    let descriptor = match shex {
+        Some(text) => OutputDescriptorKind::ShEx(
+            ShExDescriptor::from_reader(text.as_bytes())
+                .map_err(|e| format!("ShEx parse error: {e:?}"))?,
+        ),
+        None => OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+    };
+    let system: Arc<dyn System> = Arc::new(ExecutorSystem);
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, program.to_string(), "program.fossil".to_string());
+    Ok((db, file, descriptor))
+}
+
+/// The host fetch-strategy string for a source format.
+const fn format_kind(f: &SourceFormat) -> &'static str {
+    match f {
+        SourceFormat::Csv => "csv",
+        SourceFormat::Json => "json",
+        SourceFormat::Parquet => "parquet",
+        SourceFormat::Provider { .. } => "rdf",
+    }
 }
 
 /// Stage every object-store source (`csv`/`json`/`parquet`) in an [`InMemory`]
@@ -232,6 +270,26 @@ impl FossilExecutor {
     pub fn new() -> Self {
         console_error_panic_hook::set_once();
         Self
+    }
+
+    /// Enumerate the program's sources so the host knows what to fetch + how to
+    /// stage. Returns a JS array of `{ uri, format }`, `format` ∈
+    /// `"csv"`/`"json"`/`"parquet"`/`"rdf"`. Pure (no IO) — call it first, fetch
+    /// each `uri` by signed URL, then pass the bytes to [`Self::run`].
+    ///
+    /// # Errors
+    /// A JS `Error` if the `ShEx` schema fails to parse.
+    pub fn sources(&self, program: String, shex: Option<String>) -> Result<JsValue, JsError> {
+        let srcs =
+            program_sources_core(&program, shex.as_deref()).map_err(|e| JsError::new(&e))?;
+        let arr = js_sys::Array::new();
+        for (uri, format) in srcs {
+            let obj = js_sys::Object::new();
+            set(&obj, "uri", &JsValue::from_str(&uri)).map_err(|e| JsError::new(&e))?;
+            set(&obj, "format", &JsValue::from_str(format)).map_err(|e| JsError::new(&e))?;
+            arr.push(&obj);
+        }
+        Ok(arr.into())
     }
 
     /// Execute `program` against the host-fetched `sources` and return
