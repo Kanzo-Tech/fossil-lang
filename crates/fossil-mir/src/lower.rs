@@ -82,126 +82,6 @@ use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 /// shared `Extend(field="iri")` feeding N `TripleEmit`s (one per non-`iri`
 /// property), then one `Sink`. The single-property `hello.fossil` produces the
 /// same `Source → Extend → TripleEmit → Sink` sequence as Phase 1.
-#[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
-pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> MirGraph<'db> {
-    let file = mapping.file(db);
-
-    // Per ADR-0005, signatures and bodies live in separate Salsa queries.
-    // We need the HEADER (mapping name + shape IRI + source binding) from
-    // `lower_to_hir` and the BODY (property list) from `body(db, mapping)`.
-    //
-    // The `MappingLoc.index` is per-kind dense (audited in `def_map.rs`'s
-    // contract block, matching `body()`'s filter-then-nth convention), so
-    // it's also the dense index into `lower_to_hir(file).mappings`.
-    let dm = def_map(db, file);
-    let mapping_locs = dm.mappings(db);
-    let Some(dense_idx) = mapping_locs.iter().position(|loc| *loc == mapping) else {
-        // Foreign MappingLoc — emit an empty graph rather than panicking.
-        return MirGraph::new(db, Vec::new());
-    };
-    let hir = lower_to_hir(db, file);
-    let mappings = hir.mappings(db);
-    let Some(m) = mappings.get(dense_idx) else {
-        return MirGraph::new(db, Vec::new());
-    };
-    let body = body(db, mapping);
-    let prefixes = dm.prefixes(db);
-
-    // Source row type: prefer the type-checker's CSVW-derived `source_row`
-    // (CORE-05). On a type error or a schema-less source, fall back to the
-    // Phase 1 `Record({id, name})` so codegen still emits output and the
-    // walking-skeleton stays byte-identical (NEVER panic — Pitfall: type
-    // errors must not regress `fossil compile`).
-    let row_type = typecheck_mapping(db, mapping).map_or_else(
-        |_| phase1_row_type(db),
-        |out| out.source_row(db).unwrap_or_else(|| phase1_row_type(db)),
-    );
-
-    let mut ops: Vec<Op<'db>> = Vec::with_capacity(4);
-
-    // 0: Source — resolve the real URI + format from the mapping's source
-    // binding (STDL-06). `dm` (def_map, file-keyed) is already read above; the
-    // `lookup_source_call` is a pure read off that same handle, so this adds NO
-    // new per-mapping fan-out (RESEARCH Pitfall 3 / STATE.md "Do NOT"). The
-    // constructor NAME (`io.csv`/`io.json`/`io.parquet`) selects the format; the
-    // constructor's first positional string is the URI. A malformed/unknown
-    // binding falls back to the Phase-1 csv hardcode so we never panic and the
-    // walking-skeleton stays byte-identical when the binding IS `io.csv`.
-    let (uri, format) = resolve_source(dm, db, &m.source_binding);
-    ops.push(Op::Source {
-        uri,
-        format,
-        row_type,
-        binding: m.source_binding.clone(),
-    });
-
-    // 1: Extend — attach the IRI template result as a column named "iri".
-    //
-    // SC#4 / P-CRIT-4 (CORE-10): the IRI template's `${.field}` placeholders are
-    // the un-statically-dischargeable check this phase mitigates — a NULL field
-    // would yield a malformed IRI. We resolve the source LINE for the `iri`
-    // property HERE (during lowering) from the per-mapping `spans` side table so
-    // codegen stays a pure render (RESEARCH Pitfall 3 — never read
-    // `parse(db, file)` in the per-mapping path; `spans` and `mapping_cst_node`
-    // are already barrier-routed, so this does NOT widen the per-mapping
-    // fan-out). `iri_span_line` is then threaded into the field-ref wrapping in
-    // `lower_iri_template` → `lower_placeholder`, where each `${.field}` ColRef
-    // becomes `Expr::Assert { name: "iri_template_unbound", span_line, inner }`.
-    let iri_span_line = iri_property_line(db, mapping, body);
-    let iri_expr = lower_iri_property(m, body, prefixes, db, iri_span_line).unwrap_or_else(|| {
-        // No `iri = ...` property; emit an empty literal to keep the upstream
-        // Extend present for the TripleEmit subjects to reference.
-        Expr::LitString(SmolStr::default())
-    });
-    ops.push(Op::Extend {
-        input: 0,
-        field: SmolStr::new_static("iri"),
-        expr: iri_expr,
-    });
-    let extend_idx = 1usize;
-
-    // 2..N: one TripleEmit per non-`iri` predicate property (subject = the
-    // shared `iri` column reference; object = the property RHS lowered to an
-    // `Expr`). The `iri` column is produced by the Extend at `extend_idx`.
-    let subject = Expr::ColRef {
-        source: SmolStr::default(),
-        column: SmolStr::new_static("iri"),
-    };
-    for prop in body.properties(db) {
-        let PropertyKey::PrefixedName { iri } = &prop.key else {
-            continue; // skip the `iri = ...` property (handled by the Extend)
-        };
-        // Object positions are NOT wrapped in an assertion this phase (SC#4
-        // candidate 1 is the IRI-template subject only; object-side cardinality
-        // assertions are deferred — see the `<context>` note in 04-06-PLAN).
-        let object = lower_property_value(&prop.value, &m.source_binding, prefixes, None);
-        ops.push(Op::TripleEmit {
-            input: extend_idx,
-            subject: subject.clone(),
-            predicate: iri.clone(),
-            object,
-            graph: None,
-        });
-    }
-
-    // Final: Sink — GraphAr terminal, consuming the last op (the last
-    // TripleEmit if any properties exist, else the Extend).
-    let sink_input = ops.len() - 1;
-    ops.push(Op::Sink {
-        input: sink_input,
-        sink: SinkRef::GraphAr,
-    });
-
-    // Run the structural rewriting engine (R1–R6) as PLAIN RUST inside this
-    // tracked frame — NOT a separate tracked query (ADR-0010), so the
-    // per-mapping fan-out is unchanged. hello.fossil's `Source → Extend →
-    // TripleEmit → Sink` matches none of the R1–R6 triggers, so its SQL stays
-    // byte-identical.
-    let graph = MirGraph::new(db, ops);
-    crate::rewrite::rewrite(db, graph)
-}
-
 /// Property-graph-canonical lowering (paso 2): `Source → EmitVertex → Sink`.
 ///
 /// Branch-by-abstraction alongside [`lower_to_mir`] (which still emits the
@@ -826,132 +706,6 @@ mod tests {
     use fossil_hir::def_map::def_map;
     use std::sync::Arc;
 
-    const HELLO_FOSSIL: &str = "\
-prefix ex: <https://example.org/>
-
-users := io.csv(\"examples/users.csv\")
-
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
-";
-
-    fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(
-            &db,
-            HELLO_FOSSIL.to_string(),
-            "examples/hello.fossil".to_string(),
-        );
-        (db, file)
-    }
-
-    #[test]
-    fn lower_to_mir_for_hello_produces_4_ops() {
-        let (db, file) = db_with_hello();
-        let dm = def_map(&db, file);
-        let mapping = *dm.mappings(&db).first().expect("hello has one mapping");
-        let mir = lower_to_mir(&db, mapping);
-        let ops = mir.ops(&db);
-        assert_eq!(ops.len(), 4, "expected 4 ops, got {}", ops.len());
-
-        // Op 0: Source
-        match &ops[0] {
-            Op::Source {
-                uri,
-                format,
-                row_type: _,
-                ..
-            } => {
-                assert_eq!(uri.as_str(), "examples/users.csv");
-                assert_eq!(*format, SourceFormat::Csv);
-            }
-            other => panic!("expected Source at index 0, got {other:?}"),
-        }
-
-        // Op 1: Extend(iri = 'https://example.org/user/' || users.id)
-        match &ops[1] {
-            Op::Extend { input, field, expr } => {
-                assert_eq!(*input, 0);
-                assert_eq!(field.as_str(), "iri");
-                match expr {
-                    // SC#4: the `${.id}` field ref is now wrapped in a named
-                    // runtime assertion (iri_template_unbound) — the `inner` is
-                    // the original ColRef. The literal prefix is unchanged.
-                    Expr::Concat(l, r) => match (l.as_ref(), r.as_ref()) {
-                        (
-                            Expr::LitString(lit),
-                            Expr::Assert {
-                                name,
-                                span_line,
-                                inner,
-                            },
-                        ) => {
-                            assert_eq!(lit.as_str(), "https://example.org/user/");
-                            assert_eq!(name.as_str(), "iri_template_unbound");
-                            assert!(
-                                *span_line >= 1,
-                                "span_line must be a resolved 1-based line, got {span_line}"
-                            );
-                            match inner.as_ref() {
-                                Expr::ColRef { source, column } => {
-                                    // CODEGEN-LOWERING-01: ColRef.source is
-                                    // empty so codegen substitutes the view
-                                    // name (the URI stem from
-                                    // `derive_view_name`). Binding names
-                                    // (`users`) are a HIR concern, not a SQL
-                                    // concern.
-                                    assert_eq!(source.as_str(), "");
-                                    assert_eq!(column.as_str(), "id");
-                                }
-                                other => panic!("expected ColRef inside Assert, got {other:?}"),
-                            }
-                        }
-                        (lo, ro) => panic!(
-                            "expected Concat(LitString, Assert(ColRef)), got Concat({lo:?}, {ro:?})"
-                        ),
-                    },
-                    other => panic!("expected Concat for iri expr, got {other:?}"),
-                }
-            }
-            other => panic!("expected Extend at index 1, got {other:?}"),
-        }
-
-        // Op 2: TripleEmit(subject=ColRef(iri), predicate=ex:name, object=ColRef(name))
-        match &ops[2] {
-            Op::TripleEmit {
-                input,
-                subject,
-                predicate,
-                object,
-                graph,
-            } => {
-                assert_eq!(*input, 1);
-                assert!(
-                    matches!(subject, Expr::ColRef { column, .. } if column.as_str() == "iri"),
-                    "expected subject ColRef(iri), got {subject:?}"
-                );
-                assert_eq!(predicate.as_str(), "https://example.org/name");
-                assert!(
-                    matches!(object, Expr::ColRef { source, column }
-                        if source.as_str() == "" && column.as_str() == "name"),
-                    "expected object ColRef(<empty>.name), got {object:?}"
-                );
-                assert_eq!(*graph, None);
-            }
-            other => panic!("expected TripleEmit at index 2, got {other:?}"),
-        }
-
-        // Op 3: Sink(GraphAr)
-        match &ops[3] {
-            Op::Sink { input, sink } => {
-                assert_eq!(*input, 2);
-                assert_eq!(*sink, SinkRef::GraphAr);
-            }
-            other => panic!("expected Sink at index 3, got {other:?}"),
-        }
-    }
 
     /// STDL-06: a mapping reading from an `io.json("...")` / `io.parquet("...")`
     /// binding lowers `Op::Source` with the real URI from the binding and the
@@ -962,7 +716,7 @@ User : ex:Person from users
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
         let mapping = *dm.mappings(&db).first().expect("one mapping");
-        let mir = lower_to_mir(&db, mapping);
+        let mir = lower_to_mir_pg(&db, mapping);
         match &mir.ops(&db)[0] {
             Op::Source { uri, format, .. } => (uri.clone(), format.clone()),
             other => panic!("expected Source at index 0, got {other:?}"),
@@ -1001,16 +755,6 @@ User : ex:Person from rows
         let (uri, format) = lower_source_for(src);
         assert_eq!(uri.as_str(), "a.parquet");
         assert_eq!(format, SourceFormat::Parquet);
-    }
-
-    #[test]
-    fn lower_to_mir_is_memoised_across_invocations() {
-        let (db, file) = db_with_hello();
-        let dm = def_map(&db, file);
-        let mapping = *dm.mappings(&db).first().expect("hello has one mapping");
-        let a = lower_to_mir(&db, mapping);
-        let b = lower_to_mir(&db, mapping);
-        assert_eq!(a, b);
     }
 
     #[test]

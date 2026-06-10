@@ -120,19 +120,6 @@ fn erase_op<'db>(op: &Op<'db>, s: Ty<'db>) -> Op<'db> {
             input: *input,
             by: by.clone(),
         },
-        Op::TripleEmit {
-            input,
-            subject,
-            predicate,
-            object,
-            graph,
-        } => Op::TripleEmit {
-            input: *input,
-            subject: erase_expr(subject, s),
-            predicate: predicate.clone(),
-            object: erase_expr(object, s),
-            graph: graph.clone(),
-        },
         Op::EmitVertex {
             input,
             type_name,

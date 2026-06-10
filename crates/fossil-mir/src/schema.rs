@@ -70,11 +70,10 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
             schema
         }
         // Schema-preserving operators: pass the input schema through unchanged.
-        // EmitVertex/EmitEdge are terminal-ish like TripleEmit at the MIR-schema
-        // level (the PG/dense-id shaping is the backend's, not the logical schema).
+        // EmitVertex/EmitEdge are terminal-ish at the MIR-schema level (the
+        // PG/dense-id shaping is the backend's, not the logical schema).
         Op::Filter { input, .. }
         | Op::Distinct { input, .. }
-        | Op::TripleEmit { input, .. }
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => schema_of(db, ops, *input),
@@ -170,60 +169,6 @@ mod tests {
             .collect();
         let rec = Record::new(db, fields);
         Ty::new(db, TyKind::Record(rec))
-    }
-
-    #[test]
-    fn schema_of_source_extend_triple_emit_chain() {
-        let db = db();
-        let row_type = string_record(&db, &["id", "name"]);
-        let ops = vec![
-            Op::Source {
-                uri: SmolStr::new_static("users.csv"),
-                format: SourceFormat::Csv,
-                row_type,
-                binding: SmolStr::new_static("users"),
-            },
-            Op::Extend {
-                input: 0,
-                field: SmolStr::new_static("iri"),
-                expr: Expr::LitString(SmolStr::new_static("x")),
-            },
-            Op::TripleEmit {
-                input: 1,
-                subject: Expr::ColRef {
-                    source: SmolStr::default(),
-                    column: SmolStr::new_static("iri"),
-                },
-                predicate: SmolStr::new_static("https://example.org/name"),
-                object: Expr::ColRef {
-                    source: SmolStr::new_static("users"),
-                    column: SmolStr::new_static("name"),
-                },
-                graph: None,
-            },
-            Op::Sink {
-                input: 2,
-                sink: SinkRef::GraphAr,
-            },
-        ];
-
-        // Source row schema is the record field names.
-        assert_eq!(
-            schema_of(&db, &ops, 0),
-            vec![SmolStr::new_static("id"), SmolStr::new_static("name")]
-        );
-        // Extend appends the `iri` column.
-        assert_eq!(
-            schema_of(&db, &ops, 1),
-            vec![
-                SmolStr::new_static("id"),
-                SmolStr::new_static("name"),
-                SmolStr::new_static("iri")
-            ]
-        );
-        // TripleEmit and Sink pass the input schema through unchanged.
-        assert_eq!(schema_of(&db, &ops, 2), schema_of(&db, &ops, 1));
-        assert_eq!(schema_of(&db, &ops, 3), schema_of(&db, &ops, 1));
     }
 
     /// PG-canonical operators: `EmitVertex` / `EmitEdge` construct and are

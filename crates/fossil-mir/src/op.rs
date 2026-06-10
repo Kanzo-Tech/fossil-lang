@@ -111,24 +111,9 @@ pub enum Op<'db> {
         by: Option<Vec<SmolStr>>,
     },
 
-    /// `TripleEmitOp(input, subject, predicate, object, graph?)` — emit one RDF
-    /// triple per row (operator-algebra.md §2.11, typed-sink refinement).
-    ///
-    /// Phase 1 used `subject_col` / `object_col: SmolStr`; Phase 4 generalises
-    /// both to [`Expr`] (a bare `ColRef` / `Concat` renders byte-identically).
-    /// `graph` is the optional named-graph IRI (RDF 1.2 quad).
-    TripleEmit {
-        input: usize,
-        subject: Expr<'db>,
-        predicate: SmolStr,
-        object: Expr<'db>,
-        graph: Option<SmolStr>,
-    },
-
     /// `EmitVertex(input, type_name, rdf_type?, id, dedup, props)` — project rows
     /// to a typed property-graph VERTEX. The property-graph-canonical model: one
-    /// `EmitVertex` per shape carrying ALL its columns (map-only wide-row),
-    /// instead of one `TripleEmit` per predicate + a triples→wide pivot. The
+    /// `EmitVertex` per shape carrying ALL its columns (map-only wide-row). The
     /// backend assigns the dense vertex id and materialises `GraphAr`; the PG model
     /// lives here, not in triples. `id` is the subject IRI expression (typically a
     /// `Concat` template); `dedup` collapses duplicate ids (single-valued shape).
