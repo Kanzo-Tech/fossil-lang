@@ -30,6 +30,17 @@ jobs:
       - name: Install wasm-bindgen-cli (0.2.120, matches Cargo.toml pin)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
 
+      # datafusion (in @fossil-lang/executor's build:wasm) hardcodes
+      # arrow-ipc[zstd], so the wasm32 zstd-sys C build needs a wasm-capable
+      # clang (Apple/macOS clang lacks the target; ubuntu's LLVM clang has it).
+      # Point cc-rs at it for the wasm32 target.
+      - name: Install LLVM for wasm zstd-C (@fossil-lang/executor)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm
+          echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
+          echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
