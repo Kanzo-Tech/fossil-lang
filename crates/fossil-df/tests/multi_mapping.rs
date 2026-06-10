@@ -35,7 +35,7 @@ async fn same_type_from_two_sources_merges_into_one_table() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "merge.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT)
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
         .await
         .expect("execute_graph");
 

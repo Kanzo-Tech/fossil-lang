@@ -37,7 +37,7 @@ async fn execute_vertex_materialises_graphar_shape() {
         .expect("hello.fossil must contain one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(&ctx, &db, mapping, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT)
+    let (vertex, node) = fossil_df::execute_vertex(&ctx, &db, mapping, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
         .await
         .expect("execute_vertex runs the DataFusion plan");
 

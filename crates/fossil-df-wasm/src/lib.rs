@@ -121,6 +121,7 @@ pub async fn execute_core(
     shex: Option<&str>,
     sources: Vec<SourceInput>,
     dest: &str,
+    connections: &HashMap<String, String>,
 ) -> Result<ExecOutput, String> {
     let (db, file, descriptor) = build_program(program, shex)?;
 
@@ -131,9 +132,12 @@ pub async fn execute_core(
     let ctx = SessionContext::new_with_config(config);
 
     register_object_store_sources(&ctx, &sources).await?;
-    register_rdf_sources(&ctx, &db, file, &descriptor, &sources)?;
+    register_rdf_sources(&ctx, &db, file, &descriptor, &sources, connections)?;
 
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
+    // The executor resolves each `@conn` source alias through `connections`
+    // (same name→URL map the browser used in `sources()`), so the registered
+    // object-store / RDF tables line up with what the plan reads.
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor, connections)
         .await
         .map_err(|e| format!("execute_graph: {e}"))?;
 
@@ -152,9 +156,10 @@ pub async fn execute_core(
 pub fn program_sources_core(
     program: &str,
     shex: Option<&str>,
+    connections: &HashMap<String, String>,
 ) -> Result<Vec<(String, &'static str)>, String> {
     let (db, file, descriptor) = build_program(program, shex)?;
-    Ok(fossil_df::program_sources(&db, file, &descriptor)
+    Ok(fossil_df::program_sources(&db, file, &descriptor, connections)
         .into_iter()
         .map(|s| (s.uri, format_kind(&s.format)))
         .collect())
@@ -227,8 +232,9 @@ fn register_rdf_sources(
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
     sources: &[SourceInput],
+    connections: &HashMap<String, String>,
 ) -> Result<(), String> {
-    for binding in fossil_df::provider_bindings(db, file, descriptor) {
+    for binding in fossil_df::provider_bindings(db, file, descriptor, connections) {
         let src = sources
             .iter()
             .find(|s| s.format == SourceKind::Rdf && s.uri == binding.uri)
@@ -277,11 +283,21 @@ impl FossilExecutor {
     /// `"csv"`/`"json"`/`"parquet"`/`"rdf"`. Pure (no IO) — call it first, fetch
     /// each `uri` by signed URL, then pass the bytes to [`Self::run`].
     ///
+    /// `refs` is the connection ref-map `{ name: baseUrl }` (the host's
+    /// connections): a `@name/path` source alias resolves to `{baseUrl}/path`.
+    /// Pass the SAME `refs` to [`Self::run`] so the resolved URIs line up.
+    ///
     /// # Errors
     /// A JS `Error` if the `ShEx` schema fails to parse.
-    pub fn sources(&self, program: String, shex: Option<String>) -> Result<JsValue, JsError> {
-        let srcs =
-            program_sources_core(&program, shex.as_deref()).map_err(|e| JsError::new(&e))?;
+    pub fn sources(
+        &self,
+        program: String,
+        shex: Option<String>,
+        refs: JsValue,
+    ) -> Result<JsValue, JsError> {
+        let connections = parse_refs(&refs).map_err(|e| JsError::new(&e))?;
+        let srcs = program_sources_core(&program, shex.as_deref(), &connections)
+            .map_err(|e| JsError::new(&e))?;
         let arr = js_sys::Array::new();
         for (uri, format) in srcs {
             let obj = js_sys::Object::new();
@@ -295,9 +311,10 @@ impl FossilExecutor {
     /// Execute `program` against the host-fetched `sources` and return
     /// `{ files: [{ path, bytes: Uint8Array }], runStatus }`.
     ///
-    /// `sources` is a JS array of `{ uri, format, bytes: Uint8Array }`, where
-    /// `format` is `"csv"`/`"json"`/`"parquet"`/`"rdf"`. `shex` is the optional
-    /// output schema text.
+    /// `sources` is a JS array of `{ uri, format, bytes: Uint8Array }` (the `uri`
+    /// being the RESOLVED one [`Self::sources`] returned); `format` is
+    /// `"csv"`/`"json"`/`"parquet"`/`"rdf"`. `shex` is the optional output schema
+    /// text. `refs` is the same `{ name: baseUrl }` map passed to `sources`.
     ///
     /// # Errors
     /// A JS `Error` carrying the message of any parse / staging / execution /
@@ -308,13 +325,41 @@ impl FossilExecutor {
         shex: Option<String>,
         sources: JsValue,
         dest: String,
+        refs: JsValue,
     ) -> Result<JsValue, JsError> {
         let sources = parse_sources(&sources).map_err(|e| JsError::new(&e))?;
-        let out = execute_core(&program, shex.as_deref(), sources, &dest)
+        let connections = parse_refs(&refs).map_err(|e| JsError::new(&e))?;
+        let out = execute_core(&program, shex.as_deref(), sources, &dest, &connections)
             .await
             .map_err(|e| JsError::new(&e))?;
         out_to_js(&out).map_err(|e| JsError::new(&e))
     }
+}
+
+/// Parse the JS `refs` object `{ name: baseUrl }` into the connection ref-map.
+/// `undefined`/`null` (no connections) yields an empty map — all source URIs are
+/// then treated as already-concrete.
+fn parse_refs(refs: &JsValue) -> Result<HashMap<String, String>, String> {
+    if refs.is_undefined() || refs.is_null() {
+        return Ok(HashMap::new());
+    }
+    let obj: &js_sys::Object = refs
+        .dyn_ref::<js_sys::Object>()
+        .ok_or("`refs` must be an object of { name: baseUrl }")?;
+    let mut map = HashMap::new();
+    for entry in js_sys::Object::entries(obj).iter() {
+        let pair: js_sys::Array = entry.into();
+        let name = pair
+            .get(0)
+            .as_string()
+            .ok_or("`refs` keys must be strings")?;
+        let url = pair
+            .get(1)
+            .as_string()
+            .ok_or("`refs` values must be strings")?;
+        map.insert(name, url);
+    }
+    Ok(map)
 }
 
 /// Parse the JS `sources` array into [`SourceInput`]s, reading each `bytes`

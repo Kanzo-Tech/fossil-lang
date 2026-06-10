@@ -27,7 +27,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         bytes,
     }];
 
-    let out = execute_core(PROGRAM, None, sources, "s3://jobs/run-1")
+    let out = execute_core(PROGRAM, None, sources, "s3://jobs/run-1", &empty_refs())
         .await
         .expect("executor runs the CSV program");
 
@@ -73,10 +73,50 @@ Order : ex:Order from orders
 
 #[test]
 fn program_sources_lists_each_distinct_source_with_its_format() {
-    let srcs = program_sources_core(TWO_SOURCE_PROGRAM, None).expect("sources enumerated");
+    let srcs =
+        program_sources_core(TWO_SOURCE_PROGRAM, None, &empty_refs()).expect("sources enumerated");
     let uris: Vec<&str> = srcs.iter().map(|(u, _)| u.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
     assert!(uris.contains(&"https://data.example.com/orders.csv"));
     assert_eq!(srcs.len(), 2);
     assert!(srcs.iter().all(|(_, fmt)| *fmt == "csv"));
+}
+
+const CONN_PROGRAM: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"@mybucket/users.csv\")
+
+Person : ex:Person from users
+    iri = `${ex:}person/${.id}`
+    ex:name = .name
+";
+
+#[tokio::test]
+async fn at_conn_source_alias_resolves_through_the_ref_map() {
+    // `@mybucket/users.csv` resolves to `{base}/users.csv` via the ref-map —
+    // both `sources()` (enumeration) and `run()` (staging + read) must agree.
+    let mut refs = std::collections::HashMap::new();
+    refs.insert("mybucket".to_string(), "https://data.example.com".to_string());
+
+    let listed = program_sources_core(CONN_PROGRAM, None, &refs).expect("sources");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].0, "https://data.example.com/users.csv");
+
+    let resolved_uri = &listed[0].0;
+    let sources = vec![SourceInput {
+        uri: resolved_uri.clone(),
+        format: SourceKind::Csv,
+        bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
+    }];
+
+    let out = execute_core(CONN_PROGRAM, None, sources, "s3://jobs/run-1", &refs)
+        .await
+        .expect("executor runs the @conn-aliased program");
+    let person = out.run_status.vertices.iter().find(|v| v.vertex_type == "Person");
+    assert_eq!(person.and_then(|v| v.count), Some(3));
+}
+
+fn empty_refs() -> std::collections::HashMap<String, String> {
+    std::collections::HashMap::new()
 }

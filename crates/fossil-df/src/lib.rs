@@ -36,6 +36,7 @@ pub use fossil_descriptors_output::OutputDescriptorKind;
 /// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
 pub use fossil_mir::SourceFormat;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, UInt32Array};
@@ -121,6 +122,7 @@ pub async fn execute_graph<'db>(
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<GraphArData> {
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
@@ -131,7 +133,7 @@ pub async fn execute_graph<'db>(
     // other's `MemTable`.
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
-        let prepared = prepare_vertex(ctx, db, mapping, descriptor).await?;
+        let prepared = prepare_vertex(ctx, db, mapping, descriptor, connections).await?;
         match groups.iter_mut().find(|(t, _)| *t == prepared.node.label) {
             Some((_, group)) => group.push(prepared),
             None => groups.push((prepared.node.label.clone(), vec![prepared])),
@@ -149,7 +151,7 @@ pub async fn execute_graph<'db>(
     let mut edges = Vec::new();
     let mut edge_types = Vec::new();
     for &mapping in &mappings {
-        for (table, edge_type) in execute_edges(ctx, db, mapping, descriptor).await? {
+        for (table, edge_type) in execute_edges(ctx, db, mapping, descriptor, connections).await? {
             edges.push(table);
             edge_types.push(edge_type);
         }
@@ -198,8 +200,9 @@ pub async fn execute_vertex<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let prepared = prepare_vertex(ctx, db, mapping, descriptor).await?;
+    let prepared = prepare_vertex(ctx, db, mapping, descriptor, connections).await?;
     finalize_vertex(ctx, vec![prepared]).await
 }
 
@@ -210,12 +213,13 @@ async fn prepare_vertex<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 
-    let (uri, format, binding) = source_of(ops);
+    let (uri, format, binding) = source_of(ops, connections);
     let (type_name, rdf_type, id, dedup, props) = ops
         .iter()
         .find_map(|o| match o {
@@ -382,12 +386,13 @@ async fn execute_edges<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 
-    let (uri, format, binding) = source_of(ops);
+    let (uri, format, binding) = source_of(ops, connections);
 
     let mut out = Vec::new();
     for op in ops {
@@ -496,11 +501,33 @@ async fn execute_edge(
     })
 }
 
-/// The source URI + format + binding name of a lowered mapping
-/// (`lower_to_mir_pg` always emits exactly one `Source`). The `binding` is the
-/// table name a `Provider` source is registered under (the host pre-registers
-/// it; [`read_source`] scans it); object-store formats ignore it.
-fn source_of<'db>(ops: &[Op<'db>]) -> (String, SourceFormat, String) {
+/// Resolve a `.fossil` source reference through a connection ref-map:
+/// `@name/path` → `{connections[name]}/path`; any other reference (a concrete
+/// URL or path) is returned verbatim. This is THE source-resolution rule, shared
+/// by the native host ([`fossil-engine`]) and the browser executor so a `@conn`
+/// alias resolves identically everywhere — the MIR keeps the alias literal, the
+/// host owns the name→URL map (a connection's base URL). An unknown alias is
+/// left untouched (the reader then surfaces the real "not found").
+#[must_use]
+pub fn resolve_source_uri(raw: &str, connections: &HashMap<String, String>) -> String {
+    match raw.strip_prefix('@').and_then(|r| r.split_once('/')) {
+        Some((name, path)) => connections.get(name).map_or_else(
+            || raw.to_string(),
+            |base| format!("{}/{path}", base.trim_end_matches('/')),
+        ),
+        None => raw.to_string(),
+    }
+}
+
+/// The resolved source URI + format + binding name of a lowered mapping
+/// (`lower_to_mir_pg` always emits exactly one `Source`). The raw `@conn` alias
+/// is resolved through `connections` ([`resolve_source_uri`]) before use. The
+/// `binding` is the table name a `Provider` source is registered under (the host
+/// pre-registers it; [`read_source`] scans it); object-store formats ignore it.
+fn source_of<'db>(
+    ops: &[Op<'db>],
+    connections: &HashMap<String, String>,
+) -> (String, SourceFormat, String) {
     ops.iter()
         .find_map(|o| match o {
             Op::Source {
@@ -508,7 +535,11 @@ fn source_of<'db>(ops: &[Op<'db>]) -> (String, SourceFormat, String) {
                 format,
                 binding,
                 ..
-            } => Some((uri.to_string(), format.clone(), binding.to_string())),
+            } => Some((
+                resolve_source_uri(uri, connections),
+                format.clone(),
+                binding.to_string(),
+            )),
             _ => None,
         })
         .expect("lower_to_mir_pg always emits a Source")
@@ -602,6 +633,7 @@ pub fn provider_bindings(
     db: &dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
     let mappings = def_map(db, file).mappings(db).clone();
     let mut out = Vec::new();
@@ -615,7 +647,7 @@ pub fn provider_bindings(
                 format: SourceFormat::Provider { .. },
                 binding,
                 ..
-            } => Some((uri.to_string(), binding.to_string())),
+            } => Some((resolve_source_uri(uri, connections), binding.to_string())),
             _ => None,
         }) else {
             continue; // object-store source — no host bytes seam
@@ -660,13 +692,14 @@ pub fn program_sources(
     db: &dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> Vec<SourceRef> {
     let mappings = def_map(db, file).mappings(db).clone();
     let mut out: Vec<SourceRef> = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
         let ops = apply_output_shape(mir.ops(db), descriptor);
-        let (uri, format, _binding) = source_of(&ops);
+        let (uri, format, _binding) = source_of(&ops, connections);
         if !out.iter().any(|s| s.uri == uri) {
             out.push(SourceRef { uri, format });
         }
@@ -754,8 +787,9 @@ pub fn register_provider_sources(
     db: &dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
+    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<()> {
-    for binding in provider_bindings(db, file, descriptor) {
+    for binding in provider_bindings(db, file, descriptor, connections) {
         let turtle = std::fs::read_to_string(&binding.uri).map_err(|e| {
             DataFusionError::Execution(format!("read RDF source `{}`: {e}", binding.uri))
         })?;
@@ -770,12 +804,13 @@ pub fn register_provider_sources(
 /// [`GraphArData`] so the caller can build a `RunStatus` and run any post-pass
 /// (e.g. the layout enrichment).
 ///
-/// `read_uri` is the host's byte seam: given a source's raw URI (possibly a
-/// `@conn/...` alias or a relative path), return its text — the host owns the
-/// resolution + credentials + transport (fs / cloud). Object-store *formats*
-/// (csv/json/parquet) are NOT read through it; they stream via the ctx's
-/// `ObjectStore` (the local filesystem by default), so `read_uri` only services
-/// `Provider` (RDF) sources.
+/// `connections` is the name→base-URL ref-map: `@conn/path` source aliases
+/// resolve through it ([`resolve_source_uri`]) for BOTH object-store reads
+/// (csv/json/parquet → the resolved URL feeds `read_csv`) and provider (RDF)
+/// bindings. `read_uri` is the host's byte seam for RDF only: given a (resolved)
+/// source URI, return its text — the host owns credentials + transport (fs /
+/// cloud). Object-store formats are NOT read through it; they stream via the
+/// ctx's `ObjectStore` (the local filesystem by default).
 ///
 /// Blocks the async executor on a private current-thread runtime — the host
 /// stays synchronous. The browser path drives [`execute_graph`] directly from
@@ -790,10 +825,11 @@ pub fn run_to_dir(
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
     dest_dir: &std::path::Path,
+    connections: &HashMap<String, String>,
     read_uri: impl Fn(&str) -> Result<String, String>,
 ) -> datafusion::error::Result<GraphArData> {
     let ctx = SessionContext::new();
-    for binding in provider_bindings(db, file, descriptor) {
+    for binding in provider_bindings(db, file, descriptor, connections) {
         let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
         register_rdf(&ctx, &binding, &bytes)?;
     }
@@ -802,7 +838,7 @@ pub fn run_to_dir(
         .enable_all()
         .build()
         .map_err(|e| DataFusionError::Execution(format!("build tokio runtime: {e}")))?;
-    let graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor))?;
+    let graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor, connections))?;
 
     graph
         .write_to_dir(dest_dir)

@@ -328,20 +328,15 @@ fn resolve_ref(
 
 /// Resolve a `.fossil` source URI through the `--creds-stdin` connection map.
 /// `@conn/path` → `<connection url>/path`; any other URI is returned verbatim.
+/// Delegates to the shared rule [`fossil_df::resolve_source_uri`] (one
+/// resolution authority across the native host + the browser executor),
+/// projecting the creds map onto its name→base-URL view.
 fn resolve_source_uri(raw: &str, connections: &HashMap<String, creds::ConnectionCreds>) -> String {
-    let Some((conn_name, path)) = raw.strip_prefix('@').and_then(|r| r.split_once('/')) else {
-        return raw.to_string(); // not an @conn reference — pass through
-    };
-    connections.get(conn_name).map_or_else(
-        || raw.to_string(),
-        |c| {
-            format!(
-                "{}/{}",
-                c.url.trim_end_matches('/'),
-                path.trim_start_matches('/')
-            )
-        },
-    )
+    let urls: HashMap<String, String> = connections
+        .iter()
+        .map(|(name, c)| (name.clone(), c.url.clone()))
+        .collect();
+    fossil_df::resolve_source_uri(raw, &urls)
 }
 
 /// Install each source connection's scoped read secret on `conn`, so a
@@ -412,7 +407,15 @@ pub fn run(path: &Path, dest_url: &str, creds: &RunCreds) -> miette::Result<RunS
         let locator = resolve_ref(uri, &creds.connections, source_dir);
         std::fs::read_to_string(&locator).map_err(|e| format!("read source `{locator}`: {e}"))
     };
-    let graph = fossil_df::run_to_dir(&db, file, &descriptor, &dest_dir, read_uri)
+    // The name→base-URL ref-map the executor resolves `@conn` source aliases
+    // through (object-store + provider sources alike) — projected from the
+    // `--creds-stdin` connections, the single resolution authority.
+    let connections: std::collections::HashMap<String, String> = creds
+        .connections
+        .iter()
+        .map(|(name, c)| (name.clone(), c.url.clone()))
+        .collect();
+    let graph = fossil_df::run_to_dir(&db, file, &descriptor, &dest_dir, &connections, read_uri)
         .map_err(|e| miette::miette!("execute: {e}"))?;
 
     // W3.1b layout post-pass: replace the placeholder x/y/cluster_id with a real

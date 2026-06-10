@@ -28,6 +28,14 @@ export type { InitFossilExecutorOpts } from './load.js';
 /** The fetch strategy for a source — how the host must stage its bytes. */
 export type SourceFormat = 'csv' | 'json' | 'parquet' | 'rdf';
 
+/**
+ * The connection ref-map `{ name: baseUrl }` (the host's connections). A
+ * `@name/path` source alias in the program resolves to `{baseUrl}/path`. Pass
+ * the SAME map to {@link FossilExecutor.sources} and {@link FossilExecutor.run}
+ * so the resolved URIs line up. Empty/omitted ⇒ every source URI is concrete.
+ */
+export type ConnectionRefs = Record<string, string>;
+
 /** A source the program reads, as enumerated by {@link FossilExecutor.sources}. */
 export interface SourceDescriptor {
   /** The program URI (`io.csv("…")`) — resolve it to a signed URL to fetch. */
@@ -108,10 +116,11 @@ export class FossilExecutor {
   /**
    * Enumerate the program's sources so the host knows what to fetch + how to
    * stage. Pure (no IO) — call it first, resolve each `uri` to a signed URL,
-   * fetch the bytes, then pass them to {@link run}.
+   * fetch the bytes, then pass them to {@link run}. `refs` resolves `@conn`
+   * aliases (pass the same map to {@link run}).
    */
-  sources(program: string, shex?: string): SourceDescriptor[] {
-    return this.#raw.sources(program, shex) as SourceDescriptor[];
+  sources(program: string, refs?: ConnectionRefs, shex?: string): SourceDescriptor[] {
+    return this.#raw.sources(program, shex, refs ?? {}) as SourceDescriptor[];
   }
 
   /**
@@ -126,9 +135,10 @@ export class FossilExecutor {
     program: string,
     sources: SourceInput[],
     dest: string,
+    refs?: ConnectionRefs,
     shex?: string,
   ): Promise<ExecutorResult> {
-    return this.#raw.run(program, shex, sources, dest) as Promise<ExecutorResult>;
+    return this.#raw.run(program, shex, sources, dest, refs ?? {}) as Promise<ExecutorResult>;
   }
 
   /** Release the wasm-side handle. */

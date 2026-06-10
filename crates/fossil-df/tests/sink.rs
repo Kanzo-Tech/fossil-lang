@@ -34,7 +34,7 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT).await.expect("execute_graph");
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new()).await.expect("execute_graph");
 
     let dir = tempfile::tempdir().expect("tempdir");
     graph.write_to_dir(dir.path()).expect("write_to_dir");

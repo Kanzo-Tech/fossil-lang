@@ -37,7 +37,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
     let accept_all = fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
-    let bindings = fossil_df::provider_bindings(&db, file, &accept_all);
+    let bindings = fossil_df::provider_bindings(&db, file, &accept_all, &std::collections::HashMap::new());
     assert_eq!(bindings.len(), 1, "one io.rdf source");
     let b = &bindings[0];
     assert_eq!(b.binding, "people");
@@ -60,10 +60,10 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The host reads the bytes (here: from the filesystem) and registers the
     // decoded relation. Then the executor scans it.
     let ctx = SessionContext::new();
-    fossil_df::register_provider_sources(&ctx, &db, file, &accept_all)
+    fossil_df::register_provider_sources(&ctx, &db, file, &accept_all, &std::collections::HashMap::new())
         .expect("register io.rdf source");
 
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &accept_all)
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &accept_all, &std::collections::HashMap::new())
         .await
         .expect("execute_graph over an io.rdf source");
 
@@ -142,9 +142,9 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
     );
 
     let ctx = SessionContext::new();
-    fossil_df::register_provider_sources(&ctx, &db, file, &descriptor)
+    fossil_df::register_provider_sources(&ctx, &db, file, &descriptor, &std::collections::HashMap::new())
         .expect("register both io.rdf shapes");
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor, &std::collections::HashMap::new())
         .await
         .expect("execute_graph with the ShEx descriptor");
 
