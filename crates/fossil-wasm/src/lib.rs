@@ -187,43 +187,6 @@ impl FossilPlayground {
         }
     }
 
-    // ----- Phase 1 legacy surface (retained verbatim) -----
-
-    /// Compile a Fossil source string. On success returns
-    /// `{ sql: String, manifest_yaml: String }` as a JS object via
-    /// `serde-wasm-bindgen`. On error throws a JS `Error` carrying the
-    /// diagnostic message.
-    ///
-    /// Phase 1 wires the same pipeline as `fossil-cli`'s `compile`
-    /// subcommand minus the native `DuckDB` execution step (`fossil-runtime`
-    /// is intentionally NOT a dependency of this crate per RESEARCH.md
-    /// Pattern 5). Phase 7 PLAY-02 adds in-browser execution via
-    /// `DuckDB`-WASM.
-    ///
-    /// Prefer [`Self::compile_file`] for the lifecycle path (it consumes an
-    /// open `FileHandle` instead of a freshly-interned ad-hoc `SourceFile`).
-    pub fn compile(&self, source: &str) -> Result<JsValue, JsError> {
-        let file = fossil_base::SourceFile::new(
-            &self.db,
-            source.to_string(),
-            "playground.fossil".to_string(),
-        );
-
-        let dm = fossil_hir::def_map::def_map(&self.db, file);
-        let mappings = dm.mappings(&self.db);
-        let mapping = mappings
-            .first()
-            .copied()
-            .ok_or_else(|| JsError::new("no mapping found in source"))?;
-
-        let plan = fossil_codegen::codegen_sql(&self.db, mapping);
-        let result = CompileResult {
-            sql: plan.sql(&self.db).clone(),
-            manifest_yaml: plan.manifest_yaml(&self.db).clone(),
-        };
-        serde_wasm_bindgen::to_value(&result).map_err(JsError::from)
-    }
-
     /// Return the stdlib classification manifest as a JS array of
     /// `{ name, wasm_class }` objects (STDL-07).
     ///
@@ -334,22 +297,6 @@ impl FossilPlayground {
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
 
-    /// Compile one open file. Returns `{ sql, manifest_yaml }` — the same
-    /// shape [`Self::compile`] returns. Preferred over `compile(&str)` for
-    /// the playground run path because it consumes the file's stable Salsa
-    /// `SourceFile` identity (so subsequent edits benefit from incremental
-    /// memoisation).
-    ///
-    /// # Errors
-    ///
-    /// Returns a JS error if `handle` is unknown, the file has no mapping,
-    /// or serialization fails.
-    pub fn compile_file(&self, handle: FileHandle) -> Result<JsValue, JsError> {
-        let result = self
-            .compile_file_result(handle)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        serde_wasm_bindgen::to_value(&result).map_err(JsError::from)
-    }
 
     /// Install a user-supplied `ShEx` schema as the active output descriptor.
     /// On parse failure the previously-installed descriptor is RETAINED (no
@@ -501,32 +448,6 @@ impl FossilPlayground {
                 .map(|d| to_check_row(&uri, &index, &d))
                 .collect(),
         )
-    }
-
-    /// Native-reachable per-file compile. Returns `CompileResult` directly;
-    /// the wasm-bindgen wrapper serializes it via `serde_wasm_bindgen`.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err(WorkspaceError)` if the handle is unknown / closed or
-    /// the file has no mapping. The wasm-bindgen wrapper rewraps the error
-    /// string as `JsError`.
-    pub fn compile_file_result(&self, handle: FileHandle) -> Result<CompileResult, WorkspaceError> {
-        let file = self
-            .files
-            .get(handle)
-            .ok_or(WorkspaceError::UnknownHandle)?;
-        let dm = fossil_hir::def_map::def_map(&self.db, file);
-        let mapping = dm
-            .mappings(&self.db)
-            .first()
-            .copied()
-            .ok_or(WorkspaceError::NoMappingInFile)?;
-        let plan = fossil_codegen::codegen_sql(&self.db, mapping);
-        Ok(CompileResult {
-            sql: plan.sql(&self.db).clone(),
-            manifest_yaml: plan.manifest_yaml(&self.db).clone(),
-        })
     }
 
     /// Native-reachable update — pure-Rust mirror of `update_file`.
@@ -719,18 +640,6 @@ impl Default for FossilPlayground {
     }
 }
 
-/// Phase 1 [`FossilPlayground::compile`] return shape — flat object with two
-/// `String` fields. Phase 7 `compile_file` reuses the same shape (additive
-/// to the JS-side contract).
-///
-/// Re-exposed publicly for the native cargo-test path
-/// (`compile_file_result`) so integration tests can inspect the SQL +
-/// manifest strings without going through `serde_wasm_bindgen`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct CompileResult {
-    pub sql: String,
-    pub manifest_yaml: String,
-}
 
 /// One diagnostic row in the [`FossilPlayground::check`] return array.
 ///

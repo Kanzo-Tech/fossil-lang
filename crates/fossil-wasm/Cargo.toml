@@ -19,15 +19,14 @@ workspace = true
 
 [dependencies]
 # Compiler-core crates wired into FossilPlayground::compile per RESEARCH.md
-# Pattern 5 (lines 466-484): the Phase 1 wasm dep tree is exactly the 5
-# compiler crates plus WASM glue. NO fossil-runtime (native DuckDB), NO
-# fossil-cli/fossil-lsp (binaries), NO fossil-sinks (heavy arrow/parquet —
-# Phase 1 manifest is hand-templated in fossil-codegen).
+# The wasm dep tree is the compiler front-end crates plus WASM glue. NO
+# fossil-runtime (native DuckDB), NO fossil-cli/fossil-lsp (binaries), NO
+# fossil-sinks/fossil-codegen (the SQL/GraphAr backend — the browser does not
+# compile to SQL anymore; the editor is LSP-only).
 fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-fossil-codegen = { path = "../fossil-codegen" }
 # Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` on its
 # `WasmSystem` struct. Default `output_descriptor_kind()` returns AcceptAll
 # for Phase 3 v0.1 — Phase 7+ playground wires user-supplied ShEx text.

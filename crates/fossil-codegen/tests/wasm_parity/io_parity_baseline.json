@@ -1,8 +1,0 @@
-[
-  {
-    "name": "io_three_format_read_clean_parse",
-    "result_sha256": "8eb835659d76553c8289a98c7ef6d80c1863de2f955829369c4252f669d407de",
-    "row_count": 3,
-    "sql_sha256": "0f56e75793fae1c0a1b99bb436e62c0916ad1f09c26fcd2ce0dc9215a9c75d16"
-  }
-]

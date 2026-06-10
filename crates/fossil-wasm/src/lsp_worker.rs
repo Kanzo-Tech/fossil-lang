@@ -216,7 +216,6 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
         // Custom fossil/* methods (B2 — wired in 07-06; the dispatch routes
         // are listed here so the plan-stated method-not-found surface is
         // accurate. 07-06 fills in the handlers.)
-        "fossil/compileFile" => handle_compile_file(pg, params),
         "fossil/checkAll" => handle_check_all(pg),
         "fossil/setTargetShex" => handle_set_target_shex(pg, params),
         "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(pg, &params),
@@ -522,27 +521,6 @@ fn handle_code_action(
 }
 
 // ---------- Custom fossil/* methods (B2) ----------
-
-fn handle_compile_file(
-    pg: &FossilPlayground,
-    params: serde_json::Value,
-) -> Result<serde_json::Value, LspError> {
-    #[derive(serde::Deserialize)]
-    struct CompileFileParams {
-        uri: String,
-    }
-    let p: CompileFileParams = serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
-    let handle = pg.lookup_handle_by_uri(&p.uri).ok_or_else(|| LspError {
-        code: -32602,
-        message: format!("unknown uri: {}", p.uri),
-    })?;
-    pg.compile_file_result(handle)
-        .map(|r| serde_json::to_value(&r).unwrap_or(serde_json::Value::Null))
-        .map_err(|e| LspError {
-            code: -32000,
-            message: e.to_string(),
-        })
-}
 
 // Uniform handler signature for the dispatch routing table — `check_all`
 // cannot fail today, but the `Result` keeps the handler-shape symmetry with
