@@ -11,7 +11,6 @@
 //! - [`decomp`] — `ShEx`-driven vertex/edge decomposition into a [`SinkPlan`].
 //! - [`writer`] — the W0b chunked-COPY SQL plan + `GraphInfo`-indexed manifest set.
 
-pub mod catalog;
 pub mod decomp;
 pub mod graph_schema;
 pub mod manifest;
