@@ -1957,6 +1957,7 @@ dependencies = [
  "fossil-codegen",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-df",
  "fossil-hir",
  "fossil-mir",
  "fossil-provider-rdf",

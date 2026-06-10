@@ -265,7 +265,6 @@ fn pre_introspect_and_register(
 fn resolve_output_descriptor(
     db: &fossil_base::FossilDb,
     def_map: fossil_hir::def_map::DefMap<'_>,
-    conn: &duckdb::Connection,
     connections: &HashMap<String, creds::ConnectionCreds>,
     source_dir: &Path,
 ) -> miette::Result<OutputDescriptorKind> {
@@ -297,7 +296,8 @@ fn resolve_output_descriptor(
     };
 
     let locator = resolve_ref(schema.as_str(), connections, source_dir);
-    let text = read_locator_text(conn, &locator)?;
+    let text = std::fs::read_to_string(&locator)
+        .map_err(|e| miette::miette!("read io.rdf output shape `{locator}`: {e}"))?;
     let desc = fossil_descriptors_output::ShExDescriptor::from_reader(text.as_bytes())
         .map_err(|e| miette::miette!("parse io.rdf output shape `{locator}`: {e:?}"))?;
     Ok(OutputDescriptorKind::ShEx(desc))
@@ -339,21 +339,6 @@ fn resolve_ref(
     anchored.to_string_lossy().into_owned()
 }
 
-/// Read a resolved reference's full text via `DuckDB` `read_text` — the SINGLE
-/// cloud-capable reader for every program reference (local path + cloud URL take
-/// the identical path; no `std::fs` special case).
-fn read_locator_text(conn: &duckdb::Connection, locator: &str) -> miette::Result<String> {
-    conn.query_row(
-        &format!(
-            "SELECT content FROM read_text('{}')",
-            locator.replace('\'', "''")
-        ),
-        [],
-        |row| row.get::<_, String>(0),
-    )
-    .map_err(|e| miette::miette!("read reference `{locator}` via read_text: {e}"))
-}
-
 /// Resolve a `.fossil` source URI through the `--creds-stdin` connection map.
 /// `@conn/path` → `<connection url>/path`; any other URI is returned verbatim.
 fn resolve_source_uri(raw: &str, connections: &HashMap<String, creds::ConnectionCreds>) -> String {
@@ -390,53 +375,6 @@ fn apply_source_creds(
     Ok(())
 }
 
-/// A provider-backed source resolved from the program (`{ A, B } := io.<name>(uri,
-/// schema = …)`), ready for the runtime to materialise (read-once) before the
-/// prelude. The provider parses the source ONCE and emits one relation per member.
-struct ProviderSource {
-    provider: String,
-    uri: String,
-    schema_arg: Option<String>,
-    /// One `(relation_name, member_local_name)` per destructured member; the
-    /// local-name resolves to a shape IRI from the schema at materialise time.
-    members: Vec<(String, String)>,
-}
-
-/// Resolve each member's local-name to its shape IRI by reading the `ShEx` schema
-/// through the connection's cloud-capable reader. A member matching no shape is
-/// an error (each `{…}` name must be a declared shape).
-fn resolve_member_shapes(
-    conn: &duckdb::Connection,
-    schema_locator: Option<&str>,
-    members: &[(String, String)],
-) -> miette::Result<Vec<(String, String)>> {
-    let locator = schema_locator
-        .ok_or_else(|| miette::miette!("io.rdf requires a `schema = \"<shape>.shex\"` argument"))?;
-    let text = read_locator_text(conn, locator)?;
-    let desc = fossil_descriptors_output::ShExDescriptor::from_reader(text.as_bytes())
-        .map_err(|e| miette::miette!("parse io.rdf schema `{locator}`: {e:?}"))?;
-    let by_local: HashMap<String, String> = desc
-        .shapes()
-        .map(|b| {
-            let iri = b.iri.to_string();
-            let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri).to_string();
-            (local, iri)
-        })
-        .collect();
-    members
-        .iter()
-        .map(|(relation, member)| {
-            let shape = by_local.get(member).cloned().ok_or_else(|| {
-                miette::miette!(
-                    "io.rdf member `{member}` matches no shape in `{locator}`; each \
-                     `{{…}}` name must be the local-name of a declared shape"
-                )
-            })?;
-            Ok((relation.clone(), shape))
-        })
-        .collect()
-}
-
 /// The local filesystem directory a dest URL writes under, or `None` for a cloud
 /// object store (which needs no directory pre-creation).
 fn local_dest_dir(url: &str) -> Option<PathBuf> {
@@ -461,95 +399,78 @@ pub fn run(path: &Path, dest_url: &str, creds: &RunCreds) -> miette::Result<RunS
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
-    // ONE authenticated connection for the whole run: reads every reference + writes.
-    let conn = open_run_conn(&creds.connections)?;
-
     let (db, file) = open_db(text.clone(), path);
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    // CSV type pre-introspection (DuckDB DESCRIBE) feeds the type-checker's
+    // `source_row`, which the property-graph lowering reads for prop datatypes.
     pre_introspect_and_register(db.system(), &text, source_dir, &creds.connections);
 
     let def_map = fossil_hir::def_map::def_map(&db, file);
-    let mappings = def_map.mappings(&db);
-    if mappings.is_empty() {
+    if def_map.mappings(&db).is_empty() {
         return Err(miette::miette!("no mapping found in {}", path.display()));
     }
 
-    let descriptor = resolve_output_descriptor(&db, def_map, &conn, &creds.connections, source_dir)?;
+    // The program-resident output descriptor (ShEx) drives the PG edge/cardinality
+    // classification inside `execute_graph` (via `apply_output_shape`).
+    let descriptor = resolve_output_descriptor(&db, def_map, &creds.connections, source_dir)?;
 
-    let chunk_size = fossil_sinks::manifest::DEFAULT_CHUNK_SIZE;
-    let resolve = |uri: &str| resolve_source_uri(uri, &creds.connections);
-    let parts: Vec<(String, fossil_sinks::decomp::SinkPlan)> = mappings
+    // The single execution path: lower to the property-graph MIR + execute on
+    // DataFusion + write the GraphAr tree. The host's only job is the byte seam
+    // for provider (RDF) sources — resolve the URI (`@conn` + relative) and read
+    // it; object-store formats stream through the executor's filesystem store.
+    let dest_dir = local_dest_dir(dest_url).ok_or_else(|| {
+        miette::miette!("the DataFusion run path writes a local directory; cloud dest `{dest_url}` is not yet wired")
+    })?;
+    let read_uri = |uri: &str| -> Result<String, String> {
+        let locator = resolve_ref(uri, &creds.connections, source_dir);
+        std::fs::read_to_string(&locator).map_err(|e| format!("read source `{locator}`: {e}"))
+    };
+    let graph = fossil_df::run_to_dir(&db, file, &descriptor, &dest_dir, read_uri)
+        .map_err(|e| miette::miette!("execute: {e}"))?;
+
+    // W3.1b layout post-pass: replace the placeholder x/y/cluster_id with a real
+    // WCC partition + deterministic placement, rewriting each vertex Parquet in
+    // place (DuckDB — the one remaining native-runtime use on this path).
+    enrich_written_layout(&graph, &dest_dir)?;
+
+    Ok(graph.run_status(dest_url))
+}
+
+/// Run the W3 layout enrichment over the just-written GraphAr tree: for each
+/// vertex type, point DuckDB at its `vertex/<Type>.parquet` plus the CSR Parquet
+/// of any self-edge, and rewrite the placeholder x/y/cluster_id with a real
+/// layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
+fn enrich_written_layout(graph: &fossil_df::GraphArData, dest_dir: &Path) -> miette::Result<()> {
+    let conn =
+        duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
+    fossil_runtime::apply_resource_limits(&conn)
+        .map_err(|e| miette::miette!("apply duckdb resource limits: {e}"))?;
+
+    let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
+    let targets: Vec<fossil_runtime::layout::VertexLayoutTarget> = graph
+        .schema
+        .nodes
         .iter()
-        .map(|m| {
-            let mir = fossil_mir::lower_to_mir(&db, *m);
-            fossil_codegen::decompose_for_writer(&db, *m, mir, &descriptor, chunk_size, &resolve)
+        .map(|node| {
+            let self_edge_csr = graph
+                .edges
+                .iter()
+                .filter(|e| e.src_type == node.label && e.dst_type == node.label)
+                .map(|e| {
+                    path_str(format!(
+                        "edge/{}_{}_{}/by_source.parquet",
+                        e.src_type, e.label, e.dst_type
+                    ))
+                })
+                .collect();
+            fossil_runtime::layout::VertexLayoutTarget {
+                vertex_parquet: path_str(format!("vertex/{}.parquet", node.label)),
+                self_edge_csr,
+            }
         })
         .collect();
-    let (prelude_sql, sink_plan) = fossil_codegen::merge_decomposed(&parts);
-
-    // Register external source providers + collect this program's provider-backed
-    // sources (`io.<name>`), grouping members that read the SAME file into one
-    // read-once materialisation.
-    let mut providers = fossil_runtime::SourceProviderRegistry::new();
-    providers.register(std::sync::Arc::new(fossil_provider_rdf::RdfProvider));
-
-    let mut provider_sources: Vec<ProviderSource> = Vec::new();
-    for s in def_map.sources(&db) {
-        let Some(kind) = s.constructor.as_deref().and_then(fossil_registry::source_kind) else {
-            continue;
-        };
-        if kind.lowering != fossil_registry::SourceLowering::Provider {
-            continue;
-        }
-        let provider = kind.short_name;
-        if providers.get(provider).is_none() {
-            continue;
-        }
-        let Some(raw_uri) = s.uri.as_deref() else {
-            continue;
-        };
-        let uri = resolve_ref(raw_uri, &creds.connections, source_dir);
-        let schema_arg = s
-            .schema_arg
-            .as_deref()
-            .map(|a| resolve_ref(a, &creds.connections, source_dir));
-        let relation = fossil_codegen::provider_relation(&s.name);
-        let member_name = s.name.to_string();
-        match provider_sources
-            .iter_mut()
-            .find(|p| p.provider == provider && p.uri == uri && p.schema_arg == schema_arg)
-        {
-            Some(existing) => existing.members.push((relation, member_name)),
-            None => provider_sources.push(ProviderSource {
-                provider: provider.to_string(),
-                uri,
-                schema_arg,
-                members: vec![(relation, member_name)],
-            }),
-        }
-    }
-
-    let before_prelude = |conn: &duckdb::Connection| -> miette::Result<()> {
-        for src in &provider_sources {
-            let provider = providers
-                .get(&src.provider)
-                .ok_or_else(|| miette::miette!("no source provider `{}`", src.provider))?;
-            let members = resolve_member_shapes(conn, src.schema_arg.as_deref(), &src.members)?;
-            provider
-                .materialize_shapes(&src.uri, src.schema_arg.as_deref(), &members, conn)
-                .map_err(|e| miette::miette!("source provider `{}`: {e}", src.provider))?;
-        }
-        Ok(())
-    };
-
-    materialize(
-        &conn,
-        &prelude_sql,
-        &sink_plan,
-        dest_url,
-        creds.dest.secret.as_ref().map(creds::SecretSpec::to_cloud_secret),
-        before_prelude,
-    )
+    fossil_runtime::layout::enrich_layout(&conn, &targets)
+        .map_err(|e| miette::miette!("layout: {e}"))
 }
 
 /// Materialise a DCAT-AP catalog graph from a [`CatalogRequest`]. The catalog's

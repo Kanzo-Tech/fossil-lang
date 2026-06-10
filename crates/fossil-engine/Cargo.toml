@@ -21,6 +21,10 @@ fossil-registry = { path = "../fossil-registry" }
 # Descriptors (input forward-propagation + output shape).
 fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# The DataFusion executor — the SINGLE `run` path (lower_to_mir_pg → execute_graph
+# → write_to_dir). Re-exports `OutputDescriptorKind`. DuckDB now serves only the
+# layout post-pass + CSV type pre-introspection.
+fossil-df           = { path = "../fossil-df" }
 # Native runtime + sinks + the RDF source provider + cloud-path resolver.
 fossil-runtime      = { path = "../fossil-runtime" }
 fossil-sinks        = { path = "../fossil-sinks" }

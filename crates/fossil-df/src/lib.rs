@@ -724,6 +724,52 @@ pub fn register_provider_sources(
     Ok(())
 }
 
+/// Native one-call orchestration the host (CLI/engine) drives: register every
+/// provider (RDF) source from host-read bytes, execute the whole program on
+/// DataFusion, and write the GraphAr tree under `dest_dir`. Returns the
+/// [`GraphArData`] so the caller can build a `RunStatus` and run any post-pass
+/// (e.g. the layout enrichment).
+///
+/// `read_uri` is the host's byte seam: given a source's raw URI (possibly a
+/// `@conn/...` alias or a relative path), return its text — the host owns the
+/// resolution + credentials + transport (fs / cloud). Object-store *formats*
+/// (csv/json/parquet) are NOT read through it; they stream via the ctx's
+/// `ObjectStore` (the local filesystem by default), so `read_uri` only services
+/// `Provider` (RDF) sources.
+///
+/// Blocks the async executor on a private current-thread runtime — the host
+/// stays synchronous. The browser path drives [`execute_graph`] directly from
+/// JS, so this native convenience never reaches the wasm build.
+///
+/// # Errors
+/// Host read errors (surfaced from `read_uri`), decode/registration failures,
+/// DataFusion execution errors, or Parquet/manifest write failures.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_to_dir(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    descriptor: &OutputDescriptorKind,
+    dest_dir: &std::path::Path,
+    read_uri: impl Fn(&str) -> Result<String, String>,
+) -> datafusion::error::Result<GraphArData> {
+    let ctx = SessionContext::new();
+    for binding in provider_bindings(db, file, descriptor) {
+        let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
+        register_rdf(&ctx, &binding, &bytes)?;
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| DataFusionError::Execution(format!("build tokio runtime: {e}")))?;
+    let graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor))?;
+
+    graph
+        .write_to_dir(dest_dir)
+        .map_err(|e| DataFusionError::Execution(format!("write GraphAr: {e}")))?;
+    Ok(graph)
+}
+
 /// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Vertex-only covers
 /// `ColRef` / `LitString` / `Concat` / `Assert`; `Call` / `BinOp` / `LitBool` are
 /// deferred to the full paso-3 render (no vertex-only mapping uses them in
