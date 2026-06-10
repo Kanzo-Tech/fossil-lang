@@ -62,6 +62,8 @@ pub fn template_skeleton(text: &str) -> String {
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+// The `${.id}` / `${ex:}` template fixtures are skeleton syntax, not Rust format args.
+#[allow(clippy::literal_string_with_formatting_args)]
 mod tests {
     use super::template_skeleton;
 
