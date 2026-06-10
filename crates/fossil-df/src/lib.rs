@@ -21,6 +21,7 @@
 //! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
 
 pub mod catalog;
+pub mod files;
 pub mod literal;
 pub mod rdf;
 

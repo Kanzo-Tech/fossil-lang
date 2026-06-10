@@ -55,13 +55,18 @@ serde_yaml_ng = { workspace = true }
 # Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
 # subcrates — deferred. The wasm CI job must install LLVM.
 datafusion = { version = "54", default-features = false, features = ["parquet"] }
-
-# Native-only: the Arrow→Parquet sink writes RecordBatches to the filesystem.
-# The browser path writes Parquet via parquet-wasm in JS, so these never reach
-# the wasm build (keeps it lean).
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The single Arrow→Parquet encoder, shared native+wasm (universal-substrate
+# decision: one parquet-rs encoder, no parquet-wasm JS). `default-features =
+# false` + `arrow` keeps it pure-Rust (no compression C deps) → wasm-clean; the
+# in-memory `Vec<u8>` writer in `files.rs` is target-agnostic. Only the *fs*
+# write (`sink.rs`) is native-gated.
 parquet = { version = "58", default-features = false, features = ["arrow"] }
 thiserror = { workspace = true }
+
+# Native-only: the fs sink writes the encoded bytes to a directory. The browser
+# path hands the same bytes to JS for signed PUT, so std::fs + tokio never reach
+# the wasm build (keeps it lean).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Native `run_to_dir` blocks the async executor on a current-thread runtime so
 # the synchronous host (the CLI/engine) drives it without being async itself.
 # The browser drives `execute_graph` from JS's own event loop, so tokio is
