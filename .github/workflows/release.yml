@@ -30,6 +30,16 @@ jobs:
       - name: Install wasm-bindgen-cli (exact 0.2.120 per CLAUDE.md stack pins)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
 
+      # datafusion (in @fossil-lang/executor's build:wasm, built by `pnpm -r build`)
+      # hardcodes arrow-ipc[zstd]; the wasm32 zstd-sys C build needs a wasm-capable
+      # clang. Point cc-rs at ubuntu's LLVM clang for the wasm32 target.
+      - name: Install LLVM for wasm zstd-C (@fossil-lang/executor)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm
+          echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
+          echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
+
       - uses: pnpm/action-setup@v3
         with:
           version: 9
@@ -66,9 +76,16 @@ jobs:
           title: 'chore: version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # NPM_TOKEN intentionally omitted — Trusted Publishing OIDC handles auth.
-          # If Trusted Publishing isn't yet configured on the npm side (one-time human
-          # action on npmjs.com → org settings → trusted publishers), the publish step
-          # will fail with a clear "missing OIDC" error — that's the gate. For Phase 8
-          # close, we just need this workflow to EXIST; the first actual publish runs
-          # as part of Phase 10's coordinated release.
+          # Auth precedence: if the optional `NPM_TOKEN` secret is set, npm/pnpm
+          # authenticate with it; if it's absent, the publish falls back to
+          # Trusted Publishing OIDC (id-token: write + registry-url + provenance).
+          #
+          # BOOTSTRAP (one-time, in CI — no local publish needed): npm OIDC CANNOT
+          # create a brand-new package (npmjs.com requires the package to exist
+          # before you can attach a Trusted Publisher — verified vs npm docs). So
+          # for the FIRST publish, set `NPM_TOKEN` (a Granular Access Token with
+          # read+write on @fossil-lang/*) as a repo secret; CI then bootstrap-
+          # publishes, creating the packages. Afterwards: configure Trusted
+          # Publishers on npmjs.com for each package and DELETE the `NPM_TOKEN`
+          # secret — every later release then runs token-less via OIDC.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

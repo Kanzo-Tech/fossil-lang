@@ -81,22 +81,6 @@ fn workspace_lifecycle_smoke() {
     // and serialization is deferred to the wasm-bindgen wrapper.
     let _rows = pg.check_rows();
 
-    // compile_file_result's pure-Rust core returns the SQL + manifest
-    // strings. Same assertions as the Phase-1 `test-wasm.js` smoke
-    // (COPY + graphar_version) — proves the lifecycle path produces
-    // byte-identical output to the legacy `compile(&str)` path.
-    let result = pg.compile_file_result(h).expect("compile_file_result");
-    assert!(
-        result.sql.contains("COPY"),
-        "compile_file SQL must contain COPY (got: {})",
-        result.sql
-    );
-    assert!(
-        result.manifest_yaml.contains("version: gar/v1"),
-        "manifest_yaml must carry the GraphAr format version: {}",
-        result.manifest_yaml
-    );
-
     // close_file_native removes the handle from the map.
     pg.close_file_native(h).expect("close_file_native");
 
@@ -195,16 +179,3 @@ fn workspace_set_target_shex_smoke() {
         .expect("re-install after failure still works");
 }
 
-/// `compile_file` rejects a closed handle with a clear error.
-#[test]
-fn workspace_compile_file_closed_handle() {
-    let mut pg = FossilPlayground::new();
-    let source = hello_fossil_source();
-    let h = pg.open_file_native("hello.fossil".to_string(), source);
-    pg.close_file_native(h).expect("close");
-    assert_eq!(
-        pg.compile_file_result(h),
-        Err(WorkspaceError::UnknownHandle),
-        "compile of closed handle must error with UnknownHandle"
-    );
-}

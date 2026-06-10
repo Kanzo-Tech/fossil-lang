@@ -9,6 +9,8 @@
     "build": "next build",
     "start": "next start",
     "test:e2e": "playwright test",
+    "test:e2e:functional": "playwright test --grep-invert \"Visual baselines\"",
+    "test:e2e:visual": "playwright test tests/e2e/visual-baselines.spec.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

@@ -69,7 +69,6 @@ fossil-registry = { path = "../fossil-registry" }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
 fossil-mir = { path = "../fossil-mir" }
-fossil-codegen = { path = "../fossil-codegen" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # NOTE: fossil-sinks was a dev-dep here (real-files fixture in
 # graphar_decomp.rs); W0b/4 promotes it to a regular dep above for the

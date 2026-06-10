@@ -202,6 +202,38 @@ impl ResolvedConstraint {
             _ => ConstraintValue::Unknown,
         }
     }
+
+    /// The destination shape's IRI when this constraint is an inter-shape edge
+    /// (`value_expr` is a shape `Ref`) — the property decomposes to an edge
+    /// `S --predicate--> <returned IRI>`. `None` for a literal or opaque-IRI
+    /// property (those stay vertex columns).
+    ///
+    /// The single source of the edge target, shared by the output decomposition
+    /// (`fossil-sinks`) and the property-graph MIR lowering (`fossil-mir`) —
+    /// both must agree on which constraints become edges. Mirrors the `Ref` arm
+    /// of `fossil-sinks`'s `classify_object` (an inline `Shape` is not an edge;
+    /// `decompose`'s `Edge` kind is `Ref`-only).
+    #[must_use]
+    pub fn edge_target(&self) -> Option<String> {
+        match &self.value_expr {
+            Some(ShapeExpr::Ref(label)) => Some(shape_label_iri(label)),
+            _ => None,
+        }
+    }
+}
+
+/// Render a [`ShapeExprLabel`] to its IRI string (an edge's destination shape).
+/// Full IRIs render verbatim; a rare `Prefixed` form keeps `prefix:local`; a
+/// blank-node label renders as its `_:id`.
+fn shape_label_iri(label: &ShapeExprLabel) -> String {
+    match label {
+        ShapeExprLabel::IriRef { value } => match value {
+            IriRef::Iri(iri) => iri.to_string(),
+            IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
+        },
+        ShapeExprLabel::BNode { value } => value.to_string(),
+        ShapeExprLabel::Start => String::new(),
+    }
 }
 
 /// The local name of an IRI — the substring after the last `#` or `/`.

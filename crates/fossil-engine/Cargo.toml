@@ -12,20 +12,22 @@ description = "Native orchestration surface — compile + run + catalog + check 
 workspace = true
 
 [dependencies]
-# Compiler core + IR + codegen.
+# Compiler core + IR.
 fossil-base     = { path = "../fossil-base" }
 fossil-hir      = { path = "../fossil-hir" }
 fossil-mir      = { path = "../fossil-mir" }
-fossil-codegen  = { path = "../fossil-codegen" }
 fossil-registry = { path = "../fossil-registry" }
 # Descriptors (input forward-propagation + output shape).
 fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# Native runtime + sinks + the RDF source provider + cloud-path resolver.
+# The DataFusion executor — the SINGLE `run` path (lower_to_mir_pg → execute_graph
+# → write_to_dir). Re-exports `OutputDescriptorKind`. DuckDB now serves only the
+# layout post-pass + CSV type pre-introspection.
+fossil-df           = { path = "../fossil-df" }
+# Native runtime (layout + secrets) + sinks + cloud-path resolver.
 fossil-runtime      = { path = "../fossil-runtime" }
 fossil-sinks        = { path = "../fossil-sinks" }
 fossil-resolver     = { path = "../fossil-resolver" }
-fossil-provider-rdf = { path = "../fossil-provider-rdf" }
 # The `RunStatus` / `SourceRefInfo` / `ProviderInfo` / `CatalogInput` wire types
 # the engine produces (one source of truth; keasy reuses them).
 fossil-run-status = { path = "../fossil-run-status" }

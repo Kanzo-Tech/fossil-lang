@@ -25,38 +25,6 @@ serde_yaml_ng = { workspace = true }
 # we deliberately depend on it ALONE rather than fossil-hir's `Primitive` so the manifest layer
 # stays decoupled from the type system and the WASM dep surface is minimal.
 arrow-schema = { workspace = true }
-# Phase 5 SINK-01/04/05 (ADR-0018). The ShEx-driven vertex/edge decomposition consumes the
-# Phase-3 `ShExDescriptor`/`ShapeBinding`/`ResolvedConstraint`/`Cardinality` DIRECTLY (SC#4
-# option (b)) — the descriptor is a FUNCTION ARGUMENT to `vertex_edge_decomp`, never read via
-# `Db::system()`. `fossil-descriptors-output` is itself WASM-clean (it uses ONLY
-# `shex_ast::Schema::from_reader`, no reqwest/tokio — Pitfall 1 / `decisions/rudof-wasm.md`), so
-# adding it keeps `fossil-sinks` in the 7-crate WASM gate with NO cfg-fence required (ADR-0018).
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# `fossil-mir` provides the `MirGraph`/`Op`/`Expr` the decomposition routes into vertex/edge
-# tables. WASM-gated already (Phase 4) — no native leak.
-fossil-mir = { path = "../fossil-mir" }
-# `fossil-base` supplies the `Db` handle needed to read `plan.ops(db)` (WASM-gated substrate).
-fossil-base = { path = "../fossil-base" }
-# `shex_ast` + `prefixmap` are needed to classify a ResolvedConstraint's `value_expr`
-# (NodeConstraint datatype vs Ref-to-shape). Both are WASM-clean (no reqwest/tokio — they arrive
-# via the already-WASM-green fossil-descriptors-output; we name them directly for the AST match).
-shex_ast = { workspace = true }
-prefixmap = { workspace = true }
-# Typed validation errors for the `writer` module (W0b — see ADR-0039 +
-# auto-memory project_fossil_graph_reference_architecture.md). Pure-Rust,
-# WASM-clean, no IO side-effects.
-thiserror = { workspace = true }
-# `fossil-run-status` carries the host↔fossil wire contracts; the `catalog`
-# builder consumes `CatalogInput` from it. Dependency-light (serde + schemars),
-# WASM-clean — keeps fossil-sinks in the WASM gate.
-fossil-run-status = { path = "../fossil-run-status" }
 
 [dev-dependencies]
-# Test-only Parquet schema read-back. `default-features = false` drops parquet's `arrow`
-# feature (the `ArrowWriter` path → arrow-ipc). Tests are native; `parquet` is NEVER a
-# normal dependency of this WASM-gated crate (ADR-0017 / Pitfall 1).
-# Pinned directly (not `workspace = true`) so we can set `default-features = false` —
-# Cargo forbids overriding a workspace dep's default-features at the member level. The
-# version tracks the workspace `parquet = "58"` pin.
-parquet = { version = "58", default-features = false }
 insta = { workspace = true }

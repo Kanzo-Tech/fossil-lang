@@ -115,9 +115,7 @@ jobs:
         run: pnpm --filter @fossil-lang/landing exec playwright install --with-deps chromium
 
       - name: Visual regression gate (Phase 15 baselines + 17-04 multi-host cells)
-        run: |
-          pnpm --filter @fossil-lang/landing exec playwright test \
-            tests/e2e/visual-baselines.spec.ts
+        run: pnpm --filter @fossil-lang/landing test:e2e:visual
         env:
           CI: '1'
 

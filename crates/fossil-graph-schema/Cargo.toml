@@ -1,0 +1,26 @@
+# The canonical graph-schema — the shared contract of the universal substrate
+# (`~/.claude/plans/fossil-universal-substrate-architecture.md`, sensitivity
+# point #1). A property graph is a SCHEMA over typed relations (SQL/PGQ: keys +
+# references); this crate is that schema, format-neutral. Dependency-free except
+# serde so EVERY side (producer fossil-df, materializers, consumer fossil-graph,
+# the wire) can speak it without pulling the ShEx/Arrow machinery — that
+# decoupling is what preserves D2 (modifiability).
+[package]
+name = "fossil-graph-schema"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Canonical property-graph schema (SQL/PGQ keys + references) — the universal-substrate contract"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -1,3 +1,0 @@
-{
-  "io_three_format_read_clean_parse": "SELECT CAST(c.id AS VARCHAR) AS id, CAST(trim(c.name) AS VARCHAR) AS name, CAST(CAST(c.age AS BIGINT) AS VARCHAR) AS age, CAST(j.org AS VARCHAR) AS org, CAST(p.dept AS VARCHAR) AS dept FROM read_csv_auto('tests/wasm_parity/fixtures/io_people.csv', sample_size=-1) AS c JOIN read_json_auto('tests/wasm_parity/fixtures/io_orgs.json') AS j ON c.id = j.id JOIN read_parquet('tests/wasm_parity/fixtures/io_depts.parquet') AS p ON c.id = p.id ORDER BY c.id"
-}

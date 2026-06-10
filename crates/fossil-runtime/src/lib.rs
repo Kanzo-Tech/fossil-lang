@@ -28,12 +28,10 @@ use duckdb::Connection;
 pub mod graph_exec;
 pub mod layout;
 pub mod materialize;
-pub mod source_provider;
 pub mod udf;
 
 pub use graph_exec::DuckRuntime;
-pub use source_provider::{SourceProvider, SourceProviderRegistry};
-pub use materialize::{MaterializeError, install_secret, materialize as materialize_graph_ar};
+pub use materialize::{MaterializeError, install_secret};
 
 /// Execute a batch of SQL statements (semicolon-delimited) on a fresh
 /// in-memory `DuckDB` connection.

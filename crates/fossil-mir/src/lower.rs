@@ -62,6 +62,7 @@
 //! ) -> MirGraph<'db>;
 //! ```
 
+use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
@@ -72,7 +73,7 @@ use fossil_hir::{HirExpr, HirMapping, MappingLoc, Primitive, PropertyKey, Record
 use smol_str::SmolStr;
 
 use crate::graph::MirGraph;
-use crate::op::{Expr, Op, SinkRef, SourceFormat};
+use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 
 /// Lower one [`fossil_hir::MappingLoc`] to a [`MirGraph`]:
 /// `Source → Extend(iri) → TripleEmit* → Sink(GraphAr)`.
@@ -81,52 +82,47 @@ use crate::op::{Expr, Op, SinkRef, SourceFormat};
 /// shared `Extend(field="iri")` feeding N `TripleEmit`s (one per non-`iri`
 /// property), then one `Sink`. The single-property `hello.fossil` produces the
 /// same `Source → Extend → TripleEmit → Sink` sequence as Phase 1.
+/// Property-graph-canonical lowering (paso 2): `Source → EmitVertex → Sink`.
+///
+/// Branch-by-abstraction alongside [`lower_to_mir`] (which still emits the
+/// `Source → Extend → TripleEmit* → Sink` triple path — UNCHANGED, so the legacy
+/// SQL codegen + corpus stay byte-identical). This increment covers the
+/// VERTEX-only shape: the `iri = ...` template becomes the vertex `id`, and every
+/// other property becomes a [`VProp`]. EDGE classification (a property whose
+/// value points at another shape → [`Op::EmitEdge`]) + the descriptor-driven
+/// cardinality/types refinement are the NEXT increment (they need the
+/// `OutputDescriptorKind` / skeleton-match the codegen `vertex_edge_decomp`
+/// already has). Reuses the same `resolve_source` / `lower_iri_property` /
+/// `lower_property_value` helpers so there is ZERO duplicated lowering logic.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
-pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> MirGraph<'db> {
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors lower_to_mir
+pub fn lower_to_mir_pg<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> MirGraph<'db> {
     let file = mapping.file(db);
-
-    // Per ADR-0005, signatures and bodies live in separate Salsa queries.
-    // We need the HEADER (mapping name + shape IRI + source binding) from
-    // `lower_to_hir` and the BODY (property list) from `body(db, mapping)`.
-    //
-    // The `MappingLoc.index` is per-kind dense (audited in `def_map.rs`'s
-    // contract block, matching `body()`'s filter-then-nth convention), so
-    // it's also the dense index into `lower_to_hir(file).mappings`.
     let dm = def_map(db, file);
-    let mapping_locs = dm.mappings(db);
-    let Some(dense_idx) = mapping_locs.iter().position(|loc| *loc == mapping) else {
-        // Foreign MappingLoc — emit an empty graph rather than panicking.
+    let Some(dense_idx) = dm.mappings(db).iter().position(|loc| *loc == mapping) else {
         return MirGraph::new(db, Vec::new());
     };
     let hir = lower_to_hir(db, file);
-    let mappings = hir.mappings(db);
-    let Some(m) = mappings.get(dense_idx) else {
+    let Some(m) = hir.mappings(db).get(dense_idx) else {
         return MirGraph::new(db, Vec::new());
     };
     let body = body(db, mapping);
     let prefixes = dm.prefixes(db);
-
-    // Source row type: prefer the type-checker's CSVW-derived `source_row`
-    // (CORE-05). On a type error or a schema-less source, fall back to the
-    // Phase 1 `Record({id, name})` so codegen still emits output and the
-    // walking-skeleton stays byte-identical (NEVER panic — Pitfall: type
-    // errors must not regress `fossil compile`).
     let row_type = typecheck_mapping(db, mapping).map_or_else(
         |_| phase1_row_type(db),
         |out| out.source_row(db).unwrap_or_else(|| phase1_row_type(db)),
     );
+    // v0.1: every prop is typed String (the legacy path types nothing either —
+    // codegen ignores `Ty`). The descriptor-driven type refinement is the next
+    // increment; the backend derives the GraphAr/xsd spelling from `Ty`.
+    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
 
-    let mut ops: Vec<Op<'db>> = Vec::with_capacity(4);
+    let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
 
-    // 0: Source — resolve the real URI + format from the mapping's source
-    // binding (STDL-06). `dm` (def_map, file-keyed) is already read above; the
-    // `lookup_source_call` is a pure read off that same handle, so this adds NO
-    // new per-mapping fan-out (RESEARCH Pitfall 3 / STATE.md "Do NOT"). The
-    // constructor NAME (`io.csv`/`io.json`/`io.parquet`) selects the format; the
-    // constructor's first positional string is the URI. A malformed/unknown
-    // binding falls back to the Phase-1 csv hardcode so we never panic and the
-    // walking-skeleton stays byte-identical when the binding IS `io.csv`.
+    // 0: Source.
     let (uri, format) = resolve_source(dm, db, &m.source_binding);
     ops.push(Op::Source {
         uri,
@@ -135,70 +131,225 @@ pub fn lower_to_mir<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>)
         binding: m.source_binding.clone(),
     });
 
-    // 1: Extend — attach the IRI template result as a column named "iri".
-    //
-    // SC#4 / P-CRIT-4 (CORE-10): the IRI template's `${.field}` placeholders are
-    // the un-statically-dischargeable check this phase mitigates — a NULL field
-    // would yield a malformed IRI. We resolve the source LINE for the `iri`
-    // property HERE (during lowering) from the per-mapping `spans` side table so
-    // codegen stays a pure render (RESEARCH Pitfall 3 — never read
-    // `parse(db, file)` in the per-mapping path; `spans` and `mapping_cst_node`
-    // are already barrier-routed, so this does NOT widen the per-mapping
-    // fan-out). `iri_span_line` is then threaded into the field-ref wrapping in
-    // `lower_iri_template` → `lower_placeholder`, where each `${.field}` ColRef
-    // becomes `Expr::Assert { name: "iri_template_unbound", span_line, inner }`.
+    // `id` = the IRI template (the same Expr the legacy Extend would carry).
     let iri_span_line = iri_property_line(db, mapping, body);
-    let iri_expr = lower_iri_property(m, body, prefixes, db, iri_span_line).unwrap_or_else(|| {
-        // No `iri = ...` property; emit an empty literal to keep the upstream
-        // Extend present for the TripleEmit subjects to reference.
-        Expr::LitString(SmolStr::default())
-    });
-    ops.push(Op::Extend {
-        input: 0,
-        field: SmolStr::new_static("iri"),
-        expr: iri_expr,
-    });
-    let extend_idx = 1usize;
+    let id = lower_iri_property(m, body, prefixes, db, iri_span_line)
+        .unwrap_or_else(|| Expr::LitString(SmolStr::default()));
 
-    // 2..N: one TripleEmit per non-`iri` predicate property (subject = the
-    // shared `iri` column reference; object = the property RHS lowered to an
-    // `Expr`). The `iri` column is produced by the Extend at `extend_idx`.
-    let subject = Expr::ColRef {
-        source: SmolStr::default(),
-        column: SmolStr::new_static("iri"),
+    // Subject-template skeleton of EVERY mapping in the file → its vertex type.
+    // A property whose backtick-template skeleton matches one of these is a
+    // foreign key → an edge to that type (reuses the shared skeleton-matching).
+    let subject_skeletons: Vec<(String, SmolStr)> = dm
+        .mappings(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(i, loc)| {
+            let ty = SmolStr::new(local_name(hir.mappings(db).get(i)?.shape_iri.as_str()));
+            Some((crate::skeleton::subject_template_skeleton(db, *loc)?, ty))
+        })
+        .collect();
+
+    // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
+    // IRI-template that resolves to another subject → edge; dangling template /
+    // constant prefixed-name → neither (v0.1 — mirrors synthesize_sink_plan).
+    // (a) Type refinement: a FieldRef prop carries the source field's type
+    // (CSVW-refined when the source declares a `schema`; String otherwise — same
+    // as the legacy path, which types nothing). The backend derives the
+    // GraphAr/xsd spelling from `ty`. Cardinality stays `single_valued = true`
+    // here (the ShEx-descriptor refinement that would set multi-valued needs the
+    // descriptor wired into the lowering — a later increment).
+    let field_ty = |field: &str| -> Ty<'db> {
+        if let TyKind::Record(rec) = row_type.kind(db)
+            && let Some(f) = rec.fields(db).iter().find(|f| f.name == field) {
+                return f.ty;
+            }
+        string_ty
     };
+
+    let mut props: Vec<VProp<'db>> = Vec::new();
+    let mut edges: Vec<(SmolStr, SmolStr, SmolStr, Expr<'db>)> = Vec::new();
     for prop in body.properties(db) {
         let PropertyKey::PrefixedName { iri } = &prop.key else {
-            continue; // skip the `iri = ...` property (handled by the Extend)
+            continue; // the `iri = ...` property is the vertex id
         };
-        // Object positions are NOT wrapped in an assertion this phase (SC#4
-        // candidate 1 is the IRI-template subject only; object-side cardinality
-        // assertions are deferred — see the `<context>` note in 04-06-PLAN).
-        let object = lower_property_value(&prop.value, &m.source_binding, prefixes, None);
-        ops.push(Op::TripleEmit {
-            input: extend_idx,
-            subject: subject.clone(),
-            predicate: iri.clone(),
-            object,
-            graph: None,
+        let pred_local = SmolStr::new(local_name(iri));
+        match &prop.value {
+            HirExpr::FieldRef(field) => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
+                ty: field_ty(field.as_str()),
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            }),
+            HirExpr::StringLit(_) => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
+                ty: string_ty,
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            }),
+            HirExpr::Template(t) => {
+                let skel = crate::skeleton::template_skeleton(t.as_str());
+                if let Some((_, dst_type)) = subject_skeletons.iter().find(|(s, _)| *s == skel) {
+                    let dst_id = lower_property_value(&prop.value, &m.source_binding, prefixes, None);
+                    edges.push((pred_local, dst_type.clone(), iri.clone(), dst_id));
+                }
+                // non-matching template → dangling, no edge (v0.1)
+            }
+            HirExpr::PrefixedName { .. } => {} // constant IRI → not an edge
+        }
+    }
+
+    let type_name = SmolStr::new(local_name(&m.shape_iri));
+
+    // 1: EmitVertex. All emit ops read the source relation at index 0 (the Sink
+    // is nominal — the backend walks every EmitVertex/EmitEdge op, as the legacy
+    // codegen walks every TripleEmit).
+    ops.push(Op::EmitVertex {
+        input: 0,
+        type_name: type_name.clone(),
+        rdf_type: Some(m.shape_iri.clone()),
+        id: id.clone(),
+        dedup: true,
+        props,
+    });
+
+    // 2..N: one EmitEdge per resolved foreign-key template.
+    for (pred_local, dst_type, pred_iri, dst_id) in edges {
+        ops.push(Op::EmitEdge {
+            input: 0,
+            edge_type: pred_local,
+            rdf_uri: Some(pred_iri),
+            src_type: type_name.clone(),
+            dst_type,
+            src_id: id.clone(),
+            dst_id,
+            single_valued: true,
         });
     }
 
-    // Final: Sink — GraphAr terminal, consuming the last op (the last
-    // TripleEmit if any properties exist, else the Extend).
+    // Final: Sink consuming the last emit op.
     let sink_input = ops.len() - 1;
     ops.push(Op::Sink {
         input: sink_input,
         sink: SinkRef::GraphAr,
     });
 
-    // Run the structural rewriting engine (R1–R6) as PLAIN RUST inside this
-    // tracked frame — NOT a separate tracked query (ADR-0010), so the
-    // per-mapping fan-out is unchanged. hello.fossil's `Source → Extend →
-    // TripleEmit → Sink` matches none of the R1–R6 triggers, so its SQL stays
-    // byte-identical.
     let graph = MirGraph::new(db, ops);
     crate::rewrite::rewrite(db, graph)
+}
+
+/// Refine an agnostic [`lower_to_mir_pg`] op list with the program-resident
+/// **output descriptor** (ShEx): reclassify the `EmitVertex`'s properties into
+/// edges + set their cardinality from the shape's constraints.
+///
+/// The agnostic lowering types every property as a single-valued vertex column
+/// (it has no shape knowledge — `iri`-templates aside, an `ex:hasProject = .x`
+/// `FieldRef` value looks like a column). The `ShEx` descriptor is what knows that
+/// `ex:hasProject` is a **shape-ref** (→ a typed edge) and that `*`/`+`
+/// cardinality is **multi-valued**. This is the same edge-vs-property decision
+/// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, sharing the
+/// one authority ([`ResolvedConstraint::edge_target`] +
+/// [`Cardinality::is_single_valued`]).
+///
+/// Passed the descriptor as an **argument** (ADR-0018 — the descriptor is NEVER
+/// read through `Db::system()`), so this is a plain `Vec<Op>`→`Vec<Op>` pass: it
+/// never constructs a [`MirGraph`] (a Salsa tracked struct, illegal outside a
+/// tracked query) and never touches Salsa. `AcceptAll` (the walking-skeleton /
+/// no-shape case) returns the ops unchanged — the template-skeleton edges the
+/// agnostic lowering already produced stand.
+#[must_use]
+pub fn apply_output_shape<'db>(
+    ops: &[Op<'db>],
+    descriptor: &OutputDescriptorKind,
+) -> Vec<Op<'db>> {
+    let OutputDescriptorKind::ShEx(desc) = descriptor else {
+        return ops.to_vec();
+    };
+
+    // The vertex's shape IRI keys its constraint table; without it (or a shape
+    // the descriptor doesn't declare) there is nothing to refine.
+    let shape_iri = ops.iter().find_map(|o| match o {
+        Op::EmitVertex { rdf_type, .. } => rdf_type.as_ref().map(SmolStr::as_str),
+        _ => None,
+    });
+    let Some(binding) = shape_iri.and_then(|iri| desc.lookup_shape_str(iri)) else {
+        return ops.to_vec();
+    };
+    let constraint_for = |predicate: &str| {
+        binding
+            .constraints
+            .iter()
+            .find(|c| c.predicate.to_string() == predicate)
+    };
+
+    // Rebuild: Source(s) + the refined EmitVertex + existing edges + the new
+    // shape-ref edges, then the Sink (re-pointed at the new last op).
+    let mut head: Vec<Op<'db>> = Vec::with_capacity(ops.len());
+    let mut new_edges: Vec<Op<'db>> = Vec::new();
+    let mut sink: Option<Op<'db>> = None;
+
+    for op in ops {
+        match op {
+            Op::Sink { sink: kind, .. } => sink = Some(Op::Sink { input: 0, sink: *kind }),
+            Op::EmitVertex {
+                input,
+                type_name,
+                rdf_type,
+                id,
+                dedup,
+                props,
+            } => {
+                let mut kept: Vec<VProp<'db>> = Vec::with_capacity(props.len());
+                for p in props {
+                    let predicate = p.rdf_uri.as_deref().unwrap_or_default();
+                    match constraint_for(predicate) {
+                        Some(c) if c.edge_target().is_some() => {
+                            let dst = c.edge_target().expect("edge_target checked");
+                            new_edges.push(Op::EmitEdge {
+                                input: *input,
+                                edge_type: p.name.clone(),
+                                rdf_uri: p.rdf_uri.clone(),
+                                src_type: type_name.clone(),
+                                dst_type: SmolStr::new(local_name(&dst)),
+                                src_id: id.clone(),
+                                dst_id: p.value.clone(),
+                                single_valued: c.cardinality.is_single_valued(),
+                            });
+                        }
+                        Some(c) => kept.push(VProp {
+                            single_valued: c.cardinality.is_single_valued(),
+                            ..p.clone()
+                        }),
+                        None => kept.push(p.clone()),
+                    }
+                }
+                head.push(Op::EmitVertex {
+                    input: *input,
+                    type_name: type_name.clone(),
+                    rdf_type: rdf_type.clone(),
+                    id: id.clone(),
+                    dedup: *dedup,
+                    props: kept,
+                });
+            }
+            other => head.push(other.clone()),
+        }
+    }
+
+    head.extend(new_edges);
+    if let Some(Op::Sink { sink: kind, .. }) = sink {
+        let input = head.len().saturating_sub(1);
+        head.push(Op::Sink { input, sink: kind });
+    }
+    head
+}
+
+/// Local name of an IRI: the segment after the last `#` or `/` (falls back to
+/// the whole string for a bare term). Used for the vertex `type_name` + prop
+/// names in [`lower_to_mir_pg`].
+fn local_name(iri: &str) -> &str {
+    iri.rsplit(['#', '/']).next().unwrap_or(iri)
 }
 
 /// Resolve the `Op::Source` URI + [`SourceFormat`] for a mapping's source
@@ -555,132 +706,6 @@ mod tests {
     use fossil_hir::def_map::def_map;
     use std::sync::Arc;
 
-    const HELLO_FOSSIL: &str = "\
-prefix ex: <https://example.org/>
-
-users := io.csv(\"examples/users.csv\")
-
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
-";
-
-    fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(
-            &db,
-            HELLO_FOSSIL.to_string(),
-            "examples/hello.fossil".to_string(),
-        );
-        (db, file)
-    }
-
-    #[test]
-    fn lower_to_mir_for_hello_produces_4_ops() {
-        let (db, file) = db_with_hello();
-        let dm = def_map(&db, file);
-        let mapping = *dm.mappings(&db).first().expect("hello has one mapping");
-        let mir = lower_to_mir(&db, mapping);
-        let ops = mir.ops(&db);
-        assert_eq!(ops.len(), 4, "expected 4 ops, got {}", ops.len());
-
-        // Op 0: Source
-        match &ops[0] {
-            Op::Source {
-                uri,
-                format,
-                row_type: _,
-                ..
-            } => {
-                assert_eq!(uri.as_str(), "examples/users.csv");
-                assert_eq!(*format, SourceFormat::Csv);
-            }
-            other => panic!("expected Source at index 0, got {other:?}"),
-        }
-
-        // Op 1: Extend(iri = 'https://example.org/user/' || users.id)
-        match &ops[1] {
-            Op::Extend { input, field, expr } => {
-                assert_eq!(*input, 0);
-                assert_eq!(field.as_str(), "iri");
-                match expr {
-                    // SC#4: the `${.id}` field ref is now wrapped in a named
-                    // runtime assertion (iri_template_unbound) — the `inner` is
-                    // the original ColRef. The literal prefix is unchanged.
-                    Expr::Concat(l, r) => match (l.as_ref(), r.as_ref()) {
-                        (
-                            Expr::LitString(lit),
-                            Expr::Assert {
-                                name,
-                                span_line,
-                                inner,
-                            },
-                        ) => {
-                            assert_eq!(lit.as_str(), "https://example.org/user/");
-                            assert_eq!(name.as_str(), "iri_template_unbound");
-                            assert!(
-                                *span_line >= 1,
-                                "span_line must be a resolved 1-based line, got {span_line}"
-                            );
-                            match inner.as_ref() {
-                                Expr::ColRef { source, column } => {
-                                    // CODEGEN-LOWERING-01: ColRef.source is
-                                    // empty so codegen substitutes the view
-                                    // name (the URI stem from
-                                    // `derive_view_name`). Binding names
-                                    // (`users`) are a HIR concern, not a SQL
-                                    // concern.
-                                    assert_eq!(source.as_str(), "");
-                                    assert_eq!(column.as_str(), "id");
-                                }
-                                other => panic!("expected ColRef inside Assert, got {other:?}"),
-                            }
-                        }
-                        (lo, ro) => panic!(
-                            "expected Concat(LitString, Assert(ColRef)), got Concat({lo:?}, {ro:?})"
-                        ),
-                    },
-                    other => panic!("expected Concat for iri expr, got {other:?}"),
-                }
-            }
-            other => panic!("expected Extend at index 1, got {other:?}"),
-        }
-
-        // Op 2: TripleEmit(subject=ColRef(iri), predicate=ex:name, object=ColRef(name))
-        match &ops[2] {
-            Op::TripleEmit {
-                input,
-                subject,
-                predicate,
-                object,
-                graph,
-            } => {
-                assert_eq!(*input, 1);
-                assert!(
-                    matches!(subject, Expr::ColRef { column, .. } if column.as_str() == "iri"),
-                    "expected subject ColRef(iri), got {subject:?}"
-                );
-                assert_eq!(predicate.as_str(), "https://example.org/name");
-                assert!(
-                    matches!(object, Expr::ColRef { source, column }
-                        if source.as_str() == "" && column.as_str() == "name"),
-                    "expected object ColRef(<empty>.name), got {object:?}"
-                );
-                assert_eq!(*graph, None);
-            }
-            other => panic!("expected TripleEmit at index 2, got {other:?}"),
-        }
-
-        // Op 3: Sink(GraphAr)
-        match &ops[3] {
-            Op::Sink { input, sink } => {
-                assert_eq!(*input, 2);
-                assert_eq!(*sink, SinkRef::GraphAr);
-            }
-            other => panic!("expected Sink at index 3, got {other:?}"),
-        }
-    }
 
     /// STDL-06: a mapping reading from an `io.json("...")` / `io.parquet("...")`
     /// binding lowers `Op::Source` with the real URI from the binding and the
@@ -691,7 +716,7 @@ User : ex:Person from users
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
         let mapping = *dm.mappings(&db).first().expect("one mapping");
-        let mir = lower_to_mir(&db, mapping);
+        let mir = lower_to_mir_pg(&db, mapping);
         match &mir.ops(&db)[0] {
             Op::Source { uri, format, .. } => (uri.clone(), format.clone()),
             other => panic!("expected Source at index 0, got {other:?}"),
@@ -730,16 +755,6 @@ User : ex:Person from rows
         let (uri, format) = lower_source_for(src);
         assert_eq!(uri.as_str(), "a.parquet");
         assert_eq!(format, SourceFormat::Parquet);
-    }
-
-    #[test]
-    fn lower_to_mir_is_memoised_across_invocations() {
-        let (db, file) = db_with_hello();
-        let dm = def_map(&db, file);
-        let mapping = *dm.mappings(&db).first().expect("hello has one mapping");
-        let a = lower_to_mir(&db, mapping);
-        let b = lower_to_mir(&db, mapping);
-        assert_eq!(a, b);
     }
 
     #[test]

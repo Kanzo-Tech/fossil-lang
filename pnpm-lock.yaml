@@ -320,6 +320,15 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)
 
+  packages/executor:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)(happy-dom@15.11.7)
+
   packages/graph:
     devDependencies:
       '@duckdb/duckdb-wasm':

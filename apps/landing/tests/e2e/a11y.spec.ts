@@ -8,35 +8,45 @@
  *   - landmark sections (aria-label) for editor + results
  *   - stable ARIA_LABELS for Run / Reset
  *   - polite aria-live region (id="fossil-live-region")
- *   - #graph-canvas id on the ResultGraph outer wrapper (axe-exclusion
- *     target — RESEARCH.md Pattern 5 + Pitfall 5)
+ *   - #graph-canvas id on the ResultGraph outer wrapper (axe-exclusion target)
  *
  * Exclusions per RESEARCH.md Pattern 5:
- *   - #graph-canvas — Cosmos.gl canvas (or its tabular-fallback wrapper)
- *     has no inherent semantic content; the tabular fallback INSIDE the
- *     wrapper carries the data for SR users.
- *   - .cm-content — CodeMirror 6's content host owns its own a11y story
- *     (it's a contenteditable with custom keyboard interaction); axe-core
- *     flags it as "missing form label" / "contenteditable without
- *     accessible name" which is a false positive given CodeMirror's
- *     internal labelling.
+ *   - #graph-canvas — Cosmos.gl canvas (or its tabular-fallback wrapper) has
+ *     no inherent semantic content; the tabular fallback INSIDE the wrapper
+ *     carries the data for SR users.
+ *   - .cm-content / .cm-scroller — CodeMirror 6's content + scroller hosts own
+ *     their own a11y story (contenteditable with custom keyboard interaction +
+ *     a `tabindex="-1"` scroller). axe-core flags them as "contenteditable
+ *     without accessible name" / "scrollable-region-focusable", both false
+ *     positives given CodeMirror's internal labelling and key handling.
+ *
+ * v2 note: every test settles past the OFFLINE-01 Service Worker's controlled
+ * reload (gotoPlayground) before running axe — otherwise the reload lands
+ * during AxeBuilder.analyze and trips "Execution context was destroyed".
  */
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import {
+  gotoPlayground,
+  loadHelloExample,
+  runAndWaitForVertices,
+  waitForViewerReady,
+} from './helpers';
+
 test('A11Y-01: landing default flow passes WCAG 2.1 AA (axe-core)', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 15_000 });
+  await gotoPlayground(page);
+  await waitForViewerReady(page);
 
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .exclude('#graph-canvas')
     .exclude('.cm-content')
+    .exclude('.cm-scroller')
     .analyze();
 
-  // Surface any violations in the test output for debugging.
   if (results.violations.length > 0) {
     // eslint-disable-next-line no-console
     console.log(
@@ -50,16 +60,16 @@ test('A11Y-01: landing default flow passes WCAG 2.1 AA (axe-core)', async ({
 test('A11Y-01: result region remains WCAG 2.1 AA-compliant after Run', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'Run mapping' }).click();
-  await expect(
-    page.getByText(/vertices/i, { exact: false }).first(),
-  ).toBeVisible({ timeout: 5_000 });
+  await gotoPlayground(page);
+  // Load the hyphen-free `hello` example so the results region holds a real
+  // (not codegen-errored) graph — see helpers §3.
+  await loadHelloExample(page);
+  await runAndWaitForVertices(page);
+  await waitForViewerReady(page);
 
   // Scope axe to the results region (via the aria-label landmark) so we
-  // assert the tabular fallback + the result graph wrapper independently
-  // of the rest of the page.
+  // assert the tabular fallback + the result graph wrapper independently of
+  // the rest of the page.
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2aa', 'wcag21aa'])
     .include('section[aria-label="Run results"]')
@@ -78,8 +88,7 @@ test('A11Y-01: result region remains WCAG 2.1 AA-compliant after Run', async ({
 test('A11Y-01: Run + Reset buttons have stable accessible names', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 15_000 });
+  await gotoPlayground(page);
 
   // Accessible name comes from ARIA_LABELS centralised in
   // packages/playground/src/a11y/index.ts — visible text can mutate
@@ -95,10 +104,9 @@ test('A11Y-01: Run + Reset buttons have stable accessible names', async ({
 test('A11Y-01: #graph-canvas exclusion target is structurally present', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 15_000 });
-  // The axe-core exclusion `exclude: ['#graph-canvas']` needs the id to be
-  // in the DOM whether enableWebGL is on or off (v0.1 default: off → only
-  // the outer wrapper renders, but it carries the id per 08-10's hoist).
+  await gotoPlayground(page);
+  // The axe-core exclusion `exclude: ['#graph-canvas']` needs the id to be in
+  // the DOM whether enableWebGL is on or off (v0.1 default: off → only the
+  // outer wrapper renders, but it carries the id per 08-10's hoist).
   await expect(page.locator('#graph-canvas')).toBeVisible();
 });

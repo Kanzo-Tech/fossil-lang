@@ -1,0 +1,80 @@
+# DataFusion backend for the property-graph MIR: lowers `lower_to_mir_pg` to a
+# DataFusion plan and materialises the GraphAr graph (vertices + edges +
+# manifests + RunStatus). Compiles to wasm32 (browser executor); the native
+# Arrow→Parquet sink (`sink` module) is gated native-only.
+[package]
+name = "fossil-df"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "DataFusion backend for the property-graph MIR (lower_to_mir_pg)"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+fossil-base = { path = "../fossil-base" }
+fossil-hir = { path = "../fossil-hir" }
+fossil-mir = { path = "../fossil-mir" }
+# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name) and the
+# host↔fossil wire contract (RunStatus). Both WASM-clean (arrow-schema / serde
+# only) — the backend reuses them instead of re-deriving the GraphAr layout.
+fossil-sinks = { path = "../fossil-sinks" }
+fossil-run-status = { path = "../fossil-run-status" }
+# The canonical graph-schema contract — the metadata fossil-df produces and the
+# manifest/RunStatus materialize from (the universal substrate's single source).
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# The program-resident output descriptor (ShEx) that drives edge/cardinality
+# classification, threaded into execute_graph as an argument (ADR-0018) and
+# applied via `fossil_mir::apply_output_shape`.
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows. Pure Rust,
+# WASM-clean (the oxigraph parsers rudof's ShEx already pulls) — RDF is decoded
+# at the I/O border, same as in the browser.
+oxttl = { workspace = true }
+oxrdf = { workspace = true }
+serde_yaml_ng = { workspace = true }
+# `default-features = false` drops datafusion's `sql` frontend (we build plans
+# via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`
+# feature — shrinking the wasm surface. We KEEP `parquet`: `io.parquet` sources
+# must be READ (locally and, in the browser, remotely by signed URL — design C2).
+# CSV/JSON reading is core (ungated). Re-add a feature here if a plan op needs it.
+#
+# ⚠️ This does NOT remove the `zstd` C dep: datafusion 54 HARDCODES
+# `arrow-ipc` with `features=["lz4","zstd"]` in datafusion-common /
+# datafusion-datasource-arrow / datafusion-physical-plan (not behind any
+# feature). So `zstd-sys` cannot be cut from the feature graph — the wasm32
+# build needs a wasm-capable clang to compile zstd-C (verified 2026-06-09):
+#   CC_wasm32_unknown_unknown=<llvm>/clang AR_wasm32_unknown_unknown=<llvm>/llvm-ar \
+#     cargo build -p fossil-df --target wasm32-unknown-unknown
+# (Apple's system clang lacks the wasm target; `brew install llvm` provides one.)
+# Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
+# subcrates — deferred. The wasm CI job must install LLVM.
+datafusion = { version = "54", default-features = false, features = ["parquet"] }
+# The single Arrow→Parquet encoder, shared native+wasm (universal-substrate
+# decision: one parquet-rs encoder, no parquet-wasm JS). `default-features =
+# false` + `arrow` keeps it pure-Rust (no compression C deps) → wasm-clean; the
+# in-memory `Vec<u8>` writer in `files.rs` is target-agnostic. Only the *fs*
+# write (`sink.rs`) is native-gated.
+parquet = { version = "58", default-features = false, features = ["arrow"] }
+thiserror = { workspace = true }
+
+# Native-only: the fs sink writes the encoded bytes to a directory. The browser
+# path hands the same bytes to JS for signed PUT, so std::fs + tokio never reach
+# the wasm build (keeps it lean).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native `run_to_dir` blocks the async executor on a current-thread runtime so
+# the synchronous host (the CLI/engine) drives it without being async itself.
+# The browser drives `execute_graph` from JS's own event loop, so tokio is
+# native-only (kept out of the wasm build).
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+fossil-base = { path = "../fossil-base" }
+fossil-hir = { path = "../fossil-hir" }
+tempfile = { workspace = true }

@@ -1,63 +1,50 @@
 /**
- * PLAY-10 E2E gate — Turtle tab renders post-Run materialized triples.
+ * PLAY-10 E2E gate — Turtle tab renders post-Run materialized triples
+ * (post-Phase-14 "playground v2" FossilViewer tabs).
  *
- * Per 09-CONTEXT.md locked decision:
- *   - Tab alongside Graph + Edges in the result panel.
- *   - Post-Run: vertex/edge tables → rowsToTurtle (n3-backed; from 09-04).
- *   - Selectable + copyable; Copy button with accessible label.
- *   - Inherits FossilTheme.
- *
- * Depends on 09-01 (CODEGEN-LOWERING-01 fix) — without it the post-Run
- * vertex IRIs never materialise, so this spec would fail on the Run-completion
- * gate before reaching the Turtle assertion.
+ * v2 notes:
+ *   - The result panel is the lazy-loaded FossilViewer, whose tablist exposes
+ *     Graph / Turtle / Vertices (N) / Edges (N) — there is no "result views"
+ *     accessible name on the tablist. We assert the tabs by their own names.
+ *   - The default `hello-no-csvw` mapping trips the `derive_view_name` hyphen
+ *     codegen bug, so the Run-dependent tests load the hyphen-free `hello`
+ *     example first (helpers §3) and gate Run success on `Vertices (N>0)`
+ *     (the IRIs themselves are on the non-selectable WebGL canvas).
  */
 import { expect, test } from '@playwright/test';
+
+import {
+  gotoPlayground,
+  loadHelloExample,
+  runAndWaitForVertices,
+  waitForViewerReady,
+} from './helpers';
 
 test('PLAY-10: clicking Run + Turtle tab shows Turtle text containing the IRIs', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 20_000 });
-  await expect(page.getByText('Loading editor…')).toHaveCount(0, {
-    timeout: 15_000,
-  });
+  await gotoPlayground(page);
+  await loadHelloExample(page);
+  await runAndWaitForVertices(page);
+  await waitForViewerReady(page);
 
-  // Click Run — wait for vertex/edge tables to populate (the SC#1 contract
-  // from landing-run.spec.ts; 5s budget is the tight gate).
-  await page.getByRole('button', { name: 'Run mapping' }).click();
-  const root = page.getByTestId('fossil-playground');
-  await expect(
-    root.getByText(/https:\/\/example\.org\/user\/[0-9]+/).first(),
-  ).toBeVisible({ timeout: 10_000 });
-
-  // Switch to Turtle tab.
+  // Switch to the FossilViewer Turtle tab.
   await page.getByRole('tab', { name: /^turtle$/i }).click();
   const tab = page.getByTestId('turtle-tab');
   await expect(tab).toBeVisible();
 
-  // Turtle should contain the IRIs + @prefix declarations. n3 emits the
-  // `@prefix ex: <https://example.org/> .` declaration block at the top
-  // (the TURTLE_DEFAULT_PREFIXES map registers `ex` to the example.org
-  // namespace). The IRIs themselves shorten to `ex:user/1` form after
-  // prefix application.
+  // Turtle should contain the `@prefix ex:` declaration block + the IRIs.
+  // n3's Writer picks the shortest representation, so either the prefixed
+  // CURIE form (`ex:user/1`) or the full IRI is acceptable.
   await expect(tab).toContainText(/@prefix\s+ex:/);
-  // Either the unshortened IRI OR the prefixed CURIE form is acceptable —
-  // n3's Writer picks the shortest representation given the prefix table.
   await expect(tab).toContainText(/(ex:user|<https:\/\/example\.org\/user)/);
 });
 
 test('PLAY-10: Turtle tab has accessible Copy button', async ({ page }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 20_000 });
-  await expect(page.getByText('Loading editor…')).toHaveCount(0, {
-    timeout: 15_000,
-  });
-
-  await page.getByRole('button', { name: 'Run mapping' }).click();
-  const root = page.getByTestId('fossil-playground');
-  await expect(
-    root.getByText(/https:\/\/example\.org\/user\/[0-9]+/).first(),
-  ).toBeVisible({ timeout: 10_000 });
+  await gotoPlayground(page);
+  await loadHelloExample(page);
+  await runAndWaitForVertices(page);
+  await waitForViewerReady(page);
 
   await page.getByRole('tab', { name: /^turtle$/i }).click();
 
@@ -67,28 +54,28 @@ test('PLAY-10: Turtle tab has accessible Copy button', async ({ page }) => {
     /copy turtle to clipboard/i,
   );
   await expect(copyButton).toBeVisible();
-  // The button starts at "Copy" visible text; clicking it flips to "Copied!"
-  // for 1.5s. We can't reliably exercise the clipboard API in CI (permissions
-  // policy differs across browsers), but the accessible-name + initial-text
-  // gates suffice for the PLAY-10 SC.
+  // The button starts at "Copy" visible text; we don't exercise the clipboard
+  // API (permissions policy differs across browsers) — accessible-name +
+  // initial-text gates suffice for the PLAY-10 SC.
   await expect(copyButton).toHaveText(/copy/i);
 });
 
-test('PLAY-10: tablist exposes role="tab" for Graph / Edges / Turtle', async ({
+test('PLAY-10: viewer tablist exposes Graph / Turtle / Vertices / Edges', async ({
   page,
 }) => {
-  await page.goto('/');
-  await page.getByTestId('fossil-playground').waitFor({ timeout: 20_000 });
-  await expect(page.getByText('Loading editor…')).toHaveCount(0, {
-    timeout: 15_000,
-  });
+  await gotoPlayground(page);
+  await waitForViewerReady(page);
 
-  // Tablist landmark + three tabs visible without needing a Run first
-  // (the tablist exists pre-Run; the Turtle panel just shows an empty
-  // serialization until vertices/edges populate).
-  const tablist = page.getByRole('tablist', { name: /result views/i });
-  await expect(tablist).toBeVisible();
+  // The FossilViewer renders its tabs from page load (over zero rows) — no
+  // Run required. The tab names are unique across the page's tablists so a
+  // flat getByRole('tab', { name }) is unambiguous.
+  await expect(page.getByTestId('fossil-viewer-root')).toBeVisible();
   await expect(page.getByRole('tab', { name: /^graph$/i })).toBeVisible();
-  await expect(page.getByRole('tab', { name: /^edges$/i })).toBeVisible();
   await expect(page.getByRole('tab', { name: /^turtle$/i })).toBeVisible();
+  await expect(
+    page.getByRole('tab', { name: /^Vertices \(\d+\)$/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('tab', { name: /^Edges \(\d+\)$/ }),
+  ).toBeVisible();
 });
