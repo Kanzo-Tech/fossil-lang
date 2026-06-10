@@ -16,7 +16,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # `pnpm -r build` + `-r test` now build the executor (datafusion wasm) +
+    # fossil-cli; a COLD run (empty cache) far exceeds 30 min and would be
+    # canceled. Generous ceiling; the cargo cache below makes warm runs fast.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +29,12 @@ jobs:
         with:
           toolchain: 1.90.0
           targets: wasm32-unknown-unknown
+
+      # Cache cargo registry + target — without it every release rebuilds
+      # datafusion (executor wasm) + fossil-cli from scratch (~20-40 min).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
 
       - name: Install wasm-bindgen-cli (exact 0.2.120 per CLAUDE.md stack pins)
         run: cargo install --version 0.2.120 wasm-bindgen-cli

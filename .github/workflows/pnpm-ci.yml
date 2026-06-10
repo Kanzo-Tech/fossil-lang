@@ -8,6 +8,11 @@ on:
 jobs:
   pnpm:
     runs-on: ubuntu-latest
+    # Generous ceiling for a COLD run (no cargo cache yet: datafusion wasm in
+    # @fossil-lang/executor + fossil-cli --release in @fossil-lang/examples build
+    # from scratch). Warm runs (cache hit) finish in a few minutes; this only
+    # catches a genuine hang, not a slow first build.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -20,12 +25,22 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      # `pnpm -r build` builds @fossil-lang/wasm + graph, whose `build:wasm` needs
-      # the Rust toolchain + wasm-bindgen-cli (same setup release.yml uses).
+      # `pnpm -r build` builds @fossil-lang/wasm + graph + executor, whose
+      # `build:wasm` needs the Rust toolchain + wasm-bindgen-cli (same setup
+      # release.yml uses).
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.90.0
           targets: wasm32-unknown-unknown
+
+      # Cache cargo registry + target across runs. Without it every PR rebuilds
+      # datafusion (the executor's wasm) + fossil-cli from scratch (~20-40 min,
+      # the likely cause of the canceled run). Warm runs reuse the build.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The wasm32 artifacts + the native fossil-cli release build both land
+          # in target/; cache keyed on Cargo.lock + toolchain by default.
+          cache-all-crates: true
 
       - name: Install wasm-bindgen-cli (0.2.120, matches Cargo.toml pin)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
