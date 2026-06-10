@@ -1,6 +1,5 @@
 ---
 "@fossil-lang/viewer": patch
-"@fossil-lang/playground": patch
 ---
 
 _Bump-level downgraded from `minor` to `patch` as part of Phase 17 REL-01 release squash (this changeset's narrative is preserved; the v0.2.0 minor bump is carried by `release-v0-2-0.md`)._
@@ -35,7 +34,6 @@ Viewer componente standalone publicable + IDE-style tabs composition:
   `<FossilGraphView/>` in `@fossil-lang/ui` Tabs (variant=`line` for the
   IDE look from Phase 10 plan 10-03). Tabs: Graph / Turtle / Vertices /
   Edges. The Turtle tab reuses `rowsToTurtle` (MOVED in this release
-  from `@fossil-lang/playground` — single source of truth in the view
   layer; playground re-exports for v0.1.x compat).
 
 - **Accessible tabular fallback** (VIEW-04) — when `webgl={false}` OR
@@ -44,7 +42,6 @@ Viewer componente standalone publicable + IDE-style tabs composition:
   axe-clean on both the WebGL page (canvas excluded) and the fallback
   page (no exclusion needed). A11Y-01 carryover from v0.1 Phase 8.
 
-- **Backwards compat preserved** — `@fossil-lang/playground` still
   exports `ResultGraph` (deprecated alias of FossilGraphView) +
   `rowsToTurtle` + `TurtleTab` + `FossilGraphView` + `FossilViewer`
   (re-exported from `@fossil-lang/viewer`). v0.1.x consumers do not need
@@ -56,7 +53,6 @@ Viewer componente standalone publicable + IDE-style tabs composition:
 - **Bundle budget** — `@fossil-lang/viewer` ships under 300 KB gzipped
   primary cap (Cosmos.gl is heavy — locked CONTEXT.md cap higher than
   ui+editor); measures 146.72 KB / 300 KB (48.9% used) with 6.3 KB
-  diagnostic. `@fossil-lang/playground` measures 230.98 KB / 500 KB (the
   jump from Phase 11's ~95 KB is the re-export of @fossil-lang/viewer
   pulling Cosmos.gl + Mosaic into the bundle graph; Phase 14 composition
   refactor can re-isolate by making host code import @fossil-lang/viewer
