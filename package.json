@@ -2,7 +2,7 @@
   "name": "fossil-monorepo",
   "private": true,
   "version": "0.0.0",
-  "description": "Fossil compiler + LSP + playground React library family — monorepo root",
+  "description": "Fossil compiler + LSP + editor React library family — monorepo root",
   "scripts": {
     "build": "pnpm -r build",
     "build:wasm": "pnpm --filter @fossil-lang/wasm build:wasm",
@@ -11,8 +11,7 @@
     "size": "pnpm -r size",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm -r build && changeset publish",
-    "bless-baselines": "bash scripts/bless-baselines.sh"
+    "release": "pnpm -r build && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",

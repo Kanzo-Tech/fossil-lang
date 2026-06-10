@@ -5,7 +5,7 @@
  * - {@link initFossilWasm} — consumer-controlled .wasm URL loader (memoised).
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[] (ADR-0030).
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend (Phase-6 06-07).
- * - {@link FossilPlayground} — Workspace API class (ADR-0024) for LSP + compile.
+ * - {@link FossilPlayground} — Workspace API class (ADR-0024) for the LSP.
  *
  * Consumer pattern (wasm-bindgen --target web — RESEARCH.md Pattern 3):
  *
@@ -57,8 +57,8 @@ export function start_lsp_worker(): void {
 
 /**
  * Opaque file-handle returned by {@link FossilPlayground.openFile}. Pass it
- * back into the matching `updateFile` / `closeFile` / `diagnosticsFor` /
- * `compileFile` calls. JS code cannot construct one directly (the wasm-bindgen
+ * back into the matching `updateFile` / `closeFile` / `diagnosticsFor`
+ * calls. JS code cannot construct one directly (the wasm-bindgen
  * class has a private constructor) — that is intentional per ADR-0024:
  * handles are minted only by `openFile` on the Rust side, where they index a
  * `HashMap<FileHandle, SourceFile>` keyed by a `u32` newtype.
@@ -118,16 +118,6 @@ export interface CheckRow {
 export interface StdlibClass {
   name: string;
   wasm_class: 'pure_sql' | 'native_udf_only';
-}
-
-/** Compile result returned by {@link FossilPlayground.compile} and
- *  {@link FossilPlayground.compileFile} — the same `{ sql, manifest_yaml }`
- *  shape `fossil-cli`'s compile subcommand produces, minus the native DuckDB
- *  execution step (which runs in-browser via DuckDB-WASM downstream).
- */
-export interface CompileResult {
-  sql: string;
-  manifest_yaml: string;
 }
 
 /**
@@ -216,16 +206,6 @@ export class FossilPlayground {
   }
 
   /**
-   * Compile a Fossil source string ad-hoc (no file lifecycle). Returns
-   * `{ sql, manifest_yaml }` — the same shape `fossil-cli compile` produces.
-   * Prefer {@link compileFile} for the playground run path (it benefits from
-   * the file's stable Salsa identity across edits).
-   */
-  compile(source: string): CompileResult {
-    return this._inner.compile(source) as CompileResult;
-  }
-
-  /**
    * Return the stdlib classification manifest (STDL-07). The playground reads
    * this once at startup to render `native_udf_only` functions as disabled
    * with a "native-only — unavailable in the browser" tooltip.
@@ -236,7 +216,7 @@ export class FossilPlayground {
 
   /**
    * Open a file in the workspace. Returns the {@link FileHandle} subsequent
-   * `updateFile` / `closeFile` / `diagnosticsFor` / `compileFile` calls key
+   * `updateFile` / `closeFile` / `diagnosticsFor` calls key
    * on. `path` is the URI / virtual path diagnostics carry back to the LSP
    * client (e.g. `"file:///tmp/a.fossil"` or `"untitled:Untitled-1"`).
    *
@@ -289,16 +269,6 @@ export class FossilPlayground {
   }
 
   /**
-   * Compile one open file. Returns `{ sql, manifest_yaml }` — same shape as
-   * {@link compile}. Preferred over `compile(source)` for the run path because
-   * it consumes the file's stable Salsa `SourceFile` identity (so subsequent
-   * edits benefit from incremental memoisation).
-   */
-  compileFile(handle: FileHandle): CompileResult {
-    return this._inner.compile_file(handle) as CompileResult;
-  }
-
-  /**
    * Install a user-supplied ShEx schema as the active output descriptor. On
    * parse failure the previously-installed descriptor is RETAINED (no
    * half-applied state — same contract as `fossil-lsp::load_sibling_shex` in
@@ -311,16 +281,16 @@ export class FossilPlayground {
 
   /**
    * Register an {@link InferredDescriptorJson} for a source binding name
-   * BEFORE invoking {@link compile} / {@link compileFile}. The Rust compiler
-   * reads from this registration during forward type propagation (Phase 3
-   * CORE-05 rewired in plan 13-02).
+   * BEFORE invoking {@link check}. The Rust compiler reads from this
+   * registration during forward type propagation (Phase 3 CORE-05 rewired in
+   * plan 13-02).
    *
-   * The browser-side playground orchestration runs DuckDB-WASM
+   * The browser-side orchestration runs DuckDB-WASM
    * `DESCRIBE read_csv_auto('<resolved-url>')` for each `io.csv("...")`
    * reference in the source, canonicalises the columns to the
    * {@link InferredPrimitive} catalog, and calls this method with the
-   * resulting descriptor before invoking {@link compile} or
-   * {@link compileFile}. See ADR-0037 for the full architectural rationale.
+   * resulting descriptor before {@link check}. See ADR-0037 for the full
+   * architectural rationale.
    *
    * Keyed by source-binding name (e.g. `"users"` for
    * `users := io.csv("...")`), NOT by URL. Idempotent — re-registering with

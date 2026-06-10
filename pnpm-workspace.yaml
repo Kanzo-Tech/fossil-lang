@@ -1,9 +1,2 @@
 packages:
   - 'packages/*'
-  - 'apps/*'
-  # Multi-host SC#2 proof fixture — a vanilla Vite + React app that mounts
-  # <FossilPlayground/> WITHOUT Next.js. Declared as a workspace member so
-  # `@fossil-lang/playground: workspace:*` resolves; the Playwright config
-  # boots its `vite preview` server alongside the Next.js landing host.
-  # NOT published to npm (private: true).
-  - 'apps/landing/tests/e2e/multi-host-fixture'

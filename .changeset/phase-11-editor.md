@@ -1,6 +1,5 @@
 ---
 "@fossil-lang/editor": patch
-"@fossil-lang/playground": patch
 ---
 
 _Bump-level downgraded from `minor` to `patch` as part of Phase 17 REL-01 release squash (this changeset's narrative is preserved; the v0.2.0 minor bump is carried by `release-v0-2-0.md`)._
@@ -33,15 +32,11 @@ Editor componente standalone publicable + transport LSP pluggable:
   prop is the same 2-tier shape from CONN-01..03 (carryover v0.1). Phase
   11 11-04 spec includes a dedicated test asserting the resolver-driven
   autocomplete popup renders when the user types `@`.
-- **`@fossil-lang/playground` re-exports `FossilEditor` and
   `createWorkerTransport` from `@fossil-lang/editor`** — v0.1.x consumers
-  using `import { FossilEditor } from '@fossil-lang/playground'` or
-  `import { createWorkerTransport } from '@fossil-lang/playground'` do NOT
   break. Module-instance dedup via pnpm workspace symlinks.
 - **Bundle budget** — `@fossil-lang/editor` ships at 1.31 KB gzipped (well
   under the 100 KB cap per Phase 11 CONTEXT.md — CM6 + LSP-client are
   peerDeps so they don't count against the editor's own surface);
-  `@fossil-lang/playground` is 95.75 KB (was 95.53 KB Phase 10 baseline;
   +0.22 KB delta, well under its 500 KB cap).
 
 Theming: the editor is theme-less; consumes the `--fossil-*` CSS variable

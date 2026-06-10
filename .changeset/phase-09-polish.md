@@ -1,5 +1,4 @@
 ---
-"@fossil-lang/playground": patch
 "@fossil-lang/codemirror-fossil": patch
 "@fossil-lang/wasm": patch
 "@fossil-lang/types": patch
@@ -79,7 +78,6 @@ Architecture & invariants preserved:
   on `fossil-base/syntax/hir/mir/codegen/sinks/ide/ide-db/wasm`).
 - `MAX_PER_MAPPING_FAN_OUT=1` invariant intact.
 - Walking-skeleton intact (5-triple parquet from `examples/hello.fossil`).
-- Bundle budgets honored: `@fossil-lang/playground` core <500 KB gzip;
   WASM <2 MB compressed; landing build <10 MB.
 
 No new ADRs landed in Phase 9 — all decisions covered by ADRs 0024–0032

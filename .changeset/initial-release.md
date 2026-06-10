@@ -1,5 +1,4 @@
 ---
-"@fossil-lang/playground": patch
 "@fossil-lang/codemirror-fossil": patch
 "@fossil-lang/wasm": patch
 "@fossil-lang/types": patch
@@ -11,7 +10,6 @@ _Bump-level downgraded from `minor` to `patch` as part of Phase 17 REL-01 releas
 
 Initial public release of the Fossil playground React library family.
 
-- `@fossil-lang/playground` — embeddable `<FossilPlayground/>` React component composing CodeMirror 6 editor + LSP-via-WASM-Worker (Workspace API per ADR-0024) + DuckDB-WASM runner (exact pin 1.32.0 per ADR-0025) + Mosaic/Cosmos.gl result visualization + Reset semantics per ADR-0026 + light/dark/custom themes + WCAG 2.1 AA accessibility.
 - `@fossil-lang/codemirror-fossil` — CodeMirror 6 language extension delegating tokenization to the canonical Rust lexer via the `tokenize()` export from `@fossil-lang/wasm` (ADR-0030 single grammar source of truth). Importable standalone for hosts that want only the editor (Keasy migration target).
 - `@fossil-lang/wasm` — JS/TS wrapper around the `fossil-wasm` wasm-bindgen artifacts (`--target web` per RESEARCH.md Pitfall 1). Exposes `initFossilWasm({ wasmUrl })`, `tokenize`, `semanticLegend`, and the `FossilPlayground` class.
 - `@fossil-lang/types` — shared TypeScript types (zero runtime): `SourceRef`, `ResolvedSource`, `Connector`, `ConnectionResolver`, `FossilTheme`, `TokenRow`, `SemanticTokensLegend`, `Diagnostic`.

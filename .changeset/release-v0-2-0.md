@@ -1,5 +1,4 @@
 ---
-"@fossil-lang/playground": minor
 "@fossil-lang/codemirror-fossil": minor
 "@fossil-lang/wasm": minor
 "@fossil-lang/types": minor
@@ -18,7 +17,6 @@ deleted from Keasy's web tree, now sourcing from the shared library.
 
 ### Package summary
 
-- **`@fossil-lang/playground`** — embeddable `<FossilPlayground/>` polished
   through Phases 9–14 (Reset semantics, dark/light/custom themes, WCAG 2.1
   AA accessibility audit, deferred-initialization performance fix).
 - **`@fossil-lang/codemirror-fossil`** — language extension stabilized; same
@@ -46,7 +44,6 @@ deleted from Keasy's web tree, now sourcing from the shared library.
 
 ### Compatibility
 
-Existing v0.1.x consumers upgrade with `pnpm up @fossil-lang/playground@0.2.0`
 (and similar for the other five pre-existing packages) — **no breaking
 changes on the 6 pre-existing packages**. The bump is strictly additive +
 bugfixes per the v0.2 milestone semver discipline. Adopters who want to
