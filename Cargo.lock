@@ -1923,6 +1923,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-df-wasm"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "console_error_panic_hook",
+ "datafusion",
+ "fossil-base",
+ "fossil-descriptors-output",
+ "fossil-df",
+ "fossil-run-status",
+ "getrandom 0.3.4",
+ "js-sys",
+ "object_store",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "tokio",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "fossil-engine"
 version = "0.1.0"
 dependencies = [

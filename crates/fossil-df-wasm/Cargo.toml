@@ -1,0 +1,74 @@
+# fossil-df-wasm — wasm-bindgen wrapper exposing the DataFusion executor
+# (`fossil-df`) to JS. Kept SEPARATE from `fossil-wasm` (the LSP shim) so the
+# editor's wasm stays lean and loads on page-load, while this heavy executor
+# (datafusion ≈7MB gz) is lazy-loaded only when running a job (design §D/§E4).
+[package]
+name = "fossil-df-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WASM wrapper for the fossil DataFusion executor — runs mappings in the browser"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
+fossil-df = { path = "../fossil-df" }
+# FossilDb (production salsa db) + SourceFile + the System trait. The executor
+# needs no HirDb — the output descriptor is passed as an argument (ADR-0018).
+fossil-base = { path = "../fossil-base" }
+# The program-resident output descriptor: ShEx text → OutputDescriptorKind,
+# threaded into execute_graph (drives edge/cardinality classification).
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# The host↔fossil wire status keasy consumes for DCAT (serialized to JS).
+fossil-run-status = { path = "../fossil-run-status" }
+
+# DataFusion (match fossil-df: no `sql` frontend, keep `parquet` reads). The
+# wasm host owns the SessionContext so it can register source object stores +
+# tune execution (target_partitions = 1 — single-thread, no tokio::spawn).
+datafusion = { version = "54", default-features = false, features = ["parquet"] }
+# In-memory object store: JS fetches each source by signed URL and hands us the
+# bytes; we stage them in an `InMemory` store keyed by the source URI's
+# scheme+authority, so the executor's existing `read_csv`/`read_parquet` path
+# (design §C2 "the host registers an ObjectStore in the ctx") reads them
+# unchanged. The HTTP/streaming store is a later host-only swap — same seam.
+object_store = "0.13"
+url = "2"
+# chrono is transitive (datafusion / object_store) and pulled with wasmbind OFF,
+# so `Utc::now()` falls through to std `SystemTime::now()` — which PANICS on
+# wasm32 ("time not implemented"). object_store's `InMemory::put` stamps
+# `last_modified = Utc::now()`, so the executor hits it. Adding chrono directly
+# with `wasmbind` flips the feature on for the whole graph (js_sys::Date clock,
+# works in browser + node; target-gated to wasm32 → no-op on native).
+chrono = { version = "0.4", features = ["wasmbind"] }
+
+# WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
+# the wasm-bindgen-cli version (RESEARCH.md Pitfall 5). `run()` is async, so
+# wasm-bindgen-futures bridges the Rust future to a JS Promise.
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true }
+
+# Transitive WASM enablers — keep as direct deps so feature resolution sticks
+# (the `wasm_js` getrandom backend is required by salsa→hashbrown→ahash on wasm32;
+# same belt-and-suspenders as fossil-wasm).
+getrandom = { workspace = true }
+
+[dev-dependencies]
+# Native test drives the async core on a real runtime (the browser uses JS's
+# event loop instead, so tokio never reaches the wasm build).
+tokio = { workspace = true }
+fossil-base = { path = "../fossil-base" }
