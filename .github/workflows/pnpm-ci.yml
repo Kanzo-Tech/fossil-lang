@@ -69,8 +69,13 @@ jobs:
       - name: Build all packages
         run: pnpm -r build
 
-      - name: Test all packages
-        run: pnpm -r test
+      # `@fossil-lang/examples` is EXCLUDED here: its variations harness builds
+      # `fossil-cli` (datafusion/duckdb — minutes) just to spawn `fossil check`,
+      # and the dedicated, cached, path-filtered `examples.yml` workflow already
+      # owns that ≥30 compile-gate. Running it here too only duplicated the heavy
+      # Rust build and slowed every PR.
+      - name: Test all packages (except examples — owned by examples.yml)
+        run: pnpm --filter "!@fossil-lang/examples" -r test
 
       - name: Type-check all packages
         run: pnpm -r exec tsc --noEmit
