@@ -45,18 +45,22 @@ jobs:
       - name: Install wasm-bindgen-cli (0.2.120, matches Cargo.toml pin)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
 
-      # LLVM: datafusion (in @fossil-lang/executor's build:wasm) hardcodes
-      # arrow-ipc[zstd], so the wasm32 zstd-sys C build needs a wasm-capable clang
-      # (Apple/macOS clang lacks the target; ubuntu's LLVM clang has it). binaryen:
-      # `wasm-opt` for build-wasm.sh's `-Oz` size pass. Any binaryen works —
-      # build-wasm.sh passes the wasm32 default feature set (plain features, not
-      # version-specific flags).
-      - name: Install LLVM + binaryen for the executor wasm (@fossil-lang/executor)
+      # datafusion (in @fossil-lang/executor's build:wasm) hardcodes arrow-ipc[zstd],
+      # so the wasm32 zstd-sys C build needs a wasm-capable clang (Apple/macOS clang
+      # lacks the target; ubuntu's LLVM clang has it). Point cc-rs at it.
+      - name: Install LLVM for wasm zstd-C (@fossil-lang/executor)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang llvm binaryen
+          sudo apt-get install -y -qq clang llvm
           echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
           echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
+
+      # wasm-opt via the `wasm-opt` crate (binaryen 116). NOT apt binaryen: ubuntu
+      # ships 108, whose wasm-opt corrupts wasm-bindgen's externref table (binaryen
+      # #4711) → "Table.grow(): failed to grow table" instantiating the graph wasm
+      # on Node 20. 116 fixes it. Same cargo-install pattern as wasm-bindgen-cli.
+      - name: Install wasm-opt (binaryen 116 via the wasm-opt crate)
+        run: cargo install wasm-opt --locked --version 0.116.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -49,19 +49,24 @@ jobs:
       - name: Install wasm-bindgen-cli (exact 0.2.120 per CLAUDE.md stack pins)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
 
-      # LLVM: datafusion (in @fossil-lang/executor's build:wasm) hardcodes
-      # arrow-ipc[zstd]; the wasm32 zstd-sys C build needs a wasm-capable clang
-      # (Apple/ubuntu host clang lacks the target). binaryen: `wasm-opt`, which
-      # build-wasm.sh runs `-Oz` to shrink the executor artefact (~24MB → ~21MB raw
-      # / ~6MB gz). Any binaryen works — build-wasm.sh passes the wasm32 default
-      # feature set (plain features, not version-specific flags). WITHOUT binaryen
-      # the published wasm ships unoptimised (~2-3× larger).
-      - name: Install LLVM + binaryen for the executor wasm (@fossil-lang/executor)
+      # datafusion (in @fossil-lang/executor's build:wasm) hardcodes arrow-ipc[zstd];
+      # the wasm32 zstd-sys C build needs a wasm-capable clang (Apple/ubuntu host
+      # clang lacks the target). Point cc-rs at ubuntu's LLVM clang.
+      - name: Install LLVM for the wasm32 zstd-C build (@fossil-lang/executor)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang llvm binaryen
+          sudo apt-get install -y -qq clang llvm
           echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
           echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
+
+      # wasm-opt via the `wasm-opt` crate — same cargo-install pattern as
+      # wasm-bindgen-cli. Crate 0.116.1 == binaryen 116. NOT apt binaryen: ubuntu
+      # ships 108, whose wasm-opt corrupts wasm-bindgen's externref table (binaryen
+      # #4711) → "WebAssembly.Table.grow(): failed to grow table" at instantiation
+      # (the LSP/@fossil-lang/graph wasm). 116 fixes it. build-wasm.sh runs it `-Oz`
+      # (executor) / `-O3` (graph). WITHOUT it the wasm ships unoptimised (~2-3×).
+      - name: Install wasm-opt (binaryen 116 via the wasm-opt crate)
+        run: cargo install wasm-opt --locked --version 0.116.1
 
       - uses: pnpm/action-setup@v3
         with:
