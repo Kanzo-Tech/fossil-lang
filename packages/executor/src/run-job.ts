@@ -5,8 +5,13 @@
  * (signing, completion) are injected via {@link JobTransport}, so this stays
  * framework- and server-agnostic — keasy wires it to its job endpoints.
  */
-import type { ConnectionRefs, ExecutorResult, RunStatus, SourceInput } from './index.js';
-import { FossilExecutor } from './index.js';
+import type {
+  ConnectionRefs,
+  ExecutorResult,
+  FossilExecutor,
+  RunStatus,
+  SourceInput,
+} from './index.js';
 
 /**
  * The host calls {@link runJob} needs. keasy implements these against its job
