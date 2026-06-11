@@ -58,26 +58,24 @@ echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"
 wasm-bindgen "$WASM_INPUT" --target web --out-dir "$PKG_DIR"
 
 # wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact (~24MB → ~21MB raw
-# / ~6MB gz). Enable EXACTLY the broadly-supported features wasm-bindgen 0.2.120
-# emits — NOT `-all`: `-all` lets wasm-opt EMIT the gc/typed-function-references
-# family (`(ref <heaptype>)`, GC struct types) in its output, which Node and
-# older browsers reject at instantiation ("Invalid type '(ref <heaptype>)'" /
-# "unknown type form: 0") — and it buys nothing on the wire (gz is identical).
-# The bulk-memory/bulk-memory-opt split landed in binaryen 116; older binaryen
-# folds the latter into the former and rejects the flag, so add it only when the
-# installed wasm-opt advertises it (keeps this version-independent).
+# / ~6MB gz). The `--enable-*` set is EXACTLY the six features wasm32-unknown-unknown
+# turns on by default since Rust 1.87 / LLVM 20 (per the rustc platform-support
+# docs): bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint,
+# reference-types, multivalue. wasm-opt must be told to accept the same set, or it
+# rejects the input ("bulk memory operations require bulk memory"). These are
+# plain wasm FEATURES (not `--enable-bulk-memory-opt`, a binaryen-internal opt-pass
+# flag that changed name across versions), so the set is version-independent —
+# works on any binaryen, no pin/probe needed. NOT `-all`: that lets wasm-opt EMIT
+# gc/typed-function-references (`(ref heaptype)`, GC structs), which Node and older
+# browsers reject at instantiation — for zero gz benefit.
 if command -v wasm-opt &> /dev/null; then
-  WASM_OPT_FEATURES=(
-    --enable-bulk-memory --enable-sign-ext --enable-mutable-globals
-    --enable-nontrapping-float-to-int --enable-reference-types --enable-multivalue
-  )
-  if wasm-opt --help 2>&1 | grep -q -- '--enable-bulk-memory-opt'; then
-    WASM_OPT_FEATURES+=(--enable-bulk-memory-opt)
-  fi
-  echo "[build-wasm] wasm-opt -Oz ${WASM_OPT_FEATURES[*]}"
-  wasm-opt -Oz "${WASM_OPT_FEATURES[@]}" "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
+  echo "[build-wasm] wasm-opt -Oz (wasm32 default feature set, no gc)"
+  wasm-opt -Oz \
+    --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+    --enable-nontrapping-float-to-int --enable-reference-types --enable-multivalue \
+    "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
 else
-  echo "::warning::wasm-opt not found (brew install binaryen). Skipping size pass — the executor artefact will be large (lazy-loaded, so acceptable but heavier)." >&2
+  echo "::warning::wasm-opt not found (install binaryen). Skipping size pass — the executor artefact will be large (lazy-loaded, so acceptable but heavier)." >&2
 fi
 
 RAW_SIZE=$(wc -c < "$PKG_DIR/fossil_df_wasm_bg.wasm")
