@@ -57,15 +57,24 @@ mkdir -p "$PKG_DIR"
 echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"
 wasm-bindgen "$WASM_INPUT" --target web --out-dir "$PKG_DIR"
 
-# wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact substantially
-# (~24MB → ~18MB raw / ~6MB gz). `-all` enables every wasm feature wasm-bindgen
-# 0.2.120 emits (bulk-memory-opt, reference-types, sign-ext, …); WITHOUT it
-# wasm-opt aborts with "memory.copy operations require bulk memory operations",
-# which silently left the artefact unoptimised. Optional — install binaryen
-# (brew install binaryen) to enable it; CI installs it in release.yml.
+# wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact (~24MB → ~21MB raw
+# / ~6MB gz). The feature set must be EXPLICIT, not `-all`:
+#   - too few → wasm-opt aborts validating the input ("memory.copy operations
+#     require bulk memory operations [--enable-bulk-memory-opt]");
+#   - `-all` → wasm-opt is free to EMIT gc / typed-function-references in its
+#     output (`(ref <heaptype>)`), which Node 20 / older browsers reject at
+#     instantiation ("Invalid type '(ref <heaptype>)'").
+# So enable exactly what wasm-bindgen 0.2.120 emits — the broadly-supported
+# baseline — and nothing from the gc/function-references family. Needs binaryen
+# ≥116 (the bulk-memory/bulk-memory-opt split); CI installs it in release.yml.
+WASM_OPT_FEATURES=(
+  --enable-bulk-memory --enable-bulk-memory-opt --enable-sign-ext
+  --enable-mutable-globals --enable-nontrapping-float-to-int
+  --enable-reference-types --enable-multivalue
+)
 if command -v wasm-opt &> /dev/null; then
-  echo "[build-wasm] wasm-opt -Oz -all"
-  wasm-opt -Oz -all "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
+  echo "[build-wasm] wasm-opt -Oz ${WASM_OPT_FEATURES[*]}"
+  wasm-opt -Oz "${WASM_OPT_FEATURES[@]}" "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
 else
   echo "::warning::wasm-opt not found (brew install binaryen). Skipping size pass — the executor artefact will be large (lazy-loaded, so acceptable but heavier)." >&2
 fi
