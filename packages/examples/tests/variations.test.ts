@@ -88,16 +88,18 @@ function resolveFossilBin(): string {
 let FOSSIL_BIN: string;
 
 // Build the CLI once before all tests so the per-test overhead is just the
-// process spawn + check. We build --release because the harness runs ~30
-// invocations and the per-call ~0.5s debug overhead would add up.
+// process spawn + check. DEBUG build: `fossil-cli` links the whole engine
+// (datafusion/duckdb), so the release `opt-level` compile dominates CI time —
+// far more than the ~0.5s/call the ~30 debug invocations add back. A release
+// binary (built by a workflow step) is still preferred if already present.
 beforeAll(() => {
-  // Try release first; build only if missing. Skipping the rebuild when the
-  // binary already exists keeps the local watch loop fast.
+  // Prefer an existing release/debug binary; build debug only if neither
+  // exists. Skipping the rebuild keeps the local watch loop fast.
   FOSSIL_BIN = resolveFossilBin();
   if (!existsSync(FOSSIL_BIN)) {
     execFileSync(
       'cargo',
-      ['build', '-p', 'fossil-cli', '--release', '--quiet'],
+      ['build', '-p', 'fossil-cli', '--quiet'],
       { cwd: REPO_ROOT, stdio: 'inherit' },
     );
     FOSSIL_BIN = resolveFossilBin();
