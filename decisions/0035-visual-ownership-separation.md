@@ -1,9 +1,28 @@
 # ADR 0035: Separate visual ownership — brand visuals owned by `@kanzo/*`; `@fossil-lang/ui` consumes the `--fossil-*` CSS-var contract
 
 **Date:** 2026-05-26
-**Status:** accepted
+**Status:** accepted (amended 2026-06-11 — `@kanzo/theme` package retired; see amendment below)
 **Decider:** Angel Iglesias
 **Cite:** `.planning/phases/10-visual-foundation-radix-ide-theme/10-09-PLAN.md` — surfaced mid-Phase-10 (after plan 10-06's `fossilIdeTheme` default-flip) as an architectural framing issue; corrected in plan 10-09.
+
+## Amendment (2026-06-11) — `@kanzo/theme` package retired
+
+The `@kanzo/theme` package was **removed from this repo**. It became orphaned
+once `apps/landing` and `@fossil-lang/playground` were deleted (the LSP-only
+refactor): no `@fossil-lang/*` package depended on it, and its sole real
+consumer — the Keasy product — does not import it either. Keasy reproduces the
+brand token values directly as literal `--fossil-*` CSS variables in its own
+`globals.css`.
+
+**The decision below stands unchanged in principle:** `@fossil-lang/*` is
+theme-less and consumes the `--fossil-*` contract; brand visuals are owned
+downstream, not by the OSS surface. What changed is the *mechanism* — the brand
+layer is no longer a published `@kanzo/theme` package living in this OSS repo;
+it is owned by the downstream brand/product (Keasy). References below to
+installing `@kanzo/theme` or wrapping in `<KanzoThemeProvider/>` are therefore
+**historical**. The canonical path for any host is now to supply the
+`--fossil-*` variables itself — see `packages/ui/README.md` → "Supplying the
+variables".
 
 ## Context
 

@@ -7,8 +7,9 @@ dependencies, no build-time CSS authoring required of consumers.
 
 Part of the Fossil v0.2 milestone — adopted by `@fossil-lang/editor`
 (Phase 11), `@fossil-lang/viewer` (Phase 12), and `@fossil-lang/playground`
-composition refactor (Phase 14). Brand visuals owned by `@kanzo/theme`
-per [ADR-0035](../../decisions/0035-visual-ownership-separation.md).
+composition refactor (Phase 14). Brand visuals are owned by the downstream
+host/brand layer, not by `@fossil-lang/*`, per
+[ADR-0035](../../decisions/0035-visual-ownership-separation.md).
 
 ## Install
 
@@ -43,10 +44,9 @@ export function MyEditor() {
 }
 ```
 
-The primitives render with browser-default fallbacks if no theme provider
-supplies the `--fossil-*` CSS variables. For the IDE look, wrap your
-subtree in a theme provider — `@kanzo/theme` ships
-`<KanzoThemeProvider/>` as the canonical brand-cascade entry point.
+The primitives render with browser-default fallbacks if nothing supplies the
+`--fossil-*` CSS variables. For a branded look, define those variables on a
+parent element (e.g. `:root`) — see the Theming story below.
 
 ## Primitives surface
 
@@ -153,37 +153,31 @@ working ARIA + keyboard + state plumbing (all provided by Radix
 intrinsically); only the visual styling cascades from CSS vars the host
 supplies.
 
-### Canonical brand provider: `@kanzo/theme`
+### Supplying the variables
 
-For kanzo-branded apps (the Fossil reference host included), install
-the `@kanzo/theme` workspace package and wrap your subtree in
-`<KanzoThemeProvider/>`:
+The brand/host layer owns the visuals and supplies the `--fossil-*`
+variables — `@fossil-lang/*` ships none. The simplest path is a static
+declaration on `:root` (or any wrapping element); every descendant
+inherits via the CSS cascade:
 
-```tsx
-import { KanzoThemeProvider } from '@kanzo/theme';
-import { Tabs, TabsList, TabsTrigger } from '@fossil-lang/ui';
-
-export function App() {
-  return (
-    <KanzoThemeProvider>
-      <Tabs defaultValue="x"><TabsList><TabsTrigger value="x">…</TabsTrigger></TabsList></Tabs>
-    </KanzoThemeProvider>
-  );
+```css
+:root {
+  --fossil-colors-accent: #3b82f6;
+  --fossil-fonts-sizeBase: 13px;
+  /* …the rest of the --fossil-* contract… */
 }
 ```
 
-The Provider's wrapping div carries every `--fossil-*` variable as
-inline style, so every descendant inherits via the CSS cascade.
+Or emit them programmatically from a `FossilTheme` value — see "Bring
+your own theme" below.
 
 ### Bring your own theme
 
-Non-kanzo hosts assemble a `FossilTheme` value (or a partial CSS-var
-map) themselves and emit `--fossil-*` variables on whatever DOM element
-they prefer. The `themeToCssVars` + `cssVarsToStyle` helpers
-re-exported by `@kanzo/theme` (and the original implementations in
-`@fossil-lang/playground/src/theme/tokens.ts`) are governed by
-ADR-0034's mechanical-flatten contract; either implementation produces
-the same CSS-var names.
+Hosts assemble a `FossilTheme` value (or a partial CSS-var map)
+themselves and emit `--fossil-*` variables on whatever DOM element they
+prefer. The flattening from a `FossilTheme` object to CSS-var names
+follows ADR-0034's mechanical-flatten contract (`colors.accent` →
+`--fossil-colors-accent`, and so on).
 
 ### Why theme-less?
 
@@ -193,7 +187,8 @@ to one specific brand, inverting the proper ownership: WASM-first
 architecture means the visual layer is the only host-coupling point, so
 visuals must live in the brand layer, not the OSS toolchain layer. ADR-0035
 records the correction; the default-flip was reverted and brand
-ownership moved to `@kanzo/theme`. See
+ownership moved out of the OSS toolchain entirely — into the downstream
+brand/product layer. See
 [ADR-0035](../../decisions/0035-visual-ownership-separation.md) for
 context, decision, and consequences.
 

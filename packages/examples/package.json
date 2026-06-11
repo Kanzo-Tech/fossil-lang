@@ -1,6 +1,7 @@
 {
   "name": "@fossil-lang/examples",
   "version": "0.1.0",
+  "private": true,
   "description": "Bundled .fossil/.csv/.csvw.json/.shex fixture examples for the @fossil-lang/playground React component (v0.1 ships the canonical walking-skeleton hello example).",
   "license": "Apache-2.0",
   "repository": {

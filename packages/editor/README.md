@@ -109,19 +109,9 @@ thumbnails, or read-only audit views.
 ## Theming
 
 The editor is theme-less. It consumes the `--fossil-*` CSS variable contract
-documented in `@fossil-lang/ui`'s README. To get the kanzo IDE look, wrap your
-app root in `<KanzoThemeProvider/>` from `@kanzo/theme`:
-
-```tsx
-import { KanzoThemeProvider } from '@kanzo/theme';
-
-<KanzoThemeProvider>
-  <FossilEditor /* ... */ />
-</KanzoThemeProvider>
-```
-
-Or bring your own theme via the documented CSS-variable contract (see
-[`@fossil-lang/ui`](../ui/README.md) for the full variable list).
+documented in `@fossil-lang/ui`'s README — define those variables on a parent
+element (e.g. `:root`) and the editor inherits the look. See
+[`@fossil-lang/ui`](../ui/README.md) for the full variable list.
 
 ## Bundle budget
 
