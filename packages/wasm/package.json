@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/wasm",
-  "version": "0.3.0-alpha.0",
+  "version": "0.0.0-development",
   "description": "JS/TS wrapper around the fossil-wasm wasm-bindgen artifacts (--target web). Exposes initFossilWasm + tokenize + semanticLegend + FossilPlayground class for downstream @fossil-lang/* packages.",
   "license": "Apache-2.0",
   "repository": {

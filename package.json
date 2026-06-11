@@ -8,13 +8,9 @@
     "build:wasm": "pnpm --filter @fossil-lang/wasm build:wasm",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
-    "size": "pnpm -r size",
-    "changeset": "changeset",
-    "version": "changeset version",
-    "release": "pnpm -r build && changeset publish"
+    "size": "pnpm -r size"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.0",
     "size-limit": "^11.0.0",
     "@size-limit/preset-small-lib": "^11.0.0",
     "vitest": "^2.0.0",

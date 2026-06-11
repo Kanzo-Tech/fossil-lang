@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/executor",
-  "version": "0.3.0-alpha.0",
+  "version": "0.0.0-development",
   "description": "JS/TS wrapper around the fossil-df-wasm wasm-bindgen artifacts (--target web). The DataFusion executor that runs fossil mappings in the browser — lazy-loaded, separate from the LSP @fossil-lang/wasm.",
   "license": "Apache-2.0",
   "repository": {
