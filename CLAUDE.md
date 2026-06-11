@@ -66,7 +66,7 @@ check — run it before any commit that touches a compiler-core crate.
 | sqlparser | 0.59 | SQL AST construction |
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
-| binaryen (wasm-opt) | any (apt) | `build-wasm.sh` runs `wasm-opt -Oz` with the six features `wasm32-unknown-unknown` enables by default since Rust 1.87/LLVM 20 (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — plain features, version-independent). NOT `-all` → no gc/typed-funcref, which break instantiation on Node/older browsers |
+| wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating the graph wasm on Node 20, binaryen #4711; 116 fixes it). executor's `build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | serde_yaml_ng | 0.10 | NOT serde_yml (RUSTSEC) |
 | lsp-server | 0.7 | per ADR-0001 (NOT tower-lsp) |
 | arrow + parquet | latest | for GraphAr writer (no Apache GraphAr Rust SDK exists) |
