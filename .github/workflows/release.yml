@@ -68,8 +68,11 @@ jobs:
       - name: Build all packages (recursive)
         run: pnpm -r build
 
-      - name: Test (gate before publishing)
-        run: pnpm -r test
+      # Exclude @fossil-lang/examples — its variations harness builds fossil-cli
+      # (datafusion/duckdb, minutes); the dedicated cached `examples.yml` already
+      # owns that gate. Same exclusion as pnpm-ci.yml.
+      - name: Test (gate before publishing, except examples)
+        run: pnpm --filter "!@fossil-lang/examples" -r test
 
       - name: Create Release Pull Request or Publish to npm
         uses: changesets/action@v1
