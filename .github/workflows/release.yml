@@ -52,10 +52,14 @@ jobs:
       # datafusion (in @fossil-lang/executor's build:wasm, built by `pnpm -r build`)
       # hardcodes arrow-ipc[zstd]; the wasm32 zstd-sys C build needs a wasm-capable
       # clang. Point cc-rs at ubuntu's LLVM clang for the wasm32 target.
-      - name: Install LLVM for wasm zstd-C (@fossil-lang/executor)
+      # LLVM: clang/llvm-ar for the wasm32 zstd-C cross-build (Apple/ubuntu host
+      # clang lacks the target). binaryen: `wasm-opt`, which build-wasm.sh runs
+      # `-Oz -all` to shrink the executor artefact (~24MB → ~18MB raw / ~6MB gz).
+      # WITHOUT binaryen the published wasm ships unoptimised (~2-3× larger).
+      - name: Install LLVM + binaryen for the executor wasm (@fossil-lang/executor)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang llvm
+          sudo apt-get install -y -qq clang llvm binaryen
           echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
           echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
 
