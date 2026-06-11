@@ -68,16 +68,16 @@ The rebuild loop is documented and one-shot:
 
 ```bash
 cd /Users/angel.ip/dev/kanzo/keasy/rmlext
-./scripts/pack-for-keasy.sh                        # builds + packs 8 packages
+./scripts/pack-for-keasy.sh                        # builds + packs 9 packages
 cd /Users/angel.ip/dev/kanzo/keasy/keasy/web
 pnpm install                                       # resolves file: entries
 pnpm build                                         # validates dep declaration
 ```
 
-The pack script handles the eight `@fossil-lang/*` packages currently needed
-(direct + transitive): `types`, `resolvers`, `codemirror-fossil`, `wasm`, `ui`,
-`kanzo-theme` (published as `@kanzo/theme`), `viewer`, `editor`. Iteration
-order is dependency-first so each `pnpm pack` resolves clean.
+The pack script handles the `@fossil-lang/*` packages currently needed
+(direct + transitive): `types`, `introspect`, `resolvers`, `codemirror-fossil`,
+`wasm`, `graph`, `ui`, `viewer`, `editor`. Iteration order is dependency-first
+so each `pnpm pack` resolves clean.
 
 The drop-zone directory (`keasy/web/vendor/fossil-lang/`) is committed empty
 via `.gitkeep` so the `file:` paths resolve before tarballs land. The .tgz

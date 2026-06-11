@@ -9,7 +9,7 @@
 # Usage:
 #   ./scripts/pack-for-keasy.sh
 #
-# Output: 10 .tgz files appear in
+# Output: 9 .tgz files appear in
 #   /Users/angel.ip/dev/kanzo/keasy/keasy/web/vendor/fossil-lang/
 #
 # Then the operator runs (manually — this script does NOT touch Keasy):
@@ -32,7 +32,7 @@ if [ ! -d "$KEASY_VENDOR" ]; then
 fi
 
 # Pack in dependency order so each pnpm pack resolves its in-workspace deps
-# cleanly (transitive first). Ten packages, matching ADR-0038's enumeration:
+# cleanly (transitive first). Nine packages, matching ADR-0038's enumeration:
 PACKAGES=(
   types               # zero deps — leaf
   introspect          # zero @fossil-lang deps — leaf (schema introspection)
@@ -41,7 +41,6 @@ PACKAGES=(
   wasm                # depends on types
   graph               # zero @fossil-lang runtime deps — bundles fossil-graph-wasm pkg/
   ui                  # zero @fossil-lang deps (Radix + theme tokens)
-  kanzo-theme         # depends on types (published as @kanzo/theme)
   viewer              # depends on ui + types
   editor              # depends on codemirror-fossil + ui + types + wasm + resolvers
 )
