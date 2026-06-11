@@ -49,13 +49,13 @@ jobs:
       - name: Install wasm-bindgen-cli (exact 0.2.120 per CLAUDE.md stack pins)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
 
-      # datafusion (in @fossil-lang/executor's build:wasm, built by `pnpm -r build`)
-      # hardcodes arrow-ipc[zstd]; the wasm32 zstd-sys C build needs a wasm-capable
-      # clang. Point cc-rs at ubuntu's LLVM clang for the wasm32 target.
-      # LLVM: clang/llvm-ar for the wasm32 zstd-C cross-build (Apple/ubuntu host
-      # clang lacks the target). binaryen: `wasm-opt`, which build-wasm.sh runs
-      # `-Oz -all` to shrink the executor artefact (~24MB → ~18MB raw / ~6MB gz).
-      # WITHOUT binaryen the published wasm ships unoptimised (~2-3× larger).
+      # LLVM: datafusion (in @fossil-lang/executor's build:wasm) hardcodes
+      # arrow-ipc[zstd]; the wasm32 zstd-sys C build needs a wasm-capable clang
+      # (Apple/ubuntu host clang lacks the target). binaryen: `wasm-opt`, which
+      # build-wasm.sh runs `-Oz` to shrink the executor artefact (~24MB → ~21MB raw
+      # / ~6MB gz). Any binaryen works — build-wasm.sh passes the wasm32 default
+      # feature set (plain features, not version-specific flags). WITHOUT binaryen
+      # the published wasm ships unoptimised (~2-3× larger).
       - name: Install LLVM + binaryen for the executor wasm (@fossil-lang/executor)
         run: |
           sudo apt-get update -qq
@@ -69,7 +69,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: pnpm
           # registry-url is REQUIRED for npm provenance / Trusted Publishing OIDC
           registry-url: 'https://registry.npmjs.org'

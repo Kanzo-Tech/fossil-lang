@@ -57,19 +57,25 @@ mkdir -p "$PKG_DIR"
 echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"
 wasm-bindgen "$WASM_INPUT" --target web --out-dir "$PKG_DIR"
 
-# wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact (~24MB → ~18MB raw
-# / ~6MB gz). `-all` enables every wasm feature, both to READ wasm-bindgen
-# 0.2.120's output (which needs bulk-memory etc.) and to let wasm-opt EMIT the
-# gc / typed-function-references family (`(ref <heaptype>)`) in its output.
-# DELIBERATE TRADE-OFF: that output therefore requires a modern runtime —
-# Node ≥22 (the CI workflows are pinned to 22) and Chrome 119+/Safari 18.2+ in
-# the browser. Accepted because the executor is the lazy-loaded client-compute
-# path and `-all` keeps the flag set version-independent across binaryen builds.
+# wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact (~24MB → ~21MB raw
+# / ~6MB gz). The `--enable-*` set is EXACTLY the six features wasm32-unknown-unknown
+# turns on by default since Rust 1.87 / LLVM 20 (per the rustc platform-support
+# docs): bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint,
+# reference-types, multivalue. wasm-opt must be told to accept the same set, or it
+# rejects the input ("bulk memory operations require bulk memory"). These are
+# plain wasm FEATURES (not `--enable-bulk-memory-opt`, a binaryen-internal opt-pass
+# flag that changed name across versions), so the set is version-independent —
+# works on any binaryen, no pin/probe needed. NOT `-all`: that lets wasm-opt EMIT
+# gc/typed-function-references (`(ref heaptype)`, GC structs), which Node and older
+# browsers reject at instantiation — for zero gz benefit.
 if command -v wasm-opt &> /dev/null; then
-  echo "[build-wasm] wasm-opt -Oz -all"
-  wasm-opt -Oz -all "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
+  echo "[build-wasm] wasm-opt -Oz (wasm32 default feature set, no gc)"
+  wasm-opt -Oz \
+    --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+    --enable-nontrapping-float-to-int --enable-reference-types --enable-multivalue \
+    "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
 else
-  echo "::warning::wasm-opt not found (brew install binaryen). Skipping size pass — the executor artefact will be large (lazy-loaded, so acceptable but heavier)." >&2
+  echo "::warning::wasm-opt not found (install binaryen). Skipping size pass — the executor artefact will be large (lazy-loaded, so acceptable but heavier)." >&2
 fi
 
 RAW_SIZE=$(wc -c < "$PKG_DIR/fossil_df_wasm_bg.wasm")

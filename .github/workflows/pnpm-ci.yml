@@ -22,7 +22,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: pnpm
 
       # `pnpm -r build` builds @fossil-lang/wasm + graph + executor, whose
@@ -45,14 +45,16 @@ jobs:
       - name: Install wasm-bindgen-cli (0.2.120, matches Cargo.toml pin)
         run: cargo install --version 0.2.120 wasm-bindgen-cli
 
-      # datafusion (in @fossil-lang/executor's build:wasm) hardcodes
-      # arrow-ipc[zstd], so the wasm32 zstd-sys C build needs a wasm-capable
-      # clang (Apple/macOS clang lacks the target; ubuntu's LLVM clang has it).
-      # Point cc-rs at it for the wasm32 target.
-      - name: Install LLVM for wasm zstd-C (@fossil-lang/executor)
+      # LLVM: datafusion (in @fossil-lang/executor's build:wasm) hardcodes
+      # arrow-ipc[zstd], so the wasm32 zstd-sys C build needs a wasm-capable clang
+      # (Apple/macOS clang lacks the target; ubuntu's LLVM clang has it). binaryen:
+      # `wasm-opt` for build-wasm.sh's `-Oz` size pass. Any binaryen works —
+      # build-wasm.sh passes the wasm32 default feature set (plain features, not
+      # version-specific flags).
+      - name: Install LLVM + binaryen for the executor wasm (@fossil-lang/executor)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq clang llvm
+          sudo apt-get install -y -qq clang llvm binaryen
           echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
           echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
 
