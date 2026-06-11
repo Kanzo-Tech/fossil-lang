@@ -1,29 +1,39 @@
 name: release
 
+# TAG-DRIVEN publishing — the git tag IS the version. No changeset commands,
+# no Version-Packages PR, no commit pushed back to the repo.
+#
+# YOUR FLOW:
+#   1. push your work to main as usual
+#   2. create a tag  →  git tag v0.3.0-alpha.5 && git push --tags
+#      (or cut a GitHub Release in the UI — that also creates the tag)
+#   3. done. CI stamps that version into every package.json and publishes.
+#
+# The tag NAME drives both the published version and the npm dist-tag:
+#   v0.3.0-alpha.5 → version 0.3.0-alpha.5, dist-tag `alpha`  (does NOT touch `latest`)
+#   v0.3.0-rc.0    → version 0.3.0-rc.0,    dist-tag `rc`
+#   v0.3.0         → version 0.3.0,         dist-tag `latest`
 on:
   push:
-    branches: [main]
+    tags: ['v*']
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  id-token: write       # npm provenance OIDC (Trusted Publishing)
-  contents: write       # Changesets opens + commits the Version Packages PR
-  pull-requests: write  # Changesets opens + updates PRs
+  id-token: write   # npm provenance / Trusted Publishing OIDC
+  contents: read    # nothing is pushed back, no PR is opened — read is enough
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    # `pnpm -r build` + `-r test` now build the executor (datafusion wasm) +
-    # fossil-cli; a COLD run (empty cache) far exceeds 30 min and would be
-    # canceled. Generous ceiling; the cargo cache below makes warm runs fast.
+    # `pnpm -r build` builds the executor (datafusion wasm) + the rest; a COLD
+    # run (empty cache) far exceeds 30 min and would be canceled. Generous
+    # ceiling; the cargo cache below makes warm runs fast.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Changesets compares against history to compute bumps
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -57,7 +67,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          # registry-url is REQUIRED for npm Trusted Publishing OIDC to work
+          # registry-url is REQUIRED for npm provenance / Trusted Publishing OIDC
           registry-url: 'https://registry.npmjs.org'
 
       - run: pnpm install --frozen-lockfile
@@ -74,30 +84,37 @@ jobs:
       - name: Test (gate before publishing, except examples)
         run: pnpm --filter "!@fossil-lang/examples" -r test
 
-      - name: Create Release Pull Request or Publish to npm
-        uses: changesets/action@v1
-        with:
-          # `version` opens the Version Packages PR aggregating accumulated changesets;
-          # `publish` runs after that PR merges — invokes pnpm release which calls
-          # `changeset publish` with --provenance (set via .changeset/config.json
-          # provenance: true). npm Trusted Publishing OIDC uses the id-token: write
-          # permission above + the registry-url + provenance flag — NO NPM_TOKEN secret.
-          publish: pnpm release
-          version: pnpm version
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
+      # The tag (e.g. v0.3.0-alpha.5) is the single source of truth: strip the
+      # leading `v` to get the version, and derive the dist-tag from a prerelease
+      # identifier if present (alpha/rc/...), else `latest`.
+      - name: Resolve version + dist-tag from git tag
+        id: rel
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          if [[ "$ver" == *-* ]]; then
+            tag="$(echo "$ver" | sed -E 's/^[0-9]+\.[0-9]+\.[0-9]+-([0-9A-Za-z]+).*/\1/')"
+          else
+            tag="latest"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "→ version=$ver  dist-tag=$tag"
+
+      # Stamp the tag's version into every workspace package.json (ephemeral — in
+      # the CI checkout only, never committed back). pnpm rewrites internal
+      # `workspace:*` deps to this same version automatically at publish time.
+      - name: Stamp version into all packages
+        run: pnpm -r exec npm pkg set version="${{ steps.rel.outputs.version }}"
+
+      - name: Publish to npm
+        # Idempotent: pnpm publishes only packages whose version isn't on the
+        # registry yet, so re-running a tag is safe. access:public + provenance
+        # come from each package's publishConfig; --no-git-checks because CI runs
+        # on a detached tag ref.
+        run: pnpm -r publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Auth precedence: if the optional `NPM_TOKEN` secret is set, npm/pnpm
-          # authenticate with it; if it's absent, the publish falls back to
-          # Trusted Publishing OIDC (id-token: write + registry-url + provenance).
-          #
-          # BOOTSTRAP (one-time, in CI — no local publish needed): npm OIDC CANNOT
-          # create a brand-new package (npmjs.com requires the package to exist
-          # before you can attach a Trusted Publisher — verified vs npm docs). So
-          # for the FIRST publish, set `NPM_TOKEN` (a Granular Access Token with
-          # read+write on @fossil-lang/*) as a repo secret; CI then bootstrap-
-          # publishes, creating the packages. Afterwards: configure Trusted
-          # Publishers on npmjs.com for each package and DELETE the `NPM_TOKEN`
-          # secret — every later release then runs token-less via OIDC.
+          # BOOTSTRAP (one-time): npm OIDC/Trusted Publishing cannot create a
+          # brand-new package, so the FIRST publish needs `NPM_TOKEN` (a Granular
+          # Access Token with read+write on @fossil-lang/*). Afterwards, configure
+          # Trusted Publishers on npmjs.com per package and delete the secret.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
