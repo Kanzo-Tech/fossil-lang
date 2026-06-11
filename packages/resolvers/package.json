@@ -9,8 +9,7 @@
     "directory": "packages/resolvers"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -22,7 +21,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist/", "README.md", "LICENSE"],
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
@@ -34,8 +37,8 @@
     "@fossil-lang/types": "workspace:*"
   },
   "devDependencies": {
+    "happy-dom": "^15.0.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.0.0",
-    "happy-dom": "^15.0.0"
+    "vitest": "^2.0.0"
   }
 }

@@ -9,8 +9,7 @@
     "directory": "packages/editor"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -36,22 +35,22 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@fossil-lang/types": "workspace:*",
-    "@fossil-lang/ui": "workspace:*",
     "@fossil-lang/codemirror-fossil": "workspace:*",
     "@fossil-lang/introspect": "workspace:*",
+    "@fossil-lang/types": "workspace:*",
+    "@fossil-lang/ui": "workspace:*",
     "@fossil-lang/wasm": "workspace:*"
   },
   "peerDependencies": {
-    "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0",
-    "@codemirror/state": "^6.0.0",
-    "@codemirror/view": "^6.0.0",
-    "@codemirror/language": "^6.0.0",
     "@codemirror/autocomplete": "^6.0.0",
+    "@codemirror/language": "^6.0.0",
     "@codemirror/lint": "^6.0.0",
     "@codemirror/lsp-client": "^6.2.4",
-    "@lezer/highlight": "^1.0.0"
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0",
+    "@lezer/highlight": "^1.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
     "@codemirror/autocomplete": "^6.18.0",

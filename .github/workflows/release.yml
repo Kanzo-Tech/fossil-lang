@@ -108,9 +108,14 @@ jobs:
 
       - name: Publish to npm
         # Idempotent: pnpm publishes only packages whose version isn't on the
-        # registry yet, so re-running a tag is safe. access:public + provenance
-        # come from each package's publishConfig; --no-git-checks because CI runs
-        # on a detached tag ref.
+        # registry yet, so re-running a tag is safe. access:public comes from each
+        # package's publishConfig; --no-git-checks because CI runs on a detached
+        # tag ref.
+        #
+        # NO provenance: npm/sigstore provenance requires a PUBLIC source repo,
+        # and Kanzo-Tech/fossil-lang is private (E422 otherwise). When the repo
+        # goes public for the OSS launch, re-add `publishConfig.provenance: true`
+        # to each package (or pass --provenance here) to attach the attestation.
         run: pnpm -r publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
         env:
           # BOOTSTRAP (one-time): npm OIDC/Trusted Publishing cannot create a
