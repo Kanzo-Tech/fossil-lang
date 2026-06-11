@@ -39,10 +39,12 @@ if [[ -z "${CC_wasm32_unknown_unknown:-}" && -x /opt/homebrew/opt/llvm/bin/clang
   export AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar
 fi
 
-echo "[build-wasm] cargo build --release --target wasm32-unknown-unknown -p fossil-df-wasm"
-cargo build --release --target wasm32-unknown-unknown -p fossil-df-wasm
+# --profile wasm-release (NOT plain --release): opt-level="z" + fat LTO + strip +
+# panic=abort — the size-tuned profile for the lazy-loaded browser artefact.
+echo "[build-wasm] cargo build --profile wasm-release --target wasm32-unknown-unknown -p fossil-df-wasm"
+cargo build --profile wasm-release --target wasm32-unknown-unknown -p fossil-df-wasm
 
-WASM_INPUT="$REPO_ROOT/target/wasm32-unknown-unknown/release/fossil_df_wasm.wasm"
+WASM_INPUT="$REPO_ROOT/target/wasm32-unknown-unknown/wasm-release/fossil_df_wasm.wasm"
 if [[ ! -f "$WASM_INPUT" ]]; then
   echo "::error::cargo build did not produce $WASM_INPUT" >&2
   exit 1
@@ -55,11 +57,15 @@ mkdir -p "$PKG_DIR"
 echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"
 wasm-bindgen "$WASM_INPUT" --target web --out-dir "$PKG_DIR"
 
-# wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact substantially.
-# Optional — install binaryen (brew install binaryen) to enable it.
+# wasm-opt -Oz shrinks the (large, datafusion-heavy) artefact substantially
+# (~24MB → ~18MB raw / ~6MB gz). `-all` enables every wasm feature wasm-bindgen
+# 0.2.120 emits (bulk-memory-opt, reference-types, sign-ext, …); WITHOUT it
+# wasm-opt aborts with "memory.copy operations require bulk memory operations",
+# which silently left the artefact unoptimised. Optional — install binaryen
+# (brew install binaryen) to enable it; CI installs it in release.yml.
 if command -v wasm-opt &> /dev/null; then
-  echo "[build-wasm] wasm-opt -Oz"
-  wasm-opt -Oz "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
+  echo "[build-wasm] wasm-opt -Oz -all"
+  wasm-opt -Oz -all "$PKG_DIR/fossil_df_wasm_bg.wasm" -o "$PKG_DIR/fossil_df_wasm_bg.wasm"
 else
   echo "::warning::wasm-opt not found (brew install binaryen). Skipping size pass — the executor artefact will be large (lazy-loaded, so acceptable but heavier)." >&2
 fi

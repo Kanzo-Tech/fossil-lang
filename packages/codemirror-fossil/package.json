@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/codemirror-fossil",
-  "version": "0.3.0-alpha.0",
+  "version": "0.0.0-development",
   "description": "CodeMirror 6 language extension for Fossil — syntactic highlighting (via WASM tokenize) + @-prefixed autocomplete. Standalone-importable; the Keasy migration target.",
   "license": "Apache-2.0",
   "repository": {

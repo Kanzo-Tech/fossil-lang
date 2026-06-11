@@ -1,8 +1,9 @@
 # ADR 0038: Cross-repo consumption via npm pack + file: protocol (Phase 16 pre-publish smoke)
 
 **Date:** 2026-05-27
-**Status:** accepted
+**Status:** superseded (2026-06-11)
 **Decider:** Angel Iglesias (Kanzo)
+**Superseded by:** the formal npm publish (Phase 17 REL-01). The `@fossil-lang/*` family is now on the npm registry; keasy consumes it via the `alpha` dist-tag (no `pnpm pack`, no `file:` vendoring). The `scripts/pack-for-keasy.sh` packer and keasy's `web/vendor/fossil-lang/` drop-zone are removed.
 **Cite:** Phase 16 ROADMAP entry (`.planning/ROADMAP.md` — "Phase 16 keasy-migration"); Phase 17 REL-01 (`.planning/REQUIREMENTS.md` — release requirements); ADR-0031 (pnpm monorepo restructure)
 
 ## Context

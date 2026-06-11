@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/introspect",
-  "version": "0.3.0-alpha.0",
+  "version": "0.0.0-development",
   "description": "Source-binding schema introspection for the Fossil editor — the canonical TS home for extractSourceRefs + DuckDB type mapping + InferredDescriptor construction. Host injects the data plane (URL resolve + DuckDB query).",
   "license": "Apache-2.0",
   "repository": {

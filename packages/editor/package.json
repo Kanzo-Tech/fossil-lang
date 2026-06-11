@@ -1,6 +1,6 @@
 {
   "name": "@fossil-lang/editor",
-  "version": "0.3.0-alpha.0",
+  "version": "0.0.0-development",
   "description": "Standalone Fossil editor component — CodeMirror 6 + @fossil-lang/codemirror-fossil + LSP wiring with pluggable transport. Per ADR-0028 (multi-host React library family) + ADR-0032 (@codemirror/lsp-client semantic tokens) + ADR-0036 (Transport-superset design).",
   "license": "Apache-2.0",
   "repository": {
