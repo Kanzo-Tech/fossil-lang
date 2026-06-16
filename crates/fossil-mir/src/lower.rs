@@ -63,6 +63,7 @@
 //! ```
 
 use fossil_descriptors_output::OutputDescriptorKind;
+use fossil_graph_schema::Cardinality as GsCardinality;
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
@@ -263,24 +264,19 @@ pub fn apply_output_shape<'db>(
     ops: &[Op<'db>],
     descriptor: &OutputDescriptorKind,
 ) -> Vec<Op<'db>> {
-    let OutputDescriptorKind::ShEx(desc) = descriptor else {
-        return ops.to_vec();
-    };
+    // Route every source schema language (ShEx / SHACL / accept-all) through
+    // the one canonical output model. The executor classifies against this; it
+    // never sees ShEx- or SHACL-specific types.
+    let schema = descriptor.to_graph_schema();
 
-    // The vertex's shape IRI keys its constraint table; without it (or a shape
-    // the descriptor doesn't declare) there is nothing to refine.
+    // The vertex's shape IRI keys its node type; without it (or a node the
+    // model doesn't declare) there is nothing to refine.
     let shape_iri = ops.iter().find_map(|o| match o {
         Op::EmitVertex { rdf_type, .. } => rdf_type.as_ref().map(SmolStr::as_str),
         _ => None,
     });
-    let Some(binding) = shape_iri.and_then(|iri| desc.lookup_shape_str(iri)) else {
+    let Some(node) = shape_iri.and_then(|iri| schema.node_by_iri(iri)) else {
         return ops.to_vec();
-    };
-    let constraint_for = |predicate: &str| {
-        binding
-            .constraints
-            .iter()
-            .find(|c| c.predicate.to_string() == predicate)
     };
 
     // Rebuild: Source(s) + the refined EmitVertex + existing edges + the new
@@ -303,25 +299,31 @@ pub fn apply_output_shape<'db>(
                 let mut kept: Vec<VProp<'db>> = Vec::with_capacity(props.len());
                 for p in props {
                     let predicate = p.rdf_uri.as_deref().unwrap_or_default();
-                    match constraint_for(predicate) {
-                        Some(c) if c.edge_target().is_some() => {
-                            let dst = c.edge_target().expect("edge_target checked");
+                    // A predicate whose range is a shape (union) becomes one edge
+                    // per destination type (`@<A> OR @<B>` → two edges). A literal
+                    // / IRI-valued predicate stays a vertex property. Otherwise the
+                    // skeleton property is kept untouched (accept-all).
+                    let mut edges = schema.edges_from(&node.label, predicate).peekable();
+                    if edges.peek().is_some() {
+                        for e in edges {
                             new_edges.push(Op::EmitEdge {
                                 input: *input,
                                 edge_type: p.name.clone(),
                                 rdf_uri: p.rdf_uri.clone(),
                                 src_type: type_name.clone(),
-                                dst_type: SmolStr::new(local_name(&dst)),
+                                dst_type: SmolStr::new(&e.destination),
                                 src_id: id.clone(),
                                 dst_id: p.value.clone(),
-                                single_valued: c.cardinality.is_single_valued(),
+                                single_valued: matches!(e.cardinality, GsCardinality::Single),
                             });
                         }
-                        Some(c) => kept.push(VProp {
-                            single_valued: c.cardinality.is_single_valued(),
+                    } else if let Some(prop_def) = node.property_by_iri(predicate) {
+                        kept.push(VProp {
+                            single_valued: matches!(prop_def.cardinality, GsCardinality::Single),
                             ..p.clone()
-                        }),
-                        None => kept.push(p.clone()),
+                        });
+                    } else {
+                        kept.push(p.clone());
                     }
                 }
                 head.push(Op::EmitVertex {

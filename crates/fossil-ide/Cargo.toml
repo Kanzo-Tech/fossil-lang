@@ -23,6 +23,9 @@ fossil-hir = { path = "../fossil-hir" }
 # Both are WASM-clean (in / under the 9-crate gate), so fossil-ide stays WASM-clean.
 fossil-ide-db = { path = "../fossil-ide-db" }
 fossil-registry = { path = "../fossil-registry" }
+# WASM-clean wire types (serde + schemars only) — the `source_refs`/`providers`
+# lineage surface (lineage.rs) returns these; shared verbatim with the host.
+fossil-run-status = { path = "../fossil-run-status" }
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }

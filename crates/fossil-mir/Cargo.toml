@@ -23,6 +23,9 @@ fossil-registry = { path = "../fossil-registry" }
 # (ADR-0018: NEVER read through `Db::system()`), so this is a plain data dep, not
 # a Salsa input. Acyclic: descriptors-output's closure is shex/base, not mir.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# The canonical output model `apply_output_shape` classifies against (the
+# descriptor lowers to it, regardless of source schema language).
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 salsa           = { workspace = true }
 smol_str        = { workspace = true }
 

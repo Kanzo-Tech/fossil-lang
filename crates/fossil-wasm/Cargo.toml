@@ -42,6 +42,11 @@ smol_str = { workspace = true }
 # (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does
 # NOT pull fossil-runtime or any native UDF crate (Pitfall 3).
 fossil-registry = { path = "../fossil-registry" }
+# WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
+# surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host
+# (keasy consumes the SAME structs). fossil-ide produces them; we name the
+# return type of the test-reachable `refs_native` core.
+fossil-run-status = { path = "../fossil-run-status" }
 # Plan 07-02 (WASM-02): the `check()` method converts byte-offset spans to
 # UTF-16 LSP ranges via `fossil_ide::LineIndex` (rust-analyzer model from
 # 06-05). fossil-ide is the 7th crate in the 9-crate WASM gate (Phase 6) —

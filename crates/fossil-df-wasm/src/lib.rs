@@ -172,16 +172,33 @@ fn build_program(
     shex: Option<&str>,
 ) -> Result<(FossilDb, SourceFile, OutputDescriptorKind), String> {
     let descriptor = match shex {
-        Some(text) => OutputDescriptorKind::ShEx(
-            ShExDescriptor::from_reader(text.as_bytes())
-                .map_err(|e| format!("ShEx parse error: {e:?}"))?,
-        ),
+        Some(text) => build_descriptor(text)?,
         None => OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
     };
     let system: Arc<dyn System> = Arc::new(ExecutorSystem);
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "program.fossil".to_string());
     Ok((db, file, descriptor))
+}
+
+/// Build the output descriptor from a schema blob, auto-detecting its language.
+/// The host passes one opaque `schema` string; we route it to the right lowering:
+/// `ShExJ` (JSON, leading `{`) and `ShExC` go through `fossil-shex`; a SHACL
+/// shapes graph (Turtle carrying the SHACL namespace / `sh:NodeShape` /
+/// `sh:property`) is walked into a `GraphSchema`. All three end as the canonical
+/// model the executor consumes via `OutputDescriptorKind::to_graph_schema`.
+fn build_descriptor(text: &str) -> Result<OutputDescriptorKind, String> {
+    let is_json = text.trim_start().starts_with('{');
+    let looks_shacl = !is_json
+        && (text.contains("http://www.w3.org/ns/shacl#")
+            || text.contains("sh:NodeShape")
+            || text.contains("sh:property"));
+    if looks_shacl {
+        return Ok(OutputDescriptorKind::Shacl(fossil_df::shacl_to_graph_schema(text)?));
+    }
+    Ok(OutputDescriptorKind::ShEx(
+        ShExDescriptor::from_shex_source(text).map_err(|e| format!("ShEx parse error: {e:?}"))?,
+    ))
 }
 
 /// The host fetch-strategy string for a source format.

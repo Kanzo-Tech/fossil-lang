@@ -281,5 +281,10 @@ fn init_tracing(verbose: bool) {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        // Logs go to STDERR: stdout is the machine-readable channel (`--output-json`
+        // for run/refs/providers/catalog), and a host parsing it as JSON must see
+        // ONLY the payload. `fmt()` defaults to stdout, which corrupts that contract
+        // under `RUST_LOG=debug` (keasy's `POST /v1/refs` choked on the salsa trace).
+        .with_writer(std::io::stderr)
         .try_init();
 }
