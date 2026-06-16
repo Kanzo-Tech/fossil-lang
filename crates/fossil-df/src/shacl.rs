@@ -246,3 +246,89 @@ fn object_value(term: &Term) -> (String, bool) {
         Term::Triple(_) => (term.to_string(), false),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // One node shape exercising every canonical mapping: a typed literal
+    // (→ Property, single-valued via sh:maxCount 1), an opaque IRI (sh:nodeKind
+    // sh:IRI → Property AnyUri), a plain edge (sh:class), and an OR edge
+    // (sh:or → one EdgeType per alternative, same label, distinct destination).
+    const SHAPES: &str = r#"
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex:  <https://ex.org/> .
+
+ex:PersonShape a sh:NodeShape ;
+    sh:targetClass ex:Person ;
+    sh:property [ sh:path ex:name     ; sh:datatype xsd:string ; sh:maxCount 1 ] ;
+    sh:property [ sh:path ex:homepage ; sh:nodeKind sh:IRI ] ;
+    sh:property [ sh:path ex:knows    ; sh:class ex:Person ] ;
+    sh:property [ sh:path ex:contact  ; sh:or ( [ sh:class ex:Person ] [ sh:class ex:Org ] ) ] .
+"#;
+
+    #[test]
+    fn shacl_lowers_literals_iris_edges_and_or_to_graph_schema() {
+        let gs = shacl_to_graph_schema(SHAPES).expect("turtle parses");
+
+        // One node, typed by its sh:targetClass (label = local name, iri = full).
+        assert_eq!(gs.nodes.len(), 1, "one node shape: {:?}", gs.nodes);
+        let person = &gs.nodes[0];
+        assert_eq!(person.label, "Person");
+        assert_eq!(person.iri.as_deref(), Some("https://ex.org/Person"));
+
+        // Literal property: xsd:string + sh:maxCount 1 → String, single-valued.
+        let name = person
+            .properties
+            .iter()
+            .find(|p| p.name == "name")
+            .expect("name property");
+        assert_eq!(name.datatype, DataType::String);
+        assert_eq!(name.cardinality, Cardinality::Single);
+        assert_eq!(name.iri.as_deref(), Some("https://ex.org/name"));
+
+        // sh:nodeKind sh:IRI (no sh:class) → opaque AnyUri PROPERTY, not an edge.
+        let homepage = person
+            .properties
+            .iter()
+            .find(|p| p.name == "homepage")
+            .expect("homepage property");
+        assert_eq!(homepage.datatype, DataType::AnyUri);
+        assert_eq!(homepage.cardinality, Cardinality::Multi, "no maxCount → multi");
+
+        // Edges live on the graph, not the node's properties.
+        assert!(
+            !person.properties.iter().any(|p| p.name == "knows" || p.name == "contact"),
+            "edges must NOT appear as properties: {:?}",
+            person.properties
+        );
+
+        // Plain edge: sh:class ex:Person → Person --knows--> Person.
+        let knows: Vec<&EdgeType> = gs.edges.iter().filter(|e| e.label == "knows").collect();
+        assert_eq!(knows.len(), 1, "one knows edge: {:?}", gs.edges);
+        assert_eq!(knows[0].source, "Person");
+        assert_eq!(knows[0].destination, "Person");
+        assert_eq!(knows[0].iri.as_deref(), Some("https://ex.org/knows"));
+
+        // OR edge: sh:or(( ex:Person ex:Org )) → TWO edges, same label, distinct
+        // destination (the reference RDF→LPG modelling — lossless, no union node).
+        let mut contact_dsts: Vec<&str> = gs
+            .edges
+            .iter()
+            .filter(|e| e.label == "contact")
+            .map(|e| e.destination.as_str())
+            .collect();
+        contact_dsts.sort_unstable();
+        assert_eq!(
+            contact_dsts,
+            vec!["Org", "Person"],
+            "OR → one edge per alternative: {:?}",
+            gs.edges
+        );
+        assert!(
+            gs.edges.iter().filter(|e| e.label == "contact").all(|e| e.source == "Person"),
+            "all OR alternatives share the source node",
+        );
+    }
+}
