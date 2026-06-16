@@ -24,6 +24,7 @@ pub mod catalog;
 pub mod files;
 pub mod literal;
 pub mod rdf;
+pub mod shacl;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sink;
@@ -32,6 +33,9 @@ pub mod sink;
 /// [`execute_graph`] / [`provider_bindings`] take (ADR-0018: passed as an
 /// argument, never read through `Db::system()`).
 pub use fossil_descriptors_output::OutputDescriptorKind;
+/// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
+/// arm of the output model; ShEx's lives in `fossil-shex`).
+pub use shacl::shacl_to_graph_schema;
 /// Re-exported so a host can classify a [`SourceRef`]'s format without depending
 /// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
 pub use fossil_mir::SourceFormat;

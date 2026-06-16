@@ -161,6 +161,36 @@ impl GraphSchema {
     pub fn edge(&self, label: &str) -> Option<&EdgeType> {
         self.edges.iter().find(|e| e.label == label)
     }
+
+    /// Look up a node type by its `rdf:type` IRI (the descriptor key). The output
+    /// model is addressed by IRI — a shape's `rdf:type` — not by the local label.
+    #[must_use]
+    pub fn node_by_iri(&self, iri: &str) -> Option<&NodeType> {
+        self.nodes.iter().find(|n| n.iri.as_deref() == Some(iri))
+    }
+
+    /// Every edge type originating at `source_label` for the predicate `iri`.
+    /// Returns more than one when the predicate's range is a union of node types
+    /// (`@<A> OR @<B>`, `sh:or`) — the reference RDF→property-graph model emits one
+    /// edge type per destination, sharing the predicate. Object IRIs partition
+    /// cleanly across the destinations at materialisation (disjoint vertex tables).
+    pub fn edges_from<'a>(
+        &'a self,
+        source_label: &'a str,
+        iri: &'a str,
+    ) -> impl Iterator<Item = &'a EdgeType> + 'a {
+        self.edges
+            .iter()
+            .filter(move |e| e.source == source_label && e.iri.as_deref() == Some(iri))
+    }
+}
+
+impl NodeType {
+    /// Look up a literal/IRI property by its predicate IRI (the descriptor key).
+    #[must_use]
+    pub fn property_by_iri(&self, iri: &str) -> Option<&Property> {
+        self.properties.iter().find(|p| p.iri.as_deref() == Some(iri))
+    }
 }
 
 #[cfg(test)]

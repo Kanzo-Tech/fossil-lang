@@ -21,3 +21,5 @@ workspace = true
 shex_ast = { workspace = true }
 rudof_iri = { workspace = true }
 prefixmap = { workspace = true }
+# The canonical, format-neutral output model both ShEx and SHACL lower into.
+fossil-graph-schema = { path = "../fossil-graph-schema" }

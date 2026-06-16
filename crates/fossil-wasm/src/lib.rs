@@ -640,6 +640,58 @@ impl Default for FossilPlayground {
     }
 }
 
+// ----- Parse-only lineage + providers (one crate, two hosts — ADR-0024) -----
+//
+// `refs` and `providers` mirror the native `fossil refs` / `fossil providers`
+// CLI commands for the BROWSER host: keasy's client-compute job runner reads a
+// program's typed lineage (which `@conn`s + `schema =` it references) and the
+// supported source providers WITHOUT subprocessing the `fossil` binary. Both
+// delegate to the shared, WASM-clean `fossil_ide` implementation — the SAME
+// code `fossil-engine` runs natively — so the browser and the CLI can never
+// diverge ([[feedback_no_duplicate_logic_across_crates]]).
+//
+// Free functions (not `FossilPlayground` methods): they are stateless and
+// program-text-driven (the job runner has the script string, not the editor's
+// open-file workspace), mirroring the existing free `tokenize` export.
+
+/// The data-source providers fossil supports (`io.csv`, `io.rdf`, …) as a JS
+/// array of `{ name, extensions, kind }`. Pure projection of the stdlib source
+/// registry — no parsing, no db.
+///
+/// # Errors
+/// Returns a JS error only if the result fails to serialize to `JsValue`.
+#[wasm_bindgen]
+pub fn providers() -> Result<JsValue, JsError> {
+    serde_wasm_bindgen::to_value(&fossil_ide::providers()).map_err(JsError::from)
+}
+
+/// Parse `program` and return its external references — every data URI +
+/// `schema =` argument, each tagged with its `@conn` alias (`null` for a direct
+/// path) and role (`Data` / `Schema`) — as a JS array of
+/// `{ connection, path, role }`. Parse-only; the host resolves `@conn` →
+/// `{base}/path` itself (its data-plane job, kept out of fossil's semantics).
+///
+/// # Errors
+/// Returns a JS error only if the result fails to serialize to `JsValue`.
+#[wasm_bindgen]
+pub fn refs(program: &str) -> Result<JsValue, JsError> {
+    serde_wasm_bindgen::to_value(&refs_native(program)).map_err(JsError::from)
+}
+
+/// Native-reachable core of [`refs`] — builds a transient single-file db and
+/// runs the shared [`fossil_ide::source_refs`]. Cargo-tests call THIS: the
+/// `#[wasm_bindgen]` wrapper's `serde_wasm_bindgen` / `JsError` calls panic on
+/// native targets (same split as `check` ↔ `check_rows`). The db is throwaway
+/// (refs is parse-only and called once per job launch, not per keystroke), so
+/// it never touches the editor's persistent workspace.
+#[must_use]
+pub fn refs_native(program: &str) -> Vec<fossil_run_status::SourceRefInfo> {
+    let system = Arc::new(WasmSystem::default()) as Arc<dyn System>;
+    let db = WasmDb::new(system);
+    let file = SourceFile::new(&db, program.to_string(), "<refs>".to_string());
+    fossil_ide::source_refs(&db, file)
+}
+
 
 /// One diagnostic row in the [`FossilPlayground::check`] return array.
 ///

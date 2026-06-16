@@ -92,7 +92,15 @@ export async function runJob(
         const res = await doFetch(url, {
           method: 'PUT',
           body: f.bytes as BodyInit,
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: {
+            // Azure block-blob PUT via SAS REQUIRES `x-ms-blob-type` (else 400
+            // MissingRequiredHeader). S3/GCS presigned PUTs ignore the unsigned
+            // header, so sending it unconditionally is safe across providers
+            // (and works for Azurite / custom Azure endpoints too, not just
+            // `*.blob.core.windows.net`).
+            'Content-Type': 'application/octet-stream',
+            'x-ms-blob-type': 'BlockBlob',
+          },
         });
         if (!res.ok) throw new Error(`upload ${f.path}: ${res.status}`);
       }),

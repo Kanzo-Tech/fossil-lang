@@ -17,6 +17,10 @@ fossil-base     = { path = "../fossil-base" }
 fossil-hir      = { path = "../fossil-hir" }
 fossil-mir      = { path = "../fossil-mir" }
 fossil-registry = { path = "../fossil-registry" }
+# Shared IDE façade: `refs`/`providers` delegate to `fossil_ide::{source_refs,
+# providers}` so the native CLI and the browser WASM run ONE implementation
+# (ADR-0024 "one crate, two hosts"). WASM-clean; safe to depend on from native.
+fossil-ide      = { path = "../fossil-ide" }
 # Descriptors (input forward-propagation + output shape).
 fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }

@@ -254,7 +254,10 @@ pub fn resolve_target_shape<'db>(
     // Read the descriptor as a plain value — AcceptAll short-circuits.
     let descriptor = match kind {
         OutputDescriptorKind::ShEx(d) => d,
-        OutputDescriptorKind::AcceptAll(_) => return None,
+        // SHACL is consumed as a pre-lowered GraphSchema by the executor; the
+        // ShEx-specific backward checker has no resolved table to read, so it
+        // short-circuits like AcceptAll (SHACL backward checking is future work).
+        OutputDescriptorKind::Shacl(_) | OutputDescriptorKind::AcceptAll(_) => return None,
     };
 
     // The mapping's fully-resolved target shape IRI (prefix already expanded by

@@ -45,8 +45,12 @@ use std::fmt::Write as _;
 
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
+use fossil_graph_schema::{
+    Cardinality as GsCardinality, DataType, EdgeType, GraphSchema, NodeType, Property,
+};
 use shex_ast::{
-    NodeKind, Schema, Shape, ShapeDecl, ShapeExpr, ShapeExprLabel, TripleExpr, TripleExprLabel,
+    NodeKind, Schema, ShExParser, Shape, ShapeDecl, ShapeExpr, ShapeExprLabel, TripleExpr,
+    TripleExprLabel,
 };
 
 #[cfg(test)]
@@ -241,6 +245,45 @@ fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/']).next().unwrap_or(iri)
 }
 
+/// The destination shape IRIs of an edge constraint — empty for a literal/opaque
+/// property. A single shape `Ref` yields one; a value disjunction `@<A> OR @<B>`
+/// (`ShapeOr` of refs) yields all of them, so the canonical model emits one edge
+/// type per destination. `ShapeAnd`/`ShapeNot`/`NodeConstraint`/inline `Shape`
+/// are not inter-shape edges.
+fn edge_targets(value_expr: &Option<ShapeExpr>) -> Vec<String> {
+    match value_expr {
+        Some(ShapeExpr::Ref(label)) => vec![shape_label_iri(label)],
+        Some(ShapeExpr::ShapeOr { shape_exprs }) => shape_exprs
+            .iter()
+            .filter_map(|w| match &w.se {
+                ShapeExpr::Ref(label) => Some(shape_label_iri(label)),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The canonical datatype of a non-edge constraint: a typed literal maps through
+/// the XSD lattice (unknown datatypes fall back to `String`); a `nodeKind IRI`
+/// node is an opaque IRI-valued property (`AnyUri`); anything else defaults to
+/// `String` (the permissive walking-skeleton column).
+fn datatype_of(value_expr: &Option<ShapeExpr>) -> DataType {
+    match value_expr {
+        Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
+            || {
+                if matches!(nc.node_kind(), Some(NodeKind::Iri)) {
+                    DataType::AnyUri
+                } else {
+                    DataType::String
+                }
+            },
+            |dt| DataType::from_xsd_iri(&iri_ref_to_string(&dt)).unwrap_or(DataType::String),
+        ),
+        _ => DataType::String,
+    }
+}
+
 /// Render an [`IriRef`] to its IRI string. Parsed `ShExJ` datatypes are full IRIs
 /// (`IriRef::Iri`); a `Prefixed` form (rare in JSON) falls back to `prefix:local`.
 fn iri_ref_to_string(iri_ref: &IriRef) -> String {
@@ -319,6 +362,76 @@ impl ShExDescriptor {
         let schema = Schema::from_reader(rdr)
             .map_err(|e| ShExLoweringError::MalformedSchema(e.to_string()))?;
         Self::from_schema(schema)
+    }
+
+    /// Parse a `ShEx` schema in EITHER compact (`ShExC`) or JSON (`ShExJ`) syntax,
+    /// auto-detected by the first non-whitespace byte (`{` ⇒ `ShExJ`). `ShExC` is
+    /// the human-authored canonical surface syntax; `ShExJ` is the interchange
+    /// form. Both lower to the same constraint table, so the rest of the pipeline
+    /// (and [`Self::to_graph_schema`]) is syntax-agnostic.
+    ///
+    /// # Errors
+    /// [`ShExLoweringError::MalformedSchema`] if neither parser accepts the input.
+    pub fn from_shex_source(src: &str) -> Result<Self, ShExLoweringError> {
+        if src.trim_start().starts_with('{') {
+            return Self::from_reader(src.as_bytes());
+        }
+        let base = IriS::new_unchecked("http://fossil.invalid/schema");
+        let schema = ShExParser::parse(src, None, &base)
+            .map_err(|e| ShExLoweringError::MalformedSchema(e.to_string()))?;
+        Self::from_schema(schema)
+    }
+
+    /// Lower this `ShEx` schema into the canonical, format-neutral
+    /// [`GraphSchema`] — the single output model the MIR/executor consume,
+    /// shared with the (future) SHACL path. Each shape becomes a [`NodeType`]
+    /// (keyed by its `rdf:type` IRI); each triple constraint becomes either an
+    /// [`EdgeType`] (value is a shape ref) or a literal/IRI [`Property`]. A value
+    /// disjunction (`@<A> OR @<B>`) emits **one edge per destination**, sharing
+    /// the predicate label — the reference RDF→property-graph model.
+    #[must_use]
+    pub fn to_graph_schema(&self) -> GraphSchema {
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+        for binding in self.shapes() {
+            let node_iri = binding.iri.to_string();
+            let label = local_name(&node_iri).to_string();
+            let mut properties = Vec::new();
+            for c in &binding.constraints {
+                let pred_iri = c.predicate.to_string();
+                let name = local_name(&pred_iri).to_string();
+                let cardinality = if c.cardinality.is_single_valued() {
+                    GsCardinality::Single
+                } else {
+                    GsCardinality::Multi
+                };
+                let targets = edge_targets(&c.value_expr);
+                if targets.is_empty() {
+                    properties.push(Property {
+                        name,
+                        datatype: datatype_of(&c.value_expr),
+                        iri: Some(pred_iri),
+                        cardinality,
+                    });
+                } else {
+                    for t in targets {
+                        edges.push(EdgeType {
+                            label: name.clone(),
+                            iri: Some(pred_iri.clone()),
+                            source: label.clone(),
+                            destination: local_name(&t).to_string(),
+                            cardinality,
+                        });
+                    }
+                }
+            }
+            nodes.push(NodeType {
+                label,
+                iri: Some(node_iri),
+                properties,
+            });
+        }
+        GraphSchema { nodes, edges }
     }
 
     /// Build the resolved constraint table from an already-parsed schema.

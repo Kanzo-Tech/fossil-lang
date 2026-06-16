@@ -12,6 +12,7 @@
 //! UI listing loaded descriptors).
 
 use crate::AcceptAllDescriptor;
+use fossil_graph_schema::GraphSchema;
 use fossil_shex::ShExDescriptor;
 
 /// Concrete-type dispatch surface for the bidirectional checker.
@@ -32,8 +33,15 @@ use fossil_shex::ShExDescriptor;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum OutputDescriptorKind {
-    /// `ShEx` schema, pre-resolved into per-shape constraint tables.
+    /// `ShEx` schema, pre-resolved into per-shape constraint tables. The
+    /// compile-time backward checker (`fossil-hir`) needs the rich resolved
+    /// table; the executor reads only [`Self::to_graph_schema`].
     ShEx(ShExDescriptor),
+    /// A canonical output model, already lowered (the SHACL path produces this
+    /// directly — SHACL is RDF, walked into [`GraphSchema`] — and any future
+    /// pre-resolved source can reuse it). The executor consumes it as-is;
+    /// `fossil-hir`'s ShEx backward checker treats it like `AcceptAll`.
+    Shacl(GraphSchema),
     /// Phase 1 stub — accepts any graph. Used when no shape target is loaded
     /// (the walking-skeleton case) or as the degraded fallback if a host
     /// can't resolve a `ShEx` schema.
@@ -59,6 +67,7 @@ impl OutputDescriptorKind {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::ShEx(_) => "shex",
+            Self::Shacl(_) => "shacl",
             Self::AcceptAll(_) => "accept-all",
         }
     }
@@ -69,6 +78,24 @@ impl OutputDescriptorKind {
     #[must_use]
     pub const fn accepts_anything(&self) -> bool {
         matches!(self, Self::AcceptAll(_))
+    }
+
+    /// Lower this descriptor to the canonical, format-neutral [`GraphSchema`] —
+    /// the single output model the executor (`apply_output_shape`) consumes,
+    /// independent of the source schema language. ShEx lowers through its
+    /// resolved table; SHACL is already a `GraphSchema`; `AcceptAll` is empty
+    /// (no node/edge typing → every predicate stays a vertex property, the
+    /// walking-skeleton behaviour).
+    #[must_use]
+    pub fn to_graph_schema(&self) -> GraphSchema {
+        match self {
+            Self::ShEx(d) => d.to_graph_schema(),
+            Self::Shacl(gs) => gs.clone(),
+            Self::AcceptAll(_) => GraphSchema {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+            },
+        }
     }
 }
 
@@ -141,6 +168,7 @@ mod tests {
             // require a new match arm in fossil-hir, intentionally.
             let _name: &'static str = match k {
                 OutputDescriptorKind::ShEx(_) => "shex",
+                OutputDescriptorKind::Shacl(_) => "shacl",
                 OutputDescriptorKind::AcceptAll(_) => "accept-all",
             };
         }

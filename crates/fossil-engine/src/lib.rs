@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use fossil_base::{Db, Diagnostic, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_run_status::{ProviderInfo, RefRole, RunStatus, SourceRefInfo};
+use fossil_run_status::{ProviderInfo, RunStatus, SourceRefInfo};
 use smol_str::SmolStr;
 
 pub mod creds;
@@ -30,24 +30,12 @@ use system::open_db;
 
 // ===================================================================== providers
 
-/// List the data-source providers fossil supports, derived from
-/// [`fossil_registry::SOURCE_KINDS`] (the W1 single source of truth — native
-/// readers AND external providers like `rdf`). Sorted for a deterministic order.
+/// List the data-source providers fossil supports. Thin native wrapper over
+/// [`fossil_ide::providers`] (the shared, WASM-clean implementation — one
+/// source of truth for both the CLI and the browser, ADR-0024).
 #[must_use]
 pub fn providers() -> Vec<ProviderInfo> {
-    use fossil_registry::SOURCE_KINDS;
-    use fossil_run_status::ProviderKind;
-
-    let mut providers: Vec<ProviderInfo> = SOURCE_KINDS
-        .iter()
-        .map(|k| ProviderInfo {
-            name: k.short_name.to_string(),
-            extensions: k.extensions.iter().map(|e| (*e).to_string()).collect(),
-            kind: ProviderKind::Data,
-        })
-        .collect();
-    providers.sort_by(|a, b| a.name.cmp(&b.name));
-    providers
+    fossil_ide::providers()
 }
 
 // ========================================================================= refs
@@ -60,47 +48,13 @@ pub fn providers() -> Vec<ProviderInfo> {
 /// # Errors
 /// Returns a read error if `path` is unreadable.
 pub fn refs(path: &Path) -> miette::Result<Vec<SourceRefInfo>> {
-    /// Split a raw reference into its `@conn` alias + path, or `None` + the whole
-    /// locator (reports the ALIAS rather than the resolved URL).
-    fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
-        match raw.strip_prefix('@').and_then(|r| r.split_once('/')) {
-            Some((conn, path)) => SourceRefInfo {
-                connection: Some(conn.to_string()),
-                path: path.to_string(),
-                role,
-            },
-            None => SourceRefInfo {
-                connection: None,
-                path: raw.to_string(),
-                role,
-            },
-        }
-    }
-
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
     let (db, file) = open_db(text, path);
-    let def_map = fossil_hir::def_map::def_map(&db, file);
-
-    // A destructuring `{ A, B } := io.rdf(uri, schema = "x")` expands to one
-    // SourceEntry per member sharing the same uri + schema, so dedup identical
-    // refs — a job's lineage is the DISTINCT (data, schema) it reads.
-    let mut refs: Vec<SourceRefInfo> = Vec::new();
-    for s in def_map.sources(&db) {
-        if let Some(uri) = s.uri.as_deref() {
-            let r = parse_ref(uri, RefRole::Data);
-            if !refs.contains(&r) {
-                refs.push(r);
-            }
-        }
-        if let Some(schema) = s.schema_arg.as_deref() {
-            let r = parse_ref(schema, RefRole::Schema);
-            if !refs.contains(&r) {
-                refs.push(r);
-            }
-        }
-    }
-    Ok(refs)
+    // The native host reads the file; the lineage logic (parse → typed refs,
+    // dedup) is the shared WASM-clean `fossil_ide::source_refs` — same code the
+    // browser runs over its in-memory db (ADR-0024).
+    Ok(fossil_ide::source_refs(&db, file))
 }
 
 // ======================================================================== check
