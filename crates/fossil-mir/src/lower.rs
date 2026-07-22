@@ -69,7 +69,6 @@ use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
 use fossil_hir::lower::lower_to_hir;
 use fossil_hir::spans::spans;
-use fossil_hir::ty::RecordField;
 use fossil_hir::{HirExpr, HirMapping, MappingLoc, Primitive, PropertyKey, Record, Ty, TyKind};
 use smol_str::SmolStr;
 
@@ -103,19 +102,26 @@ pub fn lower_to_mir_pg<'db>(
 ) -> MirGraph<'db> {
     let file = mapping.file(db);
     let dm = def_map(db, file);
+    let span = mapping_span(db, mapping);
     let Some(dense_idx) = dm.mappings(db).iter().position(|loc| *loc == mapping) else {
-        return MirGraph::new(db, Vec::new());
+        return poisoned(db, fossil_base::bug(db, span, "mapping is absent from its own DefMap"));
     };
     let hir = lower_to_hir(db, file);
     let Some(m) = hir.mappings(db).get(dense_idx) else {
-        return MirGraph::new(db, Vec::new());
+        return poisoned(db, fossil_base::bug(db, span, "mapping has no HIR at its DefMap index"));
     };
     let body = body(db, mapping);
     let prefixes = dm.prefixes(db);
-    let row_type = typecheck_mapping(db, mapping).map_or_else(
-        |_| phase1_row_type(db),
-        |out| out.source_row(db).unwrap_or_else(|| phase1_row_type(db)),
-    );
+    // A typecheck failure taints (it already emitted the diagnostic). A source
+    // that simply declares no schema is NOT a failure — `source_row` is `None`
+    // for every program without a CSVW/ShEx schema — so it yields an empty row
+    // type, and `field_ty` types those columns `String` as before. What it must
+    // never do is invent field names: the old `Record({id, name})` default made
+    // unrelated sources look like they had `id` and `name` columns.
+    let row_type = match typecheck_mapping(db, mapping) {
+        Err(eg) => return poisoned(db, eg),
+        Ok(out) => out.source_row(db).unwrap_or_else(|| untyped_row(db)),
+    };
     // v0.1: every prop is typed String (the legacy path types nothing either —
     // codegen ignores `Ty`). The descriptor-driven type refinement is the next
     // increment; the backend derives the GraphAr/xsd spelling from `Ty`.
@@ -124,7 +130,10 @@ pub fn lower_to_mir_pg<'db>(
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
 
     // 0: Source.
-    let (uri, format) = resolve_source(dm, db, &m.source_binding);
+    let (uri, format) = match resolve_source(dm, db, &m.source_binding, span) {
+        Ok(v) => v,
+        Err(eg) => return poisoned(db, eg),
+    };
     ops.push(Op::Source {
         uri,
         format,
@@ -132,10 +141,20 @@ pub fn lower_to_mir_pg<'db>(
         binding: m.source_binding.clone(),
     });
 
-    // `id` = the IRI template (the same Expr the legacy Extend would carry).
+    // `id` = the vertex IRI. No `iri` property (or one that does not lower) is
+    // fatal: the old empty-string default produced vertices whose subject was
+    // `""`, which dedups every row of the mapping into a single blank node.
     let iri_span_line = iri_property_line(db, mapping, body);
-    let id = lower_iri_property(m, body, prefixes, db, iri_span_line)
-        .unwrap_or_else(|| Expr::LitString(SmolStr::default()));
+    let Some(id) = lower_iri_property(m, body, prefixes, db, iri_span_line) else {
+        return poisoned(
+            db,
+            fossil_base::delay_span_bug(
+                db,
+                span,
+                "mapping has no usable `iri = ...` property, so its vertices have no subject",
+            ),
+        );
+    };
 
     // Subject-template skeleton of EVERY mapping in the file → its vertex type.
     // A property whose backtick-template skeleton matches one of these is a
@@ -236,8 +255,35 @@ pub fn lower_to_mir_pg<'db>(
         sink: SinkRef::GraphAr,
     });
 
-    let graph = MirGraph::new(db, ops);
+    let graph = MirGraph::new(db, ops, None);
     crate::rewrite::rewrite(db, graph)
+}
+
+/// A tainted, op-less graph. `eg` is the [`fossil_base::ErrorGuaranteed`] whose
+/// construction already accumulated the explaining `Diagnostic` (P-CRIT-4), so
+/// the caller never has to remember to emit one.
+fn poisoned(db: &dyn fossil_base::Db, eg: fossil_base::ErrorGuaranteed) -> MirGraph<'_> {
+    MirGraph::new(db, Vec::new(), Some(eg))
+}
+
+/// The row type of a source that declares no schema: a record with no known
+/// fields. Distinct from a *failure* to type the source — callers of
+/// `field_ty` fall back to `String`, exactly as they did before.
+fn untyped_row(db: &dyn fossil_base::Db) -> Ty<'_> {
+    Ty::new(db, TyKind::Record(Record::new(db, Vec::new())))
+}
+
+/// Span of the mapping's own CST node, for diagnostics anchored at the mapping
+/// rather than at one of its properties. Reads the `mapping_cst_node` barrier
+/// that `body`/`spans` already read, so it adds no per-mapping Salsa fan-out.
+fn mapping_span<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> fossil_base::Span {
+    mapping_cst_node(db, mapping).syntax().map_or_else(
+        || fossil_base::Span::new(0, 0),
+        |node| {
+            let r = node.text_range();
+            fossil_base::Span::new(r.start().into(), r.end().into())
+        },
+    )
 }
 
 /// Refine an agnostic [`lower_to_mir_pg`] op list with the program-resident
@@ -365,13 +411,16 @@ fn local_name(iri: &str) -> &str {
 /// new reader variant is a compile error until handled); a
 /// [`SourceLowering::Provider`] becomes `SourceFormat::Provider { name }`.
 ///
-/// A binding with no recognisable `io.*("...")` call degrades to the Phase-1
-/// `examples/users.csv` / `Csv` so `lower_to_mir` never panics on a malformed
-/// source. An `io.<name>` not in `SOURCE_KINDS` still resolves to
-/// `Provider { name }` so the runtime reports "unknown provider" rather than
-/// silently mis-reading it. When the binding IS `io.csv("examples/users.csv")`
-/// (the walking-skeleton `hello.fossil`) the resolved value equals the old
-/// hardcode → byte-identical SQL.
+/// A binding that resolves to no URI is an ERROR, not a default. It is reached
+/// whenever the mapping reads `from` something that is not an `io.*("...")`
+/// call — most often a derived binding such as
+/// `x := Source |> seq.filter(...)`, which the parser accepts as a source
+/// definition but which carries no constructor and no URI. Substituting a
+/// default here is what silently pointed every such mapping at
+/// `examples/users.csv` instead of the file the program named.
+///
+/// An `io.<name>` not in `SOURCE_KINDS` still resolves to `Provider { name }`
+/// so the runtime reports "unknown provider" rather than mis-reading it as CSV.
 // The nested `match` over the constructor + its lowering reads clearer than the
 // `map_or_else` the nursery lint suggests (the Some arm is itself a match).
 #[allow(clippy::option_if_let_else)]
@@ -379,8 +428,24 @@ fn resolve_source<'db>(
     dm: DefMap<'db>,
     db: &'db dyn fossil_base::Db,
     binding: &SmolStr,
-) -> (SmolStr, SourceFormat) {
+    span: fossil_base::Span,
+) -> Result<(SmolStr, SourceFormat), fossil_base::ErrorGuaranteed> {
     let (constructor, uri) = dm.lookup_source_call(db, binding).unwrap_or((None, None));
+    let Some(uri) = uri else {
+        return Err(fossil_base::delay_span_bug(
+            db,
+            span,
+            match constructor.as_deref() {
+                Some(c) => format!(
+                    "`{binding}` is not a source: it is bound to `{c}`, which is not an \
+                     `io.*(\"...\")` call, so there is no file to read. A mapping's `from` \
+                     must name a binding declared as `{binding} := io.csv(\"...\")` (or \
+                     io.json / io.parquet / io.rdf)."
+                ),
+                None => format!("`{binding}` is not a declared source binding"),
+            },
+        ));
+    };
     let format = match constructor.as_deref() {
         Some(c) => match fossil_registry::source_kind(c) {
             Some(kind) => match kind.lowering {
@@ -389,19 +454,28 @@ fn resolve_source<'db>(
                     name: SmolStr::new(kind.short_name),
                 },
             },
-            // Unrecognised `io.<name>` → a provider the runtime will reject by
-            // name (clearer than silently reading it as CSV); anything else →
-            // the Phase-1 Csv default so malformed sources still lower.
-            None => c.strip_prefix("io.").map_or(SourceFormat::Csv, |name| {
-                SourceFormat::Provider {
+            None => match c.strip_prefix("io.") {
+                Some(name) => SourceFormat::Provider {
                     name: SmolStr::new(name),
+                },
+                None => {
+                    return Err(fossil_base::delay_span_bug(
+                        db,
+                        span,
+                        format!("`{c}` is not a source constructor; expected `io.*`"),
+                    ));
                 }
-            }),
+            },
         },
-        None => SourceFormat::Csv,
+        None => {
+            return Err(fossil_base::delay_span_bug(
+                db,
+                span,
+                format!("source `{binding}` has a URI but no constructor to read it with"),
+            ));
+        }
     };
-    let uri = uri.unwrap_or_else(|| SmolStr::new_static("examples/users.csv"));
-    (uri, format)
+    Ok((uri, format))
 }
 
 /// Exhaustive [`NativeReader`](fossil_registry::NativeReader) → [`SourceFormat`]
@@ -413,29 +487,6 @@ const fn native_reader_format(r: fossil_registry::NativeReader) -> SourceFormat 
         fossil_registry::NativeReader::JsonAuto => SourceFormat::Json,
         fossil_registry::NativeReader::Parquet => SourceFormat::Parquet,
     }
-}
-
-/// Phase 1 fallback row type: `Record({id: String, name: String})`.
-///
-/// Used when [`typecheck_mapping`] returns `Err` or the source declared no
-/// CSVW `schema` (the walking-skeleton `hello.fossil` case has no `schema`
-/// arg, so `TypeckOutput.source_row` is `None`).
-fn phase1_row_type(db: &dyn fossil_base::Db) -> Ty<'_> {
-    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
-    let record = Record::new(
-        db,
-        vec![
-            RecordField {
-                name: SmolStr::new_static("id"),
-                ty: string_ty,
-            },
-            RecordField {
-                name: SmolStr::new_static("name"),
-                ty: string_ty,
-            },
-        ],
-    );
-    Ty::new(db, TyKind::Record(record))
 }
 
 /// Resolve the 1-based, MAPPING-RELATIVE source line of the `iri = ...`

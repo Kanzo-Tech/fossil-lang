@@ -71,7 +71,7 @@ fn trigger_graph<'db>(db: &'db dyn fossil_base::Db, case: Case) -> MirGraph<'db>
         10 => r10_trigger(db),
         other => panic!("unknown rule case {other}"),
     };
-    MirGraph::new(db, ops)
+    MirGraph::new(db, ops, None)
 }
 
 /// Run the rewriting engine inside a tracked frame (so the result `MirGraph`

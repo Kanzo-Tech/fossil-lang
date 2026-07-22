@@ -68,9 +68,17 @@ pub struct CheckOutcome {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Parse + type-check `path`, draining the Salsa `Diagnostic` accumulator across
-/// every mapping. Same pre-introspection as [`run`] so `check` sees the same
-/// forward-propagated types the compiler will (no `@conn` creds on `check`).
+/// Parse + type-check + lower `path`, draining the Salsa `Diagnostic`
+/// accumulator across every mapping. Same pre-introspection as [`run`] so
+/// `check` sees the same forward-propagated types the compiler will (no `@conn`
+/// creds on `check`).
+///
+/// Drains from `lower_to_mir_pg` rather than `typecheck_mapping`: Salsa
+/// accumulators are transitive, and lowering calls the typechecker, so this
+/// yields the typecheck diagnostics PLUS the lowering ones without duplicating
+/// either. Draining only the typechecker used to make `check` report `ok` for a
+/// program `run` then refused — e.g. a mapping reading `from` a derived binding,
+/// whose source cannot be resolved. `check` must not pass what `run` rejects.
 ///
 /// # Errors
 /// Returns a read error if `path` is unreadable.
@@ -88,8 +96,8 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
 
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     for mapping in mappings {
-        let _ = fossil_hir::check::typecheck_mapping(&db, *mapping);
-        let diags = fossil_hir::check::typecheck_mapping::accumulated::<Diagnostic>(&db, *mapping);
+        let _ = fossil_mir::lower_to_mir_pg(&db, *mapping);
+        let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(&db, *mapping);
         diagnostics.extend(diags.into_iter().cloned());
     }
     Ok(CheckOutcome {

@@ -1,10 +1,8 @@
 //! E2E del lowering property-graph (paso 2, vertex-only): parse `hello.fossil`
 //! → [`lower_to_mir_pg`] → `Source → EmitVertex(Person) → Sink`.
 //!
-//! Branch-by-abstraction: el path legacy [`fossil_mir::lower_to_mir`] (`TripleEmit`)
-//! sigue intacto; este test fija el nuevo path PG-canónico para el caso de un
-//! vértice con propiedades literales (sin edges — esos llegan en el próximo
-//! incremento, con la clasificación descriptor-driven que ya tiene el codegen).
+//! Fija además la disciplina de fallo: un `from` que no resuelve a una fuente
+//! TIÑE el grafo en vez de sustituir un valor por defecto.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -67,6 +65,55 @@ fn lower_pg_emits_source_vertex_sink() {
         Some("https://example.org/name"),
         "prop carries its predicate IRI for the manifest/DCAT"
     );
+}
+
+/// A mapping reading `from` a DERIVED binding must taint, not silently read
+/// some other file.
+///
+/// `x := Source |> seq.filter(...)` parses as a source definition (the parser
+/// classifies every top-level `IDENT :=` that way) but carries no `io.*`
+/// constructor and no URI. Lowering used to substitute `examples/users.csv` —
+/// so a mapping over `@upv/aemet.csv` executed against the walking-skeleton
+/// fixture instead, producing a full, plausible, entirely wrong graph. The
+/// substitution is gone: the graph is poisoned and carries no ops.
+#[test]
+#[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+fn derived_binding_poisons_instead_of_defaulting() {
+    let src = "\
+prefix ex: <https://example.org/>
+
+Rows := io.csv(\"@conn/real.csv\")
+
+filtered := Rows |> seq.filter(.kind == \"https://example.org/wanted\")
+
+Thing : ex:Thing from filtered
+    iri = `${ex:}thing/${.id}`
+    ex:name = .name
+";
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, src.to_string(), "derived.fossil".to_string());
+    let mapping = *def_map(&db, file)
+        .mappings(&db)
+        .first()
+        .expect("one mapping");
+
+    let mir = lower_to_mir_pg(&db, mapping);
+
+    assert!(
+        mir.error(&db).is_some(),
+        "an unresolvable source binding must poison the graph"
+    );
+    assert!(
+        mir.ops(&db).is_empty(),
+        "a poisoned graph carries no ops, so nothing can execute it by accident"
+    );
+    // The specific regression: never reach for the fixture path.
+    for op in mir.ops(&db) {
+        if let Op::Source { uri, .. } = op {
+            assert_ne!(uri.as_str(), "examples/users.csv", "the Phase-1 default is gone");
+        }
+    }
 }
 
 const EDGES: &str = "\

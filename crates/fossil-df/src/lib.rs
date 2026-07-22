@@ -210,6 +210,26 @@ pub async fn execute_vertex<'db>(
     finalize_vertex(ctx, vec![prepared]).await
 }
 
+/// Refuse to execute a mapping whose lowering failed.
+///
+/// A poisoned [`MirGraph`] means lowering could not resolve something the graph
+/// needs — an unresolvable source binding, a mapping with no usable `iri`. It
+/// carries no ops, so executing it would either panic on the `expect`s below or
+/// silently produce an empty graph. Neither is acceptable: the run must fail
+/// with the reason, which the accumulated `Diagnostic` already carries
+/// (`fossil_base` P-CRIT-4 guarantees at least one).
+///
+/// Checking here is also what makes the `expect`s below sound: a graph that is
+/// not poisoned always carries its `Source` and `EmitVertex`.
+fn refuse_if_poisoned(mir: fossil_mir::MirGraph<'_>, db: &dyn fossil_base::Db) -> datafusion::error::Result<()> {
+    if mir.error(db).is_some() {
+        return Err(datafusion::error::DataFusionError::Plan(
+            "the mapping did not compile; see the reported diagnostics".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Project a mapping's source rows to the W0b vertex columns (no dedup/sort/
 /// dense-id yet — those wait for [`finalize_vertex`], after the per-type union).
 async fn prepare_vertex<'db>(
@@ -220,6 +240,7 @@ async fn prepare_vertex<'db>(
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
+    refuse_if_poisoned(mir, db)?;
     let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 
@@ -393,6 +414,7 @@ async fn execute_edges<'db>(
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
+    refuse_if_poisoned(mir, db)?;
     let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 

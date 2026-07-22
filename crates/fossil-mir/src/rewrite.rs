@@ -96,7 +96,9 @@ pub fn rewrite<'db>(db: &'db dyn fossil_base::Db, graph: MirGraph<'db>) -> MirGr
         }
     }
 
-    MirGraph::new(db, ops)
+    // Rewriting never introduces or clears a taint — it carries the input's
+    // through, so a poisoned graph stays poisoned across the optimiser.
+    MirGraph::new(db, ops, graph.error(db))
 }
 
 // ---------------------------------------------------------------------------
