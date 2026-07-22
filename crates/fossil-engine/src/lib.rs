@@ -98,7 +98,12 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
     for mapping in mappings {
         let _ = fossil_mir::lower_to_mir_pg(&db, *mapping);
         let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(&db, *mapping);
-        diagnostics.extend(diags.into_iter().cloned());
+        // Spans come out mapping-relative; the caller renders against the file.
+        diagnostics.extend(fossil_hir::spans::rebase_to_file(
+            &db,
+            *mapping,
+            diags.into_iter().cloned(),
+        ));
     }
     Ok(CheckOutcome {
         source: text,

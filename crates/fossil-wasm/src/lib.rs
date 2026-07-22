@@ -730,9 +730,18 @@ fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
     let dm = fossil_hir::def_map::def_map(db, file);
     let mut out = Vec::new();
     for mapping in dm.mappings(db) {
-        let _ = fossil_hir::typecheck_mapping(db, *mapping);
-        let diags = fossil_hir::typecheck_mapping::accumulated::<Diagnostic>(db, *mapping);
-        out.extend(diags.into_iter().cloned());
+        // Drain from the LOWERING, not the typechecker: Salsa accumulators are
+        // transitive and lowering calls the typechecker, so this yields both
+        // sets without duplicating either. Draining only the typechecker would
+        // show the editor a clean file that `run` then refuses.
+        let _ = fossil_mir::lower_to_mir_pg(db, *mapping);
+        let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(db, *mapping);
+        // Spans are mapping-relative; the editor renders against the file.
+        out.extend(fossil_hir::spans::rebase_to_file(
+            db,
+            *mapping,
+            diags.into_iter().cloned(),
+        ));
     }
     out
 }

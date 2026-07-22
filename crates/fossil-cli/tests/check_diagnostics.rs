@@ -79,6 +79,11 @@ fn check_broken_field_renders_span_and_help_and_exits_nonzero() {
     let output = Command::new(bin)
         .args(["check", fixture.to_str().expect("utf8 fixture path")])
         .env("NO_COLOR", "1")
+        // Silence tracing. The fixture names a `users.csv` that does not exist,
+        // so pre-introspection logs a WARN to stderr — and the snapshot below is
+        // of stderr. Its timestamp made this test unpassable: every run produced
+        // a line the golden file could never match.
+        .env("RUST_LOG", "off")
         .output()
         .expect("spawn fossil check");
 

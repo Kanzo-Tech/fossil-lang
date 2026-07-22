@@ -161,6 +161,58 @@ pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spa
     Spans::new(db, by_expr)
 }
 
+/// Byte offset of a mapping's CST node within its file.
+///
+/// The counterpart to this module's mapping-relative offsets: add this to any
+/// recorded [`Span`] to get a file-absolute one.
+///
+/// DELIBERATELY NOT a `#[salsa::tracked]` query. It reads `parse(db, file)`,
+/// which is exactly the whole-file read the per-mapping barrier exists to keep
+/// out of the compile path (ADR-0005). Callers are diagnostic-EMISSION layers,
+/// which sit outside that barrier and already hold the file text.
+#[must_use]
+pub fn mapping_start_offset<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> u32 {
+    fossil_syntax::parse(db, mapping.file(db))
+        .root(db)
+        .syntax()
+        .children()
+        .filter(|n| n.kind() == fossil_syntax::SyntaxKind::MAPPING)
+        .nth(mapping.index(db))
+        .map_or(0, |n| u32::from(n.text_range().start()))
+}
+
+/// Rebase a mapping's diagnostics from mapping-relative onto file-absolute
+/// offsets, so a host can render them against the file text.
+///
+/// EVERY diagnostic-emission layer must call this. Skipping it does not fail
+/// loudly — it silently points the squiggle at whatever happens to sit at that
+/// offset from the start of the FILE, which for any mapping but the first is
+/// another mapping entirely. It rebases [`Diagnostic::did_you_mean`]'s
+/// `wrong_span` too: that one drives a quick-fix `WorkspaceEdit`, so a stale
+/// offset there does not just mislead, it edits the wrong range.
+#[must_use]
+pub fn rebase_to_file<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+    diagnostics: impl IntoIterator<Item = fossil_base::Diagnostic>,
+) -> Vec<fossil_base::Diagnostic> {
+    let base = mapping_start_offset(db, mapping);
+    let shift = |s: Span| Span {
+        start: s.start.saturating_add(base),
+        end: s.end.saturating_add(base),
+    };
+    diagnostics
+        .into_iter()
+        .map(|mut d| {
+            d.span = shift(d.span);
+            if let Some(dym) = d.did_you_mean.as_mut() {
+                dym.wrong_span = shift(dym.wrong_span);
+            }
+            d
+        })
+        .collect()
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -172,6 +224,58 @@ mod tests {
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), name.to_string());
         (db, file)
+    }
+
+    /// A rebased span must select the SAME text from the file that the raw
+    /// span selects from the mapping. Regression guard: before
+    /// [`rebase_to_file`], every emission layer rendered mapping-relative
+    /// offsets against the file, so a diagnostic in any mapping but the first
+    /// pointed at an unrelated earlier one.
+    #[test]
+    fn rebase_lands_on_the_same_text_in_the_file() {
+        const SRC: &str = "\
+prefix ex: <https://example.org/>
+users := io.csv(\"x.csv\")
+First : ex:A from users
+    iri = `${ex:}a/${.id}`
+    ex:name = .name
+
+Second : ex:B from users
+    iri = `${ex:}b/${.id}`
+    ex:name = .other
+";
+        let (db, file) = db_with_text(SRC, "two.fossil");
+        let second = *def_map(&db, file)
+            .mappings(&db)
+            .get(1)
+            .expect("Second is the 2nd mapping");
+
+        let raw = spans(&db, second)
+            .get(&db, ExprId(1))
+            .expect("the 2nd property's RHS");
+        let local = &mapping_text(&db, second)[raw.start as usize..raw.end as usize];
+        assert_eq!(local, ".other", "sanity: the raw span is mapping-relative");
+
+        let base = mapping_start_offset(&db, second);
+        assert!(base > 0, "the 2nd mapping does not start at the file head");
+        let absolute = &SRC[(raw.start + base) as usize..(raw.end + base) as usize];
+        assert_eq!(absolute, local, "rebased span selects the same text in the file");
+
+        // And the whole-diagnostic path shifts `did_you_mean.wrong_span` too —
+        // that one drives a quick-fix edit, so a stale offset corrupts source.
+        let d = fossil_base::Diagnostic::new(fossil_base::Severity::Error, "x", raw)
+            .with_did_you_mean(raw, "name");
+        let out = rebase_to_file(&db, second, [d]);
+        assert_eq!(out[0].span.start, raw.start + base);
+        assert_eq!(
+            out[0]
+                .did_you_mean
+                .as_ref()
+                .expect("did_you_mean survives")
+                .wrong_span
+                .start,
+            raw.start + base
+        );
     }
 
     /// Helper — return the mapping's own text (the substring of `src`

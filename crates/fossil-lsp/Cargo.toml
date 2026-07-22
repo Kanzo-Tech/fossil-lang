@@ -37,6 +37,9 @@ harness = false
 fossil-base               = { path = "../fossil-base" }
 fossil-ide                = { path = "../fossil-ide" }
 fossil-hir                = { path = "../fossil-hir" }
+# The editor must report what the compiler reports: diagnostics are drained from
+# the LOWERING (transitively covering the typechecker), so the LSP needs it.
+fossil-mir                = { path = "../fossil-mir" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 salsa              = { workspace = true }
 lsp-server         = { workspace = true }

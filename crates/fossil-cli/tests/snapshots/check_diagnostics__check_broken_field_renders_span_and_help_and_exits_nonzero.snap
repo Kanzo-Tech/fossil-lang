@@ -8,20 +8,20 @@ Error:
   × D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is
   │ deprecated; types will be inferred from the file directly. Remove the
   │ `schema = "..."` argument.
-   ╭─[<FIXTURE>/mapping.fossil:1:1]
- 1 │ prefix ex: <https://example.org/>
+   ╭─[<FIXTURE>/mapping.fossil:3:1]
+ 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
+ 3 │ User : ex:Person from users
    · ▲
    · ╰── here
- 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
+ 4 │     iri = `${ex:}user/${.id}`
    ╰────
 
 Error: 
   × unknown column `naem` — did you mean `name`?
-   ╭─[<FIXTURE>/mapping.fossil:2:39]
- 1 │ prefix ex: <https://example.org/>
- 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
-   ·                                       ──┬──
-   ·                                         ╰── here
- 3 │ User : ex:Person from users
+   ╭─[<FIXTURE>/mapping.fossil:5:15]
+ 4 │     iri = `${ex:}user/${.id}`
+ 5 │     ex:name = .naem
+   ·               ──┬──
+   ·                 ╰── here
    ╰────
   help: did you mean `name`?
