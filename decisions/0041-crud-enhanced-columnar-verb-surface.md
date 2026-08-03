@@ -161,8 +161,30 @@ sin filtrar. Mapbox tiene el mismo problema y tampoco lo resuelve. Por eso `read
 desaparece: es el camino general, y la tesela es el camino rápido del caso espacial sin filtrar.
 
 **Renumerar por Morton es el trabajo escondido.** «Emitir chunks» suena a terminar algo declarado;
-en realidad arrastra reordenar `dense_id` y remapear los extremos de todas las aristas, y mover el
-paso de layout por delante de la fase de aristas. Presupuestarlo como una tarde es el error a evitar.
+en realidad arrastra reordenar `dense_id` y remapear los extremos de todas las aristas. Presupuestarlo
+como una tarde es el error a evitar.
+
+Leído el código (2026-08-03), el alcance es concreto y **no** es el que este ADR suponía:
+
+- **No hace falta mover el layout por delante de la fase de aristas.** `enrich_layout` ya corre al
+  final, ya tiene la conexión DuckDB y ya reescribe el Parquet de vértices en orden Morton. Renumerar
+  ahí y remapear los ficheros de aristas *que ya existen* es estrictamente menos invasivo que
+  reordenar las fases: el remapeo es un join contra una tabla de correspondencia, no un cambio de
+  arquitectura.
+- **`VertexLayoutTarget` no ve las aristas que tendría que reescribir.** Hoy lleva sólo
+  `by_source.parquet` de las aristas del mismo tipo (`fossil-engine/src/lib.rs:412`). Renumerar un
+  tipo obliga a reescribir *todo* fichero que lo referencie en cualquiera de sus dos extremos:
+  también `by_target.parquet`, también las aristas entre tipos distintos. Eso es un cambio de firma y
+  de llamante, y con dos tipos renumerados cada fichero de aristas necesita los dos remapeos, cada
+  extremo contra el mapa de su propio tipo.
+- **La trampa que no estaba listada: `adj_lists` se declara `ordered: true`.** El remapeo invalida
+  ese orden — un CSR ordenado por `src_dense` deja de estarlo en cuanto los `src_dense` cambian de
+  valor. Los dos ficheros no se remapean: se remapean **y se reordenan**. Un lector GraphAr que se
+  fíe del manifiesto leería basura, y no habría error que lo dijese.
+- **`chunk_size: 1024` no sobrevive a cinco millones como tamaño de escritura.** Son 4.883 chunks de
+  vértices más los de aristas, y la convención de nombre (`<prefix>chunk{k}.parquet`, ADR-0016) no la
+  produce `PARTITION_BY` de DuckDB, que emite `chunk=0/data_0.parquet`. Sale un `COPY` por chunk, es
+  decir casi cinco mil sentencias. O el tamaño sube, o la emisión no es un bucle de `COPY`.
 
 **No rompe el techo por sí solo lo columnar**, y no debe venderse así: quita el marshalling y la
 materialización de golpe, no hace sublineal un escaneo O(N). Lo que rompe el techo es la pirámide.
