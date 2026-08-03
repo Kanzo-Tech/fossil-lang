@@ -197,8 +197,31 @@ se está midiendo, y la primera comparación muestreó ventanas distintas en los
 sembrar una medición con un valor que el cambio bajo prueba puede mover.**
 
 Confirmadas las tres trampas del listado anterior, y todas con test porque ninguna falla sola.
-Queda **la emisión de los ficheros de chunks**, que es lo único que cambia el disco y por tanto lo
-único que toca a los lectores.
+
+**Chunks de vértices: emitidos (`fossil-runtime` c678e63).** `vertex/<Type>/chunk{k}.parquet`, con
+el `chunk_size: 1024` que el manifiesto declaraba desde el principio — medido, no supuesto. La
+sobrelectura es chunks tocados × tamaño, y los chunks tocados apenas crecen al encogerlos porque la
+localidad Morton hace que una ventana cubra un *área* casi constante:
+
+| `chunk_size` | chunks tocados | sobrelectura |
+|---|---|---|
+| 1.024 | 9,8 de 4.883 | **2,9×** |
+| 8.192 | 3,4 de 611 | 8,0× |
+| 122.880 | 2,0 de 41 | 70× |
+
+**Una ventana descarga 10 de 4.883 chunks: el 0,2 % del corpus.** La retención vuelve a ser el
+control y no se movió. Escribir 4.883 chunks cuesta segundos (200 en 0,18 s, 20 kB cada uno);
+`PARTITION_BY` sería una sentencia pero emite `chunk=0/data_0.parquet` en vez del nombre de ADR-0016.
+
+Dos cosas que no conviene redescubrir. **Un glob es la forma equivocada de leerlos**: expandir
+`*.parquet` es listar un directorio, y un origen HTTP plano no tiene listado — el httpfs de DuckDB
+*sí* puede contra S3, así que el error funciona con `file://`, funciona con un bucket y falla en el
+navegador. El lector deriva la lista del recuento de vértices y `chunk_size`. Y **`--row-group`
+desaparece**: un chunk de 1.024 filas *es* un row group.
+
+Queda **el chunking de aristas** — GraphAr las particiona por el chunk del vértice origen
+(`src_chunk_size`); aquí se renumeran y reordenan pero se emiten enteras. La poda por bbox es un
+escaneo de vértices, así que lo emitido es la mitad que poda.
 
 - **`chunk_size: 1024` no sobrevive a cinco millones como tamaño de escritura.** Son 4.883 chunks de
   vértices más los de aristas, y la convención de nombre (`<prefix>chunk{k}.parquet`, ADR-0016) no la
