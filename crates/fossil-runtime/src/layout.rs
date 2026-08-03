@@ -112,11 +112,19 @@ fn find(parent: &mut [u32], mut x: u32) -> u32 {
 }
 
 /// Deterministic 2-D positions from a per-vertex `cluster_id` list (as produced
-/// by [`community_hierarchy`] + [`flatten_to_budget`]). Clusters occupy a
-/// near-square grid of cells; within a cell, the `k`-th vertex is placed at
-/// golden-angle phyllotaxis radius `R·√k`. Same-cluster vertices cluster
-/// visually; the mapping is a pure function of the input (stable across runs —
-/// no RNG).
+/// by [`community_hierarchy`], [`flatten_to_budget`] and [`order_by_hierarchy`]).
+/// Clusters occupy the cells of a Z-order grid; within a cell, the `k`-th vertex
+/// is placed at golden-angle phyllotaxis radius `R·√k`. Same-cluster vertices
+/// cluster visually; the mapping is a pure function of the input (stable across
+/// runs — no RNG).
+///
+/// The grid is walked in Z-order and not row by row because the cluster ids
+/// arriving here are a depth-first numbering of the hierarchy, so a run of
+/// consecutive ids is a family. Row-major would smear that family along a row
+/// and break it at the wrap; Z-order keeps it in a block. A count that is not a
+/// power of four leaves the tail of the curve empty, which shows as a bite out
+/// of one corner of the picture — a gap where there is no data, rather than a
+/// crowding where there is.
 ///
 /// # Why the grid pitch is measured and not a constant
 ///
@@ -139,9 +147,6 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     if num_clusters == 0 {
         return Vec::new();
     }
-    // Near-square grid: ceil(sqrt(k)) columns.
-    let cols = (f64::from(num_clusters).sqrt().ceil() as u32).max(1);
-
     let mut sizes = vec![0u32; num_clusters as usize];
     for &c in cluster_ids {
         sizes[c as usize] += 1;
@@ -156,8 +161,9 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     let mut seen = vec![0u32; num_clusters as usize];
     let mut out = Vec::with_capacity(cluster_ids.len());
     for &c in cluster_ids {
-        let cell_x = (c % cols) as f32 * pitch;
-        let cell_y = (c / cols) as f32 * pitch;
+        let (col, row) = morton_decode(c);
+        let cell_x = col as f32 * pitch;
+        let cell_y = row as f32 * pitch;
         let k = seen[c as usize];
         seen[c as usize] += 1;
         let angle = k as f32 * GOLDEN_ANGLE;
@@ -262,8 +268,27 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
         }
 
         let levels = community_hierarchy(vertex_count, &edges);
-        let clusters = flatten_to_budget(&levels, vertex_count, CLUSTER_BUDGET);
-        let mut positions = cluster_layout(&clusters);
+
+        // The partition that is *written* and the partition that is *drawn*
+        // answer different questions, so they are not the same partition.
+        //
+        // `cluster_id` is read by `viewport`'s aggregate mode, one super-node
+        // per cluster under a LIMIT, so it must fit CLUSTER_BUDGET — which on
+        // this corpus means the top of the hierarchy. Placement wants the
+        // opposite: the finest level, whose communities are small enough that
+        // several fit in one window. Using the budget partition for both was
+        // measured and cost the ordering below its entire reason for existing —
+        // at the top level every community is a root and there are no siblings
+        // left to put side by side.
+        let (clusters, _) = flatten_to_budget(&levels, vertex_count, CLUSTER_BUDGET);
+        let mut placement = levels
+            .first()
+            .cloned()
+            .unwrap_or_else(|| (0..vertex_count).collect());
+        if !levels.is_empty() {
+            order_by_hierarchy(&levels, 0, &mut placement);
+        }
+        let mut positions = cluster_layout(&placement);
 
         // Slide this type clear of the ones already placed. The Morton codes are
         // computed *after* the shift, because they quantise against the position
@@ -661,21 +686,99 @@ pub fn community_hierarchy(vertex_count: u32, edges: &[(u32, u32)]) -> Vec<Vec<u
 ///
 /// An empty hierarchy means nothing merged (a graph with no edges), and then
 /// every vertex is its own community, which is the truth about that graph.
+/// Returns the membership and **which level it came from**, because the level is
+/// what the placement above it still needs in order to know who is whose sibling.
 #[must_use]
-fn flatten_to_budget(levels: &[Vec<u32>], vertex_count: u32, budget: u32) -> Vec<u32> {
+fn flatten_to_budget(
+    levels: &[Vec<u32>],
+    vertex_count: u32,
+    budget: u32,
+) -> (Vec<u32>, Option<usize>) {
     let Some(finest) = levels.first() else {
-        return (0..vertex_count).collect();
+        return ((0..vertex_count).collect(), None);
     };
     let count = |m: &[u32]| m.iter().copied().max().map_or(0, |x| x + 1);
 
     let mut current = finest.clone();
+    let mut chosen = 0;
     for level in &levels[1..] {
         if count(&current) <= budget {
             break;
         }
         current = current.iter().map(|&c| level[c as usize]).collect();
+        chosen += 1;
     }
-    current
+    (current, Some(chosen))
+}
+
+/// Renumber the chosen level's communities so that **siblings are consecutive**,
+/// by sorting each community on the path of ancestors above it.
+///
+/// The number a community wears decides where [`cluster_layout`] puts it, and
+/// until now that number came from the order vertices happened to be visited in
+/// — which is `dense_id` order, which is IRI order, which has nothing to do with
+/// the graph. Two communities with thousands of edges between them therefore
+/// landed on opposite sides of the picture as often as not, and every one of
+/// those edges left whatever window either of them was in.
+///
+/// Sorting by the ancestor path *is* a depth-first walk of the hierarchy, so no
+/// tree is built to do it: level *l+1* maps a community to its parent, and
+/// following that up to the top gives a key whose lexicographic order visits
+/// each subtree contiguously. The community's own id goes last so the order is
+/// total, and therefore reproducible.
+///
+/// This orders the communities. It does not lay out each level's quotient graph
+/// — a community's *position among its siblings* is still its id and not its
+/// connections, so this buys locality between subtrees, not within one.
+fn order_by_hierarchy(levels: &[Vec<u32>], chosen: usize, membership: &mut [u32]) {
+    let cluster_count = membership.iter().copied().max().map_or(0, |m| m + 1);
+    if cluster_count == 0 {
+        return;
+    }
+    let above = &levels[chosen + 1..];
+
+    let mut keyed: Vec<(Vec<u32>, u32)> = (0..cluster_count)
+        .map(|c| {
+            let mut path = Vec::with_capacity(above.len() + 1);
+            let mut current = c;
+            for level in above {
+                current = level[current as usize];
+                path.push(current);
+            }
+            // Coarsest ancestor first, so the sort groups whole subtrees before
+            // it ever looks at a finer distinction.
+            path.reverse();
+            path.push(c);
+            (path, c)
+        })
+        .collect();
+    keyed.sort_unstable();
+
+    let mut rank = vec![0u32; cluster_count as usize];
+    for (r, (_, c)) in keyed.iter().enumerate() {
+        rank[*c as usize] = r as u32;
+    }
+    for m in membership.iter_mut() {
+        *m = rank[*m as usize];
+    }
+}
+
+/// Split a Morton code back into the two coordinates [`morton2`] interleaved.
+///
+/// Used to walk the cluster grid in Z-order rather than row by row. Row-major
+/// numbering makes a run of consecutive clusters into a horizontal strip that
+/// wraps at the edge, so a parent's children end up spread across a row and
+/// broken over two; Z-order keeps a consecutive run inside a compact block, and
+/// consecutive is exactly what [`order_by_hierarchy`] arranges for siblings.
+const fn morton_decode(code: u32) -> (u32, u32) {
+    const fn compact(n: u32) -> u32 {
+        let mut n = n & 0x5555_5555;
+        n = (n | (n >> 1)) & 0x3333_3333;
+        n = (n | (n >> 2)) & 0x0f0f_0f0f;
+        n = (n | (n >> 4)) & 0x00ff_00ff;
+        (n | (n >> 8)) & 0x0000_ffff
+    }
+    (compact(code), compact(code >> 1))
 }
 
 /// An undirected weighted graph in CSR, with self-loops kept apart.
@@ -975,17 +1078,17 @@ mod hierarchy_tests {
 
         assert_eq!(
             flatten_to_budget(&levels, 6, 3),
-            vec![0, 0, 1, 1, 2, 2],
+            (vec![0, 0, 1, 1, 2, 2], Some(0)),
             "three communities fit a budget of three, so the finest level wins",
         );
         assert_eq!(
             flatten_to_budget(&levels, 6, 2),
-            vec![0, 0, 0, 0, 0, 0],
+            (vec![0, 0, 0, 0, 0, 0], Some(1)),
             "over budget, the walk composes up a level",
         );
         assert_eq!(
             flatten_to_budget(&levels, 6, 1),
-            vec![0, 0, 0, 0, 0, 0],
+            (vec![0, 0, 0, 0, 0, 0], Some(1)),
             "a budget nothing satisfies still stops at the coarsest level there is",
         );
     }
@@ -994,7 +1097,45 @@ mod hierarchy_tests {
     /// community — which is the truth about that graph, not a fallback.
     #[test]
     fn flatten_without_a_hierarchy_isolates_every_vertex() {
-        assert_eq!(flatten_to_budget(&[], 4, 2_048), vec![0, 1, 2, 3]);
+        assert_eq!(flatten_to_budget(&[], 4, 2_048), (vec![0, 1, 2, 3], None));
+    }
+
+    /// The number a community wears decides where it is drawn, so siblings have
+    /// to be consecutive — otherwise two communities with thousands of edges
+    /// between them land on opposite sides of the picture as often as not.
+    #[test]
+    fn ordering_puts_siblings_next_to_each_other() {
+        // Six communities under two parents, interleaved on purpose: the odd
+        // ones belong to parent 0 and the even ones to parent 1, which is the
+        // arrangement id order gets wrong.
+        let levels = vec![Vec::new(), vec![1, 0, 1, 0, 1, 0]];
+        let mut membership: Vec<u32> = vec![0, 1, 2, 3, 4, 5];
+        order_by_hierarchy(&levels, 0, &mut membership);
+
+        let parent = |c: u32| levels[1][c as usize];
+        let mut by_rank: Vec<(u32, u32)> = (0..6).map(|c| (membership[c as usize], c)).collect();
+        by_rank.sort_unstable();
+        let families: Vec<u32> = by_rank.iter().map(|&(_, c)| parent(c)).collect();
+
+        // Each family occupies one contiguous run, so the sequence changes hands
+        // exactly once.
+        let switches = families.windows(2).filter(|w| w[0] != w[1]).count();
+        assert_eq!(switches, 1, "families must not be interleaved: {families:?}");
+    }
+
+    /// Z-order is what turns "consecutive" into "nearby" on the grid: the first
+    /// four cells are a 2x2 block, where row-major would be a 4x1 strip.
+    #[test]
+    fn morton_decode_walks_the_grid_in_blocks() {
+        assert_eq!(morton_decode(0), (0, 0));
+        assert_eq!(morton_decode(1), (1, 0));
+        assert_eq!(morton_decode(2), (0, 1));
+        assert_eq!(morton_decode(3), (1, 1));
+        // And it is the exact inverse of the interleave the row order uses.
+        for code in 0..64u32 {
+            let (x, y) = morton_decode(code);
+            assert_eq!(morton2(x as u16, y as u16), code);
+        }
     }
 
     /// Degenerate shapes must not panic or invent levels.
