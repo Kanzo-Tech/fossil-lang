@@ -8,10 +8,14 @@
 //! `materialize` hot path (which reads the edge set + rewrites the vertex
 //! Parquet, a separate slice). Two pure functions over a `dense_id` edge list:
 //!
-//! - [`weakly_connected_components`] — the coarsest legitimate partition (WCC,
-//!   union-find). Not a placeholder: it is the correct multi-component grouping
-//!   and a real graph property. Leiden communities (modularity) refine it in a
-//!   later slice; the two answer different questions (reachability vs density).
+//! - [`community_hierarchy`] — modularity communities, and the whole hierarchy
+//!   of them, which is what [`enrich_layout`] partitions by. This is the pyramid
+//!   the level-of-detail plan is built from (ADR-0041 §1).
+//! - [`weakly_connected_components`] — reachability (union-find). It is a real
+//!   graph property and stays, but it is **no longer what the layout uses**: on
+//!   a connected graph it answers "one component", and measured on the million
+//!   corpus that put 994,786 of a million vertices in a single cluster. It now
+//!   earns its place as the contrast the hierarchy is tested against.
 //! - [`cluster_layout`] — a deterministic community-grouped placement: clusters
 //!   on a grid, nodes phyllotaxis-packed within their cell. Same-cluster nodes
 //!   land near each other. `ForceAtlas2` refinement is a later slice; this gives
@@ -35,8 +39,19 @@
 /// Golden angle (radians) — the phyllotaxis constant `π(3−√5)`. Successive
 /// nodes placed at multiples of this angle pack a disc evenly with no RNG.
 const GOLDEN_ANGLE: f32 = 2.399_963_2;
-/// Distance between adjacent cluster cells on the grid.
+/// Empty space left between one cluster's packing disc and the next. The grid
+/// pitch is this plus the largest disc's diameter, so it is a margin and not the
+/// pitch itself — see [`cluster_layout`].
 const CLUSTER_SPACING: f32 = 100.0;
+/// How many clusters `cluster_id` may carry.
+///
+/// Not an aesthetic choice: `viewport`'s aggregate mode answers one super-node
+/// per `(type_idx, cluster_id)` and promises "≤ 10k super-nodes regardless of
+/// total N" (`fossil-graph/src/exec.rs`, `viewport_aggregate`). That promise is
+/// kept by a `LIMIT`, so a partition finer than the budget does not degrade —
+/// it truncates, and the picture silently loses whole communities. A budget of
+/// 2,048 leaves the promise intact for up to four vertex types.
+const CLUSTER_BUDGET: u32 = 2_048;
 /// Intra-cluster packing radius scale (kept well below [`CLUSTER_SPACING`] so
 /// same-cluster nodes stay closer to each other than to other clusters).
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;
@@ -97,10 +112,27 @@ fn find(parent: &mut [u32], mut x: u32) -> u32 {
 }
 
 /// Deterministic 2-D positions from a per-vertex `cluster_id` list (as produced
-/// by [`weakly_connected_components`]). Clusters occupy a near-square grid of
-/// cells; within a cell, the `k`-th vertex is placed at golden-angle
-/// phyllotaxis radius `R·√k`. Same-cluster vertices cluster visually; the
-/// mapping is a pure function of the input (stable across runs — no RNG).
+/// by [`community_hierarchy`] + [`flatten_to_budget`]). Clusters occupy a
+/// near-square grid of cells; within a cell, the `k`-th vertex is placed at
+/// golden-angle phyllotaxis radius `R·√k`. Same-cluster vertices cluster
+/// visually; the mapping is a pure function of the input (stable across runs —
+/// no RNG).
+///
+/// # Why the grid pitch is measured and not a constant
+///
+/// A cluster of `n` vertices packs into a disc of radius `R·√n`, which passes
+/// 100 units at 70 vertices. A fixed 100-unit pitch is therefore only correct
+/// while every cluster is tiny, and the discs of anything larger overlap their
+/// neighbours until the grid means nothing. That defect was invisible under the
+/// weakly-connected-components partition for the reason that partition was
+/// replaced: it returned one giant component, and a single cluster has no
+/// neighbour to overlap. Real communities put several hundred vertices in every
+/// cell at once, so the pitch is now the largest disc's diameter plus
+/// [`CLUSTER_SPACING`] as the gap between them.
+///
+/// The pitch is uniform rather than per-cluster because a cluster's *cell* must
+/// be findable from its id alone — that is what makes the placement a pure
+/// function of `cluster_ids` and reproducible without carrying a table.
 #[must_use]
 pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     let num_clusters = cluster_ids.iter().copied().max().map_or(0, |m| m + 1);
@@ -110,12 +142,22 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
     // Near-square grid: ceil(sqrt(k)) columns.
     let cols = (f64::from(num_clusters).sqrt().ceil() as u32).max(1);
 
+    let mut sizes = vec![0u32; num_clusters as usize];
+    for &c in cluster_ids {
+        sizes[c as usize] += 1;
+    }
+    let largest = sizes.iter().copied().max().unwrap_or(0);
+    let pitch = 2.0f32.mul_add(
+        INTRA_CLUSTER_RADIUS * (largest as f32).sqrt(),
+        CLUSTER_SPACING,
+    );
+
     // Running per-cluster node counter for the intra-cluster phyllotaxis index.
     let mut seen = vec![0u32; num_clusters as usize];
     let mut out = Vec::with_capacity(cluster_ids.len());
     for &c in cluster_ids {
-        let cell_x = (c % cols) as f32 * CLUSTER_SPACING;
-        let cell_y = (c / cols) as f32 * CLUSTER_SPACING;
+        let cell_x = (c % cols) as f32 * pitch;
+        let cell_y = (c / cols) as f32 * pitch;
         let k = seen[c as usize];
         seen[c as usize] += 1;
         let angle = k as f32 * GOLDEN_ANGLE;
@@ -160,10 +202,10 @@ pub enum LayoutError {
 }
 
 /// Replace the W0b placeholder `x`/`y`/`cluster_id` columns of each vertex
-/// Parquet with a real WCC partition + deterministic placement.
+/// Parquet with a real community partition + deterministic placement.
 ///
 /// Per target: count vertices (`max(dense_id)+1`), read self-edges, run
-/// [`weakly_connected_components`] + [`cluster_layout`], stage the result in a
+/// [`community_hierarchy`] + [`cluster_layout`], stage the result in a
 /// temp table, and rewrite the Parquet via `SELECT * REPLACE (...)`. Row ORDER
 /// is preserved (no morton sort yet — a later slice), so `dense_id` values are
 /// unchanged and every edge stays valid. The COPY writes a sibling `.tmp` then
@@ -219,7 +261,8 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
             }
         }
 
-        let clusters = weakly_connected_components(vertex_count, &edges);
+        let levels = community_hierarchy(vertex_count, &edges);
+        let clusters = flatten_to_budget(&levels, vertex_count, CLUSTER_BUDGET);
         let mut positions = cluster_layout(&clusters);
 
         // Slide this type clear of the ones already placed. The Morton codes are
@@ -438,6 +481,44 @@ mod tests {
         assert!(cluster_layout(&[]).is_empty());
     }
 
+    /// The grid has to keep meaning something once clusters are the size real
+    /// communities are. Under the fixed 100-unit pitch a cluster of 200 packed
+    /// into a disc of radius `12·√200 ≈ 170` and reached two cells past its own,
+    /// so vertices sat nearer a community they did not belong to. The single
+    /// giant component the previous partition returned hid it — one cluster has
+    /// no neighbour to overlap.
+    ///
+    /// Asserted against the clusters' own centroids rather than against the
+    /// pitch, so the test states the property (a cluster is a place) instead of
+    /// restating the arithmetic it is checking.
+    #[test]
+    fn layout_keeps_large_clusters_inside_their_own_cell() {
+        const CLUSTERS: usize = 4;
+        const PER: usize = 200;
+        let ids: Vec<u32> = (0..CLUSTERS * PER).map(|i| (i % CLUSTERS) as u32).collect();
+        let p = cluster_layout(&ids);
+
+        let mut centroid = [(0.0f32, 0.0f32); CLUSTERS];
+        for (i, &(x, y)) in p.iter().enumerate() {
+            let c = ids[i] as usize;
+            centroid[c].0 += x / PER as f32;
+            centroid[c].1 += y / PER as f32;
+        }
+
+        for (i, &pos) in p.iter().enumerate() {
+            let own = ids[i] as usize;
+            let mine = dist(pos, centroid[own]);
+            for (other, &c) in centroid.iter().enumerate() {
+                if other != own {
+                    assert!(
+                        mine < dist(pos, c),
+                        "vertex {i} of cluster {own} is nearer cluster {other}",
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn place_after_separates_types_instead_of_stacking_them() {
         // Two types laid out independently both start at the origin, which is
@@ -560,6 +641,41 @@ pub fn community_hierarchy(vertex_count: u32, edges: &[(u32, u32)]) -> Vec<Vec<u
         }
     }
     levels
+}
+
+/// Collapse a hierarchy to one community per vertex, taking the **finest level
+/// that fits `budget`**.
+///
+/// A hierarchy has no single "the" partition, so something has to choose, and
+/// the choice is not free in either direction. Too coarse and a community is
+/// larger than any window, so grouping by it buys the viewport nothing. Too fine
+/// and `viewport`'s aggregate mode, which answers one super-node per cluster
+/// under a `LIMIT`, starts dropping communities off the end of the list rather
+/// than reporting that it did — see [`CLUSTER_BUDGET`].
+///
+/// Levels compose by lookup, not by recomputation: level *l* is indexed by level
+/// *l−1*'s community ids, so walking up is `c ← levels[l][c]`. The walk stops at
+/// the first level within budget, and at the top level regardless — the coarsest
+/// level is the smallest there is, so if it still exceeds the budget there is
+/// nothing better to return.
+///
+/// An empty hierarchy means nothing merged (a graph with no edges), and then
+/// every vertex is its own community, which is the truth about that graph.
+#[must_use]
+fn flatten_to_budget(levels: &[Vec<u32>], vertex_count: u32, budget: u32) -> Vec<u32> {
+    let Some(finest) = levels.first() else {
+        return (0..vertex_count).collect();
+    };
+    let count = |m: &[u32]| m.iter().copied().max().map_or(0, |x| x + 1);
+
+    let mut current = finest.clone();
+    for level in &levels[1..] {
+        if count(&current) <= budget {
+            break;
+        }
+        current = current.iter().map(|&c| level[c as usize]).collect();
+    }
+    current
 }
 
 /// An undirected weighted graph in CSR, with self-loops kept apart.
@@ -847,6 +963,38 @@ mod hierarchy_tests {
     fn the_same_graph_gives_the_same_hierarchy() {
         let edges: Vec<(u32, u32)> = (0..40u32).map(|i| (i % 10, (i * 7) % 10)).collect();
         assert_eq!(community_hierarchy(10, &edges), community_hierarchy(10, &edges));
+    }
+
+    /// The budget picks a level, and picking is the whole job: a hierarchy has
+    /// no single "the" partition.
+    #[test]
+    fn flatten_takes_the_finest_level_that_fits() {
+        // Six vertices → three pairs → one community. Levels are stated rather
+        // than computed so the test is about the choosing, not about Louvain.
+        let levels = vec![vec![0, 0, 1, 1, 2, 2], vec![0, 0, 0]];
+
+        assert_eq!(
+            flatten_to_budget(&levels, 6, 3),
+            vec![0, 0, 1, 1, 2, 2],
+            "three communities fit a budget of three, so the finest level wins",
+        );
+        assert_eq!(
+            flatten_to_budget(&levels, 6, 2),
+            vec![0, 0, 0, 0, 0, 0],
+            "over budget, the walk composes up a level",
+        );
+        assert_eq!(
+            flatten_to_budget(&levels, 6, 1),
+            vec![0, 0, 0, 0, 0, 0],
+            "a budget nothing satisfies still stops at the coarsest level there is",
+        );
+    }
+
+    /// A graph with no edges has no hierarchy, and then every vertex is its own
+    /// community — which is the truth about that graph, not a fallback.
+    #[test]
+    fn flatten_without_a_hierarchy_isolates_every_vertex() {
+        assert_eq!(flatten_to_budget(&[], 4, 2_048), vec![0, 1, 2, 3]);
     }
 
     /// Degenerate shapes must not panic or invent levels.
