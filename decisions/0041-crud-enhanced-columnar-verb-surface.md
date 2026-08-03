@@ -192,8 +192,17 @@ diferencia que es sobre todo el recuento.
 | | conservadas / incidentes | retención | nulo | bola |
 |---|---|---|---|---|
 | 1M, WCC | 589 / 225.448 | **0,26 %** | 0,17 % | 4,55 % |
-| 1M, comunidades | 27.366 / 200.839 | **13,63 %** | 0,16 % | 4,55 % |
-| 5M, comunidades | 13.669 / 231.853 | **5,90 %** | 0,06 % | 1,71 % |
+| 1M, comunidades | 78.094 / 137.024 | **56,99 %** | 0,21 % | 4,55 % |
+| 5M, comunidades | 91.119 / 143.147 | **63,65 %** | 0,04 % | 1,71 % |
+
+Llegar ahí requirió una separación que no estaba en este ADR. `cluster_id` y la
+colocación responden a preguntas distintas y no pueden ser la misma partición: el modo
+agregado responde un supernodo por clúster bajo un `LIMIT`, así que `cluster_id` tiene
+que quedarse grueso, mientras que la colocación quiere lo contrario — comunidades lo
+bastante pequeñas como para que quepan varias en una ventana. Con una sola partición
+para ambos usos la maquetación se quedaba en 13,63 %, porque el presupuesto la empujaba
+a la cima de la jerarquía, donde toda comunidad es raíz y ordenar hermanos no ordena
+nada. Separadas, 56,99 %.
 
 Tres correcciones salen de medirlo, y las tres afectan a lo que este ADR afirmaba:
 
