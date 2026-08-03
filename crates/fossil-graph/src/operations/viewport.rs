@@ -7,6 +7,13 @@
 //! SQL with a `WHERE x BETWEEN … AND y BETWEEN …` clause so `DuckDB`'s
 //! predicate-pushdown skips non-matching morton-sorted Parquet row groups.
 //!
+//! **Indices in a result are slice-local.** They number the answer, not the
+//! corpus: `dense_id` numbers within one vertex type, so a union of two types
+//! repeats every value, and a `LIMIT` breaks the correspondence with position
+//! regardless. The consumer's next move is a buffer upload, so the numbering it
+//! is handed is the position in this answer. What identifies a vertex across
+//! answers is the pair `(type_idx, dense_id)`, which the query still carries.
+//!
 //! `set_selection` is the crossfilter bridge: it accepts a Mosaic-style
 //! filter expression and stashes it in the executor so subsequent verb
 //! calls inherit the filter. The shape mirrors `@uwdata/mosaic-core::Selection`
@@ -54,6 +61,11 @@ const fn default_viewport_limit() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewportResult {
     pub mode: ViewportMode,
+    /// How many vertices **matched**, before `limit` cut them.
+    ///
+    /// Separate from `vertices.len()` on purpose: the difference is how a view
+    /// says "there is more here than I am showing you", and without it a
+    /// truncated answer looks exactly like a complete one.
     pub n: u32,
     /// Always present; in aggregate mode the entries are super-nodes
     /// (cluster centroids) with `cluster_id` populated.
@@ -70,6 +82,10 @@ pub enum ViewportMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewportVertex {
+    /// This vertex's position **in this answer** — what `ViewportEdge` refers to
+    /// and what a GPU buffer is indexed by. See the module note: it is not the
+    /// `GraphAr` dense id, which is ambiguous across vertex types and does not
+    /// survive a `LIMIT`.
     pub dense_id: u32,
     pub x: f32,
     pub y: f32,
@@ -81,6 +97,11 @@ pub struct ViewportVertex {
     pub cluster_id: Option<u32>,
 }
 
+/// An edge both of whose endpoints are in the answer.
+///
+/// Endpoints are indices into `ViewportResult::vertices`, not dense ids — an
+/// edge is only emitted when both ends survived the bbox and the limit, because
+/// one that reaches off screen has nowhere to land.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewportEdge {
     pub src_dense: u32,

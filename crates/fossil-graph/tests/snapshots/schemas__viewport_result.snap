@@ -18,6 +18,7 @@ properties:
   mode:
     $ref: "#/definitions/ViewportMode"
   n:
+    description: "How many vertices **matched**, before `limit` cut them.\n\nSeparate from `vertices.len()` on purpose: the difference is how a view says \"there is more here than I am showing you\", and without it a truncated answer looks exactly like a complete one."
     type: integer
     format: uint32
     minimum: 0
@@ -28,6 +29,7 @@ properties:
       $ref: "#/definitions/ViewportVertex"
 definitions:
   ViewportEdge:
+    description: "An edge both of whose endpoints are in the answer.\n\nEndpoints are indices into `ViewportResult::vertices`, not dense ids — an edge is only emitted when both ends survived the bbox and the limit, because one that reaches off screen has nowhere to land."
     type: object
     required:
       - dst_dense
@@ -68,6 +70,7 @@ definitions:
         format: uint32
         minimum: 0
       dense_id:
+        description: "This vertex's position **in this answer** — what `ViewportEdge` refers to and what a GPU buffer is indexed by. See the module note: it is not the `GraphAr` dense id, which is ambiguous across vertex types and does not survive a `LIMIT`."
         type: integer
         format: uint32
         minimum: 0

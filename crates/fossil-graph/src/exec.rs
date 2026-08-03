@@ -32,7 +32,7 @@ use crate::operations::discovery::{
 use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::operations::viewport::{
     MaterializeGraphParams, MaterializeGraphResult, MaterializedEdge, MaterializedVertex,
-    ViewportMode, ViewportParams, ViewportResult, ViewportVertex,
+    ViewportEdge, ViewportMode, ViewportParams, ViewportResult, ViewportVertex,
 };
 use crate::operations::schema::{
     DescribeFieldParams, DescribeFieldResult, DescribeVertexTypeParams, DescribeVertexTypeResult,
@@ -427,13 +427,161 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Viewport verb ─────────────────────────────────────────────────────
 
+    /// The larger-than-RAM read path: what is in this rectangle, at this zoom,
+    /// in at most `limit` marks.
+    ///
+    /// Two modes and they are not variants of each other. Below `lod_threshold`
+    /// the reader is looking at everything, and everything is not a picture of
+    /// anything — so the answer is one super-node per cluster rather than a
+    /// million dots that overplot into a smear.
     async fn viewport(&self, p: &ViewportParams) -> Result<ViewportResult> {
-        // W0b detail mode: a bbox scan over each vertex type's layout columns,
-        // returning typed-array-ready dense indices. Aggregate (LOD) mode and a
-        // meaningful spatial result depend on writer-W3 (it fills x/y from a real
-        // layout + morton-sorts the Parquet for predicate pushdown); until then
-        // x/y are 0.0 placeholders and every node sits at the origin.
-        let bbox = &p.bbox;
+        if p.zoom < p.lod_threshold {
+            self.viewport_aggregate(p).await
+        } else {
+            self.viewport_detail(p).await
+        }
+    }
+
+    /// One row per visible vertex, plus the edges both of whose endpoints are
+    /// visible.
+    ///
+    /// **Indices are slice-local, not `dense_id`.** A `dense_id` numbers within
+    /// one vertex type, so a union of two types repeats every value, and a
+    /// `LIMIT` breaks the correspondence with position regardless. The
+    /// consumer's next move is a GPU buffer upload, so the numbering it needs is
+    /// the position in *this answer* — which `row_number()` assigns inside the
+    /// CTE, before the limit, so the edge join speaks the same numbers the
+    /// vertex array is built from. `dense_id` and `type_idx` still ride along:
+    /// together they identify the vertex, which is what survives the slice.
+    async fn viewport_detail(&self, p: &ViewportParams) -> Result<ViewportResult> {
+        let Some(scan) = self.viewport_scan_sql(p) else {
+            return Ok(ViewportResult {
+                mode: ViewportMode::Detail,
+                n: 0,
+                vertices: Vec::new(),
+                edges: Vec::new(),
+            });
+        };
+
+        // The numbering is over what survives the limit. Numbering first and
+        // limiting after would hand out indices into an array never built.
+        let cte = format!(
+            "WITH vis AS (SELECT *, (row_number() OVER (ORDER BY type_idx, dense_id) - 1)::UINTEGER \
+             AS local FROM ({scan}) LIMIT {})",
+            p.limit
+        );
+
+        let rows = self
+            .exec
+            .query_json(&format!(
+                "{cte} SELECT local, dense_id, x, y, type_idx FROM vis ORDER BY local"
+            ))
+            .await?;
+        let vertices: Vec<ViewportVertex> = rows.iter().map(row_to_viewport_vertex).collect();
+
+        let edges = match self.viewport_edges_sql(p) {
+            Some(edge_sql) => self
+                .exec
+                .query_json(&format!("{cte} {edge_sql}"))
+                .await?
+                .iter()
+                .map(|r| ViewportEdge {
+                    src_dense: json_u32(r, "src"),
+                    dst_dense: json_u32(r, "dst"),
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+
+        // What *matched*, separately from what came back. Without it a truncated
+        // view looks exactly like a complete one, which is the one thing a
+        // bounded renderer must not do to its reader.
+        let matched = self
+            .exec
+            .query_json(&format!("SELECT count(*) AS n FROM ({scan})"))
+            .await?
+            .first()
+            .map_or(0, |r| json_u32(r, "n"));
+
+        Ok(ViewportResult {
+            mode: ViewportMode::Detail,
+            n: matched,
+            vertices,
+            edges,
+        })
+    }
+
+    /// Zoomed out far enough that individual vertices are not information: one
+    /// super-node per `(type_idx, cluster_id)`, at its centroid, weighted by how
+    /// many real vertices it stands for.
+    ///
+    /// Grouped by the pair rather than by `cluster_id` alone, because the writer
+    /// partitions each vertex type independently — cluster 0 of `Person` and
+    /// cluster 0 of `Org` are different clusters wearing the same number, and
+    /// merging them would place a centroid between two communities that share
+    /// nothing but an integer.
+    ///
+    /// The aggregation is a `GROUP BY` in `DuckDB`, so the bytes crossing the
+    /// wire are already the answer rather than the input to it — which is the
+    /// whole of the larger-than-RAM claim at this zoom.
+    async fn viewport_aggregate(&self, p: &ViewportParams) -> Result<ViewportResult> {
+        let Some(scan) = self.viewport_scan_sql(p) else {
+            return Ok(ViewportResult {
+                mode: ViewportMode::Aggregate,
+                n: 0,
+                vertices: Vec::new(),
+                edges: Vec::new(),
+            });
+        };
+
+        let sql = format!(
+            "SELECT (row_number() OVER (ORDER BY type_idx, cluster_id) - 1)::UINTEGER AS local, \
+             any_value(dense_id) AS dense_id, avg(x) AS x, avg(y) AS y, type_idx, cluster_id, \
+             count(*)::UINTEGER AS cluster_size \
+             FROM ({scan}) GROUP BY type_idx, cluster_id LIMIT {}",
+            p.limit
+        );
+        let rows = self.exec.query_json(&sql).await?;
+        let vertices: Vec<ViewportVertex> = rows
+            .iter()
+            .map(|r| ViewportVertex {
+                dense_id: json_u32(r, "local"),
+                x: json_f32(r, "x"),
+                y: json_f32(r, "y"),
+                type_idx: u8::try_from(json_u32(r, "type_idx")).unwrap_or(0),
+                cluster_size: Some(json_u32(r, "cluster_size")),
+                cluster_id: Some(json_u32(r, "cluster_id")),
+            })
+            .collect();
+
+        let matched = self
+            .exec
+            .query_json(&format!("SELECT count(*) AS n FROM ({scan})"))
+            .await?
+            .first()
+            .map_or(0, |r| json_u32(r, "n"));
+
+        Ok(ViewportResult {
+            mode: ViewportMode::Aggregate,
+            n: matched,
+            vertices,
+            edges: Vec::new(),
+        })
+    }
+
+    /// The bbox scan, one `SELECT` per requested vertex type, unioned.
+    ///
+    /// The `WHERE` is a plain range on `x`/`y` on purpose: that is the shape
+    /// `DuckDB` pushes into Parquet row-group statistics, and the writer's
+    /// Morton sort (`fossil-runtime::layout`) is what makes those statistics
+    /// tight enough to skip most of the file. Written any other way — a
+    /// function call over the columns, a computed distance — the pushdown is
+    /// lost and the verb reads the whole corpus to answer about a window.
+    ///
+    /// `None` when no vertex type matches, which is a legitimate answer rather
+    /// than an error: a caller may filter to a type this graph does not have.
+    fn viewport_scan_sql(&self, p: &ViewportParams) -> Option<String> {
+        let b = &p.bbox;
         let parts: Vec<String> = self
             .manifest
             .vertices()
@@ -448,55 +596,47 @@ impl<E: DuckExecutor> Context<'_, E> {
             })
             .map(|(v, idx)| {
                 format!(
-                    "SELECT dense_id, x, y, {idx} AS type_idx FROM {tbl} \
+                    "SELECT dense_id, x, y, cluster_id, {idx}::UTINYINT AS type_idx FROM {tbl} \
                      WHERE x BETWEEN {xmin} AND {xmax} AND y BETWEEN {ymin} AND {ymax}",
                     tbl = quote_ident(&v.vertex_type),
-                    xmin = bbox.x_min,
-                    xmax = bbox.x_max,
-                    ymin = bbox.y_min,
-                    ymax = bbox.y_max,
+                    xmin = b.x_min,
+                    xmax = b.x_max,
+                    ymin = b.y_min,
+                    ymax = b.y_max,
                 )
             })
             .collect();
+        (!parts.is_empty()).then(|| parts.join(" UNION ALL "))
+    }
 
-        if parts.is_empty() {
-            return Ok(ViewportResult {
-                mode: ViewportMode::Detail,
-                n: 0,
-                vertices: Vec::new(),
-                edges: Vec::new(),
-            });
-        }
-
-        let sql = format!("{} LIMIT {}", parts.join(" UNION ALL "), p.limit);
-        let vertices: Vec<ViewportVertex> = self
-            .exec
-            .query_json(&sql)
-            .await?
+    /// Edges whose **both** endpoints are in `vis` — an edge with one end off
+    /// screen has nowhere to land, so it is dropped rather than drawn to a
+    /// vertex the consumer was never sent.
+    ///
+    /// The join is per edge type and matches on `type_idx` as well as
+    /// `dense_id`, because a dense id alone is ambiguous across vertex types.
+    fn viewport_edges_sql(&self, p: &ViewportParams) -> Option<String> {
+        let parts: Vec<String> = self
+            .manifest
+            .edges()
             .iter()
-            .map(|r| ViewportVertex {
-                dense_id: r
-                    .get("dense_id")
-                    .and_then(Value::as_u64)
-                    .and_then(|n| u32::try_from(n).ok())
-                    .unwrap_or(0),
-                x: json_f32(r, "x"),
-                y: json_f32(r, "y"),
-                type_idx: r
-                    .get("type_idx")
-                    .and_then(Value::as_u64)
-                    .and_then(|n| u8::try_from(n).ok())
-                    .unwrap_or(0),
-                cluster_size: None,
-                cluster_id: None,
+            .filter(|e| {
+                p.vertex_types.is_empty()
+                    || (p.vertex_types.iter().any(|t| t == &e.src_type)
+                        && p.vertex_types.iter().any(|t| t == &e.dst_type))
+            })
+            .filter_map(|e| {
+                let src = self.manifest.vertex_type_idx(&e.src_type)?;
+                let dst = self.manifest.vertex_type_idx(&e.dst_type)?;
+                Some(format!(
+                    "SELECT s.local AS src, t.local AS dst FROM {tbl} e \
+                     JOIN vis s ON e.src_dense = s.dense_id AND s.type_idx = {src} \
+                     JOIN vis t ON e.dst_dense = t.dense_id AND t.type_idx = {dst}",
+                    tbl = quote_ident(&edge_table_name(e)),
+                ))
             })
             .collect();
-        Ok(ViewportResult {
-            mode: ViewportMode::Detail,
-            n: u32::try_from(vertices.len()).unwrap_or(u32::MAX),
-            vertices,
-            edges: Vec::new(),
-        })
+        (!parts.is_empty()).then(|| parts.join(" UNION ALL "))
     }
 
     /// Canvas-ready whole-graph snapshot: vertices with resolved
@@ -910,6 +1050,32 @@ fn json_f32(row: &Value, key: &str) -> f32 {
     row.get(key)
         .and_then(Value::as_f64)
         .map_or(0.0, |v| v as f32)
+}
+
+/// A row column as `u32`, `0` when absent or out of range.
+fn json_u32(row: &Value, key: &str) -> u32 {
+    row.get(key)
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0)
+}
+
+/// One detail-mode row to a [`ViewportVertex`].
+///
+/// `dense_id` carries the **slice-local** index — the position in the answer
+/// being built, which is what an edge refers to and what a GPU buffer is
+/// indexed by. The vertex's own dense id is still selected by the query and
+/// pairs with `type_idx` to identify it, for a caller that needs to ask about
+/// one afterwards.
+fn row_to_viewport_vertex(row: &Value) -> ViewportVertex {
+    ViewportVertex {
+        dense_id: json_u32(row, "local"),
+        x: json_f32(row, "x"),
+        y: json_f32(row, "y"),
+        type_idx: u8::try_from(json_u32(row, "type_idx")).unwrap_or(0),
+        cluster_size: None,
+        cluster_id: None,
+    }
 }
 
 /// Extract a row column that is a JSON array of strings (a `DuckDB` `VARCHAR[]`).
@@ -1581,39 +1747,102 @@ mod tests {
         assert_eq!(r.edges[1].target, "urn:c");
     }
 
+    /// The viewport params for a bbox big enough to hold the fixture, at `zoom`.
+    fn viewport_params(zoom: f32) -> crate::operations::viewport::ViewportParams {
+        crate::operations::viewport::ViewportParams {
+            bbox: crate::operations::viewport::BoundingBox {
+                x_min: 0.0,
+                y_min: 0.0,
+                x_max: 10.0,
+                y_max: 10.0,
+            },
+            zoom,
+            lod_threshold: 0.5,
+            limit: 1000,
+            vertex_types: Vec::new(),
+        }
+    }
+
     #[test]
-    fn viewport_detail_maps_dense_indices() {
+    fn viewport_detail_numbers_the_answer_and_joins_edges_to_it() {
         let m = fixture();
+        // The verb asks three different questions, so the fake answers three —
+        // a stub that returns one shape for every query cannot tell a vertex
+        // scan from a count, and silently made `n` zero when it was asked.
         let exec = FnExec(|sql: &str| {
+            if sql.contains("count(*)") {
+                return vec![serde_json::json!({ "n": 7 })];
+            }
+            if sql.contains("AS src") {
+                // Both endpoints are in `vis`, so the edge speaks slice-local.
+                return vec![serde_json::json!({ "src": 0, "dst": 1 })];
+            }
             assert!(sql.contains("x BETWEEN") && sql.contains("y BETWEEN"));
+            assert!(sql.contains("row_number()"), "the answer must be numbered");
             vec![
-                serde_json::json!({ "dense_id": 0, "x": 1.5, "y": 2.0, "type_idx": 0 }),
-                serde_json::json!({ "dense_id": 1, "x": 3.0, "y": 4.0, "type_idx": 0 }),
+                serde_json::json!({ "local": 0, "dense_id": 4, "x": 1.5, "y": 2.0, "type_idx": 0 }),
+                serde_json::json!({ "local": 1, "dense_id": 9, "x": 3.0, "y": 4.0, "type_idx": 0 }),
             ]
         });
-        let v = run(
-            &Operation::Viewport(crate::operations::viewport::ViewportParams {
-                bbox: crate::operations::viewport::BoundingBox {
-                    x_min: 0.0,
-                    y_min: 0.0,
-                    x_max: 10.0,
-                    y_max: 10.0,
-                },
-                zoom: 1.0,
-                lod_threshold: 0.5,
-                limit: 1000,
-                vertex_types: Vec::new(),
-            }),
-            &m,
-            &exec,
-        )
-        .unwrap();
+        let v = run(&Operation::Viewport(viewport_params(1.0)), &m, &exec).unwrap();
+
         let r: ViewportResult = serde_json::from_value(v).unwrap();
         assert_eq!(r.mode, ViewportMode::Detail);
-        assert_eq!(r.n, 2);
+        // What matched, not what came back — the honesty column.
+        assert_eq!(r.n, 7);
         assert_eq!(r.vertices.len(), 2);
+        // The index is the position in this answer, not the corpus's dense id
+        // (4 and 9 here), which repeats across types and dies at the limit.
         assert_eq!(r.vertices[0].dense_id, 0);
+        assert_eq!(r.vertices[1].dense_id, 1);
         assert!((r.vertices[1].x - 3.0).abs() < f32::EPSILON);
+        assert_eq!(r.edges.len(), 1);
+        assert_eq!(r.edges[0].src_dense, 0);
+        assert_eq!(r.edges[0].dst_dense, 1);
+    }
+
+    #[test]
+    fn viewport_below_the_threshold_answers_super_nodes() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            if sql.contains("count(*) AS n FROM (") {
+                return vec![serde_json::json!({ "n": 5000 })];
+            }
+            // Grouped by the pair: cluster 0 of one type is not cluster 0 of
+            // another, and merging them would centroid across two communities
+            // that share nothing but an integer.
+            assert!(sql.contains("GROUP BY type_idx, cluster_id"));
+            vec![
+                serde_json::json!({ "local": 0, "x": 1.0, "y": 1.0, "type_idx": 0, "cluster_id": 0, "cluster_size": 3000 }),
+                serde_json::json!({ "local": 1, "x": 8.0, "y": 8.0, "type_idx": 0, "cluster_id": 1, "cluster_size": 2000 }),
+            ]
+        });
+        let v = run(&Operation::Viewport(viewport_params(0.1)), &m, &exec).unwrap();
+
+        let r: ViewportResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.mode, ViewportMode::Aggregate);
+        // A view of everything is a few marks whatever the corpus holds.
+        assert_eq!(r.n, 5000);
+        assert_eq!(r.vertices.len(), 2);
+        assert_eq!(r.vertices[0].cluster_size, Some(3000));
+        assert_eq!(r.vertices[1].cluster_id, Some(1));
+    }
+
+    #[test]
+    fn viewport_scan_keeps_the_predicate_pushdown_shape() {
+        // A plain range on x/y is what DuckDB pushes into Parquet row-group
+        // statistics, and the writer's Morton sort is what makes those
+        // statistics tight. Written any other way the verb reads the whole
+        // corpus to answer about a window, which is the entire point lost.
+        let m = fixture();
+        let exec = FnExec(|_: &str| Vec::new());
+        let ctx = Context {
+            manifest: &m,
+            exec: &exec,
+        };
+        let sql = ctx.viewport_scan_sql(&viewport_params(1.0)).unwrap();
+        assert!(sql.contains("WHERE x BETWEEN 0 AND 10 AND y BETWEEN 0 AND 10"));
+        assert!(!sql.contains("sqrt") && !sql.contains("abs("));
     }
 
     #[test]
