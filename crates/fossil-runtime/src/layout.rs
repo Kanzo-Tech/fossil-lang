@@ -189,10 +189,46 @@ use duckdb::Connection;
 /// URL verbatim and `DuckDB`'s httpfs/object-store extension dereferences it.
 #[derive(Debug, Clone)]
 pub struct VertexLayoutTarget {
+    /// Schema label, e.g. `"Person"` — what an [`AdjacencyTarget`] names to say
+    /// which `dense_id` space each of its two endpoint columns lives in.
+    pub type_name: String,
     /// Vertex Parquet URL (e.g. `file://…/vertex/Person.parquet`, `s3://…`).
     pub vertex_parquet: String,
     /// This type's self-edge CSR Parquet URLs.
     pub self_edge_csr: Vec<String>,
+}
+
+/// Which endpoint column an adjacency list is sorted by — `GraphAr`'s
+/// `aligned_by`, i.e. CSR (`Src`) or CSC (`Dst`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endpoint {
+    /// Ordered by `src_dense` — the CSR orientation.
+    Src,
+    /// Ordered by `dst_dense` — the CSC orientation.
+    Dst,
+}
+
+/// One adjacency-list Parquet, and everything needed to rewrite it when the
+/// `dense_id` numbering underneath it changes.
+///
+/// **Every** file referencing a renumbered vertex type has to be listed, on
+/// either endpoint and in both orientations. The layout used to take only the
+/// same-type `by_source` files, which was enough while it read edges and wrote
+/// nothing back to them; the moment `dense_id` values change it is not, because
+/// a `by_target` file and a cross-type file hold the same ids and would be left
+/// pointing at whoever inherited their numbers. Nothing would fail — the column
+/// is still a valid `UINTEGER` — so the corruption is silent, which is why the
+/// caller is made to enumerate rather than the layout to guess.
+#[derive(Debug, Clone)]
+pub struct AdjacencyTarget {
+    /// The adjacency Parquet URL.
+    pub parquet: String,
+    /// Schema label of the type `src_dense` indexes.
+    pub src_type: String,
+    /// Schema label of the type `dst_dense` indexes.
+    pub dst_type: String,
+    /// The manifest declares `ordered: true`, so this says ordered by *what*.
+    pub ordered_by: Endpoint,
 }
 
 /// Failure modes of [`enrich_layout`].
@@ -205,22 +241,67 @@ pub enum LayoutError {
         #[source]
         source: duckdb::Error,
     },
+    /// An [`AdjacencyTarget`] named a type no [`VertexLayoutTarget`] provides,
+    /// so its endpoints could not be renumbered.
+    #[error("adjacency `{target}` references vertex type `{vertex_type}`, which was not laid out")]
+    UnknownVertexType { target: String, vertex_type: String },
+    /// The renumbering join dropped rows, which means an endpoint referenced a
+    /// `dense_id` no vertex has.
+    ///
+    /// Worth an error rather than a warning: the rewrite is an inner join, so a
+    /// dangling endpoint does not fail, it *disappears* — and an adjacency list
+    /// quietly missing edges reads downstream as a sparser graph, not as a bug.
+    #[error("renumbering `{target}` dropped {dropped} of {before} rows — dangling endpoints")]
+    DanglingEndpoint {
+        target: String,
+        before: u64,
+        dropped: u64,
+    },
 }
 
 /// Replace the W0b placeholder `x`/`y`/`cluster_id` columns of each vertex
-/// Parquet with a real community partition + deterministic placement.
+/// Parquet with a real community partition + deterministic placement, and
+/// **renumber `dense_id` into Morton order**, remapping every adjacency list.
 ///
-/// Per target: count vertices (`max(dense_id)+1`), read self-edges, run
-/// [`community_hierarchy`] + [`cluster_layout`], stage the result in a
-/// temp table, and rewrite the Parquet via `SELECT * REPLACE (...)`. Row ORDER
-/// is preserved (no morton sort yet — a later slice), so `dense_id` values are
-/// unchanged and every edge stays valid. The COPY writes a sibling `.tmp` then
-/// renames over the original (never reads + writes the same file in one stmt).
+/// # Why the renumbering is here and not in the writer
+///
+/// `GraphAr` defines chunk *i* as the `dense_id` range `[i·chunk_size,
+/// (i+1)·chunk_size)`, so a chunk is a spatial tile only if `dense_id` ascends
+/// with position. `finalize_vertex` numbers in IRI order, and this pass used to
+/// reorder the *rows* by Morton code while leaving the *values* alone — which
+/// made the file's physical order spatial and its chunk definition not. Measured
+/// on the five-million corpus in 41 chunks, a window touched 41 of 41 chunks by
+/// `dense_id` and 6 of 41 by physical row order (ADR-0041 §2).
+///
+/// ADR-0041 assumed this meant moving the layout ahead of the edge phase. It
+/// does not: this pass already runs last, holding the `DuckDB` connection, with
+/// every adjacency already written as Parquet. Renumbering after the fact is a
+/// join against a mapping table, which is strictly less invasive than reordering
+/// the phases.
+///
+/// # What it does
+///
+/// Vertices first, all of them, because an adjacency spans two types and cannot
+/// be rewritten until both mappings exist. Per type: count vertices, read
+/// self-edges, run [`community_hierarchy`] + [`cluster_layout`], derive the
+/// Morton rank of each vertex, and stage `dense_id → (new_dense_id, x, y,
+/// cluster_id)`. The vertex Parquet is then rewritten ordered by the new id, so
+/// physical row order and `dense_id` order become the same thing — which is the
+/// invariant chunking needs and the one that was missing.
+///
+/// Then every adjacency: both endpoints remapped through their own type's
+/// mapping, and **re-sorted**, because the manifest declares `ordered: true` and
+/// a CSR sorted on `src_dense` stops being sorted the moment those values change.
 ///
 /// # Errors
 ///
-/// Returns [`LayoutError`] on the first failing `DuckDB` op or rename.
-pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Result<(), LayoutError> {
+/// Returns [`LayoutError`] on the first failing `DuckDB` op, on an adjacency
+/// naming an unknown vertex type, or on a renumbering that dropped rows.
+pub fn enrich_layout(
+    conn: &Connection,
+    targets: &[VertexLayoutTarget],
+    adjacencies: &[AdjacencyTarget],
+) -> Result<(), LayoutError> {
     // Where the next vertex type's grid starts, so the types do not stack. Each
     // is laid out independently and `cluster_layout` always begins at the
     // origin, so without this every type occupies the same coordinates and a
@@ -229,13 +310,22 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
     // with each other but their position. See `place_after`.
     let mut origin_x = 0.0f32;
 
-    for target in targets {
+    for (index, target) in targets.iter().enumerate() {
         let vurl = target.vertex_parquet.as_str();
         let vname = vurl.to_string();
         let duck = |source: duckdb::Error| LayoutError::Duck {
             target: vname.clone(),
             source,
         };
+
+        // Created even for an empty type, so phase two can join against it and
+        // report a dangling endpoint rather than fail to find a table.
+        let map = map_table(index);
+        conn.execute_batch(&format!(
+            "CREATE OR REPLACE TEMP TABLE {map} \
+             (dense_id UINTEGER, new_dense_id UINTEGER, x REAL, y REAL, cluster_id UINTEGER)"
+        ))
+        .map_err(duck)?;
 
         let vertex_count: u32 = conn
             .query_row(
@@ -298,29 +388,23 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
         origin_x = place_after(&mut positions, origin_x);
 
         let morton = morton_codes(&positions);
+        let new_ids = morton_ranks(&morton);
 
-        // Stage (dense_id, x, y, cluster_id, morton) in a temp table via the
-        // Appender. `morton` is used only for ORDER BY — it is NOT carried into
-        // the output Parquet (the rewrite SELECTs the vertex columns only).
-        conn.execute_batch(
-            "CREATE OR REPLACE TEMP TABLE __fossil_layout \
-             (dense_id UINTEGER, x REAL, y REAL, cluster_id UINTEGER, morton UINTEGER)",
-        )
-        .map_err(duck)?;
+        // Stage dense_id → (new_dense_id, x, y, cluster_id) via the Appender.
         {
-            let mut appender = conn.appender("__fossil_layout").map_err(duck)?;
-            for (dense_id, (&(x, y), (&cluster_id, &morton_code))) in positions
+            let mut appender = conn.appender(&map).map_err(duck)?;
+            for (dense_id, (&(x, y), (&cluster_id, &new_dense_id))) in positions
                 .iter()
-                .zip(clusters.iter().zip(morton.iter()))
+                .zip(clusters.iter().zip(new_ids.iter()))
                 .enumerate()
             {
                 appender
                     .append_row(duckdb::params![
                         dense_id as u32,
+                        new_dense_id,
                         x,
                         y,
-                        cluster_id,
-                        morton_code
+                        cluster_id
                     ])
                     .map_err(duck)?;
             }
@@ -340,25 +424,119 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
         ))
         .map_err(duck)?;
 
-        // Rewrite: same columns, x/y/cluster_id replaced from the temp table,
-        // rows reordered by Morton(x,y) so a bbox viewport query prunes via
-        // row-group stats. `dense_id` VALUES are unchanged (only the row order),
-        // so every edge stays valid.
+        // Rewrite: same columns, x/y/cluster_id and dense_id all replaced from
+        // the mapping, rows ordered by the new id. Ordering by the new id *is*
+        // ordering by Morton code — that is what the new id is — so the file
+        // comes out with its physical row order and its `dense_id` order in
+        // agreement, which is the property a GraphAr chunk range needs and the
+        // one this pass used to leave broken.
         conn.execute_batch(&format!(
-            "COPY (SELECT v.* REPLACE (l.x AS x, l.y AS y, l.cluster_id AS cluster_id) \
-             FROM __fossil_vertices v JOIN __fossil_layout l USING (dense_id) \
-             ORDER BY l.morton) \
+            "COPY (SELECT v.* REPLACE (m.new_dense_id AS dense_id, m.x AS x, m.y AS y, \
+             m.cluster_id AS cluster_id) \
+             FROM __fossil_vertices v JOIN {map} m USING (dense_id) \
+             ORDER BY m.new_dense_id) \
              TO '{}' (FORMAT PARQUET)",
             sql_lit(vurl),
         ))
         .map_err(duck)?;
 
         // Free the staged vertices before the next target (each type can be
-        // large; the temp table is single-use per iteration).
+        // large; the temp table is single-use per iteration). The mapping stays
+        // — phase two needs every type's at once.
         conn.execute_batch("DROP TABLE IF EXISTS __fossil_vertices")
             .map_err(duck)?;
     }
+
+    let index_of = |name: &str, target: &str| {
+        targets
+            .iter()
+            .position(|t| t.type_name == name)
+            .ok_or_else(|| LayoutError::UnknownVertexType {
+                target: target.to_string(),
+                vertex_type: name.to_string(),
+            })
+    };
+
+    for adjacency in adjacencies {
+        let aurl = adjacency.parquet.as_str();
+        let aname = aurl.to_string();
+        let duck = |source: duckdb::Error| LayoutError::Duck {
+            target: aname.clone(),
+            source,
+        };
+        let src_map = map_table(index_of(&adjacency.src_type, aurl)?);
+        let dst_map = map_table(index_of(&adjacency.dst_type, aurl)?);
+
+        conn.execute_batch(&format!(
+            "CREATE OR REPLACE TEMP TABLE __fossil_adjacency AS \
+             SELECT * FROM read_parquet('{}')",
+            sql_lit(aurl)
+        ))
+        .map_err(duck)?;
+        let before: u64 = conn
+            .query_row("SELECT count(*) FROM __fossil_adjacency", [], |r| r.get(0))
+            .map_err(duck)?;
+
+        // Re-sorted, not just remapped. `adj_lists` declares `ordered: true`, and
+        // a CSR sorted on `src_dense` stops being sorted the instant those values
+        // are replaced — with no error anywhere, because the column is still a
+        // perfectly good UINTEGER. A reader trusting the manifest would binary
+        // search a list that is no longer in order.
+        let order = match adjacency.ordered_by {
+            Endpoint::Src => "s.new_dense_id, d.new_dense_id",
+            Endpoint::Dst => "d.new_dense_id, s.new_dense_id",
+        };
+        conn.execute_batch(&format!(
+            "COPY (SELECT e.* REPLACE (s.new_dense_id AS src_dense, d.new_dense_id AS dst_dense) \
+             FROM __fossil_adjacency e \
+             JOIN {src_map} s ON s.dense_id = e.src_dense \
+             JOIN {dst_map} d ON d.dense_id = e.dst_dense \
+             ORDER BY {order}) \
+             TO '{}' (FORMAT PARQUET)",
+            sql_lit(aurl),
+        ))
+        .map_err(duck)?;
+
+        let after: u64 = conn
+            .query_row(
+                &format!("SELECT count(*) FROM read_parquet('{}')", sql_lit(aurl)),
+                [],
+                |r| r.get(0),
+            )
+            .map_err(duck)?;
+        if after != before {
+            return Err(LayoutError::DanglingEndpoint {
+                target: aname,
+                before,
+                dropped: before - after,
+            });
+        }
+
+        conn.execute_batch("DROP TABLE IF EXISTS __fossil_adjacency")
+            .map_err(duck)?;
+    }
     Ok(())
+}
+
+/// Name of the temp table holding vertex type `index`'s `dense_id` mapping.
+fn map_table(index: usize) -> String {
+    format!("__fossil_map_{index}")
+}
+
+/// Rank each vertex by its Morton code — its position in the renumbering.
+///
+/// Ties are broken by the old `dense_id`, so the ranking is total and the same
+/// input yields the same numbering on every run. Two vertices sharing a code is
+/// the common case rather than an edge case: the codes quantise to 16 bits per
+/// axis, and a community packs many vertices into far less than one bucket.
+fn morton_ranks(morton: &[u32]) -> Vec<u32> {
+    let mut order: Vec<u32> = (0..morton.len() as u32).collect();
+    order.sort_unstable_by_key(|&i| (morton[i as usize], i));
+    let mut rank = vec![0u32; morton.len()];
+    for (new_id, &old_id) in order.iter().enumerate() {
+        rank[old_id as usize] = new_id as u32;
+    }
+    rank
 }
 
 /// Translate one vertex type's layout to start at `origin_x`, and answer where

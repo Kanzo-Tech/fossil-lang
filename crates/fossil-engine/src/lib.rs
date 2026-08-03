@@ -404,6 +404,12 @@ fn enrich_written_layout(graph: &fossil_df::GraphArData, dest_dir: &Path) -> mie
         .map_err(|e| miette::miette!("apply duckdb resource limits: {e}"))?;
 
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
+    let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
+        path_str(format!(
+            "edge/{}_{}_{}/{file}.parquet",
+            e.src_type, e.label, e.dst_type
+        ))
+    };
     let targets: Vec<fossil_runtime::layout::VertexLayoutTarget> = graph
         .schema
         .nodes
@@ -413,20 +419,40 @@ fn enrich_written_layout(graph: &fossil_df::GraphArData, dest_dir: &Path) -> mie
                 .edges
                 .iter()
                 .filter(|e| e.src_type == node.label && e.dst_type == node.label)
-                .map(|e| {
-                    path_str(format!(
-                        "edge/{}_{}_{}/by_source.parquet",
-                        e.src_type, e.label, e.dst_type
-                    ))
-                })
+                .map(|e| adjacency(e, "by_source"))
                 .collect();
             fossil_runtime::layout::VertexLayoutTarget {
+                type_name: node.label.clone(),
                 vertex_parquet: path_str(format!("vertex/{}.parquet", node.label)),
                 self_edge_csr,
             }
         })
         .collect();
-    fossil_runtime::layout::enrich_layout(&conn, &targets)
+
+    // Every adjacency file, both orientations, cross-type included — the layout
+    // renumbers `dense_id`, and a file left out keeps ids that now belong to
+    // somebody else. Enumerated here rather than derived there because this is
+    // the side that has the schema: a missed file is a silent corruption, so
+    // naming the set is the caller's job and not a guess.
+    let adjacencies: Vec<fossil_runtime::layout::AdjacencyTarget> = graph
+        .edges
+        .iter()
+        .flat_map(|e| {
+            use fossil_runtime::layout::Endpoint;
+            [
+                (adjacency(e, "by_source"), Endpoint::Src),
+                (adjacency(e, "by_target"), Endpoint::Dst),
+            ]
+            .map(|(parquet, ordered_by)| fossil_runtime::layout::AdjacencyTarget {
+                parquet,
+                src_type: e.src_type.clone(),
+                dst_type: e.dst_type.clone(),
+                ordered_by,
+            })
+        })
+        .collect();
+
+    fossil_runtime::layout::enrich_layout(&conn, &targets, &adjacencies)
         .map_err(|e| miette::miette!("layout: {e}"))
 }
 
