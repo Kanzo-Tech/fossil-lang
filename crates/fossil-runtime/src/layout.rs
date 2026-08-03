@@ -193,7 +193,18 @@ pub struct VertexLayoutTarget {
     /// which `dense_id` space each of its two endpoint columns lives in.
     pub type_name: String,
     /// Vertex Parquet URL (e.g. `file://…/vertex/Person.parquet`, `s3://…`).
+    ///
+    /// This is the writer's single-file output and is **read, not written**: the
+    /// enriched vertices are emitted as chunks under [`Self::chunk_prefix`].
     pub vertex_parquet: String,
+    /// Where the chunks go — the manifest's `prefix`, e.g. `…/vertex/Person/`,
+    /// trailing separator included. Files are named `chunk{k}.parquet`
+    /// (ADR-0016).
+    pub chunk_prefix: String,
+    /// Rows per chunk — the manifest's `chunk_size`. The manifest and the files
+    /// have to agree, so this comes from whoever wrote the manifest rather than
+    /// being a constant here.
+    pub chunk_size: u64,
     /// This type's self-edge CSR Parquet URLs.
     pub self_edge_csr: Vec<String>,
 }
@@ -285,9 +296,16 @@ pub enum LayoutError {
 /// be rewritten until both mappings exist. Per type: count vertices, read
 /// self-edges, run [`community_hierarchy`] + [`cluster_layout`], derive the
 /// Morton rank of each vertex, and stage `dense_id → (new_dense_id, x, y,
-/// cluster_id)`. The vertex Parquet is then rewritten ordered by the new id, so
-/// physical row order and `dense_id` order become the same thing — which is the
-/// invariant chunking needs and the one that was missing.
+/// cluster_id)`. The enriched vertices are then emitted **as chunks** under
+/// [`VertexLayoutTarget::chunk_prefix`] — `chunk{k}.parquet`, `chunk_size` rows
+/// each, which is what the manifest has declared since it was first written and
+/// what `fossil-sinks` deferred as "lands in plan 05-08". The writer's
+/// single-file output is the input to this and is not written back.
+///
+/// **Vertices only, so far.** `GraphAr` also partitions adjacency lists by the
+/// source vertex's chunk (`src_chunk_size`); those are renumbered and re-sorted
+/// here but still emitted whole. The bbox prune a viewport does is a vertex
+/// scan, so this is the half that prunes; the edge half is a later slice.
 ///
 /// Then every adjacency: both endpoints remapped through their own type's
 /// mapping, and **re-sorted**, because the manifest declares `ordered: true` and
@@ -424,26 +442,44 @@ pub fn enrich_layout(
         ))
         .map_err(duck)?;
 
-        // Rewrite: same columns, x/y/cluster_id and dense_id all replaced from
-        // the mapping, rows ordered by the new id. Ordering by the new id *is*
-        // ordering by Morton code — that is what the new id is — so the file
-        // comes out with its physical row order and its `dense_id` order in
-        // agreement, which is the property a GraphAr chunk range needs and the
-        // one this pass used to leave broken.
+        // The enriched rows: same columns, x/y/cluster_id and dense_id all
+        // replaced from the mapping. Ordering by the new id *is* ordering by
+        // Morton code — that is what the new id is — so a `dense_id` range and a
+        // contiguous run of the picture are the same set of rows, which is the
+        // property a GraphAr chunk needs and the one this pass used to leave
+        // broken.
         conn.execute_batch(&format!(
-            "COPY (SELECT v.* REPLACE (m.new_dense_id AS dense_id, m.x AS x, m.y AS y, \
+            "CREATE OR REPLACE TEMP TABLE __fossil_enriched AS \
+             SELECT v.* REPLACE (m.new_dense_id AS dense_id, m.x AS x, m.y AS y, \
              m.cluster_id AS cluster_id) \
-             FROM __fossil_vertices v JOIN {map} m USING (dense_id) \
-             ORDER BY m.new_dense_id) \
-             TO '{}' (FORMAT PARQUET)",
-            sql_lit(vurl),
+             FROM __fossil_vertices v JOIN {map} m USING (dense_id)"
         ))
         .map_err(duck)?;
 
+        // One Parquet per chunk, which is the whole point: a chunk is an HTTP
+        // resource a browser and a CDN can cache, where row groups inside one
+        // file share a footer and a single URL. Measured on the five-million
+        // corpus, 200 chunks take 0.18 s to write and come out at 20 kB each, so
+        // the loop the naming convention forces is not the cost it looks like —
+        // `PARTITION_BY` would be one statement but emits `chunk=0/data_0.parquet`
+        // rather than the `chunk{k}.parquet` ADR-0016 specifies.
+        let chunks = u64::from(vertex_count).div_ceil(target.chunk_size);
+        for k in 0..chunks {
+            let lo = k * target.chunk_size;
+            let hi = lo + target.chunk_size;
+            conn.execute_batch(&format!(
+                "COPY (SELECT * FROM __fossil_enriched \
+                 WHERE dense_id >= {lo} AND dense_id < {hi} ORDER BY dense_id) \
+                 TO '{}chunk{k}.parquet' (FORMAT PARQUET)",
+                sql_lit(&target.chunk_prefix),
+            ))
+            .map_err(duck)?;
+        }
+
         // Free the staged vertices before the next target (each type can be
-        // large; the temp table is single-use per iteration). The mapping stays
+        // large; the temp tables are single-use per iteration). The mapping stays
         // — phase two needs every type's at once.
-        conn.execute_batch("DROP TABLE IF EXISTS __fossil_vertices")
+        conn.execute_batch("DROP TABLE IF EXISTS __fossil_vertices; DROP TABLE IF EXISTS __fossil_enriched")
             .map_err(duck)?;
     }
 

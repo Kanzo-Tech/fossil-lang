@@ -424,10 +424,21 @@ fn enrich_written_layout(graph: &fossil_df::GraphArData, dest_dir: &Path) -> mie
             fossil_runtime::layout::VertexLayoutTarget {
                 type_name: node.label.clone(),
                 vertex_parquet: path_str(format!("vertex/{}.parquet", node.label)),
+                // Trailing separator: the layout appends `chunk{k}.parquet`.
+                chunk_prefix: path_str(format!("vertex/{}/", node.label)),
+                // The same constant the manifest is written with, so the files
+                // and the promise cannot drift apart.
+                chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
                 self_edge_csr,
             }
         })
         .collect();
+
+    // DuckDB's COPY writes a file, not the directory above it.
+    for target in &targets {
+        std::fs::create_dir_all(&target.chunk_prefix)
+            .map_err(|e| miette::miette!("create chunk dir {}: {e}", target.chunk_prefix))?;
+    }
 
     // Every adjacency file, both orientations, cross-type included — the layout
     // renumbers `dense_id`, and a file left out keeps ids that now belong to
@@ -453,7 +464,16 @@ fn enrich_written_layout(graph: &fossil_df::GraphArData, dest_dir: &Path) -> mie
         .collect();
 
     fossil_runtime::layout::enrich_layout(&conn, &targets, &adjacencies)
-        .map_err(|e| miette::miette!("layout: {e}"))
+        .map_err(|e| miette::miette!("layout: {e}"))?;
+
+    // The single-file vertex Parquet was this pass's input and nothing reads it
+    // afterwards: the manifest points at the chunk prefix, and leaving it would
+    // be a second copy of every vertex, stale the moment anything is re-run.
+    for target in &targets {
+        std::fs::remove_file(&target.vertex_parquet)
+            .map_err(|e| miette::miette!("remove staged {}: {e}", target.vertex_parquet))?;
+    }
+    Ok(())
 }
 
 /// Materialise a DCAT-AP catalog graph from a [`CatalogRequest`]. The catalog's

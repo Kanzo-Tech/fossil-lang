@@ -71,6 +71,7 @@ fn targets(
     vertices: &Path,
     by_source: &Path,
     by_target: &Path,
+    chunks: &Path,
 ) -> (Vec<VertexLayoutTarget>, Vec<AdjacencyTarget>) {
     let adjacency = |p: &Path, ordered_by| AdjacencyTarget {
         parquet: p.to_string_lossy().into_owned(),
@@ -82,6 +83,11 @@ fn targets(
         vec![VertexLayoutTarget {
             type_name: "Node".to_string(),
             vertex_parquet: vertices.to_string_lossy().into_owned(),
+            chunk_prefix: format!("{}{}", chunks.to_string_lossy(), std::path::MAIN_SEPARATOR),
+            // Two rows per chunk over six vertices, so the emission is exercised
+            // as three chunks and a boundary rather than as one file wearing a
+            // chunk's name.
+            chunk_size: 2,
             self_edge_csr: vec![by_source.to_string_lossy().into_owned()],
         }],
         vec![
@@ -91,18 +97,21 @@ fn targets(
     )
 }
 
+/// All chunks as one relation — what a `GraphAr` reader sees.
+fn glob(chunks: &Path) -> String {
+    format!("{}/*.parquet", lit(chunks))
+}
+
 /// Edges as pairs of **subjects**, which is the one description of the graph
 /// that renumbering is not allowed to change.
-fn edges_by_subject(conn: &Connection, vertices: &Path, adjacency: &Path) -> Vec<(String, String)> {
+fn edges_by_subject(conn: &Connection, all: &str, adjacency: &Path) -> Vec<(String, String)> {
     let mut stmt = conn
         .prepare(&format!(
             "SELECT s.subject, d.subject FROM read_parquet('{}') e \
-             JOIN read_parquet('{}') s ON s.dense_id = e.src_dense \
-             JOIN read_parquet('{}') d ON d.dense_id = e.dst_dense \
+             JOIN read_parquet('{all}') s ON s.dense_id = e.src_dense \
+             JOIN read_parquet('{all}') d ON d.dense_id = e.dst_dense \
              ORDER BY 1, 2",
             lit(adjacency),
-            lit(vertices),
-            lit(vertices)
         ))
         .expect("prepare subject join");
     let rows = stmt
@@ -120,62 +129,77 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     let root = dir("renumber");
     let conn = Connection::open_in_memory().expect("duckdb");
     let (vertices, by_source, by_target) = write_corpus(&conn, &root, &EDGES);
+    let chunks = root.join("chunks");
+    fs::create_dir_all(&chunks).expect("chunk dir");
 
-    let before = edges_by_subject(&conn, &vertices, &by_source);
-    let (v, a) = targets(&vertices, &by_source, &by_target);
+    // The graph as it stands before the layout touches it, read off the writer's
+    // single file — the only point at which that file is the source of truth.
+    let before = edges_by_subject(&conn, &lit(&vertices), &by_source);
+    let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
     fossil_runtime::layout::enrich_layout(&conn, &v, &a).expect("enrich_layout");
 
     // 1. The graph is the same graph. Ids changed; who is connected to whom did
     //    not. This is the assertion a missed adjacency file fails.
     assert_eq!(
         before,
-        edges_by_subject(&conn, &vertices, &by_source),
+        edges_by_subject(&conn, &glob(&chunks), &by_source),
         "renumbering changed which subjects are connected",
     );
     assert_eq!(
         before,
-        edges_by_subject(&conn, &vertices, &by_target),
+        edges_by_subject(&conn, &glob(&chunks), &by_target),
         "by_target disagrees with by_source about the graph",
     );
 
     // 2. Ids stay dense and gap-free — a chunk range means nothing otherwise.
+    let all = glob(&chunks);
     assert_eq!(
         scalar(
             &conn,
-            &format!(
-                "SELECT count(*) FROM read_parquet('{}') WHERE dense_id NOT BETWEEN 0 AND 5",
-                lit(&vertices)
-            )
+            &format!("SELECT count(DISTINCT dense_id) FROM read_parquet('{all}')")
+        ),
+        6,
+        "dense_id is not a gap-free permutation of 0..n-1",
+    );
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!("SELECT count(*) FROM read_parquet('{all}') WHERE dense_id NOT BETWEEN 0 AND 5")
         ),
         0,
         "dense_id left the range 0..n-1",
     );
-    assert_eq!(
-        scalar(
-            &conn,
-            &format!(
-                "SELECT count(DISTINCT dense_id) FROM read_parquet('{}')",
-                lit(&vertices)
-            )
-        ),
-        6,
-        "dense_id is not a permutation",
-    );
 
-    // 3. Physical row order == dense_id order. This is the whole point: GraphAr
-    //    defines chunk i as the dense_id range [i*size, (i+1)*size), so a chunk
-    //    is a contiguous slice of the file only if the two agree.
+    // 3. Each chunk holds exactly the dense_id range GraphAr says it does, and
+    //    holds it in order. This is what the whole renumbering was for: chunk k
+    //    is [k*size, (k+1)*size), so unless the ids land that way a chunk is a
+    //    file name and not a tile. Six vertices at two per chunk is three files.
+    let mut found = 0;
+    for k in 0..3u64 {
+        let chunk = chunks.join(format!("chunk{k}.parquet"));
+        assert!(chunk.exists(), "missing {}", chunk.display());
+        found += 1;
+        assert_eq!(
+            scalar(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM (SELECT dense_id, row_number() OVER () - 1 + {} AS pos \
+                     FROM read_parquet('{}')) WHERE dense_id <> pos",
+                    k * 2,
+                    lit(&chunk)
+                )
+            ),
+            0,
+            "chunk {k} is not the dense_id range [{}, {}) in order",
+            k * 2,
+            k * 2 + 2,
+        );
+    }
+    assert_eq!(found, 3);
     assert_eq!(
-        scalar(
-            &conn,
-            &format!(
-                "SELECT count(*) FROM (SELECT dense_id, row_number() OVER () - 1 AS pos \
-                 FROM read_parquet('{}')) WHERE dense_id <> pos",
-                lit(&vertices)
-            )
-        ),
-        0,
-        "the file's row order and its dense_id order disagree",
+        fs::read_dir(&chunks).expect("read chunk dir").count(),
+        3,
+        "extra chunk files were emitted",
     );
 
     // 4. Both adjacency lists are sorted on the endpoint they declare. The
@@ -219,8 +243,10 @@ fn a_dangling_endpoint_is_an_error_and_not_a_missing_row() {
     let mut edges = EDGES.to_vec();
     edges.push((0, 99)); // no such vertex
     let (vertices, by_source, by_target) = write_corpus(&conn, &root, &edges);
+    let chunks = root.join("chunks");
+    fs::create_dir_all(&chunks).expect("chunk dir");
 
-    let (v, a) = targets(&vertices, &by_source, &by_target);
+    let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
     let err = fossil_runtime::layout::enrich_layout(&conn, &v, &a)
         .expect_err("a dangling endpoint must not pass silently");
     assert!(
@@ -238,8 +264,10 @@ fn an_unknown_vertex_type_is_refused() {
     let root = dir("unknown_type");
     let conn = Connection::open_in_memory().expect("duckdb");
     let (vertices, by_source, by_target) = write_corpus(&conn, &root, &EDGES);
+    let chunks = root.join("chunks");
+    fs::create_dir_all(&chunks).expect("chunk dir");
 
-    let (v, mut a) = targets(&vertices, &by_source, &by_target);
+    let (v, mut a) = targets(&vertices, &by_source, &by_target, &chunks);
     a[0].dst_type = "Nowhere".to_string();
     let err = fossil_runtime::layout::enrich_layout(&conn, &v, &a).expect_err("unknown type");
     assert!(
