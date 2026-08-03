@@ -177,6 +177,38 @@ es que la ruta acotada sea el camino de arranque en frío y la GPU se hidrate po
 
 `/view/showcases/graph-bench` en `kanzo-ui` ejecuta las mismas dos consultas que el verbo hasta cinco
 millones y separa primer pintado, pan, actualizaciones/s y techo de redibujado. **Dos números tienen
-que moverse: la retención de aristas en una ventana (1,4 %), que valida Leiden y va primero; y el pan
+que moverse: la retención de aristas en una ventana, que valida la jerarquía y va primero; y el pan
 a cinco millones (331 ms), que debe caer a la banda de 40 ms y dejar de crecer con N.** Controles que
 deben seguir planos: `count(*)` 7–9 ms, transferencia 23 ms, techo de redibujado en miles de fps.
+
+### El primero, medido (2026-08-03)
+
+`enrich_layout` particiona por `community_hierarchy` en vez de por componentes conexas
+(`fossil-runtime` 9ee4770). Arnés: `corpus/measure-retention.mjs`, cinco ventanas de 3.500 nodos cada
+una, definidas **por rango** — el cuadrado más pequeño centrado en un nodo que contiene exactamente
+*k* — porque un rectángulo fijo atrapa recuentos muy distintos en dos maquetaciones y reportaría una
+diferencia que es sobre todo el recuento.
+
+| | conservadas / incidentes | retención | nulo | bola |
+|---|---|---|---|---|
+| 1M, WCC | 589 / 225.448 | **0,26 %** | 0,17 % | 4,55 % |
+| 1M, comunidades | 27.366 / 200.839 | **13,63 %** | 0,16 % | 4,55 % |
+| 5M, comunidades | 13.669 / 231.853 | **5,90 %** | 0,06 % | 1,71 % |
+
+Tres correcciones salen de medirlo, y las tres afectan a lo que este ADR afirmaba:
+
+- **El 1,4 % estaba puntuado contra un nulo del doble de lo que toca.** Para una ventana aleatoria
+  `conservadas ≈ E·(k/N)²` frente a `incidentes ≈ 2E·k/N`, así que el azar es `(k/N)/2` y no `k/N`.
+  La maquetación vieja no era «cuatro veces el azar» sino 1,5 veces: aún más plana de lo que decíamos.
+- **La bola BFS es una referencia, no un techo.** Es lo que da la topología sola, sin maquetación de
+  por medio, y la maquetación por comunidades la triplica — una bola gasta casi todo su presupuesto
+  en una frontera cuyas aristas apuntan todas hacia fuera. El máximo alcanzable sigue sin acotarse.
+- **`cluster_layout` tenía un defecto que la partición vieja escondía.** Un clúster de *n* se empaqueta
+  en un disco de radio `12·√n`, que pasa el paso fijo de 100 unidades a los 70 vértices; una única
+  componente gigante no tiene vecino con quien solaparse, y por eso nunca se vio. El paso se mide
+  ahora desde el clúster más grande.
+
+Lo que **no** cambia: el algoritmo es Louvain, no Leiden. Falta la pasada de refinamiento que
+garantiza que una comunidad esté internamente conexa. Y la maquetación sigue siendo de un solo nivel
+— la retícula ordena las comunidades por id, así que dos comunidades muy conectadas caen lejos por
+casualidad. Ambas cosas son trabajo pendiente, no supuestos ya cobrados.
