@@ -40,6 +40,10 @@ const CLUSTER_SPACING: f32 = 100.0;
 /// Intra-cluster packing radius scale (kept well below [`CLUSTER_SPACING`] so
 /// same-cluster nodes stay closer to each other than to other clusters).
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;
+/// Empty space between one vertex type's region and the next — two cluster
+/// cells, so the seam between types reads as deliberate rather than as a gap
+/// that happened.
+const TYPE_GUTTER: f32 = CLUSTER_SPACING * 2.0;
 
 /// Assign each vertex `0..vertex_count` a dense, contiguous `cluster_id` via
 /// weakly-connected components (union-find with path halving).
@@ -169,6 +173,14 @@ pub enum LayoutError {
 ///
 /// Returns [`LayoutError`] on the first failing `DuckDB` op or rename.
 pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Result<(), LayoutError> {
+    // Where the next vertex type's grid starts, so the types do not stack. Each
+    // is laid out independently and `cluster_layout` always begins at the
+    // origin, so without this every type occupies the same coordinates and a
+    // two-type graph renders as one blob with its communities interleaved at
+    // random — and a bbox query answers with vertices that have nothing to do
+    // with each other but their position. See `place_after`.
+    let mut origin_x = 0.0f32;
+
     for target in targets {
         let vurl = target.vertex_parquet.as_str();
         let vname = vurl.to_string();
@@ -208,7 +220,15 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
         }
 
         let clusters = weakly_connected_components(vertex_count, &edges);
-        let positions = cluster_layout(&clusters);
+        let mut positions = cluster_layout(&clusters);
+
+        // Slide this type clear of the ones already placed. The Morton codes are
+        // computed *after* the shift, because they quantise against the position
+        // list's own bounding box — coding first would sort the rows by a
+        // geometry the file no longer has, and the row-group statistics a bbox
+        // query prunes on would describe somewhere else.
+        origin_x = place_after(&mut positions, origin_x);
+
         let morton = morton_codes(&positions);
 
         // Stage (dense_id, x, y, cluster_id, morton) in a temp table via the
@@ -271,6 +291,29 @@ pub fn enrich_layout(conn: &Connection, targets: &[VertexLayoutTarget]) -> Resul
             .map_err(duck)?;
     }
     Ok(())
+}
+
+/// Translate one vertex type's layout to start at `origin_x`, and answer where
+/// the next type should start.
+///
+/// [`cluster_layout`] always begins at the origin, so laying several types out
+/// independently puts every one of them in the same place. Read back through the
+/// `viewport` verb that is worse than ugly: a rectangle answers with vertices
+/// from unrelated types that share nothing but coordinates, and the picture
+/// looks like a graph rather than like a mistake.
+///
+/// The gap is [`TYPE_GUTTER`], wide enough that the seam reads as a seam. This
+/// separates the types; it does not lay them out together — cross-type edges
+/// still pull on nothing, which is the later slice
+/// (`.planning/W3-LAYOUT-PLAN.md` §5). Separated is wrong in a way a reader can
+/// see and reason about; overlapped is wrong in a way that looks like data.
+fn place_after(positions: &mut [(f32, f32)], origin_x: f32) -> f32 {
+    let mut width = 0.0f32;
+    for (x, _) in positions.iter_mut() {
+        width = width.max(*x);
+        *x += origin_x;
+    }
+    origin_x + width + TYPE_GUTTER
 }
 
 /// Escape a URL for embedding in a single-quoted `DuckDB` SQL string literal
@@ -396,6 +439,37 @@ mod tests {
     }
 
     #[test]
+    fn place_after_separates_types_instead_of_stacking_them() {
+        // Two types laid out independently both start at the origin, which is
+        // how a two-type graph rendered as one blob with its communities
+        // interleaved at random — and a bbox query answered with vertices that
+        // share nothing but a coordinate.
+        let mut first = cluster_layout(&[0, 0, 1, 1]);
+        let mut second = cluster_layout(&[0, 0, 1, 1]);
+        assert_eq!(first, second, "independently, the two types coincide");
+
+        let next = place_after(&mut first, 0.0);
+        place_after(&mut second, next);
+
+        let first_right = first.iter().fold(f32::MIN, |m, &(x, _)| m.max(x));
+        let second_left = second.iter().fold(f32::MAX, |m, &(x, _)| m.min(x));
+        assert!(
+            second_left > first_right,
+            "the second type starts ({second_left}) clear of the first ({first_right})",
+        );
+    }
+
+    #[test]
+    fn place_after_leaves_a_single_type_where_it_was() {
+        // The common case is one vertex type, and it must not be pushed off the
+        // origin by the machinery that exists for the several-type case.
+        let mut only = cluster_layout(&[0, 0, 1]);
+        let untouched = only.clone();
+        place_after(&mut only, 0.0);
+        assert_eq!(only, untouched);
+    }
+
+    #[test]
     fn morton2_interleaves_bits() {
         // x bits in even positions, y bits in odd. (1,0)→0b01=1; (0,1)→0b10=2;
         // (1,1)→0b11=3; (3,0)→0b0101=5.
@@ -419,5 +493,369 @@ mod tests {
         // All same y (range 0 on that axis) → no div-by-zero.
         let codes = morton_codes(&[(0.0, 5.0), (10.0, 5.0)]);
         assert_eq!(codes.len(), 2);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// W3.2 — the community hierarchy the LOD pyramid is built from.
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Modularity-based community detection, returning the **whole hierarchy**
+/// rather than one partition.
+///
+/// This is what [`weakly_connected_components`] cannot give. WCC is a
+/// reachability partition, so on a connected graph it answers "one community"
+/// — measured on a 5M-vertex benchmark corpus it put 1,998 of 2,000 vertices in
+/// a single cluster, and a viewport window then retained **375 of 27,244
+/// incident edges (1.4%)**, barely four times chance. Positions derived from
+/// that partition are topology-blind, and a spatial index over topology-blind
+/// positions is fast access to noise.
+///
+/// The hierarchy is the point, not a by-product: level *l* is a graph whose
+/// nodes are level *l−1*'s communities, which is exactly the quotient graph a
+/// level-of-detail pyramid needs. `contract` stops being a query verb and
+/// becomes how a level is built.
+///
+/// # What this is and is not
+///
+/// This is **Louvain** (local moving + aggregation, maximising modularity), not
+/// Leiden. Leiden adds a *refinement* pass that guarantees every community is
+/// internally well-connected; Louvain can emit communities that are internally
+/// disconnected, which for a viewport shows up as a "community" whose members
+/// sit together on screen while having no path between them. Naming it honestly
+/// matters more than claiming the better algorithm: the refinement pass is a
+/// separate slice, and it slots in between the local-moving loop and the
+/// aggregation below without changing this signature.
+///
+/// Deterministic: nodes are visited in index order and ties are broken by lower
+/// community id, so the same input yields the same hierarchy on every run — no
+/// RNG, like everything else in this module.
+///
+/// # Returns
+///
+/// One entry per level. `levels[0][v]` is the community of original vertex `v`;
+/// `levels[l][c]` is the parent community of level-`l` community `c`. Community
+/// ids at every level are dense (`0..k`). The vector is empty for an empty
+/// graph, and stops as soon as a pass merges nothing.
+#[must_use]
+pub fn community_hierarchy(vertex_count: u32, edges: &[(u32, u32)]) -> Vec<Vec<u32>> {
+    if vertex_count == 0 {
+        return Vec::new();
+    }
+    let mut levels: Vec<Vec<u32>> = Vec::new();
+    let mut graph = Weighted::from_edges(vertex_count, edges);
+
+    loop {
+        let membership = local_moving(&graph);
+        let community_count = membership.iter().copied().max().map_or(0, |m| m + 1);
+        // A pass that merges nothing is where the hierarchy ends: recording it
+        // would add a level that is a copy of the one below.
+        if community_count as usize == graph.node_count() {
+            break;
+        }
+        graph = graph.contract(&membership, community_count);
+        levels.push(membership);
+        if community_count <= 1 {
+            break;
+        }
+    }
+    levels
+}
+
+/// An undirected weighted graph in CSR, with self-loops kept apart.
+///
+/// Self-loops are separate because aggregation creates them — a community's
+/// internal edges become one — and because they enter the degree twice while
+/// appearing once in the adjacency. Folding them into `targets` would make
+/// every later sum quietly wrong by a factor of two.
+struct Weighted {
+    offsets: Vec<usize>,
+    targets: Vec<u32>,
+    weights: Vec<f64>,
+    /// Weight of each node's self-loop, counted **once**.
+    self_loops: Vec<f64>,
+    /// Sum of incident weights plus twice the self-loop — the `k_i` of the
+    /// modularity formula.
+    degrees: Vec<f64>,
+    /// Total edge weight `m`, i.e. half the sum of all degrees.
+    total: f64,
+}
+
+impl Weighted {
+    const fn node_count(&self) -> usize {
+        self.self_loops.len()
+    }
+
+    /// Build from an unweighted, possibly duplicated edge list. Parallel edges
+    /// add their weights rather than being deduplicated: two links between the
+    /// same pair really are a stronger tie, and modularity is defined over
+    /// weights.
+    fn from_edges(vertex_count: u32, edges: &[(u32, u32)]) -> Self {
+        let n = vertex_count as usize;
+        let mut degree_count = vec![0usize; n];
+        for &(a, b) in edges {
+            if (a as usize) < n && (b as usize) < n && a != b {
+                degree_count[a as usize] += 1;
+                degree_count[b as usize] += 1;
+            }
+        }
+        let mut offsets = Vec::with_capacity(n + 1);
+        let mut acc = 0usize;
+        offsets.push(0);
+        for d in &degree_count {
+            acc += *d;
+            offsets.push(acc);
+        }
+        let mut cursor = offsets.clone();
+        let mut targets = vec![0u32; acc];
+        let mut weights = vec![0.0f64; acc];
+        let mut self_loops = vec![0.0f64; n];
+        for &(a, b) in edges {
+            if (a as usize) >= n || (b as usize) >= n {
+                continue;
+            }
+            if a == b {
+                self_loops[a as usize] += 1.0;
+                continue;
+            }
+            targets[cursor[a as usize]] = b;
+            weights[cursor[a as usize]] = 1.0;
+            cursor[a as usize] += 1;
+            targets[cursor[b as usize]] = a;
+            weights[cursor[b as usize]] = 1.0;
+            cursor[b as usize] += 1;
+        }
+        Self::finish(offsets, targets, weights, self_loops)
+    }
+
+    fn finish(
+        offsets: Vec<usize>,
+        targets: Vec<u32>,
+        weights: Vec<f64>,
+        self_loops: Vec<f64>,
+    ) -> Self {
+        let n = self_loops.len();
+        let mut degrees = vec![0.0f64; n];
+        for v in 0..n {
+            let incident: f64 = weights[offsets[v]..offsets[v + 1]].iter().sum();
+            degrees[v] = 2.0f64.mul_add(self_loops[v], incident);
+        }
+        let total = degrees.iter().sum::<f64>() / 2.0;
+        Self {
+            offsets,
+            targets,
+            weights,
+            self_loops,
+            degrees,
+            total,
+        }
+    }
+
+    fn neighbours(&self, v: usize) -> impl Iterator<Item = (u32, f64)> + '_ {
+        (self.offsets[v]..self.offsets[v + 1]).map(|i| (self.targets[i], self.weights[i]))
+    }
+
+    /// The quotient graph: one node per community, intra-community weight
+    /// folded into a self-loop, inter-community weight summed.
+    fn contract(&self, membership: &[u32], community_count: u32) -> Self {
+        let k = community_count as usize;
+        let mut acc: Vec<std::collections::HashMap<u32, f64>> =
+            vec![std::collections::HashMap::new(); k];
+        let mut self_loops = vec![0.0f64; k];
+        for v in 0..self.node_count() {
+            let cv = membership[v];
+            // Each node's own self-loop carries over whole.
+            self_loops[cv as usize] += self.self_loops[v];
+            for (u, w) in self.neighbours(v) {
+                let cu = membership[u as usize];
+                if cu == cv {
+                    // Counted once per direction, so half lands here and half
+                    // when the other endpoint is visited.
+                    self_loops[cv as usize] += w / 2.0;
+                } else {
+                    *acc[cv as usize].entry(cu).or_insert(0.0) += w;
+                }
+            }
+        }
+        let mut offsets = Vec::with_capacity(k + 1);
+        let mut targets = Vec::new();
+        let mut weights = Vec::new();
+        offsets.push(0);
+        for row in &acc {
+            // Sorted so the structure is a pure function of the input, not of
+            // hash iteration order.
+            let mut entries: Vec<(u32, f64)> = row.iter().map(|(c, w)| (*c, *w)).collect();
+            entries.sort_unstable_by_key(|(c, _)| *c);
+            for (c, w) in entries {
+                targets.push(c);
+                weights.push(w);
+            }
+            offsets.push(targets.len());
+        }
+        Self::finish(offsets, targets, weights, self_loops)
+    }
+}
+
+/// One Louvain local-moving pass: repeatedly move each node to the neighbouring
+/// community that most increases modularity, until a sweep moves nothing.
+///
+/// The gain of moving isolated node `i` into community `C` is proportional to
+/// `k_i_in - Σ_tot(C)·k_i / (2m)`; the constant factor is the same for every
+/// candidate, so only the comparison matters and it is never divided out.
+fn local_moving(graph: &Weighted) -> Vec<u32> {
+    let n = graph.node_count();
+    let mut community: Vec<u32> = (0..n as u32).collect();
+    if graph.total <= 0.0 {
+        // No edges: every node is its own community and nothing can improve.
+        return community;
+    }
+    // Σ_tot per community — the sum of degrees of its members.
+    let mut totals: Vec<f64> = graph.degrees.clone();
+    let two_m = 2.0 * graph.total;
+
+    let mut moved = true;
+    let mut sweeps = 0;
+    // Bounded because a pathological tie could otherwise oscillate; Louvain
+    // converges in a handful of sweeps in practice.
+    while moved && sweeps < 32 {
+        moved = false;
+        sweeps += 1;
+        for v in 0..n {
+            let own = community[v];
+            let k_v = graph.degrees[v];
+            // Weight from v into each neighbouring community.
+            let mut into: std::collections::HashMap<u32, f64> = std::collections::HashMap::new();
+            for (u, w) in graph.neighbours(v) {
+                *into.entry(community[u as usize]).or_insert(0.0) += w;
+            }
+            // Remove v from its community before comparing, so staying put is
+            // evaluated on the same footing as moving.
+            totals[own as usize] -= k_v;
+
+            let mut best = own;
+            let mut best_gain =
+                totals[own as usize].mul_add(-k_v / two_m, into.get(&own).copied().unwrap_or(0.0));
+            let mut candidates: Vec<(u32, f64)> = into.iter().map(|(c, w)| (*c, *w)).collect();
+            candidates.sort_unstable_by_key(|(c, _)| *c);
+            for (c, w_in) in candidates {
+                if c == own {
+                    continue;
+                }
+                let gain = totals[c as usize].mul_add(-k_v / two_m, w_in);
+                // Strictly greater keeps the lower community id on a tie, which
+                // is what makes the result reproducible.
+                if gain > best_gain {
+                    best_gain = gain;
+                    best = c;
+                }
+            }
+            totals[best as usize] += k_v;
+            if best != own {
+                community[v] = best;
+                moved = true;
+            }
+        }
+    }
+    densify(&mut community);
+    community
+}
+
+/// Relabel community ids to `0..k` in order of first appearance, so every level
+/// hands the next one a dense node range.
+fn densify(community: &mut [u32]) {
+    let mut seen: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for c in community.iter_mut() {
+        let next = seen.len() as u32;
+        *c = *seen.entry(*c).or_insert(next);
+    }
+}
+
+#[cfg(test)]
+mod hierarchy_tests {
+    use super::*;
+
+    /// Two cliques joined by a single edge is the canonical case: modularity
+    /// must find the two cliques, where WCC finds one component.
+    #[test]
+    fn two_cliques_joined_by_a_bridge_become_two_communities() {
+        let mut edges = Vec::new();
+        for a in 0..4u32 {
+            for b in (a + 1)..4 {
+                edges.push((a, b));
+            }
+        }
+        for a in 4..8u32 {
+            for b in (a + 1)..8 {
+                edges.push((a, b));
+            }
+        }
+        edges.push((0, 4)); // the bridge
+
+        // What we are measured against: reachability says "one".
+        let wcc = weakly_connected_components(8, &edges);
+        assert_eq!(wcc.iter().copied().max(), Some(0), "the graph is connected");
+
+        let levels = community_hierarchy(8, &edges);
+        assert!(!levels.is_empty(), "a bridged pair of cliques must split");
+        let first = &levels[0];
+        assert_eq!(first.len(), 8);
+        for v in 1..4 {
+            assert_eq!(first[v], first[0], "clique A stays together");
+        }
+        for v in 5..8 {
+            assert_eq!(first[v], first[4], "clique B stays together");
+        }
+        assert_ne!(first[0], first[4], "the two cliques are not one community");
+    }
+
+    /// Every level's ids are dense and every level indexes the one below, or the
+    /// pyramid cannot be walked.
+    #[test]
+    fn levels_are_dense_and_stack() {
+        let mut edges = Vec::new();
+        // Four cliques of four, chained by single bridges.
+        for c in 0..4u32 {
+            let base = c * 4;
+            for a in 0..4u32 {
+                for b in (a + 1)..4 {
+                    edges.push((base + a, base + b));
+                }
+            }
+            if c > 0 {
+                edges.push((base, base - 4));
+            }
+        }
+        let levels = community_hierarchy(16, &edges);
+        assert!(!levels.is_empty());
+        assert_eq!(levels[0].len(), 16, "level 0 is indexed by vertex");
+        for (l, level) in levels.iter().enumerate() {
+            let count = level.iter().copied().max().map_or(0, |m| m + 1) as usize;
+            let mut seen = vec![false; count];
+            for &c in level {
+                seen[c as usize] = true;
+            }
+            assert!(seen.iter().all(|s| *s), "level {l} ids must be dense");
+            if let Some(next) = levels.get(l + 1) {
+                assert_eq!(next.len(), count, "level {} indexes level {l}'s output", l + 1);
+            }
+        }
+    }
+
+    /// Determinism is a promise this module makes everywhere else, so it is
+    /// tested rather than assumed.
+    #[test]
+    fn the_same_graph_gives_the_same_hierarchy() {
+        let edges: Vec<(u32, u32)> = (0..40u32).map(|i| (i % 10, (i * 7) % 10)).collect();
+        assert_eq!(community_hierarchy(10, &edges), community_hierarchy(10, &edges));
+    }
+
+    /// Degenerate shapes must not panic or invent levels.
+    #[test]
+    fn empty_and_edgeless_graphs_have_no_hierarchy() {
+        assert!(community_hierarchy(0, &[]).is_empty());
+        assert!(
+            community_hierarchy(5, &[]).is_empty(),
+            "with no edges nothing merges, so there is no level to record"
+        );
     }
 }
