@@ -181,6 +181,25 @@ Leído el código (2026-08-03), el alcance es concreto y **no** es el que este A
   ese orden — un CSR ordenado por `src_dense` deja de estarlo en cuanto los `src_dense` cambian de
   valor. Los dos ficheros no se remapean: se remapean **y se reordenan**. Un lector GraphAr que se
   fíe del manifiesto leería basura, y no habría error que lo dijese.
+**Renumerado: hecho y medido (`fossil-runtime` fc2a892).** `enrich_layout` asigna `dense_id` en
+orden Morton y remapea todas las listas de adyacencia. Cinco millones, 41 chunks, ventana de 3.500
+nodos:
+
+| | por `dense_id` (lo que lee un lector) | por orden físico |
+|---|---|---|
+| antes | 40,8 de 41 | 2,0 de 41 |
+| después | **2,0 de 41** | 2,0 de 41 |
+
+**Que las dos columnas coincidan es el resultado.** La retención es el control y no se movió —56,99 %
+y 63,65 %— porque renumerar cambia qué entero lleva un vértice, no dónde está. Ese control sólo
+funcionó tras arreglar el arnés: elegía los centros de ventana por `dense_id`, que es justo lo que
+se está midiendo, y la primera comparación muestreó ventanas distintas en los dos corpus. **Nunca
+sembrar una medición con un valor que el cambio bajo prueba puede mover.**
+
+Confirmadas las tres trampas del listado anterior, y todas con test porque ninguna falla sola.
+Queda **la emisión de los ficheros de chunks**, que es lo único que cambia el disco y por tanto lo
+único que toca a los lectores.
+
 - **`chunk_size: 1024` no sobrevive a cinco millones como tamaño de escritura.** Son 4.883 chunks de
   vértices más los de aristas, y la convención de nombre (`<prefix>chunk{k}.parquet`, ADR-0016) no la
   produce `PARTITION_BY` de DuckDB, que emite `chunk=0/data_0.parquet`. Sale un `COPY` por chunk, es
