@@ -100,3 +100,34 @@ breakage but is not the required path for v0.1.
 - **Phase 3 (`fossil-descriptors-output`)** can wire rudof directly with no fallback scaffolding. Standard `[workspace.dependencies]` declaration; standard usage in the descriptor impl.
 - **Phase 7 (playground)** can include `fossil-descriptors-output` in the `fossil-wasm` dep tree without conditional-compilation gymnastics. The "ShEx checking unavailable in playground" banner contemplated under path (d) is no longer needed.
 - **OutputDescriptor trait abstraction** is still designed (insurance + extensibility for SHACL Core in v2), but the "WasmSystem stubs it out" branch is unused for v0.1.
+
+## Re-base onto the Kanzo-Tech rudof FORK (2026-07-01)
+
+**Change:** `[workspace.dependencies]` `shex_ast`/`rudof_iri`/`prefixmap` moved from crates.io
+`"0.3"` (resolved 0.3.1) to the **Kanzo-Tech/rudof fork** at workspace version **0.3.4**
+(branch `arch/wasm-validator` — the branch that carries the `rudof_wasm` Session façade
++ a diverged `shex_ast` `ParseCtx` parser refactor). Motivation: a **single rudof engine**
+across keasy / fossil / metadata-form (metadata-form already ships `@kanzo-tech/rudof-wasm`
+built from this fork). See memory `rudof-fork-single-engine`.
+
+**Verification (2026-07-01):**
+- **Native** `cargo check -p fossil-shex -p fossil-hir` → **PASS**. The fork's `ParseCtx`
+  refactor did **not** break the `shex_ast` public API fossil consumes (`ShExParser`,
+  `Schema`, `ShapeExpr`, `TripleExpr`, …).
+- **wasm32** `cargo check --target wasm32-unknown-unknown -p fossil-hir
+  -p fossil-descriptors-output -p fossil-shex -p fossil-wasm` → **PASS**. The fork's
+  `shex_ast`/`rudof_rdf`/`rudof_iri`/`prefixmap` 0.3.4 compile clean to `wasm32` (no
+  regression from the Phase 0/3 spikes; no `tokio`/`reqwest`/`mio` leak).
+- The full `cargo xtask wasm-check` fails **only** on `fossil-df-wasm → datafusion →
+  arrow-ipc → zstd-sys` (a C lib) on toolchains whose `clang` lacks a wasm32 backend —
+  **pre-existing and unrelated to rudof** (`fossil-wasm` does not pull datafusion).
+
+**Note (dependency form):** verified locally via `path = "../rudof-fork/<crate>"` (sibling
+checkout). The portable/CI form should pin a **git rev** of `Kanzo-Tech/rudof` instead
+(subject to repo visibility/auth), or the fork's crates get published under the kanzo scope.
+
+**Toolchain caveat:** the fork's `rudof_wasm/build.sh` still uses `wasm-pack` (banned in
+this workspace's `deny.toml`). That ban governs *fossil's own* build; fossil re-bases on the
+fork's **crates** (compiled here with `wasm-bindgen-cli`), not on the fork's wasm-pack
+output — so the ban is not violated. Migrating the fork off wasm-pack remains an optional
+tooling-unification follow-up.

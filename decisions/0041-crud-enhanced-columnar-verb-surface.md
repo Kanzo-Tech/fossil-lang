@@ -61,10 +61,29 @@ cualquiera de sus extremos.
 `by_target.parquet` como ficheros únicos. `fossil-sinks/src/manifest.rs:16` lo dice — la emisión por
 chunks *"lands in plan 05-08"*. Estaba planificada y aplazada.
 
-**El orden Morton que ya calculamos convierte el chunking secuencial de GraphAr en un teselado
-espacial**: el chunk *i* lleva `[i·chunk_size, (i+1)·chunk_size)` de `dense_id`, y sobre orden Morton
-ese rango *es* una región. Y **un chunk de Parquet ya es una tesela con su índice dentro**: el
-min/max de `x`/`y` de su footer es su bounding box.
+**Un chunk de Parquet ya es una tesela con su índice dentro**: el min/max de `x`/`y` de su footer es
+su bounding box, así que el índice espacial no hay que construirlo.
+
+**Pero con el escritor de hoy el chunking de GraphAr NO sería espacial.** Medido sobre el corpus de
+cinco millones partido en 41 chunks, para una ventana de 22.216 filas:
+
+| Chunking por | Chunks tocados | Filas leídas |
+|---|---|---|
+| `dense_id` (lo que GraphAr define) | **41 de 41** | 5.000.000 |
+| Orden físico de fila (Morton) | **6 de 41** | 737.280 |
+
+`finalize_vertex` (`fossil-df`) ordena por `subject` y numera; `enrich_layout` (`fossil-runtime`)
+aplica el orden Morton **después**, como reescritura de filas. El orden *físico* del fichero es
+Morton, pero los *valores* de `dense_id` van en orden de IRI — y GraphAr define el chunk *i* como los
+`dense_id` de `[i·chunk_size, (i+1)·chunk_size)`. Sobre orden de IRI, cada chunk abarca todo el
+espacio y no poda nada.
+
+**Para que un chunk sea una tesela, `dense_id` debe asignarse en orden Morton.** Y eso cuesta más de
+lo que parece: **las tablas de aristas referencian `dense_id`**, así que renumerar los vértices
+obliga a remapear ambos extremos de todas las aristas — 35 M a cinco millones de nodos. Es
+precisamente por eso que `enrich_layout` hoy toca sólo `x`/`y`/`cluster_id` y deja la numeración en
+paz. La dependencia de orden real es: posiciones → Morton → `dense_id` → aristas, y hoy el layout
+corre después de la fase de aristas.
 
 Un borrador anterior de este ADR inventó una política de «arista al ancestro común más grueso». Era
 innecesaria: GraphAr la resuelve guardando ambas direcciones.
@@ -140,6 +159,10 @@ snapshots insta**, que fallan por diseño y son el detector de regresión.
 **Un crossfilter arbitrario no se responde desde teselas precalculadas** — se compilan para el grafo
 sin filtrar. Mapbox tiene el mismo problema y tampoco lo resuelve. Por eso `read(where:)` no
 desaparece: es el camino general, y la tesela es el camino rápido del caso espacial sin filtrar.
+
+**Renumerar por Morton es el trabajo escondido.** «Emitir chunks» suena a terminar algo declarado;
+en realidad arrastra reordenar `dense_id` y remapear los extremos de todas las aristas, y mover el
+paso de layout por delante de la fase de aristas. Presupuestarlo como una tarde es el error a evitar.
 
 **No rompe el techo por sí solo lo columnar**, y no debe venderse así: quita el marshalling y la
 materialización de golpe, no hace sublineal un escaneo O(N). Lo que rompe el techo es la pirámide.
