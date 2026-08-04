@@ -213,6 +213,21 @@ localidad Morton hace que una ventana cubra un *área* casi constante:
 control y no se movió. Escribir 4.883 chunks cuesta segundos (200 en 0,18 s, 20 kB cada uno);
 `PARTITION_BY` sería una sentencia pero emite `chunk=0/data_0.parquet` en vez del nombre de ADR-0016.
 
+**Y la afirmación de caché, medida sobre un paneo** (`corpus/measure-pan.mjs`), porque chunks
+tocados sale igual con ficheros que con rangos y no puede ver lo que compró emitirlos por separado.
+Ocho pasos de arrastre de un cuarto del ancho de la ventana, cinco millones:
+
+| `chunk_size` | aciertos | chunks pedidos | **filas en todo el paneo** |
+|---|---|---|---|
+| 1.024 | 85 % | 21 de 79 tocados | **21.504** |
+| 8.192 | 97 % | 6 | 49.152 |
+| 32.768 | 100 % | 4 | 131.072 |
+| 122.880 | 100 % | 3 | 368.640 |
+
+**La tasa de aciertos es una trampa.** Mejora con chunks más grandes por la razón que la invalida: un
+chunk que contenga el paneo entero se pide una vez y no vuelve a fallar, así que puntúa perfecto por
+haberlo descargado ya todo. La columna comparable es la carga, y ahí 1.024 gana por diecisiete veces.
+
 Dos cosas que no conviene redescubrir. **Un glob es la forma equivocada de leerlos**: expandir
 `*.parquet` es listar un directorio, y un origen HTTP plano no tiene listado — el httpfs de DuckDB
 *sí* puede contra S3, así que el error funciona con `file://`, funciona con un bucket y falla en el
