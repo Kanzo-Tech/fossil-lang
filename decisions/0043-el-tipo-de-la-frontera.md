@@ -79,6 +79,32 @@ dos lecturas de columna +35. **Neto ≈ +45 LOC, ≈ −1,7 GB.**
 **Sostenido por:** `crates/fossil-runtime/tests/layout_renumber.rs` (279 líneas, tres casos incluido el
 camino feliz) debe pasar sin tocarse. Ésa es la definición de paridad.
 
+#### Intentada el 2026-08-04, y refutada por la medición
+
+Se implementó entera: `Weights::{Unit,Stored}`, `Weighted::from_sorted` con el merge de los dos
+flujos, `community_hierarchy_sorted`, el campo `self_edge_csc`, y `enrich_layout` leyendo las dos
+sentencias en vez de construir la bolsa. Compiló y **los tres tests de paridad pasaron sin tocarse**.
+
+Y el pico subió:
+
+| | antes | con el merge |
+|---|---|---|
+| RSS al empezar `enrich_layout` | 14,61 GiB | **21,54 GiB** |
+| pico del proceso | 17,0 GiB | **24,4 GiB** |
+
+**`query_map` de `duckdb-rs` no streamea: materializa el resultado completo.** Así que las dos
+sentencias abiertas a la vez son dos conjuntos de resultados residentes — más el CSR que se está
+construyendo — donde antes había una sola `Vec`. Se cambió una copia por dos.
+
+El razonamiento de esta etapa no cae: el fichero sigue ordenado, el algoritmo sigue siendo
+secuencial, y las tres asignaciones que el tipo obliga siguen siendo innecesarias. Lo que cae es la
+suposición no comprobada de que el *driver* streamea. **Leer el CSR que ya existe requiere leer
+Parquet directamente** —`parquet`/`arrow` por row group, sin DuckDB en medio— lo que hace que esta
+etapa dependa de la 2 y la 3 en lugar de ser independiente como se afirmaba arriba.
+
+Cambio revertido; el árbol queda como estaba. Lo que sobrevive es el número, que es lo que hacía
+falta para no volver a intentarlo igual.
+
 ### Etapa 2 — el núcleo puro sale del crate que posee DuckDB
 
 Lo que pedía ADR-0042 §5, ahora con la razón medida: `community_hierarchy`, `cluster_layout`,
