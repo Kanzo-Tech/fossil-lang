@@ -234,9 +234,19 @@ Dos cosas que no conviene redescubrir. **Un glob es la forma equivocada de leerl
 navegador. El lector deriva la lista del recuento de vértices y `chunk_size`. Y **`--row-group`
 desaparece**: un chunk de 1.024 filas *es* un row group.
 
-Queda **el chunking de aristas** — GraphAr las particiona por el chunk del vértice origen
-(`src_chunk_size`); aquí se renumeran y reordenan pero se emiten enteras. La poda por bbox es un
-escaneo de vértices, así que lo emitido es la mitad que poda.
+Queda **el chunking de aristas**, y tiene una pregunta de diseño abierta que conviene resolver
+antes de escribir nada. GraphAr las particiona por el chunk del vértice origen (`src_chunk_size`) y
+luego trocea cada partición en chunks de `chunk_size` aristas. Los dos números están en `EdgeInfo`,
+pero **cuántos chunks tiene la partición *i* no sale del manifiesto**: depende de cuántas aristas
+salgan de esos 1.024 vértices, que es una distribución de grado y en un grafo hiperbólico es una ley
+de potencias. Un lector de GraphAr resuelve eso listando el directorio — y ya sabemos, por el error
+de los vértices, que **sobre HTTP plano no hay listado**. Así que hace falta o un índice emitido
+junto a las aristas, o una convención que haga derivable el recuento. Elegir eso es el primer paso,
+no la emisión.
+
+Mientras tanto las aristas se renumeran y se reordenan pero se emiten enteras. La poda por bbox es un
+escaneo de vértices, así que lo ya emitido es la mitad que poda; el join de aristas sigue siendo
+O(N).
 
 - **`chunk_size: 1024` no sobrevive a cinco millones como tamaño de escritura.** Son 4.883 chunks de
   vértices más los de aristas, y la convención de nombre (`<prefix>chunk{k}.parquet`, ADR-0016) no la
