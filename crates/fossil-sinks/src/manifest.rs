@@ -137,9 +137,31 @@ pub struct AdjList {
     pub file_type: String,
 }
 
-/// Default rows-per-chunk when a mapping does not override it. The manifest carries the value;
-/// the runtime (05-08) materializes the chunks. `1024` per `RESEARCH` §"`GraphAr` Sink".
-pub const DEFAULT_CHUNK_SIZE: u64 = 1024;
+/// Default rows-per-chunk when a mapping does not override it.
+///
+/// **A chunk is one Parquet row group**, which is what 122,880 is: `DuckDB`'s default
+/// `ROW_GROUP_SIZE`. A chunk smaller than that buys pruning the file format cannot express, and
+/// pays a whole HTTP resource for it.
+///
+/// It was 1,024 — carried from `RESEARCH` §"`GraphAr` Sink" and never measured against a reader,
+/// because until the runtime actually emitted chunks there was nothing to measure. Once it did, the
+/// same bbox query over HTTP against a million vertices came out:
+///
+/// | files | `chunk_size` | warm |
+/// |---|---|---|
+/// | 1 | — | 2 ms |
+/// | 9 | 122,880 | 3 ms |
+/// | 123 | 8,192 | 22 ms |
+/// | 977 | 1,024 | **196 ms** |
+///
+/// Linear in the file count at roughly 0.2 ms each, and that is over *localhost*, where a request
+/// costs nothing. An earlier reading of the same trade preferred 1,024 because it fetched 17× fewer
+/// **rows** — true, and the wrong currency: it counted bytes as though requests were free. In
+/// milliseconds 1,024 loses by 65×.
+///
+/// The same finding the row-group experiment recorded twice (`kanzo-ui/BENCHMARKS.md`): more,
+/// smaller reads cost more than the pruning saves.
+pub const DEFAULT_CHUNK_SIZE: u64 = 122_880;
 
 impl VertexInfo {
     /// Construct a `VertexInfo` with the [`GRAPHAR_VERSION`] preset.
@@ -293,7 +315,9 @@ mod tests {
         // Pitfall-2 field-name guard: spec spellings present, NOT the Phase-1 template.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
         assert!(yaml.contains("type: Person"), "{yaml}");
-        assert!(yaml.contains("chunk_size: 1024"), "{yaml}");
+        // Asserted against the constant, not a literal: the value is a measured trade-off
+        // (see DEFAULT_CHUNK_SIZE) and this test is about the spec *spelling* of the key.
+        assert!(yaml.contains(&format!("chunk_size: {DEFAULT_CHUNK_SIZE}")), "{yaml}");
         assert!(yaml.contains("prefix: vertex/person/"), "{yaml}");
         assert!(yaml.contains("property_groups:"), "{yaml}");
         assert!(yaml.contains("data_type: int64"), "{yaml}");
