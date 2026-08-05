@@ -1,0 +1,133 @@
+---
+title: Streaming
+description: Every stage boundary is a stream. The engine already does it; our seams collect, and one of the three turned out not to be a seam.
+direction:
+  summary: Every stage boundary in the write path is a stream, so no stage ever holds a whole value and memory follows the working set rather than the corpus.
+  decidedBy: decisions/0043-el-tipo-de-la-frontera.md
+today:
+  summary: The engine streams and our seams collect — the layout pass still reads the entire edge list into one vector, and the lazy driver API that replaces the one which cost +7 GiB is identified and not yet applied.
+  backedBy: crates/fossil-runtime/src/layout.rs
+---
+
+## The destination
+
+No stage in the write path holds a whole value. A batch arrives, is transformed, is handed on and is
+dropped. Peak memory follows the working set — a batch, a window, the O(n) state an algorithm
+genuinely needs — and not the size of the corpus.
+
+This is what makes the [budget](/docs/characteristics/bounded-write) into larger-than-RAM rather than
+a smaller ceiling. A budget bounds the operators inside the pool; everything outside the pool is
+bounded only by being a stream.
+
+## What is true today
+
+**DataFusion already streams.** It hands `RecordBatch`es out lazily and its operators reserve,
+spill and release against the pool. The unbounded half of the write path is not the engine. It is
+the seams we wrote around it, each one a place where a stage boundary is a whole value.
+
+Measured under a 4 GiB budget, going from one million to ten million vertices multiplies the peak by
+4.1× — 2.43 GiB to 9.87 GiB — with the pool held constant. Three terms were named as the cause.
+Here they are, with what has happened to each since.
+
+### 1. `GraphArData` holds every batch
+
+`crates/fossil-df/src/lib.rs`
+
+The materialised graph is a value: every vertex batch, plus both orientations of every edge table,
+resident together before the writer is called. Counted in Arrow it is 0.16 GiB at one million and
+**1.64 GiB at ten** — 10.3× for 10×, which is exactly linear in N and the cleanest evidence on this
+page that the term is real.
+
+It is also the smallest of the three at the moment it exists, which is what made it misleading: the
+process holds 15.68 GiB when the graph itself is 1.64. The residency was operator memory, and
+bounding it was [the budget's job](/docs/characteristics/bounded-write). What remains here is the
+1.64 GiB itself, growing with the corpus, and nothing bounds it.
+
+### 2. `to_files()` encodes every file before touching disk — measured, and refuted
+
+`crates/fossil-df/src/files.rs`
+
+This was the third term in the original diagnosis, and it is now the one honest example on this page
+of a seam that was named on structure and did not survive measurement.
+
+`to_files()` encoded the whole corpus into a `Vec<GraphArFile>` before the native sink wrote a byte.
+The encoder is now `try_for_each_file`, which builds each file, hands it over and drops it before the
+next; `to_files()` is that with a `Vec` on the end, kept for the browser host, which genuinely needs a
+list.
+
+**Peak RSS at ten million moved from 10.60 GB to 10.58 GB.** That is inside the noise between two
+identical runs. The +0.58 GiB the probe bills to the encode phase is the encoder's own working
+memory, not the retained list: the whole output is 713 MB across six files, so holding six of them
+was never what that number meant.
+
+The change stayed anyway, and the reason is worth separating from the number: holding N files in
+order to write them one at a time has no reader on that path. It is indefensible per file. It is just
+not worth any megabytes at this size, and the comments that claimed otherwise were corrected rather
+than left standing.
+
+### 3. The layout pass reads the whole edge list into a `Vec`
+
+`crates/fossil-runtime/src/layout.rs`
+
+Still true, and the largest of the three: +2.22 GiB above the budget at ten million.
+
+`enrich_layout` builds a `Vec<(u32, u32)>` of every edge — 568 MB at ten million — plus an 80 MB
+clone of a cursor used to scatter into it, and Louvain then holds O(n) community state on top. The
+scatter is random writes over a 568 MB array, which is hostile to cache as well as expensive.
+
+**None of the three is asked for by the algorithm.** `local_moving` walks
+`for v in 0..n { neighbours(v) }`, which is a sequential CSR scan; the only random access is
+`community[u]`, which is O(n) — about 200 MB at ten million, not 2.9 GB. And the file it reads from
+has been sorted since it was written: `by_source.parquet` has **zero out-of-order rows** by
+`src_dense` across 71,024,690 rows, and `by_target.parquet` likewise by `dst_dense`. It is CSR and
+CSC on disk.
+
+The materialisation exists because of a type. `Weighted::from_edges(vertex_count, edges: &[(u32, u32)])`
+takes an unordered bag, so the ordering the file already has cannot be passed through it: the bag must
+be built, degrees counted in a prior pass, and the entries scattered. `from_csr(offsets, targets)`
+cannot need any of that, because its signature already asserts the order. The invariant lives in the
+type or it lives in a comment.
+
+## The fix that is diagnosed and not applied
+
+This one has a history, and the history is the useful part.
+
+The CSR change was implemented in full on 2026-08-04 — `Weights::{Unit,Stored}`,
+`Weighted::from_sorted` merging two streams, `community_hierarchy_sorted`, and `enrich_layout`
+reading two statements instead of building the bag. It compiled, and the three parity tests in
+`crates/fossil-runtime/tests/layout_renumber.rs` passed **without being touched**, which was the
+declared definition of done.
+
+And the peak went up:
+
+| | before | with the merge |
+| --- | --- | --- |
+| RSS entering `enrich_layout` | 14.61 GiB | **21.54 GiB** |
+| process peak | 17.0 GiB | **24.4 GiB** |
+
+**`duckdb-rs`'s `query_map` does not stream: it materialises the entire result.** Two statements open
+at once are two full result sets resident, plus the CSR being built, where before there had been one
+`Vec`. One copy was traded for two. The change was reverted.
+
+What survives is the name of the function that was missing. Checked in the source of `duckdb-rs`
+1.10502.0:
+
+| API | what it does |
+| --- | --- |
+| `Statement::query_map` | `execute()` — materialises the whole result. What was used, and what regressed |
+| `Statement::stream_arrow(params, schema)` | `execute_streaming()` + `ArrowStream` — genuinely lazy |
+
+`ArrowStream` implements `Iterator<Item = RecordBatch>` with one `stream_step()` per call. One batch
+at a time, not the result. And what makes it the right answer rather than a patch: **the item is a
+`RecordBatch`**. The lazy API hands over exactly the boundary this whole page argues for — Arrow,
+offsets and values — instead of rows converted to Rust tuples one at a time. The `from_sorted` that
+was written takes `impl Iterator<Item = (u32, u32)>`; over `stream_arrow` it takes `UInt32Array`
+columns per batch, which is less code and no per-row conversion.
+
+<Callout type="warn" title="What the failed attempt actually proved">
+Not that the reasoning was wrong — the file is still sorted, the algorithm is still sequential, the
+three allocations are still unnecessary. What it proved is that **the definition of done was wrong.**
+Three parity tests in green did not see a seven-gigabyte regression, because they checked that the
+result was correct when the cost *was the entire objective*. The next attempt carries the probe's
+measurement in its acceptance criteria, not only the parity.
+</Callout>

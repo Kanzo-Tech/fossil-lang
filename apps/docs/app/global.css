@@ -1,0 +1,53 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@source "../content/**/*.mdx";
+@source "../components/**/*.tsx";
+@source "../app/**/*.tsx";
+
+/*
+ * TODO(ADR): no design system here yet. `@kanzo-tech/ui` is the intended one and is NOT on npm
+ * (`npm view @kanzo-tech/ui` → 404 as of 2026-08-05), so consuming it means vendoring tarballs
+ * across two repositories — a cross-repo dependency that needs its own decision record before any
+ * of it is wired. Until that ADR exists this app dresses in fumadocs' own preset and the handful of
+ * rules below. Everything here is meant to be deleted, not extended.
+ */
+
+/*
+ * The one thing the site actually needs from CSS: the two registers must be distinguishable at a
+ * glance, without reading them. A page says where it is going and what is true today; if those look
+ * alike the whole editorial stance collapses into prose nobody can audit.
+ */
+.register {
+  --register-accent: var(--color-fd-primary);
+  border-inline-start: 3px solid var(--register-accent);
+  padding-block: 0.75rem;
+  padding-inline: 1rem;
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: color-mix(in oklab, var(--register-accent) 7%, transparent);
+}
+
+.register--today {
+  --register-accent: var(--color-fd-muted-foreground);
+  border-inline-start-style: dashed;
+}
+
+.register__label {
+  display: block;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-fd-muted-foreground);
+  margin-block-end: 0.25rem;
+}
+
+.register__cite {
+  display: block;
+  font-size: 0.8125rem;
+  color: var(--color-fd-muted-foreground);
+  margin-block-start: 0.375rem;
+}
+
+.register__cite code {
+  font-size: inherit;
+}

@@ -1,0 +1,117 @@
+---
+title: The bounded write path
+description: A write path that honours a declared memory budget at any N — and the measured distance between that and what exists.
+direction:
+  summary: The write path honours a declared memory budget at any N, so a corpus larger than the machine is a slower run rather than an OOM.
+  decidedBy: decisions/0043-el-tipo-de-la-frontera.md
+today:
+  summary: A budget can be declared and the executor honours it — ten million vertices peak at 9.87 GiB against roughly 21 unbounded, for 13% more wall clock and a byte-identical corpus — but the peak still grows with N.
+  backedBy: crates/fossil-df/src/lib.rs
+---
+
+## The destination
+
+`fossil run` accepts a memory budget and stays inside it, at any corpus size. Exceeding the machine
+means spilling to disk and taking longer, never dying. That is the ring-2 promise and it can only
+live in ring 2, because ring 2 is the only one with a disk to spill to — a browser has roughly 4 GB
+of address space and nowhere to put the overflow.
+
+The budget becomes an input to the run rather than an environment variable, and a spill test in CI
+keeps it honest: a small corpus, a ridiculous limit, and an assertion that something actually
+spilled.
+
+## What is true today, measured 2026-08-05
+
+Three things exist and are measured. Take them in order, because each one made the next one
+answerable.
+
+### The probe reports RSS per phase
+
+`FOSSIL_MEM_PROBE=1` on a `fossil run` prints resident set size at each phase boundary of the write
+path. It is what turned "seventeen gigabytes go somewhere" into a table, and it is why four
+plausible hypotheses about where the memory went could each be killed by a number rather than an
+argument.
+
+The finding that mattered: **RSS was already 14.61 GiB when `enrich_layout` executed its first
+statement**, and the entire layout pass added 0.13 GiB net. The memory was spent before the pass
+everyone suspected had even started.
+
+### A declared budget, and the join that would not honour it
+
+`FOSSIL_DF_MEM_GIB=<n>` builds the DataFusion runtime with a `FairSpillPool` of that size wrapped in
+a `TrackConsumersPool`, instead of `SessionContext::new()` — which is an unlimited pool with no disk
+manager, and therefore a configuration in which larger-than-RAM is not untested but impossible by
+construction.
+
+It also **turns off `prefer_hash_join`**, and that is not a tuning preference. The first attempt at a
+4 GiB budget died, and the consumer tracking named the culprit without needing a hypothesis:
+
+```text
+HashJoinInput[8]#125(can spill: false) consumed 387.7 MB, peak 387.7 MB,
+HashJoinInput[9]#126(can spill: false) consumed 291.9 MB, peak 291.9 MB,
+…five of them, on a ten-core machine: one reservation per partition
+```
+
+A hash join's build side declares `can spill: false`. Told it may not allocate, it has nothing to
+give back, so it dies. A sort-merge join spills. **A budget only means something if the operators can
+honour it** — declaring the pool and leaving the plan free to pick an operator that cannot obey it is
+a budget in name.
+
+### The result, at ten million vertices
+
+| ten million | unbounded | 4 GiB + sort-merge |
+| --- | --- | --- |
+| RSS after `execute_graph` | 15.68 GiB | **5.56 GiB** |
+| RSS entering `enrich_layout` | 16.51 GiB | **6.82 GiB** |
+| process peak | ~21 GiB | **9.87 GiB** |
+| wall clock | 256.3 s | 290.9 s |
+
+**Eleven gigabytes off the peak for 13% more wall clock, and the corpus is byte-identical** — 87
+files, every md5 equal. This is a memory result, not a different output.
+
+It also settled what the sixteen gigabytes were. Counted in Arrow, the graph handed to the writer —
+every vertex batch plus both orientations of every edge table, 10M vertices and 71,024,690 edges — is
+**1.64 GiB**, while the process holds 15.68. Dropping the `SessionContext` before encoding frees
+**0.00 GiB**, because its `MemTable`s are the same Arrow buffers rather than a second copy. And the
+edge collect measured +7.67 GiB on one run and +11.35 GiB on the next of an identical corpus. Live
+data does not vary by 3.7 GiB. It was operator memory nobody had bounded.
+
+<Callout type="warn" title="What backs this, precisely">
+`backedBy` on this page points at `crates/fossil-df/src/lib.rs` — the file that reads
+`FOSSIL_DF_MEM_GIB`, builds the pool and clears `prefer_hash_join`. That is the *implementation*, not
+a test. The spill test ADR-0043 stage 4 specifies — small corpus, ridiculous limit, assert a spill —
+**does not exist**, and neither does the budget as a `run` input rather than an environment variable.
+Nothing in CI would go red if this regressed. The number above came from a hand-run measurement, and
+that is exactly the condition the ADR says produced the original 23×-the-output figure: nobody was
+watching.
+</Callout>
+
+## What is not true: the peak still grows with N
+
+A bounded executor is not larger-than-RAM, and the same budget at two sizes says so plainly. The only
+variable below is the corpus:
+
+| under a 4 GiB budget | 1M | 10M | ratio |
+| --- | --- | --- | --- |
+| retained in Arrow | 0.16 GiB | 1.64 GiB | **10.3×** |
+| RSS after `execute_graph` | 2.02 GiB | 5.56 GiB | 2.8× |
+| RSS entering `enrich_layout` | 2.13 GiB | 6.82 GiB | 3.2× |
+| process peak | **2.43 GiB** | **9.87 GiB** | **4.1×** |
+| wall clock | 17.8 s | 290.9 s | 16.3× |
+
+Ten times the corpus, four times the peak. The pool caps the executor and nothing else, and the terms
+outside it follow N.
+
+They are ours, and they are all the same shape: **a stage boundary that is a whole value rather than
+a stream.** `GraphArData` holds every batch before a byte is written, and the layout pass reads the
+whole edge list into a `Vec` while Louvain holds O(n) state (+2.22 GiB). The engine streams —
+DataFusion hands batches out lazily — and our seams collect. [Streaming](/docs/characteristics/streaming)
+takes each one in turn, including the third one, which was measured after this table was written and
+turned out not to be a seam at all.
+
+<Callout>
+So the claim that survives today is narrower than the destination, and the difference is the whole
+point of separating the two registers: **the write path can now be given a memory budget it will
+honour**, which it could not before. Whether a corpus larger than the machine can be written is
+untested, and on these numbers the answer at 100M is no.
+</Callout>

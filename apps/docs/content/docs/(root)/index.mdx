@@ -1,0 +1,113 @@
+---
+title: fossil
+description: A mapping language and a corpus compiler, organised by where the code runs.
+---
+
+fossil is two things, and not having decided that is part of the problem it is now solving. It is a
+**mapping language** — you declare how tabular and RDF sources become a property graph, and it type
+checks, diagnoses and lowers that declaration. And it is a **corpus compiler** — it executes the
+mapping and writes a graph corpus you can address by byte range from anywhere, with no server in
+the path.
+
+This site documents where that is going. Every page keeps two registers apart and marks which one
+it is in:
+
+<Cards>
+  <Card title="Where this is going" description="The destination, with the decision record that chose it. Written before the code gets there — that is the point of writing it." />
+  <Card title="True today" description="What holds right now, with the file that would go red if it stopped holding. Or the word `unmeasured`, which is the honest alternative." />
+</Cards>
+
+Never both in one sentence. A target restated as a fact is the failure this site exists to avoid,
+and `apps/docs/content.test.ts` fails the build rather than trust anyone to remember.
+
+## Three rings, and the axis is where the code runs
+
+The organising axis is not subject matter. It is **deployment target**, because that is the only
+axis on which the hard constraints actually conflict.
+
+Three destinations have to work — a native CLI, wasm in a browser, an MCP server — and the corpus
+has to be writable with no ceiling on size. Those two demands contradict each other the moment both
+are read as *"run the engine here"*: wasm32 has roughly 4 GB of address space and **nowhere to
+spill**. A browser cannot be larger-than-RAM. That is the substrate, not the code.
+
+So the code is cut by where it runs, and each ring gets a different promise.
+
+<Steps>
+
+<Step>
+
+### Ring 1 — the language. It knows no engine
+
+Parsing, types, name resolution, diagnostics, lowering to MIR, and the LSP that surfaces all of it.
+`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-resolver`, `fossil-registry`, `fossil-base`,
+`fossil-shex`, the input and output descriptors, `fossil-lsp`, `fossil-ide`, `fossil-ide-db`.
+
+**No dependency on `datafusion` or on `duckdb`.** That is what lets the LSP start in milliseconds
+and compile to wasm without dragging a database behind it. `fossil-mcp` belongs here too: it is
+tooling, and tooling that carries an engine is tooling you cannot deploy.
+
+</Step>
+
+<Step>
+
+### Ring 2 — the compiler. Native, batch, and it declares a budget
+
+`fossil-df`, `fossil-engine`, `fossil-sinks`, `fossil-cli`, and the pure layout core that
+ADR-0042 §5 lifts out of `fossil-runtime`.
+
+Takes MIR and sources, produces the corpus. **"No ceiling" lives here and only here**, and it is
+reachable precisely because this ring has a disk: a declared memory budget, and spill when the
+budget bites. A ring without a disk cannot promise that, which is why the promise cannot live in
+the other two.
+
+</Step>
+
+<Step>
+
+### Ring 3 — the reader. wasm, and it does not run programs
+
+Addresses bytes against the corpus: reads the manifest, works out which ranges the camera is
+asking for, hands Arrow to the canvas. **No dependency on `datafusion` or on `duckdb`.**
+
+This is ADR-0042 §1 — *the camera is addressed, not queried* — applied to the engine and not only
+to the camera. Compiling the engine into the browser is a claim that the browser runs programs,
+which is exactly what that record decided against.
+
+</Step>
+
+</Steps>
+
+### The rule, and its guard
+
+> A crate may depend on its own ring and on lower-numbered ones. Never upward, and never on an
+> engine its ring does not declare.
+
+Checked, not agreed — a `cargo-deny` `wrappers` entry banning `duckdb` outside ring 2, and
+`datafusion` in rings 1 and 3.
+
+<Callout type="warn" title="True today: the guard is written, was run, and is switched off">
+It was written and executed on 2026-08-05 and it came out **red**. What it caught on the first
+attempt is that `fossil-wasm` — the reader's ring — reaches the engine transitively, through
+`fossil-ide → fossil-engine`, while its own `Cargo.toml` says *"NOT pull `fossil-runtime` or any
+native UDF crate (Pitfall 3)"*. The rule had been written as a comment the whole time and the graph
+broke it anyway.
+
+It is not left enabled because `deny` is a hard CI gate and today it would break the branch for
+everyone. `deny.toml` on disk carries the advisory, licence and four-crate ban list, and **not** the
+ring rule. Turning it on is the first task of the migration, not a side effect of it: the day it
+passes, the migration is finished.
+</Callout>
+
+That gap is the shape of the whole project right now. Twenty-four crates whose boundaries were drawn
+by **topic**, when what separates them is **where the code runs** — `fossil-mcp` is tooling and
+carries an engine; so does `fossil-cli`. The design did not bend because of a bad decision. It bent
+because of a decision nobody took.
+
+## Where to read next
+
+<Cards>
+  <Card href="/docs/characteristics/verbs" title="The verb surface" description="Six verbs as the destination; seventeen today, four of them unimplemented. The mapping between them, verb by verb." />
+  <Card href="/docs/characteristics/bounded-write" title="The bounded write path" description="A declared budget the executor honours — measured, 9.87 GiB against ~21. And why that is not yet larger-than-RAM." />
+  <Card href="/docs/characteristics/streaming" title="Streaming" description="The engine streams and three of our seams collect. Named, with their numbers, and with a fix already diagnosed and not applied." />
+  <Card href="/docs/decisions" title="Decisions" description="Every record under decisions/, read from the directory at build time so the list cannot go stale." />
+</Cards>

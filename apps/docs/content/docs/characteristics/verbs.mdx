@@ -1,0 +1,129 @@
+---
+title: The verb surface
+description: Six verbs, and the file is the contract. The mapping from the surface that exists today, verb by verb.
+direction:
+  summary: The surface closes at six verbs — read, expand, path, aggregate, schema, execute_sql — and the corpus file, not the verb list, is what every consumer actually agrees on.
+  decidedBy: decisions/0042-la-camara-se-direcciona.md
+today:
+  summary: Thirteen verbs are declared and all thirteen dispatch; the four that had no implementation were deleted rather than written, so the dispatch match is now exhaustive.
+  backedBy: crates/fossil-graph/tests/snapshots/schemas__operation_envelope.snap
+---
+
+## Six, and why six
+
+`fossil-graph` defines the surface; MCP, HTTP, the CLI and the in-process TS package are bindings
+over it. The destination is six verbs:
+
+| verb | what it answers |
+| --- | --- |
+| `read` | rows from a relation, with an optional `where:` |
+| `expand{into\|all}` | the neighbourhood of a set of vertices, one hop |
+| `path` | a route between two vertices |
+| `aggregate` | a grouped, bounded summary |
+| `schema` | what types, fields and relations exist |
+| `execute_sql` | the escape hatch, which a binding may hide behind a permission |
+
+Six is not a tidiness target. It follows from a decision about what the surface is *for*: the
+algebra answers questions and **does not draw**. Drawing is addressing — the camera works out which
+level and which tiles it needs and asks for bytes, with no bbox in flight, no SQL and no database on
+that path. Level-of-detail is not a filter but a different relation: a level-3 tile holds super-nodes
+that do not exist at level 0. A `where` selects rows from a table; zoom changes the table.
+
+Once that is settled, every verb whose job was to make a picture stops having a job.
+
+<Callout title="The rule that keeps it at six">
+A new verb enters only if it serves a case the single path demonstrably cannot, and that
+demonstration is a measurement. Not an argument.
+</Callout>
+
+## The mapping
+
+The surface has already moved once toward this. It was seventeen; four of those were declared,
+carried params and result types and wire schemas, and were never implemented — dispatch fell through
+to a `NotImplemented` arm. They were deleted rather than written, which took the surface to thirteen
+and took `GraphError::NotImplemented` with it: the `match` is now exhaustive, so a verb can no longer
+be added without being wired. The compiler says what a stub used to say at runtime.
+
+### Four schema verbs collapse to `schema`
+
+`list_vertex_types`, `list_edge_types`, `describe_field`, `describe_vertex_type` → **`schema`**.
+
+All four are manifest reads with no SQL behind them. They differ in what they project, which is an
+argument, not a verb.
+
+### Three aggregation verbs collapse to `aggregate`
+
+`aggregate`, `histogram`, `top_k` → **`aggregate`**.
+
+A histogram is a group-by on a bucketed expression; a top-k is a group-by with an order and a limit.
+Both were spelled as separate verbs because they had separate result shapes, and separate result
+shapes is what a parameterised verb is for.
+
+### Three keep their meaning and change their name
+
+| today | destination |
+| --- | --- |
+| `get_vertex` | `read(where:)` — one vertex is a predicate, not a verb |
+| `find_neighbors` | `expand` |
+| `find_path` | `path` |
+
+`execute_sql` survives unchanged, and it survives on purpose: an arbitrary crossfilter can only
+filter what is resident, so a general question needs a general escape hatch. Mapbox has the same
+limit and does not solve it either.
+
+### Four disappeared without ever being implemented
+
+`search_by_label`, `summarize_cluster`, `answer_with_communities`, `set_selection`.
+
+Three of the four were never verbs. `summarize_cluster` and `answer_with_communities` are a `read`
+over a hierarchy level. `set_selection` always belonged to the client — a selection is state the
+canvas holds, not a question the corpus answers. `search_by_label` needed an embedding column that no
+writer emits, so it was gated on work that had not happened.
+
+Deleting these was free in the strict sense: no implementation, no caller. The interesting part is
+what the deletion bought, which is the exhaustive `match` above.
+
+### Two disappear when tiles exist, and not one commit before
+
+`viewport` and `materialize_graph`.
+
+These are the two the destination has no room for and today's code cannot do without. `viewport` is
+the only verb that draws: bbox in, vertices and edges out, with a detail mode and an aggregate mode
+selected by an `if` inside the verb — which is relation selection wearing a predicate's clothes,
+and precisely the confusion the tile design removes.
+
+<Callout type="warn" title="They are load-bearing until the tiles land">
+There is no tile store, no tile index and no tile emission yet. Until there is, `viewport` is how
+the graph read path is expressed: it is dispatched over MCP, it is a method on the
+`@fossil-lang/graph` client, and the two SQL statements it emits are what the scale benchmarks
+actually execute. Removing it before the replacement exists deletes the read path and replaces it
+with nothing.
+
+One correction to a claim that circulates about this: **no viewer in this repository reads through
+`viewport`.** `packages/viewer` does not import `@fossil-lang/graph` at all. The verb's consumers are
+the MCP binding, the TS client's method surface, and the tests.
+</Callout>
+
+## The trap ADR-0042 records about `expand{into}`
+
+`expand{into}` is on the destination list, and the reasoning that put it there does not hold on our
+engine. It should be read with that attached.
+
+The justification came from Kùzu and Neo4j, which push a mask of candidate destinations *into* the
+scan so the expansion never materialises neighbours it will discard. On DuckDB that class of pruning
+is measured and unavailable. A window of 20,000 vertices at five million is 179 contiguous runs of
+`dense_id` covering 20,007 ids — a 268× superset of the visible edges with zero over-read, and
+**no way of asking for it in SQL wins**:
+
+| how the prune was expressed | time |
+| --- | --- |
+| no pruning at all (plain join) | 5 ms |
+| range join against the runs | 237 ms |
+| 179 `BETWEEN … OR …` predicates | 189 ms, 2.3 s CPU |
+
+Both attempts are slower than not pruning, because the engine evaluates the ranges per row instead of
+skipping row groups.
+
+**The verb is right as a shape. Its performance motivation is not available to us.** That is why the
+same measurement produced the addressing decision: pruning cannot be a predicate, only a choice of
+what to read.

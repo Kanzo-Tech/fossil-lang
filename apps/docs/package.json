@@ -1,0 +1,37 @@
+{
+  "name": "@fossil-lang/docs",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Where fossil is going, written before the code gets there — Next.js App Router + fumadocs. Never published; the pnpm-workspace entry is for resolution, not for npm.",
+  "type": "module",
+  "//build": "`pnpm test` runs FIRST and is not a convenience: content.test.ts asserts that every path a page cites still exists, so renaming a test or an ADR out from under a page has to break the build rather than rot in prose.",
+  "scripts": {
+    "dev": "next dev --port 3200",
+    "build": "pnpm run test && next build",
+    "start": "next start --port 3200",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "postinstall": "fumadocs-mdx"
+  },
+  "dependencies": {
+    "fumadocs-core": "16.9.3",
+    "fumadocs-mdx": "15.0.11",
+    "fumadocs-ui": "16.9.3",
+    "next": "16.2.7",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^20",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "gray-matter": "^4.0.3",
+    "tailwindcss": "4",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}
