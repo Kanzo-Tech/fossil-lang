@@ -72,8 +72,11 @@ jobs:
       - name: Build wasm
         run: pnpm --filter "@fossil-lang/wasm" run build:wasm || echo "no @fossil-lang/wasm yet"
 
+      # Scoped to packages/ because the workspace also holds `apps/*`, which this
+      # job must not build: the ceiling below is already 60 minutes for a cold
+      # cargo build, and the docs app has its own path-filtered `docs.yml`.
       - name: Build all packages
-        run: pnpm -r build
+        run: pnpm --filter "./packages/*" build
 
       # `@fossil-lang/examples` is EXCLUDED here: its variations harness builds
       # `fossil-cli` (datafusion/duckdb — minutes) just to spawn `fossil check`,
@@ -81,15 +84,15 @@ jobs:
       # owns that ≥30 compile-gate. Running it here too only duplicated the heavy
       # Rust build and slowed every PR.
       - name: Test all packages (except examples — owned by examples.yml)
-        run: pnpm --filter "!@fossil-lang/examples" -r test
+        run: pnpm --filter "./packages/*" --filter "!@fossil-lang/examples" test
 
       - name: Type-check all packages
-        run: pnpm -r exec tsc --noEmit
+        run: pnpm --filter "./packages/*" exec tsc --noEmit
 
       # PKG-03 JS half — enforce per-package bundle budgets via size-limit.
       # Currently only @fossil-lang/playground declares a size script + budget
       # (500 KB gzip per CONTEXT.md SC#4 + 08-VERIFICATION.md gap 2). Future
-      # packages with budgets are picked up automatically by `pnpm -r`.
+      # packages with budgets are picked up automatically by the packages/ filter.
       # The WASM half of PKG-03 is enforced separately by wasm-size.yml.
       - name: Bundle size budget (PKG-03 JS half)
-        run: pnpm -r size
+        run: pnpm --filter "./packages/*" size
