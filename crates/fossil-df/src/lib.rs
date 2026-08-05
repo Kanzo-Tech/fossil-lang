@@ -49,6 +49,10 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::Column;
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
+#[cfg(not(target_arch = "wasm32"))]
+use datafusion::execution::memory_pool::{FairSpillPool, TrackConsumersPool};
+#[cfg(not(target_arch = "wasm32"))]
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
 use datafusion::prelude::{
     col, lit, CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext,
@@ -834,6 +838,43 @@ pub fn register_provider_sources(
     Ok(())
 }
 
+/// A `SessionContext` under a declared memory budget, or the unbounded default.
+///
+/// Ten million vertices peak at 15.7 GiB in the executor while the graph it
+/// produces is 1.64 GiB of Arrow, and nothing in between is retained — so the
+/// difference is operator memory that DataFusion is never told to bound. A pool
+/// bounds it and spills instead, and [`TrackConsumersPool`] names the operators
+/// that asked for it when the budget is too small to hold.
+///
+/// `FOSSIL_DF_MEM_GIB` unset is today's behaviour, unbounded.
+#[cfg(not(target_arch = "wasm32"))]
+fn bounded_context() -> datafusion::error::Result<SessionContext> {
+    let Some(gib) = std::env::var("FOSSIL_DF_MEM_GIB")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+    else {
+        return Ok(SessionContext::new());
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let bytes = (gib * 1024.0 * 1024.0 * 1024.0) as usize;
+    let pool = TrackConsumersPool::new(
+        FairSpillPool::new(bytes),
+        std::num::NonZeroUsize::new(5).expect("5 is not zero"),
+    );
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(Arc::new(pool))
+        .build_arc()?;
+    // A budget only means something if the operators can honour it. The edge
+    // phase joins every edge's endpoints against the vertex table, and a hash
+    // join's build side reports `can spill: false` — one reservation per
+    // partition, none of which will give anything back. A sort-merge join
+    // spills; that it is the slower plan on a small graph is not the trade being
+    // made here.
+    let config = datafusion::prelude::SessionConfig::new()
+        .set_bool("datafusion.optimizer.prefer_hash_join", false);
+    Ok(SessionContext::new_with_config_rt(config, runtime))
+}
+
 /// Native one-call orchestration the host (CLI/engine) drives: register every
 /// provider (RDF) source from host-read bytes, execute the whole program on
 /// DataFusion, and write the GraphAr tree under `dest_dir`. Returns the
@@ -865,7 +906,7 @@ pub fn run_to_dir(
     read_uri: impl Fn(&str) -> Result<String, String>,
 ) -> datafusion::error::Result<GraphArData> {
     let mut probe = Probe::new("run_to_dir");
-    let ctx = SessionContext::new();
+    let ctx = bounded_context()?;
     for binding in provider_bindings(db, file, descriptor, connections) {
         let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
         register_rdf(&ctx, &binding, &bytes)?;

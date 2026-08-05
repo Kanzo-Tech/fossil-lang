@@ -7,7 +7,9 @@
 //! `DataFusion` executor and Parquet sink in `fossil-df`, and the `DuckDB` layout pass in
 //! `fossil-runtime`. Neither may depend on the other, and this crate is the substrate under both.
 //!
-//!     FOSSIL_MEM_PROBE=1 fossil run …
+//! ```text
+//! FOSSIL_MEM_PROBE=1 fossil run …
+//! ```
 //!
 //! Off, it is one relaxed load per phase. On, it shells out to `ps` per phase — which is fine at
 //! this granularity (a dozen calls per run) and is the honest number, because it includes the
