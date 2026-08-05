@@ -218,7 +218,7 @@ maquetación, que gasta 0,13 GiB netos.
 |---|---|
 | `RuntimeEnvBuilder` con pool acotado + `DiskManager` | +35 |
 | presupuesto como entrada del `run` (CLI + API) | +45 |
-| `apply_resource_limits` (DuckDB) borrado | −40 |
+| `apply_resource_limits` (DuckDB) borrado | −40 · **refutada, ver abajo** |
 | test: corpus pequeño, límite ridículo, exigir derrame | +60 |
 
 **Neto ≈ +100 LOC**, y convierte un OOM en lentitud o en un error legible.
@@ -265,8 +265,41 @@ ficheros, todos los md5 iguales). Lo que queda arriba es Louvain (+2,22 GiB) y l
 donde ADR-0042 predijo el coste antes de que nada de esto estuviera medido. De ese +2,22 GiB, la
 etapa 1 se llevó luego casi todo: no era Louvain, era el CSR que Louvain construía al entrar.
 
-Sigue debiéndose el resto de la etapa: el presupuesto como entrada del `run` en vez de una variable
-de entorno, borrar el `apply_resource_limits` de DuckDB que duplica, y el test de derrame.
+#### Terminada el mismo día: la bandera, los dos motores y el test
+
+**El presupuesto es una entrada del `run`.** `fossil run --memory-gib <GIB>` (fracciones válidas, no
+positivo se rechaza en el parseo) baja como `Option<u64>` de bytes por `fossil_engine::run` hasta
+`fossil_df::run_to_dir`. `FOSSIL_DF_MEM_GIB` **no existe**: era andamio de una medición, y un número
+del que depende que un trabajo sobreviva se declara en la orden que lo lanzó. Sin bandera, el
+comportamiento de hoy — sin techo.
+
+**Y aquí la tabla de arriba se equivocaba.** Decía borrar `apply_resource_limits` «que duplica».
+Leído el código, no duplicaba nada: la maquetación **sigue ejecutándose en DuckDB**, así que borrar su
+`memory_limit` no quita una duplicación, quita el único límite del segundo motor. Lo duplicado era la
+*forma de declararlo* — tres variables de entorno (`FOSSIL_DUCKDB_MEMORY_LIMIT`, `_THREADS`,
+`_TEMP_DIR`) contra una bandera. Así que la función no se borra: pasa a ser
+`apply_memory_budget(conn, bytes)`, recibe **el mismo número** que el pool de DataFusion y fija
+`memory_limit` más un `temp_directory` (un límite sin sitio donde derramar da error donde podía dar
+lentitud). Las tres variables sí se borran. **Un presupuesto declarado, dos motores, ningún sitio
+donde declararlo dos veces.** Lo que también se borra es la llamada de la pre-introspección (un
+`DESCRIBE` de cabeceras no es donde se gasta memoria) y la de `fossil-mcp`, que no tiene presupuesto
+que pasar.
+
+**El test que exige derrame** (`crates/fossil-df/tests/spill.rs`, ~30 s): 5k personas y 400k pedidos,
+dos pasadas sobre el mismo corpus. Sin presupuesto no toca disco; con él, DataFusion abre su
+directorio de derrame y lo dice por `log` —única evidencia que sobrevive a la ejecución: los ficheros
+se borran, `used_disk_space` vuelve a cero y las métricas del plan no salen de `execute_graph`—, y
+los dos árboles escritos son **idénticos byte a byte**. Lo que no prueba: que diez millones quepan en
+4 GiB (aquí no se mide RSS), ni que un plan libre de elegir hash join sobreviva (no lo hace: por eso
+`bounded_context` apaga `prefer_hash_join`, y el test sólo ve el plan que eso deja).
+
+**Y una medición que el test obligó a hacer: un presupuesto demasiado pequeño no derrama, muere, y el
+suelo lo pone la máquina.** Cada partición de `sort` reserva `sort_spill_reservation_bytes` (10 MB) y
+la declara `can spill: false`, así que el pool mínimo crece con `target_partitions`. En diez núcleos:
+384 MiB muere con cinco `ExternalSorterMerge` reteniendo 10 MB cada uno, 480 MiB corre y derrama, y
+sigue derramando a 2 GiB. Por eso el test pide 64 MiB **por núcleo** en vez de una cifra redonda. Los
+4 GiB de la tabla de diez millones están holgadamente por encima de ese suelo; un presupuesto de 100
+MB no es viable a ningún tamaño, y eso es parte del contrato, no un detalle de la implementación.
 
 #### Y lo que esto le hace a la tesis del documento
 

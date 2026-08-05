@@ -149,6 +149,10 @@ wasm-bindgen-test = "0.3"
 # write GraphAr Parquet to disk and read back via duckdb. Native-only
 # (uses real filesystem); not in the WASM gate.
 tempfile = "3"
+# The spill test (fossil-df tests/spill.rs) reads DataFusion's own log records:
+# an operator that spills says so through `log`, and nothing else survives the
+# run to be asserted on. Dev-dep only — fossil emits `tracing`, not `log`.
+log = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "deny"   # per ADR-0004 — per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
