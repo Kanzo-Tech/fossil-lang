@@ -62,42 +62,36 @@ pub fn execute(sql: &str) -> Result<(), duckdb::Error> {
     Ok(())
 }
 
-/// Apply optional `DuckDB` resource limits from the environment, so a host
-/// running many fossil subprocesses on a small machine can bound each run's
-/// memory + CPU footprint. No-op when the vars are unset (preserves `DuckDB`
-/// defaults, which target ~80% of physical RAM — unsafe for multi-instance
-/// hosts). Recognised:
+/// Bound `conn` to the run's declared memory budget, in bytes.
 ///
-/// - `FOSSIL_DUCKDB_MEMORY_LIMIT` — e.g. `256MB`. When a query exceeds it,
-///   `DuckDB` spills to `temp_directory` instead of OOM-ing (set the temp dir
-///   too, else large queries error rather than spill).
-/// - `FOSSIL_DUCKDB_THREADS` — worker thread cap (e.g. `2`).
-/// - `FOSSIL_DUCKDB_TEMP_DIR` — spill directory used once `memory_limit` is hit.
+/// The same number `fossil_df::run_to_dir` builds its `FairSpillPool` from: a
+/// run declares one budget and both engines that spend memory under it honour
+/// it — the `DataFusion` write path, and the `DuckDB` layout pass that rewrites
+/// the vertex Parquet afterwards. `DuckDB`'s own default targets ~80% of
+/// physical RAM, i.e. a whole machine per process, which is the wrong default
+/// for a host running several runs at once.
 ///
-/// Call right after opening a connection used for a run/materialize.
+/// `temp_directory` is set with the limit, not instead of it: an in-memory
+/// database told it may not allocate and given nowhere to spill errors out
+/// where it could have gone slower. Same destination the `DataFusion` disk
+/// manager picks by default, so both engines overflow to the same place.
+///
+/// Call right after opening a connection used for a run; a run without a
+/// declared budget does not call it at all (unbounded, `DuckDB`'s default).
 ///
 /// # Errors
 ///
 /// Returns the underlying [`duckdb::Error`] if a `SET` statement fails.
-pub fn apply_resource_limits(conn: &Connection) -> Result<(), duckdb::Error> {
-    // Values are host-supplied (env); strip quotes defensively before interpolating.
-    if let Ok(mem) = std::env::var("FOSSIL_DUCKDB_MEMORY_LIMIT")
-        && !mem.is_empty()
-    {
-        conn.execute_batch(&format!("SET memory_limit='{}';", mem.replace('\'', "")))?;
-    }
-    if let Ok(threads) = std::env::var("FOSSIL_DUCKDB_THREADS")
-        && let Ok(n) = threads.parse::<u32>()
-        && n > 0
-    {
-        conn.execute_batch(&format!("SET threads={n};"))?;
-    }
-    if let Ok(tmp) = std::env::var("FOSSIL_DUCKDB_TEMP_DIR")
-        && !tmp.is_empty()
-    {
-        conn.execute_batch(&format!("SET temp_directory='{}';", tmp.replace('\'', "")))?;
-    }
-    Ok(())
+pub fn apply_memory_budget(conn: &Connection, bytes: u64) -> Result<(), duckdb::Error> {
+    // `B` (not GiB): the byte count is the budget's canonical form, so DuckDB
+    // and the DataFusion pool get literally the same number rather than two
+    // roundings of it. The temp dir is machine-supplied — escape it as a SQL
+    // literal rather than trusting it has no quote.
+    let tmp = std::env::temp_dir();
+    conn.execute_batch(&format!(
+        "SET memory_limit='{bytes}B'; SET temp_directory='{}';",
+        tmp.to_string_lossy().replace('\'', "''"),
+    ))
 }
 
 #[cfg(test)]
@@ -121,6 +115,28 @@ mod tests {
             .expect("write users.csv fixture");
             p
         })
+    }
+
+    /// The second engine actually receives the run's number. `memory_limit` is
+    /// reported back in `DuckDB`'s own formatting, so the assertion is on the
+    /// setting having moved off the machine-sized default, plus a temp directory
+    /// to spill into — a limit without one errors where it could go slower.
+    #[test]
+    fn a_declared_budget_reaches_duckdb() {
+        let conn = Connection::open_in_memory().expect("open in-memory duckdb");
+        apply_memory_budget(&conn, 1024 * 1024 * 1024).expect("apply the budget");
+
+        let setting = |name: &str| -> String {
+            conn.query_row(&format!("SELECT current_setting('{name}')"), [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap_or_else(|e| panic!("read {name}: {e}"))
+        };
+        assert_eq!(setting("memory_limit"), "1.0 GiB");
+        assert!(
+            !setting("temp_directory").is_empty(),
+            "a memory limit with nowhere to spill is an error, not a slower run",
+        );
     }
 
     #[test]

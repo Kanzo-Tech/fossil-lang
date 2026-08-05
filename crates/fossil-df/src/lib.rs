@@ -846,19 +846,16 @@ pub fn register_provider_sources(
 /// bounds it and spills instead, and [`TrackConsumersPool`] names the operators
 /// that asked for it when the budget is too small to hold.
 ///
-/// `FOSSIL_DF_MEM_GIB` unset is today's behaviour, unbounded.
+/// The budget is an input of the run — `memory_bytes` comes from the command
+/// that started it (`fossil run --memory-gib`), not from the environment the
+/// process happens to be carrying. `None` is today's behaviour, unbounded.
 #[cfg(not(target_arch = "wasm32"))]
-fn bounded_context() -> datafusion::error::Result<SessionContext> {
-    let Some(gib) = std::env::var("FOSSIL_DF_MEM_GIB")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-    else {
+fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<SessionContext> {
+    let Some(bytes) = memory_bytes else {
         return Ok(SessionContext::new());
     };
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let bytes = (gib * 1024.0 * 1024.0 * 1024.0) as usize;
     let pool = TrackConsumersPool::new(
-        FairSpillPool::new(bytes),
+        FairSpillPool::new(usize::try_from(bytes).unwrap_or(usize::MAX)),
         std::num::NonZeroUsize::new(5).expect("5 is not zero"),
     );
     let runtime = RuntimeEnvBuilder::new()
@@ -889,6 +886,11 @@ fn bounded_context() -> datafusion::error::Result<SessionContext> {
 /// cloud). Object-store formats are NOT read through it; they stream via the
 /// ctx's `ObjectStore` (the local filesystem by default).
 ///
+/// `memory_bytes` is the run's declared memory budget ([`bounded_context`]):
+/// under one, the executor spills instead of growing, and a corpus larger than
+/// the machine is a slower run rather than an OOM. `None` leaves the pool
+/// unbounded.
+///
 /// Blocks the async executor on a private current-thread runtime — the host
 /// stays synchronous. The browser path drives [`execute_graph`] directly from
 /// JS, so this native convenience never reaches the wasm build.
@@ -904,9 +906,10 @@ pub fn run_to_dir(
     dest_dir: &std::path::Path,
     connections: &HashMap<String, String>,
     read_uri: impl Fn(&str) -> Result<String, String>,
+    memory_bytes: Option<u64>,
 ) -> datafusion::error::Result<GraphArData> {
     let mut probe = Probe::new("run_to_dir");
-    let ctx = bounded_context()?;
+    let ctx = bounded_context(memory_bytes)?;
     for binding in provider_bindings(db, file, descriptor, connections) {
         let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
         register_rdf(&ctx, &binding, &bytes)?;

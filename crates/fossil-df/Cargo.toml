@@ -78,3 +78,6 @@ tokio = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
 tempfile = { workspace = true }
+# tests/spill.rs asserts that a declared budget is honoured by spilling, and the
+# spill only announces itself through a `log` record from DataFusion.
+log = { workspace = true }

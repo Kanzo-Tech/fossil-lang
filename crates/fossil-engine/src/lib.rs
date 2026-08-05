@@ -166,7 +166,6 @@ fn pre_introspect_and_register(
             return;
         }
     };
-    let _ = fossil_runtime::apply_resource_limits(&conn);
     if let Err(e) = apply_source_creds(&conn, connections) {
         tracing::warn!("applying source creds for pre-introspection failed: {e}");
     }
@@ -341,9 +340,20 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 /// The output descriptor is program-resident (invariant #1). `creds` carries the
 /// cloud config (empty ⇒ local / public-URL behaviour).
 ///
+/// `memory_bytes` is the run's declared memory budget, and it is one number for
+/// the whole run: the `DataFusion` pool the write path executes under and the
+/// `DuckDB` `memory_limit` of the layout pass that follows it. Two engines spend
+/// memory here; a budget that governed only one of them would be a budget for
+/// half the run. `None` runs both unbounded.
+///
 /// # Errors
 /// Returns a compile, read, or materialisation error.
-pub fn run(path: &Path, dest_url: &str, creds: &RunCreds) -> miette::Result<RunStatus> {
+pub fn run(
+    path: &Path,
+    dest_url: &str,
+    creds: &RunCreds,
+    memory_bytes: Option<u64>,
+) -> miette::Result<RunStatus> {
     tracing::debug!(?path, dest_url, "fossil run");
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
@@ -382,13 +392,21 @@ pub fn run(path: &Path, dest_url: &str, creds: &RunCreds) -> miette::Result<RunS
         .iter()
         .map(|(name, c)| (name.clone(), c.url.clone()))
         .collect();
-    let graph = fossil_df::run_to_dir(&db, file, &descriptor, &dest_dir, &connections, read_uri)
-        .map_err(|e| miette::miette!("execute: {e}"))?;
+    let graph = fossil_df::run_to_dir(
+        &db,
+        file,
+        &descriptor,
+        &dest_dir,
+        &connections,
+        read_uri,
+        memory_bytes,
+    )
+    .map_err(|e| miette::miette!("execute: {e}"))?;
 
     // W3.1b layout post-pass: replace the placeholder x/y/cluster_id with a real
     // WCC partition + deterministic placement, rewriting each vertex Parquet in
     // place (DuckDB — the one remaining native-runtime use on this path).
-    enrich_written_layout(&graph, &dest_dir)?;
+    enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
 
     Ok(graph.run_status(dest_url))
 }
@@ -397,11 +415,22 @@ pub fn run(path: &Path, dest_url: &str, creds: &RunCreds) -> miette::Result<RunS
 /// vertex type, point DuckDB at its `vertex/<Type>.parquet` plus the CSR Parquet
 /// of any self-edge, and rewrite the placeholder x/y/cluster_id with a real
 /// layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
-fn enrich_written_layout(graph: &fossil_df::GraphArData, dest_dir: &Path) -> miette::Result<()> {
+///
+/// `memory_bytes` is the run's budget again, applied to the second engine — the
+/// pass is measured at 0.13 GiB net today, but it is the half of the write path
+/// that reads back everything the first half wrote, and an unbounded `DuckDB`
+/// targets ~80% of the machine.
+fn enrich_written_layout(
+    graph: &fossil_df::GraphArData,
+    dest_dir: &Path,
+    memory_bytes: Option<u64>,
+) -> miette::Result<()> {
     let conn =
         duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
-    fossil_runtime::apply_resource_limits(&conn)
-        .map_err(|e| miette::miette!("apply duckdb resource limits: {e}"))?;
+    if let Some(bytes) = memory_bytes {
+        fossil_runtime::apply_memory_budget(&conn, bytes)
+            .map_err(|e| miette::miette!("apply duckdb memory budget: {e}"))?;
+    }
 
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
     let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
@@ -492,7 +521,10 @@ pub fn catalog(dest_url: &str, req: &CatalogRequest) -> miette::Result<RunStatus
     graph
         .write_to_dir(&dest_dir)
         .map_err(|e| miette::miette!("write catalog: {e}"))?;
-    enrich_written_layout(&graph, &dest_dir)?;
+    // No budget: a catalog is the governance rows the host just handed over on
+    // stdin, so its size is the payload's and declaring a limit for it would be
+    // a number with nothing to bound.
+    enrich_written_layout(&graph, &dest_dir, None)?;
     Ok(graph.run_status(dest_url))
 }
 

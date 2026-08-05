@@ -70,6 +70,13 @@ enum Commands {
         /// argv/env on a shared host. Omit for local / public-URL runs.
         #[arg(long)]
         creds_stdin: bool,
+        /// Memory budget for the run, in gibibytes (`--memory-gib 4`, fractions
+        /// allowed). One number for both engines: the executor spills to disk
+        /// instead of growing past it, and the layout pass runs under the same
+        /// limit. Omit for unbounded — a corpus larger than the machine then
+        /// dies rather than slows down.
+        #[arg(long, value_name = "GIB", value_parser = gib_to_bytes)]
+        memory_gib: Option<u64>,
     },
     /// Materialise a DCAT-AP catalog graph (`GraphAr`) from a `CatalogInput`
     /// piped on stdin. The host supplies governance values + the run's dataset
@@ -114,7 +121,8 @@ fn main() -> miette::Result<()> {
             dest,
             output_json,
             creds_stdin,
-        } => cmd_run(&file, &dest, output_json, creds_stdin),
+            memory_gib,
+        } => cmd_run(&file, &dest, output_json, creds_stdin, memory_gib),
         Commands::Catalog { dest, output_json } => {
             let req = CatalogRequest::from_stdin().map_err(|e| miette::miette!(e))?;
             cmd_catalog(&dest, output_json, &req)
@@ -189,14 +197,34 @@ fn cmd_check(path: &Path) -> miette::Result<()> {
     Ok(())
 }
 
+/// `--memory-gib` → bytes, the form both engines are configured in. Rejects
+/// anything that is not a positive size: a budget of zero (or of NaN) is not a
+/// tighter run, it is a run in which the first allocation fails.
+fn gib_to_bytes(raw: &str) -> Result<u64, String> {
+    let gib: f64 = raw
+        .parse()
+        .map_err(|_| format!("`{raw}` is not a number of gibibytes"))?;
+    if !gib.is_finite() || gib <= 0.0 {
+        return Err(format!("memory budget must be positive, got `{raw}`"));
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Ok((gib * 1024.0 * 1024.0 * 1024.0) as u64)
+}
+
 /// `fossil run`: compile + execute, then report the resulting `RunStatus`.
-fn cmd_run(path: &Path, dest: &str, output_json: bool, creds_stdin: bool) -> miette::Result<()> {
+fn cmd_run(
+    path: &Path,
+    dest: &str,
+    output_json: bool,
+    creds_stdin: bool,
+    memory_bytes: Option<u64>,
+) -> miette::Result<()> {
     let creds = if creds_stdin {
         RunCreds::from_stdin().map_err(|e| miette::miette!("{e}"))?
     } else {
         RunCreds::default()
     };
-    let status = fossil_engine::run(path, dest, &creds)?;
+    let status = fossil_engine::run(path, dest, &creds, memory_bytes)?;
     report(&status, output_json);
     Ok(())
 }

@@ -64,8 +64,10 @@ impl ManifestSource for MapSource {
 /// Returns a stringified error if the connection, secret install, manifest
 /// parse, or view registration fails.
 pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), String> {
+    // No memory budget: a budget is an input of the command that declares it,
+    // and an MCP dataset does not declare one. When it does, it calls
+    // `fossil_runtime::apply_memory_budget` with that number.
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
-    fossil_runtime::apply_resource_limits(&conn).map_err(|e| e.to_string())?;
 
     if let Some(spec) = &dataset.secret {
         let params: HashMap<String, SecretString> = spec
