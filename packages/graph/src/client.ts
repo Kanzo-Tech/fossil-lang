@@ -3,16 +3,14 @@ import type {
   Operation,
   SchemaParams,
   SchemaResult,
-  FindNeighborsParams,
-  FindNeighborsResult,
-  FindPathParams,
-  FindPathResult,
-  GetVertexParams,
-  GetVertexResult,
+  ReadParams,
+  ReadResult,
+  ExpandParams,
+  ExpandResult,
+  PathParams,
+  PathResult,
   AggregateParams,
   AggregateResult,
-  TopKParams,
-  TopKResult,
   ViewportParams,
   ViewportResult,
   MaterializeGraphParams,
@@ -70,16 +68,25 @@ export interface GraphClient {
    * pays for a second query.
    */
   schema(params?: SchemaParams): Promise<SchemaResult>;
-  findNeighbors(params: FindNeighborsParams): Promise<FindNeighborsResult>;
-  findPath(params: FindPathParams): Promise<FindPathResult>;
-  /** Fetch one vertex's user-facing properties by subject IRI. */
-  getVertex(params: GetVertexParams): Promise<GetVertexResult>;
+  /**
+   * Rows of one vertex type: a `where` predicate, an order, a limit. The
+   * general bounded read — reading one vertex is `where: "subject = '…'"`.
+   * `where` is SQL and carries the same authority as `executeSql`: gate it
+   * with the same permission.
+   */
+  read(params: ReadParams): Promise<ReadResult>;
+  /**
+   * The neighbourhood of a set of vertices: `all` walks outward up to `depth`,
+   * `into` keeps only the edges whose both ends are in the set.
+   */
+  expand(params: ExpandParams): Promise<ExpandResult>;
+  /** The shortest route between two vertices. */
+  path(params: PathParams): Promise<PathResult>;
   /**
    * One grouping, over values or — with `bins` — over equal-width ranges of
    * the column. Binning is grouping, so there is no separate histogram verb.
    */
   aggregate(params: AggregateParams): Promise<AggregateResult>;
-  topK(params: TopKParams): Promise<TopKResult>;
   viewport(params: ViewportParams): Promise<ViewportResult>;
   /** Canvas-ready whole-graph snapshot (vertices + dense→subject-mapped edges). */
   materializeGraph(params: MaterializeGraphParams): Promise<MaterializeGraphResult>;
@@ -107,11 +114,10 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
 
   return {
     schema: (params = {}) => call({ verb: 'schema', params }),
-    findNeighbors: (params) => call({ verb: 'find_neighbors', params }),
-    findPath: (params) => call({ verb: 'find_path', params }),
-    getVertex: (params) => call({ verb: 'get_vertex', params }),
+    read: (params) => call({ verb: 'read', params }),
+    expand: (params) => call({ verb: 'expand', params }),
+    path: (params) => call({ verb: 'path', params }),
     aggregate: (params) => call({ verb: 'aggregate', params }),
-    topK: (params) => call({ verb: 'top_k', params }),
     viewport: (params) => call({ verb: 'viewport', params }),
     materializeGraph: (params) => call({ verb: 'materialize_graph', params }),
     executeSql: (params) => call({ verb: 'execute_sql', params }),

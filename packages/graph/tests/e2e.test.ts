@@ -113,12 +113,12 @@ describe('@fossil-lang/graph verbs e2e against DuckDB-WASM', () => {
     expect(rows.reduce((a, r) => a + r.value, 0)).toBe(3);
   });
 
-  it('top_k: descending order_by returns the real ordering', async () => {
-    const { rows } = (await graph.topK({
+  it('read: descending order_by returns the real ordering', async () => {
+    const { rows } = (await graph.read({
       vertex_type: 'Person',
       order_by: 'age',
-      k: 2,
       descending: true,
+      limit: 2,
     })) as { rows: Array<Record<string, unknown>> };
     expect(rows).toHaveLength(2);
     expect(rows[0]!.name).toBe('Bob'); // age 41

@@ -7,6 +7,10 @@
 
 export type Aggregation = "count" | "sum" | "avg" | "min" | "max";
 /**
+ * Which edges an expansion keeps — Neo4j's `Expand(All)` / `Expand(Into)`.
+ */
+export type ExpandMode = "all" | "into";
+/**
  * Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts:: inferRole` — promoted here to be authoritative.
  */
 export type FieldRole = "identifier" | "dimension" | "measure";
@@ -21,24 +25,20 @@ export type Operation =
       verb: "schema";
     }
   | {
-      params: FindNeighborsParams;
-      verb: "find_neighbors";
+      params: ReadParams;
+      verb: "read";
     }
   | {
-      params: FindPathParams;
-      verb: "find_path";
+      params: ExpandParams;
+      verb: "expand";
     }
   | {
-      params: GetVertexParams;
-      verb: "get_vertex";
+      params: PathParams;
+      verb: "path";
     }
   | {
       params: AggregateParams;
       verb: "aggregate";
-    }
-  | {
-      params: TopKParams;
-      verb: "top_k";
     }
   | {
       params: ViewportParams;
@@ -64,25 +64,24 @@ export interface FossilGraphSchemas {
   EdgeTypeSummary?: EdgeTypeSummary;
   ExecuteSqlParams?: ExecuteSqlParams;
   ExecuteSqlResult?: ExecuteSqlResult;
+  ExpandMode?: ExpandMode;
+  ExpandParams?: ExpandParams;
+  ExpandResult?: ExpandResult;
   FieldRole?: FieldRole;
   FieldStat?: FieldStat;
-  FindNeighborsParams?: FindNeighborsParams;
-  FindNeighborsResult?: FindNeighborsResult;
-  FindPathParams?: FindPathParams;
-  FindPathResult?: FindPathResult;
-  GetVertexParams?: GetVertexParams;
-  GetVertexResult?: GetVertexResult;
+  GraphEdge?: GraphEdge;
+  GraphVertex?: GraphVertex;
   MaterializeGraphParams?: MaterializeGraphParams;
   MaterializeGraphResult?: MaterializeGraphResult;
   MaterializedEdge?: MaterializedEdge;
   MaterializedVertex?: MaterializedVertex;
-  NeighborEdge?: NeighborEdge;
-  NeighborVertex?: NeighborVertex;
   Operation?: Operation;
+  PathParams?: PathParams;
+  PathResult?: PathResult;
+  ReadParams?: ReadParams;
+  ReadResult?: ReadResult;
   SchemaParams?: SchemaParams;
   SchemaResult?: SchemaResult;
-  TopKParams?: TopKParams;
-  TopKResult?: TopKResult;
   VertexTypeSummary?: VertexTypeSummary;
   ViewportEdge?: ViewportEdge;
   ViewportMode?: ViewportMode;
@@ -171,6 +170,43 @@ export interface ExecuteSqlResult {
    */
   truncated: boolean;
 }
+export interface ExpandParams {
+  /**
+   * Hops to walk. [`ExpandMode::Into`] ignores it — the induced subgraph has no frontier to advance.
+   */
+  depth?: number;
+  /**
+   * Restrict traversal to a subset of edge names. Empty = all.
+   */
+  edge_types?: string[];
+  /**
+   * The vertices to expand from, by subject IRI.
+   */
+  from: string[];
+  limit?: number;
+  /**
+   * Which edges an expansion keeps — Neo4j's `Expand(All)` / `Expand(Into)`.
+   */
+  mode?: "all" | "into";
+}
+export interface ExpandResult {
+  edges: GraphEdge[];
+  vertices: GraphVertex[];
+}
+export interface GraphEdge {
+  predicate: string;
+  source: string;
+  target: string;
+}
+export interface GraphVertex {
+  /**
+   * Hop count from the origin set (0 = a vertex the call named).
+   */
+  hop: number;
+  iri: string;
+  label: string;
+  vertex_type: string;
+}
 export interface FieldStat {
   /**
    * `GraphAr` data-type spelling (`string`, `int64`, `double`, …).
@@ -189,60 +225,6 @@ export interface FieldStat {
    * Up to 8 non-null values. **Populated only when the call named this field**: they are a second query, and a bare per-type call would pay it once per column.
    */
   samples: string[];
-}
-export interface FindNeighborsParams {
-  depth?: number;
-  /**
-   * Restrict traversal to a subset of edge names. Empty = all.
-   */
-  edge_types?: string[];
-  iri: string;
-  limit?: number;
-}
-export interface FindNeighborsResult {
-  edges: NeighborEdge[];
-  vertices: NeighborVertex[];
-}
-export interface NeighborEdge {
-  predicate: string;
-  source: string;
-  target: string;
-}
-export interface NeighborVertex {
-  /**
-   * Hop count from the origin (0 = origin itself).
-   */
-  hop: number;
-  iri: string;
-  label: string;
-  vertex_type: string;
-}
-export interface FindPathParams {
-  max_hops?: number;
-  source_iri: string;
-  target_iri: string;
-}
-export interface FindPathResult {
-  edges: NeighborEdge[];
-  /**
-   * Ordered path vertices including endpoints. Empty when no path exists within `max_hops`.
-   */
-  vertices: NeighborVertex[];
-}
-export interface GetVertexParams {
-  /**
-   * The vertex's `subject` IRI (unique across the graph).
-   */
-  subject: string;
-  vertex_type: string;
-}
-export interface GetVertexResult {
-  /**
-   * The matched vertex's user-facing property columns (reserved columns filtered) as a JSON object; `null` when no vertex has that subject.
-   */
-  vertex?: {
-    [k: string]: unknown;
-  };
 }
 export interface MaterializeGraphParams {
   limit?: number;
@@ -294,11 +276,28 @@ export interface SchemaParams {
    */
   vertex_type?: string | null;
 }
-export interface TopKParams {
+/**
+ * Rows of one vertex type, filtered, ordered and capped.
+ *
+ * **`where` is SQL and is trusted exactly as far as `execute_sql` is.** A binding that gates the escape hatch behind a permission MUST gate this field with it: the two carry the same authority over the same engine.
+ */
+export interface ReadParams {
   descending?: boolean;
-  k?: number;
-  order_by: string;
+  limit?: number;
+  /**
+   * Column to order by. Absent, the rows arrive in storage order, which is the writer's Morton order and says nothing the caller asked about.
+   */
+  order_by?: string | null;
   vertex_type: string;
+  /**
+   * A `WHERE` predicate over the type's columns, without the keyword. Reading one vertex is `subject = '…'`.
+   */
+  where?: string | null;
+}
+export interface PathParams {
+  max_hops?: number;
+  source_iri: string;
+  target_iri: string;
 }
 export interface ViewportParams {
   bbox: BoundingBox;
@@ -312,6 +311,19 @@ export interface ViewportParams {
    * Current zoom level. Above [`Self::lod_threshold`] the executor swaps to aggregate mode (`GROUP BY cluster_id`) returning ≤ 10k super-nodes regardless of total N.
    */
   zoom: number;
+}
+export interface PathResult {
+  edges: GraphEdge[];
+  /**
+   * Ordered path vertices including endpoints. Empty when no path exists within `max_hops`.
+   */
+  vertices: GraphVertex[];
+}
+export interface ReadResult {
+  /**
+   * Rows as opaque JSON objects so the verb stays generic across arbitrary vertex shapes. `subject` rides along as the identity; the writer's layout columns do not — those are the tiles' business, not the algebra's.
+   */
+  rows: unknown[];
 }
 export interface SchemaResult {
   edges: EdgeTypeSummary[];
@@ -338,12 +350,6 @@ export interface VertexTypeSummary {
    * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
    */
   name: string;
-}
-export interface TopKResult {
-  /**
-   * Rows as opaque JSON objects so the verb stays generic across arbitrary vertex shapes. Bindings render to their UI of choice.
-   */
-  rows: unknown[];
 }
 /**
  * An edge both of whose endpoints are in the answer.

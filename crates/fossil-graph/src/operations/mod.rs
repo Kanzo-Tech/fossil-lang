@@ -1,7 +1,7 @@
 //! The verbs of the fossil-graph surface, on the way from seventeen to six.
 //!
 //! ADR-0042 closes the surface at `read`, `expand{into|all}`, `path`,
-//! `aggregate`, `schema` and `execute_sql`. **Nine remain.** The four that never
+//! `aggregate`, `schema` and `execute_sql`. **Eight remain.** The four that never
 //! had an implementation are gone, three of them because they were never verbs
 //! — `summarize_cluster` and `answer_with_communities` are a `read` over a
 //! level, and `set_selection` always belonged to the client. The four
@@ -9,7 +9,7 @@
 //! used to separate the cheap ones from the expensive one is now a parameter.
 //! `histogram` is gone the same way — binning is grouping, so it is a parameter
 //! of `aggregate`. `top_k` is not: it returns whole rows ordered and limited,
-//! which is a read.
+//! which is a read, and `read` is where it went, along with `get_vertex`.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed
@@ -38,15 +38,16 @@ pub enum Operation {
     // Introspection — the manifest, and per-field statistics on request.
     Schema(schema::SchemaParams),
 
-    // Discovery — semantic / structural lookups.
-    FindNeighbors(discovery::FindNeighborsParams),
-    FindPath(discovery::FindPathParams),
-    GetVertex(discovery::GetVertexParams),
+    // Reads — rows of one type, the neighbourhood of a set, the route between
+    // two. `read` absorbed `get_vertex` (a predicate on `subject`) and `top_k`
+    // (an order and a limit).
+    Read(discovery::ReadParams),
+    Expand(discovery::ExpandParams),
+    Path(discovery::PathParams),
 
     // Aggregation — bounded constant-memory queries. Binning is grouping, so
     // `histogram` is a parameter of this one rather than a verb beside it.
     Aggregate(aggregate::AggregateParams),
-    TopK(aggregate::TopKParams),
 
     // Viewport — the larger-than-RAM-friendly visual layer (writer W3 emits
     // morton-sorted vertex Parquet so bbox + LIMIT = predicate pushdown).
@@ -67,11 +68,10 @@ impl Operation {
     pub const fn verb_name(&self) -> &'static str {
         match self {
             Self::Schema(_) => "schema",
-            Self::FindNeighbors(_) => "find_neighbors",
-            Self::FindPath(_) => "find_path",
-            Self::GetVertex(_) => "get_vertex",
+            Self::Read(_) => "read",
+            Self::Expand(_) => "expand",
+            Self::Path(_) => "path",
             Self::Aggregate(_) => "aggregate",
-            Self::TopK(_) => "top_k",
             Self::Viewport(_) => "viewport",
             Self::MaterializeGraph(_) => "materialize_graph",
             Self::ExecuteSql(_) => "execute_sql",

@@ -6,11 +6,9 @@ use std::collections::HashMap;
 
 use duckdb::Connection;
 use fossil_graph::manifest::{Manifest, ManifestSource};
-use fossil_graph::operations::aggregate::{
-    AggregateParams, AggregateResult, Aggregation, TopKParams, TopKResult,
-};
+use fossil_graph::operations::aggregate::{AggregateParams, AggregateResult, Aggregation};
 use fossil_graph::operations::discovery::{
-    FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult,
+    ExpandMode, ExpandParams, ExpandResult, PathParams, PathResult, ReadParams, ReadResult,
 };
 use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, Result, dispatch};
@@ -233,31 +231,55 @@ fn aggregate_bins_age_over_real_ranges() {
 }
 
 #[test]
-fn top_k_oldest_first() {
+fn read_orders_and_caps_what_top_k_used_to() {
     let (conn, m) = (connection(), manifest());
-    let r: TopKResult = run(
+    let r: ReadResult = run(
         &conn,
         &m,
-        &Operation::TopK(TopKParams {
+        &Operation::Read(ReadParams {
             vertex_type: "Person".into(),
-            order_by: "age".into(),
-            k: 2,
+            r#where: None,
+            order_by: Some("age".into()),
             descending: true,
+            limit: 2,
         }),
     );
     assert_eq!(r.rows.len(), 2);
     assert_eq!(r.rows[0]["name"], serde_json::json!("Bob")); // 41
     assert_eq!(r.rows[1]["name"], serde_json::json!("Ann")); // 30
+    // Identity rides along; the writer's layout columns do not.
+    assert_eq!(r.rows[0]["subject"], serde_json::json!("urn:b"));
+    assert!(r.rows[0].get("dense_id").is_none());
+    assert!(r.rows[0].get("x").is_none());
 }
 
 #[test]
-fn find_neighbors_one_hop() {
+fn read_by_subject_is_what_get_vertex_was() {
     let (conn, m) = (connection(), manifest());
-    let r: FindNeighborsResult = run(
+    let r: ReadResult = run(
         &conn,
         &m,
-        &Operation::FindNeighbors(FindNeighborsParams {
-            iri: "urn:a".into(),
+        &Operation::Read(ReadParams {
+            vertex_type: "Person".into(),
+            r#where: Some("subject = 'urn:a'".into()),
+            order_by: None,
+            descending: false,
+            limit: 1,
+        }),
+    );
+    assert_eq!(r.rows.len(), 1);
+    assert_eq!(r.rows[0]["name"], serde_json::json!("Ann"));
+}
+
+#[test]
+fn expand_all_one_hop() {
+    let (conn, m) = (connection(), manifest());
+    let r: ExpandResult = run(
+        &conn,
+        &m,
+        &Operation::Expand(ExpandParams {
+            from: vec!["urn:a".into()],
+            mode: ExpandMode::All,
             depth: 1,
             edge_types: Vec::new(),
             limit: 100,
@@ -276,13 +298,14 @@ fn find_neighbors_one_hop() {
 }
 
 #[test]
-fn find_neighbors_two_hops_reaches_c() {
+fn expand_all_two_hops_reaches_c() {
     let (conn, m) = (connection(), manifest());
-    let r: FindNeighborsResult = run(
+    let r: ExpandResult = run(
         &conn,
         &m,
-        &Operation::FindNeighbors(FindNeighborsParams {
-            iri: "urn:a".into(),
+        &Operation::Expand(ExpandParams {
+            from: vec!["urn:a".into()],
+            mode: ExpandMode::All,
             depth: 2,
             edge_types: Vec::new(),
             limit: 100,
@@ -294,12 +317,35 @@ fn find_neighbors_two_hops_reaches_c() {
 }
 
 #[test]
-fn find_path_a_to_c() {
+fn expand_into_drops_the_edge_that_leaves_the_set() {
+    // a→b→c, and the set is {a, b}: only a→b survives, and c never appears.
     let (conn, m) = (connection(), manifest());
-    let r: FindPathResult = run(
+    let r: ExpandResult = run(
         &conn,
         &m,
-        &Operation::FindPath(FindPathParams {
+        &Operation::Expand(ExpandParams {
+            from: vec!["urn:a".into(), "urn:b".into()],
+            mode: ExpandMode::Into,
+            depth: 5, // ignored: an induced subgraph has no frontier.
+            edge_types: Vec::new(),
+            limit: 100,
+        }),
+    );
+    assert_eq!(r.edges.len(), 1);
+    assert_eq!(r.edges[0].source, "urn:a");
+    assert_eq!(r.edges[0].target, "urn:b");
+    let named: Vec<&str> = r.vertices.iter().map(|v| v.iri.as_str()).collect();
+    assert_eq!(named, vec!["urn:a", "urn:b"]);
+    assert!(r.vertices.iter().all(|v| v.vertex_type == "Person"));
+}
+
+#[test]
+fn path_a_to_c() {
+    let (conn, m) = (connection(), manifest());
+    let r: PathResult = run(
+        &conn,
+        &m,
+        &Operation::Path(PathParams {
             source_iri: "urn:a".into(),
             target_iri: "urn:c".into(),
             max_hops: 5,
@@ -395,12 +441,12 @@ fn execute_sql_real_columns_and_cap() {
 }
 
 #[test]
-fn find_path_unreachable_is_empty() {
+fn path_unreachable_is_empty() {
     let (conn, m) = (connection(), manifest());
-    let r: FindPathResult = run(
+    let r: PathResult = run(
         &conn,
         &m,
-        &Operation::FindPath(FindPathParams {
+        &Operation::Path(PathParams {
             source_iri: "urn:c".into(), // c has no outgoing edges
             target_iri: "urn:a".into(),
             max_hops: 5,

@@ -23,33 +23,33 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/FindNeighborsParams"
+        $ref: "#/definitions/ReadParams"
       verb:
         type: string
         enum:
-          - find_neighbors
+          - read
   - type: object
     required:
       - params
       - verb
     properties:
       params:
-        $ref: "#/definitions/FindPathParams"
+        $ref: "#/definitions/ExpandParams"
       verb:
         type: string
         enum:
-          - find_path
+          - expand
   - type: object
     required:
       - params
       - verb
     properties:
       params:
-        $ref: "#/definitions/GetVertexParams"
+        $ref: "#/definitions/PathParams"
       verb:
         type: string
         enum:
-          - get_vertex
+          - path
   - type: object
     required:
       - params
@@ -61,17 +61,6 @@ oneOf:
         type: string
         enum:
           - aggregate
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/TopKParams"
-      verb:
-        type: string
-        enum:
-          - top_k
   - type: object
     required:
       - params
@@ -190,12 +179,24 @@ definitions:
         format: uint32
         minimum: 0
     additionalProperties: false
-  FindNeighborsParams:
+  ExpandMode:
+    description: "Which edges an expansion keeps — Neo4j's `Expand(All)` / `Expand(Into)`."
+    oneOf:
+      - description: "Walk outward: every edge leaving the frontier, up to `depth`."
+        type: string
+        enum:
+          - all
+      - description: "The subgraph induced on `from`: only edges whose **both** ends are in the set.\n\n**The form is right and the speed argument is not available here.** ADR-0041 justified this mode by the membership mask Kùzu (`SEMI_MASKER`) and Neo4j push inside the scan; ADR-0042 measured that `DuckDB` does not accept that class of pruning — a range join against the ids costs more than not pruning at all. So this is a shape a caller wants, not a fast path we have."
+        type: string
+        enum:
+          - into
+  ExpandParams:
     type: object
     required:
-      - iri
+      - from
     properties:
       depth:
+        description: "Hops to walk. [`ExpandMode::Into`] ignores it — the induced subgraph has no frontier to advance."
         default: 1
         type: integer
         format: uint8
@@ -206,41 +207,20 @@ definitions:
         type: array
         items:
           type: string
-      iri:
-        type: string
+      from:
+        description: "The vertices to expand from, by subject IRI."
+        type: array
+        items:
+          type: string
       limit:
         default: 500
         type: integer
         format: uint32
         minimum: 0
-    additionalProperties: false
-  FindPathParams:
-    type: object
-    required:
-      - source_iri
-      - target_iri
-    properties:
-      max_hops:
-        default: 5
-        type: integer
-        format: uint8
-        minimum: 0
-      source_iri:
-        type: string
-      target_iri:
-        type: string
-    additionalProperties: false
-  GetVertexParams:
-    type: object
-    required:
-      - subject
-      - vertex_type
-    properties:
-      subject:
-        description: "The vertex's `subject` IRI (unique across the graph)."
-        type: string
-      vertex_type:
-        type: string
+      mode:
+        default: all
+        allOf:
+          - $ref: "#/definitions/ExpandMode"
     additionalProperties: false
   MaterializeGraphParams:
     type: object
@@ -257,6 +237,51 @@ definitions:
         items:
           type: string
     additionalProperties: false
+  PathParams:
+    type: object
+    required:
+      - source_iri
+      - target_iri
+    properties:
+      max_hops:
+        default: 5
+        type: integer
+        format: uint8
+        minimum: 0
+      source_iri:
+        type: string
+      target_iri:
+        type: string
+    additionalProperties: false
+  ReadParams:
+    description: "Rows of one vertex type, filtered, ordered and capped.\n\n**`where` is SQL and is trusted exactly as far as `execute_sql` is.** A binding that gates the escape hatch behind a permission MUST gate this field with it: the two carry the same authority over the same engine."
+    type: object
+    required:
+      - vertex_type
+    properties:
+      descending:
+        default: false
+        type: boolean
+      limit:
+        default: 100
+        type: integer
+        format: uint32
+        minimum: 0
+      order_by:
+        description: "Column to order by. Absent, the rows arrive in storage order, which is the writer's Morton order and says nothing the caller asked about."
+        default: ~
+        type:
+          - string
+          - "null"
+      vertex_type:
+        type: string
+      where:
+        description: "A `WHERE` predicate over the type's columns, without the keyword. Reading one vertex is `subject = '…'`."
+        default: ~
+        type:
+          - string
+          - "null"
+    additionalProperties: false
   SchemaParams:
     type: object
     properties:
@@ -272,25 +297,6 @@ definitions:
         type:
           - string
           - "null"
-    additionalProperties: false
-  TopKParams:
-    type: object
-    required:
-      - order_by
-      - vertex_type
-    properties:
-      descending:
-        default: false
-        type: boolean
-      k:
-        default: 20
-        type: integer
-        format: uint32
-        minimum: 0
-      order_by:
-        type: string
-      vertex_type:
-        type: string
     additionalProperties: false
   ViewportParams:
     type: object

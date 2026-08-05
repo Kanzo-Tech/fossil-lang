@@ -1,0 +1,49 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (discovery::ExpandParams)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: ExpandParams
+type: object
+required:
+  - from
+properties:
+  depth:
+    description: "Hops to walk. [`ExpandMode::Into`] ignores it — the induced subgraph has no frontier to advance."
+    default: 1
+    type: integer
+    format: uint8
+    minimum: 0
+  edge_types:
+    description: Restrict traversal to a subset of edge names. Empty = all.
+    default: []
+    type: array
+    items:
+      type: string
+  from:
+    description: "The vertices to expand from, by subject IRI."
+    type: array
+    items:
+      type: string
+  limit:
+    default: 500
+    type: integer
+    format: uint32
+    minimum: 0
+  mode:
+    default: all
+    allOf:
+      - $ref: "#/definitions/ExpandMode"
+additionalProperties: false
+definitions:
+  ExpandMode:
+    description: "Which edges an expansion keeps — Neo4j's `Expand(All)` / `Expand(Into)`."
+    oneOf:
+      - description: "Walk outward: every edge leaving the frontier, up to `depth`."
+        type: string
+        enum:
+          - all
+      - description: "The subgraph induced on `from`: only edges whose **both** ends are in the set.\n\n**The form is right and the speed argument is not available here.** ADR-0041 justified this mode by the membership mask Kùzu (`SEMI_MASKER`) and Neo4j push inside the scan; ADR-0042 measured that `DuckDB` does not accept that class of pruning — a range join against the ids costs more than not pruning at all. So this is a shape a caller wants, not a fast path we have."
+        type: string
+        enum:
+          - into

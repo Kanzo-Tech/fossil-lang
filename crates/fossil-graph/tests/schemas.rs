@@ -34,21 +34,19 @@ fn schema_verb() {
 }
 
 #[test]
-fn discovery_verbs() {
-    snap!("find_neighbors_params", discovery::FindNeighborsParams);
-    snap!("find_neighbors_result", discovery::FindNeighborsResult);
-    snap!("find_path_params", discovery::FindPathParams);
-    snap!("find_path_result", discovery::FindPathResult);
-    snap!("get_vertex_params", discovery::GetVertexParams);
-    snap!("get_vertex_result", discovery::GetVertexResult);
+fn read_verbs() {
+    snap!("read_params", discovery::ReadParams);
+    snap!("read_result", discovery::ReadResult);
+    snap!("expand_params", discovery::ExpandParams);
+    snap!("expand_result", discovery::ExpandResult);
+    snap!("path_params", discovery::PathParams);
+    snap!("path_result", discovery::PathResult);
 }
 
 #[test]
-fn aggregate_verbs() {
+fn aggregate_verb() {
     snap!("aggregate_params", aggregate::AggregateParams);
     snap!("aggregate_result", aggregate::AggregateResult);
-    snap!("top_k_params", aggregate::TopKParams);
-    snap!("top_k_result", aggregate::TopKResult);
 }
 
 #[test]

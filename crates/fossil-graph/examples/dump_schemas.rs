@@ -27,11 +27,10 @@ fn main() {
     generator.subschema_for::<Operation>();
 
     generator.subschema_for::<schema::SchemaResult>();
-    generator.subschema_for::<discovery::FindNeighborsResult>();
-    generator.subschema_for::<discovery::FindPathResult>();
-    generator.subschema_for::<discovery::GetVertexResult>();
+    generator.subschema_for::<discovery::ReadResult>();
+    generator.subschema_for::<discovery::ExpandResult>();
+    generator.subschema_for::<discovery::PathResult>();
     generator.subschema_for::<aggregate::AggregateResult>();
-    generator.subschema_for::<aggregate::TopKResult>();
     generator.subschema_for::<viewport::ViewportResult>();
     generator.subschema_for::<viewport::MaterializeGraphResult>();
     generator.subschema_for::<sql::ExecuteSqlResult>();

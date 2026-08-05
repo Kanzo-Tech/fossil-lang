@@ -1,9 +1,9 @@
 ---
 source: crates/fossil-graph/tests/schemas.rs
-expression: "schema_for! (discovery::FindPathResult)"
+expression: "schema_for! (discovery::PathResult)"
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
-title: FindPathResult
+title: PathResult
 type: object
 required:
   - edges
@@ -12,14 +12,14 @@ properties:
   edges:
     type: array
     items:
-      $ref: "#/definitions/NeighborEdge"
+      $ref: "#/definitions/GraphEdge"
   vertices:
     description: "Ordered path vertices including endpoints. Empty when no path exists within `max_hops`."
     type: array
     items:
-      $ref: "#/definitions/NeighborVertex"
+      $ref: "#/definitions/GraphVertex"
 definitions:
-  NeighborEdge:
+  GraphEdge:
     type: object
     required:
       - predicate
@@ -32,7 +32,7 @@ definitions:
         type: string
       target:
         type: string
-  NeighborVertex:
+  GraphVertex:
     type: object
     required:
       - hop
@@ -41,7 +41,7 @@ definitions:
       - vertex_type
     properties:
       hop:
-        description: Hop count from the origin (0 = origin itself).
+        description: Hop count from the origin set (0 = a vertex the call named).
         type: integer
         format: uint8
         minimum: 0

@@ -1,9 +1,9 @@
 ---
 source: crates/fossil-graph/tests/schemas.rs
-expression: "schema_for! (discovery::FindPathParams)"
+expression: "schema_for! (discovery::PathParams)"
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
-title: FindPathParams
+title: PathParams
 type: object
 required:
   - source_iri

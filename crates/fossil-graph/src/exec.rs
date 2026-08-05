@@ -22,11 +22,11 @@ use serde_json::Value;
 
 use crate::manifest::{Manifest, edge_table_name};
 use crate::operations::aggregate::{
-    AggregateParams, AggregateResult, AggregateRow, Aggregation, TopKParams, TopKResult,
+    AggregateParams, AggregateResult, AggregateRow, Aggregation,
 };
 use crate::operations::discovery::{
-    FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, GetVertexParams,
-    GetVertexResult, NeighborEdge, NeighborVertex,
+    ExpandMode, ExpandParams, ExpandResult, GraphEdge, GraphVertex, PathParams, PathResult,
+    ReadParams, ReadResult,
 };
 use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::operations::viewport::{
@@ -116,10 +116,9 @@ impl<E: DuckExecutor> Context<'_, E> {
         match op {
             Operation::Schema(p) => to_json(&self.schema(p).await?),
             Operation::Aggregate(p) => to_json(&self.aggregate(p).await?),
-            Operation::TopK(p) => to_json(&self.top_k(p).await?),
-            Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p).await?),
-            Operation::FindPath(p) => to_json(&self.find_path(p).await?),
-            Operation::GetVertex(p) => to_json(&self.get_vertex(p).await?),
+            Operation::Read(p) => to_json(&self.read(p).await?),
+            Operation::Expand(p) => to_json(&self.expand(p).await?),
+            Operation::Path(p) => to_json(&self.path(p).await?),
             Operation::Viewport(p) => to_json(&self.viewport(p).await?),
             Operation::MaterializeGraph(p) => to_json(&self.materialize_graph(p).await?),
             Operation::ExecuteSql(p) => to_json(&self.execute_sql(p).await?),
@@ -404,17 +403,6 @@ impl<E: DuckExecutor> Context<'_, E> {
                 })
                 .collect(),
             edges,
-        })
-    }
-
-    async fn top_k(&self, p: &TopKParams) -> Result<TopKResult> {
-        self.manifest.lookup_vertex(&p.vertex_type)?;
-        let table = quote_ident(&p.vertex_type);
-        let order = quote_ident(&p.order_by);
-        let dir = if p.descending { "DESC" } else { "ASC" };
-        let sql = format!("SELECT * FROM {table} ORDER BY {order} {dir} LIMIT {}", p.k);
-        Ok(TopKResult {
-            rows: self.exec.query_json(&sql).await?,
         })
     }
 
@@ -768,25 +756,126 @@ impl<E: DuckExecutor> Context<'_, E> {
         })
     }
 
-    // ── Discovery verbs ───────────────────────────────────────────────────
+    // ── Read verbs ────────────────────────────────────────────────────────
 
-    async fn find_neighbors(&self, p: &FindNeighborsParams) -> Result<FindNeighborsResult> {
+    /// Rows of one vertex type: a predicate, an order, a limit.
+    ///
+    /// The general bounded read, and the two verbs it replaced are two of its
+    /// shapes — `get_vertex` was `where: "subject = '…'"`, `top_k` was an
+    /// `order_by` and a `limit`. Neither was a different question.
+    ///
+    /// The projection is the identity plus the user-facing columns: `subject`
+    /// rides along because a filter that must change the picture answers with
+    /// ids (ADR-0042), and the writer's `dense_id`/`x`/`y`/`cluster_id` do not,
+    /// because those are what a tile carries and this is the algebra.
+    async fn read(&self, p: &ReadParams) -> Result<ReadResult> {
+        let props: Vec<&str> = self
+            .manifest
+            .lookup_vertex(&p.vertex_type)?
+            .property_groups
+            .iter()
+            .flat_map(|g| g.properties.iter())
+            .map(|prop| prop.name.as_str())
+            .collect();
+
+        let mut cols: Vec<String> = Vec::with_capacity(props.len());
+        if props.contains(&"subject") {
+            cols.push(quote_ident("subject"));
+        }
+        cols.extend(
+            props
+                .iter()
+                .filter(|name| !RESERVED_VERTEX_COLUMNS.contains(name))
+                .map(|name| quote_ident(name)),
+        );
+        if cols.is_empty() {
+            // Nothing but writer columns: there is nothing here to read.
+            return Ok(ReadResult { rows: Vec::new() });
+        }
+
+        let mut sql = format!(
+            "SELECT {} FROM {}",
+            cols.join(", "),
+            quote_ident(&p.vertex_type)
+        );
+        if let Some(predicate) = p.r#where.as_deref() {
+            let _ = write!(sql, " WHERE {predicate}");
+        }
+        if let Some(order_by) = p.order_by.as_deref() {
+            let dir = if p.descending { "DESC" } else { "ASC" };
+            let _ = write!(sql, " ORDER BY {} {dir}", quote_ident(order_by));
+        }
+        let _ = write!(sql, " LIMIT {}", p.limit);
+
+        Ok(ReadResult {
+            rows: self.exec.query_json(&sql).await?,
+        })
+    }
+
+    /// The neighbourhood of a set of vertices, either outward or among itself.
+    async fn expand(&self, p: &ExpandParams) -> Result<ExpandResult> {
+        let seeds = self.seed_vertices(&p.from).await;
         let Some(edge_relation) = self.edge_relation_sql(&p.edge_types) else {
-            // No edge types match → the origin has no reachable neighbours.
-            return Ok(FindNeighborsResult {
-                vertices: self.origin_only(&p.iri).await,
+            // No edge type matches → the set reaches nothing.
+            return Ok(ExpandResult {
+                vertices: seeds,
                 edges: Vec::new(),
             });
         };
+        match p.mode {
+            ExpandMode::Into => self.expand_into(p, &edge_relation, seeds).await,
+            ExpandMode::All => self.expand_all(p, &edge_relation, seeds).await,
+        }
+    }
 
-        let root = sql_str_lit(&p.iri);
+    /// `Expand(Into)`: the subgraph induced on `from` — every edge whose two
+    /// ends are both in the set, and no vertex the call did not name.
+    ///
+    /// One pass, no recursion: an induced subgraph has no frontier to advance,
+    /// so `depth` means nothing here. See [`ExpandMode::Into`] for why this is
+    /// not the fast path it was argued to be.
+    async fn expand_into(
+        &self,
+        p: &ExpandParams,
+        edge_relation: &str,
+        seeds: Vec<GraphVertex>,
+    ) -> Result<ExpandResult> {
+        let Some(set) = iri_list(&p.from) else {
+            return Ok(ExpandResult {
+                vertices: seeds,
+                edges: Vec::new(),
+            });
+        };
+        let sql = format!(
+            "SELECT src, dst, predicate FROM ({edge_relation}) AS _e \
+             WHERE src IN ({set}) AND dst IN ({set}) LIMIT {}",
+            p.limit
+        );
+        Ok(ExpandResult {
+            edges: self.exec.query_json(&sql).await?.iter().filter_map(row_to_edge).collect(),
+            vertices: seeds,
+        })
+    }
+
+    /// `Expand(All)`: a breadth-first walk out of the set, bounded by `depth`
+    /// and by an outer `LIMIT` so a hub cannot explode the result.
+    async fn expand_all(
+        &self,
+        p: &ExpandParams,
+        edge_relation: &str,
+        seeds: Vec<GraphVertex>,
+    ) -> Result<ExpandResult> {
+        let Some(roots) = iri_list(&p.from) else {
+            return Ok(ExpandResult {
+                vertices: seeds,
+                edges: Vec::new(),
+            });
+        };
         let depth = u32::from(p.depth.max(1));
-        // Breadth-first walk over the resolved (src, dst, predicate) relation,
-        // bounded by depth and an outer LIMIT so a hub can't explode the result.
         let sql = format!(
             "WITH RECURSIVE edge_rel AS ({edge_relation}), \
              walk(src, dst, dst_type, predicate, hop) AS ( \
-                 SELECT src, dst, dst_type, predicate, 1 FROM edge_rel WHERE src = {root} \
+                 SELECT src, dst, dst_type, predicate, 1 FROM edge_rel WHERE src IN ({roots}) \
                  UNION ALL \
                  SELECT e.src, e.dst, e.dst_type, e.predicate, w.hop + 1 \
                  FROM edge_rel e JOIN walk w ON e.src = w.dst WHERE w.hop < {depth} \
@@ -798,26 +887,17 @@ impl<E: DuckExecutor> Context<'_, E> {
 
         let rows = self.exec.query_json(&sql).await?;
         let mut edges = Vec::with_capacity(rows.len());
-        let mut vertices = self.origin_only(&p.iri).await;
+        let mut vertices = seeds;
         let mut seen: std::collections::HashSet<String> =
             vertices.iter().map(|v| v.iri.clone()).collect();
         for r in &rows {
-            let (Some(src), Some(dst), Some(predicate)) = (
-                r.get("src").and_then(Value::as_str),
-                r.get("dst").and_then(Value::as_str),
-                r.get("predicate").and_then(Value::as_str),
-            ) else {
-                continue;
-            };
-            edges.push(NeighborEdge {
-                source: src.to_string(),
-                target: dst.to_string(),
-                predicate: predicate.to_string(),
-            });
-            if seen.insert(dst.to_string()) {
-                vertices.push(NeighborVertex {
-                    iri: dst.to_string(),
-                    label: dst.to_string(),
+            let Some(edge) = row_to_edge(r) else { continue };
+            let reached = edge.target.clone();
+            edges.push(edge);
+            if seen.insert(reached.clone()) {
+                vertices.push(GraphVertex {
+                    iri: reached.clone(),
+                    label: reached,
                     vertex_type: r
                         .get("dst_type")
                         .and_then(Value::as_str)
@@ -831,11 +911,11 @@ impl<E: DuckExecutor> Context<'_, E> {
                 });
             }
         }
-        Ok(FindNeighborsResult { vertices, edges })
+        Ok(ExpandResult { vertices, edges })
     }
 
-    async fn find_path(&self, p: &FindPathParams) -> Result<FindPathResult> {
-        let empty = FindPathResult {
+    async fn path(&self, p: &PathParams) -> Result<PathResult> {
+        let empty = PathResult {
             vertices: Vec::new(),
             edges: Vec::new(),
         };
@@ -846,8 +926,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         let source = sql_str_lit(&p.source_iri);
         let target = sql_str_lit(&p.target_iri);
         let max_hops = u32::from(p.max_hops.max(1));
-        let src_type =
-            sql_str_lit(&self.vertex_type_of(&p.source_iri).await.unwrap_or_default());
+        let src_type = sql_str_lit(&self.vertex_type_of(&p.source_iri).await.unwrap_or_default());
 
         // BFS accumulating the node / predicate / type lists, pruning cycles via
         // `list_contains`; the shortest path to `target` is the min-depth row.
@@ -875,7 +954,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         let vertices = nodes
             .iter()
             .enumerate()
-            .map(|(i, iri)| NeighborVertex {
+            .map(|(i, iri)| GraphVertex {
                 iri: iri.clone(),
                 label: iri.clone(),
                 vertex_type: types.get(i).cloned().unwrap_or_default(),
@@ -885,72 +964,44 @@ impl<E: DuckExecutor> Context<'_, E> {
         let edges = nodes
             .windows(2)
             .enumerate()
-            .map(|(i, pair)| NeighborEdge {
+            .map(|(i, pair)| GraphEdge {
                 source: pair[0].clone(),
                 target: pair[1].clone(),
                 predicate: preds.get(i).cloned().unwrap_or_default(),
             })
             .collect();
-        Ok(FindPathResult { vertices, edges })
+        Ok(PathResult { vertices, edges })
     }
 
-    /// Fetch one vertex's user-facing properties by subject IRI — the
-    /// member-safe single-entity read (no `execute_sql` escape hatch). Reserved
-    /// (writer) columns are filtered; `vertex` is `null` when no match.
-    async fn get_vertex(&self, p: &GetVertexParams) -> Result<GetVertexResult> {
-        let cols: Vec<String> = self
-            .manifest
-            .lookup_vertex(&p.vertex_type)?
-            .property_groups
-            .iter()
-            .flat_map(|g| g.properties.iter())
-            .map(|prop| prop.name.clone())
-            .filter(|n| !RESERVED_VERTEX_COLUMNS.contains(&n.as_str()))
-            .collect();
-
-        if cols.is_empty() {
-            return Ok(GetVertexResult {
-                vertex: Some(Value::Object(serde_json::Map::new())),
-            });
-        }
-
-        let select = cols
-            .iter()
-            .map(|c| quote_ident(c))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let sql = format!(
-            "SELECT {select} FROM {table} WHERE subject = {subj} LIMIT 1",
-            table = quote_ident(&p.vertex_type),
-            subj = sql_str_lit(&p.subject),
-        );
-        Ok(GetVertexResult {
-            vertex: self.exec.query_json(&sql).await?.into_iter().next(),
-        })
+    /// The vertices the call named, at hop 0, with their types resolved. The
+    /// seed of an expansion, and the whole answer of an `into` one.
+    async fn seed_vertices(&self, iris: &[String]) -> Vec<GraphVertex> {
+        let types = self.vertex_types_of(iris).await;
+        iris.iter()
+            .map(|iri| GraphVertex {
+                iri: iri.clone(),
+                label: iri.clone(),
+                vertex_type: types.get(iri).cloned().unwrap_or_default(),
+                hop: 0,
+            })
+            .collect()
     }
 
-    /// The origin vertex alone (hop 0), with its type resolved from whichever
-    /// vertex table holds the subject. Used as the seed of a neighbour result.
-    async fn origin_only(&self, iri: &str) -> Vec<NeighborVertex> {
-        vec![NeighborVertex {
-            iri: iri.to_string(),
-            label: iri.to_string(),
-            vertex_type: self.vertex_type_of(iri).await.unwrap_or_default(),
-            hop: 0,
-        }]
-    }
-
-    /// Resolve which vertex type holds `iri` by probing each type's `subject`
-    /// column. Returns the first match (subjects are unique across the graph).
-    async fn vertex_type_of(&self, iri: &str) -> Option<String> {
-        let lit = sql_str_lit(iri);
+    /// Resolve which vertex type holds each IRI, in ONE query: each vertex
+    /// table probed for the whole set at once, rather than a round trip per
+    /// vertex per table. Subjects are unique across the graph, so the first
+    /// row wins.
+    async fn vertex_types_of(&self, iris: &[String]) -> std::collections::HashMap<String, String> {
+        let Some(set) = iri_list(iris) else {
+            return std::collections::HashMap::new();
+        };
         let probe = self
             .manifest
             .vertices()
             .iter()
             .map(|v| {
                 format!(
-                    "SELECT '{}' AS t FROM {} WHERE subject = {lit}",
+                    "SELECT subject AS iri, '{}' AS t FROM {} WHERE subject IN ({set})",
                     v.vertex_type,
                     quote_ident(&v.vertex_type)
                 )
@@ -958,18 +1009,26 @@ impl<E: DuckExecutor> Context<'_, E> {
             .collect::<Vec<_>>()
             .join(" UNION ALL ");
         if probe.is_empty() {
-            return None;
+            return std::collections::HashMap::new();
         }
-        // One outer LIMIT over the whole union (subjects are unique).
-        let rows = self
-            .exec
-            .query_json(&format!("{probe} LIMIT 1"))
+        let Ok(rows) = self.exec.query_json(&probe).await else {
+            return std::collections::HashMap::new();
+        };
+        rows.iter()
+            .filter_map(|r| {
+                Some((
+                    r.get("iri").and_then(Value::as_str)?.to_string(),
+                    r.get("t").and_then(Value::as_str)?.to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    /// One IRI's vertex type — the single-vertex case of [`Self::vertex_types_of`].
+    async fn vertex_type_of(&self, iri: &str) -> Option<String> {
+        self.vertex_types_of(std::slice::from_ref(&iri.to_string()))
             .await
-            .ok()?;
-        rows.first()
-            .and_then(|r| r.get("t"))
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
+            .remove(iri)
     }
 
     /// The resolved-subject edge relation: every edge table joined to its src
@@ -1090,6 +1149,31 @@ fn row_to_viewport_vertex(row: &Value) -> ViewportVertex {
         cluster_size: None,
         cluster_id: None,
     }
+}
+
+/// A comma-separated `IN` list of quoted IRIs, or `None` for an empty set —
+/// `IN ()` is not valid SQL and an empty set has no answer to look up.
+fn iri_list(iris: &[String]) -> Option<String> {
+    (!iris.is_empty()).then(|| {
+        iris.iter()
+            .map(|iri| sql_str_lit(iri))
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+}
+
+/// One `(src, dst, predicate)` row to a [`GraphEdge`], dropping rows missing a
+/// column the caller could do nothing with.
+fn row_to_edge(row: &Value) -> Option<GraphEdge> {
+    Some(GraphEdge {
+        source: row.get("src").and_then(Value::as_str)?.to_string(),
+        target: row.get("dst").and_then(Value::as_str)?.to_string(),
+        predicate: row
+            .get("predicate")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    })
 }
 
 /// Extract a row column that is a JSON array of strings (a `DuckDB` `VARCHAR[]`).
@@ -1420,25 +1504,72 @@ mod tests {
     }
 
     #[test]
-    fn top_k_passes_rows_through() {
+    fn read_projects_identity_and_user_columns_ordered_and_capped() {
         let m = fixture();
         let exec = FnExec(|sql: &str| {
             assert!(sql.contains("ORDER BY") && sql.contains("DESC") && sql.contains("LIMIT 5"));
+            // The writer's columns are the tiles' business, not the algebra's.
+            assert!(!sql.contains("dense_id"), "reserved cols filtered: {sql}");
             vec![serde_json::json!({ "name": "x", "age": 9 })]
         });
         let v = run(
-            &Operation::TopK(TopKParams {
+            &Operation::Read(ReadParams {
                 vertex_type: "Person".into(),
-                order_by: "age".into(),
-                k: 5,
+                r#where: None,
+                order_by: Some("age".into()),
                 descending: true,
+                limit: 5,
             }),
             &m,
             &exec,
         )
         .unwrap();
-        let r: TopKResult = serde_json::from_value(v).unwrap();
+        let r: ReadResult = serde_json::from_value(v).unwrap();
         assert_eq!(r.rows.len(), 1);
+    }
+
+    #[test]
+    fn read_by_subject_is_what_get_vertex_was() {
+        let m = fixture();
+        let exec = FnExec(|sql: &str| {
+            assert!(sql.contains("WHERE subject = 'urn:a'"), "predicate: {sql}");
+            vec![serde_json::json!({ "age": 30, "name": "Alice" })]
+        });
+        let v = run(
+            &Operation::Read(ReadParams {
+                vertex_type: "Person".into(),
+                r#where: Some("subject = 'urn:a'".into()),
+                order_by: None,
+                descending: false,
+                limit: 1,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: ReadResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].get("name").and_then(Value::as_str), Some("Alice"));
+    }
+
+    #[test]
+    fn read_that_matches_nothing_is_no_rows() {
+        let m = fixture();
+        let exec = FnExec(|_sql: &str| Vec::new());
+        let v = run(
+            &Operation::Read(ReadParams {
+                vertex_type: "Person".into(),
+                r#where: Some("subject = 'urn:nope'".into()),
+                order_by: None,
+                descending: false,
+                limit: 1,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: ReadResult = serde_json::from_value(v).unwrap();
+        assert!(r.rows.is_empty());
     }
 
     #[test]
@@ -1642,46 +1773,6 @@ mod tests {
     }
 
     #[test]
-    fn get_vertex_returns_user_properties() {
-        let m = fixture();
-        let exec = FnExec(|sql: &str| {
-            assert!(sql.contains("WHERE subject ="), "lookup by subject: {sql}");
-            assert!(!sql.contains("dense_id"), "reserved cols filtered: {sql}");
-            vec![serde_json::json!({ "age": 30, "name": "Alice" })]
-        });
-        let v = run(
-            &Operation::GetVertex(GetVertexParams {
-                vertex_type: "Person".into(),
-                subject: "urn:a".into(),
-            }),
-            &m,
-            &exec,
-        )
-        .unwrap();
-        let r: GetVertexResult = serde_json::from_value(v).unwrap();
-        let obj = r.vertex.expect("matched vertex");
-        assert_eq!(obj.get("name").and_then(Value::as_str), Some("Alice"));
-        assert!(obj.get("subject").is_none());
-    }
-
-    #[test]
-    fn get_vertex_missing_subject_is_null() {
-        let m = fixture();
-        let exec = FnExec(|_sql: &str| Vec::new());
-        let v = run(
-            &Operation::GetVertex(GetVertexParams {
-                vertex_type: "Person".into(),
-                subject: "urn:nope".into(),
-            }),
-            &m,
-            &exec,
-        )
-        .unwrap();
-        let r: GetVertexResult = serde_json::from_value(v).unwrap();
-        assert!(r.vertex.is_none());
-    }
-
-    #[test]
     fn materialize_graph_resolves_subjects_and_drops_orphans() {
         let m = fixture();
         let exec = FnExec(|sql: &str| {
@@ -1736,10 +1827,11 @@ mod tests {
     }
 
     #[test]
-    fn find_neighbors_walks_resolved_edges() {
+    fn expand_all_walks_out_of_the_named_set() {
         let m = fixture();
         let exec = FnExec(|sql: &str| {
             if sql.contains("WITH RECURSIVE") {
+                assert!(sql.contains("WHERE src IN ('urn:a')"), "seeded by set: {sql}");
                 // depth-1 out-neighbours of the origin.
                 vec![serde_json::json!({
                     "src": "urn:a",
@@ -1749,13 +1841,14 @@ mod tests {
                     "hop": 1,
                 })]
             } else {
-                // vertex_type_of probe for the origin.
-                vec![serde_json::json!({ "t": "Person" })]
+                // The one probe that resolves every named vertex's type.
+                vec![serde_json::json!({ "iri": "urn:a", "t": "Person" })]
             }
         });
         let v = run(
-            &Operation::FindNeighbors(FindNeighborsParams {
-                iri: "urn:a".into(),
+            &Operation::Expand(ExpandParams {
+                from: vec!["urn:a".into()],
+                mode: ExpandMode::All,
                 depth: 1,
                 edge_types: Vec::new(),
                 limit: 500,
@@ -1764,23 +1857,59 @@ mod tests {
             &exec,
         )
         .unwrap();
-        let r: crate::operations::discovery::FindNeighborsResult =
-            serde_json::from_value(v).unwrap();
+        let r: ExpandResult = serde_json::from_value(v).unwrap();
         assert_eq!(r.edges.len(), 1);
         assert_eq!(r.edges[0].source, "urn:a");
         assert_eq!(r.edges[0].target, "urn:b");
         assert_eq!(r.edges[0].predicate, "knows");
-        // origin (hop 0) + neighbour (hop 1).
+        // seed (hop 0) + what it reached (hop 1).
         assert_eq!(r.vertices.len(), 2);
         assert_eq!(r.vertices[0].iri, "urn:a");
         assert_eq!(r.vertices[0].hop, 0);
+        assert_eq!(r.vertices[0].vertex_type, "Person");
         assert_eq!(r.vertices[1].iri, "urn:b");
         assert_eq!(r.vertices[1].hop, 1);
-        assert_eq!(r.vertices[1].vertex_type, "Person");
     }
 
     #[test]
-    fn find_path_reconstructs_ordered_path() {
+    fn expand_into_keeps_only_edges_with_both_ends_named() {
+        let m = fixture();
+        // The induced subgraph has no frontier, so there is no recursion and no
+        // vertex the caller did not name.
+        let exec = FnExec(|sql: &str| {
+            if sql.contains("src IN") && sql.contains("dst IN") {
+                assert!(!sql.contains("RECURSIVE"), "one pass, no walk: {sql}");
+                return vec![serde_json::json!({
+                    "src": "urn:a",
+                    "dst": "urn:b",
+                    "predicate": "knows",
+                })];
+            }
+            vec![
+                serde_json::json!({ "iri": "urn:a", "t": "Person" }),
+                serde_json::json!({ "iri": "urn:b", "t": "Person" }),
+            ]
+        });
+        let v = run(
+            &Operation::Expand(ExpandParams {
+                from: vec!["urn:a".into(), "urn:b".into()],
+                mode: ExpandMode::Into,
+                depth: 3, // ignored: an induced subgraph has no frontier.
+                edge_types: Vec::new(),
+                limit: 500,
+            }),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: ExpandResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.edges.len(), 1);
+        assert_eq!(r.vertices.len(), 2, "no vertex beyond the named set");
+        assert!(r.vertices.iter().all(|v| v.hop == 0));
+    }
+
+    #[test]
+    fn path_reconstructs_the_ordered_route() {
         let m = fixture();
         let exec = FnExec(|sql: &str| {
             if sql.contains("WITH RECURSIVE") {
@@ -1790,11 +1919,11 @@ mod tests {
                     "types": ["Person", "Person", "Person"],
                 })]
             } else {
-                vec![serde_json::json!({ "t": "Person" })]
+                vec![serde_json::json!({ "iri": "urn:a", "t": "Person" })]
             }
         });
         let v = run(
-            &Operation::FindPath(FindPathParams {
+            &Operation::Path(PathParams {
                 source_iri: "urn:a".into(),
                 target_iri: "urn:c".into(),
                 max_hops: 5,
@@ -1803,7 +1932,7 @@ mod tests {
             &exec,
         )
         .unwrap();
-        let r: FindPathResult = serde_json::from_value(v).unwrap();
+        let r: PathResult = serde_json::from_value(v).unwrap();
         assert_eq!(r.vertices.len(), 3);
         assert_eq!(r.vertices[2].iri, "urn:c");
         assert_eq!(r.vertices[2].hop, 2);
