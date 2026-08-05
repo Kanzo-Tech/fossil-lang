@@ -36,19 +36,37 @@ const graph = createGraphClient({
   manifestFiles,
 });
 
-const { types } = await graph.listVertexTypes();
-const hist = await graph.histogram({ vertex_type: 'Person', field: 'age', bins: 20 });
+const { vertices } = await graph.schema();
+const hist = await graph.aggregate({
+  vertex_type: 'Person',
+  group_by: 'age',
+  agg: 'count',
+  bins: 20,
+});
 ```
 
-## Verbs
+## The six verbs
 
-Schema (`listVertexTypes`, `listEdgeTypes`, `describeField`), discovery
-(`searchByLabel`, `findNeighbors`, `findPath`), aggregation (`aggregate`,
-`histogram`, `topK`), GraphRAG (`summarizeCluster`, `answerWithCommunities`),
-viewport (`viewport`, `setSelection`), and the `executeSql` escape hatch. The
-GraphRAG/search verbs require writer enrichment (embeddings + cluster summaries,
-fossil-sinks W3); `viewport` returns real positions once the writer emits
-`x`/`y`.
+`read` · `expand` · `path` · `aggregate` · `schema` · `executeSql`.
+
+- **`read`** — rows of one vertex type under a `where` predicate, an order and
+  a limit. `where` is SQL and carries the same authority as `executeSql`: gate
+  it with the same permission.
+- **`expand`** — the neighbourhood of a set of vertices. `all` walks outward up
+  to `depth`; `into` keeps only the edges whose both ends are in the set.
+- **`path`** — the shortest route between two vertices.
+- **`aggregate`** — one grouping, over values or, with `bins`, over equal-width
+  ranges. Binning is grouping, so there is no histogram verb.
+- **`schema`** — the vertex and edge types with their counts. Name a
+  `vertex_type` for its per-field statistics, and a `field` for its samples;
+  a bare call runs no per-field query.
+- **`executeSql`** — the escape hatch, for the question the other five cannot
+  shape.
+
+**None of them draws.** ADR-0042: the camera is addressed, not queried — the
+LOD is not a filter but a different relation, and a `WHERE` cannot change which
+table it reads. A filter that must change the picture answers with ids, and the
+canvas masks its resident tiles with them.
 
 ## Build
 
