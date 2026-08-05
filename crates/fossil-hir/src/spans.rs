@@ -204,6 +204,12 @@ pub fn rebase_to_file<'db>(
     diagnostics
         .into_iter()
         .map(|mut d| {
+            // A file-level diagnostic that happens to be emitted from a
+            // per-mapping query is already absolute — shifting it by the
+            // mapping's start would move it somewhere meaningless.
+            if d.frame == fossil_base::SpanFrame::FileAbsolute {
+                return d;
+            }
             d.span = shift(d.span);
             if let Some(dym) = d.did_you_mean.as_mut() {
                 dym.wrong_span = shift(dym.wrong_span);
@@ -276,6 +282,41 @@ Second : ex:B from users
                 .start,
             raw.start + base
         );
+    }
+
+    /// A `FileAbsolute` diagnostic must survive rebasing untouched. Some
+    /// diagnostics emitted from per-mapping queries are about FILE-level syntax
+    /// (a `SOURCE_DEF`'s `schema = "..."`, which lives outside every mapping);
+    /// shifting those by the mapping's start moves them onto unrelated text.
+    #[test]
+    fn rebase_leaves_file_absolute_diagnostics_alone() {
+        const SRC: &str = "\
+prefix ex: <https://example.org/>
+users := io.csv(\"x.csv\")
+First : ex:A from users
+    iri = `${ex:}a/${.id}`
+    ex:name = .name
+
+Second : ex:B from users
+    iri = `${ex:}b/${.id}`
+    ex:name = .other
+";
+        let (db, file) = db_with_text(SRC, "two.fossil");
+        let second = *def_map(&db, file).mappings(&db).get(1).expect("2nd mapping");
+        assert!(mapping_start_offset(&db, second) > 0, "a shift is available");
+
+        let span = Span::new(3, 9);
+        let out = rebase_to_file(
+            &db,
+            second,
+            [
+                fossil_base::Diagnostic::new(fossil_base::Severity::Error, "file-level", span)
+                    .file_absolute(),
+                fossil_base::Diagnostic::new(fossil_base::Severity::Error, "mapping-level", span),
+            ],
+        );
+        assert_eq!(out[0].span, span, "file-absolute spans are never shifted");
+        assert_ne!(out[1].span, span, "mapping-relative spans are");
     }
 
     /// Helper — return the mapping's own text (the substring of `src`

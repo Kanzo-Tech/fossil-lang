@@ -54,6 +54,7 @@ use std::path::PathBuf;
 
 use fossil_base::{Span, delay_span_bug};
 use fossil_descriptors_input::{CsvwDescriptor, InferredDescriptor};
+use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use crate::def_map::{MappingLoc, def_map};
@@ -434,15 +435,26 @@ pub(crate) fn record_from_inferred<'db>(
 /// accumulator is the existing Phase-3 channel (a dedicated `warning`
 /// accumulator is out-of-scope for plan 13-02).
 fn emit_csvw_deprecated_diagnostic(db: &dyn fossil_base::Db, source_name: &SmolStr) {
-    let _eg = delay_span_bug(
-        db,
-        Span::new(0, 0),
+    // FILE-ABSOLUTE, not mapping-relative: this is about the `SOURCE_DEF`'s
+    // `schema = "..."` argument, which lives OUTSIDE any mapping. Marked so the
+    // host's rebase leaves it alone — shifting it by the enclosing mapping's
+    // start would point it at unrelated text.
+    //
+    // The span itself is still (0, 0): anchoring it on the `schema` argument
+    // needs `def_map` to record that token's range, which it does not yet. So
+    // this lands at the file head — imprecise, but honestly imprecise, which is
+    // better than precisely wrong.
+    fossil_base::Diagnostic::new(
+        fossil_base::Severity::Error,
         format!(
             "D-CSVW-DEPRECATED: explicit CSVW descriptor for source \
              `{source_name}` is deprecated; types will be inferred from the \
              file directly. Remove the `schema = \"...\"` argument."
         ),
-    );
+        Span::new(0, 0),
+    )
+    .file_absolute()
+    .accumulate(db);
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

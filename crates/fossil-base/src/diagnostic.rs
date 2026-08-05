@@ -31,12 +31,37 @@
 //! `suggestion_source` precedent exactly (ADR-0006 Approach A — structured, not
 //! string-parsed). Defaults to `None`; plain data (wasm-clean).
 
+/// What a [`Diagnostic`]'s span was measured against.
+///
+/// A byte offset means nothing without knowing its origin, and fossil has two.
+/// Per-mapping queries read `mapping_cst_node`, whose offsets rowan resets to
+/// zero, so their spans are MAPPING-RELATIVE and a host must rebase them onto
+/// the file before rendering (`fossil_hir::spans::rebase_to_file`). But some
+/// diagnostics emitted from those same queries are about FILE-level syntax — a
+/// `SOURCE_DEF`'s arguments, say — and rebasing those by the mapping's start
+/// moves them somewhere meaningless.
+///
+/// Making the frame part of the diagnostic is what stops that from being an
+/// unwritten rule nobody can check. `MappingRelative` is the default because
+/// nearly every diagnostic comes from a per-mapping query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpanFrame {
+    /// Offsets from the start of the enclosing mapping. Must be rebased.
+    #[default]
+    MappingRelative,
+    /// Offsets from the start of the file. Already absolute; never rebase.
+    FileAbsolute,
+}
+
 #[salsa::accumulator]
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
     pub message: String,
     pub span: Span,
+    /// What [`Self::span`] (and `did_you_mean.wrong_span`) were measured
+    /// against — see [`SpanFrame`]. Hosts rebase only `MappingRelative` ones.
+    pub frame: SpanFrame,
     /// Optional structured suggestion-source text. Populated by
     /// suggestion-emitting diagnostics (e.g. `ShEx` `OneOf` rejection's
     /// split-into-N-mappings code suggestion); read directly by consumers
@@ -92,9 +117,19 @@ impl Diagnostic {
             severity,
             message: message.into(),
             span,
+            frame: SpanFrame::MappingRelative,
             suggestion_source: None,
             did_you_mean: None,
         }
+    }
+
+    /// Declare that this diagnostic's span is already file-absolute, so hosts
+    /// leave it alone. For diagnostics about file-level syntax (a `SOURCE_DEF`,
+    /// a prefix declaration) that happen to be emitted from a per-mapping query.
+    #[must_use]
+    pub const fn file_absolute(mut self) -> Self {
+        self.frame = SpanFrame::FileAbsolute;
+        self
     }
 
     /// Attach a suggestion-source string (e.g. the generated split snippet
@@ -169,11 +204,17 @@ mod tests {
             severity: Severity::Warning,
             message: "ok".into(),
             span: Span::new(0, 0),
+            frame: SpanFrame::default(),
             suggestion_source: None,
             did_you_mean: None,
         };
         assert!(d.suggestion_source.is_none());
         assert!(d.did_you_mean.is_none());
+        assert_eq!(
+            d.frame,
+            SpanFrame::MappingRelative,
+            "the default frame is the one nearly every emitter is in"
+        );
     }
 
     #[test]
