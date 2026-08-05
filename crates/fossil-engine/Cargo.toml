@@ -49,3 +49,7 @@ tracing  = { workspace = true }
 
 [dev-dependencies]
 secrecy = { workspace = true }
+# The artefact validator (tests/conformance.rs) writes a corpus and reads it
+# back with plain SQL — never through our own reader. tempfile gives it a
+# destination; duckdb is already a regular dep for the layout pass.
+tempfile = { workspace = true }
