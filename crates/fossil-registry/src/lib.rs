@@ -305,13 +305,14 @@ pub enum SourceFormatTag {
 //
 // Every `io.<name>` source constructor the language recognises is described by
 // exactly one [`SourceKind`] in [`SOURCE_KINDS`]. `fossil-mir`'s `resolve_source`
-// reads it to pick the [`fossil_mir::SourceFormat`]; the CLI's `providers`
-// listing iterates it; the provider-registry invariant test pins every runtime
-// `SourceProvider` to its `Provider`-lowered entry. Adding a source format is
-// ONE edit here — no string-matching scattered across crates.
+// reads it to pick the [`fossil_mir::SourceFormat`]; `fossil_registry::providers`
+// iterates it for the CLI and the browser. Adding a source format is ONE edit
+// here — no string-matching scattered across crates.
 //
-// This mirrors DataFusion's split: built-in `FileFormat`s (read natively) vs.
-// the `TableProvider` trait (external), both indexed by one catalog.
+// The split is between bytes a reader scans directly and bytes something else
+// has to materialise first. It is NOT DataFusion's `FileFormat`/`TableProvider`
+// split, which this comment used to claim: there is no `TableProvider` here and
+// no trait of ours plays that part.
 
 /// A recognised `io.<name>` source constructor: how its URI is read and which
 /// file shapes it accepts. The single source of truth for source dispatch.
@@ -334,9 +335,11 @@ pub enum SourceLowering {
     /// A native `DuckDB` table function (`read_csv_auto`, …) — portable
     /// native↔WASM, no custom decode.
     NativeReader(NativeReader),
-    /// An external `SourceProvider` (RDF, …) materialises the relation; the
-    /// core only scans it. The provider impl lives outside the core
-    /// (`fossil-provider-rdf`); the runtime registers it by `short_name`.
+    /// Something outside the reader materialises the relation (RDF, …) and the
+    /// core only scans the result. Lowers to `fossil_mir::SourceFormat::Provider`
+    /// and is executed by `fossil-df` (`lib.rs:616`) — there is no
+    /// `SourceProvider` trait and no `fossil-provider-rdf` crate, which is what
+    /// this comment claimed until ADR-0045 §6.
     Provider,
 }
 

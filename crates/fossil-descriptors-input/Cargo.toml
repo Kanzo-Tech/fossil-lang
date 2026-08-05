@@ -6,7 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Input descriptors (CSVW, JSON Schema, Parquet, XSD) for forward type propagation"
+# CSVW and ShEx are the two that exist. CSV, JSON and Parquet arrive as
+# `Inferred` because the HOST runs `DESCRIBE read_csv_auto(...)` (ADR-0037) —
+# there is no JSON Schema, Parquet or XSD descriptor here, and the description
+# claimed all three until ADR-0045 §3.
+description = "Input descriptors (CSVW, ShEx, and host-inferred schemas) for forward type propagation"
 
 [lints]
 workspace = true

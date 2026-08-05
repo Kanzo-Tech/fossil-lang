@@ -13,7 +13,6 @@
 //! | [`FossilPlayground::close_file`]| `()`                                 | `textDocument/didClose`    |
 //! | [`FossilPlayground::check`]     | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
 //! | [`FossilPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (07-03 drain) |
-//! | [`FossilPlayground::compile_file`] | `{ sql, manifest_yaml }`           | run-button → DuckDB-WASM (07-04) |
 //! | [`FossilPlayground::set_target_shex`] | `()`                              | Schema panel install |
 //!
 //! The Phase-1 `compile(&str)` + `classification()` methods are RETAINED
