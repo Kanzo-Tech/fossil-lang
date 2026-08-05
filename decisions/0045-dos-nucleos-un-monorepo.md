@@ -876,6 +876,25 @@ tablas de versiones malas conocidas.
 opción se pierde. El problema de Parquet son trece años de ficheros que ya no se pueden retirar.
 Hoy no hay nada publicado, así que esto es barato exactamente una vez.
 
+### Negociación de capacidades: no, y cuándo sí
+
+Delta Lake tiene *table features* — un número de versión monótono («eres demasiado viejo») más un
+conjunto **sin orden** de capacidades nombradas que el artefacto exige, separadas en lectura y
+escritura, donde los *campos* desconocidos se ignoran por construcción y las *capacidades*
+desconocidas son fallo duro. Iceberg no lo tiene: sólo un entero, y la regla de que un lector v3
+**ignore** las transformaciones que no entiende. Esa diferencia es por qué en Delta una omisión de
+`invariants` sale como un error con nombre y en Iceberg una divergencia sale como datos silenciosos.
+
+**Aquí no se construye, y la razón no es que no sirva: es que no hay problema todavía.** Nada está
+publicado, no existe ningún lector viejo, y este repo prohíbe compatibilidad hacia atrás mientras
+todo sea `0.0.0`. Un mecanismo de negociación hoy sería una respuesta a una pregunta que nadie ha
+hecho, mantenida durante meses hasta que alguien la necesite o la borre.
+
+**El disparador, escrito para no tener que acordarse:** el día que un corpus salga de esta máquina
+hacia alguien que no pueda regenerarlo, la negociación deja de ser prematura y pasa a ser tarde. Es
+la misma frontera que §4 marca para los vectores de prueba, y por la misma razón — el problema de
+Parquet son trece años de ficheros que ya no se pueden retirar.
+
 ## Consecuencias
 
 **El recuento, y es más modesto de lo que la queja sugiere.** De 25 crates a **21** — o a 20 si §1
