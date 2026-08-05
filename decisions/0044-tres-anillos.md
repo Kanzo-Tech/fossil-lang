@@ -85,6 +85,17 @@ Comprobada, no acordada — `deny.toml`:
   criterio de terminado que le ha faltado desde junio.
 - `datafusion` prohibido en los anillos 1 y 3.
 
+**Escrita y ejecutada el 2026-08-05, y hoy está en rojo.** El trinquete con `wrappers` sobre los
+cuatro dependientes directos de `duckdb` no pasa, y lo que destapó al primer intento es que
+`fossil-wasm` —el anillo del lector— **alcanza el motor por transitividad**, vía
+`fossil-ide → fossil-engine`, mientras su propio `Cargo.toml` dice *«NOT pull fossil-runtime or any
+native UDF crate (Pitfall 3)»*. La regla llevaba escrita como comentario todo este tiempo y el grafo
+la incumple.
+
+No se deja activada porque el job `deny` de CI es puerta dura y hoy rompería la rama a todo el
+mundo. **Activarla es la primera tarea del strangler, no un efecto secundario suyo**: el día que
+pase, la migración terminó.
+
 Un ADR sin guardia es una intención. `kanzo-ui` borró ocho composites y quedó *terminado* porque
 `index.test.ts` afirma que no están; aquí hay 46 ADRs y ninguna afirmación ejecutable, y por eso
 ADR-0042 puede listar `viewport` como «fuera» y `viewport` sigue ahí.

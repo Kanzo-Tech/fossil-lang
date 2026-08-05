@@ -31,41 +31,7 @@ deny = [
     { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server (per ADR-0001)" },
     { name = "wasm-pack", reason = "Archived July 2025; use wasm-bindgen-cli + Vite" },
     { name = "sqlx", reason = "Not WASM-compatible; out of MVP scope" },
-    # ADR-0044, el trinquete del strangler: cada wrapper es deuda declarada y se quita según cierra
-    # la migración. Cuando la lista quede vacía, la entrada se borra y con ella la dependencia — el
-    # criterio de terminado que le ha faltado desde junio. `fossil-mcp` es anillo 1 y no debería
-    # estar ni hoy.
-    # Los cuatro son dependientes DIRECTOS; `wrappers` no admite otra cosa. Lo que el guard destapó
-    # al escribirse es que `fossil-wasm` alcanza DuckDB por transitividad —vía fossil-ide →
-    # fossil-engine— cuando su propio Cargo.toml dice «NOT pull fossil-runtime or any native UDF
-    # crate (Pitfall 3)». La regla estaba escrita como comentario, que es lo que no sujeta nada: el
-    # anillo 3 arrastra hoy el motor entero, y cerrar el strangler es lo que lo corta.
-    { name = "duckdb", wrappers = ["fossil-runtime", "fossil-engine", "fossil-cli", "fossil-mcp"], reason = "ADR-0044: el motor es del anillo 2; DuckDB sale entero con el strangler" },
-    # `fossil-df-wasm` compila el motor al navegador, que afirma que el navegador ejecuta programas —
-    # lo contrario de ADR-0042 §1. Sale borrándolo, no añadiendo excepciones.
-    { name = "datafusion", wrappers = ["fossil-df", "fossil-df-wasm"], reason = "ADR-0044: el motor no entra en el anillo del lenguaje ni en el del lector" },
 ]
-
-# ── La regla de dependencia del ADR-0044, comprobada en vez de acordada ───────────────────────────
-#
-# Tres anillos separados por dónde corre el código: el lenguaje (sin motor), el compilador (nativo,
-# con presupuesto y disco) y el lector (wasm, direcciona bytes y no ejecuta programas). Un crate
-# depende de su anillo y de los de número menor, nunca de un motor que su anillo no declare.
-#
-# `wrappers` es un trinquete: cada nombre es deuda declarada, se quitan uno a uno según cierra la
-# migración, y un consumidor nuevo falla el día que aparece en vez de dentro de tres meses.
-
-# DuckDB fue el ejecutor original (2026-05-15) y DataFusion llegó a reemplazarlo (2026-06-09) por
-# rodajas con nombre, la última «compila a wasm32». El código lo llama «the one remaining
-# native-runtime use on this path» y lo que queda son 8 `execute_batch` y un `appender`. Cuando esta
-# lista quede vacía se borra el bloque, y ése es el criterio de terminado que a la migración le ha
-# faltado desde junio. `fossil-mcp` (anillo 1) y `fossil-cli` no deberían estar ni hoy.
-
-
-# El motor es del anillo 2 y de nadie más. `fossil-df-wasm` compila DataFusion al navegador, que
-# afirma que el navegador ejecuta programas — lo contrario de lo que decidió ADR-0042 §1. Está aquí
-# porque existe hoy; sale borrándolo, no añadiendo excepciones.
-
 
 [sources]
 unknown-registry = "warn"
