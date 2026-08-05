@@ -257,7 +257,12 @@ fn corpus_exec_native_and_write_baseline() {
     // Write the cross-engine baseline + the single-sourced SQL list the WASM
     // harness reads. Pretty-printed + sorted-key-stable so the checked-in
     // artifact has a stable diff.
-    let wasm_parity_dir = root.join("crates/fossil-codegen/tests/wasm_parity");
+    // `tests/wasm_parity/` — beside `run-parity.mjs`, which reads these two
+    // files. It used to write into `crates/fossil-codegen/`, a crate deleted in
+    // `af39ff4`: the directory was recreated on every test run and `members =
+    // ["crates/*"]` then failed to load it, breaking every cargo command in the
+    // workspace until someone deleted it again.
+    let wasm_parity_dir = root.join("tests/wasm_parity");
     std::fs::create_dir_all(&wasm_parity_dir).expect("create wasm_parity dir");
 
     write_baseline(&wasm_parity_dir.join("native_baseline.json"), &baseline);

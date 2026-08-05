@@ -5,7 +5,7 @@
 //   2. native tier     — fossil-runtime/tests/corpus_exec.rs runs the executable
 //                        corpus subset on native duckdb 1.10502, asserts the
 //                        result bytes, and WRITES the digest baseline
-//                        crates/fossil-codegen/tests/wasm_parity/native_baseline.json
+//                        tests/wasm_parity/native_baseline.json
 //                        plus the single-sourced SQL list corpus_sql.json.
 //   3. WASM tier (THIS) — re-run the SAME SQL on @duckdb/duckdb-wasm 1.33.x,
 //                        recompute the digests with the SAME serialization, and
@@ -37,11 +37,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
 const BASELINE_PATH = resolve(
   ROOT,
-  "crates/fossil-codegen/tests/wasm_parity/native_baseline.json",
+  "tests/wasm_parity/native_baseline.json",
 );
 const CORPUS_SQL_PATH = resolve(
   ROOT,
-  "crates/fossil-codegen/tests/wasm_parity/corpus_sql.json",
+  "tests/wasm_parity/corpus_sql.json",
 );
 
 // SC#2 (Phase 5): the io/csv + io/json + io/parquet parity tier. Written by
@@ -52,11 +52,11 @@ const CORPUS_SQL_PATH = resolve(
 // identical SQL, diffing the digests against the io baseline.
 const IO_BASELINE_PATH = resolve(
   ROOT,
-  "crates/fossil-codegen/tests/wasm_parity/io_parity_baseline.json",
+  "tests/wasm_parity/io_parity_baseline.json",
 );
 const IO_SQL_PATH = resolve(
   ROOT,
-  "crates/fossil-codegen/tests/wasm_parity/io_parity_sql.json",
+  "tests/wasm_parity/io_parity_sql.json",
 );
 
 // The fixture CSVs the executable corpus reads, by the relative path the SQL
