@@ -10,11 +10,14 @@
 //! queries (CLAUDE.md hard rule). `data_type` strings are derived from [`arrow_schema::DataType`]
 //! via [`data_type_name`], the single authority for the spec spellings (`int64`, `string`, ...).
 //!
-//! Fossil never byte-writes Parquet from Rust (ADR-0017) — the runtime materializes chunks via
-//! `DuckDB` `COPY ... (FORMAT PARQUET)` into the manifest-declared `prefix`. The chunk-file naming
-//! convention is `<prefix>chunk{k}.parquet` (ADR-0016, `RESEARCH` Open Q1); the actual chunked COPY
-//! emission lands in plan 05-08. This module declares `chunk_size` and the layout; it does not
-//! emit bytes.
+//! Fossil never byte-writes Parquet from Rust (ADR-0017) — the runtime materializes tiles via
+//! `DuckDB` `COPY ... (FORMAT PARQUET)` into the manifest-declared `prefix`. The vertex-tile naming
+//! convention is `<prefix>chunk{k}.parquet` (ADR-0016, `RESEARCH` Open Q1) and the edge-tile one is
+//! `<prefix>by_source/tile{k}.parquet`. This module declares the tiling; it does not emit bytes,
+//! and `fossil-runtime`'s `enrich_layout` is the only thing that does — **what the emitter writes
+//! is what the manifest says**, asserted on the artefact by
+//! `fossil-engine/tests/conformance.rs` rather than agreed by convention. ADR-0041 is the record of
+//! that gap being open for a long time; it does not get to reopen.
 
 use arrow_schema::DataType;
 use serde::{Deserialize, Serialize};
@@ -36,9 +39,11 @@ pub struct VertexInfo {
     /// empty so non-RDF graphs keep the canonical `GraphAr` shape.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub iri: String,
-    /// Rows per Parquet chunk (configurable; default [`DEFAULT_CHUNK_SIZE`]).
+    /// Rows per tile (configurable; default [`DEFAULT_CHUNK_SIZE`]). Tile `k` is
+    /// the `dense_id` range `[k·chunk_size, (k+1)·chunk_size)` and a power of
+    /// two, so a reader addresses it with [`tile_of`] rather than a division.
     pub chunk_size: u64,
-    /// Output path prefix for this vertex's chunks, e.g. `"vertex/person/"`.
+    /// Output path prefix for this vertex's tiles, e.g. `"vertex/person/"`.
     pub prefix: String,
     /// Property groups (column groupings → one file per group per chunk).
     pub property_groups: Vec<PropertyGroup>,
@@ -59,9 +64,19 @@ pub struct EdgeInfo {
     pub iri: String,
     /// Destination vertex type label.
     pub dst_type: String,
-    /// Rows per edge chunk.
+    /// The addressing unit of an edge tile, equal to [`Self::src_chunk_size`].
+    ///
+    /// **Not a row count**, and it never was one for edges: an edge lives in its
+    /// source's tile (CSR — ADR-0042 §3.2), so tile `k` under
+    /// `<prefix>by_source/` holds every edge whose `src_dense` is in vertex tile
+    /// `k` and its row count is the degree of those 4,096 vertices. The
+    /// alternative — the deepest tile containing both endpoints — was measured
+    /// and is dominated on both curves: 2.29× → 15.86× over-read against CSR's
+    /// flat 1.95× → 2.89×, and 2.5–3.5× the tiles.
     pub chunk_size: u64,
-    /// Source-vertex chunk size (must align with the source [`VertexInfo::chunk_size`]).
+    /// Source-vertex tile size (must equal the source [`VertexInfo::chunk_size`]:
+    /// an edge tile is addressed by the source's tile, so a different number
+    /// here would address nothing).
     pub src_chunk_size: u64,
     /// Destination-vertex chunk size (must align with the destination vertex).
     pub dst_chunk_size: u64,
@@ -137,31 +152,66 @@ pub struct AdjList {
     pub file_type: String,
 }
 
-/// Default rows-per-chunk when a mapping does not override it.
+/// How many bits a `dense_id` is shifted right by to name the tile holding it.
 ///
-/// **A chunk is one Parquet row group**, which is what 122,880 is: `DuckDB`'s default
-/// `ROW_GROUP_SIZE`. A chunk smaller than that buys pruning the file format cannot express, and
-/// pays a whole HTTP resource for it.
+/// Published as arithmetic and not as prose, because that is the difference
+/// between an implementation somebody can copy and one they have to re-derive
+/// (ADR-0045, «Decidido el 2026-08-05» §4 — Iceberg publishes Murmur3 with a
+/// vector table and every port agrees; PMTiles links Wikipedia for its Hilbert
+/// curve and every port differs).
 ///
-/// It was 1,024 — carried from `RESEARCH` §"`GraphAr` Sink" and never measured against a reader,
-/// because until the runtime actually emitted chunks there was nothing to measure. Once it did, the
-/// same bbox query over HTTP against a million vertices came out:
+/// **The operands, spelled out.** The input is an unsigned 64-bit `dense_id`,
+/// the shift is logical, and the result is an unsigned 64-bit tile number. Not
+/// pedantry: `>>` is arithmetic on a signed type in Rust, and in JavaScript it
+/// truncates to 32 bits before shifting, so the same three characters mean
+/// three different things across the layers that have to agree. The border
+/// vectors a re-implementation is checked against are in this module's tests.
+pub const TILE_SHIFT: u32 = 12;
+
+/// The tile a `dense_id` lives in — the whole of the addressing scheme.
 ///
-/// | files | `chunk_size` | warm |
-/// |---|---|---|
-/// | 1 | — | 2 ms |
-/// | 9 | 122,880 | 3 ms |
-/// | 123 | 8,192 | 22 ms |
-/// | 977 | 1,024 | **196 ms** |
+/// There is no tile tree and nothing to discover: tile `i` **is** the range
+/// `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest common
+/// ancestor of two vertices is the common prefix of their ids. A reader computes
+/// every URL it wants before it emits the first request, which is the whole
+/// content of *the camera is addressed, not queried* (ADR-0042 §3.3).
+#[must_use]
+pub const fn tile_of(dense_id: u64) -> u64 {
+    dense_id >> TILE_SHIFT
+}
+
+/// Rows per tile when a mapping does not override it — `1 << TILE_SHIFT`.
 ///
-/// Linear in the file count at roughly 0.2 ms each, and that is over *localhost*, where a request
-/// costs nothing. An earlier reading of the same trade preferred 1,024 because it fetched 17× fewer
-/// **rows** — true, and the wrong currency: it counted bytes as though requests were free. In
-/// milliseconds 1,024 loses by 65×.
+/// **A tile is a fixed 4,096-row `dense_id` range**, and both lines of reasoning
+/// that reach that number arrived independently (ADR-0042 §3.1, ADR-0045 §8).
+/// Measured on the five-million corpus served over a plain HTTP origin, counting
+/// every request that answers, against an ideal payload of 0.6–0.9 MB per window
+/// that is flat in N:
 ///
-/// The same finding the row-group experiment recorded twice (`kanzo-ui/BENCHMARKS.md`): more,
-/// smaller reads cost more than the pruning saves.
-pub const DEFAULT_CHUNK_SIZE: u64 = 122_880;
+/// | `chunk_size` | requests | bytes | vs ideal |
+/// |---|---|---|---|
+/// | 1,024 | 178 | 1.11 MB | 1.73× |
+/// | **4,096** | **78** | **1.48 MB** | **2.31×** |
+/// | 8,192 | 47 | 1.89 MB | 2.95× |
+/// | 32,768 | 25 | 4.61 MB | 7.20× |
+/// | 122,880 | 35 | 11.73 MB | 18.3× |
+///
+/// The two curves have no common optimum — bytes bottom out at 1,024–2,048 and
+/// requests fall monotonically — so what chooses is `λ·β`, the bytes a link
+/// moves in the latency of one request: 32,768 in series, 8,192 with six in
+/// flight, **4,096 fully multiplexed**, which is what an addressed reader is.
+///
+/// **And the byte curve is flat from 1,024 to 8,192, so the emitter is not tuned
+/// inside that band.** A change there is not an improvement, it is noise with a
+/// `git blame` on it.
+///
+/// It was 122,880 — `DuckDB`'s default `ROW_GROUP_SIZE`, chosen when a chunk was
+/// thought to be a row group and measured only in milliseconds over localhost,
+/// where a request costs nothing. It is **Pareto-dominated by 32,768 on both
+/// curves at once** (more requests *and* four times the bytes, because a
+/// 122,880-row edge tile crosses several row groups and costs 9.4 requests), and
+/// it is not a power of two, which forces a division where a shift does.
+pub const DEFAULT_CHUNK_SIZE: u64 = 1 << TILE_SHIFT;
 
 impl VertexInfo {
     /// Construct a `VertexInfo` with the [`GRAPHAR_VERSION`] preset.
@@ -299,6 +349,35 @@ mod tests {
             property_groups: vec![],
             version: GRAPHAR_VERSION.to_string(),
         }
+    }
+
+    /// The border vectors of [`tile_of`], which are the deliverable.
+    ///
+    /// A second implementation — the wasm reader, the `TypeScript`/`DuckDB` path,
+    /// or a stranger's — is checked against this table and not against a
+    /// sentence. Every value here is a border: the first id, the last id of tile
+    /// 0, the first of tile 1, and the three places where a 32-bit reading of the
+    /// shift diverges from a 64-bit one. `2^31` and `2^53` exceed the `u32` a
+    /// `dense_id` column holds *today*, and they are here precisely for that
+    /// reason: they are where a port that took the shift as signed, or that ran
+    /// it through a JavaScript `number`, gives a different answer.
+    #[test]
+    fn tile_of_border_vectors() {
+        for (dense_id, tile) in [
+            (0u64, 0u64),
+            (4_095, 0),
+            (4_096, 1),
+            (8_191, 1),
+            (2_147_483_647, 524_287),                   // 2^31 − 1
+            (2_147_483_648, 524_288),                   // 2^31
+            (9_007_199_254_740_992, 2_199_023_255_552), // 2^53
+        ] {
+            assert_eq!(tile_of(dense_id), tile, "tile_of({dense_id})");
+        }
+        // The shift and the row count are one statement, not two that agree.
+        assert_eq!(DEFAULT_CHUNK_SIZE, 4_096);
+        assert_eq!(tile_of(DEFAULT_CHUNK_SIZE - 1), 0);
+        assert_eq!(tile_of(DEFAULT_CHUNK_SIZE), 1);
     }
 
     #[test]

@@ -177,6 +177,8 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 // W3.1b — integration: apply the pure layout to the written GraphAr vertices.
 // ──────────────────────────────────────────────────────────────────────────
 
+use std::fmt::Write as _;
+
 use duckdb::Connection;
 use duckdb::arrow::array::{Array, UInt32Array};
 use fossil_base::probe::Probe;
@@ -199,13 +201,20 @@ pub struct VertexLayoutTarget {
     /// This is the writer's single-file output and is **read, not written**: the
     /// enriched vertices are emitted as chunks under [`Self::chunk_prefix`].
     pub vertex_parquet: String,
-    /// Where the chunks go — the manifest's `prefix`, e.g. `…/vertex/Person/`,
+    /// Where the tiles go — the manifest's `prefix`, e.g. `…/vertex/Person/`,
     /// trailing separator included. Files are named `chunk{k}.parquet`
     /// (ADR-0016).
     pub chunk_prefix: String,
-    /// Rows per chunk — the manifest's `chunk_size`. The manifest and the files
+    /// Rows per tile — the manifest's `chunk_size`. The manifest and the files
     /// have to agree, so this comes from whoever wrote the manifest rather than
     /// being a constant here.
+    ///
+    /// **A power of two, and refused otherwise.** Tile `k` is the `dense_id`
+    /// range `[k·chunk_size, (k+1)·chunk_size)`, and the point of the range being
+    /// fixed is that a reader finds it with `dense_id >> shift` instead of a
+    /// division and a table (ADR-0042 §3.3). A size that is not a power of two
+    /// still *emits* correctly and quietly costs every reader that arithmetic,
+    /// which is why it is an error here rather than a rounding.
     pub chunk_size: u64,
     /// This type's self-edge CSR Parquet URLs.
     pub self_edge_csr: Vec<String>,
@@ -274,6 +283,17 @@ pub enum LayoutError {
     /// adjacencies, so the reverse edges have nowhere to be read from in order.
     #[error("adjacency `{target}` has no target-ordered counterpart beside it")]
     MissingOrientation { target: String },
+    /// A tile size that is not a power of two, so `dense_id >> shift` does not
+    /// name a tile.
+    #[error("vertex type `{vertex_type}` declares a tile of {rows} rows, which is not a power of two")]
+    TileSize { vertex_type: String, rows: u64 },
+    /// A tile prefix that could not be created on the local filesystem.
+    #[error("creating the tile directory `{prefix}` failed: {source}")]
+    Prefix {
+        prefix: String,
+        #[source]
+        source: std::io::Error,
+    },
     /// An adjacency the manifest declares `ordered: true` is not.
     ///
     /// Worth an error for the same reason as [`Self::DanglingEndpoint`]: the
@@ -310,20 +330,29 @@ pub enum LayoutError {
 /// be rewritten until both mappings exist. Per type: count vertices, read
 /// self-edges, run [`community_hierarchy`] + [`cluster_layout`], derive the
 /// Morton rank of each vertex, and stage `dense_id → (new_dense_id, x, y,
-/// cluster_id)`. The enriched vertices are then emitted **as chunks** under
+/// cluster_id)`. The enriched vertices are then emitted **as tiles** under
 /// [`VertexLayoutTarget::chunk_prefix`] — `chunk{k}.parquet`, `chunk_size` rows
-/// each, which is what the manifest has declared since it was first written and
-/// what `fossil-sinks` deferred as "lands in plan 05-08". The writer's
-/// single-file output is the input to this and is not written back.
-///
-/// **Vertices only, so far.** `GraphAr` also partitions adjacency lists by the
-/// source vertex's chunk (`src_chunk_size`); those are renumbered and re-sorted
-/// here but still emitted whole. The bbox prune a viewport does is a vertex
-/// scan, so this is the half that prunes; the edge half is a later slice.
+/// each. The writer's single-file output is the input to this and is not written
+/// back.
 ///
 /// Then every adjacency: both endpoints remapped through their own type's
 /// mapping, and **re-sorted**, because the manifest declares `ordered: true` and
 /// a CSR sorted on `src_dense` stops being sorted the moment those values change.
+///
+/// And finally the source-ordered adjacencies are emitted as tiles too, under
+/// `by_source/tile{k}.parquet`, **keyed by the same range as the vertices**: tile
+/// `k` holds every edge whose `src_dense` is in vertex tile `k`. That is CSR, and
+/// it is the placement ADR-0042 §3.2 measured against the alternative of hoisting
+/// an edge to the deepest tile holding both its endpoints — which reads 2.29× to
+/// 15.86× more edges across 200k/1M/5M/10M against CSR's flat 1.95× to 2.89×,
+/// and touches 2.5–3.5× the tiles. The mechanism is that near the root of such a
+/// tree there is no branching left to prune with. CSR needs no second request:
+/// every drawable edge has its source on screen, so the tiles of the window are
+/// an exact superset of what can be drawn.
+///
+/// The target-ordered adjacency is **not** tiled. It is the half that would
+/// answer "an edge with one endpoint off screen", which is a different question
+/// and doubles the addressing to ask it (ADR-0042 §3.6).
 ///
 /// # Errors
 ///
@@ -354,6 +383,13 @@ pub fn enrich_layout(
             target: vname.clone(),
             source,
         };
+        // Checked before anything is written, so a bad tile size is a refusal
+        // rather than a corpus that has to be thrown away.
+        let shift = shift_for(target.chunk_size).ok_or_else(|| LayoutError::TileSize {
+            vertex_type: target.type_name.clone(),
+            rows: target.chunk_size,
+        })?;
+        ensure_prefix(&target.chunk_prefix)?;
 
         // Created even for an empty type, so phase two can join against it and
         // report a dangling endpoint rather than fail to find a table.
@@ -498,36 +534,44 @@ pub fn enrich_layout(
         // replaced from the mapping. Ordering by the new id *is* ordering by
         // Morton code — that is what the new id is — so a `dense_id` range and a
         // contiguous run of the picture are the same set of rows, which is the
-        // property a GraphAr chunk needs and the one this pass used to leave
-        // broken.
+        // property a tile needs and the one this pass used to leave broken.
+        //
+        // `ORDER BY` on the staging table and not only inside each tile's COPY:
+        // a tile is a range predicate over this table, and DuckDB prunes a table
+        // scan on the per-row-group min/max it keeps. Sorted, a tile reads one
+        // row group; unsorted, it reads all of them, and at 4,096 rows a million
+        // vertices is 245 tiles rather than 9 — the same full scan repeated 245
+        // times. The tile size is what made this matter; it was invisible at
+        // 122,880.
         conn.execute_batch(&format!(
             "CREATE OR REPLACE TEMP TABLE __fossil_enriched AS \
              SELECT v.* REPLACE (m.new_dense_id AS dense_id, m.x AS x, m.y AS y, \
              m.cluster_id AS cluster_id) \
-             FROM __fossil_vertices v JOIN {map} m USING (dense_id)"
+             FROM __fossil_vertices v JOIN {map} m USING (dense_id) ORDER BY 1"
         ))
         .map_err(duck)?;
         probe.mark("join enriched (duck)");
 
-        // One Parquet per chunk, which is the whole point: a chunk is an HTTP
-        // resource a browser and a CDN can cache, where row groups inside one
-        // file share a footer and a single URL. Measured on the five-million
-        // corpus, 200 chunks take 0.18 s to write and come out at 20 kB each, so
-        // the loop the naming convention forces is not the cost it looks like —
-        // `PARTITION_BY` would be one statement but emits `chunk=0/data_0.parquet`
-        // rather than the `chunk{k}.parquet` ADR-0016 specifies.
-        let chunks = u64::from(vertex_count).div_ceil(target.chunk_size);
-        for k in 0..chunks {
-            let lo = k * target.chunk_size;
-            let hi = lo + target.chunk_size;
-            conn.execute_batch(&format!(
+        // One Parquet per tile, which is the whole point: a tile is an HTTP
+        // resource a browser and a CDN can cache, and its address is
+        // `dense_id >> shift` — no index, no listing, no discovery. The loop the
+        // naming convention forces is not the cost it looks like: at five million
+        // 200 files took 0.18 s to write. `PARTITION_BY` would be one statement
+        // but emits `chunk=0/data_0.parquet` rather than the `chunk{k}.parquet`
+        // ADR-0016 specifies, which is a directory listing wearing a filename.
+        let tiles = u64::from(vertex_count).div_ceil(target.chunk_size);
+        let mut emission = String::new();
+        for k in 0..tiles {
+            let (lo, hi) = (k << shift, (k + 1) << shift);
+            let _ = write!(
+                emission,
                 "COPY (SELECT * FROM __fossil_enriched \
                  WHERE dense_id >= {lo} AND dense_id < {hi} ORDER BY dense_id) \
-                 TO '{}chunk{k}.parquet' (FORMAT PARQUET)",
+                 TO '{}chunk{k}.parquet' (FORMAT PARQUET);",
                 sql_lit(&target.chunk_prefix),
-            ))
-            .map_err(duck)?;
+            );
         }
+        conn.execute_batch(&emission).map_err(duck)?;
 
         // Free the staged vertices before the next target (each type can be
         // large; the temp tables are single-use per iteration). The mapping stays
@@ -607,9 +651,112 @@ pub fn enrich_layout(
             .map_err(duck)?;
     }
     probe.mark("remap adjacencies");
+
+    // The edge half of the tiling, and the last thing written: an edge lives in
+    // its source's tile, so this reads the file the loop above just re-sorted by
+    // `src_dense` and cuts it on the same ranges the vertices were cut on.
+    //
+    // Read back from the Parquet rather than kept in a temp table on the way
+    // past. The file is sorted on the very column each tile filters, so Parquet's
+    // own row-group statistics prune the scan, and a staging table would hold a
+    // second copy of the adjacency beside the one the remap already materialises
+    // — 568 MB at ten million, which is the allocation ADR-0043 stage 1 spent
+    // itself removing.
+    for adjacency in adjacencies {
+        if adjacency.ordered_by != Endpoint::Src {
+            continue;
+        }
+        let aurl = adjacency.parquet.as_str();
+        let aname = aurl.to_string();
+        let duck = |source: duckdb::Error| LayoutError::Duck {
+            target: aname.clone(),
+            source,
+        };
+        let source = &targets[index_of(&adjacency.src_type, aurl)?];
+        let shift = shift_for(source.chunk_size).ok_or_else(|| LayoutError::TileSize {
+            vertex_type: source.type_name.clone(),
+            rows: source.chunk_size,
+        })?;
+        let prefix = tile_prefix(aurl);
+        ensure_prefix(&prefix)?;
+
+        // Which tiles exist, asked rather than assumed. A vertex tile is always
+        // full — dense ids are gapless — but a tile of 4,096 sources can hold no
+        // edges at all, and writing the empty file to say so is a request the
+        // reader pays for to learn nothing. A 404 says it for free.
+        let occupied: Vec<u64> = {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT DISTINCT (src_dense >> {shift})::UBIGINT AS tile \
+                     FROM read_parquet('{}') ORDER BY tile",
+                    sql_lit(aurl)
+                ))
+                .map_err(duck)?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, u64>(0))
+                .map_err(duck)?
+                .collect::<Result<Vec<u64>, _>>()
+                .map_err(duck)?;
+            rows
+        };
+
+        let mut emission = String::new();
+        for k in occupied {
+            let (lo, hi) = (k << shift, (k + 1) << shift);
+            let _ = write!(
+                emission,
+                "COPY (SELECT * FROM read_parquet('{}') \
+                 WHERE src_dense >= {lo} AND src_dense < {hi} \
+                 ORDER BY src_dense, dst_dense) TO '{}tile{k}.parquet' (FORMAT PARQUET);",
+                sql_lit(aurl),
+                sql_lit(&prefix),
+            );
+        }
+        conn.execute_batch(&emission).map_err(duck)?;
+    }
+    probe.mark("write edge tiles");
     probe.finish();
 
     Ok(())
+}
+
+/// The shift that addresses a tile of `rows` rows, or `None` if `rows` is not a
+/// power of two and therefore addresses nothing.
+const fn shift_for(rows: u64) -> Option<u32> {
+    if rows == 0 || !rows.is_power_of_two() {
+        return None;
+    }
+    Some(rows.trailing_zeros())
+}
+
+/// Where one adjacency's tiles go, from where the adjacency itself is:
+/// `…/by_source.parquet` → `…/by_source/`.
+///
+/// Derived and not passed in, because the caller has nothing to say about it: the
+/// tiles are the same relation cut on the same ranges, and a second path to
+/// configure is a second path to get wrong. A URL that is not a `.parquet` gets
+/// the separator appended, which cannot happen from the writer and is not worth
+/// an error variant nobody can reach.
+fn tile_prefix(adjacency: &str) -> String {
+    format!("{}/", adjacency.strip_suffix(".parquet").unwrap_or(adjacency))
+}
+
+/// Create the directory a local prefix names, so `COPY` has somewhere to put a
+/// tile.
+///
+/// A no-op for a cloud URL, and deliberately: an object store has no directories
+/// and the prefix is part of the key, so there is nothing to create and an error
+/// would be invented. Local paths and `file://` are the case `DuckDB` will not
+/// create for itself.
+fn ensure_prefix(prefix: &str) -> Result<(), LayoutError> {
+    let local = prefix.strip_prefix("file://").unwrap_or(prefix);
+    if local.contains("://") {
+        return Ok(());
+    }
+    std::fs::create_dir_all(local).map_err(|source| LayoutError::Prefix {
+        prefix: prefix.to_string(),
+        source,
+    })
 }
 
 /// Name of the temp table holding vertex type `index`'s `dense_id` mapping.
@@ -928,6 +1075,27 @@ mod tests {
         let untouched = only.clone();
         place_after(&mut only, 0.0);
         assert_eq!(only, untouched);
+    }
+
+    #[test]
+    fn shift_for_accepts_only_powers_of_two() {
+        // The default tile, and the shift ADR-0045 §8 publishes for it.
+        assert_eq!(shift_for(4_096), Some(12));
+        assert_eq!(shift_for(2), Some(1));
+        assert_eq!(shift_for(1), Some(0));
+        // The retired chunk. It is refused rather than rounded: emitting under it
+        // works and silently costs every reader a division and a table.
+        assert_eq!(shift_for(122_880), None);
+        assert_eq!(shift_for(0), None);
+    }
+
+    #[test]
+    fn tile_prefix_is_the_adjacency_without_its_extension() {
+        assert_eq!(
+            tile_prefix("file:///c/edge/A_b_A/by_source.parquet"),
+            "file:///c/edge/A_b_A/by_source/"
+        );
+        assert_eq!(tile_prefix("s3://b/by_source.parquet"), "s3://b/by_source/");
     }
 
     #[test]
