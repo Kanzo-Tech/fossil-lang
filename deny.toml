@@ -24,6 +24,12 @@ confidence-threshold = 0.93
 
 [bans]
 multiple-versions = "warn"
+# NOTE: this is red today, and has nothing to do with the ring guard below.
+# Every workspace path dependency is a wildcard (no crate carries a version —
+# nothing is published), so all 19 members fail. `allow-wildcard-paths = true`
+# does NOT fix it: cargo-deny refuses to apply it to crates that do not set
+# `publish = false`, and none of ours do. That is the fix, and it is its own
+# change: 24 manifests, and a statement about what is publishable.
 wildcards = "deny"
 deny = [
     # Strike-from-stack list per .planning/research/STACK.md
@@ -31,6 +37,28 @@ deny = [
     { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server (per ADR-0001)" },
     { name = "wasm-pack", reason = "Archived July 2025; use wasm-bindgen-cli + Vite" },
     { name = "sqlx", reason = "Not WASM-compatible; out of MVP scope" },
+
+    # The ADR-0044 ring guard. A crate may depend on its ring and lower ones,
+    # never on an engine its ring does not declare — so the engines are denied
+    # workspace-wide and the ring-2 crates are named as wrappers. The list IS
+    # the ring boundary: adding a name here is declaring that crate native, and
+    # that is the review the rule exists to force.
+    #
+    # These are ratchets over ground already held, not a migration to finish.
+    # ADR-0044 believed six crates reached `duckdb` and that the reader ring got
+    # there transitively via `fossil-ide -> fossil-engine`; ADR-0045 §7 showed
+    # that edge runs the other way and that the reader ring was already clean.
+    # `cargo tree -e normal -i duckdb --workspace` is the authority, not prose.
+    { name = "duckdb", wrappers = [
+        "fossil-engine",
+        "fossil-mcp",
+        "fossil-runtime",
+        "fossil-cli",
+    ], reason = "Ring 2 only (ADR-0044): the native engine. Ring 1 must start in milliseconds and ring 3 addresses bytes — neither may link a database. `fossil-cli` keeps it as a dev-dependency to read the written Parquet back, which is not a ring crossing." },
+    { name = "datafusion", wrappers = [
+        "fossil-df",
+        "fossil-df-wasm",
+    ], reason = "Ring 2 only (ADR-0044): the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — ADR-0044 deletes it, and compiling the engine to the browser asserts the opposite of ADR-0042 §1." },
 ]
 
 [sources]
