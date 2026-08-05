@@ -4,7 +4,7 @@
 
 //! An artefact validator: what the corpus promises, checked on the corpus.
 //!
-//! Every assertion here reads the produced tree with **plain SQL over DuckDB**
+//! Every assertion here reads the produced tree with **plain SQL over `DuckDB`**
 //! and never through `fossil-graph`, `fossil-df` or any of our reader code. That
 //! is the entire point. A test that reads back through the writer's own types
 //! proves the types are self-consistent and nothing else — it cannot see a
@@ -24,7 +24,7 @@
 //! writer read by one independent engine. It is not the round trip ADR-0045
 //! asks for — write with the Rust writer, read with the wasm reader *and* with
 //! the TypeScript/DuckDB path, diff the three — because two of those three live
-//! in another repository. What is here is the artefact validator that GraphAr
+//! in another repository. What is here is the artefact validator that `GraphAr`
 //! explicitly lacks; the cross-implementation half arrives with the tile reader.
 //!
 //! **And it deliberately does not freeze the arithmetic.** No test vector for
@@ -36,6 +36,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use duckdb::Connection;
@@ -73,15 +74,15 @@ fn write_fixture(dir: &Path) {
     // rejects. `name` rides along in the edge source for exactly that reason.
     let mut knows = String::from("id,name,target\n");
     for i in 0..PEOPLE {
-        users.push_str(&format!("{i},person-{i}\n"));
-        knows.push_str(&format!("{i},person-{i},{}\n", (i + 1) % PEOPLE));
+        let _ = writeln!(users, "{i},person-{i}");
+        let _ = writeln!(knows, "{i},person-{i},{}", (i + 1) % PEOPLE);
     }
     std::fs::write(dir.join("users.csv"), users).expect("write users.csv");
     std::fs::write(dir.join("knows.csv"), knows).expect("write knows.csv");
     std::fs::write(dir.join("mapping.fossil"), PROGRAM).expect("write mapping");
 }
 
-/// A single scalar out of DuckDB, as `i64`. Every check below is a count of
+/// A single scalar out of `DuckDB`, as `i64`. Every check below is a count of
 /// violations, so the expected answer is always zero and the failure message can
 /// say what was violated rather than what was expected.
 fn scalar(conn: &Connection, sql: &str) -> i64 {
