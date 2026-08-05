@@ -10,7 +10,7 @@
 //! proves the types are self-consistent and nothing else — it cannot see a
 //! promise the format makes to somebody who is not us.
 //!
-//! ADR-0045 §4 decided this shape on evidence rather than taste. GraphAr — whose
+//! ADR-0045 §4 decided this shape on evidence rather than taste. `GraphAr` — whose
 //! vocabulary fossil borrowed — ships a shared corpus that every language's CI
 //! clones, and **no job writes with one implementation and reads with another**.
 //! A fourth implementation landed there having re-derived the path arithmetic
