@@ -170,11 +170,23 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         "multi-valued hasProject unrolls to 2 edges; got: {edge}"
     );
 
-    // The GraphAr edge Parquet pair + per-type vertex Parquets exist on disk.
-    assert!(dest.join("vertex/KB.parquet").exists(), "KB vertex Parquet");
+    // The GraphAr edge Parquet pair + per-type vertex chunks exist on disk.
+    //
+    // Chunks, not `vertex/<Type>.parquet`: that single file is the layout pass's
+    // input and `c678e63` deletes it once the chunks the manifest has always
+    // declared are written. Asserting it still exists is asserting the writer
+    // leaves a stale second copy of every vertex behind.
     assert!(
-        dest.join("vertex/Project.parquet").exists(),
-        "Project vertex Parquet"
+        dest.join("vertex/KB/chunk0.parquet").exists(),
+        "KB vertex chunk"
+    );
+    assert!(
+        dest.join("vertex/Project/chunk0.parquet").exists(),
+        "Project vertex chunk"
+    );
+    assert!(
+        !dest.join("vertex/KB.parquet").exists(),
+        "the staged single-file vertex Parquet is removed once chunked"
     );
     assert!(
         dest.join("edge/KB_hasProject_Project/by_source.parquet")
