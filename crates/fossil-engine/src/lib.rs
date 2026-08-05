@@ -31,11 +31,11 @@ use system::open_db;
 // ===================================================================== providers
 
 /// List the data-source providers fossil supports. Thin native wrapper over
-/// [`fossil_ide::providers`] (the shared, WASM-clean implementation — one
+/// [`fossil_registry::providers`] (the shared, WASM-clean implementation — one
 /// source of truth for both the CLI and the browser, ADR-0024).
 #[must_use]
 pub fn providers() -> Vec<ProviderInfo> {
-    fossil_ide::providers()
+    fossil_registry::providers()
 }
 
 // ========================================================================= refs
@@ -52,9 +52,9 @@ pub fn refs(path: &Path) -> miette::Result<Vec<SourceRefInfo>> {
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
     let (db, file) = open_db(text, path);
     // The native host reads the file; the lineage logic (parse → typed refs,
-    // dedup) is the shared WASM-clean `fossil_ide::source_refs` — same code the
-    // browser runs over its in-memory db (ADR-0024).
-    Ok(fossil_ide::source_refs(&db, file))
+    // dedup) is the shared WASM-clean `fossil_registry::source_refs` — same code
+    // the browser runs over its in-memory db (ADR-0024).
+    Ok(fossil_registry::source_refs(&db, file))
 }
 
 // ======================================================================== check

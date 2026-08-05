@@ -56,6 +56,10 @@
 //! of the eight-namespace surface-function completeness set (`io/sql` and
 //! `io/http` are out of scope this milestone). See ADR-0015.
 
+pub mod lineage;
+
+pub use lineage::{providers, source_refs};
+
 use fossil_hir::FnSig;
 use fossil_hir::ty::{Primitive, Ty, TyKind};
 use smol_str::SmolStr;

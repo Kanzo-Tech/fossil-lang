@@ -1957,7 +1957,6 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-df",
  "fossil-hir",
- "fossil-ide",
  "fossil-mir",
  "fossil-registry",
  "fossil-resolver",
@@ -2036,7 +2035,6 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-hir",
  "fossil-registry",
- "fossil-run-status",
  "fossil-syntax",
  "insta",
  "lsp-types",
@@ -2105,6 +2103,7 @@ version = "0.1.0"
 dependencies = [
  "fossil-base",
  "fossil-hir",
+ "fossil-run-status",
  "salsa",
  "smol_str",
 ]

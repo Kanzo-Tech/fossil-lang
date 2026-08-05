@@ -1,6 +1,6 @@
 //! `fossil_wasm::refs_native` — the in-process (no-JS) core behind the WASM
 //! `refs()` export. Proves the BROWSER path (a transient `WasmDb` +
-//! `fossil_ide::source_refs`) produces the SAME typed lineage as the native
+//! `fossil_registry::source_refs`) produces the SAME typed lineage as the native
 //! `fossil refs` CLI, over the SAME program shape: `@conn` data + schema refs in
 //! a destructuring `io.rdf` plus an unaliased local csv. Parse-only — no DuckDB,
 //! no JS runtime (the `#[wasm_bindgen]` `refs()` wrapper's `serde_wasm_bindgen`

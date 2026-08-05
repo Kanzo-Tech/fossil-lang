@@ -17,9 +17,10 @@ workspace = true
 # registry entry can materialize a real interned `FnSig<'db>` on demand.
 # fossil-hir is already WASM-clean, so the WASM gate stays green (no leak).
 fossil-hir = { path = "../fossil-hir" }
+# `lineage.rs` (ADR-0045 §4): `providers` projects SOURCE_KINDS and `source_refs`
+# walks the def map, both into the CLI/browser wire types. WASM-clean — the wire
+# crate is serde + schemars only, and `fossil-base` is already transitive here.
+fossil-base = { path = "../fossil-base" }
+fossil-run-status = { path = "../fossil-run-status" }
 salsa = { workspace = true }
 smol_str = { workspace = true }
-
-[dev-dependencies]
-# Tests materialize FnSig against a real FossilDb (NativeSystem).
-fossil-base = { path = "../fossil-base" }

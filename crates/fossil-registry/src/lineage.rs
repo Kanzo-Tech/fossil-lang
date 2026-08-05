@@ -1,14 +1,20 @@
 //! Source lineage + provider introspection — the parse-only "what does this
 //! program reference?" and "what sources does fossil support?" surface.
 //!
-//! Lives here, in the shared IDE façade, so BOTH hosts consume one
-//! implementation (ADR-0024 "one crate, two hosts"): the native
-//! `fossil-engine`/`fossil-cli` (via [`source_refs`] over a file-backed db) and
-//! the browser `fossil-wasm` (over its in-memory `WasmDb`). The host injects
-//! only its own [`fossil_base::Db`] + program text; the logic — parse → source
-//! headers → typed refs — is identical and pure (no I/O, no `DuckDB`), so it is
-//! WASM-clean. Mirrors how the hover/completion features in this crate are
-//! shared by both hosts.
+//! Both hosts consume one implementation (ADR-0024 "one crate, two hosts"): the
+//! native `fossil-engine`/`fossil-cli` (via [`source_refs`] over a file-backed
+//! db) and the browser `fossil-wasm` (over its in-memory `WasmDb`). The host
+//! injects only its own [`fossil_base::Db`] + program text; the logic — parse →
+//! source headers → typed refs — is identical and pure (no I/O, no `DuckDB`),
+//! so it is WASM-clean.
+//!
+//! It lives in the registry because that is where its content is:
+//! [`providers`] is a projection of [`crate::SOURCE_KINDS`], and until
+//! ADR-0045 §4 the projection sat in `fossil-ide` while the data sat here and
+//! the result type sat in `fossil-run-status` — one idea across three crates
+//! that did not know each other. Being in `fossil-ide` also made
+//! `fossil-engine` depend on the editor surface for five lines, which is the
+//! edge ADR-0045 §4 went after; nothing here is an editor feature.
 
 use fossil_base::{Db, SourceFile};
 use fossil_run_status::{ProviderInfo, ProviderKind, RefRole, SourceRefInfo};
@@ -62,12 +68,12 @@ fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
 }
 
 /// The data-source providers fossil supports, projected from
-/// [`fossil_registry::SOURCE_KINDS`] (the single source of truth — native
+/// [`crate::SOURCE_KINDS`] (the single source of truth — native
 /// readers AND external providers like `rdf`). Sorted for a deterministic
 /// order (the registry's own iteration order is unspecified).
 #[must_use]
 pub fn providers() -> Vec<ProviderInfo> {
-    let mut providers: Vec<ProviderInfo> = fossil_registry::SOURCE_KINDS
+    let mut providers: Vec<ProviderInfo> = crate::SOURCE_KINDS
         .iter()
         .map(|k| ProviderInfo {
             name: k.short_name.to_string(),

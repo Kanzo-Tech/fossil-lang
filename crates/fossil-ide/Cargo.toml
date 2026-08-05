@@ -23,9 +23,6 @@ fossil-hir = { path = "../fossil-hir" }
 # symbol / prefix infrastructure (06-03) used to be `fossil-ide-db` and is now
 # the `symbol_index` / `prefix_index` / `workspace` modules here (ADR-0045 §6).
 fossil-registry = { path = "../fossil-registry" }
-# WASM-clean wire types (serde + schemars only) — the `source_refs`/`providers`
-# lineage surface (lineage.rs) returns these; shared verbatim with the host.
-fossil-run-status = { path = "../fossil-run-status" }
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
