@@ -4,6 +4,12 @@
 **Language name:** Fossil
 **File extension:** `.fossil`
 
+> **Qué de aquí es cierto hoy.** «Crate layering» y «Dependencies» describen el árbol de hoy y se
+> mantienen contra él. Todo lo demás es el corpus de diseño original y hay puntos superados: **en
+> caso de duda, ganan los ADRs**, y los que más contradicen este documento son ADR-0002 (quince
+> crates, con `fossil-hir` absorbiendo tres), ADR-0044 (tres anillos) y ADR-0045 (dos bloques, y el
+> veredicto crate a crate).
+
 ---
 
 ## La arquitectura en una frase
@@ -32,51 +38,68 @@ Compilador **incremental query-based** (Salsa 0.26) con **layered crate structur
 
 ## Crate layering
 
+**Este es el árbol de hoy, derivado de los `Cargo.toml`, no el reparto de diseño.** Son 25 crates.
+El diagrama anterior dibujaba `fossil-typeck`, `fossil-types`, `fossil-resolve` y `fossil-codegen`,
+que **no existen**: los tres primeros los absorbió `fossil-hir` (ADR-0002, y su `Cargo.toml` lo dice
+en un comentario), y el codegen vive repartido entre `fossil-mir` y `fossil-df`. El resto del
+documento sigue siendo de fase de diseño; esta sección no.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  BINARIES                                                    │
-│  fossil-cli       fossil-lsp       fossil-wasm              │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  BINARIOS Y HOSTS                                                │
+│  fossil-cli    fossil-lsp    fossil-wasm    fossil-mcp   xtask  │
+│  fossil-graph-wasm    fossil-df-wasm                            │
+└─────────────────────────────────────────────────────────────────┘
                           ▲
-┌─────────────────────────────────────────────────────────────┐
-│  IDE LAYER                                                   │
-│  fossil-ide       (hover, completion, goto-def, refactor)   │
-│  fossil-ide-db    (symbol indexes, search infrastructure)   │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  ORQUESTACIÓN Y EJECUCIÓN (fuera de Salsa)                       │
+│  fossil-engine    (compile + run + catalog + check + refs)      │
+│  fossil-runtime   (DuckDB nativo)                    [NATIVO]   │
+│  fossil-df        (backend DataFusion del MIR)                  │
+│  fossil-resolver  (rutas cloud + credenciales)       [NATIVO]   │
+└─────────────────────────────────────────────────────────────────┘
                           ▲
-┌─────────────────────────────────────────────────────────────┐
-│  COMPILER LAYER                                              │
-│  fossil-codegen   (typed plan → DuckDB SQL + manifest)      │
-│  fossil-mir       (typed operator algebra IR)               │
-│  fossil-typeck    (bidirectional type checker)              │
-│  fossil-hir       (high-level IR, name-resolved)            │
-│  fossil-resolve   (item tree, prefix resolution)            │
-│  fossil-types     (type ADT, type interning)                │
-│  fossil-syntax    (lossless CST, parser)                    │
-│  fossil-base      (Salsa db trait, VFS, file inputs)        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  ANÁLISIS (lo que consumen LSP y navegador)                      │
+│  fossil-ide       (hover, completion, goto-def, code actions)   │
+│  fossil-ide-db    (índices de símbolos)                         │
+└─────────────────────────────────────────────────────────────────┘
                           ▲
-┌─────────────────────────────────────────────────────────────┐
-│  EXTENSION LAYER (trait-based, pluggable)                    │
-│  fossil-descriptors/input/   fossil-descriptors/output/      │
-│    csvw                        shex (rudof-based)            │
-│    jsonschema                  shacl (fase 2)                │
-│    xsd                                                       │
-│    sql (sqlx-based)                                          │
-│    parquet                                                   │
-│                                                              │
-│  fossil-sinks/                 fossil-registry/              │
-│    graphar (primary)             (stdlib functions +         │
-│    turtle (fase 2)                named compositions)        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  COMPILADOR                                                      │
+│  fossil-mir       (álgebra de operadores tipada)                │
+│  fossil-registry  (catálogo stdlib)                             │
+│  fossil-hir       (item tree + resolución + tipos + checker)    │
+│  fossil-syntax    (CST lossless, parser)                        │
+│  fossil-base      (trait Db de Salsa + System)                  │
+└─────────────────────────────────────────────────────────────────┘
                           ▲
-┌─────────────────────────────────────────────────────────────┐
-│  RUNTIME (OUTSIDE SALSA)                                     │
-│  fossil-runtime   (DuckDB execution, output materialization)│
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  DESCRIPTORES Y CONTRATOS                                        │
+│  fossil-descriptors-input     fossil-descriptors-output         │
+│  fossil-shex                  fossil-graph-schema               │
+│  fossil-sinks (modelo del manifiesto GraphAr)                   │
+│  fossil-run-status (contratos de cable del CLI)                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  LECTURA DEL CORPUS — no conoce el lenguaje                      │
+│  fossil-graph  (seis verbos: schema, read, expand, path,        │
+│                 aggregate, execute_sql)                         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Regla cardinal:** cada layer depende solo de las que tiene debajo. Nunca skip-level access.
+
+**Y hoy hay una arista que la incumple**, con su ADR abierto: `fossil-base` depende de
+`fossil-descriptors-input` (`fossil-base/src/system.rs:21`, por `InferredDescriptor`), así que el
+sustrato conoce un tipo concreto de un proveedor concreto. ADR-0045 §2 la documenta y ADR-0045 §11
+de la secuencia la borra.
+
+**El reparto que este diagrama no muestra, y que gobierna hoy:** ADR-0044 corta por *dónde corre el
+código* (tres anillos: lenguaje / nativo / wasm) y ADR-0045 por *de qué trata* (dos bloques:
+«fossil» y «graph»). Los dos ejes componen y ninguno subsume al otro; la tabla de ADR-0045 §7 los
+cruza.
 
 ---
 
@@ -420,9 +443,10 @@ Designed from day 1. Costly to retrofit later.
 
 When a function expects `T -> U` and the argument is an expression containing free `FieldRef`s, the compiler synthesizes a single-parameter lambda. Detailed in `type-system.md`.
 
-```rust
-// In fossil-typeck/src/closures.rs
+*Aterrizó en `fossil-hir/src/check.rs` (`synthesize_closure`), no en un crate propio; el boceto de
+abajo conserva la forma, no las firmas.*
 
+```rust
 fn maybe_lift_closure(
     arg_expr: &Expression,
     expected_ty: &Ty,
@@ -553,36 +577,42 @@ DuckDB-WASM executes the SQL output. Mosaic visualizes results in playground.
 
 ## Dependencies
 
+**Las versiones vivas están en `[workspace.dependencies]` y en la tabla de `CLAUDE.md`; esto es la
+intención de diseño, con las tres elecciones que se revirtieron marcadas.**
+
 ```toml
 # fossil-syntax
-rowan = "0.15"           # lossless CST
-logos = "0.15"           # lexer
+rowan = "0.16"           # lossless CST
+logos = "0.16"           # lexer
 
 # fossil-base
 salsa = "0.26"           # incremental queries
 
-# fossil-descriptors/input
-sqlx = "..."             # SQL catalog introspection (desktop only, not WASM)
+# fossil-descriptors-input
+# sqlx — DESCARTADO: no compila a WASM; prohibido en deny.toml
+# serde_yml — DESCARTADO: RUSTSEC-2025-0068; se usa serde_yaml_ng
 arrow = "..."            # Parquet schema
-serde_yml = "..."        # CSVW JSON-LD
-jsonschema = "..."       # JSON Schema validation
+serde_yaml_ng = "0.10"   # CSVW JSON-LD
 
-# fossil-descriptors/output
+# fossil-descriptors-output / fossil-shex
 rudof = "..."            # ShEx parser + validator (WESO group, in-house)
 
-# fossil-mir / codegen
-sqlparser = "..."        # SQL AST construction
+# fossil-mir
+sqlparser = "0.59"       # SQL AST construction
 
-# fossil-runtime
-duckdb = "..."           # native execution
-duckdb-wasm bindings     # WASM execution
+# fossil-df
+datafusion = "..."       # el backend que sí compila a wasm32
+
+# fossil-runtime / fossil-engine / fossil-mcp
+duckdb = "1.10502"       # ejecución nativa (bundled)
 
 # fossil-lsp
-tower-lsp = "..."
-miette = "7"
+# tower-lsp — DESCARTADO: sin mantenimiento; se usa lsp-server (ADR-0001)
+lsp-server = "0.7"
+miette = "7.6"
 
 # fossil-wasm
-wasm-bindgen = "..."
+wasm-bindgen = "=0.2.120"
 ```
 
 ---
