@@ -49,32 +49,60 @@ impl GraphArData {
     /// Parquet encode or manifest YAML serialization failures.
     pub fn to_files(&self) -> Result<Vec<GraphArFile>, EncodeError> {
         let mut out = Vec::new();
+        self.try_for_each_file::<EncodeError>(|file| {
+            out.push(file);
+            Ok(())
+        })?;
+        Ok(out)
+    }
+
+    /// The same dataset, one file at a time: each is encoded, handed to `emit`,
+    /// and dropped before the next one is built.
+    ///
+    /// This is the encoder — [`Self::to_files`] is this with a `Vec` on the end.
+    /// Collecting first keeps every Parquet buffer resident at once, which the
+    /// native sink never needed: it writes each file and forgets it. The browser
+    /// host does, because it hands JS a list.
+    ///
+    /// **This is a shape, not a measured win.** At ten million vertices the whole
+    /// output is 713 MB across six files, and swapping the list for this changed
+    /// peak RSS by 0.02 GB — inside the run-to-run noise. The +0.58 GiB the probe
+    /// bills to the encode phase is the encoder's own working memory, which this
+    /// does not touch. It is here because holding N files to write them one at a
+    /// time is indefensible per file, not because it paid at this size.
+    ///
+    /// # Errors
+    /// Whatever `emit` returns, or an encode failure converted through `E`.
+    pub fn try_for_each_file<E: From<EncodeError>>(
+        &self,
+        mut emit: impl FnMut(GraphArFile) -> Result<(), E>,
+    ) -> Result<(), E> {
         for v in &self.vertices {
-            if let Some(bytes) = batches_to_parquet(&v.batches)? {
-                out.push(GraphArFile {
+            if let Some(bytes) = batches_to_parquet(&v.batches).map_err(EncodeError::from)? {
+                emit(GraphArFile {
                     rel_path: format!("vertex/{}.parquet", v.label),
                     bytes,
-                });
+                })?;
             }
         }
         for e in &self.edges {
             let dir = format!("{}_{}_{}", e.src_type, e.label, e.dst_type);
             for (orient, batches) in [("by_source", &e.by_source), ("by_target", &e.by_target)] {
-                if let Some(bytes) = batches_to_parquet(batches)? {
-                    out.push(GraphArFile {
+                if let Some(bytes) = batches_to_parquet(batches).map_err(EncodeError::from)? {
+                    emit(GraphArFile {
                         rel_path: format!("edge/{dir}/{orient}.parquet"),
                         bytes,
-                    });
+                    })?;
                 }
             }
         }
-        for manifest in self.manifests()? {
-            out.push(GraphArFile {
+        for manifest in self.manifests().map_err(EncodeError::from)? {
+            emit(GraphArFile {
                 rel_path: manifest.rel_path,
                 bytes: manifest.yaml.into_bytes(),
-            });
+            })?;
         }
-        Ok(out)
+        Ok(())
     }
 }
 

@@ -38,20 +38,22 @@ impl GraphArData {
     /// # Errors
     /// Filesystem or Parquet-encode failures, or manifest serialization.
     pub fn write_to_dir(&self, dest: &Path) -> Result<(), SinkError> {
-        // `to_files` encodes the whole corpus before a byte reaches disk: every
-        // Parquet file's bytes are resident at once, alongside the Arrow they
-        // were encoded from. The two marks separate that from the write itself.
+        // One file at a time: encoded, written, dropped. `to_files` would hold
+        // every Parquet buffer at once for a list nothing on this path reads.
+        // Measured at ten million, it is worth 0.02 GB of peak — noise. The
+        // reason it stays is that the list has no reader here, not the number.
         let mut probe = fossil_base::probe::Probe::new("write_to_dir");
-        let files = self.to_files()?;
-        probe.mark(&format!("encode {} file(s)", files.len()));
-        for file in files {
+        let mut count = 0usize;
+        self.try_for_each_file::<SinkError>(|file| {
             let path = dest.join(&file.rel_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
             fs::write(path, file.bytes)?;
-        }
-        probe.mark("drop to disk");
+            count += 1;
+            Ok(())
+        })?;
+        probe.mark(&format!("encode + write {count} file(s)"));
         probe.finish();
         Ok(())
     }
