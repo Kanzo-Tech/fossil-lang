@@ -791,6 +791,45 @@ Lo que es seguro primero, lo que es de un solo sentido, y lo que no se toca hast
 respondiera a algo, y ninguna renumeración de crates «para que queden bonitos». Cada línea de la
 tabla de §6 se ejecuta sola o no se ejecuta.
 
+## Decidido el 2026-08-05, en revisión de este documento
+
+Tres de las cuatro preguntas que este ADR pone encima de la mesa tienen respuesta. Se anotan aquí y
+no en el cuerpo porque el cuerpo argumenta y esto decide.
+
+**1. Identidad y dirección se separan.** La identidad estable de un vértice es el **IRI del sujeto**;
+`dense_id` es una **dirección** — barata, calculable, y que puede cambiar cuando el corpus se
+reescribe. Eso desbloquea §8 sin mentir: un id plano exige que el espacio de ids *sea* el orden
+espacial, y sólo se puede pagar ese precio si la identidad no depende de él.
+
+**Lo que cuesta, dicho antes de cobrarlo:** el lector necesita el IRI dentro de la tesela, o una
+tabla para traducir. Son bytes en el cable que hoy no paga, y la medición de la carga útil ideal
+—0,6–0,9 MB planos por ventana— se hizo sin ellos. Hay que rehacerla antes de fijar el tamaño de la
+tesela como definitivo.
+
+**2. Se va directo a teselas de 4.096 filas; el chunk se retira.** No se toca `DEFAULT_CHUNK_SIZE`
+por el camino. Está medido que 122.880 está Pareto-dominado por 32.768 —más peticiones *y* cuatro
+veces los bytes— y que además no es potencia de dos, que es lo que un id plano necesita. Bajarlo
+primero sería mover un número dos veces y tirar el trabajo.
+
+**El precio, aceptado a sabiendas:** hasta que el emisor exista, el corpus se queda con el peor valor
+de la tabla y el lector sigue pagando 18,9× de sobre-lectura a cinco millones.
+
+**3. `kanzo-ui` consumirá el paquete de verbos — y la cámara no.** El reparto es por trabajo, no por
+comodidad: **la cámara se direcciona** (teselas, aritmética, sin verbo) y **todo lo demás es verbo**
+— `expand` para un vecindario, `read` para las propiedades de un vértice, `aggregate`, `schema`.
+
+Esto no reabre ADR-0042 y hay que decir por qué: la poda **no se puede expresar como predicado**, y
+está medido —5 ms de join simple contra 237 ms por rangos contra 189 ms de 179 `BETWEEN`—. Pedir la
+ventana con `read(where: …)` sería volver exactamente al número que hizo nacer las teselas. El verbo
+`viewport` era el único sitio donde la cámara fingía ser una consulta, y por eso se ha ido.
+
+Con esto los seis verbos ganan su segundo consumidor real, que es lo que la extracción necesitaba.
+
+**4. Sigue abierta la de §1** — dónde vive una convención cuando no es un crate. Se decidirá con una
+revisión de los sistemas de referencia (Arrow, Parquet, MVT, PMTiles, H3 contra S2, Iceberg,
+GraphAr) en vez de por preferencia, porque el punto entero de la pregunta es cuál de las dos formas
+ha producido menos divergencias en sistemas que ya la resolvieron.
+
 ## Consecuencias
 
 **El recuento, y es más modesto de lo que la queja sugiere.** De 25 crates a **21** — o a 20 si §1
