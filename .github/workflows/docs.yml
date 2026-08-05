@@ -1,0 +1,66 @@
+name: docs
+
+# Path-filtered, and deliberately NOT a step inside `pnpm-ci.yml`.
+#
+# That job's ceiling is 60 minutes because a cold run compiles datafusion to wasm
+# and builds `fossil-cli --release`; hanging a Next.js build off it would slow every
+# PR that touches a crate in order to check a website that no crate can break. The
+# converse holds too: a change to an `.mdx` file has no business rebuilding
+# datafusion. So the two gates are separate and each one only runs when its own
+# inputs move.
+#
+# The paths below include `decisions/` and `crates/` even though this job compiles
+# no Rust. That is the point of the guard: `content.test.ts` asserts that every path
+# a page cites — an ADR under `decisions/`, a test or source file under `crates/` —
+# is still on disk. Deleting or renaming one has to turn this red, and it cannot if
+# the workflow never runs on that change.
+on:
+  pull_request:
+    paths:
+      - 'apps/docs/**'
+      - 'decisions/**'
+      - 'crates/**'
+      - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/docs/**'
+      - 'decisions/**'
+      - 'crates/**'
+      - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/docs.yml'
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    # Minutes, not tens of minutes: no Rust toolchain, no wasm, no cargo cache. If
+    # this ever needs more, something has been added that does not belong in it.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Only this app and what it needs. `pnpm install` at the root would pull the
+      # whole @fossil-lang family, several of which need the Rust toolchain to build.
+      - name: Install (docs and its dependencies only)
+        run: pnpm install --frozen-lockfile --filter @fossil-lang/docs...
+
+      # `build` runs the content guard first (see the package's `build` script), so
+      # this single step covers both: a page missing a register, a page citing a path
+      # that no longer exists, and a page that does not compile.
+      - name: Build (content guard, then Next)
+        run: pnpm --filter @fossil-lang/docs build
+
+      - name: Type-check
+        run: pnpm --filter @fossil-lang/docs typecheck
