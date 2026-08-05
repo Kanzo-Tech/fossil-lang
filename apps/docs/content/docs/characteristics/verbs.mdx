@@ -5,7 +5,7 @@ direction:
   summary: The surface closes at six verbs — read, expand, path, aggregate, schema, execute_sql — and the corpus file, not the verb list, is what every consumer actually agrees on.
   decidedBy: decisions/0042-la-camara-se-direcciona.md
 today:
-  summary: Thirteen verbs are declared and all thirteen dispatch; the four that had no implementation were deleted rather than written, so the dispatch match is now exhaustive.
+  summary: The surface is converging on six one collapse at a time — the four verbs that had no implementation are gone and the dispatch match is exhaustive, so a verb can no longer be declared without being wired.
   backedBy: crates/fossil-graph/tests/snapshots/schemas__operation_envelope.snap
 ---
 
@@ -38,11 +38,17 @@ demonstration is a measurement. Not an argument.
 
 ## The mapping
 
-The surface has already moved once toward this. It was seventeen; four of those were declared,
-carried params and result types and wire schemas, and were never implemented — dispatch fell through
-to a `NotImplemented` arm. They were deleted rather than written, which took the surface to thirteen
-and took `GraphError::NotImplemented` with it: the `match` is now exhaustive, so a verb can no longer
-be added without being wired. The compiler says what a stub used to say at runtime.
+The surface is converging on six one collapse at a time, and each collapse below is a step that has
+either landed or not. Read them as a sequence, not as a count — the count is whatever the last landed
+step left behind.
+
+<Callout title="The first step has landed: seventeen to thirteen">
+The surface was seventeen. Four of those were declared, carried params and result types and wire
+schemas, and were never implemented — dispatch fell through to a `NotImplemented` arm. They were
+deleted rather than written, which took `GraphError::NotImplemented` with them: the `match` is now
+exhaustive, so a verb can no longer be added without being wired. The compiler says what a stub used
+to say at runtime.
+</Callout>
 
 ### Four schema verbs collapse to `schema`
 
@@ -50,6 +56,11 @@ be added without being wired. The compiler says what a stub used to say at runti
 
 All four are manifest reads with no SQL behind them. They differ in what they project, which is an
 argument, not a verb.
+
+The envelope snapshot in this page's `backedBy` is what pins whichever set is current — it is the
+wire contract every binding consumes, so a collapse cannot land without it changing. It will not,
+however, notice a *count*: nothing on disk asserts how many verbs there should be, which is why this
+page describes steps rather than quoting a total.
 
 ### Three aggregation verbs collapse to `aggregate`
 
