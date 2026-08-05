@@ -22,6 +22,10 @@ import { repoRoot } from "@/lib/repo";
  *      renamed, the claim it backed keeps its confident sentence, and nothing anywhere notices.
  *      Renaming that test now fails the docs build, because `build` runs this first.
  *
+ * A fourth assertion joined them and is of a different kind: it does not check a citation, it *is*
+ * the evidence one page cites — see `fossilDependenciesOf` below and `architecture.mdx`, whose
+ * `backedBy` points here. A page may cite this file only for a claim this file actually measures.
+ *
  * What it does NOT prove, and this matters:
  *
  *   - That a `backedBy` path actually *tests* the claim. It checks that the file is there, not that
@@ -56,13 +60,30 @@ function mdxUnder(dir: string): string[] {
   });
 }
 
-const pages: Page[] = GOVERNED.flatMap((group) =>
-  mdxUnder(join(CONTENT_ROOT, group)).map((path) => ({
+function read(path: string): Page {
+  return {
     id: relative(repoRoot, path),
     path,
     data: matter(readFileSync(path, "utf8")).data as Record<string, unknown>,
-  })),
-);
+  };
+}
+
+const inGovernedDirs = GOVERNED.flatMap((group) => mdxUnder(join(CONTENT_ROOT, group))).map(read);
+
+/**
+ * And anywhere else, any page that opts in.
+ *
+ * `architecture.mdx` sits at the root next to the index and the decision list, both of which carry
+ * no registers by design, so the directory rule alone would let it declare a `direction:` block and
+ * then never be held to it — the one page on this site whose whole subject is a shape that does not
+ * exist yet. Declaring either block is the opt-in; declaring one and not the other is the failure.
+ */
+const opted = mdxUnder(CONTENT_ROOT)
+  .filter((path) => !inGovernedDirs.some((page) => page.path === path))
+  .map(read)
+  .filter((page) => "direction" in page.data || "today" in page.data);
+
+const pages: Page[] = [...inGovernedDirs, ...opted];
 
 describe("every governed page declares both registers", () => {
   // A directory rename that emptied `characteristics/` would otherwise turn every assertion below
@@ -89,6 +110,55 @@ describe("every governed page declares both registers", () => {
       [hasBacking, declaresUnmeasured].filter(Boolean),
       "today: exactly one of `backedBy: <path>` or `unmeasured: true`",
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * The one claim on this site that a manifest can settle, and `architecture.mdx` is what cites it.
+ *
+ * That page says `fossil-graph` reaches the rest of the tree exactly once, and everything else it
+ * says about two cores hangs off that number. Left as prose it is a sentence somebody measured in
+ * August 2026; here it is a build failure the moment it stops holding — in either direction, which
+ * is the point. A second dependency appearing means the graph core has started to grow roots into
+ * the language; the last one *disappearing* means ADR-0042 §2 landed and the page's `today:` block
+ * now understates what is true. Both deserve a red test, because both need the page rewritten.
+ *
+ * `[dev-dependencies]` are deliberately out of scope: a test may depend on whatever it likes, and
+ * `fossil-graph`'s do not include a fossil crate today anyway.
+ */
+const GRAPH_MANIFEST = "crates/fossil-graph/Cargo.toml";
+
+/** Enough of a TOML reader for one question: the `fossil-*` keys under `[dependencies]`. */
+function fossilDependenciesOf(manifest: string): string[] {
+  let section = "";
+  const found: string[] = [];
+
+  for (const raw of readFileSync(manifest, "utf8").split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("#")) continue;
+
+    const header = /^\[([^\]]+)\]/.exec(line);
+    if (header) {
+      section = header[1];
+      continue;
+    }
+
+    const key = /^(fossil-[a-z0-9-]+)\s*=/.exec(line);
+    if (section === "dependencies" && key) found.push(key[1]);
+  }
+
+  return found.sort();
+}
+
+describe("the graph core reaches the rest of the tree exactly once", () => {
+  it("is a manifest that is still on disk", () => {
+    expect(existsSync(join(repoRoot, GRAPH_MANIFEST)), `${GRAPH_MANIFEST} is not on disk`).toBe(
+      true,
+    );
+  });
+
+  it("fossil-graph depends on fossil-sinks and on nothing else of ours", () => {
+    expect(fossilDependenciesOf(join(repoRoot, GRAPH_MANIFEST))).toEqual(["fossil-sinks"]);
   });
 });
 

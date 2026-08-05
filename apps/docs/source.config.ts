@@ -1,4 +1,5 @@
 import { defineDocs, defineConfig } from "fumadocs-mdx/config";
+import { remarkMdxMermaid } from "fumadocs-core/mdx-plugins";
 import { pageSchema } from "fumadocs-core/source/schema";
 import { z } from "zod";
 
@@ -44,6 +45,11 @@ export const docs = defineDocs({
 
 export default defineConfig({
   mdxOptions: {
+    // fumadocs ships this one; no third-party plugin is involved. It rewrites a ```mermaid fence
+    // into `<Mermaid chart="…" />` and nothing else — the renderer is `components/mermaid.tsx`,
+    // which says there why it runs in the browser rather than at build time. It has to be a remark
+    // plugin because `rehypeCode` would otherwise have turned the fence into highlighted markup.
+    remarkPlugins: [remarkMdxMermaid],
     rehypeCodeOptions: {
       themes: { light: "github-light", dark: "github-dark" },
       defaultColor: false,

@@ -1,5 +1,5 @@
 {
   "title": "fossil",
   "root": true,
-  "pages": ["index", "characteristics", "decisions"]
+  "pages": ["index", "architecture", "characteristics", "decisions"]
 }

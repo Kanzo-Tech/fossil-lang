@@ -4,6 +4,7 @@ import { Card, Cards } from "fumadocs-ui/components/card";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import type { MDXComponents } from "mdx/types";
 import { DecisionIndex } from "@/components/decision-index";
+import { Mermaid } from "@/components/mermaid";
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
@@ -14,6 +15,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     Step,
     Steps,
     DecisionIndex,
+    Mermaid,
     ...components,
   };
 }
