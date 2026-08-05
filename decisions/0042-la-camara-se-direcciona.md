@@ -91,6 +91,25 @@ Las columnas se disponen para subir a GPU sin transformar —`x` e `y` como arra
 elimina por construcción el interleave que hoy hace `arrays()` en el hilo principal. Una arista vive
 en la tesela más profunda que contiene ambos extremos.
 
+**Revisado el 2026-08-05: §3 son dos afirmaciones y sólo una se sostiene.**
+
+| | veredicto |
+|---|---|
+| «los niveles de la jerarquía son los niveles de LOD» | **confirmado** |
+| «una tesela es una comunidad» | **refutado** |
+
+Medido a cinco millones: `cluster_id` tiene **mediana 1 vértice** y p90 de 3, así que no es una
+carga útil ni explica los ~170 tramos de una ventana — ésos los produce la curva de Morton, que
+parte un rectángulo en O(√n) segmentos. Pero las mismas comunidades tienen **p90 de radio 20** sobre
+un lienzo de 5.289.638 de ancho, contra 72.722 de un bin contiguo de la curva del mismo tamaño: como
+agregados son fieles y la curva no sirve.
+
+**Son dos estructuras ortogonales, no una.** La jerarquía da los niveles de *agregación*; el orden
+Morton da los rangos de *bytes*. Este párrafo las confundió en una sola, y por eso al caer la mitad
+del fetch parecía caer también la del LOD. La pirámide sobrevive; la tesela no es una comunidad.
+
+Detalle en `kanzo-ui/BENCHMARKS.md` y en ADR-0044.
+
 ### 4. Las posiciones se toman si vienen y se calculan si no
 
 `enrich_layout` hoy calcula `x`/`y` incondicionalmente. Con posiciones dadas —geográficas, o
