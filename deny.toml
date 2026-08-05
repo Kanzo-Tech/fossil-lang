@@ -35,11 +35,12 @@ deny = [
     # la migración. Cuando la lista quede vacía, la entrada se borra y con ella la dependencia — el
     # criterio de terminado que le ha faltado desde junio. `fossil-mcp` es anillo 1 y no debería
     # estar ni hoy.
-    # `fossil-ide` y `fossil-wasm` NO son deuda aceptada: son un bug que este guard encontró el día
-    # que se escribió. `fossil-wasm/Cargo.toml` dice literalmente «NOT pull fossil-runtime or any
-    # native UDF crate (Pitfall 3)» y el grafo lo alcanza igual, vía fossil-ide → fossil-engine. La
-    # regla estaba escrita como comentario, que es precisamente lo que no sujeta nada.
-    { name = "duckdb", wrappers = ["fossil-runtime", "fossil-engine", "fossil-cli", "fossil-mcp", "fossil-ide", "fossil-wasm"], reason = "ADR-0044: el motor es del anillo 2; DuckDB sale entero con el strangler" },
+    # Los cuatro son dependientes DIRECTOS; `wrappers` no admite otra cosa. Lo que el guard destapó
+    # al escribirse es que `fossil-wasm` alcanza DuckDB por transitividad —vía fossil-ide →
+    # fossil-engine— cuando su propio Cargo.toml dice «NOT pull fossil-runtime or any native UDF
+    # crate (Pitfall 3)». La regla estaba escrita como comentario, que es lo que no sujeta nada: el
+    # anillo 3 arrastra hoy el motor entero, y cerrar el strangler es lo que lo corta.
+    { name = "duckdb", wrappers = ["fossil-runtime", "fossil-engine", "fossil-cli", "fossil-mcp"], reason = "ADR-0044: el motor es del anillo 2; DuckDB sale entero con el strangler" },
     # `fossil-df-wasm` compila el motor al navegador, que afirma que el navegador ejecuta programas —
     # lo contrario de ADR-0042 §1. Sale borrándolo, no añadiendo excepciones.
     { name = "datafusion", wrappers = ["fossil-df", "fossil-df-wasm"], reason = "ADR-0044: el motor no entra en el anillo del lenguaje ni en el del lector" },
