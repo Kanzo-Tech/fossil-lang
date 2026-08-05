@@ -95,14 +95,20 @@ crates/
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace, per ADR-0031)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
+  graph/                   in-process TS binding for the fossil-graph verb surface
+  executor/                datafusion-wasm query executor
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
   codemirror-fossil/       CodeMirror 6 language extension (StreamParser → fossil-wasm tokenize)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
+  introspect/              schema introspection helpers
   examples/                bundled .fossil/.csv/.csvw.json/.shex fixtures
-  playground/              top-level <FossilPlayground/> React component
+  ui/ viewer/ editor/      React family that ADR-0040 retires to @kanzo-tech/*. Still on disk;
+                           that ADR is `proposed`, not done, so do not treat them as gone.
 
-apps/                      NOT published (pnpm workspace)
-  landing/                 Next.js 15 reference host → playground.kanzo.dev
+apps/                      NOT published, and no recursive CI step reaches them (all are
+                           filtered to `./packages/*` by path — see release.yml)
+  docs/                    Next.js + fumadocs. Where fossil is GOING, with what is already
+                           true marked as such; `apps/docs/CLAUDE.md` has the editorial rules
 
 decisions/                 ADRs + non-numbered decision logs (rudof-wasm spike, etc.)
 .planning/                 GSD orchestration artifacts (gitignored — commit_docs=false)
@@ -125,7 +131,8 @@ decisions/                 ADRs + non-numbered decision logs (rudof-wasm spike, 
   using one of the three stub templates (compiler-core, native-only with cfg-tripwire, or wasm-shim).
   Update ADR-0002 if the crate count changes from 15.
 - **Add a new ADR:** copy `decisions/template.md`, increment NNNN. Update `decisions/README.md` index.
-- **Run the WASM smoke test:** historical `playground-poc/` removed in Phase 8 plan 08-01 (ADR-0031). Phase 8 builds a pnpm-workspace React library family under `packages/` + a Next.js host under `apps/landing/`.
+- **Run the WASM smoke test:** historical `playground-poc/` removed in Phase 8 plan 08-01 (ADR-0031). Phase 8 built the pnpm-workspace React library family under `packages/`.
+- **Add an app:** it goes under `apps/`, carries `private: true`, and needs nothing else — every recursive CI step and every root script is already filtered to `./packages/*`, so an app cannot be version-stamped or published by accident. Give it its own path-filtered workflow rather than a step in `pnpm-ci.yml`, whose 60-minute ceiling exists for a cold cargo build.
 
 ## Anti-patterns
 
