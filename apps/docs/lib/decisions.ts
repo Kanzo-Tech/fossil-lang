@@ -23,8 +23,8 @@ const FIELD = (name: string) => new RegExp(`^\\*\\*${name}:\\*\\*\\s*(.+)$`, "m"
  * Read `decisions/` from disk at build time.
  *
  * The index is derived, never transcribed. `decisions/README.md` keeps a hand-maintained table and
- * it is already behind — 0041 through 0044 are on disk and not in it — which is the whole argument
- * for not writing a second one by hand on this site.
+ * it is already behind — its last row is 0039, and 0040 through 0044 are on disk — which is the
+ * whole argument for not writing a second one by hand on this site.
  */
 export function readDecisions(): DecisionRecord[] {
   const dir = join(repoRoot, DECISIONS_DIR);
