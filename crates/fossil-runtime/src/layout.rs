@@ -178,6 +178,7 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 // ──────────────────────────────────────────────────────────────────────────
 
 use duckdb::Connection;
+use duckdb::arrow::array::{Array, UInt32Array};
 use fossil_base::probe::Probe;
 
 /// One vertex type's layout target: its vertex Parquet URL plus the CSR Parquet
@@ -269,6 +270,18 @@ pub enum LayoutError {
         before: u64,
         dropped: u64,
     },
+    /// A self-edge CSR was listed with no target-ordered counterpart among the
+    /// adjacencies, so the reverse edges have nowhere to be read from in order.
+    #[error("adjacency `{target}` has no target-ordered counterpart beside it")]
+    MissingOrientation { target: String },
+    /// An adjacency the manifest declares `ordered: true` is not.
+    ///
+    /// Worth an error for the same reason as [`Self::DanglingEndpoint`]: the
+    /// layout reads the file as the CSR it claims to be, so a file out of order
+    /// does not fail — it builds a different graph, and lays the corpus out by
+    /// it. Checked while streaming, for one comparison per row.
+    #[error("adjacency `{target}` is not ordered by `{column}`, which the manifest claims it is")]
+    Disordered { target: String, column: String },
 }
 
 /// Replace the W0b placeholder `x`/`y`/`cluster_id` columns of each vertex
@@ -365,25 +378,51 @@ pub fn enrich_layout(
             continue;
         }
 
-        let mut edges: Vec<(u32, u32)> = Vec::new();
+        // The artefact is already the CSR this needs — `by_source.parquet` has
+        // zero disorders by `src_dense` over 71M rows and `by_target.parquet`
+        // zero by `dst_dense`, and both have since the writer emitted them. What
+        // used to stand here read the pairs into a `Vec<(u32, u32)>` (568 MB at
+        // ten million), counted degrees in a second pass and scattered through a
+        // cloned cursor (80 MB) doing random writes over the 568. None of the
+        // three is asked for by the algorithm; all three exist because the
+        // parameter was an unordered bag (ADR-0043 §1).
+        //
+        // Both orientations, because the layout is undirected: the file grouped
+        // by source holds each vertex's out-neighbours and the one grouped by
+        // target its in-neighbours, and a vertex's neighbourhood is the two
+        // concatenated. Neither is transformed to get there.
+        let mut sides = Vec::with_capacity(target.self_edge_csr.len() * 2);
+        let mut self_loops = vec![0.0f64; vertex_count as usize];
         for csr in &target.self_edge_csr {
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT src_dense, dst_dense FROM read_parquet('{}')",
-                    sql_lit(csr)
-                ))
-                .map_err(duck)?;
-            let rows = stmt
-                .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, u32>(1)?)))
-                .map_err(duck)?;
-            for row in rows {
-                edges.push(row.map_err(duck)?);
-            }
+            let csc =
+                csc_beside(adjacencies, csr).ok_or_else(|| LayoutError::MissingOrientation {
+                    target: csr.clone(),
+                })?;
+            sides.push(read_orientation(
+                conn,
+                csr,
+                "src_dense",
+                "dst_dense",
+                vertex_count,
+                &mut self_loops,
+            )?);
+            sides.push(read_orientation(
+                conn,
+                csc,
+                "dst_dense",
+                "src_dense",
+                vertex_count,
+                &mut self_loops,
+            )?);
         }
+        // A self-loop is a row in *both* orientations, so the reads above saw
+        // each of them twice. Halving is exact — the counts are integers.
+        for count in &mut self_loops {
+            *count /= 2.0;
+        }
+        probe.mark("read CSR + CSC");
 
-        probe.mark("read edges into Vec");
-
-        let levels = community_hierarchy(vertex_count, &edges);
+        let levels = hierarchy(Weighted::finish(sides, self_loops));
         probe.mark("community_hierarchy");
 
         // The partition that is *written* and the partition that is *drawn*
@@ -576,6 +615,89 @@ pub fn enrich_layout(
 /// Name of the temp table holding vertex type `index`'s `dense_id` mapping.
 fn map_table(index: usize) -> String {
     format!("__fossil_map_{index}")
+}
+
+/// The target-ordered file sitting beside a source-ordered one — the same edge
+/// table's other orientation, where the reverse edges are already grouped by the
+/// endpoint the layout needs them under.
+///
+/// Not a new input, and deliberately not a new field on [`VertexLayoutTarget`]:
+/// the caller already enumerates every adjacency file with the endpoint it is
+/// ordered by, because renumbering rewrites both. The two orientations of one
+/// edge table share a directory, which is what pairs them.
+fn csc_beside<'a>(adjacencies: &'a [AdjacencyTarget], csr: &str) -> Option<&'a str> {
+    fn dir(url: &str) -> &str {
+        url.rsplit_once('/').map_or("", |(d, _)| d)
+    }
+    adjacencies
+        .iter()
+        .find(|a| a.ordered_by == Endpoint::Dst && dir(&a.parquet) == dir(csr))
+        .map(|a| a.parquet.as_str())
+}
+
+/// Read one adjacency Parquet as the CSR it already is.
+///
+/// `stream_arrow` and not `query_map`: the latter materialises the whole result
+/// set, which is what the first attempt at this measured — the process peak went
+/// 17.0 → 24.4 GiB while the three parity tests stayed green (ADR-0043 §1). The
+/// item of a stream is a `RecordBatch`, so the two columns arrive as the `u32`
+/// slices the builder wants and no row is ever a Rust tuple.
+fn read_orientation(
+    conn: &Connection,
+    url: &str,
+    key: &str,
+    value: &str,
+    vertex_count: u32,
+    self_loops: &mut [f64],
+) -> Result<Csr, LayoutError> {
+    let name = url.to_string();
+    let duck = |source: duckdb::Error| LayoutError::Duck {
+        target: name.clone(),
+        source,
+    };
+    let sql = format!(
+        "SELECT {key}::UINTEGER AS k, {value}::UINTEGER AS v FROM read_parquet('{}')",
+        sql_lit(url)
+    );
+    // Reserved exactly, from the Parquet footer rather than by doubling: the
+    // targets array is the one large allocation left and growing into it would
+    // put a copy of it beside itself.
+    let edges: i64 = conn
+        .query_row(
+            &format!("SELECT count(*) FROM read_parquet('{}')", sql_lit(url)),
+            [],
+            |r| r.get(0),
+        )
+        .map_err(duck)?;
+
+    // `stream_arrow` wants the schema before the statement has run, and
+    // `Statement::schema` panics until it has. A `LIMIT 0` execution answers it
+    // for the price of the footer, which beats asserting a layout here and
+    // finding out about it inside `from_ffi`.
+    let schema = {
+        let mut header = conn.prepare(&format!("{sql} LIMIT 0")).map_err(duck)?;
+        header.query_arrow([]).map_err(duck)?.get_schema()
+    };
+
+    let mut builder = CsrBuilder::new(vertex_count as usize, edges.max(0) as usize);
+    let mut stmt = conn.prepare(&sql).map_err(duck)?;
+    for batch in stmt.stream_arrow([], schema).map_err(duck)? {
+        let cast = |i: usize| {
+            batch
+                .column(i)
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .expect("the projection casts both columns to UINTEGER")
+        };
+        let (keys, values) = (cast(0), cast(1));
+        if !builder.push(keys.values(), values.values(), self_loops) {
+            return Err(LayoutError::Disordered {
+                target: url.to_string(),
+                column: key.to_string(),
+            });
+        }
+    }
+    Ok(builder.finish())
 }
 
 /// Rank each vertex by its Morton code — its position in the renumbering.
@@ -881,9 +1003,14 @@ pub fn community_hierarchy(vertex_count: u32, edges: &[(u32, u32)]) -> Vec<Vec<u
     if vertex_count == 0 {
         return Vec::new();
     }
-    let mut levels: Vec<Vec<u32>> = Vec::new();
-    let mut graph = Weighted::from_edges(vertex_count, edges);
+    hierarchy(Weighted::from_edges(vertex_count, edges))
+}
 
+/// [`community_hierarchy`] over a graph that is already built, which is how the
+/// write path enters: it reads the two orientations the artefact stores and has
+/// no bag of pairs to hand over.
+fn hierarchy(mut graph: Weighted) -> Vec<Vec<u32>> {
+    let mut levels: Vec<Vec<u32>> = Vec::new();
     loop {
         let membership = local_moving(&graph);
         let community_count = membership.iter().copied().max().map_or(0, |m| m + 1);
@@ -1014,16 +1141,137 @@ const fn morton_decode(code: u32) -> (u32, u32) {
     (compact(code), compact(code >> 1))
 }
 
-/// An undirected weighted graph in CSR, with self-loops kept apart.
+/// What a half-edge weighs.
+///
+/// Level 0 is the graph the artefact stores and every edge there weighs one, so
+/// the array is not stored at all; only [`Weighted::contract`] sums weights and
+/// therefore has to keep them. Measured at ten million, the `f64` per half-edge
+/// was 1,136 MB — 16 of the 53 B/edge the core costs (ADR-0043 §1).
+enum Weights {
+    Unit,
+    Stored(Vec<f64>),
+}
+
+impl Weights {
+    fn at(&self, i: usize) -> f64 {
+        match self {
+            Self::Unit => 1.0,
+            Self::Stored(w) => w[i],
+        }
+    }
+
+    /// Total weight over `range`, which for [`Self::Unit`] is its length: the
+    /// sum of `k` ones is exactly `k` in `f64`, so this is the same number the
+    /// stored variant produces and not an approximation of it.
+    fn sum(&self, range: std::ops::Range<usize>) -> f64 {
+        match self {
+            Self::Unit => range.len() as f64,
+            Self::Stored(w) => w[range].iter().sum(),
+        }
+    }
+}
+
+/// One orientation of an adjacency in compressed row form: vertex `v`'s
+/// neighbours under this orientation are `targets[offsets[v]..offsets[v + 1]]`.
+struct Csr {
+    offsets: Vec<usize>,
+    targets: Vec<u32>,
+    weights: Weights,
+}
+
+impl Csr {
+    fn range(&self, v: usize) -> std::ops::Range<usize> {
+        self.offsets[v]..self.offsets[v + 1]
+    }
+
+    fn neighbours(&self, v: usize) -> impl Iterator<Item = (u32, f64)> + '_ {
+        self.range(v).map(|i| (self.targets[i], self.weights.at(i)))
+    }
+}
+
+/// Build a [`Csr`] from rows that already arrive grouped by their key.
+///
+/// A run of equal keys **is** a vertex's neighbour list, so the offsets are
+/// written as the runs close and nothing is counted twice or written out of
+/// place. That is the whole of ADR-0043 stage 1: the degree pre-pass and the
+/// cursor scatter [`Weighted::from_edges`] needs exist only because its
+/// parameter is an unordered bag, and the file on disk has never been one.
+struct CsrBuilder {
+    n: usize,
+    offsets: Vec<usize>,
+    targets: Vec<u32>,
+    /// The vertex whose run is open. Every key seen so far is `<=` it, which is
+    /// what makes a file that lies about its order detectable in one comparison.
+    open: usize,
+}
+
+impl CsrBuilder {
+    fn new(n: usize, edges: usize) -> Self {
+        let mut offsets = Vec::with_capacity(n + 1);
+        offsets.push(0);
+        Self {
+            n,
+            offsets,
+            targets: Vec::with_capacity(edges),
+            open: 0,
+        }
+    }
+
+    /// One Arrow batch, as the two columns it already is. `false` means the keys
+    /// went backwards, i.e. the file is not what it declares itself to be.
+    fn push(&mut self, keys: &[u32], values: &[u32], self_loops: &mut [f64]) -> bool {
+        for (&key, &value) in keys.iter().zip(values) {
+            let (key, value) = (key as usize, value as usize);
+            if key < self.open {
+                return false;
+            }
+            // Keys ascend, so the first one past the last vertex ends the useful
+            // part of the file. A clean writer emits none of these.
+            if key >= self.n {
+                break;
+            }
+            while self.open < key {
+                self.open += 1;
+                self.offsets.push(self.targets.len());
+            }
+            if value == key {
+                self_loops[key] += 1.0;
+            } else if value < self.n {
+                self.targets.push(value as u32);
+            }
+        }
+        true
+    }
+
+    fn finish(mut self) -> Csr {
+        while self.open < self.n {
+            self.open += 1;
+            self.offsets.push(self.targets.len());
+        }
+        Csr {
+            offsets: self.offsets,
+            targets: self.targets,
+            weights: Weights::Unit,
+        }
+    }
+}
+
+/// An undirected weighted graph, as however many oriented adjacencies it was
+/// read from, with self-loops kept apart.
+///
+/// `sides` is a list rather than one array because that is what the artefact
+/// hands over: a source-ordered file and a target-ordered file per edge table,
+/// each already grouped by the endpoint it is ordered on. Merging them into one
+/// adjacency would be a copy of the whole graph to buy nothing — a vertex's
+/// neighbourhood is the concatenation of its run in each. A contraction builds
+/// one symmetric side and so has a list of one.
 ///
 /// Self-loops are separate because aggregation creates them — a community's
 /// internal edges become one — and because they enter the degree twice while
-/// appearing once in the adjacency. Folding them into `targets` would make
-/// every later sum quietly wrong by a factor of two.
+/// appearing once in the adjacency. Folding them into `targets` would make every
+/// later sum quietly wrong by a factor of two.
 struct Weighted {
-    offsets: Vec<usize>,
-    targets: Vec<u32>,
-    weights: Vec<f64>,
+    sides: Vec<Csr>,
     /// Weight of each node's self-loop, counted **once**.
     self_loops: Vec<f64>,
     /// Sum of incident weights plus twice the self-loop — the `k_i` of the
@@ -1042,6 +1290,11 @@ impl Weighted {
     /// add their weights rather than being deduplicated: two links between the
     /// same pair really are a stronger tie, and modularity is defined over
     /// weights.
+    ///
+    /// This is what an unordered bag costs — a degree pass, a prefix sum and a
+    /// scatter through a cloned cursor — and it is kept for callers that have
+    /// one, which since ADR-0043 stage 1 means the tests and
+    /// `examples/layout_memory.rs`. The write path reads [`Csr`]s instead.
     fn from_edges(vertex_count: u32, edges: &[(u32, u32)]) -> Self {
         let n = vertex_count as usize;
         let mut degree_count = vec![0usize; n];
@@ -1060,7 +1313,6 @@ impl Weighted {
         }
         let mut cursor = offsets.clone();
         let mut targets = vec![0u32; acc];
-        let mut weights = vec![0.0f64; acc];
         let mut self_loops = vec![0.0f64; n];
         for &(a, b) in edges {
             if (a as usize) >= n || (b as usize) >= n {
@@ -1071,32 +1323,30 @@ impl Weighted {
                 continue;
             }
             targets[cursor[a as usize]] = b;
-            weights[cursor[a as usize]] = 1.0;
             cursor[a as usize] += 1;
             targets[cursor[b as usize]] = a;
-            weights[cursor[b as usize]] = 1.0;
             cursor[b as usize] += 1;
         }
-        Self::finish(offsets, targets, weights, self_loops)
+        Self::finish(
+            vec![Csr {
+                offsets,
+                targets,
+                weights: Weights::Unit,
+            }],
+            self_loops,
+        )
     }
 
-    fn finish(
-        offsets: Vec<usize>,
-        targets: Vec<u32>,
-        weights: Vec<f64>,
-        self_loops: Vec<f64>,
-    ) -> Self {
+    fn finish(sides: Vec<Csr>, self_loops: Vec<f64>) -> Self {
         let n = self_loops.len();
         let mut degrees = vec![0.0f64; n];
         for v in 0..n {
-            let incident: f64 = weights[offsets[v]..offsets[v + 1]].iter().sum();
+            let incident: f64 = sides.iter().map(|s| s.weights.sum(s.range(v))).sum();
             degrees[v] = 2.0f64.mul_add(self_loops[v], incident);
         }
         let total = degrees.iter().sum::<f64>() / 2.0;
         Self {
-            offsets,
-            targets,
-            weights,
+            sides,
             self_loops,
             degrees,
             total,
@@ -1104,7 +1354,7 @@ impl Weighted {
     }
 
     fn neighbours(&self, v: usize) -> impl Iterator<Item = (u32, f64)> + '_ {
-        (self.offsets[v]..self.offsets[v + 1]).map(|i| (self.targets[i], self.weights[i]))
+        self.sides.iter().flat_map(move |side| side.neighbours(v))
     }
 
     /// The quotient graph: one node per community, intra-community weight
@@ -1144,7 +1394,14 @@ impl Weighted {
             }
             offsets.push(targets.len());
         }
-        Self::finish(offsets, targets, weights, self_loops)
+        Self::finish(
+            vec![Csr {
+                offsets,
+                targets,
+                weights: Weights::Stored(weights),
+            }],
+            self_loops,
+        )
     }
 }
 
@@ -1369,6 +1626,85 @@ mod hierarchy_tests {
             let (x, y) = morton_decode(code);
             assert_eq!(morton2(x as u16, y as u16), code);
         }
+    }
+
+    /// One orientation of `edges` as the writer emits it — keyed, sorted, then
+    /// pushed through the very builder `read_orientation` feeds from Arrow.
+    fn side(
+        n: u32,
+        edges: &[(u32, u32)],
+        key: impl Fn(&(u32, u32)) -> (u32, u32),
+        self_loops: &mut [f64],
+    ) -> Csr {
+        let mut rows: Vec<(u32, u32)> = edges.iter().map(key).collect();
+        rows.sort_unstable();
+        let (keys, values): (Vec<u32>, Vec<u32>) = rows.into_iter().unzip();
+        let mut builder = CsrBuilder::new(n as usize, keys.len());
+        assert!(builder.push(&keys, &values, self_loops));
+        builder.finish()
+    }
+
+    /// The claim the whole of ADR-0043 stage 1 rests on: reading the two
+    /// orientations the artefact already stores builds the **same graph** as
+    /// handing the same edges over as an unordered bag. Exactly the same, not
+    /// nearly — modularity is defined over sums, every weight at level 0 is one,
+    /// and a sum of ones is exact in `f64`, so the two hierarchies are compared
+    /// whole rather than by some tolerance.
+    #[test]
+    fn the_orientations_on_disk_and_the_bag_are_one_graph() {
+        const N: u32 = 24;
+        let mut edges: Vec<(u32, u32)> = Vec::new();
+        for c in 0..4u32 {
+            let base = c * 6;
+            for a in 0..6u32 {
+                for b in (a + 1)..6 {
+                    edges.push((base + a, base + b));
+                }
+            }
+            if c > 0 {
+                edges.push((base, base - 6));
+            }
+        }
+        edges.push((7, 7)); // a self-loop, which is a row in *both* files
+
+        let mut self_loops = vec![0.0f64; N as usize];
+        let sides = vec![
+            side(N, &edges, |&(a, b)| (a, b), &mut self_loops),
+            side(N, &edges, |&(a, b)| (b, a), &mut self_loops),
+        ];
+        for count in &mut self_loops {
+            *count /= 2.0;
+        }
+
+        assert_eq!(
+            community_hierarchy(N, &edges),
+            hierarchy(Weighted::finish(sides, self_loops)),
+            "the CSR on disk and the bag in memory are the same graph",
+        );
+    }
+
+    /// A file that is not in the order it declares does not fail, it builds a
+    /// different graph — so the builder refuses it rather than believing it.
+    #[test]
+    fn a_key_that_goes_backwards_is_refused() {
+        let mut self_loops = vec![0.0f64; 4];
+        let mut builder = CsrBuilder::new(4, 3);
+        assert!(builder.push(&[0, 2], &[1, 3], &mut self_loops));
+        assert!(!builder.push(&[1], &[0], &mut self_loops));
+    }
+
+    /// Vertices with no edges are the common case at both ends of the range, and
+    /// the file says nothing about them. Their offsets still have to be written
+    /// — the ones it skips over and the tail it stops before — or one vertex's
+    /// neighbour list reads off into another's.
+    #[test]
+    fn the_builder_fills_the_vertices_the_file_never_mentions() {
+        let mut self_loops = vec![0.0f64; 5];
+        let mut builder = CsrBuilder::new(5, 2);
+        assert!(builder.push(&[1, 1], &[0, 3], &mut self_loops));
+        let csr = builder.finish();
+        assert_eq!(csr.offsets, vec![0, 0, 2, 2, 2, 2]);
+        assert_eq!(csr.targets, vec![0, 3]);
     }
 
     /// Degenerate shapes must not panic or invent levels.

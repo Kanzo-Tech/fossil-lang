@@ -132,6 +132,48 @@ lleva la medición del `Probe` en el criterio, no sólo la paridad.
 Cambio revertido; el árbol queda como estaba. Lo que sobrevive son los dos números y el nombre de la
 función que faltaba.
 
+#### Rehecha el 2026-08-05 sobre `stream_arrow`, y la predicción se cumple
+
+`Statement::stream_arrow` era, en efecto, lo que faltaba. Con él la etapa entera cabe donde el ADR
+decía que cabía, y las tres cosas que el tipo obligaba —la bolsa, el conteo de grados y la dispersión
+por el cursor— desaparecen sin sustituto.
+
+| a diez millones | antes | con el CSR |
+|---|---|---|
+| RSS al empezar `enrich_layout` | 7,05 GiB | 6,89 GiB |
+| leer las aristas | −0,43 GiB · 2,3 s | +0,29 GiB · 0,9 s |
+| `community_hierarchy` | +2,09 GiB · 135,0 s | **+0,08 GiB** · 168,0 s |
+| pico del proceso | 10,10 GiB | **8,39 GiB** |
+
+**−1,71 GiB de pico, contra los ≈ −1,7 GB predichos**, y el corpus sale idéntico byte a byte: 87
+ficheros, los 87 md5 iguales a los del binario anterior sobre el mismo CSV. Los tres tests de paridad
+pasan **sin tocarse**, que era la otra mitad del criterio.
+
+Lo que dice la fila de `community_hierarchy`: antes el paso costaba +2,09 GiB porque construía el CSR
+dentro; ahora el CSR ya existe y el paso cuesta +0,08 GiB. La memoria no se movió de sitio, dejó de
+pedirse.
+
+Tres cosas que este intento corrige del anterior, y ninguna estaba en el plan:
+
+- **No hace falta el campo `self_edge_csc`.** Añadirlo obliga a editar el literal de struct de
+  `tests/layout_renumber.rs`, que es precisamente el fichero que define la paridad. La otra
+  orientación no es una entrada nueva: el llamante ya enumera *todos* los ficheros de adyacencia con
+  el extremo por el que están ordenados, porque la renumeración reescribe ambos. Se encuentra ahí.
+- **`from_edges` no se borra.** El coste de una bolsa lo sigue pagando quien tiene una bolsa —los
+  tests y `examples/layout_memory.rs`, que existe para medir justamente eso—. Lo que cambia es que el
+  camino de escritura ya no tiene ninguna.
+- **`Weighted` guarda una lista de lados, no un CSR.** Fusionar las dos orientaciones en un array
+  sería copiar el grafo entero para no ganar nada: la vecindad de un vértice es la concatenación de
+  su tramo en cada fichero. Una contracción construye un lado simétrico y por tanto una lista de uno.
+
+**Y dos cosas que el ADR estimó mal.** El diff son **+376/−40 líneas en un fichero**, de las que 79
+son tres tests nuevos, contra las ≈ +45 previstas: la estimación contaba el código y no la prosa que
+este repositorio le exige a cada invariante. Y el reloj de `community_hierarchy` sube de 135 a 168 s
+— con la máquina cargada por otros agentes, y con el mismo binario anterior habiendo medido 151 s en
+otra pasada, así que el número no es limpio; pero recorrer dos arrays por vértice en vez de uno tiene
+un coste de localidad que es estructural y no ruido, y queda anotado como lo que hay que medir en
+seco antes de darlo por gratis.
+
 ### Etapa 2 — el núcleo puro sale del crate que posee DuckDB
 
 Lo que pedía ADR-0042 §5, ahora con la razón medida: `community_hierarchy`, `cluster_layout`,
@@ -220,7 +262,8 @@ muere. Un sort-merge join sí derrama. De ahí que el presupuesto lleve `prefer_
 
 **Diecisiete gigabytes a diez, por un 13% de reloj, y el corpus sale idéntico byte a byte** (87
 ficheros, todos los md5 iguales). Lo que queda arriba es Louvain (+2,22 GiB) y la maquetación, que es
-donde ADR-0042 predijo el coste antes de que nada de esto estuviera medido.
+donde ADR-0042 predijo el coste antes de que nada de esto estuviera medido. De ese +2,22 GiB, la
+etapa 1 se llevó luego casi todo: no era Louvain, era el CSR que Louvain construía al entrar.
 
 Sigue debiéndose el resto de la etapa: el presupuesto como entrada del `run` en vez de una variable
 de entorno, borrar el `apply_resource_limits` de DuckDB que duplica, y el test de derrame.
@@ -356,7 +399,7 @@ es cambiar un problema medido por uno mayor sin medir.
 
 | etapa | LOC neto | memoria | depende de |
 |---|---|---|---|
-| 1 · CSR desde el artefacto | **+45** | −1,7 GB | — |
+| 1 · CSR desde el artefacto ✔ | +336 *(est. +45)* | **−1,71 GiB medidos** | — |
 | 2 · núcleo puro fuera | +12 | — | — |
 | 3 · un motor + guardia | −290 | — | 2 |
 | 4 · presupuesto | +100 | acota el resto | 3 |
