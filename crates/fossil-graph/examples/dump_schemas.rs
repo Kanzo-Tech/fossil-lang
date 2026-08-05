@@ -14,7 +14,7 @@
 //! cargo run -p fossil-graph --example dump_schemas
 //! ```
 
-use fossil_graph::operations::{Operation, aggregate, discovery, graphrag, schema, sql, viewport};
+use fossil_graph::operations::{Operation, aggregate, discovery, schema, sql, viewport};
 use schemars::r#gen::SchemaGenerator;
 use serde_json::{Map, Value, json};
 
@@ -30,17 +30,13 @@ fn main() {
     generator.subschema_for::<schema::ListEdgeTypesResult>();
     generator.subschema_for::<schema::DescribeFieldResult>();
     generator.subschema_for::<schema::DescribeVertexTypeResult>();
-    generator.subschema_for::<discovery::SearchByLabelResult>();
     generator.subschema_for::<discovery::FindNeighborsResult>();
     generator.subschema_for::<discovery::FindPathResult>();
     generator.subschema_for::<discovery::GetVertexResult>();
     generator.subschema_for::<aggregate::AggregateResult>();
     generator.subschema_for::<aggregate::HistogramResult>();
     generator.subschema_for::<aggregate::TopKResult>();
-    generator.subschema_for::<graphrag::SummarizeClusterResult>();
-    generator.subschema_for::<graphrag::AnswerWithCommunitiesResult>();
     generator.subschema_for::<viewport::ViewportResult>();
-    generator.subschema_for::<viewport::SetSelectionResult>();
     generator.subschema_for::<viewport::MaterializeGraphResult>();
     generator.subschema_for::<sql::ExecuteSqlResult>();
 

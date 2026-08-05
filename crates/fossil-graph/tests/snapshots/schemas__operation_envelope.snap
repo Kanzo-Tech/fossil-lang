@@ -1,5 +1,6 @@
 ---
 source: crates/fossil-graph/tests/schemas.rs
+assertion_line: 27
 expression: schema_for! (Operation)
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
@@ -50,17 +51,6 @@ oneOf:
         type: string
         enum:
           - describe_vertex_type
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/SearchByLabelParams"
-      verb:
-        type: string
-        enum:
-          - search_by_label
   - type: object
     required:
       - params
@@ -133,44 +123,11 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/SummarizeClusterParams"
-      verb:
-        type: string
-        enum:
-          - summarize_cluster
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/AnswerWithCommunitiesParams"
-      verb:
-        type: string
-        enum:
-          - answer_with_communities
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
         $ref: "#/definitions/ViewportParams"
       verb:
         type: string
         enum:
           - viewport
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/SetSelectionParams"
-      verb:
-        type: string
-        enum:
-          - set_selection
   - type: object
     required:
       - params
@@ -227,20 +184,6 @@ definitions:
       - avg
       - min
       - max
-  AnswerWithCommunitiesParams:
-    type: object
-    required:
-      - question
-    properties:
-      max_communities:
-        description: "Cap on how many cluster summaries the LLM may pull as context. The Microsoft `GraphRAG` paper recommends 5–10; defaulting low to match."
-        default: 8
-        type: integer
-        format: uint8
-        minimum: 0
-      question:
-        type: string
-    additionalProperties: false
   BoundingBox:
     type: object
     required:
@@ -388,41 +331,6 @@ definitions:
         type: array
         items:
           type: string
-    additionalProperties: false
-  SearchByLabelParams:
-    type: object
-    required:
-      - query
-    properties:
-      query:
-        type: string
-      top_k:
-        default: 20
-        type: integer
-        format: uint32
-        minimum: 0
-      vertex_types:
-        description: Restrict the vector search to a subset of vertex types. Empty = all.
-        default: []
-        type: array
-        items:
-          type: string
-    additionalProperties: false
-  SetSelectionParams:
-    type: object
-    properties:
-      selection:
-        description: "Mosaic-Selection-compatible filter expression. `None` clears the current selection so the next viewport call returns the full bbox."
-    additionalProperties: false
-  SummarizeClusterParams:
-    type: object
-    required:
-      - cluster_id
-    properties:
-      cluster_id:
-        type: integer
-        format: uint32
-        minimum: 0
     additionalProperties: false
   TopKParams:
     type: object

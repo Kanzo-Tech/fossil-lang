@@ -31,10 +31,6 @@ export type Operation =
       verb: "describe_vertex_type";
     }
   | {
-      params: SearchByLabelParams;
-      verb: "search_by_label";
-    }
-  | {
       params: FindNeighborsParams;
       verb: "find_neighbors";
     }
@@ -59,20 +55,8 @@ export type Operation =
       verb: "top_k";
     }
   | {
-      params: SummarizeClusterParams;
-      verb: "summarize_cluster";
-    }
-  | {
-      params: AnswerWithCommunitiesParams;
-      verb: "answer_with_communities";
-    }
-  | {
       params: ViewportParams;
       verb: "viewport";
-    }
-  | {
-      params: SetSelectionParams;
-      verb: "set_selection";
     }
   | {
       params: MaterializeGraphParams;
@@ -89,8 +73,6 @@ export interface FossilGraphSchemas {
   AggregateResult?: AggregateResult;
   AggregateRow?: AggregateRow;
   Aggregation?: Aggregation;
-  AnswerWithCommunitiesParams?: AnswerWithCommunitiesParams;
-  AnswerWithCommunitiesResult?: AnswerWithCommunitiesResult;
   BoundingBox?: BoundingBox;
   ColumnDescriptor?: ColumnDescriptor;
   DescribeFieldParams?: DescribeFieldParams;
@@ -122,13 +104,6 @@ export interface FossilGraphSchemas {
   NeighborEdge?: NeighborEdge;
   NeighborVertex?: NeighborVertex;
   Operation?: Operation;
-  SearchByLabelParams?: SearchByLabelParams;
-  SearchByLabelResult?: SearchByLabelResult;
-  SearchHit?: SearchHit;
-  SetSelectionParams?: SetSelectionParams;
-  SetSelectionResult?: SetSelectionResult;
-  SummarizeClusterParams?: SummarizeClusterParams;
-  SummarizeClusterResult?: SummarizeClusterResult;
   TopKParams?: TopKParams;
   TopKResult?: TopKResult;
   VertexTypeSummary?: VertexTypeSummary;
@@ -154,20 +129,6 @@ export interface AggregateResult {
 export interface AggregateRow {
   group: unknown;
   value: number;
-}
-export interface AnswerWithCommunitiesParams {
-  /**
-   * Cap on how many cluster summaries the LLM may pull as context. The Microsoft `GraphRAG` paper recommends 5–10; defaulting low to match.
-   */
-  max_communities?: number;
-  question: string;
-}
-export interface AnswerWithCommunitiesResult {
-  answer: string;
-  /**
-   * Clusters the answer was derived from. The binding renders these as "sources" / citations.
-   */
-  cited_clusters: number[];
 }
 export interface BoundingBox {
   x_max: number;
@@ -395,22 +356,11 @@ export interface MaterializedVertex {
    */
   type_name: string;
 }
-export interface SearchByLabelParams {
-  query: string;
-  top_k?: number;
-  /**
-   * Restrict the vector search to a subset of vertex types. Empty = all.
-   */
-  vertex_types?: string[];
-}
 export interface TopKParams {
   descending?: boolean;
   k?: number;
   order_by: string;
   vertex_type: string;
-}
-export interface SummarizeClusterParams {
-  cluster_id: number;
 }
 export interface ViewportParams {
   bbox: BoundingBox;
@@ -425,52 +375,17 @@ export interface ViewportParams {
    */
   zoom: number;
 }
-export interface SetSelectionParams {
-  /**
-   * Mosaic-Selection-compatible filter expression. `None` clears the current selection so the next viewport call returns the full bbox.
-   */
-  selection?: {
-    [k: string]: unknown;
-  };
-}
-export interface SearchByLabelResult {
-  hits: SearchHit[];
-}
-export interface SearchHit {
-  iri: string;
-  label: string;
-  /**
-   * Cosine similarity in [0, 1].
-   */
-  score: number;
-  vertex_type: string;
-}
-export interface SetSelectionResult {
-  /**
-   * Echo of how many vertices the new selection would yield against the last viewport bbox. Lets the caller decide whether to repaint.
-   */
-  matching_count: number;
-}
-export interface SummarizeClusterResult {
-  /**
-   * Dominant vertex type (mode of `type_idx` inside the cluster).
-   */
-  dominant_type: string;
-  /**
-   * Writer-emitted summary text.
-   */
-  summary: string;
-  /**
-   * Cluster size for caller context.
-   */
-  vertex_count: number;
-}
 export interface TopKResult {
   /**
    * Rows as opaque JSON objects so the verb stays generic across arbitrary vertex shapes. Bindings render to their UI of choice.
    */
   rows: unknown[];
 }
+/**
+ * An edge both of whose endpoints are in the answer.
+ *
+ * Endpoints are indices into `ViewportResult::vertices`, not dense ids — an edge is only emitted when both ends survived the bbox and the limit, because one that reaches off screen has nowhere to land.
+ */
 export interface ViewportEdge {
   dst_dense: number;
   src_dense: number;
@@ -478,6 +393,11 @@ export interface ViewportEdge {
 export interface ViewportResult {
   edges: ViewportEdge[];
   mode: ViewportMode;
+  /**
+   * How many vertices **matched**, before `limit` cut them.
+   *
+   * Separate from `vertices.len()` on purpose: the difference is how a view says "there is more here than I am showing you", and without it a truncated answer looks exactly like a complete one.
+   */
   n: number;
   /**
    * Always present; in aggregate mode the entries are super-nodes (cluster centroids) with `cluster_id` populated.
@@ -490,6 +410,9 @@ export interface ViewportVertex {
    * Aggregate mode only: cluster size + `cluster_id`.
    */
   cluster_size?: number | null;
+  /**
+   * This vertex's position **in this answer** — what `ViewportEdge` refers to and what a GPU buffer is indexed by. See the module note: it is not the `GraphAr` dense id, which is ambiguous across vertex types and does not survive a `LIMIT`.
+   */
   dense_id: number;
   type_idx: number;
   x: number;

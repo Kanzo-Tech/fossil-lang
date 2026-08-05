@@ -11,7 +11,7 @@
 //! schemas via openapi-typescript at the playground/keasy `pnpm openapi`
 //! step.
 
-use fossil_graph::operations::{Operation, aggregate, discovery, graphrag, schema, sql, viewport};
+use fossil_graph::operations::{Operation, aggregate, discovery, schema, sql, viewport};
 use schemars::schema_for;
 
 macro_rules! snap {
@@ -47,8 +47,6 @@ fn schema_verbs() {
 
 #[test]
 fn discovery_verbs() {
-    snap!("search_by_label_params", discovery::SearchByLabelParams);
-    snap!("search_by_label_result", discovery::SearchByLabelResult);
     snap!("find_neighbors_params", discovery::FindNeighborsParams);
     snap!("find_neighbors_result", discovery::FindNeighborsResult);
     snap!("find_path_params", discovery::FindPathParams);
@@ -68,25 +66,9 @@ fn aggregate_verbs() {
 }
 
 #[test]
-fn graphrag_verbs() {
-    snap!("summarize_cluster_params", graphrag::SummarizeClusterParams);
-    snap!("summarize_cluster_result", graphrag::SummarizeClusterResult);
-    snap!(
-        "answer_with_communities_params",
-        graphrag::AnswerWithCommunitiesParams
-    );
-    snap!(
-        "answer_with_communities_result",
-        graphrag::AnswerWithCommunitiesResult
-    );
-}
-
-#[test]
 fn viewport_verbs() {
     snap!("viewport_params", viewport::ViewportParams);
     snap!("viewport_result", viewport::ViewportResult);
-    snap!("set_selection_params", viewport::SetSelectionParams);
-    snap!("set_selection_result", viewport::SetSelectionResult);
     snap!("materialize_graph_params", viewport::MaterializeGraphParams);
     snap!("materialize_graph_result", viewport::MaterializeGraphResult);
 }

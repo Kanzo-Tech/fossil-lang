@@ -99,14 +99,13 @@ struct Context<'a, E: DuckExecutor> {
 
 /// Dispatch one [`Operation`] against the manifest + executor.
 ///
-/// Returns the verb's `Result` as JSON. Verbs gated on writer-W3 columns
-/// (`GraphRAG`, `search_by_label`) and not-yet-wired verbs return
-/// [`GraphError::NotImplemented`].
+/// Returns the verb's `Result` as JSON. Every variant is handled: the four
+/// that had no implementation were deleted rather than stubbed, so the match
+/// is exhaustive and a new verb cannot be added without wiring it.
 ///
 /// # Errors
 ///
-/// Propagates verb execution errors; returns [`GraphError::NotImplemented`]
-/// for verbs without a W2 implementation.
+/// Propagates verb execution errors.
 pub async fn dispatch<E: DuckExecutor>(
     op: &Operation,
     manifest: &Manifest,
@@ -131,7 +130,6 @@ impl<E: DuckExecutor> Context<'_, E> {
             Operation::Viewport(p) => to_json(&self.viewport(p).await?),
             Operation::MaterializeGraph(p) => to_json(&self.materialize_graph(p).await?),
             Operation::ExecuteSql(p) => to_json(&self.execute_sql(p).await?),
-            other => Err(GraphError::NotImplemented(other.verb_name())),
         }
     }
 
@@ -1873,22 +1871,4 @@ mod tests {
         assert_eq!(r.columns.len(), 2);
     }
 
-    #[test]
-    fn unimplemented_verb_reports_its_name() {
-        let m = fixture();
-        let err = run(
-            &Operation::SearchByLabel(crate::operations::discovery::SearchByLabelParams {
-                query: "x".into(),
-                vertex_types: Vec::new(),
-                top_k: 20,
-            }),
-            &m,
-            &FakeExec,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            GraphError::NotImplemented("search_by_label")
-        ));
-    }
 }

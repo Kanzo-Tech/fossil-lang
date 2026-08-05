@@ -24,10 +24,6 @@ pub enum GraphError {
     /// stringified error so this crate stays free of any concrete DB dep.
     #[error("execution failed: {0}")]
     Execution(String),
-
-    /// Reserved for unimplemented W1 stubs. Will disappear by W2.
-    #[error("verb `{0}` is not yet implemented")]
-    NotImplemented(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, GraphError>;

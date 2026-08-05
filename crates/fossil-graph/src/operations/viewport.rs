@@ -1,4 +1,4 @@
-//! Viewport verbs — `viewport`, `set_selection`.
+//! Viewport verbs — `viewport`, `materialize_graph`.
 //!
 //! The viewport verb is the **larger-than-RAM-friendly** read path: it
 //! returns at most `limit` vertices intersecting the bbox + LOD threshold,
@@ -13,11 +13,6 @@
 //! regardless. The consumer's next move is a buffer upload, so the numbering it
 //! is handed is the position in this answer. What identifies a vertex across
 //! answers is the pair `(type_idx, dense_id)`, which the query still carries.
-//!
-//! `set_selection` is the crossfilter bridge: it accepts a Mosaic-style
-//! filter expression and stashes it in the executor so subsequent verb
-//! calls inherit the filter. The shape mirrors `@uwdata/mosaic-core::Selection`
-//! so the keasy viewer can forward its current state 1-for-1.
 
 use serde::{Deserialize, Serialize};
 
@@ -159,23 +154,4 @@ pub struct MaterializedEdge {
     /// Target vertex `subject` (dense→subject resolved).
     pub target: String,
     pub predicate: String,
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// set_selection
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetSelectionParams {
-    /// Mosaic-Selection-compatible filter expression. `None` clears the
-    /// current selection so the next viewport call returns the full bbox.
-    pub selection: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SetSelectionResult {
-    /// Echo of how many vertices the new selection would yield against the
-    /// last viewport bbox. Lets the caller decide whether to repaint.
-    pub matching_count: u32,
 }

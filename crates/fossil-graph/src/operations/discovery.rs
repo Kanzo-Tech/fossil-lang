@@ -1,8 +1,5 @@
-//! Discovery verbs — semantic + structural lookups.
+//! Discovery verbs — structural lookups.
 //!
-//! - `search_by_label` is the **semantic** entry point: vector search over
-//!   the writer-emitted `embedding` column (W3). Without W3 the binding
-//!   returns `NotImplemented`.
 //! - `find_neighbors` walks the `GraphAr` edge tables breadth-first up to
 //!   `depth`. Bounded by `limit` so a hub vertex doesn't explode the result.
 //! - `find_path` returns the shortest path (BFS over reachable edges).
@@ -28,39 +25,6 @@ pub struct GetVertexResult {
     /// The matched vertex's user-facing property columns (reserved columns
     /// filtered) as a JSON object; `null` when no vertex has that subject.
     pub vertex: Option<serde_json::Value>,
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// search_by_label
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SearchByLabelParams {
-    pub query: String,
-    /// Restrict the vector search to a subset of vertex types. Empty = all.
-    #[serde(default)]
-    pub vertex_types: Vec<String>,
-    #[serde(default = "default_top_k")]
-    pub top_k: u32,
-}
-
-const fn default_top_k() -> u32 {
-    20
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SearchByLabelResult {
-    pub hits: Vec<SearchHit>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SearchHit {
-    pub iri: String,
-    pub label: String,
-    pub vertex_type: String,
-    /// Cosine similarity in [0, 1].
-    pub score: f32,
 }
 
 // ──────────────────────────────────────────────────────────────────────────

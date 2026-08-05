@@ -1,4 +1,10 @@
-//! The 17 verbs of the fossil-graph surface.
+//! The verbs of the fossil-graph surface, on the way from seventeen to six.
+//!
+//! ADR-0042 closes the surface at `read`, `expand{into|all}`, `path`,
+//! `aggregate`, `schema` and `execute_sql`. Thirteen remain: the four that
+//! never had an implementation are gone, three of them because they were never
+//! verbs — `summarize_cluster` and `answer_with_communities` are a `read` over
+//! a level, and `set_selection` always belonged to the client.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed
@@ -10,7 +16,6 @@
 
 pub mod aggregate;
 pub mod discovery;
-pub mod graphrag;
 pub mod schema;
 pub mod sql;
 pub mod viewport;
@@ -32,7 +37,6 @@ pub enum Operation {
     DescribeVertexType(schema::DescribeVertexTypeParams),
 
     // Discovery — semantic / structural lookups.
-    SearchByLabel(discovery::SearchByLabelParams),
     FindNeighbors(discovery::FindNeighborsParams),
     FindPath(discovery::FindPathParams),
     GetVertex(discovery::GetVertexParams),
@@ -42,15 +46,10 @@ pub enum Operation {
     Histogram(aggregate::HistogramParams),
     TopK(aggregate::TopKParams),
 
-    // GraphRAG — relies on writer-emitted cluster_summary + embedding columns
-    // (writer W3). Stubs return NotImplemented until then.
-    SummarizeCluster(graphrag::SummarizeClusterParams),
-    AnswerWithCommunities(graphrag::AnswerWithCommunitiesParams),
-
     // Viewport — the larger-than-RAM-friendly visual layer (writer W3 emits
     // morton-sorted vertex Parquet so bbox + LIMIT = predicate pushdown).
+    // Both leave with ADR-0042: the camera is addressed, not queried.
     Viewport(viewport::ViewportParams),
-    SetSelection(viewport::SetSelectionParams),
     MaterializeGraph(viewport::MaterializeGraphParams),
 
     // Escape hatch — text2sql lives here. Bindings MAY hide this verb behind
@@ -69,17 +68,13 @@ impl Operation {
             Self::ListEdgeTypes(_) => "list_edge_types",
             Self::DescribeField(_) => "describe_field",
             Self::DescribeVertexType(_) => "describe_vertex_type",
-            Self::SearchByLabel(_) => "search_by_label",
             Self::FindNeighbors(_) => "find_neighbors",
             Self::FindPath(_) => "find_path",
             Self::GetVertex(_) => "get_vertex",
             Self::Aggregate(_) => "aggregate",
             Self::Histogram(_) => "histogram",
             Self::TopK(_) => "top_k",
-            Self::SummarizeCluster(_) => "summarize_cluster",
-            Self::AnswerWithCommunities(_) => "answer_with_communities",
             Self::Viewport(_) => "viewport",
-            Self::SetSelection(_) => "set_selection",
             Self::MaterializeGraph(_) => "materialize_graph",
             Self::ExecuteSql(_) => "execute_sql",
         }

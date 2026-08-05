@@ -9,8 +9,6 @@ import type {
   DescribeFieldResult,
   DescribeVertexTypeParams,
   DescribeVertexTypeResult,
-  SearchByLabelParams,
-  SearchByLabelResult,
   FindNeighborsParams,
   FindNeighborsResult,
   FindPathParams,
@@ -23,14 +21,8 @@ import type {
   HistogramResult,
   TopKParams,
   TopKResult,
-  SummarizeClusterParams,
-  SummarizeClusterResult,
-  AnswerWithCommunitiesParams,
-  AnswerWithCommunitiesResult,
   ViewportParams,
   ViewportResult,
-  SetSelectionParams,
-  SetSelectionResult,
   MaterializeGraphParams,
   MaterializeGraphResult,
   ExecuteSqlParams,
@@ -83,7 +75,6 @@ export interface GraphClient {
   describeField(params: DescribeFieldParams): Promise<DescribeFieldResult>;
   /** Batched per-type field stats + authoritative roles in one call. */
   describeVertexType(params: DescribeVertexTypeParams): Promise<DescribeVertexTypeResult>;
-  searchByLabel(params: SearchByLabelParams): Promise<SearchByLabelResult>;
   findNeighbors(params: FindNeighborsParams): Promise<FindNeighborsResult>;
   findPath(params: FindPathParams): Promise<FindPathResult>;
   /** Fetch one vertex's user-facing properties by subject IRI. */
@@ -91,12 +82,7 @@ export interface GraphClient {
   aggregate(params: AggregateParams): Promise<AggregateResult>;
   histogram(params: HistogramParams): Promise<HistogramResult>;
   topK(params: TopKParams): Promise<TopKResult>;
-  summarizeCluster(params: SummarizeClusterParams): Promise<SummarizeClusterResult>;
-  answerWithCommunities(
-    params: AnswerWithCommunitiesParams,
-  ): Promise<AnswerWithCommunitiesResult>;
   viewport(params: ViewportParams): Promise<ViewportResult>;
-  setSelection(params: SetSelectionParams): Promise<SetSelectionResult>;
   /** Canvas-ready whole-graph snapshot (vertices + dense→subject-mapped edges). */
   materializeGraph(params: MaterializeGraphParams): Promise<MaterializeGraphResult>;
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
@@ -126,17 +112,13 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
     listEdgeTypes: (params = {}) => call({ verb: 'list_edge_types', params }),
     describeField: (params) => call({ verb: 'describe_field', params }),
     describeVertexType: (params) => call({ verb: 'describe_vertex_type', params }),
-    searchByLabel: (params) => call({ verb: 'search_by_label', params }),
     findNeighbors: (params) => call({ verb: 'find_neighbors', params }),
     findPath: (params) => call({ verb: 'find_path', params }),
     getVertex: (params) => call({ verb: 'get_vertex', params }),
     aggregate: (params) => call({ verb: 'aggregate', params }),
     histogram: (params) => call({ verb: 'histogram', params }),
     topK: (params) => call({ verb: 'top_k', params }),
-    summarizeCluster: (params) => call({ verb: 'summarize_cluster', params }),
-    answerWithCommunities: (params) => call({ verb: 'answer_with_communities', params }),
     viewport: (params) => call({ verb: 'viewport', params }),
-    setSelection: (params) => call({ verb: 'set_selection', params }),
     materializeGraph: (params) => call({ verb: 'materialize_graph', params }),
     executeSql: (params) => call({ verb: 'execute_sql', params }),
     dispatch,
