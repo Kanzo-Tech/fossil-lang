@@ -1,11 +1,10 @@
 ---
 source: crates/fossil-graph/tests/schemas.rs
-assertion_line: 27
 expression: schema_for! (Operation)
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
 title: Operation
-description: "All graph operations dispatchable on the surface.\n\nThe `tag = \"verb\"` serde representation makes the wire form `{ \"verb\": \"list_vertex_types\", \"params\": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args."
+description: "All graph operations dispatchable on the surface.\n\nThe `tag = \"verb\"` serde representation makes the wire form `{ \"verb\": \"schema\", \"params\": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args."
 oneOf:
   - type: object
     required:
@@ -13,44 +12,11 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/ListVertexTypesParams"
+        $ref: "#/definitions/SchemaParams"
       verb:
         type: string
         enum:
-          - list_vertex_types
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/ListEdgeTypesParams"
-      verb:
-        type: string
-        enum:
-          - list_edge_types
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/DescribeFieldParams"
-      verb:
-        type: string
-        enum:
-          - describe_field
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/DescribeVertexTypeParams"
-      verb:
-        type: string
-        enum:
-          - describe_vertex_type
+          - schema
   - type: object
     required:
       - params
@@ -204,25 +170,6 @@ definitions:
       y_min:
         type: number
         format: float
-  DescribeFieldParams:
-    type: object
-    required:
-      - field
-      - vertex_type
-    properties:
-      field:
-        type: string
-      vertex_type:
-        type: string
-    additionalProperties: false
-  DescribeVertexTypeParams:
-    type: object
-    required:
-      - vertex_type
-    properties:
-      vertex_type:
-        type: string
-    additionalProperties: false
   ExecuteSqlParams:
     type: object
     required:
@@ -311,12 +258,6 @@ definitions:
       vertex_type:
         type: string
     additionalProperties: false
-  ListEdgeTypesParams:
-    type: object
-    additionalProperties: false
-  ListVertexTypesParams:
-    type: object
-    additionalProperties: false
   MaterializeGraphParams:
     type: object
     properties:
@@ -331,6 +272,22 @@ definitions:
         type: array
         items:
           type: string
+    additionalProperties: false
+  SchemaParams:
+    type: object
+    properties:
+      field:
+        description: "Name a field to narrow the statistics to it and pick up its samples. Ignored without `vertex_type`."
+        default: ~
+        type:
+          - string
+          - "null"
+      vertex_type:
+        description: "Name a vertex type to also get its per-field statistics. Omitted, the answer is the type lists alone and no field is queried."
+        default: ~
+        type:
+          - string
+          - "null"
     additionalProperties: false
   TopKParams:
     type: object

@@ -1,14 +1,8 @@
 import { dispatch_graph } from '../pkg/fossil_graph_wasm.js';
 import type {
   Operation,
-  ListVertexTypesParams,
-  ListVertexTypesResult,
-  ListEdgeTypesParams,
-  ListEdgeTypesResult,
-  DescribeFieldParams,
-  DescribeFieldResult,
-  DescribeVertexTypeParams,
-  DescribeVertexTypeResult,
+  SchemaParams,
+  SchemaResult,
   FindNeighborsParams,
   FindNeighborsResult,
   FindPathParams,
@@ -70,11 +64,14 @@ export interface CreateGraphClientOpts {
  * (`./generated.ts`) — single source of truth with the Rust verb structs.
  */
 export interface GraphClient {
-  listVertexTypes(params?: ListVertexTypesParams): Promise<ListVertexTypesResult>;
-  listEdgeTypes(params?: ListEdgeTypesParams): Promise<ListEdgeTypesResult>;
-  describeField(params: DescribeFieldParams): Promise<DescribeFieldResult>;
-  /** Batched per-type field stats + authoritative roles in one call. */
-  describeVertexType(params: DescribeVertexTypeParams): Promise<DescribeVertexTypeResult>;
+  /**
+   * The manifest, and per-field statistics on request. Bare: the vertex and
+   * edge types with their counts, and no field is queried. With `vertex_type`:
+   * one batched query adds that type's per-field cardinality and role. With
+   * `field` too: narrowed to that field, plus its samples — the one shape that
+   * pays for a second query.
+   */
+  schema(params?: SchemaParams): Promise<SchemaResult>;
   findNeighbors(params: FindNeighborsParams): Promise<FindNeighborsResult>;
   findPath(params: FindPathParams): Promise<FindPathResult>;
   /** Fetch one vertex's user-facing properties by subject IRI. */
@@ -108,10 +105,7 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
   const call = async <R>(op: Operation): Promise<R> => (await dispatch(op)) as R;
 
   return {
-    listVertexTypes: (params = {}) => call({ verb: 'list_vertex_types', params }),
-    listEdgeTypes: (params = {}) => call({ verb: 'list_edge_types', params }),
-    describeField: (params) => call({ verb: 'describe_field', params }),
-    describeVertexType: (params) => call({ verb: 'describe_vertex_type', params }),
+    schema: (params = {}) => call({ verb: 'schema', params }),
     findNeighbors: (params) => call({ verb: 'find_neighbors', params }),
     findPath: (params) => call({ verb: 'find_path', params }),
     getVertex: (params) => call({ verb: 'get_vertex', params }),

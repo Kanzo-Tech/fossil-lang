@@ -1,22 +1,40 @@
-//! Schema introspection verbs — `list_vertex_types`, `list_edge_types`,
-//! `describe_field`.
+//! The introspection verb — `schema`.
 //!
-//! No SQL execution required — pure manifest reads. Cheap, side-effect-free,
-//! safe for any binding to expose to any caller.
+//! One verb answers what four used to: the vertex types, the edge types, and —
+//! on request — a type's per-field statistics. **The cheap/expensive line is a
+//! parameter, not a second verb.**
+//!
+//! - Bare `schema`: the manifest plus one `count(*)` per table, which `DuckDB`
+//!   answers from the Parquet footer. No per-field query, ever.
+//! - `schema { vertex_type }`: adds ONE batched query (`count(*)` + a
+//!   `count(DISTINCT …)` per field) for that type's fields.
+//! - `schema { vertex_type, field }`: narrows to that field and adds one more
+//!   query for its samples. **Samples cost a query, so they arrive only when a
+//!   field is named** — see [`FieldStat::samples`].
 
 use serde::{Deserialize, Serialize};
 
-// ──────────────────────────────────────────────────────────────────────────
-// list_vertex_types
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ListVertexTypesParams {}
+pub struct SchemaParams {
+    /// Name a vertex type to also get its per-field statistics. Omitted, the
+    /// answer is the type lists alone and no field is queried.
+    #[serde(default)]
+    pub vertex_type: Option<String>,
+    /// Name a field to narrow the statistics to it and pick up its samples.
+    /// Ignored without `vertex_type`.
+    #[serde(default)]
+    pub field: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ListVertexTypesResult {
-    pub types: Vec<VertexTypeSummary>,
+pub struct SchemaResult {
+    pub vertices: Vec<VertexTypeSummary>,
+    pub edges: Vec<EdgeTypeSummary>,
+    /// Per-field statistics for the named `vertex_type`, narrowed to `field`
+    /// when one was named. **Empty when no `vertex_type` was named** — that is
+    /// the whole of the cheap/expensive distinction.
+    pub fields: Vec<FieldStat>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -27,21 +45,8 @@ pub struct VertexTypeSummary {
     pub iri: String,
     /// Vertex count from the manifest.
     pub count: u64,
-    /// Field names for downstream calls to `describe_field`.
+    /// Field names — what a follow-up `schema { vertex_type, field }` may name.
     pub fields: Vec<String>,
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// list_edge_types
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ListEdgeTypesParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ListEdgeTypesResult {
-    pub edges: Vec<EdgeTypeSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -56,59 +61,6 @@ pub struct EdgeTypeSummary {
     pub table_name: String,
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// describe_field
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DescribeFieldParams {
-    pub vertex_type: String,
-    pub field: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DescribeFieldResult {
-    pub datatype: String,
-    /// Distinct value count when known from manifest stats.
-    pub distinct: Option<u64>,
-    /// Up to 8 sample values surfaced by the writer.
-    pub samples: Vec<String>,
-    /// Inferred role for chart-axis defaults: `identifier`, `dimension`,
-    /// `measure`. Mirrors keasy `lib/graph-schema.ts::inferRole` — promoted
-    /// here to be authoritative.
-    pub role: FieldRole,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum FieldRole {
-    Identifier,
-    Dimension,
-    Measure,
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// describe_vertex_type — batched per-type field stats + roles (one SQL query).
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct DescribeVertexTypeParams {
-    pub vertex_type: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DescribeVertexTypeResult {
-    /// Total row count of the vertex table (`COUNT(*)`), the denominator role
-    /// inference uses for the cardinality test.
-    pub count: u64,
-    /// Every user-facing field (reserved columns filtered), in manifest order,
-    /// with authoritative role + cardinality. One batched query computes all of
-    /// it — the single source for what keasy used to derive client-side.
-    pub fields: Vec<FieldStat>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FieldStat {
     pub name: String,
@@ -118,4 +70,18 @@ pub struct FieldStat {
     pub distinct: u64,
     /// Authoritative chart-axis role.
     pub role: FieldRole,
+    /// Up to 8 non-null values. **Populated only when the call named this
+    /// field**: they are a second query, and a bare per-type call would pay it
+    /// once per column.
+    pub samples: Vec<String>,
+}
+
+/// Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts::
+/// inferRole` — promoted here to be authoritative.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldRole {
+    Identifier,
+    Dimension,
+    Measure,
 }

@@ -13,10 +13,7 @@ use fossil_graph::operations::aggregate::{
 use fossil_graph::operations::discovery::{
     FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult,
 };
-use fossil_graph::operations::schema::{
-    DescribeFieldParams, DescribeFieldResult, FieldRole, ListVertexTypesParams,
-    ListVertexTypesResult,
-};
+use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, Result, dispatch};
 use fossil_runtime::DuckRuntime;
 use fossil_sinks::manifest::{
@@ -139,36 +136,38 @@ fn run<T: serde::de::DeserializeOwned>(conn: &Connection, m: &Manifest, op: &Ope
 }
 
 #[test]
-fn list_vertex_types_counts_and_fields() {
+fn bare_schema_counts_both_halves_and_leaves_fields_alone() {
     let (conn, m) = (connection(), manifest());
-    let r: ListVertexTypesResult = run(
-        &conn,
-        &m,
-        &Operation::ListVertexTypes(ListVertexTypesParams {}),
-    );
-    assert_eq!(r.types.len(), 1);
-    let t = &r.types[0];
+    let r: SchemaResult = run(&conn, &m, &Operation::Schema(SchemaParams::default()));
+    assert_eq!(r.vertices.len(), 1);
+    let t = &r.vertices[0];
     assert_eq!(t.name, "Person");
     assert_eq!(t.iri, "http://example.org/Person");
     assert_eq!(t.count, 3);
     assert_eq!(t.fields, vec!["age", "name"]); // reserved cols hidden
+    assert_eq!(r.edges.len(), 1);
+    assert_eq!(r.edges[0].table_name, "Person_knows_Person");
+    assert_eq!(r.edges[0].count, 2);
+    assert!(r.fields.is_empty(), "no type named → no field statistics");
 }
 
 #[test]
-fn describe_field_age_is_a_measure() {
+fn schema_for_a_field_is_a_measure_with_samples() {
     let (conn, m) = (connection(), manifest());
-    let r: DescribeFieldResult = run(
+    let r: SchemaResult = run(
         &conn,
         &m,
-        &Operation::DescribeField(DescribeFieldParams {
-            vertex_type: "Person".into(),
-            field: "age".into(),
+        &Operation::Schema(SchemaParams {
+            vertex_type: Some("Person".into()),
+            field: Some("age".into()),
         }),
     );
-    assert_eq!(r.datatype, "int64");
-    assert_eq!(r.role, FieldRole::Measure);
-    assert_eq!(r.distinct, Some(3));
-    assert_eq!(r.samples.len(), 3);
+    assert_eq!(r.fields.len(), 1);
+    let age = &r.fields[0];
+    assert_eq!(age.datatype, "int64");
+    assert_eq!(age.role, FieldRole::Measure);
+    assert_eq!(age.distinct, 3);
+    assert_eq!(age.samples.len(), 3);
 }
 
 #[test]

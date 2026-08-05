@@ -1,10 +1,12 @@
 //! The verbs of the fossil-graph surface, on the way from seventeen to six.
 //!
 //! ADR-0042 closes the surface at `read`, `expand{into|all}`, `path`,
-//! `aggregate`, `schema` and `execute_sql`. Thirteen remain: the four that
-//! never had an implementation are gone, three of them because they were never
-//! verbs — `summarize_cluster` and `answer_with_communities` are a `read` over
-//! a level, and `set_selection` always belonged to the client.
+//! `aggregate`, `schema` and `execute_sql`. **Ten remain.** The four that never
+//! had an implementation are gone, three of them because they were never verbs
+//! — `summarize_cluster` and `answer_with_communities` are a `read` over a
+//! level, and `set_selection` always belonged to the client. The four
+//! introspection verbs are gone too: `schema` answers all of them, and what
+//! used to separate the cheap ones from the expensive one is now a parameter.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed
@@ -25,16 +27,13 @@ use serde::{Deserialize, Serialize};
 /// All graph operations dispatchable on the surface.
 ///
 /// The `tag = "verb"` serde representation makes the wire form
-/// `{ "verb": "list_vertex_types", "params": { … } }` — identical for MCP
-/// tool calls, HTTP POST bodies, and CLI subcommand args.
+/// `{ "verb": "schema", "params": { … } }` — identical for MCP tool calls,
+/// HTTP POST bodies, and CLI subcommand args.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "verb", content = "params", rename_all = "snake_case")]
 pub enum Operation {
-    // Schema introspection — no SQL, just manifest reads.
-    ListVertexTypes(schema::ListVertexTypesParams),
-    ListEdgeTypes(schema::ListEdgeTypesParams),
-    DescribeField(schema::DescribeFieldParams),
-    DescribeVertexType(schema::DescribeVertexTypeParams),
+    // Introspection — the manifest, and per-field statistics on request.
+    Schema(schema::SchemaParams),
 
     // Discovery — semantic / structural lookups.
     FindNeighbors(discovery::FindNeighborsParams),
@@ -64,10 +63,7 @@ impl Operation {
     #[must_use]
     pub const fn verb_name(&self) -> &'static str {
         match self {
-            Self::ListVertexTypes(_) => "list_vertex_types",
-            Self::ListEdgeTypes(_) => "list_edge_types",
-            Self::DescribeField(_) => "describe_field",
-            Self::DescribeVertexType(_) => "describe_vertex_type",
+            Self::Schema(_) => "schema",
             Self::FindNeighbors(_) => "find_neighbors",
             Self::FindPath(_) => "find_path",
             Self::GetVertex(_) => "get_vertex",

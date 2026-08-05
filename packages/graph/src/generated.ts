@@ -6,29 +6,20 @@
  */
 
 export type Aggregation = "count" | "sum" | "avg" | "min" | "max";
+/**
+ * Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts:: inferRole` — promoted here to be authoritative.
+ */
 export type FieldRole = "identifier" | "dimension" | "measure";
 export type HistogramKind = "numeric" | "temporal" | "categorical";
 /**
  * All graph operations dispatchable on the surface.
  *
- * The `tag = "verb"` serde representation makes the wire form `{ "verb": "list_vertex_types", "params": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args.
+ * The `tag = "verb"` serde representation makes the wire form `{ "verb": "schema", "params": { … } }` — identical for MCP tool calls, HTTP POST bodies, and CLI subcommand args.
  */
 export type Operation =
   | {
-      params: ListVertexTypesParams;
-      verb: "list_vertex_types";
-    }
-  | {
-      params: ListEdgeTypesParams;
-      verb: "list_edge_types";
-    }
-  | {
-      params: DescribeFieldParams;
-      verb: "describe_field";
-    }
-  | {
-      params: DescribeVertexTypeParams;
-      verb: "describe_vertex_type";
+      params: SchemaParams;
+      verb: "schema";
     }
   | {
       params: FindNeighborsParams;
@@ -75,10 +66,6 @@ export interface FossilGraphSchemas {
   Aggregation?: Aggregation;
   BoundingBox?: BoundingBox;
   ColumnDescriptor?: ColumnDescriptor;
-  DescribeFieldParams?: DescribeFieldParams;
-  DescribeFieldResult?: DescribeFieldResult;
-  DescribeVertexTypeParams?: DescribeVertexTypeParams;
-  DescribeVertexTypeResult?: DescribeVertexTypeResult;
   EdgeTypeSummary?: EdgeTypeSummary;
   ExecuteSqlParams?: ExecuteSqlParams;
   ExecuteSqlResult?: ExecuteSqlResult;
@@ -93,10 +80,6 @@ export interface FossilGraphSchemas {
   HistogramKind?: HistogramKind;
   HistogramParams?: HistogramParams;
   HistogramResult?: HistogramResult;
-  ListEdgeTypesParams?: ListEdgeTypesParams;
-  ListEdgeTypesResult?: ListEdgeTypesResult;
-  ListVertexTypesParams?: ListVertexTypesParams;
-  ListVertexTypesResult?: ListVertexTypesResult;
   MaterializeGraphParams?: MaterializeGraphParams;
   MaterializeGraphResult?: MaterializeGraphResult;
   MaterializedEdge?: MaterializedEdge;
@@ -104,6 +87,8 @@ export interface FossilGraphSchemas {
   NeighborEdge?: NeighborEdge;
   NeighborVertex?: NeighborVertex;
   Operation?: Operation;
+  SchemaParams?: SchemaParams;
+  SchemaResult?: SchemaResult;
   TopKParams?: TopKParams;
   TopKResult?: TopKResult;
   VertexTypeSummary?: VertexTypeSummary;
@@ -140,53 +125,6 @@ export interface ColumnDescriptor {
   duckdb_type: string;
   name: string;
 }
-export interface DescribeFieldParams {
-  field: string;
-  vertex_type: string;
-}
-export interface DescribeFieldResult {
-  datatype: string;
-  /**
-   * Distinct value count when known from manifest stats.
-   */
-  distinct?: number | null;
-  /**
-   * Inferred role for chart-axis defaults: `identifier`, `dimension`, `measure`. Mirrors keasy `lib/graph-schema.ts::inferRole` — promoted here to be authoritative.
-   */
-  role: "identifier" | "dimension" | "measure";
-  /**
-   * Up to 8 sample values surfaced by the writer.
-   */
-  samples: string[];
-}
-export interface DescribeVertexTypeParams {
-  vertex_type: string;
-}
-export interface DescribeVertexTypeResult {
-  /**
-   * Total row count of the vertex table (`COUNT(*)`), the denominator role inference uses for the cardinality test.
-   */
-  count: number;
-  /**
-   * Every user-facing field (reserved columns filtered), in manifest order, with authoritative role + cardinality. One batched query computes all of it — the single source for what keasy used to derive client-side.
-   */
-  fields: FieldStat[];
-}
-export interface FieldStat {
-  /**
-   * `GraphAr` data-type spelling (`string`, `int64`, `double`, …).
-   */
-  datatype: string;
-  /**
-   * Distinct value count (`COUNT(DISTINCT field)`).
-   */
-  distinct: number;
-  name: string;
-  /**
-   * Authoritative chart-axis role.
-   */
-  role: "identifier" | "dimension" | "measure";
-}
 export interface EdgeTypeSummary {
   count: number;
   iri: string;
@@ -216,6 +154,25 @@ export interface ExecuteSqlResult {
    * True when the result was truncated by `row_cap`.
    */
   truncated: boolean;
+}
+export interface FieldStat {
+  /**
+   * `GraphAr` data-type spelling (`string`, `int64`, `double`, …).
+   */
+  datatype: string;
+  /**
+   * Distinct value count (`COUNT(DISTINCT field)`).
+   */
+  distinct: number;
+  name: string;
+  /**
+   * Authoritative chart-axis role.
+   */
+  role: "identifier" | "dimension" | "measure";
+  /**
+   * Up to 8 non-null values. **Populated only when the call named this field**: they are a second query, and a bare per-type call would pay it once per column.
+   */
+  samples: string[];
 }
 export interface FindNeighborsParams {
   depth?: number;
@@ -290,32 +247,6 @@ export interface HistogramResult {
    */
   field_kind: "numeric" | "temporal" | "categorical";
 }
-export interface ListEdgeTypesParams {}
-export interface ListEdgeTypesResult {
-  edges: EdgeTypeSummary[];
-}
-export interface ListVertexTypesParams {}
-export interface ListVertexTypesResult {
-  types: VertexTypeSummary[];
-}
-export interface VertexTypeSummary {
-  /**
-   * Vertex count from the manifest.
-   */
-  count: number;
-  /**
-   * Field names for downstream calls to `describe_field`.
-   */
-  fields: string[];
-  /**
-   * Full RDF type IRI.
-   */
-  iri: string;
-  /**
-   * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
-   */
-  name: string;
-}
 export interface MaterializeGraphParams {
   limit?: number;
   /**
@@ -356,6 +287,16 @@ export interface MaterializedVertex {
    */
   type_name: string;
 }
+export interface SchemaParams {
+  /**
+   * Name a field to narrow the statistics to it and pick up its samples. Ignored without `vertex_type`.
+   */
+  field?: string | null;
+  /**
+   * Name a vertex type to also get its per-field statistics. Omitted, the answer is the type lists alone and no field is queried.
+   */
+  vertex_type?: string | null;
+}
 export interface TopKParams {
   descending?: boolean;
   k?: number;
@@ -374,6 +315,32 @@ export interface ViewportParams {
    * Current zoom level. Above [`Self::lod_threshold`] the executor swaps to aggregate mode (`GROUP BY cluster_id`) returning ≤ 10k super-nodes regardless of total N.
    */
   zoom: number;
+}
+export interface SchemaResult {
+  edges: EdgeTypeSummary[];
+  /**
+   * Per-field statistics for the named `vertex_type`, narrowed to `field` when one was named. **Empty when no `vertex_type` was named** — that is the whole of the cheap/expensive distinction.
+   */
+  fields: FieldStat[];
+  vertices: VertexTypeSummary[];
+}
+export interface VertexTypeSummary {
+  /**
+   * Vertex count from the manifest.
+   */
+  count: number;
+  /**
+   * Field names — what a follow-up `schema { vertex_type, field }` may name.
+   */
+  fields: string[];
+  /**
+   * Full RDF type IRI.
+   */
+  iri: string;
+  /**
+   * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
+   */
+  name: string;
 }
 export interface TopKResult {
   /**

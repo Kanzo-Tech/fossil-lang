@@ -34,27 +34,30 @@ beforeAll(async () => {
 });
 
 describe('createGraphClient over fossil-graph-wasm', () => {
-  it('list_vertex_types: reads the manifest + issues count(*) via the query callback', async () => {
+  it('schema: reads the manifest + issues count(*) via the query callback', async () => {
     const graph = createGraphClient({ query: fakeQuery, manifestFiles });
 
-    const { types } = await graph.listVertexTypes();
+    const { vertices, fields } = await graph.schema();
 
-    expect(types).toHaveLength(1);
-    const person = types[0]!;
+    expect(vertices).toHaveLength(1);
+    const person = vertices[0]!;
     expect(person.name).toBe('Person');
     expect(person.iri).toBe('http://example.org/Person');
     expect(person.count).toBe(3);
     // dense_id is a reserved writer column → hidden; user fields surfaced.
     expect(person.fields).toEqual(['age', 'name']);
 
+    // Naming no type costs no per-field query — the point of the collapse.
+    expect(fields).toHaveLength(0);
+
     // The count(*) round-tripped through the JS callback into WASM and back.
     expect(fakeQuery).toHaveBeenCalledWith(expect.stringContaining('count(*)'));
   });
 
-  it('list_edge_types: derives the GraphAr table name + carries the predicate IRI', async () => {
+  it('schema: derives the GraphAr edge table name + carries the predicate IRI', async () => {
     const graph = createGraphClient({ query: fakeQuery, manifestFiles });
 
-    const { edges } = await graph.listEdgeTypes();
+    const { edges } = await graph.schema();
 
     expect(edges).toHaveLength(1);
     const knows = edges[0]!;
@@ -69,7 +72,7 @@ describe('createGraphClient over fossil-graph-wasm', () => {
     const graph = createGraphClient({ query: fakeQuery, manifestFiles });
 
     await expect(
-      graph.describeField({ vertex_type: 'Nope', field: 'ghost' }),
+      graph.schema({ vertex_type: 'Nope', field: 'ghost' }),
     ).rejects.toThrow();
   });
 });

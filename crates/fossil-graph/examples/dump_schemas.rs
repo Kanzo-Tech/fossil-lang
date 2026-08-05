@@ -26,10 +26,7 @@ fn main() {
     // exhaustive and self-documenting.
     generator.subschema_for::<Operation>();
 
-    generator.subschema_for::<schema::ListVertexTypesResult>();
-    generator.subschema_for::<schema::ListEdgeTypesResult>();
-    generator.subschema_for::<schema::DescribeFieldResult>();
-    generator.subschema_for::<schema::DescribeVertexTypeResult>();
+    generator.subschema_for::<schema::SchemaResult>();
     generator.subschema_for::<discovery::FindNeighborsResult>();
     generator.subschema_for::<discovery::FindPathResult>();
     generator.subschema_for::<discovery::GetVertexResult>();

@@ -1,0 +1,21 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (schema::SchemaParams)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: SchemaParams
+type: object
+properties:
+  field:
+    description: "Name a field to narrow the statistics to it and pick up its samples. Ignored without `vertex_type`."
+    default: ~
+    type:
+      - string
+      - "null"
+  vertex_type:
+    description: "Name a vertex type to also get its per-field statistics. Omitted, the answer is the type lists alone and no field is queried."
+    default: ~
+    type:
+      - string
+      - "null"
+additionalProperties: false

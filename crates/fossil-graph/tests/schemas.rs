@@ -28,21 +28,9 @@ fn dispatch_envelope() {
 }
 
 #[test]
-fn schema_verbs() {
-    snap!("list_vertex_types_params", schema::ListVertexTypesParams);
-    snap!("list_vertex_types_result", schema::ListVertexTypesResult);
-    snap!("list_edge_types_params", schema::ListEdgeTypesParams);
-    snap!("list_edge_types_result", schema::ListEdgeTypesResult);
-    snap!("describe_field_params", schema::DescribeFieldParams);
-    snap!("describe_field_result", schema::DescribeFieldResult);
-    snap!(
-        "describe_vertex_type_params",
-        schema::DescribeVertexTypeParams
-    );
-    snap!(
-        "describe_vertex_type_result",
-        schema::DescribeVertexTypeResult
-    );
+fn schema_verb() {
+    snap!("schema_params", schema::SchemaParams);
+    snap!("schema_result", schema::SchemaResult);
 }
 
 #[test]
@@ -82,12 +70,12 @@ fn sql_verb() {
 #[test]
 fn operation_round_trip() {
     // Sanity: the wire envelope round-trips through JSON.
-    let op = Operation::ListVertexTypes(schema::ListVertexTypesParams {});
+    let op = Operation::Schema(schema::SchemaParams::default());
     let json = serde_json::to_string(&op).expect("serialize");
     assert!(
-        json.contains(r#""verb":"list_vertex_types""#),
+        json.contains(r#""verb":"schema""#),
         "envelope tag should match snake_case verb name, got: {json}",
     );
     let back: Operation = serde_json::from_str(&json).expect("deserialize");
-    assert_eq!(back.verb_name(), "list_vertex_types");
+    assert_eq!(back.verb_name(), "schema");
 }

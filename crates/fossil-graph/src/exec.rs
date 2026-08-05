@@ -35,9 +35,7 @@ use crate::operations::viewport::{
     ViewportEdge, ViewportMode, ViewportParams, ViewportResult, ViewportVertex,
 };
 use crate::operations::schema::{
-    DescribeFieldParams, DescribeFieldResult, DescribeVertexTypeParams, DescribeVertexTypeResult,
-    EdgeTypeSummary, FieldRole, FieldStat, ListEdgeTypesResult, ListVertexTypesResult,
-    VertexTypeSummary,
+    EdgeTypeSummary, FieldRole, FieldStat, SchemaParams, SchemaResult, VertexTypeSummary,
 };
 use crate::manifest::RESERVED_VERTEX_COLUMNS;
 use crate::{GraphError, Operation, Result};
@@ -117,10 +115,7 @@ pub async fn dispatch<E: DuckExecutor>(
 impl<E: DuckExecutor> Context<'_, E> {
     async fn dispatch(&self, op: &Operation) -> Result<Value> {
         match op {
-            Operation::ListVertexTypes(_) => to_json(&self.list_vertex_types().await?),
-            Operation::ListEdgeTypes(_) => to_json(&self.list_edge_types().await?),
-            Operation::DescribeField(p) => to_json(&self.describe_field(p).await?),
-            Operation::DescribeVertexType(p) => to_json(&self.describe_vertex_type(p).await?),
+            Operation::Schema(p) => to_json(&self.schema(p).await?),
             Operation::Aggregate(p) => to_json(&self.aggregate(p).await?),
             Operation::Histogram(p) => to_json(&self.histogram(p).await?),
             Operation::TopK(p) => to_json(&self.top_k(p).await?),
@@ -133,22 +128,32 @@ impl<E: DuckExecutor> Context<'_, E> {
         }
     }
 
-    // ── Schema verbs ──────────────────────────────────────────────────────
+    // ── Schema verb ───────────────────────────────────────────────────────
 
-    async fn list_vertex_types(&self) -> Result<ListVertexTypesResult> {
-        let mut types = Vec::with_capacity(self.manifest.vertices().len());
+    /// The manifest, and — only if asked — what the data says about a type's
+    /// fields.
+    ///
+    /// The three calls this verb replaced differed in what they cost, not in
+    /// what they were: two listings that read the manifest, and one that ran a
+    /// query per field. **That difference is now a parameter.** A bare call
+    /// touches no field; naming a type costs one batched query; naming a field
+    /// costs one more, for its samples.
+    async fn schema(&self, p: &SchemaParams) -> Result<SchemaResult> {
+        // Fail on an unknown type before spending the listing queries.
+        if let Some(vertex_type) = p.vertex_type.as_deref() {
+            self.manifest.lookup_vertex(vertex_type)?;
+        }
+
+        let mut vertices = Vec::with_capacity(self.manifest.vertices().len());
         for info in self.manifest.vertices() {
-            types.push(VertexTypeSummary {
+            vertices.push(VertexTypeSummary {
                 name: info.vertex_type.clone(),
                 iri: info.iri.clone(),
                 count: self.count_rows(&info.vertex_type).await?,
                 fields: self.manifest.vertex_fields(&info.vertex_type)?,
             });
         }
-        Ok(ListVertexTypesResult { types })
-    }
 
-    async fn list_edge_types(&self) -> Result<ListEdgeTypesResult> {
         let mut edges = Vec::with_capacity(self.manifest.edges().len());
         for info in self.manifest.edges() {
             let table_name = edge_table_name(info);
@@ -162,61 +167,32 @@ impl<E: DuckExecutor> Context<'_, E> {
                 table_name,
             });
         }
-        Ok(ListEdgeTypesResult { edges })
-    }
 
-    async fn describe_field(&self, p: &DescribeFieldParams) -> Result<DescribeFieldResult> {
-        let datatype = self.field_datatype(&p.vertex_type, &p.field)?;
+        let fields = match p.vertex_type.as_deref() {
+            None => Vec::new(),
+            Some(vertex_type) => self.field_stats(vertex_type, p.field.as_deref()).await?,
+        };
 
-        let table = quote_ident(&p.vertex_type);
-        let field = quote_ident(&p.field);
-
-        let distinct = scalar_u64(
-            &self
-                .exec
-                .query_json(&format!(
-                    "SELECT count(DISTINCT {field}) AS distinct_count FROM {table}"
-                ))
-                .await?,
-            "distinct_count",
-        );
-
-        let sample_rows = self
-            .exec
-            .query_json(&format!(
-                "SELECT {field} AS sample FROM {table} WHERE {field} IS NOT NULL LIMIT 8"
-            ))
-            .await?;
-        let samples = sample_rows
-            .iter()
-            .filter_map(|row| row.get("sample"))
-            .map(value_to_string)
-            .collect();
-
-        // count(*) is O(1) from the Parquet footer — cheap, and the denominator
-        // the cardinality arm of role inference needs.
-        let count = self.count_rows(&p.vertex_type).await?;
-
-        Ok(DescribeFieldResult {
-            role: infer_role(&p.field, &datatype, distinct, Some(count)),
-            datatype,
-            distinct,
-            samples,
+        Ok(SchemaResult {
+            vertices,
+            edges,
+            fields,
         })
     }
 
-    /// Batched per-type field stats + authoritative roles in ONE query
+    /// Per-field cardinality + role for one vertex type in ONE query
     /// (`COUNT(*)` + a `COUNT(DISTINCT)` per field) — the single source for what
     /// keasy used to compute client-side (`computeColumnStats` + `inferRole`).
-    async fn describe_vertex_type(
-        &self,
-        p: &DescribeVertexTypeParams,
-    ) -> Result<DescribeVertexTypeResult> {
+    ///
+    /// `field` narrows the answer to that one column and is what earns the
+    /// extra samples query: it is the only shape where sampling costs one query
+    /// rather than one per column.
+    async fn field_stats(&self, vertex_type: &str, field: Option<&str>) -> Result<Vec<FieldStat>> {
         // User fields in manifest order, reserved (writer) columns filtered —
-        // same source as `list_vertex_types`' field list.
-        let fields: Vec<(String, String)> = self
+        // same source as the summary's field list.
+        let mut fields: Vec<(String, String)> = self
             .manifest
-            .lookup_vertex(&p.vertex_type)?
+            .lookup_vertex(vertex_type)?
             .property_groups
             .iter()
             .flat_map(|g| g.properties.iter())
@@ -224,32 +200,36 @@ impl<E: DuckExecutor> Context<'_, E> {
             .map(|prop| (prop.name.clone(), prop.data_type.clone()))
             .collect();
 
-        let table = quote_ident(&p.vertex_type);
+        if let Some(name) = field {
+            fields.retain(|(candidate, _)| candidate == name);
+            if fields.is_empty() {
+                return Err(GraphError::UnknownEntity {
+                    kind: "field",
+                    name: name.to_string(),
+                });
+            }
+        }
         if fields.is_empty() {
-            return Ok(DescribeVertexTypeResult {
-                count: self.count_rows(&p.vertex_type).await?,
-                fields: Vec::new(),
-            });
+            return Ok(Vec::new());
         }
 
-        // ONE query: COUNT(*) AS n, COUNT(DISTINCT fieldI) AS dI — keasy parity.
         let mut selects = String::from("count(*) AS n");
         for (i, (name, _)) in fields.iter().enumerate() {
             let _ = write!(selects, ", count(DISTINCT {}) AS d{i}", quote_ident(name));
         }
         let rows = self
             .exec
-            .query_json(&format!("SELECT {selects} FROM {table}"))
+            .query_json(&format!(
+                "SELECT {selects} FROM {}",
+                quote_ident(vertex_type)
+            ))
             .await?;
         let row = rows.first().ok_or_else(|| {
-            GraphError::Execution(format!(
-                "describe_vertex_type on `{}` returned no row",
-                p.vertex_type
-            ))
+            GraphError::Execution(format!("schema stats on `{vertex_type}` returned no row"))
         })?;
         let count = row.get("n").and_then(Value::as_u64).unwrap_or(0);
 
-        let out = fields
+        let mut out: Vec<FieldStat> = fields
             .iter()
             .enumerate()
             .map(|(i, (name, datatype))| {
@@ -262,11 +242,35 @@ impl<E: DuckExecutor> Context<'_, E> {
                     name: name.clone(),
                     datatype: datatype.clone(),
                     distinct,
+                    samples: Vec::new(),
                 }
             })
             .collect();
 
-        Ok(DescribeVertexTypeResult { count, fields: out })
+        // One field named, so one extra query — the whole reason samples are not
+        // part of a per-type answer.
+        if let (Some(name), Some(stat)) = (field, out.first_mut()) {
+            stat.samples = self.field_samples(vertex_type, name).await?;
+        }
+        Ok(out)
+    }
+
+    /// Up to 8 non-null values of one column, for a caller deciding what a
+    /// field holds.
+    async fn field_samples(&self, vertex_type: &str, field: &str) -> Result<Vec<String>> {
+        let rows = self
+            .exec
+            .query_json(&format!(
+                "SELECT {field} AS sample FROM {table} WHERE {field} IS NOT NULL LIMIT 8",
+                field = quote_ident(field),
+                table = quote_ident(vertex_type),
+            ))
+            .await?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| row.get("sample"))
+            .map(value_to_string)
+            .collect())
     }
 
     // ── Aggregation verbs ─────────────────────────────────────────────────
@@ -1316,18 +1320,19 @@ mod tests {
     struct FakeExec;
     impl DuckExecutor for FakeExec {
         async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
-            let row = if sql.contains("count(*)") {
-                serde_json::json!({ "n": 3 })
-            } else if sql.contains("count(DISTINCT") {
-                serde_json::json!({ "distinct_count": 2 })
-            } else {
-                // samples query
-                return Ok(vec![
-                    serde_json::json!({ "sample": "30" }),
-                    serde_json::json!({ "sample": "41" }),
-                ]);
-            };
-            Ok(vec![row])
+            // The batched stats query carries both spellings, so it is matched
+            // first: `count(*) AS n, count(DISTINCT …) AS d0, …`.
+            if sql.contains("count(DISTINCT") {
+                return Ok(vec![serde_json::json!({ "n": 3, "d0": 3, "d1": 2 })]);
+            }
+            if sql.contains("count(*)") {
+                return Ok(vec![serde_json::json!({ "n": 3 })]);
+            }
+            // samples query
+            Ok(vec![
+                serde_json::json!({ "sample": "30" }),
+                serde_json::json!({ "sample": "41" }),
+            ])
         }
     }
 
@@ -1467,59 +1472,100 @@ mod tests {
         assert_eq!(r.edges, vec![0.0, 1.0]);
     }
 
+    /// A [`SchemaParams`] naming nothing, one type, or one type + one field.
+    fn schema_params(vertex_type: Option<&str>, field: Option<&str>) -> SchemaParams {
+        SchemaParams {
+            vertex_type: vertex_type.map(ToString::to_string),
+            field: field.map(ToString::to_string),
+        }
+    }
+
     #[test]
-    fn list_vertex_types_carries_iri_count_and_user_fields() {
+    fn bare_schema_lists_both_halves_and_queries_no_field() {
         let m = fixture();
-        let v = run(
-            &Operation::ListVertexTypes(crate::operations::schema::ListVertexTypesParams {}),
-            &m,
-            &FakeExec,
-        )
-        .unwrap();
-        let r: ListVertexTypesResult = serde_json::from_value(v).unwrap();
-        assert_eq!(r.types.len(), 1);
-        let p = &r.types[0];
-        assert_eq!(p.name, "Person");
-        assert_eq!(p.iri, "http://example.org/Person");
-        assert_eq!(p.count, 3);
+        // The property the collapse had to keep: naming no type must not cost a
+        // query per column. Recording the SQL is the only way to assert it.
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let exec = FnExec(|sql: &str| {
+            seen.borrow_mut().push(sql.to_string());
+            vec![serde_json::json!({ "n": 3 })]
+        });
+
+        let v = run(&Operation::Schema(schema_params(None, None)), &m, &exec).unwrap();
+        let r: SchemaResult = serde_json::from_value(v).unwrap();
+
+        assert_eq!(r.vertices.len(), 1);
+        let person = &r.vertices[0];
+        assert_eq!(person.name, "Person");
+        assert_eq!(person.iri, "http://example.org/Person");
+        assert_eq!(person.count, 3);
         // dense_id hidden; user fields surfaced.
-        assert_eq!(p.fields, vec!["age", "name"]);
-    }
+        assert_eq!(person.fields, vec!["age", "name"]);
 
-    #[test]
-    fn list_edge_types_builds_table_name_and_iri() {
-        let m = fixture();
-        let v = run(
-            &Operation::ListEdgeTypes(crate::operations::schema::ListEdgeTypesParams {}),
-            &m,
-            &FakeExec,
-        )
-        .unwrap();
-        let r: ListEdgeTypesResult = serde_json::from_value(v).unwrap();
         assert_eq!(r.edges.len(), 1);
-        let e = &r.edges[0];
-        assert_eq!(e.table_name, "Person_knows_Person");
-        assert_eq!(e.iri, "http://example.org/knows");
-        assert_eq!(e.count, 3);
+        let knows = &r.edges[0];
+        assert_eq!(knows.table_name, "Person_knows_Person");
+        assert_eq!(knows.iri, "http://example.org/knows");
+        assert_eq!(knows.count, 3);
+
+        assert!(r.fields.is_empty(), "no vertex_type named → no field stats");
+        assert!(
+            seen.borrow().iter().all(|sql| !sql.contains("DISTINCT")),
+            "a bare schema call must not run a per-field query: {:?}",
+            seen.borrow(),
+        );
     }
 
     #[test]
-    fn describe_field_infers_measure_for_numeric() {
+    fn schema_with_a_vertex_type_batches_fields_and_roles() {
+        let m = fixture();
+        // ONE query for every field: count(*) + a count(DISTINCT) per column.
+        let exec = FnExec(|sql: &str| {
+            if sql.contains("count(DISTINCT") {
+                assert_eq!(sql.matches("count(DISTINCT").count(), 2, "one pass: {sql}");
+                return vec![serde_json::json!({ "n": 3, "d0": 3, "d1": 2 })];
+            }
+            vec![serde_json::json!({ "n": 3 })]
+        });
+        let v = run(
+            &Operation::Schema(schema_params(Some("Person"), None)),
+            &m,
+            &exec,
+        )
+        .unwrap();
+        let r: SchemaResult = serde_json::from_value(v).unwrap();
+
+        // dense_id filtered; age + name surfaced, in manifest order.
+        assert_eq!(r.fields.len(), 2);
+        assert_eq!(r.fields[0].name, "age");
+        assert_eq!(r.fields[0].role, FieldRole::Measure); // int64
+        assert_eq!(r.fields[0].distinct, 3);
+        assert_eq!(r.fields[1].name, "name");
+        assert_eq!(r.fields[1].role, FieldRole::Dimension); // string, 2/3 < 0.8
+        assert_eq!(r.fields[1].distinct, 2);
+        // Samples are a second query, so a per-type call does not pay for them.
+        assert!(r.fields.iter().all(|f| f.samples.is_empty()));
+    }
+
+    #[test]
+    fn schema_with_a_field_narrows_to_it_and_samples_it() {
         let m = fixture();
         let v = run(
-            &Operation::DescribeField(DescribeFieldParams {
-                vertex_type: "Person".into(),
-                field: "age".into(),
-            }),
+            &Operation::Schema(schema_params(Some("Person"), Some("age"))),
             &m,
             &FakeExec,
         )
         .unwrap();
-        let r: DescribeFieldResult = serde_json::from_value(v).unwrap();
-        assert_eq!(r.datatype, "int64");
-        assert_eq!(r.role, FieldRole::Measure);
-        assert_eq!(r.distinct, Some(2));
-        assert_eq!(r.samples, vec!["30", "41"]);
+        let r: SchemaResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.fields.len(), 1, "narrowed to the named field");
+        let age = &r.fields[0];
+        assert_eq!(age.datatype, "int64");
+        assert_eq!(age.role, FieldRole::Measure);
+        assert_eq!(age.distinct, 3);
+        assert_eq!(age.samples, vec!["30", "41"]);
+        // The listings still come back — naming a field narrows the stats, not
+        // the answer.
+        assert_eq!(r.vertices.len(), 1);
     }
 
     #[test]
@@ -1540,35 +1586,6 @@ mod tests {
         assert_eq!(infer_role("email", "string", Some(95), Some(100)), FieldRole::Identifier);
         assert_eq!(infer_role("dept", "string", Some(3), Some(100)), FieldRole::Dimension);
         assert_eq!(infer_role("huge", "string", Some(201), Some(100_000)), FieldRole::Identifier);
-    }
-
-    #[test]
-    fn describe_vertex_type_batches_fields_and_roles() {
-        let m = fixture();
-        // One batched query: COUNT(*) + COUNT(DISTINCT) per user field.
-        let exec = FnExec(|sql: &str| {
-            assert!(sql.contains("count(DISTINCT"), "batched stats query: {sql}");
-            vec![serde_json::json!({ "n": 3, "d0": 3, "d1": 2 })]
-        });
-        let v = run(
-            &Operation::DescribeVertexType(crate::operations::schema::DescribeVertexTypeParams {
-                vertex_type: "Person".into(),
-            }),
-            &m,
-            &exec,
-        )
-        .unwrap();
-        let r: crate::operations::schema::DescribeVertexTypeResult =
-            serde_json::from_value(v).unwrap();
-        assert_eq!(r.count, 3);
-        // dense_id filtered; age + name surfaced, in manifest order.
-        assert_eq!(r.fields.len(), 2);
-        assert_eq!(r.fields[0].name, "age");
-        assert_eq!(r.fields[0].role, FieldRole::Measure); // int64
-        assert_eq!(r.fields[0].distinct, 3);
-        assert_eq!(r.fields[1].name, "name");
-        assert_eq!(r.fields[1].role, FieldRole::Dimension); // string, 2/3 < 0.8
-        assert_eq!(r.fields[1].distinct, 2);
     }
 
     #[test]
@@ -1651,13 +1668,10 @@ mod tests {
     }
 
     #[test]
-    fn describe_unknown_field_is_typed_error() {
+    fn schema_unknown_field_is_typed_error() {
         let m = fixture();
         let err = run(
-            &Operation::DescribeField(DescribeFieldParams {
-                vertex_type: "Person".into(),
-                field: "ghost".into(),
-            }),
+            &Operation::Schema(schema_params(Some("Person"), Some("ghost"))),
             &m,
             &FakeExec,
         )

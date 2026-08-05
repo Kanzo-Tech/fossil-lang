@@ -82,11 +82,11 @@ beforeAll(async () => {
 });
 
 describe('@fossil-lang/graph verbs e2e against DuckDB-WASM', () => {
-  it('list_vertex_types: real count(*) from the loaded table', async () => {
-    const { types } = await graph.listVertexTypes();
-    expect(types).toHaveLength(1);
-    expect(types[0]!.count).toBe(3);
-    expect(types[0]!.fields).toEqual(['age', 'name']);
+  it('schema: real count(*) from the loaded table', async () => {
+    const { vertices } = await graph.schema();
+    expect(vertices).toHaveLength(1);
+    expect(vertices[0]!.count).toBe(3);
+    expect(vertices[0]!.fields).toEqual(['age', 'name']);
   });
 
   it('aggregate: count grouped by a user field', async () => {
@@ -123,10 +123,12 @@ describe('@fossil-lang/graph verbs e2e against DuckDB-WASM', () => {
     expect(rows[1]!.name).toBe('Alice'); // age 30
   });
 
-  it('describe_field: distinct + datatype from real data + manifest', async () => {
-    const r = await graph.describeField({ vertex_type: 'Person', field: 'age' });
-    expect(r.datatype).toBe('int64');
-    expect(r.distinct).toBe(3);
+  it('schema: a named field carries distinct + datatype + samples', async () => {
+    const { fields } = await graph.schema({ vertex_type: 'Person', field: 'age' });
+    expect(fields).toHaveLength(1);
+    expect(fields[0]!.datatype).toBe('int64');
+    expect(fields[0]!.distinct).toBe(3);
+    expect(fields[0]!.samples).toHaveLength(3);
   });
 
   it('execute_sql: escape hatch returns columns + rows', async () => {

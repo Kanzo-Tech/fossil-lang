@@ -1,0 +1,110 @@
+---
+source: crates/fossil-graph/tests/schemas.rs
+expression: "schema_for! (schema::SchemaResult)"
+---
+$schema: "http://json-schema.org/draft-07/schema#"
+title: SchemaResult
+type: object
+required:
+  - edges
+  - fields
+  - vertices
+properties:
+  edges:
+    type: array
+    items:
+      $ref: "#/definitions/EdgeTypeSummary"
+  fields:
+    description: "Per-field statistics for the named `vertex_type`, narrowed to `field` when one was named. **Empty when no `vertex_type` was named** — that is the whole of the cheap/expensive distinction."
+    type: array
+    items:
+      $ref: "#/definitions/FieldStat"
+  vertices:
+    type: array
+    items:
+      $ref: "#/definitions/VertexTypeSummary"
+definitions:
+  EdgeTypeSummary:
+    type: object
+    required:
+      - count
+      - iri
+      - name
+      - source_type
+      - table_name
+      - target_type
+    properties:
+      count:
+        type: integer
+        format: uint64
+        minimum: 0
+      iri:
+        type: string
+      name:
+        type: string
+      source_type:
+        type: string
+      table_name:
+        description: "Convenience: `DuckDB` view name `{source}_{name}_{target}`. Pre-computed here so bindings don't reimplement the `GraphAr` edge naming convention."
+        type: string
+      target_type:
+        type: string
+  FieldRole:
+    description: "Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts:: inferRole` — promoted here to be authoritative."
+    type: string
+    enum:
+      - identifier
+      - dimension
+      - measure
+  FieldStat:
+    type: object
+    required:
+      - datatype
+      - distinct
+      - name
+      - role
+      - samples
+    properties:
+      datatype:
+        description: "`GraphAr` data-type spelling (`string`, `int64`, `double`, …)."
+        type: string
+      distinct:
+        description: "Distinct value count (`COUNT(DISTINCT field)`)."
+        type: integer
+        format: uint64
+        minimum: 0
+      name:
+        type: string
+      role:
+        description: Authoritative chart-axis role.
+        allOf:
+          - $ref: "#/definitions/FieldRole"
+      samples:
+        description: "Up to 8 non-null values. **Populated only when the call named this field**: they are a second query, and a bare per-type call would pay it once per column."
+        type: array
+        items:
+          type: string
+  VertexTypeSummary:
+    type: object
+    required:
+      - count
+      - fields
+      - iri
+      - name
+    properties:
+      count:
+        description: Vertex count from the manifest.
+        type: integer
+        format: uint64
+        minimum: 0
+      fields:
+        description: "Field names — what a follow-up `schema { vertex_type, field }` may name."
+        type: array
+        items:
+          type: string
+      iri:
+        description: Full RDF type IRI.
+        type: string
+      name:
+        description: "Short local name as used in `DuckDB` table identifier (e.g. `\"Person\"`)."
+        type: string
