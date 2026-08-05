@@ -118,7 +118,32 @@ ocho grupos rotos en 5.461 tramos cada uno. Se pagan O(V) y 132 de los 139 segun
 cuya contribución a la lectura nadie ha medido.
 
 El orden correcto es **medir primero si la jerarquía sirve para el LOD**, y sólo entonces decidir
-cuánto vale sostenerla. Esa medición no existe y es el prerrequisito de esta decisión.
+cuánto vale sostenerla.
+
+### Medido el 2026-08-05, y la recomendación de arriba era equivocada
+
+Un supernodo por comunidad sólo resume con honestidad si la comunidad es **compacta en el espacio**.
+Comparado contra la alternativa que no cuesta nada —bins contiguos de la curva, mismo número de
+grupos— sobre el corpus de cinco millones, lienzo de 5.289.638 de ancho:
+
+| partición | grupos | radio medio | **p90** |
+|---|---|---|---|
+| `cluster_id` | 15.310 | 4.108 | **20** |
+| bin de Morton | 15.291 | 44.654 | **72.722** |
+
+**El 90 % de las comunidades cabe en un radio de veinte unidades.** Son un punto. Un bin de la curva
+del mismo tamaño ocupa 72.722 — tres mil seiscientas veces más — porque el orden Z da saltos largos
+al cruzar bits altos, que es su debilidad conocida frente a Hilbert.
+
+Así que **la jerarquía sí gana su sitio, y la salida 2 queda descartada.** Las dos afirmaciones
+conviven sin contradicción y hay que leerlas juntas: para **traer** una ventana, lo que abarata es la
+curva y las comunidades no aportan (ADR-0043); para **agregar** una vista alejada, las comunidades
+son fieles y la curva no sirve. Son dos preguntas distintas sobre la misma columna, y hasta hoy sólo
+se había medido una.
+
+Consecuencia: **Louvain tiene que sobrevivir**, y por tanto «sin techo» exige la salida 1 —estado de
+vértice fuera del heap, GraphChi/X-Stream— que es el proyecto que esta sección esperaba poder evitar.
+La medición cerró la puerta barata.
 
 ## Consecuencias
 
