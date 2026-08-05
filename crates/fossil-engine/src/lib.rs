@@ -463,11 +463,11 @@ fn enrich_written_layout(
         })
         .collect();
 
-    // DuckDB's COPY writes a file, not the directory above it.
-    for target in &targets {
-        std::fs::create_dir_all(&target.chunk_prefix)
-            .map_err(|e| miette::miette!("create chunk dir {}: {e}", target.chunk_prefix))?;
-    }
+    // The tile directories are not created here. `DuckDB`'s COPY writes a file
+    // and not the directory above it, so somebody has to — and once the layout
+    // emits edge tiles under a prefix it derives for itself, that somebody can
+    // only be the layout. Two callers creating the same directory is one of them
+    // being wrong about which directories exist.
 
     // Every adjacency file, both orientations, cross-type included — the layout
     // renumbers `dense_id`, and a file left out keeps ids that now belong to
