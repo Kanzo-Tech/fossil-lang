@@ -9,15 +9,26 @@ the decision, and the consequences — including the uncomfortable ones. Any cho
 alternatives that took more than fifteen minutes gets one.
 
 A record carries the reasoning, not the conclusion alone, which is what lets it be *reopened* rather
-than re-argued. Several here have been: ADR-0042 §3 is revised inside its own document by a
-measurement taken a day later, and ADR-0043 stage 1 records being implemented, measured, refuted and
-reverted, with the two numbers and the name of the function that was missing kept as the residue.
+than re-argued. Several here have been, and the most useful ones were reopened by a measurement:
+
+- **ADR-0042 §3** is revised inside its own document by a measurement taken a day later.
+- **ADR-0043 stage 1** records being implemented, measured, refuted and reverted — and then, on
+  2026-08-05, redone over the API the first attempt was missing, with the predicted −1.7 GB arriving
+  as −1.71. Both attempts stay in the record; the failed one is where the definition of done was
+  found to be wrong.
+- **ADR-0043 stage 4** has a row of its own table corrected against the code: it said to delete
+  DuckDB's memory limit as a duplication, and deleting it would have removed the only bound that
+  engine had.
+- **ADR-0045** opens by correcting two claims ADR-0044 made less than twenty-four hours earlier, and
+  then corrects one of its own — a §2 proposal that was impossible, because the crate it wanted to
+  merge carries a `compile_error!` on wasm32. Both mistakes were the same mistake: reading prose
+  where there was a checkable constraint.
 
 <Callout>
 The table below is read from the `decisions/` directory when this site is built. It is not
 transcribed, and it cannot go stale — which is the point, because the hand-maintained index in
-`decisions/README.md` already is: its last row is 0039, and five records have landed since. A record
-whose file lands in the directory appears here without anyone remembering to add a row.
+`decisions/README.md` already is: its last row is 0039, and 0040 through 0045 have landed since. A
+record whose file lands in the directory appears here without anyone remembering to add a row.
 </Callout>
 
 Status is the record's own field. `proposed` means drafted, not yet in force; `accepted` means in

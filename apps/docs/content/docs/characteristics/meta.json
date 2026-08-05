@@ -1,4 +1,4 @@
 {
   "title": "Characteristics",
-  "pages": ["verbs", "bounded-write", "streaming"]
+  "pages": ["verbs", "bounded-write", "streaming", "corpus-contract"]
 }

@@ -1,26 +1,26 @@
 ---
 title: The verb surface
-description: Six verbs, and the file is the contract. The mapping from the surface that exists today, verb by verb.
+description: Six verbs, landed. What the seventeen collapsed into, and the one thing that left before its replacement existed.
 direction:
-  summary: The surface closes at six verbs — read, expand, path, aggregate, schema, execute_sql — and the corpus file, not the verb list, is what every consumer actually agrees on.
+  summary: The corpus file, not the verb list, is what every consumer agrees on — the camera is addressed against tiles and no verb draws.
   decidedBy: decisions/0042-la-camara-se-direcciona.md
 today:
-  summary: The surface is converging on six one collapse at a time — the four verbs that had no implementation are gone and the dispatch match is exhaustive, so a verb can no longer be declared without being wired.
+  summary: The surface is six — read, expand{into|all}, path, aggregate, schema, execute_sql — landed on 2026-08-05, with the dispatch match exhaustive and no verb that draws.
   backedBy: crates/fossil-graph/tests/snapshots/schemas__operation_envelope.snap
 ---
 
 ## Six, and why six
 
 `fossil-graph` defines the surface; MCP, HTTP, the CLI and the in-process TS package are bindings
-over it. The destination is six verbs:
+over it. **The surface is six verbs, and it closed on 2026-08-05:**
 
 | verb | what it answers |
 | --- | --- |
-| `read` | rows from a relation, with an optional `where:` |
-| `expand{into\|all}` | the neighbourhood of a set of vertices, one hop |
+| `read` | rows of one vertex type, filtered, ordered and capped |
+| `expand{into\|all}` | the neighbourhood of a *set* of vertices, one hop |
 | `path` | a route between two vertices |
-| `aggregate` | a grouped, bounded summary |
-| `schema` | what types, fields and relations exist |
+| `aggregate` | a grouped, bounded summary — over values or over ranges |
+| `schema` | what types, fields and relations exist, with field stats on request |
 | `execute_sql` | the escape hatch, which a binding may hide behind a permission |
 
 Six is not a tidiness target. It follows from a decision about what the surface is *for*: the
@@ -36,95 +36,107 @@ A new verb enters only if it serves a case the single path demonstrably cannot, 
 demonstration is a measurement. Not an argument.
 </Callout>
 
-## The mapping
+## `read`'s `where` is SQL, and carries `execute_sql`'s authority
 
-The surface is converging on six one collapse at a time, and each collapse below is a step that has
-either landed or not. Read them as a sequence, not as a count — the count is whatever the last landed
-step left behind.
+This is the one thing on the page a binding can get wrong quietly. `read { vertex_type, where?,
+order_by?, descending, limit }` takes `where` as a **raw SQL fragment**, evaluated by the same engine
+`execute_sql` reaches. It is not a parsed predicate language.
 
-<Callout title="The first step has landed: seventeen to thirteen">
-The surface was seventeen. Four of those were declared, carried params and result types and wire
-schemas, and were never implemented — dispatch fell through to a `NotImplemented` arm. They were
-deleted rather than written, which took `GraphError::NotImplemented` with them: the `match` is now
-exhaustive, so a verb can no longer be added without being wired. The compiler says what a stub used
-to say at runtime.
-</Callout>
+So the permission travels with it: **a binding that gates `execute_sql` behind a permission must gate
+`read`'s `where` with the same one.** Gating the escape hatch and leaving `where` open is not a
+narrower surface, it is the same surface with a second door. That rule is written on the type in
+`crates/fossil-graph/src/operations/discovery.rs`, not in a design note, so a binding author reads it
+where they type it.
 
-### Four schema verbs collapse to `schema`
+## What the seventeen became
+
+Four commits on 2026-08-05, in order, and `exec.rs` went from **1,874 lines to 1,546**. This section
+is history now, not a plan — read it for what each collapse cost, because the reasoning is what would
+decide a seventh verb if there ever is one.
+
+### Four introspection verbs to one — `bb775b3`
 
 `list_vertex_types`, `list_edge_types`, `describe_field`, `describe_vertex_type` → **`schema`**.
 
-All four are manifest reads with no SQL behind them. They differ in what they project, which is an
-argument, not a verb.
+All four are manifest reads. They differed in **what they cost**, not in what they were: two
+listings, one batched query per type, one that sampled a column. `schema { vertex_type?, field? }`
+answers all four, and the cost distinction becomes two optional fields — a bare call is the cheap
+default, and that it stays cheap is asserted rather than described: its recorded SQL contains no
+`DISTINCT`. Naming a field is what buys the samples and what costs the second query.
 
-The envelope snapshot in this page's `backedBy` is what pins whichever set is current — it is the
-wire contract every binding consumes, so a collapse cannot land without it changing. It will not,
-however, notice a *count*: nothing on disk asserts how many verbs there should be, which is why this
-page describes steps rather than quoting a total.
+### Binning is grouping — `22006d6`
 
-### Three aggregation verbs collapse to `aggregate`
+`histogram` → a parameter of **`aggregate`**.
 
-`aggregate`, `histogram`, `top_k` → **`aggregate`**.
+A histogram was the same `GROUP BY` with the key computed from a range instead of read from a column.
+`aggregate { bins }` is that difference. The binned arm is *more* general than the verb it replaced,
+because it takes any aggregation rather than only a count — and it stays dense, one row per bin with
+`0.0` where nothing landed, because a grouping over ranges knows how many there are and a gap is
+information.
 
-A histogram is a group-by on a bucketed expression; a top-k is a group-by with an order and a limit.
-Both were spelled as separate verbs because they had separate result shapes, and separate result
-shapes is what a parameterised verb is for.
+### `read`, `expand`, `path` — `d14e0c6`
 
-### Three keep their meaning and change their name
-
-| today | destination |
+| before | after |
 | --- | --- |
 | `get_vertex` | `read(where:)` — one vertex is a predicate, not a verb |
-| `find_neighbors` | `expand` |
-| `find_path` | `path` |
+| `top_k` | `read(order_by:, descending:, limit:)` |
+| `find_neighbors` | `expand`, whose `from` is now a **set** |
+| `find_path` | `path`, unchanged in shape |
 
-`execute_sql` survives unchanged, and it survives on purpose: an arbitrary crossfilter can only
-filter what is resident, so a general question needs a general escape hatch. Mapbox has the same
-limit and does not solve it either.
+`get_vertex` and `top_k` were not different questions from each other: both were rows of one vertex
+type, one under a predicate and one under an order and a limit. `expand` taking a set is not
+cosmetic — an induced subgraph is a question about a set, and a single IRI could not ask it.
 
-### Four disappeared without ever being implemented
+### `viewport` and `materialize_graph` leave — `c6c87fa`
 
-`search_by_label`, `summarize_cluster`, `answer_with_communities`, `set_selection`.
+Deleted, not absorbed, because neither had anywhere to go. `viewport` was the only verb that drew:
+bbox in, vertices and edges out, with a detail mode and an aggregate mode selected by an `if` inside
+the verb — relation selection wearing a predicate's clothes. `materialize_graph` was the same claim
+without the bbox: the whole graph as renderable rows.
 
-Three of the four were never verbs. `summarize_cluster` and `answer_with_communities` are a `read`
-over a hierarchy level. `set_selection` always belonged to the client — a selection is state the
-canvas holds, not a question the corpus answers. `search_by_label` needed an embedding column that no
-writer emits, so it was gated on work that had not happened.
+### And four that were deleted rather than written
 
-Deleting these was free in the strict sense: no implementation, no caller. The interesting part is
-what the deletion bought, which is the exhaustive `match` above.
+`search_by_label`, `summarize_cluster`, `answer_with_communities` and `set_selection` were declared,
+carried params and result types and wire schemas, and were never implemented — dispatch fell through
+to a `NotImplemented` arm. Deleting them took `GraphError::NotImplemented` with them, so **the
+`match` is now exhaustive and a verb can no longer be declared without being wired.** The compiler
+says what a stub used to say at runtime.
 
-### Two disappear when tiles exist, and not one commit before
+<Callout type="warn" title="What the snapshot proves, and what nothing proves">
+`backedBy` on this page is the operation envelope snapshot — the wire contract every binding
+consumes. It enumerates exactly these six, so a seventh cannot land without it changing, and it is
+why the count above is a fact rather than a recollection.
 
-`viewport` and `materialize_graph`.
+What it does **not** know is that six is the right number. Nothing on disk asserts a target count;
+the closed set is a discipline, and ADR-0042 is where the discipline is written down.
+</Callout>
 
-These are the two the destination has no room for and today's code cannot do without. `viewport` is
-the only verb that draws: bbox in, vertices and edges out, with a detail mode and an aggregate mode
-selected by an `if` inside the verb — which is relation selection wearing a predicate's clothes,
-and precisely the confusion the tile design removes.
+## The gap the closure opened, and it is real
 
-<Callout type="warn" title="They are load-bearing until the tiles land">
-There is no tile store, no tile index and no tile emission yet. Until there is, `viewport` is how
-the graph read path is expressed: it is dispatched over MCP, it is a method on the
-`@fossil-lang/graph` client, and the two SQL statements it emits are what the scale benchmarks
-actually execute. Removing it before the replacement exists deletes the read path and replaces it
-with nothing.
+<Callout type="warn" title="Nothing answers a camera today">
+`viewport` was deleted **before its replacement existed**, and that is a decision rather than an
+oversight — `c6c87fa` records the breakage as *expected and accepted*. There is still no tile store,
+no tile index and no tile emission anywhere in `crates/`, and none of the six verbs answers a camera.
 
-One correction to a claim that circulates about this: **no viewer in this repository reads through
-`viewport`.** `packages/viewer` does not import `@fossil-lang/graph` at all. The verb's consumers are
-the MCP binding, the TS client's method surface, and the tests.
+So the two registers genuinely diverge here. **Decided:** the camera is addressed, not queried
+(`decisions/0042-la-camara-se-direcciona.md`), and `kanzo-ui` consumes the verb package while the
+camera does not (`decisions/0045-dos-nucleos-un-monorepo.md`, third of the decisions recorded in its
+2026-08-05 review). **Undone:** the tiles both of those address. What broke in the meantime is the
+reader in `kanzo-ui`, and its migration is the next piece of work rather than a regression to be
+fixed here.
 </Callout>
 
 ## The trap ADR-0042 records about `expand{into}`
 
-`expand{into}` is on the destination list, and the reasoning that put it there does not hold on our
-engine. It should be read with that attached.
+`expand{into}` shipped, and the reasoning that first put it on the list does not hold on our engine.
+It should be read with that attached — which is why the trap is now carried on `ExpandMode::Into`
+itself rather than in a note somewhere.
 
-The justification came from Kùzu and Neo4j, which push a mask of candidate destinations *into* the
-scan so the expansion never materialises neighbours it will discard. On DuckDB that class of pruning
-is measured and unavailable. A window of 20,000 vertices at five million is 179 contiguous runs of
-`dense_id` covering 20,007 ids — a 268× superset of the visible edges with zero over-read, and
-**no way of asking for it in SQL wins**:
+The justification came from Kùzu (`SEMI_MASKER`) and Neo4j, which push a mask of candidate
+destinations *into* the scan so the expansion never materialises neighbours it will discard. On
+DuckDB that class of pruning is measured and unavailable. A window of 20,000 vertices at five million
+is 179 contiguous runs of `dense_id` covering 20,007 ids — a 268× superset of the visible edges with
+zero over-read, and **no way of asking for it in SQL wins**:
 
 | how the prune was expressed | time |
 | --- | --- |
@@ -135,6 +147,6 @@ is measured and unavailable. A window of 20,000 vertices at five million is 179 
 Both attempts are slower than not pruning, because the engine evaluates the ranges per row instead of
 skipping row groups.
 
-**The verb is right as a shape. Its performance motivation is not available to us.** That is why the
-same measurement produced the addressing decision: pruning cannot be a predicate, only a choice of
-what to read.
+**The verb is right as a shape. Its performance motivation is not available to us.** That is also why
+`read(where: …)` cannot be how a window is asked for, now that `viewport` has gone: it would be a
+return to the 237 ms. Pruning cannot be a predicate, only a choice of what to read.
