@@ -19,9 +19,13 @@ descartada por medición y no por argumento:
 | DuckDB durante la maquetación | sin límite por defecto | acotado a 2 GB: total igual, derrame **0 B** |
 | el generador de Node | tenía 12 GB de heap | `fossil run` solo llega al mismo pico |
 
-Lo que sí dice la instrumentación (`FOSSIL_LAYOUT_PROBE=1`): **el RSS ya es 14,61 GiB cuando
+Lo que sí dice la instrumentación (`FOSSIL_MEM_PROBE=1`): **el RSS ya es 14,61 GiB cuando
 `enrich_layout` ejecuta su primera sentencia**, y toda la pasada añade 0,13 GiB netos. Y leer las 71M
 aristas a un `Vec` da **−3,12 GiB**: se libera más de lo que se reserva.
+
+Esos catorce quedaron atribuidos el 2026-08-05 y no son ninguna de las cinco cosas de arriba: son
+memoria de operador de DataFusion que nunca se acotó — la etapa 4, y el único sitio de este documento
+donde la medición ya dio un número de después.
 
 Y dos hechos verificados sobre el artefacto:
 
@@ -176,6 +180,60 @@ maquetación, que gasta 0,13 GiB netos.
 | test: corpus pequeño, límite ridículo, exigir derrame | +60 |
 
 **Neto ≈ +100 LOC**, y convierte un OOM en lentitud o en un error legible.
+
+#### Ejecutada a medias el 2026-08-05, y es la etapa que pagaba
+
+Se implementó sólo la primera fila —`RuntimeEnvBuilder` con `FairSpillPool` envuelto en
+`TrackConsumersPool`, tras `FOSSIL_DF_MEM_GIB`— y bastó para responder la pregunta que ADR-0042 §5
+dejó abierta: **la memoria de W0b no es el corpus.**
+
+`arrow_gib` cuenta lo que el tipo de la frontera retiene de verdad: cada lote de vértices y las dos
+orientaciones de cada tabla de aristas. A diez millones son **1,64 GiB**, con **15,68 GiB
+residentes**. El grafo entero es la décima parte de lo que el proceso tiene cuando se lo entrega al
+escritor.
+
+Dos lecturas más lo confirman, y ninguna es un argumento: soltar el `SessionContext` antes de
+codificar libera **0,00 GiB** —las `MemTable` del ejecutor son los mismos buffers Arrow, no una
+segunda copia— y la misma fase midió **+11,35 GiB** en una ejecución y **+7,67 GiB** en la
+siguiente. Dato vivo no varía en 3,7 GiB.
+
+Lo que sí es: memoria de operador que nadie acota. El primer intento con 4 GiB murió, y el pool con
+consumidores nombró al culpable sin necesidad de hipótesis:
+
+    HashJoinInput[8]#125(can spill: false) consumed 387,7 MB, peak 387,7 MB,
+    HashJoinInput[9]#126(can spill: false) consumed 291,9 MB, peak 291,9 MB,
+    …cinco así, en una máquina de 10 núcleos: una reserva por partición
+
+El lado de los vértices ya había demostrado que el presupuesto funciona —el orden/dedup sobre diez
+millones de IRIs pasó de 7,94 a 3,02 GiB derramando, a cambio de diez segundos—. El lado de las
+aristas junta cada extremo contra la tabla de vértices, y el lado de construcción de un hash join
+declara `can spill: false`: cuando se le dice que no puede asignar, no tiene nada que devolver y
+muere. Un sort-merge join sí derrama. De ahí que el presupuesto lleve `prefer_hash_join` apagado:
+**un presupuesto sólo significa algo si los operadores pueden honrarlo.**
+
+| a diez millones | sin techo | 4 GiB + sort-merge |
+|---|---|---|
+| RSS al terminar `execute_graph` | 15,68 GiB | **5,56 GiB** |
+| RSS al empezar `enrich_layout` | 16,51 GiB | **6,82 GiB** |
+| pico del proceso | ~21 GiB | **9,87 GiB** |
+| reloj | 256,3 s | 290,9 s |
+
+**Diecisiete gigabytes a diez, por un 13% de reloj, y el corpus sale idéntico byte a byte** (87
+ficheros, todos los md5 iguales). Lo que queda arriba es Louvain (+2,22 GiB) y la maquetación, que es
+donde ADR-0042 predijo el coste antes de que nada de esto estuviera medido.
+
+Sigue debiéndose el resto de la etapa: el presupuesto como entrada del `run` en vez de una variable
+de entorno, borrar el `apply_resource_limits` de DuckDB que duplica, y el test de derrame.
+
+#### Y lo que esto le hace a la tesis del documento
+
+La causa que da la §«La causa, que es de tipos» —seis representaciones, cada frontera una copia— se
+midió aquí y **no es la que paga a esta altura**: la copia retenida es 1,64 GiB de 17. La etapa 1
+sigue en pie porque su medición es otra y más abajo: el `Vec<(u32,u32)>` de 568 MB y el `cursor` de
+80 MB son reales, y su justificación es el acceso aleatorio, no el pico total.
+
+Dicho como corresponde: el tipo de la frontera explica lo que cuesta *cruzarla*; lo que hacía que el
+proceso pidiera diecisiete gigabytes era **no haber declarado nunca un presupuesto**.
 
 ### Etapa 5 — la superficie deja de ser el contrato
 
