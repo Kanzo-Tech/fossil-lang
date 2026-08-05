@@ -11,10 +11,6 @@ import type {
   PathResult,
   AggregateParams,
   AggregateResult,
-  ViewportParams,
-  ViewportResult,
-  MaterializeGraphParams,
-  MaterializeGraphResult,
   ExecuteSqlParams,
   ExecuteSqlResult,
 } from './generated.js';
@@ -54,10 +50,15 @@ export interface CreateGraphClientOpts {
 }
 
 /**
- * The typed verb surface. One method per `fossil-graph` verb; each forwards to
- * the WASM `dispatch_graph` with the shared `query` + `manifestFiles`. Params
- * and results are the codegen'd shapes from the schemars JSON Schemas
- * (`./generated.ts`) — single source of truth with the Rust verb structs.
+ * The typed verb surface: six methods, one per `fossil-graph` verb, each
+ * forwarding to the WASM `dispatch_graph` with the shared `query` +
+ * `manifestFiles`. Params and results are the codegen'd shapes from the
+ * schemars JSON Schemas (`./generated.ts`) — single source of truth with the
+ * Rust verb structs.
+ *
+ * There is no viewport method and there will not be one: the camera is
+ * addressed, not queried (ADR-0042). These verbs answer questions and return
+ * ids; what gets drawn comes from tiles.
  */
 export interface GraphClient {
   /**
@@ -87,9 +88,6 @@ export interface GraphClient {
    * the column. Binning is grouping, so there is no separate histogram verb.
    */
   aggregate(params: AggregateParams): Promise<AggregateResult>;
-  viewport(params: ViewportParams): Promise<ViewportResult>;
-  /** Canvas-ready whole-graph snapshot (vertices + dense→subject-mapped edges). */
-  materializeGraph(params: MaterializeGraphParams): Promise<MaterializeGraphResult>;
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
   /** Escape hatch: dispatch a raw `{ verb, params }` operation. */
   dispatch(op: Operation): Promise<unknown>;
@@ -118,8 +116,6 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
     expand: (params) => call({ verb: 'expand', params }),
     path: (params) => call({ verb: 'path', params }),
     aggregate: (params) => call({ verb: 'aggregate', params }),
-    viewport: (params) => call({ verb: 'viewport', params }),
-    materializeGraph: (params) => call({ verb: 'materialize_graph', params }),
     executeSql: (params) => call({ verb: 'execute_sql', params }),
     dispatch,
   };

@@ -11,7 +11,7 @@
 //! schemas via openapi-typescript at the playground/keasy `pnpm openapi`
 //! step.
 
-use fossil_graph::operations::{Operation, aggregate, discovery, schema, sql, viewport};
+use fossil_graph::operations::{Operation, aggregate, discovery, schema, sql};
 use schemars::schema_for;
 
 macro_rules! snap {
@@ -47,14 +47,6 @@ fn read_verbs() {
 fn aggregate_verb() {
     snap!("aggregate_params", aggregate::AggregateParams);
     snap!("aggregate_result", aggregate::AggregateResult);
-}
-
-#[test]
-fn viewport_verbs() {
-    snap!("viewport_params", viewport::ViewportParams);
-    snap!("viewport_result", viewport::ViewportResult);
-    snap!("materialize_graph_params", viewport::MaterializeGraphParams);
-    snap!("materialize_graph_result", viewport::MaterializeGraphResult);
 }
 
 #[test]

@@ -23,21 +23,23 @@
 //! the entire surface "MCP" would lock fossil into an AI-agent framing when
 //! the same verbs serve dashboards, federation, tests, and the CLI.
 //!
-//! ## Verbs (14)
+//! ## Verbs (6)
 //!
 //! ```text
-//! Schema:       list_vertex_types · list_edge_types · describe_field
-//! Discovery:    search_by_label · find_neighbors · find_path
-//! Aggregation:  aggregate · histogram · top_k
-//! GraphRAG:     summarize_cluster · answer_with_communities
-//! Viewport:     viewport · set_selection
-//! Escape:       execute_sql                              ← text2sql lives HERE
+//! Read:         read · expand{into|all} · path
+//! Aggregation:  aggregate            ← binning included; it is a grouping
+//! Introspect:   schema               ← the lists, and field stats on request
+//! Escape:       execute_sql          ← text2sql lives HERE
 //! ```
 //!
-//! Each verb is a unit-struct or unit-variant on [`Operation`]; the
-//! `Params` and `Result` shapes are pure data with no transport coupling.
-//! Transport bindings implement `dispatch(op, ctx) → Result` by matching on
-//! the enum.
+//! Each verb is a variant on [`Operation`]; the `Params` and `Result` shapes
+//! are pure data with no transport coupling. Transport bindings implement
+//! `dispatch(op, ctx) → Result` by matching on the enum.
+//!
+//! **No verb draws.** ADR-0042: the camera is addressed, not queried — the LOD
+//! is not a filter but a different relation, and a `WHERE` cannot change which
+//! table it reads. A filter that must change the picture answers with ids and
+//! the canvas masks its resident tiles with them.
 //!
 //! ## Native-only (for now)
 //!
@@ -48,21 +50,15 @@
 //! (`todo!()`), and the crate carries NO wasm32 tripwire because the verb
 //! logic itself is WASM-safe.
 //!
-//! ## Larger-than-RAM contract (W3+)
+//! ## What bounds a verb
 //!
-//! Verbs that scan the vertex/edge tables MUST emit SQL that `DuckDB` can
-//! satisfy via predicate-pushdown over morton-sorted Parquet row groups.
-//! Anti-patterns explicitly banned from the query path:
-//!
-//! - `row_number() OVER ()` without `PARTITION BY` — materialises the whole
-//!   table to sort.
-//! - JOINs whose hash-build side scans the whole vertex/edge table — must
-//!   filter the build side first (`WHERE id IN (SELECT … FROM viewport)`).
-//!
-//! The writer (`fossil-sinks` W1+W3) is the upstream that lets these
-//! restrictions be observed — it pre-computes `dense_id`, `x/y`, `cluster_id`,
-//! `embedding`, and morton-sorts the Parquet so query SQL only needs to
-//! WHERE+LIMIT.
+//! Every verb here is bounded by a `LIMIT` or by a `GROUP BY` whose
+//! cardinality is capped, so cost is a function of the answer rather than of
+//! the corpus. What is NOT available is pruning by predicate: ADR-0042
+//! measured that `DuckDB` evaluates a range predicate per row instead of
+//! skipping row groups, so a window expressed as a `WHERE` reads the whole
+//! file. **Pruning is which bytes are read, and that is the tiles' job, not a
+//! verb's.**
 
 pub mod error;
 pub mod exec;

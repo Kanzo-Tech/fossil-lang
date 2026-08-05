@@ -48,7 +48,8 @@ pub struct Manifest {
     vertices: Vec<VertexInfo>,
     edges: Vec<EdgeInfo>,
     /// Vertex type name → index into `vertices`. The index doubles as the
-    /// `type_idx` ordinal the viewport verb emits (stable, manifest order).
+    /// `type_idx` ordinal (stable, manifest order) — how a tile names which
+    /// vertex type a `dense_id` belongs to.
     vertex_idx: HashMap<String, usize>,
     /// Edge table name (`{src}_{edge}_{dst}`) → index into `edges`.
     edge_idx: HashMap<String, usize>,
@@ -132,7 +133,7 @@ impl Manifest {
     }
 
     /// The `type_idx` ordinal for a vertex type (its manifest position), as
-    /// emitted on the viewport verb's vertices. `None` if the type is unknown
+    /// paired with a `dense_id` to identify a vertex. `None` if the type is unknown
     /// or the manifest holds more than 256 types (the `u8` ceiling).
     #[must_use]
     pub fn vertex_type_idx(&self, name: &str) -> Option<u8> {

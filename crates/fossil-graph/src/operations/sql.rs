@@ -2,12 +2,15 @@
 //!
 //! Bindings MAY hide this verb behind a permission flag. The keasy proxy
 //! gates it: only org admins reach this tool; participant-role users see the
-//! other 13 verbs but not this one. The reason is dual:
+//! other five verbs but not this one. The reason is dual:
 //!
 //! 1. SQL is unbounded — a bad query brings down the WASM `DuckDB` heap.
-//! 2. The other 13 verbs cover the supported question shapes with
+//! 2. The other five verbs cover the supported question shapes with
 //!    predictable cost. `execute_sql` is the LLM's last resort when none
 //!    of those fit — useful but not for every caller.
+//!
+//! **`read`'s `where` is the same authority**, and a binding that gates this
+//! verb must gate that field with it.
 //!
 //! When exposed, the result shape is the DuckDB-row-as-JSON form. Rows are
 //! `serde_json::Value`s because the schema is unknown at verb-call time.

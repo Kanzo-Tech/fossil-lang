@@ -41,25 +41,15 @@ export type Operation =
       verb: "aggregate";
     }
   | {
-      params: ViewportParams;
-      verb: "viewport";
-    }
-  | {
-      params: MaterializeGraphParams;
-      verb: "materialize_graph";
-    }
-  | {
       params: ExecuteSqlParams;
       verb: "execute_sql";
     };
-export type ViewportMode = "detail" | "aggregate";
 
 export interface FossilGraphSchemas {
   AggregateParams?: AggregateParams;
   AggregateResult?: AggregateResult;
   AggregateRow?: AggregateRow;
   Aggregation?: Aggregation;
-  BoundingBox?: BoundingBox;
   ColumnDescriptor?: ColumnDescriptor;
   EdgeTypeSummary?: EdgeTypeSummary;
   ExecuteSqlParams?: ExecuteSqlParams;
@@ -71,10 +61,6 @@ export interface FossilGraphSchemas {
   FieldStat?: FieldStat;
   GraphEdge?: GraphEdge;
   GraphVertex?: GraphVertex;
-  MaterializeGraphParams?: MaterializeGraphParams;
-  MaterializeGraphResult?: MaterializeGraphResult;
-  MaterializedEdge?: MaterializedEdge;
-  MaterializedVertex?: MaterializedVertex;
   Operation?: Operation;
   PathParams?: PathParams;
   PathResult?: PathResult;
@@ -83,11 +69,6 @@ export interface FossilGraphSchemas {
   SchemaParams?: SchemaParams;
   SchemaResult?: SchemaResult;
   VertexTypeSummary?: VertexTypeSummary;
-  ViewportEdge?: ViewportEdge;
-  ViewportMode?: ViewportMode;
-  ViewportParams?: ViewportParams;
-  ViewportResult?: ViewportResult;
-  ViewportVertex?: ViewportVertex;
 }
 /**
  * One grouping, over values or over ranges.
@@ -129,12 +110,6 @@ export interface AggregateRow {
     [k: string]: unknown;
   };
   value: number;
-}
-export interface BoundingBox {
-  x_max: number;
-  x_min: number;
-  y_max: number;
-  y_min: number;
 }
 export interface ColumnDescriptor {
   duckdb_type: string;
@@ -226,46 +201,6 @@ export interface FieldStat {
    */
   samples: string[];
 }
-export interface MaterializeGraphParams {
-  limit?: number;
-  /**
-   * Restrict to a subset of vertex types. Empty = all.
-   */
-  vertex_types?: string[];
-}
-export interface MaterializeGraphResult {
-  edges: MaterializedEdge[];
-  /**
-   * True when the vertex set was capped by `limit` (edges to dropped vertices are omitted, mirroring the canvas's orphan-edge drop).
-   */
-  truncated: boolean;
-  vertices: MaterializedVertex[];
-}
-export interface MaterializedEdge {
-  predicate: string;
-  /**
-   * Source vertex `subject` (dense→subject resolved).
-   */
-  source: string;
-  /**
-   * Target vertex `subject` (dense→subject resolved).
-   */
-  target: string;
-}
-export interface MaterializedVertex {
-  /**
-   * The vertex `subject` IRI — the canvas's string node id.
-   */
-  id: string;
-  /**
-   * Display label: first present of `name`/`label`/`title`, else the subject.
-   */
-  label: string;
-  /**
-   * Vertex type short name.
-   */
-  type_name: string;
-}
 export interface SchemaParams {
   /**
    * Name a field to narrow the statistics to it and pick up its samples. Ignored without `vertex_type`.
@@ -298,19 +233,6 @@ export interface PathParams {
   max_hops?: number;
   source_iri: string;
   target_iri: string;
-}
-export interface ViewportParams {
-  bbox: BoundingBox;
-  limit?: number;
-  lod_threshold?: number;
-  /**
-   * Restrict to a subset of vertex types. Empty = all.
-   */
-  vertex_types?: string[];
-  /**
-   * Current zoom level. Above [`Self::lod_threshold`] the executor swaps to aggregate mode (`GROUP BY cluster_id`) returning ≤ 10k super-nodes regardless of total N.
-   */
-  zoom: number;
 }
 export interface PathResult {
   edges: GraphEdge[];
@@ -350,41 +272,4 @@ export interface VertexTypeSummary {
    * Short local name as used in `DuckDB` table identifier (e.g. `"Person"`).
    */
   name: string;
-}
-/**
- * An edge both of whose endpoints are in the answer.
- *
- * Endpoints are indices into `ViewportResult::vertices`, not dense ids — an edge is only emitted when both ends survived the bbox and the limit, because one that reaches off screen has nowhere to land.
- */
-export interface ViewportEdge {
-  dst_dense: number;
-  src_dense: number;
-}
-export interface ViewportResult {
-  edges: ViewportEdge[];
-  mode: ViewportMode;
-  /**
-   * How many vertices **matched**, before `limit` cut them.
-   *
-   * Separate from `vertices.len()` on purpose: the difference is how a view says "there is more here than I am showing you", and without it a truncated answer looks exactly like a complete one.
-   */
-  n: number;
-  /**
-   * Always present; in aggregate mode the entries are super-nodes (cluster centroids) with `cluster_id` populated.
-   */
-  vertices: ViewportVertex[];
-}
-export interface ViewportVertex {
-  cluster_id?: number | null;
-  /**
-   * Aggregate mode only: cluster size + `cluster_id`.
-   */
-  cluster_size?: number | null;
-  /**
-   * This vertex's position **in this answer** — what `ViewportEdge` refers to and what a GPU buffer is indexed by. See the module note: it is not the `GraphAr` dense id, which is ambiguous across vertex types and does not survive a `LIMIT`.
-   */
-  dense_id: number;
-  type_idx: number;
-  x: number;
-  y: number;
 }

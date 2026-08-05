@@ -1,15 +1,21 @@
-//! The verbs of the fossil-graph surface, on the way from seventeen to six.
+//! The verbs of the fossil-graph surface. **Six**, down from seventeen.
 //!
-//! ADR-0042 closes the surface at `read`, `expand{into|all}`, `path`,
-//! `aggregate`, `schema` and `execute_sql`. **Eight remain.** The four that never
-//! had an implementation are gone, three of them because they were never verbs
-//! — `summarize_cluster` and `answer_with_communities` are a `read` over a
-//! level, and `set_selection` always belonged to the client. The four
-//! introspection verbs are gone too: `schema` answers all of them, and what
-//! used to separate the cheap ones from the expensive one is now a parameter.
-//! `histogram` is gone the same way — binning is grouping, so it is a parameter
-//! of `aggregate`. `top_k` is not: it returns whole rows ordered and limited,
-//! which is a read, and `read` is where it went, along with `get_vertex`.
+//! `read` · `expand{into|all}` · `path` · `aggregate` · `schema` ·
+//! `execute_sql` — the set ADR-0042 closes the surface at. Eleven left, and
+//! only four of them were deleted rather than absorbed:
+//!
+//! - Four never had an implementation. Three were never verbs:
+//!   `summarize_cluster` and `answer_with_communities` are a `read` over a
+//!   level, and `set_selection` always belonged to the client.
+//! - Four introspection verbs became `schema`; what used to separate the cheap
+//!   ones from the expensive one is now a parameter.
+//! - `histogram` became a parameter of `aggregate`, because binning is
+//!   grouping. `top_k` and `get_vertex` became `read`, because both were rows
+//!   of one type under a predicate, an order and a limit.
+//! - `viewport` and `materialize_graph` are gone with nowhere to go.
+//!   **The camera is addressed, not queried** (ADR-0042): the LOD is not a
+//!   filter, it is a different relation, and a `WHERE` cannot change which
+//!   table it reads. The tiles answer that, and they are not a verb.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed
@@ -23,7 +29,6 @@ pub mod aggregate;
 pub mod discovery;
 pub mod schema;
 pub mod sql;
-pub mod viewport;
 
 use serde::{Deserialize, Serialize};
 
@@ -49,12 +54,6 @@ pub enum Operation {
     // `histogram` is a parameter of this one rather than a verb beside it.
     Aggregate(aggregate::AggregateParams),
 
-    // Viewport — the larger-than-RAM-friendly visual layer (writer W3 emits
-    // morton-sorted vertex Parquet so bbox + LIMIT = predicate pushdown).
-    // Both leave with ADR-0042: the camera is addressed, not queried.
-    Viewport(viewport::ViewportParams),
-    MaterializeGraph(viewport::MaterializeGraphParams),
-
     // Escape hatch — text2sql lives here. Bindings MAY hide this verb behind
     // a permission flag (keasy proxy disables it for participant users).
     ExecuteSql(sql::ExecuteSqlParams),
@@ -72,8 +71,6 @@ impl Operation {
             Self::Expand(_) => "expand",
             Self::Path(_) => "path",
             Self::Aggregate(_) => "aggregate",
-            Self::Viewport(_) => "viewport",
-            Self::MaterializeGraph(_) => "materialize_graph",
             Self::ExecuteSql(_) => "execute_sql",
         }
     }

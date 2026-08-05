@@ -359,53 +359,6 @@ fn path_a_to_c() {
 }
 
 #[test]
-fn viewport_bbox_filters_by_layout() {
-    use fossil_graph::operations::viewport::{
-        BoundingBox, ViewportMode, ViewportParams, ViewportResult,
-    };
-    let m = manifest();
-    let conn = Connection::open_in_memory().expect("open duckdb");
-    // Real layout coords (W3 would fill these); a→(1,1) b→(2,2) c→(50,50).
-    conn.execute_batch(
-        r#"
-        CREATE TABLE "Person" (
-            dense_id UINTEGER, subject VARCHAR, age BIGINT, name VARCHAR,
-            x REAL, y REAL, cluster_id UINTEGER
-        );
-        INSERT INTO "Person" VALUES
-            (0, 'urn:a', 30, 'Ann', 1, 1, 0),
-            (1, 'urn:b', 41, 'Bob', 2, 2, 0),
-            (2, 'urn:c', 25, 'Cy', 50, 50, 0);
-        CREATE TABLE "Person_knows_Person" (src_dense UINTEGER, dst_dense UINTEGER);
-        "#,
-    )
-    .expect("seed");
-
-    let r: ViewportResult = run(
-        &conn,
-        &m,
-        &Operation::Viewport(ViewportParams {
-            bbox: BoundingBox {
-                x_min: 0.0,
-                y_min: 0.0,
-                x_max: 10.0,
-                y_max: 10.0,
-            },
-            zoom: 1.0,
-            lod_threshold: 0.5,
-            limit: 1000,
-            vertex_types: Vec::new(),
-        }),
-    );
-    assert_eq!(r.mode, ViewportMode::Detail);
-    // a and b are inside the 0..10 box; c (50,50) is outside.
-    assert_eq!(r.n, 2);
-    let ids: Vec<u32> = r.vertices.iter().map(|v| v.dense_id).collect();
-    assert!(ids.contains(&0) && ids.contains(&1) && !ids.contains(&2));
-    assert!(r.vertices.iter().all(|v| v.type_idx == 0));
-}
-
-#[test]
 fn execute_sql_real_columns_and_cap() {
     use fossil_graph::operations::sql::{ExecuteSqlParams, ExecuteSqlResult};
     let (conn, m) = (connection(), manifest());

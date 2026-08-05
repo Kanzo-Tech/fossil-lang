@@ -2,7 +2,7 @@
 //! over stdio. The host (keasy) spawns this as a subprocess and calls the
 //! `dispatch_verb` tool; see `lib.rs` for the native execution core.
 //!
-//! One generic tool (`dispatch_verb`) covers all 17 verbs via the
+//! One generic tool (`dispatch_verb`) covers all six verbs via the
 //! `{ verb, params }` operation envelope — the minimal surface that is still
 //! the full verb service. Per-verb LLM-facing tools (for the `/ask` tool-loop)
 //! are a follow-up; the transport + execution core land here.

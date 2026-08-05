@@ -1,8 +1,8 @@
-//! Aggregation verbs — `aggregate`, `top_k`.
+//! The aggregation verb — `aggregate`.
 //!
-//! Constant-memory by construction: every verb translates to a single SQL
-//! pass with a bounded result set (`GROUP BY` cardinality cap or `LIMIT`).
-//! Safe to expose to LLM tool callers without further cost-gating.
+//! Constant-memory by construction: one SQL pass with a bounded result set
+//! (`GROUP BY` cardinality cap or `LIMIT`). Safe to expose to LLM tool callers
+//! without further cost-gating.
 
 use serde::{Deserialize, Serialize};
 
@@ -68,30 +68,4 @@ pub struct AggregateRow {
     /// was binned (pair it with `AggregateResult::edges` for the range).
     pub group: serde_json::Value,
     pub value: f64,
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// top_k
-// ──────────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TopKParams {
-    pub vertex_type: String,
-    pub order_by: String,
-    #[serde(default = "default_k")]
-    pub k: u32,
-    #[serde(default)]
-    pub descending: bool,
-}
-
-const fn default_k() -> u32 {
-    20
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TopKResult {
-    /// Rows as opaque JSON objects so the verb stays generic across
-    /// arbitrary vertex shapes. Bindings render to their UI of choice.
-    pub rows: Vec<serde_json::Value>,
 }

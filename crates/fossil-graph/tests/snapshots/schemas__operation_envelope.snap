@@ -67,28 +67,6 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/ViewportParams"
-      verb:
-        type: string
-        enum:
-          - viewport
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
-        $ref: "#/definitions/MaterializeGraphParams"
-      verb:
-        type: string
-        enum:
-          - materialize_graph
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
         $ref: "#/definitions/ExecuteSqlParams"
       verb:
         type: string
@@ -139,26 +117,6 @@ definitions:
       - avg
       - min
       - max
-  BoundingBox:
-    type: object
-    required:
-      - x_max
-      - x_min
-      - y_max
-      - y_min
-    properties:
-      x_max:
-        type: number
-        format: float
-      x_min:
-        type: number
-        format: float
-      y_max:
-        type: number
-        format: float
-      y_min:
-        type: number
-        format: float
   ExecuteSqlParams:
     type: object
     required:
@@ -222,21 +180,6 @@ definitions:
         allOf:
           - $ref: "#/definitions/ExpandMode"
     additionalProperties: false
-  MaterializeGraphParams:
-    type: object
-    properties:
-      limit:
-        default: 50000
-        type: integer
-        format: uint32
-        minimum: 0
-      vertex_types:
-        description: Restrict to a subset of vertex types. Empty = all.
-        default: []
-        type: array
-        items:
-          type: string
-    additionalProperties: false
   PathParams:
     type: object
     required:
@@ -297,32 +240,4 @@ definitions:
         type:
           - string
           - "null"
-    additionalProperties: false
-  ViewportParams:
-    type: object
-    required:
-      - bbox
-      - zoom
-    properties:
-      bbox:
-        $ref: "#/definitions/BoundingBox"
-      limit:
-        default: 500000
-        type: integer
-        format: uint32
-        minimum: 0
-      lod_threshold:
-        default: 0.5
-        type: number
-        format: float
-      vertex_types:
-        description: Restrict to a subset of vertex types. Empty = all.
-        default: []
-        type: array
-        items:
-          type: string
-      zoom:
-        description: "Current zoom level. Above [`Self::lod_threshold`] the executor swaps to aggregate mode (`GROUP BY cluster_id`) returning ≤ 10k super-nodes regardless of total N."
-        type: number
-        format: float
     additionalProperties: false
