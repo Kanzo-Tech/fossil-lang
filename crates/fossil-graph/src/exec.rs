@@ -22,8 +22,7 @@ use serde_json::Value;
 
 use crate::manifest::{Manifest, edge_table_name};
 use crate::operations::aggregate::{
-    AggregateParams, AggregateResult, AggregateRow, Aggregation, HistogramKind, HistogramParams,
-    HistogramResult, TopKParams, TopKResult,
+    AggregateParams, AggregateResult, AggregateRow, Aggregation, TopKParams, TopKResult,
 };
 use crate::operations::discovery::{
     FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult, GetVertexParams,
@@ -117,7 +116,6 @@ impl<E: DuckExecutor> Context<'_, E> {
         match op {
             Operation::Schema(p) => to_json(&self.schema(p).await?),
             Operation::Aggregate(p) => to_json(&self.aggregate(p).await?),
-            Operation::Histogram(p) => to_json(&self.histogram(p).await?),
             Operation::TopK(p) => to_json(&self.top_k(p).await?),
             Operation::FindNeighbors(p) => to_json(&self.find_neighbors(p).await?),
             Operation::FindPath(p) => to_json(&self.find_path(p).await?),
@@ -275,21 +273,26 @@ impl<E: DuckExecutor> Context<'_, E> {
 
     // ── Aggregation verbs ─────────────────────────────────────────────────
 
+    /// One grouping, over values or over ranges.
+    ///
+    /// `bins` is the whole of what `histogram` used to be a separate verb for.
+    /// Both arms end in one `GROUP BY` with a bounded cardinality; they differ
+    /// only in where the group key comes from.
     async fn aggregate(&self, p: &AggregateParams) -> Result<AggregateResult> {
         self.manifest.lookup_vertex(&p.vertex_type)?;
+        match p.bins {
+            None => self.aggregate_by_value(p).await,
+            // `limit` caps rows in both arms, so it caps bins here: one meaning.
+            Some(bins) => self.aggregate_by_range(p, bins.clamp(1, p.limit.max(1))).await,
+        }
+    }
+
+    /// `GROUP BY` the column, ordered by the aggregate and cut at `limit` —
+    /// constant memory by the cap.
+    async fn aggregate_by_value(&self, p: &AggregateParams) -> Result<AggregateResult> {
         let table = quote_ident(&p.vertex_type);
         let group = quote_ident(&p.group_by);
-        let agg_expr = match p.agg {
-            Aggregation::Count => "count(*)".to_string(),
-            measured => {
-                let measure = p.measure.as_deref().ok_or_else(|| GraphError::InvalidParams {
-                    verb: "aggregate",
-                    detail: format!("agg `{}` requires a `measure` column", agg_fn(measured)),
-                })?;
-                format!("{}({})", agg_fn(measured), quote_ident(measure))
-            }
-        };
-        // group cardinality is capped by LIMIT → constant memory.
+        let agg_expr = agg_expr(p)?;
         let sql = format!(
             "SELECT {group} AS grp, {agg_expr}::DOUBLE AS val FROM {table} \
              GROUP BY {group} ORDER BY val DESC LIMIT {}",
@@ -305,7 +308,103 @@ impl<E: DuckExecutor> Context<'_, E> {
                 value: r.get("val").and_then(Value::as_f64).unwrap_or(0.0),
             })
             .collect();
-        Ok(AggregateResult { rows })
+        Ok(AggregateResult {
+            rows,
+            edges: Vec::new(),
+        })
+    }
+
+    /// The same `GROUP BY` with the key computed from an equal-width range of
+    /// the column instead of read from it.
+    ///
+    /// The answer is dense: one row per bin, `0.0` where nothing landed. A
+    /// grouping over values omits its empty groups because it cannot know them;
+    /// a grouping over ranges knows exactly how many there are, and a gap in a
+    /// binned answer is information.
+    ///
+    /// Only a numeric or temporal column has ranges. A categorical one is
+    /// rejected rather than silently grouped by value, because the caller that
+    /// asked for bins would get an answer of a shape it did not ask for — and
+    /// grouping it by value is one call away.
+    async fn aggregate_by_range(&self, p: &AggregateParams, bins: u32) -> Result<AggregateResult> {
+        let datatype = self.field_datatype(&p.vertex_type, &p.group_by)?;
+        if !is_binnable_datatype(&datatype) {
+            return Err(GraphError::InvalidParams {
+                verb: "aggregate",
+                detail: format!(
+                    "`bins` needs a numeric or temporal column; `{}` is `{datatype}` — group over \
+                     its values instead",
+                    p.group_by
+                ),
+            });
+        }
+
+        let table = quote_ident(&p.vertex_type);
+        let field = quote_ident(&p.group_by);
+        let agg_expr = agg_expr(p)?;
+
+        let bounds = self
+            .exec
+            .query_json(&format!(
+                "SELECT min({field})::DOUBLE AS lo, max({field})::DOUBLE AS hi FROM {table}"
+            ))
+            .await?;
+        let (Some(lo), Some(hi)) = (scalar_f64(&bounds, "lo"), scalar_f64(&bounds, "hi")) else {
+            // Empty column → no range, so no bins.
+            return Ok(AggregateResult {
+                rows: Vec::new(),
+                edges: Vec::new(),
+            });
+        };
+
+        let width = (hi - lo) / f64::from(bins);
+        let edges = (0..=bins).map(|i| f64::from(i).mul_add(width, lo)).collect();
+        let mut values = vec![0.0_f64; bins as usize];
+
+        if width > 0.0 {
+            let rows = self
+                .exec
+                .query_json(&format!(
+                    "SELECT least({bins} - 1, floor(({field}::DOUBLE - {lo}) / {width}))::BIGINT \
+                     AS grp, {agg_expr}::DOUBLE AS val FROM {table} WHERE {field} IS NOT NULL \
+                     GROUP BY grp ORDER BY grp"
+                ))
+                .await?;
+            for r in &rows {
+                let (Some(bin), Some(val)) = (
+                    r.get("grp").and_then(Value::as_u64),
+                    r.get("val").and_then(Value::as_f64),
+                ) else {
+                    continue;
+                };
+                if let Some(slot) = usize::try_from(bin).ok().and_then(|i| values.get_mut(i)) {
+                    *slot = val;
+                }
+            }
+        } else {
+            // Every value equal → one bin holds the whole column.
+            let rows = self
+                .exec
+                .query_json(&format!(
+                    "SELECT {agg_expr}::DOUBLE AS val FROM {table} WHERE {field} IS NOT NULL"
+                ))
+                .await?;
+            if let (Some(val), Some(slot)) = (scalar_f64(&rows, "val"), values.first_mut()) {
+                *slot = val;
+            }
+        }
+
+        Ok(AggregateResult {
+            rows: values
+                .into_iter()
+                .enumerate()
+                .map(|(i, value)| AggregateRow {
+                    group: Value::from(i),
+                    value,
+                })
+                .collect(),
+            edges,
+        })
     }
 
     async fn top_k(&self, p: &TopKParams) -> Result<TopKResult> {
@@ -317,93 +416,6 @@ impl<E: DuckExecutor> Context<'_, E> {
         Ok(TopKResult {
             rows: self.exec.query_json(&sql).await?,
         })
-    }
-
-    async fn histogram(&self, p: &HistogramParams) -> Result<HistogramResult> {
-        let field_kind = histogram_kind(&self.field_datatype(&p.vertex_type, &p.field)?);
-        let table = quote_ident(&p.vertex_type);
-        let field = quote_ident(&p.field);
-        let bins = p.bins.max(1);
-
-        match field_kind {
-            HistogramKind::Categorical => {
-                // No numeric axis: return the top-`bins` category counts. Labels
-                // aren't representable in the f64 `edges` contract, so edges carry
-                // the bin ordinals; callers pair them with a separate label query.
-                let rows = self
-                    .exec
-                    .query_json(&format!(
-                        "SELECT count(*) AS n FROM {table} WHERE {field} IS NOT NULL \
-                         GROUP BY {field} ORDER BY n DESC LIMIT {bins}"
-                    ))
-                    .await?;
-                let counts: Vec<u64> = rows
-                    .iter()
-                    .map(|r| r.get("n").and_then(Value::as_u64).unwrap_or(0))
-                    .collect();
-                let edges = (0..counts.len())
-                    .map(|i| f64::from(u32::try_from(i).unwrap_or(u32::MAX)))
-                    .collect();
-                Ok(HistogramResult {
-                    edges,
-                    counts,
-                    field_kind,
-                })
-            }
-            HistogramKind::Numeric | HistogramKind::Temporal => {
-                let bounds = self
-                    .exec
-                    .query_json(&format!(
-                        "SELECT min({field})::DOUBLE AS lo, max({field})::DOUBLE AS hi FROM {table}"
-                    ))
-                    .await?;
-                let (Some(lo), Some(hi)) = (
-                    scalar_f64(&bounds, "lo"),
-                    scalar_f64(&bounds, "hi"),
-                ) else {
-                    // Empty column → no bins.
-                    return Ok(HistogramResult {
-                        edges: Vec::new(),
-                        counts: Vec::new(),
-                        field_kind,
-                    });
-                };
-                let width = (hi - lo) / f64::from(bins);
-                let edges = (0..=bins).map(|i| f64::from(i).mul_add(width, lo)).collect();
-                let mut counts = vec![0u64; bins as usize];
-                if width > 0.0 {
-                    let rows = self
-                        .exec
-                        .query_json(&format!(
-                            "SELECT least({bins} - 1, floor(({field}::DOUBLE - {lo}) / {width}))::BIGINT \
-                             AS bin, count(*) AS n FROM {table} WHERE {field} IS NOT NULL \
-                             GROUP BY bin ORDER BY bin"
-                        ))
-                        .await?;
-                    for r in &rows {
-                        let (Some(bin), Some(n)) = (
-                            r.get("bin").and_then(Value::as_u64),
-                            r.get("n").and_then(Value::as_u64),
-                        ) else {
-                            continue;
-                        };
-                        if let Some(slot) =
-                            usize::try_from(bin).ok().and_then(|i| counts.get_mut(i))
-                        {
-                            *slot = n;
-                        }
-                    }
-                } else {
-                    // All values equal → one populated bin.
-                    counts[0] = self.count_rows(&p.vertex_type).await?;
-                }
-                Ok(HistogramResult {
-                    edges,
-                    counts,
-                    field_kind,
-                })
-            }
-        }
     }
 
     // ── Escape hatch ──────────────────────────────────────────────────────
@@ -1110,6 +1122,21 @@ fn scalar_f64(rows: &[Value], key: &str) -> Option<f64> {
         .and_then(Value::as_f64)
 }
 
+/// The `DuckDB` aggregate expression, checking that a measured aggregation was
+/// handed the column it measures.
+fn agg_expr(p: &AggregateParams) -> Result<String> {
+    Ok(match p.agg {
+        Aggregation::Count => "count(*)".to_string(),
+        measured => {
+            let measure = p.measure.as_deref().ok_or_else(|| GraphError::InvalidParams {
+                verb: "aggregate",
+                detail: format!("agg `{}` requires a `measure` column", agg_fn(measured)),
+            })?;
+            format!("{}({})", agg_fn(measured), quote_ident(measure))
+        }
+    })
+}
+
 /// The `DuckDB` aggregate function name for a measured [`Aggregation`].
 /// `Count` is handled separately (it takes no measure column).
 const fn agg_fn(a: Aggregation) -> &'static str {
@@ -1122,13 +1149,10 @@ const fn agg_fn(a: Aggregation) -> &'static str {
     }
 }
 
-/// Classify a `GraphAr` `data_type` spelling for histogram binning.
-fn histogram_kind(datatype: &str) -> HistogramKind {
-    match datatype {
-        "int32" | "int64" | "float" | "double" => HistogramKind::Numeric,
-        "date" | "timestamp" | "time" => HistogramKind::Temporal,
-        _ => HistogramKind::Categorical,
-    }
+/// Whether a `GraphAr` `data_type` spelling has ranges to bin over. A string
+/// or a boolean does not: the only grouping it admits is by value.
+fn is_binnable_datatype(datatype: &str) -> bool {
+    is_numeric_datatype(datatype) || matches!(datatype, "date" | "timestamp" | "time")
 }
 
 fn value_to_string(v: &Value) -> String {
@@ -1363,6 +1387,7 @@ mod tests {
                 group_by: "name".into(),
                 agg: Aggregation::Count,
                 measure: None,
+                bins: None,
                 limit: 1000,
             }),
             &m,
@@ -1384,6 +1409,7 @@ mod tests {
                 group_by: "name".into(),
                 agg: Aggregation::Sum,
                 measure: None,
+                bins: None,
                 limit: 1000,
             }),
             &m,
@@ -1416,60 +1442,87 @@ mod tests {
     }
 
     #[test]
-    fn histogram_numeric_builds_edges_and_counts() {
+    fn aggregate_over_ranges_is_dense_and_carries_its_edges() {
         let m = fixture();
-        // age is int64 → numeric. First query = bounds, second = buckets.
+        // age is int64 → binnable. First query = bounds, second = the grouping.
         let exec = FnExec(|sql: &str| {
             if sql.contains("min(") {
                 vec![serde_json::json!({ "lo": 0.0, "hi": 4.0 })]
             } else {
+                assert!(sql.contains("GROUP BY grp"), "still one GROUP BY: {sql}");
                 vec![
-                    serde_json::json!({ "bin": 0, "n": 3 }),
-                    serde_json::json!({ "bin": 3, "n": 1 }),
+                    serde_json::json!({ "grp": 0, "val": 3.0 }),
+                    serde_json::json!({ "grp": 3, "val": 1.0 }),
                 ]
             }
         });
         let v = run(
-            &Operation::Histogram(HistogramParams {
+            &Operation::Aggregate(AggregateParams {
                 vertex_type: "Person".into(),
-                field: "age".into(),
-                bins: 4,
+                group_by: "age".into(),
+                agg: Aggregation::Count,
+                measure: None,
+                bins: Some(4),
+                limit: 1000,
             }),
             &m,
             &exec,
         )
         .unwrap();
-        let r: HistogramResult = serde_json::from_value(v).unwrap();
-        assert_eq!(r.field_kind, HistogramKind::Numeric);
-        assert_eq!(r.edges, vec![0.0, 1.0, 2.0, 3.0, 4.0]); // bins+1 edges
-        assert_eq!(r.counts, vec![3, 0, 0, 1]); // bins counts, bucketed by index
+        let r: AggregateResult = serde_json::from_value(v).unwrap();
+        assert_eq!(r.edges, vec![0.0, 1.0, 2.0, 3.0, 4.0]); // bins + 1
+        // Dense: the two bins nothing landed in are rows, not absences.
+        let values: Vec<f64> = r.rows.iter().map(|row| row.value).collect();
+        assert_eq!(values, vec![3.0, 0.0, 0.0, 1.0]);
+        assert_eq!(r.rows[3].group, serde_json::json!(3));
     }
 
     #[test]
-    fn histogram_categorical_returns_ordinal_edges() {
+    fn aggregate_over_values_draws_no_axis() {
+        // The two arms are told apart by `edges`, so a grouping over values
+        // must not carry any: there is no range for a bin edge to bound.
         let m = fixture();
-        // name is string → categorical: top-bins counts, ordinal edges.
-        let exec = FnExec(|sql: &str| {
-            assert!(sql.contains("GROUP BY") && !sql.contains("min("));
-            vec![
-                serde_json::json!({ "n": 5 }),
-                serde_json::json!({ "n": 2 }),
-            ]
-        });
+        let exec = FnExec(|_: &str| vec![serde_json::json!({ "grp": "a", "val": 1.0 })]);
         let v = run(
-            &Operation::Histogram(HistogramParams {
+            &Operation::Aggregate(AggregateParams {
                 vertex_type: "Person".into(),
-                field: "name".into(),
-                bins: 10,
+                group_by: "name".into(),
+                agg: Aggregation::Count,
+                measure: None,
+                bins: None,
+                limit: 1000,
             }),
             &m,
             &exec,
         )
         .unwrap();
-        let r: HistogramResult = serde_json::from_value(v).unwrap();
-        assert_eq!(r.field_kind, HistogramKind::Categorical);
-        assert_eq!(r.counts, vec![5, 2]);
-        assert_eq!(r.edges, vec![0.0, 1.0]);
+        let r: AggregateResult = serde_json::from_value(v).unwrap();
+        assert!(r.edges.is_empty());
+    }
+
+    #[test]
+    fn aggregate_refuses_to_bin_a_categorical_column() {
+        // `name` is a string: it has no ranges. Grouping it by value is the
+        // answer, and it is one parameter away — so say so rather than quietly
+        // return an answer of a different shape.
+        let m = fixture();
+        let err = run(
+            &Operation::Aggregate(AggregateParams {
+                vertex_type: "Person".into(),
+                group_by: "name".into(),
+                agg: Aggregation::Count,
+                measure: None,
+                bins: Some(10),
+                limit: 1000,
+            }),
+            &m,
+            &FakeExec,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            GraphError::InvalidParams { verb: "aggregate", .. }
+        ));
     }
 
     /// A [`SchemaParams`] naming nothing, one type, or one type + one field.

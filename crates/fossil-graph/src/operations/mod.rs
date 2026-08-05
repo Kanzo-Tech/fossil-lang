@@ -1,12 +1,15 @@
 //! The verbs of the fossil-graph surface, on the way from seventeen to six.
 //!
 //! ADR-0042 closes the surface at `read`, `expand{into|all}`, `path`,
-//! `aggregate`, `schema` and `execute_sql`. **Ten remain.** The four that never
+//! `aggregate`, `schema` and `execute_sql`. **Nine remain.** The four that never
 //! had an implementation are gone, three of them because they were never verbs
 //! — `summarize_cluster` and `answer_with_communities` are a `read` over a
 //! level, and `set_selection` always belonged to the client. The four
 //! introspection verbs are gone too: `schema` answers all of them, and what
 //! used to separate the cheap ones from the expensive one is now a parameter.
+//! `histogram` is gone the same way — binning is grouping, so it is a parameter
+//! of `aggregate`. `top_k` is not: it returns whole rows ordered and limited,
+//! which is a read.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed
@@ -40,9 +43,9 @@ pub enum Operation {
     FindPath(discovery::FindPathParams),
     GetVertex(discovery::GetVertexParams),
 
-    // Aggregation — bounded constant-memory queries.
+    // Aggregation — bounded constant-memory queries. Binning is grouping, so
+    // `histogram` is a parameter of this one rather than a verb beside it.
     Aggregate(aggregate::AggregateParams),
-    Histogram(aggregate::HistogramParams),
     TopK(aggregate::TopKParams),
 
     // Viewport — the larger-than-RAM-friendly visual layer (writer W3 emits
@@ -68,7 +71,6 @@ impl Operation {
             Self::FindPath(_) => "find_path",
             Self::GetVertex(_) => "get_vertex",
             Self::Aggregate(_) => "aggregate",
-            Self::Histogram(_) => "histogram",
             Self::TopK(_) => "top_k",
             Self::Viewport(_) => "viewport",
             Self::MaterializeGraph(_) => "materialize_graph",

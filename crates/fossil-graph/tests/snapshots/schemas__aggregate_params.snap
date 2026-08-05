@@ -4,6 +4,7 @@ expression: "schema_for! (aggregate::AggregateParams)"
 ---
 $schema: "http://json-schema.org/draft-07/schema#"
 title: AggregateParams
+description: "One grouping, over values or over ranges.\n\n**Binning is grouping**, which is why `histogram` is not a second verb: it was the same `GROUP BY` with the key computed from a range instead of read from a column. Setting [`Self::bins`] is what picks which, and it is the only difference between the two."
 type: object
 required:
   - agg
@@ -12,9 +13,19 @@ required:
 properties:
   agg:
     $ref: "#/definitions/Aggregation"
+  bins:
+    description: "Group over this many equal-width ranges of `group_by` rather than over its distinct values — what `histogram` used to be. Requires a numeric or temporal column: a categorical one has no ranges, and grouping it by value is already the answer."
+    default: ~
+    type:
+      - integer
+      - "null"
+    format: uint32
+    minimum: 0
   group_by:
+    description: "The column the groups come from — its values, or its ranges when [`Self::bins`] is set."
     type: string
   limit:
+    description: "Cap on rows returned. Groups are ordered by value and cut here; a binned call is cut to this many bins instead, so `limit` means one thing."
     default: 1000
     type: integer
     format: uint32

@@ -11,8 +11,6 @@ import type {
   GetVertexResult,
   AggregateParams,
   AggregateResult,
-  HistogramParams,
-  HistogramResult,
   TopKParams,
   TopKResult,
   ViewportParams,
@@ -76,8 +74,11 @@ export interface GraphClient {
   findPath(params: FindPathParams): Promise<FindPathResult>;
   /** Fetch one vertex's user-facing properties by subject IRI. */
   getVertex(params: GetVertexParams): Promise<GetVertexResult>;
+  /**
+   * One grouping, over values or — with `bins` — over equal-width ranges of
+   * the column. Binning is grouping, so there is no separate histogram verb.
+   */
   aggregate(params: AggregateParams): Promise<AggregateResult>;
-  histogram(params: HistogramParams): Promise<HistogramResult>;
   topK(params: TopKParams): Promise<TopKResult>;
   viewport(params: ViewportParams): Promise<ViewportResult>;
   /** Canvas-ready whole-graph snapshot (vertices + dense→subject-mapped edges). */
@@ -110,7 +111,6 @@ export function createGraphClient(opts: CreateGraphClientOpts): GraphClient {
     findPath: (params) => call({ verb: 'find_path', params }),
     getVertex: (params) => call({ verb: 'get_vertex', params }),
     aggregate: (params) => call({ verb: 'aggregate', params }),
-    histogram: (params) => call({ verb: 'histogram', params }),
     topK: (params) => call({ verb: 'top_k', params }),
     viewport: (params) => call({ verb: 'viewport', params }),
     materializeGraph: (params) => call({ verb: 'materialize_graph', params }),

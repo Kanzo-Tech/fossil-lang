@@ -10,7 +10,6 @@ export type Aggregation = "count" | "sum" | "avg" | "min" | "max";
  * Inferred role for chart-axis defaults. Mirrors keasy `lib/graph-schema.ts:: inferRole` — promoted here to be authoritative.
  */
 export type FieldRole = "identifier" | "dimension" | "measure";
-export type HistogramKind = "numeric" | "temporal" | "categorical";
 /**
  * All graph operations dispatchable on the surface.
  *
@@ -36,10 +35,6 @@ export type Operation =
   | {
       params: AggregateParams;
       verb: "aggregate";
-    }
-  | {
-      params: HistogramParams;
-      verb: "histogram";
     }
   | {
       params: TopKParams;
@@ -77,9 +72,6 @@ export interface FossilGraphSchemas {
   FindPathResult?: FindPathResult;
   GetVertexParams?: GetVertexParams;
   GetVertexResult?: GetVertexResult;
-  HistogramKind?: HistogramKind;
-  HistogramParams?: HistogramParams;
-  HistogramResult?: HistogramResult;
   MaterializeGraphParams?: MaterializeGraphParams;
   MaterializeGraphResult?: MaterializeGraphResult;
   MaterializedEdge?: MaterializedEdge;
@@ -98,9 +90,24 @@ export interface FossilGraphSchemas {
   ViewportResult?: ViewportResult;
   ViewportVertex?: ViewportVertex;
 }
+/**
+ * One grouping, over values or over ranges.
+ *
+ * **Binning is grouping**, which is why `histogram` is not a second verb: it was the same `GROUP BY` with the key computed from a range instead of read from a column. Setting [`Self::bins`] is what picks which, and it is the only difference between the two.
+ */
 export interface AggregateParams {
   agg: Aggregation;
+  /**
+   * Group over this many equal-width ranges of `group_by` rather than over its distinct values — what `histogram` used to be. Requires a numeric or temporal column: a categorical one has no ranges, and grouping it by value is already the answer.
+   */
+  bins?: number | null;
+  /**
+   * The column the groups come from — its values, or its ranges when [`Self::bins`] is set.
+   */
   group_by: string;
+  /**
+   * Cap on rows returned. Groups are ordered by value and cut here; a binned call is cut to this many bins instead, so `limit` means one thing.
+   */
   limit?: number;
   /**
    * Optional measure column for `sum`/`avg`/`min`/`max` aggregations. Ignored when `agg` is `count`.
@@ -109,10 +116,19 @@ export interface AggregateParams {
   vertex_type: string;
 }
 export interface AggregateResult {
+  /**
+   * Bin boundaries, `rows.len() + 1` of them, low to high. **Empty unless the call set `bins`** — a grouping over values has no axis to draw.
+   */
+  edges: number[];
   rows: AggregateRow[];
 }
 export interface AggregateRow {
-  group: unknown;
+  /**
+   * The group's key: the column's value, or the bin's ordinal when the call was binned (pair it with `AggregateResult::edges` for the range).
+   */
+  group: {
+    [k: string]: unknown;
+  };
   value: number;
 }
 export interface BoundingBox {
@@ -227,25 +243,6 @@ export interface GetVertexResult {
   vertex?: {
     [k: string]: unknown;
   };
-}
-export interface HistogramParams {
-  bins?: number;
-  field: string;
-  vertex_type: string;
-}
-export interface HistogramResult {
-  /**
-   * Per-bin counts.
-   */
-  counts: number[];
-  /**
-   * Bin edges (length `bins + 1` for numeric, `bins` for categorical).
-   */
-  edges: number[];
-  /**
-   * Field role echoed back so the caller can pick the right chart.
-   */
-  field_kind: "numeric" | "temporal" | "categorical";
 }
 export interface MaterializeGraphParams {
   limit?: number;

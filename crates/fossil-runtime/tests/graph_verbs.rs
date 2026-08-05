@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use duckdb::Connection;
 use fossil_graph::manifest::{Manifest, ManifestSource};
 use fossil_graph::operations::aggregate::{
-    AggregateParams, AggregateResult, Aggregation, HistogramParams, HistogramResult, TopKParams,
-    TopKResult,
+    AggregateParams, AggregateResult, Aggregation, TopKParams, TopKResult,
 };
 use fossil_graph::operations::discovery::{
     FindNeighborsParams, FindNeighborsResult, FindPathParams, FindPathResult,
@@ -181,6 +180,7 @@ fn aggregate_count_by_name() {
             group_by: "name".into(),
             agg: Aggregation::Count,
             measure: None,
+            bins: None,
             limit: 100,
         }),
     );
@@ -199,6 +199,7 @@ fn aggregate_avg_requires_and_uses_measure() {
             group_by: "name".into(),
             agg: Aggregation::Avg,
             measure: Some("age".into()),
+            bins: None,
             limit: 100,
         }),
     );
@@ -209,21 +210,26 @@ fn aggregate_avg_requires_and_uses_measure() {
 }
 
 #[test]
-fn histogram_age_numeric() {
+fn aggregate_bins_age_over_real_ranges() {
     let (conn, m) = (connection(), manifest());
-    let r: HistogramResult = run(
+    let r: AggregateResult = run(
         &conn,
         &m,
-        &Operation::Histogram(HistogramParams {
+        &Operation::Aggregate(AggregateParams {
             vertex_type: "Person".into(),
-            field: "age".into(),
-            bins: 4,
+            group_by: "age".into(),
+            agg: Aggregation::Count,
+            measure: None,
+            bins: Some(4),
+            limit: 100,
         }),
     );
     assert_eq!(r.edges.len(), 5); // bins + 1
     assert!((r.edges[0] - 25.0).abs() < 1e-6);
     assert!((r.edges[4] - 41.0).abs() < 1e-6);
-    assert_eq!(r.counts.iter().sum::<u64>(), 3);
+    assert_eq!(r.rows.len(), 4); // dense: one row per bin
+    let total: f64 = r.rows.iter().map(|row| row.value).sum();
+    assert!((total - 3.0).abs() < f64::EPSILON);
 }
 
 #[test]

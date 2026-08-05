@@ -31,7 +31,6 @@ fn main() {
     generator.subschema_for::<discovery::FindPathResult>();
     generator.subschema_for::<discovery::GetVertexResult>();
     generator.subschema_for::<aggregate::AggregateResult>();
-    generator.subschema_for::<aggregate::HistogramResult>();
     generator.subschema_for::<aggregate::TopKResult>();
     generator.subschema_for::<viewport::ViewportResult>();
     generator.subschema_for::<viewport::MaterializeGraphResult>();

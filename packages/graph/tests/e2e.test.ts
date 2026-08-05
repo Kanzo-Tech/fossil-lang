@@ -100,15 +100,17 @@ describe('@fossil-lang/graph verbs e2e against DuckDB-WASM', () => {
     expect(rows.every((r) => r.value === 1)).toBe(true);
   });
 
-  it('histogram: numeric field bins real ages', async () => {
-    const { field_kind, counts } = await graph.histogram({
+  it('aggregate: bins real ages over ranges', async () => {
+    const { rows, edges } = await graph.aggregate({
       vertex_type: 'Person',
-      field: 'age',
+      group_by: 'age',
+      agg: 'count',
       bins: 4,
     });
-    expect(field_kind).toBe('numeric');
-    // Every age (25, 30, 41) lands in some bin; counts sum to 3.
-    expect(counts.reduce((a, b) => a + b, 0)).toBe(3);
+    expect(edges).toHaveLength(5); // bins + 1
+    expect(rows).toHaveLength(4); // dense: one row per bin
+    // Every age (25, 30, 41) lands in some bin; the counts sum to 3.
+    expect(rows.reduce((a, r) => a + r.value, 0)).toBe(3);
   });
 
   it('top_k: descending order_by returns the real ordering', async () => {

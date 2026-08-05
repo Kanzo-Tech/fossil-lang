@@ -47,8 +47,6 @@ fn discovery_verbs() {
 fn aggregate_verbs() {
     snap!("aggregate_params", aggregate::AggregateParams);
     snap!("aggregate_result", aggregate::AggregateResult);
-    snap!("histogram_params", aggregate::HistogramParams);
-    snap!("histogram_result", aggregate::HistogramResult);
     snap!("top_k_params", aggregate::TopKParams);
     snap!("top_k_result", aggregate::TopKResult);
 }

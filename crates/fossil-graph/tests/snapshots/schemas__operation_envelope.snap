@@ -67,17 +67,6 @@ oneOf:
       - verb
     properties:
       params:
-        $ref: "#/definitions/HistogramParams"
-      verb:
-        type: string
-        enum:
-          - histogram
-  - type: object
-    required:
-      - params
-      - verb
-    properties:
-      params:
         $ref: "#/definitions/TopKParams"
       verb:
         type: string
@@ -118,6 +107,7 @@ oneOf:
           - execute_sql
 definitions:
   AggregateParams:
+    description: "One grouping, over values or over ranges.\n\n**Binning is grouping**, which is why `histogram` is not a second verb: it was the same `GROUP BY` with the key computed from a range instead of read from a column. Setting [`Self::bins`] is what picks which, and it is the only difference between the two."
     type: object
     required:
       - agg
@@ -126,9 +116,19 @@ definitions:
     properties:
       agg:
         $ref: "#/definitions/Aggregation"
+      bins:
+        description: "Group over this many equal-width ranges of `group_by` rather than over its distinct values — what `histogram` used to be. Requires a numeric or temporal column: a categorical one has no ranges, and grouping it by value is already the answer."
+        default: ~
+        type:
+          - integer
+          - "null"
+        format: uint32
+        minimum: 0
       group_by:
+        description: "The column the groups come from — its values, or its ranges when [`Self::bins`] is set."
         type: string
       limit:
+        description: "Cap on rows returned. Groups are ordered by value and cut here; a binned call is cut to this many bins instead, so `limit` means one thing."
         default: 1000
         type: integer
         format: uint32
@@ -238,22 +238,6 @@ definitions:
     properties:
       subject:
         description: "The vertex's `subject` IRI (unique across the graph)."
-        type: string
-      vertex_type:
-        type: string
-    additionalProperties: false
-  HistogramParams:
-    type: object
-    required:
-      - field
-      - vertex_type
-    properties:
-      bins:
-        default: 50
-        type: integer
-        format: uint32
-        minimum: 0
-      field:
         type: string
       vertex_type:
         type: string
