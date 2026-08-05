@@ -1,2 +1,7 @@
+# Two halves, and the difference is whether npm ever sees it.
+#   packages/  — the published @fossil-lang/* family. CI stamps and publishes these.
+#   apps/      — private hosts. Never published; every recursive CI step excludes them
+#                by path, so adding one here cannot leak into a release.
 packages:
   - 'packages/*'
+  - 'apps/*'

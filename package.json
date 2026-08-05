@@ -3,12 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "description": "Fossil compiler + LSP + editor React library family — monorepo root",
+  "//scripts": "The four recursive scripts stay on packages/ — an app is not a library and has neither a size budget nor a dist to build for anyone. `docs:*` is the separate door.",
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --filter \"./packages/*\" build",
     "build:wasm": "pnpm --filter @fossil-lang/wasm build:wasm",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
-    "size": "pnpm -r size"
+    "test": "pnpm --filter \"./packages/*\" test",
+    "lint": "pnpm --filter \"./packages/*\" lint",
+    "size": "pnpm --filter \"./packages/*\" size",
+    "docs:dev": "pnpm --filter @fossil-lang/docs dev",
+    "docs:build": "pnpm --filter @fossil-lang/docs build"
   },
   "devDependencies": {
     "size-limit": "^11.0.0",
