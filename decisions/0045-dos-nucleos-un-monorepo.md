@@ -825,10 +825,56 @@ ventana con `read(where: …)` sería volver exactamente al número que hizo nac
 
 Con esto los seis verbos ganan su segundo consumidor real, que es lo que la extracción necesitaba.
 
-**4. Sigue abierta la de §1** — dónde vive una convención cuando no es un crate. Se decidirá con una
-revisión de los sistemas de referencia (Arrow, Parquet, MVT, PMTiles, H3 contra S2, Iceberg,
-GraphAr) en vez de por preferencia, porque el punto entero de la pregunta es cuál de las dos formas
-ha producido menos divergencias en sistemas que ya la resolvieron.
+**4. La convención vive en las dos formas — y la evidencia dice cuál cubre qué.**
+
+Se revisaron Arrow, Parquet, Iceberg, Delta, MVT, PMTiles, Zarr, GraphAr, y H3 contra S2. Tres
+hallazgos deciden:
+
+**H3 gana, y no porque los bindings sean mágicos.** Gana porque tiene **un solo oráculo** y casi
+nadie lo reimplementa: cero incidencias de divergencia en todo su ecosistema. S2 tiene cuatro
+oráculos en cadena —`rust-s2` es un port del de Go, `s2js` es «compatible con el de Go»: ports de un
+port— y ningún vector compartido, con divergencias concretas abiertas durante años.
+
+**Y el matiz que decide nuestra frontera: `node-s2` es un *binding*, no un port, y devolvía ids
+equivocados igualmente** — el `number` de JavaScript tiene 53 bits y un cell id tiene 64. **El
+modelo de bindings no protege en una frontera de lenguaje que no puede sostener el valor.** H3 lo
+resolvió por decreto, tipando `H3Index` como cadena antes de que nadie pudiera equivocarse.
+
+**Iceberg demuestra que la aritmética *sí* se puede publicar**, si se publica como Iceberg y no como
+PMTiles: Murmur3 x86 de 32 bits con semilla 0, la fórmula, y una tabla de vectores por tipo
+(`34 → 2017239379`). Buscar esa constante la encuentra en los tests de implementaciones
+independientes que la copiaron. PMTiles despacha su curva de Hilbert con un enlace a Wikipedia, y
+cada port la vuelve a derivar.
+
+De ahí, cuatro obligaciones y ninguna es opcional:
+
+1. **La aritmética se publica como Iceberg, no como PMTiles.** `tile = dense_id >> 12` se escribe con
+   el ancho del desplazamiento, el ancho entero, el signo, y **una tabla de vectores** con los
+   bordes: 0, 4.095, 4.096, 2³¹−1, 2³¹, 2⁵³. Los vectores son el entregable — son lo que se copia.
+   Van en el corpus como Parquet, para que cada capa los lea con lo que ya tiene.
+2. **La representación de 64 bits se decide antes de que alguien se equivoque: `BigInt` en la
+   frontera TS, y `number` prohibido para un id por regla de lint.** No es precaución teórica: `>>`
+   significa tres cosas distintas en nuestras tres capas, y en JavaScript **convierte a 32 bits**.
+   Lo que se envía a la GPU sigue siendo un array tipado; lo que identifica, no.
+3. **Nuestro lector TS llama al mismo Rust compilado**, no reimplementa. Es el modelo H3 y no cuesta
+   nada, porque el escritor ya es Rust. Los terceros —medidos, existen— reciben especificación y
+   vectores, que es la mitad que un wasm no puede darles.
+4. **La conformidad es de ida y vuelta y bloquea el merge.** Escribir con el escritor, leer con el
+   lector wasm y con el camino TS/DuckDB, y comparar. Arrow exige dos implementaciones y tests de
+   integración *antes* de que entre un cambio de formato, y por eso sus huecos son líneas de `skip`
+   en vez de respuestas incorrectas. GraphAr tiene corpus sin ida y vuelta, y por ese hueco se coló
+   su cuarto módulo con CI en verde en los dos lados.
+
+**Lo que invalida esta decisión, y conviene saberlo ahora:** si apareciera un **segundo escritor**
+—alguien que produzca nuestro corpus sin ser nuestro Rust— se invierte la prioridad y la
+especificación pasa a ser el contrato con la librería como una implementación más. Un solo escritor
+es lo que hace segura la mitad de librería; dos escritores es lo que convirtió a Parquet en lo que
+es, con la implementación de referencia normativa por accidente y el `created_by` parseado contra
+tablas de versiones malas conocidas.
+
+**Y el reloj corre en una dirección:** si el corpus llega a terceros antes que los vectores, la
+opción se pierde. El problema de Parquet son trece años de ficheros que ya no se pueden retirar.
+Hoy no hay nada publicado, así que esto es barato exactamente una vez.
 
 ## Consecuencias
 
