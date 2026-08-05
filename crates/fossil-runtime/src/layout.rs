@@ -178,6 +178,7 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 // ──────────────────────────────────────────────────────────────────────────
 
 use duckdb::Connection;
+use fossil_base::probe::Probe;
 
 /// One vertex type's layout target: its vertex Parquet URL plus the CSR Parquet
 /// URLs of its **self-edges** (`src_type == dst_type == this type`), whose
@@ -315,110 +316,6 @@ pub enum LayoutError {
 ///
 /// Returns [`LayoutError`] on the first failing `DuckDB` op, on an adjacency
 /// naming an unknown vertex type, or on a renumbering that dropped rows.
-
-/// Per-phase resident-set reporting for the layout pass, off unless asked for.
-///
-/// Writing a ten-million-vertex corpus peaks at **17.0 GiB** for 713 MB of output
-/// (`kanzo-ui/BENCHMARKS.md`, 2026-08-04). Three candidates were eliminated by measurement before
-/// this existed, which is why it exists: [`community_hierarchy`] in isolation is 3.94 GiB of that
-/// (`examples/layout_memory.rs`); `DuckDB` bounded to 2 GB left the total unchanged and never
-/// touched its spill directory; and the Node generator is not in the process at all — `fossil run`
-/// alone reaches the same figure. So roughly thirteen gigabytes belong to the code between the
-/// database and the pure core, and nothing said which part.
-///
-/// Guessing cost three wrong hypotheses in one afternoon. This reports instead.
-///
-///     FOSSIL_LAYOUT_PROBE=1 fossil run …
-///
-/// Off, it is one relaxed load per phase. On, it shells out to `ps` per phase — which is fine at
-/// this granularity (a dozen calls per run) and is the honest number, because it includes the
-/// allocator's fragmentation where a counting allocator would not.
-pub struct Probe {
-    enabled: bool,
-    peak: u64,
-    last: u64,
-    started: std::time::Instant,
-    phase_started: std::time::Instant,
-}
-
-impl Probe {
-    /// Reads the environment once. A run that does not ask pays a bool.
-    #[must_use]
-    pub fn new(label: &str) -> Self {
-        let enabled = std::env::var("FOSSIL_LAYOUT_PROBE").is_ok_and(|v| !v.is_empty() && v != "0");
-        let now = std::time::Instant::now();
-        let rss = if enabled { rss_bytes() } else { 0 };
-        if enabled {
-            eprintln!("layout probe: {label}");
-            eprintln!(
-                "  {:<28} {:>9} {:>10} {:>10}",
-                "phase", "seconds", "RSS", "delta"
-            );
-            eprintln!("  {:<28} {:>9} {:>9.2}G {:>10}", "start", "", gib(rss), "");
-        }
-        Self {
-            enabled,
-            peak: rss,
-            last: rss,
-            started: now,
-            phase_started: now,
-        }
-    }
-
-    /// Close a phase and report it. The delta is against the previous mark, so a phase that frees
-    /// as much as it takes shows zero and its cost lives in [`Self::peak`] instead.
-    pub fn mark(&mut self, phase: &str) {
-        if !self.enabled {
-            return;
-        }
-        let rss = rss_bytes();
-        self.peak = self.peak.max(rss);
-        let delta = rss as i64 - self.last as i64;
-        eprintln!(
-            "  {:<28} {:>9.1} {:>9.2}G {:>+9.2}G",
-            phase,
-            self.phase_started.elapsed().as_secs_f64(),
-            gib(rss),
-            delta as f64 / (1024.0 * 1024.0 * 1024.0)
-        );
-        self.last = rss;
-        self.phase_started = std::time::Instant::now();
-    }
-
-    /// Final line. Kept separate from [`Self::mark`] so the total is visible even when the last
-    /// phase is cheap and the interesting number was reached three phases ago.
-    pub fn finish(&mut self) {
-        if !self.enabled {
-            return;
-        }
-        let rss = rss_bytes();
-        self.peak = self.peak.max(rss);
-        eprintln!(
-            "  {:<28} {:>9.1} {:>9.2}G  peak {:.2}G",
-            "total",
-            self.started.elapsed().as_secs_f64(),
-            gib(rss),
-            gib(self.peak)
-        );
-    }
-}
-
-fn gib(bytes: u64) -> f64 {
-    bytes as f64 / (1024.0 * 1024.0 * 1024.0)
-}
-
-/// Resident set from the OS, because that is what the machine had to find.
-fn rss_bytes() -> u64 {
-    let pid = std::process::id();
-    std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &pid.to_string()])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u64>().ok())
-        .unwrap_or(0)
-        * 1024
-}
-
 pub fn enrich_layout(
     conn: &Connection,
     targets: &[VertexLayoutTarget],
@@ -432,7 +329,7 @@ pub fn enrich_layout(
     // with each other but their position. See `place_after`.
     let mut origin_x = 0.0f32;
     let mut probe = Probe::new(&format!(
-        "{} vertex type(s), {} adjacency target(s)",
+        "enrich_layout — {} vertex type(s), {} adjacency target(s)",
         targets.len(),
         adjacencies.len()
     ));

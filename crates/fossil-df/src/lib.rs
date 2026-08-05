@@ -53,6 +53,7 @@ use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
 use datafusion::prelude::{
     col, lit, CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext,
 };
+use fossil_base::probe::Probe;
 use fossil_base::SourceFile;
 use fossil_graph_schema::{
     Cardinality, DataType as ScalarType, EdgeType as GraphEdge, GraphSchema, NodeType,
@@ -129,6 +130,7 @@ pub async fn execute_graph<'db>(
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<GraphArData> {
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
+    let mut probe = Probe::new(&format!("execute_graph — {} mapping(s)", mappings.len()));
 
     // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
     // the mappings that emit the SAME type (UNION) before assigning dense ids —
@@ -143,10 +145,12 @@ pub async fn execute_graph<'db>(
             None => groups.push((prepared.node.label.clone(), vec![prepared])),
         }
     }
+    probe.mark("prepare vertices (lazy)");
     let mut vertices = Vec::with_capacity(groups.len());
     let mut nodes = Vec::with_capacity(groups.len());
-    for (_, group) in groups {
+    for (label, group) in groups {
         let (table, node) = finalize_vertex(ctx, group).await?;
+        probe.mark(&format!("collect vertex {label}"));
         vertices.push(table);
         nodes.push(node);
     }
@@ -155,11 +159,17 @@ pub async fn execute_graph<'db>(
     let mut edges = Vec::new();
     let mut edge_types = Vec::new();
     for &mapping in &mappings {
-        for (table, edge_type) in execute_edges(ctx, db, mapping, descriptor, connections).await? {
+        // Marked per `execute_edges` call and not per table: the whole call's
+        // memory is already spent by the time it returns, so a mark inside the
+        // loop over its results would bill all of it to the first table.
+        let produced = execute_edges(ctx, db, mapping, descriptor, connections).await?;
+        probe.mark(&format!("collect {} edge table(s)", produced.len()));
+        for (table, edge_type) in produced {
             edges.push(table);
             edge_types.push(edge_type);
         }
     }
+    probe.finish();
 
     let schema = GraphSchema {
         nodes,
@@ -854,21 +864,37 @@ pub fn run_to_dir(
     connections: &HashMap<String, String>,
     read_uri: impl Fn(&str) -> Result<String, String>,
 ) -> datafusion::error::Result<GraphArData> {
+    let mut probe = Probe::new("run_to_dir");
     let ctx = SessionContext::new();
     for binding in provider_bindings(db, file, descriptor, connections) {
         let bytes = read_uri(&binding.uri).map_err(DataFusionError::Execution)?;
         register_rdf(&ctx, &binding, &bytes)?;
     }
+    probe.mark("register providers");
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| DataFusionError::Execution(format!("build tokio runtime: {e}")))?;
     let graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor, connections))?;
+    // What the boundary type itself holds, against what the process holds. The
+    // gap between them is the executor's transient — sort buffers, and pages the
+    // allocator has not returned — and the two want opposite fixes, so the mark
+    // reports both rather than leaving the difference to be assumed.
+    probe.mark(&format!("execute_graph — {:.2}G in Arrow", graph.arrow_gib()));
+
+    // The executor's context still holds a `MemTable` per vertex type, and the
+    // edge phase joined against them. Nothing below reads them, and the encode
+    // that follows is the other half of the corpus resident at once — so this
+    // is the last moment they can be released rather than added to.
+    drop(ctx);
+    probe.mark("drop session context");
 
     graph
         .write_to_dir(dest_dir)
         .map_err(|e| DataFusionError::Execution(format!("write GraphAr: {e}")))?;
+    probe.mark("write_to_dir");
+    probe.finish();
     Ok(graph)
 }
 
@@ -907,6 +933,22 @@ fn count_rows(batches: &[RecordBatch]) -> i64 {
 }
 
 impl GraphArData {
+    /// What this value costs in Arrow buffers, in `GiB` — every vertex batch plus
+    /// both orientations of every edge table. Cheap (a walk of the batch list, no
+    /// data touched) and the number ADR-0043 is about: the corpus resident in one
+    /// value because the boundary between executing and writing is a whole graph.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn arrow_gib(&self) -> f64 {
+        let batches = self
+            .vertices
+            .iter()
+            .flat_map(|v| &v.batches)
+            .chain(self.edges.iter().flat_map(|e| e.by_source.iter().chain(&e.by_target)));
+        batches.map(RecordBatch::get_array_memory_size).sum::<usize>() as f64
+            / (1024.0 * 1024.0 * 1024.0)
+    }
+
     /// Build the three GraphAr manifest YAMLs (design §C4 phase 3) — the GraphAr
     /// *materializer*, a pure function of the [`GraphSchema`]: the top-level
     /// `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per node type, and

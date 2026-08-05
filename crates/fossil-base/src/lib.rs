@@ -11,6 +11,7 @@ pub mod db;
 pub mod diagnostic;
 pub mod error;
 pub mod files;
+pub mod probe;
 pub mod system;
 
 pub use db::{Db, FossilDb};
