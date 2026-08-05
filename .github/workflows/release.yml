@@ -109,11 +109,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "→ version=$ver  dist-tag=$tag"
 
-      # Stamp the tag's version into every workspace package.json (ephemeral — in
+      # Stamp the tag's version into every PUBLISHED package.json (ephemeral — in
       # the CI checkout only, never committed back). pnpm rewrites internal
       # `workspace:*` deps to this same version automatically at publish time.
-      - name: Stamp version into all packages
-        run: pnpm -r exec npm pkg set version="${{ steps.rel.outputs.version }}"
+      #
+      # `--filter "./packages/*"` is load-bearing, not tidiness. The workspace also
+      # contains `apps/*`, which is never published; unfiltered, this step would
+      # stamp a release version into an app that has no `version` to speak of.
+      - name: Stamp version into all published packages
+        run: pnpm --filter "./packages/*" exec npm pkg set version="${{ steps.rel.outputs.version }}"
 
       - name: Publish to npm
         # Idempotent: pnpm publishes only packages whose version isn't on the
@@ -125,7 +129,11 @@ jobs:
         # and Kanzo-Tech/fossil-lang is private (E422 otherwise). When the repo
         # goes public for the OSS launch, re-add `publishConfig.provenance: true`
         # to each package (or pass --provenance here) to attach the attestation.
-        run: pnpm -r publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
+        #
+        # Scoped to packages/ for the same reason as the stamp above. `private: true`
+        # on an app would also make pnpm skip it, but that is an implicit guard one
+        # forgotten field away from a leaked publish. This one is explicit.
+        run: pnpm --filter "./packages/*" publish --no-git-checks --tag "${{ steps.rel.outputs.tag }}"
         env:
           # BOOTSTRAP (one-time): npm OIDC/Trusted Publishing cannot create a
           # brand-new package, so the FIRST publish needs `NPM_TOKEN` (a Granular
