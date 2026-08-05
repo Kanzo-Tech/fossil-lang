@@ -27,17 +27,17 @@ motor**.
 
 Medido, el acoplamiento actual no sigue ninguna frontera:
 
-| crate | depende de |
-|---|---|
-| `fossil-cli` | `duckdb` |
-| `fossil-engine` | `duckdb` |
-| `fossil-mcp` | `duckdb` |
-| `fossil-runtime` | `duckdb` |
-| `fossil-df` | `datafusion` |
-| `fossil-df-wasm` | `datafusion` |
+| crate | depende de | cómo |
+|---|---|---|
+| `fossil-engine` | `duckdb` | normal |
+| `fossil-mcp` | `duckdb` | normal |
+| `fossil-runtime` | `duckdb` | normal |
+| `fossil-cli` | `duckdb` | **sólo `[dev-dependencies]`** (`Cargo.toml:38`), para leer el Parquet de vuelta en los tests |
+| `fossil-df` | `datafusion` | normal |
+| `fossil-df-wasm` | `datafusion` | normal |
 
-`fossil-mcp` es tooling y arrastra un motor. `fossil-cli` también. Veintiséis crates cuyas fronteras
-se dibujaron **por tema**, cuando lo que las separa es **dónde corre el código**.
+`fossil-mcp` es tooling y arrastra un motor. Veintiséis crates cuyas fronteras se dibujaron **por
+tema**, cuando lo que las separa es **dónde corre el código**.
 
 ## Decisión
 
@@ -74,6 +74,13 @@ Esto es ADR-0042 §1 aplicado al motor y no sólo a la cámara. `fossil-df-wasm`
 motor al navegador es afirmar que el navegador ejecuta programas, que es exactamente lo que ADR-0042
 decidió que no. `fossil-wasm` se parte — el tokenizer y el LSP son anillo 1; lo que ejecute, fuera.
 
+**Corregido el 2026-08-05: esa partición ya había ocurrido.** A `fossil-wasm` no le queda superficie
+de ejecución que sacar — `compile_file` no existe en `src/` (sólo lo nombran una fila de la tabla del
+encabezado y los tests JS), sus dependencias no incluyen ni `duckdb`, ni `datafusion`, ni `fossil-df`,
+ni `fossil-runtime`, ni `fossil-engine`, y su único uso del backend, `lower_to_mir_pg`
+(`lib.rs:737`), **descarta el resultado** con `let _ =` y sólo drena el acumulador de diagnósticos.
+El crate es lenguaje y LSP, que es donde este ADR quería dejarlo.
+
 ### La regla, y su guardia
 
 > Un crate puede depender de su anillo y de los de número menor. Nunca al revés, y nunca de un motor
@@ -85,16 +92,37 @@ Comprobada, no acordada — `deny.toml`:
   criterio de terminado que le ha faltado desde junio.
 - `datafusion` prohibido en los anillos 1 y 3.
 
-**Escrita y ejecutada el 2026-08-05, y hoy está en rojo.** El trinquete con `wrappers` sobre los
-cuatro dependientes directos de `duckdb` no pasa, y lo que destapó al primer intento es que
-`fossil-wasm` —el anillo del lector— **alcanza el motor por transitividad**, vía
-`fossil-ide → fossil-engine`, mientras su propio `Cargo.toml` dice *«NOT pull fossil-runtime or any
-native UDF crate (Pitfall 3)»*. La regla llevaba escrita como comentario todo este tiempo y el grafo
-la incumple.
+### Corregido el 2026-08-05 — la arista que sostenía este párrafo no existe
 
-No se deja activada porque el job `deny` de CI es puerta dura y hoy rompería la rama a todo el
-mundo. **Activarla es la primera tarea del strangler, no un efecto secundario suyo**: el día que
-pase, la migración terminó.
+El párrafo original decía que el trinquete con `wrappers` sobre los cuatro dependientes directos de
+`duckdb` no pasaba, y que lo que destapó al primer intento era que `fossil-wasm` —el anillo del
+lector— *«alcanza el motor por transitividad, vía `fossil-ide → fossil-engine`»*.
+
+**Esa arista no existe, y la que sí existe va en el sentido contrario:** `fossil-engine → fossil-ide`
+(`fossil-engine/Cargo.toml:23`, para `providers` y `source_refs`). El grafo se puede consultar, y
+`cargo tree -e normal -i duckdb --workspace` devuelve entera esto:
+
+    duckdb v1.10502.0
+    ├── fossil-engine → fossil-cli
+    ├── fossil-mcp
+    └── fossil-runtime → fossil-engine, fossil-mcp
+
+Ni `fossil-wasm` ni `fossil-ide` aparecen, ni siquiera con dev-dependencies incluidas. Lo que
+cargo-deny rechazó como `unmatched wrapper` no era transitividad: era que esos nombres **no son
+dependientes en absoluto**, y una entrada de `wrappers` que nombra a un no-dependiente es un error de
+configuración, no un hallazgo. El cuarto nombre, `fossil-cli`, está en la misma situación por otra
+razón: declara `duckdb` sólo en `[dev-dependencies]`.
+
+**El estado real es mejor que el que este ADR describía.** Los dependientes normales de `duckdb` son
+**tres** —`engine`, `mcp`, `runtime`— y el anillo del lector ya está limpio de los dos motores. La
+guardia tampoco está hoy en el árbol: `ed8a732` la sacó de `deny.toml` y la dejó como prosa aquí
+dentro. Con tres nombres en vez de seis, **activarla cuesta menos de lo que este documento creía**, y
+deja de ser «la primera tarea del strangler» para ser un trinquete que fija lo ya conseguido.
+
+La lección, y es la que vale más que la corrección: **el grafo de dependencias se puede consultar y
+no se consultó**, y el comentario de `fossil-wasm/Cargo.toml` —*«NOT pull fossil-runtime or any
+native UDF crate (Pitfall 3)»*— se leyó como si fuera una restricción incumplida cuando era una
+intención cumplida. Ver ADR-0045 §7.
 
 Un ADR sin guardia es una intención. `kanzo-ui` borró ocho composites y quedó *terminado* porque
 `index.test.ts` afirma que no están; aquí hay 46 ADRs y ninguna afirmación ejecutable, y por eso
@@ -147,8 +175,10 @@ La medición cerró la puerta barata.
 
 ## Consecuencias
 
-**Lo que se borra** (regla 4, sin alias): `fossil-df-wasm` (436), la mitad ejecutora de `fossil-wasm`,
-`fossil-runtime` como crate, y `duckdb` de los cuatro `Cargo.toml`.
+**Lo que se borra** (regla 4, sin alias): `fossil-df-wasm` (436), `fossil-runtime` como crate, y
+`duckdb` de los **tres** `Cargo.toml` que lo declaran como dependencia normal —`engine`, `mcp`,
+`runtime`— más el `[dev-dependencies]` de `fossil-cli`. La mitad ejecutora de `fossil-wasm` ya no
+está: ver la corrección del anillo 3.
 
 **Lo que se mueve:** el núcleo puro de `layout.rs` al anillo 2; `fossil-mcp` al anillo 1, sin motor.
 
