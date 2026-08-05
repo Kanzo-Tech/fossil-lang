@@ -10,7 +10,9 @@
 //! proves the types are self-consistent and nothing else — it cannot see a
 //! promise the format makes to somebody who is not us.
 //!
-//! ADR-0045 §4 decided this shape on evidence rather than taste. `GraphAr` — whose
+//! ADR-0045 decided this shape on evidence rather than taste — the fourth of the
+//! decisions recorded there under «Decidido el 2026-08-05», not its §4, whose
+//! heading is about something else. `GraphAr` — whose
 //! vocabulary fossil borrowed — ships a shared corpus that every language's CI
 //! clones, and **no job writes with one implementation and reads with another**.
 //! A fourth implementation landed there having re-derived the path arithmetic
@@ -21,7 +23,7 @@
 //! is why its gaps are enumerated skip-lines instead of wrong answers.
 //!
 //! **What this cannot prove yet, and it is the larger half.** This is one
-//! writer read by one independent engine. It is not the round trip ADR-0045
+//! writer read by one independent engine. It is not the round trip that decision
 //! asks for — write with the Rust writer, read with the wasm reader *and* with
 //! the TypeScript/DuckDB path, diff the three — because two of those three live
 //! in another repository. What is here is the artefact validator that `GraphAr`
