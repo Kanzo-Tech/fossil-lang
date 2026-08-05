@@ -24,6 +24,25 @@
 //!     split-mapping suggestion
 //!   - semantic tokens (Monaco depends on this)
 //!   - document outline (textDocument/documentSymbol)
+//!
+//! ## The search layer ([`symbol_index`], [`prefix_index`], [`workspace`])
+//!
+//! Three plain-struct indexes built by a CST walk, and **no Salsa query of
+//! their own** — so the per-mapping `body()` fan-out stays at 1 (Research
+//! Pitfall #3):
+//!   - [`SymbolIndex`] — per-file table of `{prefix, mapping, function, shape}`
+//!     definitions with byte ranges (outline + goto-def hit resolution).
+//!   - [`PrefixIndex`] — prefix → IRI resolution with a well-known fallback
+//!     (the gleam-lsp auto-import completion pattern).
+//!   - [`WorkspaceIndex`] — cross-file aggregation under the
+//!     open-files-as-workspace model (ADR-0023), so a prefix/mapping/function/
+//!     shape declared in file A resolves from file B.
+//!
+//! They were `fossil-ide-db` until ADR-0045 §6, on the strength of
+//! rust-analyzer's `ide-db`/`ide` split. That split carries ~20k lines shared
+//! by five crates; this one carried 592 lines with one consumer, no Salsa, no
+//! macro, no `tests/`, and a dependency set that was a strict subset of this
+//! crate's. A crate boundary that separates nothing is a file boundary.
 
 pub mod code_action;
 pub mod completion;
@@ -33,7 +52,10 @@ pub mod line_index;
 pub mod lineage;
 pub mod outline;
 pub mod position;
+pub mod prefix_index;
 pub mod semantic;
+pub mod symbol_index;
+pub mod workspace;
 
 pub use code_action::code_actions;
 pub use completion::completions;
@@ -46,7 +68,10 @@ pub use position::{
     LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
     position_to_offset, token_at_position,
 };
+pub use prefix_index::{PrefixBinding, PrefixIndex, WELL_KNOWN_PREFIXES};
 pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
+pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
+pub use workspace::WorkspaceIndex;
 
 /// IDE analysis entry point.
 ///

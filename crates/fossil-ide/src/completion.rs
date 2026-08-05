@@ -16,8 +16,8 @@
 //!    `CompletionItemTag` in LSP 3.17) + a `(native-only)` detail suffix so the
 //!    playground can gray it out.
 //! 2. **prefixes** — declared prefixes from the cross-file
-//!    [`fossil_ide_db::WorkspaceIndex`] + the well-known set
-//!    ([`fossil_ide_db::WELL_KNOWN_PREFIXES`]: rdf/rdfs/xsd/owl), the latter
+//!    [`crate::WorkspaceIndex`] + the well-known set
+//!    ([`crate::WELL_KNOWN_PREFIXES`]: rdf/rdfs/xsd/owl), the latter
 //!    offered as auto-importable (a `prefix <p>: <iri>` `additional_text_edits`
 //!    insertion when not already declared).
 //! 3. **shape properties** — when the cursor is in a mapping whose target `ShEx`
@@ -36,13 +36,13 @@
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
 //! `detail` string (Risk Register).
 
+use crate::{PrefixIndex, WELL_KNOWN_PREFIXES, WorkspaceIndex};
 use fossil_base::SourceFile;
 use fossil_hir::HirDb;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_hir::ty::TyKind;
-use fossil_ide_db::{PrefixIndex, WELL_KNOWN_PREFIXES, WorkspaceIndex};
 use fossil_registry::{FunctionRegistry, WasmClass};
 use fossil_syntax::SyntaxKind;
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag, Position, Range, TextEdit};

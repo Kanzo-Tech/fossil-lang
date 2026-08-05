@@ -126,7 +126,7 @@
 //!     The ten-mapping fixture declares no `ShEx` schema, so the in-query
 //!     path still observes `AcceptAll` → `resolve_target_shape` returns `None`
 //!     here, exactly as in Phase 3/4. Fan-out is provably unchanged.
-//!   * Plans 06-02 (CLI) and 06-03 (`fossil-ide-db` `WorkspaceIndex`) touch
+//!   * Plans 06-02 (CLI) and 06-03 (`fossil_ide::WorkspaceIndex`) touch
 //!     only native CLI / WASM-clean IDE-index code; neither introduces a
 //!     `#[salsa::tracked]` query keyed by `MappingLoc`. The IDE indexes are
 //!     plain structs built from `def_map` (file-keyed) — not per-mapping

@@ -9,9 +9,9 @@
 //! # Source: the 06-03 [`SymbolIndex`], translated to LSP coordinates
 //!
 //! The heavy lifting (the CST walk that finds named definitions + their byte
-//! ranges) already lives in `fossil-ide-db`'s [`fossil_ide_db::SymbolIndex`]
+//! ranges) already lives in [`crate::SymbolIndex`]
 //! (FILE-keyed, no per-mapping Salsa key — Research Pitfall #3). This module is a
-//! thin adapter: it builds that index, maps each Fossil [`fossil_ide_db::SymbolKind`]
+//! thin adapter: it builds that index, maps each Fossil [`crate::SymbolKind`]
 //! to an LSP [`lsp_types::SymbolKind`], and converts each byte range to a UTF-16
 //! [`lsp_types::Range`] via the 06-05 [`LineIndex`] (Research Pitfall #4 — Monaco
 //! counts UTF-16, so a byte range would mis-highlight after a multi-byte char).
@@ -28,8 +28,8 @@
 //! WASM-clean: returns `lsp_types::DocumentSymbol` directly (06-01 Spike A:
 //! lsp-types is wasm32-clean), so the playground consumes it with no translation.
 
+use crate::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use fossil_base::SourceFile;
-use fossil_ide_db::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use lsp_types::{DocumentSymbol, Position, Range, SymbolKind as LspSymbolKind};
 
 use crate::line_index::LineIndex;

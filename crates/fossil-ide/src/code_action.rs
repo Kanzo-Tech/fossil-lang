@@ -13,8 +13,8 @@
 //!    string (Research §code actions, ADR-0006 Approach A).
 //! 2. **auto-import prefix** — an unknown-prefix diagnostic yields a `QuickFix`
 //!    inserting a `prefix xx: <iri>` declaration at the top of the file. The
-//!    IRI comes from [`fossil_ide_db::WELL_KNOWN_PREFIXES`] for rdf/rdfs/xsd/owl
-//!    (via the 06-03 [`fossil_ide_db::PrefixIndex`]); an unknown prefix gets a
+//!    IRI comes from [`crate::WELL_KNOWN_PREFIXES`] for rdf/rdfs/xsd/owl
+//!    (via the 06-03 [`crate::PrefixIndex`]); an unknown prefix gets a
 //!    `<>` placeholder the user fills in.
 //! 3. **split-mapping** — a target `ShEx` `OneOf` diagnostic ALREADY carries the
 //!    generated split-into-N-mappings snippet in
@@ -35,8 +35,8 @@
 use std::collections::HashMap;
 use std::str::FromStr as _;
 
+use crate::WELL_KNOWN_PREFIXES;
 use fossil_base::{Diagnostic, SourceFile, Span};
-use fossil_ide_db::WELL_KNOWN_PREFIXES;
 use lsp_types::{
     CodeAction, CodeActionKind, Diagnostic as LspDiagnostic, Position, Range, TextEdit, Uri,
     WorkspaceEdit,
@@ -117,7 +117,7 @@ fn auto_import_action(
     let prefix = unknown_prefix_name(&diag.message)?;
     // Don't offer the import if the file already declares the prefix (a stale
     // diagnostic after the user fixed it manually).
-    let prefixes = fossil_ide_db::PrefixIndex::build(db, file);
+    let prefixes = crate::PrefixIndex::build(db, file);
     if prefixes.is_declared(&prefix) {
         return None;
     }

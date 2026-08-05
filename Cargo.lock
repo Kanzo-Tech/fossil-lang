@@ -2035,7 +2035,6 @@ dependencies = [
  "fossil-descriptors-input",
  "fossil-descriptors-output",
  "fossil-hir",
- "fossil-ide-db",
  "fossil-registry",
  "fossil-run-status",
  "fossil-syntax",
@@ -2043,15 +2042,6 @@ dependencies = [
  "lsp-types",
  "rowan",
  "salsa",
- "smol_str",
-]
-
-[[package]]
-name = "fossil-ide-db"
-version = "0.1.0"
-dependencies = [
- "fossil-base",
- "fossil-syntax",
  "smol_str",
 ]
 

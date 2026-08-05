@@ -4,7 +4,7 @@
 //! **open-file set** (the open-files-as-workspace model, ADR-0023). Unlike hover
 //! (which reads per-mapping type provenance), goto-def is a pure name-resolution
 //! query: it classifies the token under the cursor and looks it up in the
-//! [`fossil_ide_db::WorkspaceIndex`] (built by 06-03), returning every matching
+//! [`crate::WorkspaceIndex`] (built by 06-03), returning every matching
 //! definition's owning file + byte range.
 //!
 //! # The four symbol kinds (SC#4)
@@ -17,7 +17,7 @@
 //! 3. **function** — a top-level (`@export f := …`) definition name. Same
 //!    `resolve` path.
 //! 4. **shape ref** — the `ex:Person` prefixed name in a mapping header. The
-//!    06-03 [`fossil_ide_db::SymbolIndex`] records shape refs under their full
+//!    06-03 [`crate::SymbolIndex`] records shape refs under their full
 //!    surface text (`"ex:Person"`), so `resolve` lands on the declaring mapping
 //!    site.
 //!
@@ -32,8 +32,8 @@
 
 use std::ops::Range;
 
+use crate::WorkspaceIndex;
 use fossil_base::SourceFile;
-use fossil_ide_db::WorkspaceIndex;
 
 use crate::position::token_at_position;
 
@@ -146,7 +146,7 @@ fn name_candidates(token: &fossil_syntax::SyntaxToken) -> Vec<String> {
 
 /// Find the byte range of the `prefix <name>: <iri>` declaration in `file`.
 ///
-/// The [`fossil_ide_db::SymbolIndex`] records prefix declarations under their
+/// The [`crate::SymbolIndex`] records prefix declarations under their
 /// `SymbolKind::Prefix` entries with the declaration's byte range; we re-read
 /// the per-file index to obtain it (the `resolve_prefix` API returns the IRI,
 /// not the range, since most callers only need the IRI for auto-import).
@@ -155,7 +155,7 @@ fn prefix_decl_range(
     file: SourceFile,
     prefix: &str,
 ) -> Option<Range<u32>> {
-    use fossil_ide_db::{SymbolIndex, SymbolKind};
+    use crate::{SymbolIndex, SymbolKind};
     let idx = SymbolIndex::build(db, file);
     idx.of_kind(SymbolKind::Prefix)
         .find(|e| e.name.as_str() == prefix)

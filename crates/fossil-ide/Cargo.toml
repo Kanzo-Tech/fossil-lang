@@ -18,10 +18,10 @@ workspace = true
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
-# Plan 06-06 (SC#4): goto-def + completion consume the cross-file symbol /
-# prefix infrastructure (06-03) and the stdlib classification catalog (Phase 5).
-# Both are WASM-clean (in / under the 9-crate gate), so fossil-ide stays WASM-clean.
-fossil-ide-db = { path = "../fossil-ide-db" }
+# Plan 06-06 (SC#4): goto-def + completion consume the stdlib classification
+# catalog (Phase 5). WASM-clean, so fossil-ide stays WASM-clean. The cross-file
+# symbol / prefix infrastructure (06-03) used to be `fossil-ide-db` and is now
+# the `symbol_index` / `prefix_index` / `workspace` modules here (ADR-0045 §6).
 fossil-registry = { path = "../fossil-registry" }
 # WASM-clean wire types (serde + schemars only) — the `source_refs`/`providers`
 # lineage surface (lineage.rs) returns these; shared verbatim with the host.

@@ -61,8 +61,8 @@ documento sigue siendo de fase de diseño; esta sección no.
                           ▲
 ┌─────────────────────────────────────────────────────────────────┐
 │  ANÁLISIS (lo que consumen LSP y navegador)                      │
-│  fossil-ide       (hover, completion, goto-def, code actions)   │
-│  fossil-ide-db    (índices de símbolos)                         │
+│  fossil-ide       (hover, completion, goto-def, code actions,   │
+│                    índices de símbolos y prefijos)              │
 └─────────────────────────────────────────────────────────────────┘
                           ▲
 ┌─────────────────────────────────────────────────────────────────┐

@@ -23,14 +23,14 @@ cargo test --workspace                                           # native tests
 cargo fmt --all -- --check                                       # format check
 cargo clippy --workspace --all-targets -- -D warnings            # lint check
 cargo deny check                                                 # advisories + licenses + bans
-cargo check --target wasm32-unknown-unknown \
-    -p fossil-base -p fossil-syntax -p fossil-hir \
-    -p fossil-mir -p fossil-codegen -p fossil-sinks \
-    -p fossil-ide -p fossil-ide-db -p fossil-wasm  # WASM gate (9 crates)
+cargo wasm-check                                                 # WASM gate; xtask derives the crate set
 ```
 
 CI runs all of the above on every PR. Locally, the WASM gate is the highest-leverage
-check — run it before any commit that touches a compiler-core crate.
+check — run it before any commit that touches a compiler-core crate. It needs a
+wasm-capable `clang` for `fossil-df-wasm`'s `zstd-sys` (Apple clang is not one; CI installs
+LLVM and sets `CC_wasm32_unknown_unknown`). Without it, check the compiler closure directly:
+`cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
 
 ## Hard Rules
 
@@ -87,8 +87,7 @@ crates/
   fossil-sinks/            Sink trait + GraphAr writer (atop arrow + parquet)
   fossil-registry/         function registry
   fossil-runtime/          DuckDB native execution    [NATIVE-ONLY]
-  fossil-ide-db/           symbol indexes
-  fossil-ide/              hover, completion, goto-def
+  fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-cli/              `fossil run/check/catalog/providers` [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilPlayground API + tokenize export per ADR-0030)
