@@ -5,7 +5,7 @@ direction:
   summary: The write path honours a declared memory budget at any N, so a corpus larger than the machine is a slower run rather than an OOM.
   decidedBy: decisions/0043-el-tipo-de-la-frontera.md
 today:
-  summary: A budget can be declared and the executor honours it — ten million vertices peak at 9.87 GiB against roughly 21 unbounded, for 13% more wall clock and a byte-identical corpus — but the peak still grows with N.
+  summary: A budget can be declared and the executor honours it — ten million vertices peak at 9.87 GiB against roughly 21 unbounded, for 13% more wall clock and a byte-identical corpus — but the peak still grows with N, and how the budget is asked for is being changed as this is written.
   backedBy: crates/fossil-df/src/lib.rs
 ---
 
@@ -16,9 +16,10 @@ means spilling to disk and taking longer, never dying. That is the ring-2 promis
 live in ring 2, because ring 2 is the only one with a disk to spill to — a browser has roughly 4 GB
 of address space and nowhere to put the overflow.
 
-The budget becomes an input to the run rather than an environment variable, and a spill test in CI
-keeps it honest: a small corpus, a ridiculous limit, and an assertion that something actually
-spilled.
+The budget is an **input of the run** — a flag on `fossil run`, alongside the sources and the
+destination — rather than something the environment happens to be carrying. A number that decides
+whether a job survives should be visible in the command that started it. And a spill test in CI keeps
+it honest: a small corpus, a ridiculous limit, and an assertion that something actually spilled.
 
 ## What is true today, measured 2026-08-05
 
@@ -28,9 +29,11 @@ answerable.
 ### The probe reports RSS per phase
 
 `FOSSIL_MEM_PROBE=1` on a `fossil run` prints resident set size at each phase boundary of the write
-path. It is what turned "seventeen gigabytes go somewhere" into a table, and it is why four
-plausible hypotheses about where the memory went could each be killed by a number rather than an
-argument.
+path. This one is an environment variable and staying one — it is diagnostic instrumentation, not a
+parameter of the job, and nothing about a run's result depends on it.
+
+It is what turned "seventeen gigabytes go somewhere" into a table, and it is why four plausible
+hypotheses about where the memory went could each be killed by a number rather than an argument.
 
 The finding that mattered: **RSS was already 14.61 GiB when `enrich_layout` executed its first
 statement**, and the entire layout pass added 0.13 GiB net. The memory was spent before the pass
@@ -38,12 +41,25 @@ everyone suspected had even started.
 
 ### A declared budget, and the join that would not honour it
 
-`FOSSIL_DF_MEM_GIB=<n>` builds the DataFusion runtime with a `FairSpillPool` of that size wrapped in
-a `TrackConsumersPool`, instead of `SessionContext::new()` — which is an unlimited pool with no disk
-manager, and therefore a configuration in which larger-than-RAM is not untested but impossible by
-construction.
+Given a budget in gigabytes, `bounded_context` builds the DataFusion runtime with a `FairSpillPool`
+of that size wrapped in a `TrackConsumersPool`. Without one it falls back to `SessionContext::new()`
+— an unlimited pool with no disk manager, and therefore a configuration in which larger-than-RAM is
+not untested but impossible by construction.
 
-It also **turns off `prefer_hash_join`**, and that is not a tuning preference. The first attempt at a
+<Callout title="The mechanism is settled; the invocation is not">
+**How you ask for the budget is changing while this page is being written**, so this page does not
+pin a spelling. It is being lifted out of an environment variable and into a flag on `fossil run`,
+with no alias and no fallback — the repository's standing rule is that a rename is free and an alias
+is permanent. Everything below the invocation is unaffected: the pool, the spill, the join choice and
+every number are the same measurement either way. Read `fossil run --help`, or `bounded_context` in
+`crates/fossil-df/src/lib.rs`, for today's exact form.
+
+This is deliberately not smoothed over. A page that pinned the current spelling would be wrong within
+the week and would look authoritative while being so, which is worse than saying the interface is in
+flux.
+</Callout>
+
+The budget also **turns off `prefer_hash_join`**, and that is not a tuning preference. The first attempt at a
 4 GiB budget died, and the consumer tracking named the culprit without needing a hypothesis:
 
 ```text
@@ -77,13 +93,13 @@ edge collect measured +7.67 GiB on one run and +11.35 GiB on the next of an iden
 data does not vary by 3.7 GiB. It was operator memory nobody had bounded.
 
 <Callout type="warn" title="What backs this, precisely">
-`backedBy` on this page points at `crates/fossil-df/src/lib.rs` — the file that reads
-`FOSSIL_DF_MEM_GIB`, builds the pool and clears `prefer_hash_join`. That is the *implementation*, not
-a test. The spill test ADR-0043 stage 4 specifies — small corpus, ridiculous limit, assert a spill —
-**does not exist**, and neither does the budget as a `run` input rather than an environment variable.
-Nothing in CI would go red if this regressed. The number above came from a hand-run measurement, and
-that is exactly the condition the ADR says produced the original 23×-the-output figure: nobody was
-watching.
+`backedBy` on this page points at `crates/fossil-df/src/lib.rs` — the file that holds
+`bounded_context`: the pool, the spill and the cleared `prefer_hash_join`. It is cited for the
+*mechanism*, which is why it survives the invocation moving. But it is the **implementation, not a
+test**. The spill test ADR-0043 stage 4 specifies — small corpus, ridiculous limit, assert a spill —
+**does not exist**. Nothing in CI would go red if any of this regressed. The numbers above came from
+a hand-run measurement, which is exactly the condition the ADR says produced the original
+23×-the-output figure in the first place: nobody was watching.
 </Callout>
 
 ## What is not true: the peak still grows with N
