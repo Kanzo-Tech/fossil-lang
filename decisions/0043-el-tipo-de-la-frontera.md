@@ -98,12 +98,35 @@ construyendo — donde antes había una sola `Vec`. Se cambió una copia por dos
 
 El razonamiento de esta etapa no cae: el fichero sigue ordenado, el algoritmo sigue siendo
 secuencial, y las tres asignaciones que el tipo obliga siguen siendo innecesarias. Lo que cae es la
-suposición no comprobada de que el *driver* streamea. **Leer el CSR que ya existe requiere leer
-Parquet directamente** —`parquet`/`arrow` por row group, sin DuckDB en medio— lo que hace que esta
-etapa dependa de la 2 y la 3 en lugar de ser independiente como se afirmaba arriba.
+suposición no comprobada de que el *driver* streamea.
 
-Cambio revertido; el árbol queda como estaba. Lo que sobrevive es el número, que es lo que hacía
-falta para no volver a intentarlo igual.
+#### Y la refutación se pasó de pesimista
+
+Escrita, decía que hacía falta leer Parquet directamente y que por tanto esta etapa dependía de la 2
+y la 3. **Comprobado en la fuente de `duckdb-rs` 1.10502.0, no es así:**
+
+| | qué hace | |
+|---|---|---|
+| `Statement::query_map` | `execute()` — materializa el resultado entero | lo que se usó, y lo que regresó |
+| `Statement::stream_arrow(params, schema)` | `execute_streaming()` + `ArrowStream` | perezoso de verdad |
+
+`ArrowStream` implementa `Iterator<Item = RecordBatch>` con un `stream_step()` por llamada
+(`src/arrow_batch.rs:61-67`). Un batch cada vez, no el resultado.
+
+Y lo que lo hace la elección correcta y no un parche: **el item es `RecordBatch`**. La API perezosa
+entrega exactamente la frontera que este ADR defiende —Arrow, offsets y valores— en vez de filas
+convertidas a tuplas de Rust una a una. El `from_sorted` que se escribió toma
+`impl Iterator<Item = (u32, u32)>`; sobre `stream_arrow` toma columnas `UInt32Array` por batch, que
+es menos código y ninguna conversión por fila.
+
+Así que la etapa 1 sigue siendo independiente, y el cambio pendiente es de una línea de API y del
+bucle que lee las dos columnas. Lo único que este intento demostró es que **el criterio de terminado
+estaba mal**: tres tests de paridad en verde no vieron una regresión de siete gigabytes, porque
+comprobaban que el resultado fuera correcto y el coste era el objetivo entero. El siguiente intento
+lleva la medición del `Probe` en el criterio, no sólo la paridad.
+
+Cambio revertido; el árbol queda como estaba. Lo que sobrevive son los dos números y el nombre de la
+función que faltaba.
 
 ### Etapa 2 — el núcleo puro sale del crate que posee DuckDB
 
