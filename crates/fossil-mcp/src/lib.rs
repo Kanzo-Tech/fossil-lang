@@ -131,19 +131,37 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 }
 
 /// `CREATE OR REPLACE VIEW` per vertex/edge type, over the writer's Parquet
-/// layout (`<dest>/vertex/<Type>.parquet`, `<dest>/edge/<table>/by_source.parquet`
-/// — see `fossil-sinks::writer`). The view names match what the verbs query.
+/// layout. The view names match what the verbs query.
+///
+/// # Vertices are tiles, and the manifest says where
+///
+/// This read `<dest>/vertex/<Type>.parquet` until 2026-08-06, which is a file
+/// the writer **deletes**: `c416e07` made the layout pass emit one tile per
+/// 4,096-row `dense_id` range and then remove the single staged file
+/// (`crates/fossil-engine/src/lib.rs:502`). Every verb over a freshly written
+/// corpus failed to find its vertices, and the test below asserted the stale
+/// path, so nothing went red — the same commit left four call sites naming a
+/// path that no longer exists.
+///
+/// The fix is not a new hard-coded string. `VertexInfo::prefix` is the
+/// directory the writer declares it emitted into, so the reader asks the
+/// manifest instead of re-deriving the convention; the day the tile naming
+/// changes again, this does not.
+///
+/// Edges are unaffected: the layout pass rewrites `by_source.parquet` in place
+/// (`crates/fossil-runtime/src/layout.rs:630`) and emits its tiles alongside it.
 fn register_views_sql(manifest: &Manifest, dest: &str) -> String {
     use std::fmt::Write;
     let base = dest.trim_end_matches('/');
     let mut sql = String::new();
     for v in manifest.vertices() {
         let name = &v.vertex_type;
+        let dir = v.prefix.trim_end_matches('/');
         let _ = writeln!(
             sql,
-            "CREATE OR REPLACE VIEW {ident} AS SELECT * FROM read_parquet('{base}/vertex/{path}.parquet');",
+            "CREATE OR REPLACE VIEW {ident} AS SELECT * FROM read_parquet('{base}/{path}/*.parquet');",
             ident = quote_ident(name),
-            path = escape_lit(name),
+            path = escape_lit(dir),
         );
     }
     for e in manifest.edges() {
@@ -249,9 +267,17 @@ mod tests {
         let manifest = Manifest::load(&MapSource(map)).unwrap();
 
         let sql = register_views_sql(&manifest, "s3://bucket/run/");
-        assert!(sql.contains(
-            "CREATE OR REPLACE VIEW \"Person\" AS SELECT * FROM read_parquet('s3://bucket/run/vertex/Person.parquet')"
-        ));
+        // The vertex view globs the tile directory the manifest declares, not a
+        // single file. It asserted `vertex/Person.parquet` until 2026-08-06 —
+        // a path the writer deletes — which is why this test stayed green while
+        // every verb over a real corpus failed. It must read the fixture's
+        // `prefix`, so a future change to the tile naming lands here as a diff.
+        assert!(
+            sql.contains(
+                "CREATE OR REPLACE VIEW \"Person\" AS SELECT * FROM read_parquet('s3://bucket/run/vertex/Person/*.parquet')"
+            ),
+            "vertex view did not glob the declared prefix, got: {sql}"
+        );
         assert!(sql.contains(
             "CREATE OR REPLACE VIEW \"Person_knows_Person\" AS SELECT * FROM read_parquet('s3://bucket/run/edge/Person_knows_Person/by_source.parquet')"
         ));

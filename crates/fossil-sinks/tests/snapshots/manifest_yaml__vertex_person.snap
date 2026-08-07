@@ -3,7 +3,7 @@ source: crates/fossil-sinks/tests/manifest_yaml.rs
 expression: "person_vertex().to_yaml().expect(\"vertex serialization\")"
 ---
 type: Person
-chunk_size: 122880
+chunk_size: 4096
 prefix: vertex/person/
 property_groups:
 - file_type: parquet

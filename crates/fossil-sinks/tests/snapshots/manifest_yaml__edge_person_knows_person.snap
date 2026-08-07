@@ -5,9 +5,9 @@ expression: "knows_edge().to_yaml().expect(\"edge serialization\")"
 src_type: Person
 edge_type: knows
 dst_type: Person
-chunk_size: 122880
-src_chunk_size: 122880
-dst_chunk_size: 122880
+chunk_size: 4096
+src_chunk_size: 4096
+dst_chunk_size: 4096
 directed: true
 prefix: edge/person_knows_person/
 adj_lists:

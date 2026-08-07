@@ -58,6 +58,46 @@ fn fresh_workdir(test_name: &str) -> PathBuf {
     tmp
 }
 
+/// Assert that `vtype`'s vertex tiles are on disk, and return a `read_parquet`
+/// glob over them.
+///
+/// A vertex is **tiles**, not a file. `c416e07` made the layout pass emit one
+/// tile per 4,096-row `dense_id` range under `vertex/<Type>/` and then delete
+/// the single staged `vertex/<Type>.parquet`
+/// (`crates/fossil-engine/src/lib.rs:502`). Three assertions in this file went
+/// on naming the deleted path, so the suite went red the day the emitter landed
+/// and stayed red — one of five failures across the repo from the same commit,
+/// none of which were the emitter being wrong.
+///
+/// The convention lives here so the next change to tile naming is one diff.
+fn assert_vertex_tiles(dest: &Path, vtype: &str) -> String {
+    let dir = dest.join("vertex").join(vtype);
+    assert!(
+        dir.is_dir(),
+        "vertex tile directory missing at {}",
+        dir.display()
+    );
+    let tiles: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "parquet"))
+        .collect();
+    assert!(
+        !tiles.is_empty(),
+        "no vertex tiles under {} — the directory exists but the emitter wrote nothing",
+        dir.display()
+    );
+    // And the staged single file must be gone; if it comes back, the emitter has
+    // stopped cleaning up and every reader has two sources of truth.
+    let staged = dest.join(format!("vertex/{vtype}.parquet"));
+    assert!(
+        !staged.exists(),
+        "the staged single file survived at {} — readers would see it and the tiles",
+        staged.display()
+    );
+    format!("{}/*.parquet", dir.display())
+}
+
 /// Acceptance: the W0b path produces `GraphAr` Parquet + YAML manifests
 /// under --dest, with the W0b vertex column shape declared in the
 /// vertex.yml manifest. The vertex type `Person` is derived from the mapping's
@@ -83,13 +123,8 @@ fn run_w0b_writes_graph_ar_under_dest() {
         String::from_utf8_lossy(&output.stderr),
     );
 
-    // The Person vertex Parquet is the W0b artefact.
-    let vertex_parquet = dest.join("vertex/Person.parquet");
-    assert!(
-        vertex_parquet.exists(),
-        "vertex Parquet missing at {}",
-        vertex_parquet.display()
-    );
+    // The Person vertex tiles are the W0b artefact.
+    let vertex_glob = assert_vertex_tiles(&dest, "Person");
 
     // W3.1b: the layout pass must have replaced the placeholder x/y (0 for every
     // vertex) with real coordinates — at least one vertex now carries a non-zero
@@ -99,7 +134,7 @@ fn run_w0b_writes_graph_ar_under_dest() {
         .query_row(
             &format!(
                 "SELECT count(*) FROM read_parquet('{}') WHERE x <> 0 OR y <> 0",
-                vertex_parquet.display().to_string().replace('\'', "''")
+                vertex_glob.replace('\'', "''")
             ),
             [],
             |r| r.get(0),
@@ -269,14 +304,8 @@ Order : ex:Order from orders
     );
 
     // Both vertex types materialised.
-    assert!(
-        dest.join("vertex/Person.parquet").exists(),
-        "Person vertex Parquet missing"
-    );
-    assert!(
-        dest.join("vertex/Order.parquet").exists(),
-        "Order vertex Parquet missing"
-    );
+    let _ = assert_vertex_tiles(&dest, "Person");
+    let _ = assert_vertex_tiles(&dest, "Order");
 
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     let parsed: serde_json::Value =
@@ -503,10 +532,7 @@ fn catalog_subcommand_materialises_dcat_ap_graph() {
         "Contact",
         "Field",
     ] {
-        assert!(
-            dest.join(format!("vertex/{vtype}.parquet")).exists(),
-            "missing vertex/{vtype}.parquet"
-        );
+        let _ = assert_vertex_tiles(&dest, vtype);
     }
 
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
