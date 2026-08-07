@@ -293,8 +293,7 @@ pub fn lower_to_mir_pg<'db>(
         sink: SinkRef::GraphAr,
     });
 
-    let graph = MirGraph::new(db, ops, None);
-    crate::rewrite::rewrite(db, graph)
+    MirGraph::new(db, ops, None)
 }
 
 /// A tainted, op-less graph. `eg` is the [`fossil_base::ErrorGuaranteed`] whose

@@ -17,21 +17,17 @@
 //!
 //! See `operator-algebra.md` for the full algebra spec.
 
-pub mod eval;
 pub mod graph;
 pub mod lower;
 pub mod op;
-pub mod rewrite;
 pub mod schema;
 pub mod skeleton;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
 // types at the crate root, query functions stay under their module path
 // (`fossil_mir::lower::lower_to_mir_pg`) to avoid name shadowing with modules.
-pub use eval::{partial_eval, static_truth};
 pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
 pub use op::{AggFn, AggSpec, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
-pub use rewrite::rewrite;
 pub use schema::{free_cols, schema_of};
 pub use skeleton::{subject_template_skeleton, template_skeleton};
