@@ -168,7 +168,11 @@ Min Oo & Hartig prove several algebraic equivalences in [1]. We inherit them and
                                         when k₁ ⊆ schema(s) and aggregations compose
 ```
 
-These power the optimizer in `fossil-mir/optimize.rs`.
+**We do not implement these.** They are recorded because they are the algebra's properties, not
+because they are our code: `rewrite.rs` held R1–R10, ran on every compile and always returned its
+input, and it was removed along with the `eval.rs` that existed only to drive R7–R10 (ADR-0046 F5,
+`apps/docs/content/docs/characteristics/pipeline.mdx`). The plan is DataFusion's — predicate
+pushdown, join reordering and constant folding included. Ours is the type of the mapping.
 
 ---
 

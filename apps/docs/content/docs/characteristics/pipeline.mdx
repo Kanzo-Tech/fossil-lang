@@ -5,8 +5,8 @@ direction:
   summary: Sources compose with a pipeline operator that our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan — so the fourteen MIR operators are the pipeline's vocabulary and stay, while the ten rewrite rules go because they duplicate an optimizer that is already underneath.
   decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
 today:
-  summary: Since 2026-08-07 a pipe in VALUE position lowers — it is sugar over a call, so `.name |> clean.trim()` is `clean.trim(.name)` — but a pipe over a SOURCE is a relation and still lowers to nothing, and `rewrite()` runs on every compile and always returns its input because all ten rules match operators the lowering never emits.
-  backedBy: crates/fossil-mir/src/rewrite.rs
+  summary: Since 2026-08-07 a pipe in VALUE position lowers — it is sugar over a call, so `.name |> clean.trim()` is `clean.trim(.name)` — and the ten rewrite rules are gone, `rewrite.rs` with them. A pipe over a SOURCE is a relation and still lowers to nothing — `lower_pipeline` handles the value case only, and a source binding can hold an `io.*` call and nothing else.
+  backedBy: crates/fossil-hir/src/lower.rs
 ---
 
 ## The question this answers
@@ -42,16 +42,19 @@ type the mapping; what it does better than we will is choose a plan.
 
 ## What is true today
 
-`rewrite()` is called on every compile — `crates/fossil-mir/src/lower.rs:259` — and **always returns
-its input**, because all ten rules match operators the lowering never emits. The lowering emits four
-of fourteen: `Source`, `EmitVertex`, `EmitEdge`, `Sink`.
+**The ten rules are gone.** `rewrite()` ran on every compile and always returned its input, because
+all ten matched operators the lowering never emits; `rewrite.rs` and the `eval.rs` that existed only
+to drive R7–R10 left together, and `fossil run examples/hello.fossil` writes a byte-identical corpus
+before and after. The lowering still emits four of fourteen operators: `Source`, `EmitVertex`,
+`EmitEdge`, `Sink`.
 
-That was downstream of [the expression cliff](/docs/characteristics/expressions), which closed on
-2026-08-07 — but only for values. `.name |> clean.trim()` is now sugar over a call (ADR-0050) and
-runs. `adultos := users |> where(.edad >= 18)` is a **relation**, not a value: it needs a source
-binding that is not an `io.*` call, `Op::Filter` reachable from source, and types for
-`where`/`select`/`join`. That is this phase, and it opens with a decision that is not the
-compiler's: whether `join` is in the first version.
+The other four-of-fourteen is downstream of [the expression
+cliff](/docs/characteristics/expressions), which closed on 2026-08-07 — but only for values. `.name
+|> clean.trim()` is now sugar over a call (ADR-0050) and runs. `adultos := users |> where(.edad >=
+18)` is a **relation**, not a value: it needs a source binding that is not an `io.*` call,
+`Op::Filter` reachable from source, and types for `where`/`select`/`join`. That is this phase, and
+its opening question — whether `join` is in the first version — is answered: **it is**, as an inner
+equi-join whose key is named once (ADR-0054).
 
 There is one more mismatch worth recording because it is the shape of how the enum grew: the module
 header of `crates/fossil-mir/src/op.rs:1` says *"the complete 11-operator typed set"*, the enum has
@@ -68,9 +71,14 @@ fourteen, twelve and eleven above is what growing speculatively looks like from 
 
 ## What this does not settle
 
-- **Whether `join` is in the first version.** `where` and `select` may be enough for a while, and the
-  answer comes from a real mapping rather than from an argument. `join` is the operator that makes
-  the checker genuinely hard, so the order matters.
+- **How two keys with different names are joined.** `on = .k` is `USING (k)`: the column has to be
+  called the same on both sides, so `pedidos.persona_id` against `personas.id` — the ordinary shape
+  of a foreign key — cannot be written in v1. The extension is `on = .a == .b`, and it is declared
+  rather than built because it first has to say which row each `.` names, and that is a qualified
+  reference the language does not have.
+- **The three join flavours that are not `Inner`.** They stay defined and unreachable. An outer join
+  manufactures NULL, and [the shape](/docs/characteristics/types) has no way to declare a nullable
+  property yet, so the one that arrives will arrive with that story and not before.
 - **How a pipeline's type is reported in the editor.** A source binding today has a schema from a
   descriptor; a pipeline has a schema derived from one, and hover has to say something useful about
   the derived one.

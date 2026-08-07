@@ -544,9 +544,9 @@ fn lower_expr_inner(
 /// the backend all see the call they already know.
 ///
 /// The SOURCE-level pipeline — `adultos := users |> where(.edad >= 18)`, which
-/// is a relation and not a value — is not this. It is F5 of ADR-0046, and it is
-/// blocked on a decision that is not the compiler's to make: whether `join`
-/// enters the first version.
+/// is a relation and not a value — is not this. It is F5 of ADR-0046, and the
+/// decision it was waiting on is taken: `join` is in the first version, as an
+/// inner equi-join whose key is named once (ADR-0054).
 fn lower_pipeline(
     db: &dyn fossil_base::Db,
     node: &fossil_syntax::SyntaxNode,
