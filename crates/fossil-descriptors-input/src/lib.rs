@@ -31,10 +31,12 @@
 //! public-API commitment to Phase 3-9. Additive growth (e.g. `parse_async`
 //! for streaming descriptors) is allowed; method removal requires an ADR.
 
+pub mod cache;
 pub mod csvw;
 pub mod inferred;
 pub mod shex;
 
+pub use cache::DescriptorCache;
 pub use csvw::{CsvwDescriptor, CsvwMetadata};
 pub use inferred::{InferredColumn, InferredDescriptor};
 pub use shex::{ShExInputError, inferred_descriptor_from_shex};

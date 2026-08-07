@@ -41,7 +41,7 @@ pub enum ShExInputError {
 /// [`ShExInputError::Parse`] if the schema is malformed; [`ShExInputError::ShapeNotFound`]
 /// if `shape_iri` names no shape in the schema.
 pub fn inferred_descriptor_from_shex(
-    source_name: &str,
+    uri: &str,
     shape_iri: &str,
     shex_json: &[u8],
 ) -> Result<InferredDescriptor, ShExInputError> {
@@ -61,9 +61,13 @@ pub fn inferred_descriptor_from_shex(
         .collect();
 
     Ok(InferredDescriptor {
-        source_name: source_name.into(),
+        uri: uri.into(),
         columns,
-        content_hash: String::new(),
+        // A shape is not a file: nothing about it goes stale between two reads
+        // of the same schema text, so there is no token to carry. The empty
+        // token means the caller re-derives, which for a compile-time shape
+        // costs a parse it was doing anyway.
+        freshness_token: String::new(),
     })
 }
 
@@ -129,13 +133,13 @@ mod tests {
     #[test]
     fn derives_columns_and_primitives_from_the_shape() {
         let d = inferred_descriptor_from_shex(
-            "people",
+            "people.ttl",
             "http://example.org/Person",
             PERSON_SCHEMA.as_bytes(),
         )
         .expect("descriptor derives");
 
-        assert_eq!(d.source_name, "people");
+        assert_eq!(d.uri, "people.ttl");
         assert_eq!(d.columns.len(), 3, "one column per triple constraint");
         // Predicate local name → column name; datatype → Primitive.
         assert_eq!(primitive_of(&d, "name"), Primitive::String);

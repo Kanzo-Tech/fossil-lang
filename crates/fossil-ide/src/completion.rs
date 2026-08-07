@@ -482,28 +482,34 @@ mod tests {
     fn offers_source_fields_after_dot_when_descriptor_registered() {
         use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
         let db = db();
-        db.system.register_inferred_descriptor(InferredDescriptor {
-            source_name: "u".into(),
-            columns: vec![
-                InferredColumn {
-                    name: "name".into(),
-                    primitive: fossil_graph_schema::Primitive::String,
-                },
-                InferredColumn {
-                    name: "age".into(),
-                    primitive: fossil_graph_schema::Primitive::Integer,
-                },
-            ],
-            content_hash: String::new(),
-        });
+        db.system
+            .descriptors()
+            .expect("the test host keeps a descriptor table")
+            .insert(InferredDescriptor {
+                // Keyed by the URI the binding names, not by `u` (ADR-0050) —
+                // so the program below has to declare the binding for the
+                // completion to find anything.
+                uri: "u.csv".into(),
+                columns: vec![
+                    InferredColumn {
+                        name: "name".into(),
+                        primitive: fossil_graph_schema::Primitive::String,
+                    },
+                    InferredColumn {
+                        name: "age".into(),
+                        primitive: fossil_graph_schema::Primitive::Integer,
+                    },
+                ],
+                freshness_token: String::new(),
+            });
         // `ex:` must be declared so the mapping lowers (lower_mapping resolves
-        // the shape prefix); the `.name` field ref sits on line 2.
-        let src =
-            "prefix ex: <https://example.org/>\nUser : ex:Person from u\n    ex:name = .name\n";
+        // the shape prefix); the `.name` field ref sits on line 3.
+        let src = "prefix ex: <https://example.org/>\nu := io.csv(\"u.csv\")\n\
+                   User : ex:Person from u\n    ex:name = .name\n";
         let f = file(&db, src);
-        // Cursor right after the `.` on line 2 → token_at_position picks the DOT.
-        let dot = u32::try_from(src.lines().nth(2).unwrap().find('.').unwrap()).unwrap();
-        let items = completions(&db, &[f], f, 2, dot + 1);
+        // Cursor right after the `.` on line 3 → token_at_position picks the DOT.
+        let dot = u32::try_from(src.lines().nth(3).unwrap().find('.').unwrap()).unwrap();
+        let items = completions(&db, &[f], f, 3, dot + 1);
         let fields: Vec<&str> = items
             .iter()
             .filter(|i| i.kind == Some(CompletionItemKind::FIELD))

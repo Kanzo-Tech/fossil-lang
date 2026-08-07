@@ -42,12 +42,21 @@ export interface InferredColumn {
 }
 
 export interface InferredDescriptor {
-  /** The source binding name (`users` from `users := io.csv(...)`). */
-  source_name: string;
+  /**
+   * The source URI exactly as the program writes it (`data/users.csv` from
+   * `users := io.csv("data/users.csv")`) — the key the compiler looks the
+   * descriptor up under, and NOT the resolved URL this package fetched.
+   * ADR-0050.
+   */
+  uri: string;
   /** Ordered, position-significant columns. */
   columns: InferredColumn[];
-  /** Empty from the host; the Rust side derives it (ADR-0037). */
-  content_hash: string;
+  /**
+   * Opaque token identifying the state of the source. The compiler's cache
+   * compares it and re-introspects when it moves; nothing interprets it.
+   * `""` means "this host cannot cheaply tell", which is never fresh.
+   */
+  freshness_token: string;
 }
 
 /** A source binding scraped from a `.fossil` mapping. */
@@ -123,12 +132,22 @@ export function describeSql(url: string): string {
 }
 
 /**
- * Build the descriptor a `DESCRIBE` produced for one source binding. Columns
- * with empty/missing names are dropped (defensive against malformed rows).
+ * Build the descriptor a `DESCRIBE` produced for one source. Keyed by the URI
+ * the program wrote, not the binding name and not the URL `resolve` returned.
+ * Columns with empty/missing names are dropped (defensive against malformed
+ * rows).
+ *
+ * `freshnessToken` is what the host knows about the source's state — an ETag
+ * or `Last-Modified` off the fetch that fed the DESCRIBE is the cheap one in a
+ * browser. Omitted, it is `""`: never fresh, so the compiler re-introspects
+ * every time. That is the correct default for a host that has not wired one,
+ * and it is not a hash of the columns — a token derived from the answer cannot
+ * tell you whether to ask the question.
  */
 export function buildDescriptor(
-  sourceName: string,
+  uri: string,
   describeRows: readonly DescribeRow[],
+  freshnessToken = "",
 ): InferredDescriptor {
   const columns: InferredColumn[] = describeRows
     .map((r) => ({
@@ -136,7 +155,7 @@ export function buildDescriptor(
       primitive: duckdbTypeToFossilPrimitive(String(r.column_type ?? "")),
     }))
     .filter((c) => c.name.length > 0);
-  return { source_name: sourceName, columns, content_hash: "" };
+  return { uri, columns, freshness_token: freshnessToken };
 }
 
 /**
@@ -149,6 +168,13 @@ export function buildDescriptor(
 export interface IntrospectIO {
   resolve(ref: SourceRef): Promise<string> | string;
   query(sql: string): Promise<readonly DescribeRow[]> | readonly DescribeRow[];
+  /**
+   * Optional freshness token for the source behind `resolvedUrl` — an ETag, a
+   * `Last-Modified`, a version id. Only the host can produce one cheaply,
+   * because only the host knows how it fetched the file. Absent, descriptors
+   * carry `""` and the compiler re-introspects on every compile.
+   */
+  freshness?(ref: SourceRef, resolvedUrl: string): Promise<string> | string;
   /** Optional per-source failure sink; defaults to `console.warn`. */
   onWarn?(message: string, err: unknown): void;
 }
@@ -175,7 +201,7 @@ export async function introspect(
     try {
       const url = await io.resolve(ref);
       const rows = await io.query(describeSql(url));
-      out.push(buildDescriptor(ref.sourceName, rows));
+      out.push(buildDescriptor(ref.url, rows, await io.freshness?.(ref, url)));
     } catch (err) {
       warn(
         `[introspect] source \`${ref.sourceName}\` (url=\`${ref.url}\`) failed`,

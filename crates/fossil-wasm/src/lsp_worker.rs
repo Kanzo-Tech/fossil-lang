@@ -550,7 +550,7 @@ fn handle_set_target_shex(
 /// `fossil/registerInferredDescriptor` — host-injected source schema (the
 /// connection's catalog). Mirrors [`handle_set_target_shex`]: the symmetric
 /// input-side counterpart to the output-side target-shape. `params` IS the
-/// `InferredDescriptorJson` object (`{ source_name, columns, content_hash }`);
+/// `InferredDescriptorJson` object (`{ uri, columns, freshness_token }`);
 /// the native API takes the JSON string, so we re-serialise the already-parsed
 /// value rather than threading a second param shape. Once registered on the
 /// worker's `FossilPlayground`, source-field completion + forward type-check
@@ -617,15 +617,15 @@ mod tests {
     fn register_inferred_descriptor_dispatch_registers_on_worker_pg() {
         let pg = FossilPlayground::new();
         let params = serde_json::json!({
-            "source_name": "u",
+            "uri": "u.csv",
             "columns": [{ "name": "name", "primitive": "string" }],
-            "content_hash": ""
+            "freshness_token": ""
         });
         handle_register_inferred_descriptor(&pg, &params).expect("dispatch ok");
         let desc = pg
-            .inferred_descriptor_native("u")
+            .inferred_descriptor_native("u.csv")
             .expect("descriptor registered on the worker's playground");
-        assert_eq!(desc.source_name.as_str(), "u");
+        assert_eq!(desc.uri.as_str(), "u.csv");
         assert_eq!(desc.columns.len(), 1);
     }
 
@@ -633,7 +633,7 @@ mod tests {
     #[test]
     fn register_inferred_descriptor_dispatch_rejects_malformed() {
         let pg = FossilPlayground::new();
-        let bad = serde_json::json!({ "source_name": "u" }); // missing `columns`
+        let bad = serde_json::json!({ "uri": "u.csv" }); // missing `columns`
         assert!(handle_register_inferred_descriptor(&pg, &bad).is_err());
     }
 }

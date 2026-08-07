@@ -1,104 +1,109 @@
-//! Integration tests for Phase 13 INPUT-01 + INPUT-03 — forward propagation
-//! via `InferredDescriptor` (host-registered, no CSVW JSON on disk).
+//! Forward propagation via a host-registered `InferredDescriptor`, keyed by the
+//! source **URI** (ADR-0037, rekeyed by ADR-0050).
 //!
-//! These tests assert the System-trait wiring + `NativeSystem` storage that
-//! plan 13-02 lands: registering a descriptor via
-//! `System::register_inferred_descriptor` round-trips through
-//! `System::inferred_descriptor`, and the semantic-equivalence invariant
-//! (`record_from_inferred(inferred) ≡ record_from_descriptor(csvw)` on
-//! identical column shapes) holds.
-//!
-//! The full lower→check→Record-Ty integration through `resolve_source_row`
-//! requires building a fully-wired `MappingLoc` (`lower_to_hir` + `def_map` setup)
-//! — that surface is exercised by the existing `fossil-hir` test suite via
-//! its own helpers. Here we cover the new seams introduced by plan 13-02:
-//! the System trait extension + the `NativeSystem` Mutex<HashMap> backing
-//! + the cloned-on-read OWNED return contract.
+//! What only this crate can test is the indirection: the checker holds a
+//! binding name, the cache holds URIs, and the `DefMap` is what joins them. The
+//! table's own behaviour — insertion, replacement, freshness — belongs to
+//! `fossil-descriptors-input::cache`, and the `System` accessor to
+//! `fossil-base`; neither is re-asserted here.
 
-use fossil_base::{Db, FossilDb, NativeSystem, System};
+use fossil_base::{Db, FossilDb, NativeSystem, SourceFile, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
+use fossil_hir::def_map::def_map;
+use fossil_hir::infer::source_row_inferred;
+use fossil_hir::ty::TyKind;
 use std::sync::Arc;
 
-fn sample(source: &str, columns: Vec<(&str, Primitive)>) -> InferredDescriptor {
+const PROGRAM: &str = "prefix ex: <https://example.org/>\n\
+                       users := io.csv(\"data/users.csv\")\n\
+                       User : ex:Person from users\n    \
+                       ex:name = .name\n";
+
+fn descriptor(uri: &str, columns: &[(&str, Primitive)]) -> InferredDescriptor {
     InferredDescriptor {
-        source_name: source.into(),
+        uri: uri.into(),
         columns: columns
-            .into_iter()
+            .iter()
             .map(|(n, p)| InferredColumn {
-                name: n.into(),
-                primitive: p,
+                name: (*n).into(),
+                primitive: *p,
             })
             .collect(),
-        content_hash: String::new(),
+        freshness_token: "t1".into(),
     }
 }
 
-fn db_with_inferred(descriptors: Vec<InferredDescriptor>) -> FossilDb {
+/// A db over a `NativeSystem` holding `descriptors`, plus the program file.
+fn db_with(descriptors: Vec<InferredDescriptor>) -> (FossilDb, SourceFile) {
     let system = NativeSystem::default();
+    let cache = system
+        .descriptors()
+        .expect("the native host keeps a descriptor table");
     for d in descriptors {
-        system.register_inferred_descriptor(d);
+        cache.insert(d);
     }
-    // VERIFIED signature (plan 13-02 Task 0): FossilDb::new takes Arc<dyn System>.
-    FossilDb::new(Arc::new(system) as Arc<dyn System>)
+    let db = FossilDb::new(Arc::new(system) as Arc<dyn System>);
+    let file = SourceFile::new(&db, PROGRAM.to_string(), "/w/mapping.fossil".to_string());
+    (db, file)
 }
 
+fn field_names(db: &FossilDb, file: SourceFile) -> Vec<String> {
+    let mappings = def_map(db, file).mappings(db).clone();
+    let mapping = *mappings.first().expect("one mapping");
+    let Some(row) = source_row_inferred(db, mapping) else {
+        return Vec::new();
+    };
+    let TyKind::Record(rec) = row.kind(db) else {
+        panic!("a source row is a Record");
+    };
+    rec.fields(db).iter().map(|f| f.name.to_string()).collect()
+}
+
+/// The checker reaches the descriptor through the URI the binding names, which
+/// is the one thing the binding name is good for here.
 #[test]
-fn inferred_descriptor_registers_and_round_trips_through_system() {
-    let db = db_with_inferred(vec![sample(
-        "users",
-        vec![
-            ("id", Primitive::Integer),
-            ("name", Primitive::String),
-            ("age", Primitive::Integer),
-        ],
+fn a_descriptor_registered_under_the_uri_reaches_the_binding_that_names_it() {
+    let (db, file) = db_with(vec![descriptor(
+        "data/users.csv",
+        &[("id", Primitive::Integer), ("name", Primitive::String)],
     )]);
-
-    // Reach through the Db's System accessor — same path that
-    // `resolve_source_row` takes inside the typecheck_mapping query.
-    let got = db
-        .system()
-        .inferred_descriptor("users")
-        .expect("registered descriptor must round-trip");
-    assert_eq!(got.source_name.as_str(), "users");
-    assert_eq!(got.columns.len(), 3);
-    assert_eq!(got.columns[0].name.as_str(), "id");
-    assert_eq!(got.columns[0].primitive, Primitive::Integer);
-    assert_eq!(got.columns[1].name.as_str(), "name");
-    assert_eq!(got.columns[1].primitive, Primitive::String);
-    assert_eq!(got.columns[2].name.as_str(), "age");
-    assert_eq!(got.columns[2].primitive, Primitive::Integer);
+    assert_eq!(field_names(&db, file), ["id", "name"]);
 }
 
+/// The binding name is not a key. A descriptor filed under `"users"` — what the
+/// pre-ADR-0050 host registered — is not found, and the checker falls through
+/// to no forward propagation instead of typing against the wrong file.
 #[test]
-fn unknown_source_returns_none_without_panicking() {
-    let db = db_with_inferred(vec![sample(
-        "users",
-        vec![("id", Primitive::Integer), ("name", Primitive::String)],
+fn a_descriptor_registered_under_the_binding_name_is_not_found() {
+    let (db, file) = db_with(vec![descriptor("users", &[("id", Primitive::Integer)])]);
+    assert!(field_names(&db, file).is_empty());
+}
+
+/// A URI nobody registered propagates nothing, and does not panic on the way.
+#[test]
+fn an_unregistered_uri_propagates_nothing() {
+    let (db, file) = db_with(vec![descriptor(
+        "data/other.csv",
+        &[("id", Primitive::Integer)],
     )]);
-    assert!(db.system().inferred_descriptor("nonexistent").is_none());
+    assert!(field_names(&db, file).is_empty());
 }
 
+/// Re-introspection is visible to the checker: the cache replaces the entry for
+/// a URI, and the next type-check reads the new columns. This is the
+/// consumer-side half of the engine's re-introspection test.
 #[test]
-fn re_registering_same_source_name_overwrites_previous_entry() {
-    let system = NativeSystem::default();
-    system.register_inferred_descriptor(sample("users", vec![("id", Primitive::Integer)]));
-    // Second registration with same source_name + extra column.
-    system.register_inferred_descriptor(sample(
-        "users",
-        vec![("id", Primitive::Integer), ("email", Primitive::String)],
+fn re_registering_a_uri_changes_what_the_checker_sees() {
+    let (db, file) = db_with(vec![descriptor(
+        "data/users.csv",
+        &[("id", Primitive::Integer)],
+    )]);
+    assert_eq!(field_names(&db, file), ["id"]);
+
+    db.system().descriptors().expect("table").insert(descriptor(
+        "data/users.csv",
+        &[("id", Primitive::Integer), ("email", Primitive::String)],
     ));
-    let got = system
-        .inferred_descriptor("users")
-        .expect("present after re-register");
-    assert_eq!(got.columns.len(), 2);
-    assert_eq!(got.columns[1].name.as_str(), "email");
-}
-
-#[test]
-fn empty_descriptor_register_and_lookup_returns_empty_columns() {
-    let db = db_with_inferred(vec![InferredDescriptor::empty("users")]);
-    let got = db.system().inferred_descriptor("users").expect("present");
-    assert!(got.columns.is_empty());
-    assert_eq!(got.content_hash, "");
+    assert_eq!(field_names(&db, file), ["id", "email"]);
 }

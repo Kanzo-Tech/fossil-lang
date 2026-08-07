@@ -331,23 +331,26 @@ impl FossilPlayground {
     ///
     /// ```json
     /// {
-    ///   "source_name": "users",
+    ///   "uri": "examples/users.csv",
     ///   "columns": [
     ///     { "name": "id", "primitive": "integer" },
     ///     { "name": "name", "primitive": "string" }
     ///   ],
-    ///   "content_hash": ""
+    ///   "freshness_token": ""
     /// }
     /// ```
     ///
     /// Called by the browser-side playground orchestration AFTER running
     /// DuckDB-WASM `DESCRIBE read_csv_auto('<resolved-url>')` and BEFORE
-    /// invoking `compile()` / `compile_file()`. Keyed by source-binding
-    /// name (`"users"` for `users := io.csv("...")`), NOT by URL.
+    /// invoking `compile()` / `compile_file()`. Keyed by the source URI as the
+    /// program writes it (`"examples/users.csv"` for
+    /// `users := io.csv("examples/users.csv")`), NOT by the binding name and
+    /// NOT by the resolved URL the host fetched — ADR-0050.
     ///
-    /// Idempotent: re-registering with the same `source_name` OVERWRITES the
-    /// previous entry — intentional, since the host may re-introspect when
-    /// file content changes.
+    /// Idempotent: re-registering the same `uri` OVERWRITES the previous entry
+    /// — intentional, since the host re-introspects when the source changes.
+    /// A host that can tell whether it changed puts a token in
+    /// `freshness_token` and skips the `DESCRIBE` when the cache agrees.
     ///
     /// # Errors
     ///
@@ -576,19 +579,21 @@ impl FossilPlayground {
         let descriptor: fossil_descriptors_input::InferredDescriptor =
             serde_json::from_str(descriptor_json)
                 .map_err(|e| WorkspaceError::MalformedDescriptor(e.to_string()))?;
-        self.system.register_inferred_descriptor(descriptor);
+        if let Some(cache) = self.system.descriptors() {
+            cache.insert(descriptor);
+        }
         Ok(())
     }
 
-    /// Native-reachable lookup mirroring `System::inferred_descriptor`.
+    /// Native-reachable lookup into the descriptor cache, by source URI.
     /// Lets cargo-tests verify the registration round-trips without going
     /// through the wasm-bindgen wrapper.
     #[must_use]
     pub fn inferred_descriptor_native(
         &self,
-        source_name: &str,
+        uri: &str,
     ) -> Option<fossil_descriptors_input::InferredDescriptor> {
-        self.system.inferred_descriptor(source_name)
+        self.system.descriptors()?.get(uri)
     }
 }
 

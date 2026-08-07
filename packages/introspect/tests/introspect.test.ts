@@ -73,21 +73,28 @@ describe("describeSql", () => {
 });
 
 describe("buildDescriptor", () => {
-  it("maps DESCRIBE rows to a typed descriptor with empty content_hash", () => {
+  it("maps DESCRIBE rows to a descriptor keyed by URI, with no token", () => {
     const rows: DescribeRow[] = [
       { column_name: "id", column_type: "INTEGER" },
       { column_name: "name", column_type: "VARCHAR" },
       { column_name: "joined", column_type: "TIMESTAMP" },
     ];
-    expect(buildDescriptor("users", rows)).toEqual({
-      source_name: "users",
+    expect(buildDescriptor("data/users.csv", rows)).toEqual({
+      uri: "data/users.csv",
       columns: [
         { name: "id", primitive: "integer" },
         { name: "name", primitive: "string" },
         { name: "joined", primitive: "date_time" },
       ],
-      content_hash: "",
+      freshness_token: "",
     });
+  });
+
+  it("carries the host's freshness token through when it supplies one", () => {
+    const rows: DescribeRow[] = [{ column_name: "id", column_type: "INT" }];
+    expect(buildDescriptor("u.csv", rows, 'W/"abc"').freshness_token).toBe(
+      'W/"abc"',
+    );
   });
 
   it("drops columns with empty/missing names", () => {
@@ -96,7 +103,7 @@ describe("buildDescriptor", () => {
       { column_name: "", column_type: "INT" },
       { column_type: "INT" },
     ];
-    expect(buildDescriptor("s", rows).columns).toEqual([
+    expect(buildDescriptor("s.csv", rows).columns).toEqual([
       { name: "ok", primitive: "integer" },
     ]);
   });
@@ -122,16 +129,27 @@ describe("introspect", () => {
     expect(query).toHaveBeenCalledTimes(2);
     expect(descriptors).toEqual([
       {
-        source_name: "users",
+        uri: "@w/users.csv",
         columns: [{ name: "id", primitive: "integer" }],
-        content_hash: "",
+        freshness_token: "",
       },
       {
-        source_name: "orders",
+        uri: "@w/orders.csv",
         columns: [{ name: "total", primitive: "float" }],
-        content_hash: "",
+        freshness_token: "",
       },
     ]);
+  });
+
+  it("asks the host for a freshness token and stamps it on the descriptor", async () => {
+    const freshness = vi.fn((ref: SourceRef) => `etag-for-${ref.url}`);
+    const descriptors = await introspect('u := io.csv("@w/u.csv")', {
+      resolve: (r) => r.url,
+      query: async () => [{ column_name: "id", column_type: "INT" }],
+      freshness,
+    });
+    expect(freshness).toHaveBeenCalledTimes(1);
+    expect(descriptors[0]?.freshness_token).toBe("etag-for-@w/u.csv");
   });
 
   it("is best-effort: a failing source is skipped (logged), the rest succeed", async () => {
@@ -147,9 +165,9 @@ describe("introspect", () => {
     expect(onWarn).toHaveBeenCalledTimes(1);
     expect(descriptors).toEqual([
       {
-        source_name: "orders",
+        uri: "@w/orders.csv",
         columns: [{ name: "total", primitive: "integer" }],
-        content_hash: "",
+        freshness_token: "",
       },
     ]);
   });

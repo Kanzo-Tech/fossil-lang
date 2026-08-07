@@ -117,17 +117,23 @@ export interface InferredColumnJson {
  * introspection feeds the compiler ahead of `compile()`).
  */
 export interface InferredDescriptorJson {
-  /** Source binding name (e.g. `"users"` for `users := io.csv(...)`). */
-  source_name: string;
+  /**
+   * The source URI exactly as the program writes it — the string inside
+   * `io.csv("examples/users.csv")`. NOT the binding name, and NOT the URL the
+   * host resolved in order to read the file: the checker only ever sees what
+   * the program says. ADR-0050.
+   */
+  uri: string;
   /** Ordered columns — order is significant for column-position fallback. */
   columns: InferredColumnJson[];
   /**
-   * Opaque content-hash. Empty string means "let the Rust side derive a
-   * deterministic hash from the column tuple list" (used for Salsa keying).
-   * Hosts that already maintain a per-file content-hash (e.g. resolver-side)
-   * MAY supply it.
+   * Opaque token identifying the state of the source this was read from. The
+   * cache compares it and nothing interprets it: an ETag, a digest, a
+   * `Last-Modified`, whatever the host can get cheaply. Empty means "I cannot
+   * tell", which the cache reads as never-fresh, so that source is
+   * re-introspected on every compile.
    */
-  content_hash: string;
+  freshness_token: string;
 }
 
 // Re-export the Token + Diagnostic + Resolver types for ergonomics — consumers

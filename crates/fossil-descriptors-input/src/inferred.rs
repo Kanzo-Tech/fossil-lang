@@ -31,50 +31,39 @@ pub struct InferredColumn {
 
 /// A descriptor inferred from a runtime file introspection.
 ///
-/// `content_hash` is provided by the host (browser-side DuckDB-WASM; native
-/// CLI). If absent (`""`), the consumer falls back to hashing the canonical
-/// `(name, primitive)` column tuple list deterministically. The hash drives
-/// Salsa invalidation: when the host re-registers a descriptor with the same
-/// hash, downstream queries do not re-run.
+/// Identified by the source **URI**, which is what the descriptor is about: a
+/// binding name is a name for the *program*'s convenience, and two of them can
+/// point at one file. See ADR-0050.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InferredDescriptor {
-    /// Source binding name this descriptor is for (`users` in
-    /// `users := io.csv("...")`).
-    pub source_name: SmolStr,
+    /// The source URI exactly as written in the program — the string inside
+    /// `io.csv("examples/users.csv")`. NOT the resolved locator: the host
+    /// resolves (`@conn` aliases, a program-relative path, a signed URL) in
+    /// order to *read* the source, but the checker only ever sees what the
+    /// program says, so that is the only string both ends can agree on.
+    pub uri: SmolStr,
     /// Ordered columns (order is significant — Phase 3 CORE-05 column-position
     /// fallback parsing depends on it).
     pub columns: Vec<InferredColumn>,
-    /// Opaque content-hash provided by the host; empty means "consumer should
-    /// derive". UTF-8 hex string; max 64 chars.
-    pub content_hash: String,
+    /// Opaque token identifying the state of the source this was read from.
+    /// The cache compares it; nothing interprets it. The native host writes
+    /// `mtime` + size, a host that has a strong `ETag` or a content digest
+    /// writes that instead, and a host that cannot cheaply tell writes `""` —
+    /// which [`crate::DescriptorCache::is_fresh`] reads as "never fresh", so
+    /// that source is re-introspected every time. See ADR-0050 for why the
+    /// native token is not a hash of the bytes.
+    pub freshness_token: String,
 }
 
 impl InferredDescriptor {
-    /// Build an empty descriptor for `source_name` — useful for tests.
+    /// Build an empty descriptor for `uri` — useful for tests.
     #[must_use]
-    pub fn empty(source_name: impl Into<SmolStr>) -> Self {
+    pub fn empty(uri: impl Into<SmolStr>) -> Self {
         Self {
-            source_name: source_name.into(),
+            uri: uri.into(),
             columns: Vec::new(),
-            content_hash: String::new(),
+            freshness_token: String::new(),
         }
-    }
-
-    /// Compute a deterministic content-hash from the column list if the host
-    /// did not supply one. Uses std `DefaultHasher` for portability (no new
-    /// dep on blake3 / sha2 — WASM gate friendly). Returned as a 16-char hex
-    /// string (sufficient for Salsa keying within a single workspace).
-    #[must_use]
-    pub fn derived_content_hash(&self) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut h = DefaultHasher::new();
-        self.source_name.hash(&mut h);
-        for c in &self.columns {
-            c.name.hash(&mut h);
-            c.primitive.hash(&mut h);
-        }
-        format!("{:016x}", h.finish())
     }
 }
 
@@ -116,7 +105,7 @@ mod tests {
     #[test]
     fn inferred_descriptor_round_trips_through_serde() {
         let d = InferredDescriptor {
-            source_name: "users".into(),
+            uri: "examples/users.csv".into(),
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
@@ -127,7 +116,7 @@ mod tests {
                     primitive: Primitive::String,
                 },
             ],
-            content_hash: "abc123".into(),
+            freshness_token: "abc123".into(),
         };
         let j = serde_json::to_string(&d).expect("serialise");
         let d2: InferredDescriptor = serde_json::from_str(&j).expect("deserialise");
@@ -135,24 +124,9 @@ mod tests {
     }
 
     #[test]
-    fn derived_content_hash_is_deterministic() {
-        let d1 = InferredDescriptor {
-            source_name: "users".into(),
-            columns: vec![InferredColumn {
-                name: "id".into(),
-                primitive: Primitive::Integer,
-            }],
-            content_hash: String::new(),
-        };
-        let d2 = d1.clone();
-        assert_eq!(d1.derived_content_hash(), d2.derived_content_hash());
-        assert_eq!(d1.derived_content_hash().len(), 16);
-    }
-
-    #[test]
     fn parse_builds_input_schema_from_columns() {
         let d = InferredDescriptor {
-            source_name: "users".into(),
+            uri: "examples/users.csv".into(),
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
@@ -163,7 +137,7 @@ mod tests {
                     primitive: Primitive::String,
                 },
             ],
-            content_hash: String::new(),
+            freshness_token: String::new(),
         };
         let schema = d.parse(b"unused").unwrap();
         assert_eq!(schema.fields.len(), 2);
@@ -177,9 +151,9 @@ mod tests {
     /// checker as a diagnostic about a column.
     #[test]
     fn a_primitive_outside_the_lattice_is_a_deserialisation_error() {
-        let json = r#"{"source_name":"users",
+        let json = r#"{"uri":"examples/users.csv",
                        "columns":[{"name":"id","primitive":"decimal"}],
-                       "content_hash":""}"#;
+                       "freshness_token":""}"#;
         let err = serde_json::from_str::<InferredDescriptor>(json)
             .expect_err("`decimal` is not in the lattice");
         assert!(
@@ -190,7 +164,7 @@ mod tests {
 
     #[test]
     fn name_is_inferred() {
-        let d = InferredDescriptor::empty("users");
+        let d = InferredDescriptor::empty("examples/users.csv");
         assert_eq!(d.name(), "inferred");
     }
 }

@@ -21,12 +21,16 @@
 //! Priority order:
 //!
 //! 1. **`InferredDescriptor`** (preferred). When the host has pre-registered
-//!    a descriptor for the mapping's source binding name via
-//!    `db.system().register_inferred_descriptor(...)` (browser-side
-//!    `DuckDB-WASM` via `FossilPlayground::register_inferred_descriptor`;
-//!    native CLI via the `duckdb` crate), `resolve_source_row` consumes that
-//!    descriptor and builds the [`Record`] directly — no CSVW JSON is read
-//!    from disk.
+//!    a descriptor for the mapping's source **URI** via
+//!    `db.system().descriptors()` (browser-side `DuckDB-WASM` via
+//!    `FossilPlayground::registerInferredDescriptor`; the native engine via
+//!    the `duckdb` crate), `resolve_source_row` consumes that descriptor and
+//!    builds the [`Record`] directly — no CSVW JSON is read from disk.
+//!
+//!    The lookup key is the URI as the program writes it, not the binding
+//!    name (ADR-0050): the descriptor describes a file, and two bindings may
+//!    name one. A source whose RHS is not a recognisable `io.*("…")` call has
+//!    no URI, hence no descriptor, and falls through to 2 or 3.
 //!
 //! 2. **CSVW descriptor** (deprecated; ADR-0007 retained as intermediate IR).
 //!    When the source binding declares `schema = "<path>"` AND no
@@ -42,8 +46,8 @@
 //!
 //! ## Salsa-safety of the inferred path
 //!
-//! `db.system().inferred_descriptor(source_name)` reads through the existing
-//! `System` abstraction (ADR-0003 / ADR-0020). The descriptor table is NOT a
+//! `db.system().descriptors()` reads through the existing `System`
+//! abstraction (ADR-0003 / ADR-0020). The descriptor table is NOT a
 //! `salsa::input` — it is host-owned state on the System impl, mirroring
 //! `read_file`. Reads from inside a tracked query do not register a Salsa
 //! input dependency, so re-registering a descriptor does NOT trigger
@@ -70,7 +74,7 @@ use crate::ty::{Record, RecordField, Ty, TyKind};
 /// `delay_span_bug` / `D-CSVW-DEPRECATED` emission. For IDE features
 /// (completion, hover) that want the source schema OUTSIDE a tracked query.
 /// Returns `None` when no descriptor is registered for the mapping's source
-/// binding (e.g. the host did not pre-introspect, or the legacy CSVW path is
+/// URI (e.g. the host did not pre-introspect, or the legacy CSVW path is
 /// in use — those callers want [`resolve_source_row`] inside type-check).
 #[must_use]
 pub fn source_row_inferred<'db>(
@@ -81,8 +85,24 @@ pub fn source_row_inferred<'db>(
     let mappings = crate::lower::lower_to_hir(db, file);
     let hir_mapping = mappings.mappings(db).get(mapping.index(db))?;
     let source_name = hir_mapping.source_binding.clone();
-    let inferred = db.system().inferred_descriptor(source_name.as_str())?;
+    let inferred = lookup_inferred(db, def_map(db, file), source_name.as_str())?;
     Some(record_from_inferred(db, &inferred))
+}
+
+/// The descriptor registered for the URI `source_name` is bound to, if the
+/// binding has a URI at all and the host keeps a table.
+///
+/// The indirection binding-name → URI → descriptor is the whole of ADR-0050 on
+/// the consumer side: the `DefMap` already carries the positional URI (it has
+/// to, `fossil-mir::lower` reads it for `Op::Source`), so no new datum crosses
+/// a query boundary and the per-mapping fan-out is unchanged.
+fn lookup_inferred<'db>(
+    db: &'db dyn fossil_base::Db,
+    dm: crate::def_map::DefMap<'db>,
+    source_name: &str,
+) -> Option<InferredDescriptor> {
+    let (_ctor, uri) = dm.lookup_source_call(db, source_name)?;
+    db.system().descriptors()?.get(uri?.as_str())
 }
 
 /// Map one [`InferredColumn`] to a [`RecordField`] — the column→field lowering
@@ -123,7 +143,7 @@ pub fn resolve_source_row<'db>(
     // FIRST. This is the new authoring style — the user writes `io.csv("...")`
     // and the host (browser-side `DuckDB-WASM`; native CLI `duckdb` crate)
     // pre-registers the descriptor before invoking `compile`.
-    if let Some(inferred) = db.system().inferred_descriptor(source_name.as_str()) {
+    if let Some(inferred) = lookup_inferred(db, dm, source_name.as_str()) {
         // If an explicit `schema = "..."` arg is ALSO present, the
         // InferredDescriptor wins (it represents fresher truth from the
         // file itself) but we ALSO emit the `D-CSVW-DEPRECATED` warning so
@@ -439,7 +459,7 @@ mod tests {
 
         // Build the equivalent InferredDescriptor (same column shape).
         let inferred = InferredDescriptor {
-            source_name: "users".into(),
+            uri: "users.csv".into(),
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
@@ -454,7 +474,7 @@ mod tests {
                     primitive: Primitive::Integer,
                 },
             ],
-            content_hash: "test-hash".into(),
+            freshness_token: "test-token".into(),
         };
         let row_inferred = record_from_inferred(&db, &inferred);
 
@@ -482,12 +502,12 @@ mod tests {
     fn a_column_carries_the_lattice_and_not_its_spelling() {
         let db = db();
         let inferred = fossil_descriptors_input::InferredDescriptor {
-            source_name: "users".into(),
+            uri: "users.csv".into(),
             columns: vec![fossil_descriptors_input::InferredColumn {
                 name: "born".into(),
                 primitive: Primitive::GYear,
             }],
-            content_hash: String::new(),
+            freshness_token: String::new(),
         };
         let TyKind::Record(rec) = record_from_inferred(&db, &inferred).kind(&db) else {
             panic!("expected Record");

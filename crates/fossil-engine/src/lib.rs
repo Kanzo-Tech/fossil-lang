@@ -152,51 +152,120 @@ fn extract_source_refs(text: &str) -> Vec<(SmolStr, String)> {
         .collect()
 }
 
-/// Pre-introspect every source binding and register an [`InferredDescriptor`] on
-/// the [`System`] BEFORE typecheck (ADR-0037). Per-source failures are non-fatal
-/// — they log + skip; the compile may still succeed with no forward propagation
-/// for that source.
+/// The token that decides whether a cached descriptor still describes its
+/// source: the file's modification time in nanoseconds since the epoch, paired
+/// with its byte length. Two `stat` fields, no read of the source itself — see
+/// ADR-0050 for why the native host does not hash the bytes.
+///
+/// Returns `""` for anything this host cannot `stat` — an `http(s)://` or
+/// `s3://` locator, or a path that does not exist. An empty token is never
+/// fresh ([`fossil_descriptors_input::DescriptorCache::is_fresh`]), so those are
+/// re-introspected on every compile. That is the honest answer for an object we
+/// would have to make a network round trip to interrogate.
+fn freshness_token(resolved: &str) -> String {
+    let Ok(meta) = std::fs::metadata(resolved) else {
+        return String::new();
+    };
+    let Ok(modified) = meta.modified() else {
+        return String::new();
+    };
+    let Ok(since_epoch) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH) else {
+        return String::new();
+    };
+    format!(
+        "mtime:{}.{:09}:size:{}",
+        since_epoch.as_secs(),
+        since_epoch.subsec_nanos(),
+        meta.len()
+    )
+}
+
+/// Turn a source URI as the program writes it into a locator `DuckDB` can read:
+/// `@conn` aliases expand, a URL or absolute path passes through, and a
+/// relative path anchors to the program's directory when that resolves to a
+/// file that exists.
+fn resolve_for_read(
+    raw_uri: &str,
+    source_dir: &Path,
+    connections: &HashMap<String, creds::ConnectionCreds>,
+) -> String {
+    let url = resolve_source_uri(raw_uri, connections);
+    let is_pass_through = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("s3://")
+        || Path::new(&url).is_absolute();
+    if is_pass_through {
+        return url;
+    }
+    let joined = source_dir.join(&url);
+    if joined.exists() {
+        joined.to_string_lossy().into_owned()
+    } else {
+        url
+    }
+}
+
+/// Pre-introspect every source the program names and register an
+/// [`InferredDescriptor`] on the host's descriptor cache BEFORE typecheck
+/// (ADR-0037, keyed by URI since ADR-0050).
+///
+/// A source whose cached descriptor still carries the current
+/// [`freshness_token`] is skipped — no `DESCRIBE`, no read. That is where the
+/// cost is: programs are small and sources are not, so the introspection is
+/// the expensive half of a compile and it is the half that rarely needs doing
+/// twice.
+///
+/// Per-source failures are non-fatal — they log + skip; the compile may still
+/// succeed with no forward propagation for that source.
 fn pre_introspect_and_register(
     system: &dyn System,
     source_text: &str,
     source_dir: &Path,
     connections: &HashMap<String, creds::ConnectionCreds>,
 ) {
-    let conn = match duckdb::Connection::open_in_memory() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("DuckDB in-memory open failed; skipping pre-introspection: {e}");
-            return;
-        }
+    let Some(cache) = system.descriptors() else {
+        tracing::debug!("host keeps no descriptor cache; skipping pre-introspection");
+        return;
     };
-    if let Err(e) = apply_source_creds(&conn, connections) {
-        tracing::warn!("applying source creds for pre-introspection failed: {e}");
-    }
-    for (source_name, url) in extract_source_refs(source_text) {
-        let url = resolve_source_uri(url.as_str(), connections);
-        let url_str = url.as_str();
-        let is_pass_through = url_str.starts_with("http://")
-            || url_str.starts_with("https://")
-            || url_str.starts_with("s3://")
-            || Path::new(url_str).is_absolute();
-        let resolved_path = if is_pass_through {
-            url_str.to_string()
+
+    // Opened on the first miss, not on entry. A compile whose sources are all
+    // fresh must do no DuckDB work at all, and opening a connection is work.
+    let mut conn: Option<duckdb::Connection> = None;
+
+    for (source_name, raw_uri) in extract_source_refs(source_text) {
+        let token = freshness_token(&resolve_for_read(&raw_uri, source_dir, connections));
+        if cache.is_fresh(&raw_uri, &token) {
+            tracing::debug!("`{raw_uri}` is unchanged since it was introspected; reusing");
+            continue;
+        }
+
+        let conn = if let Some(c) = &conn {
+            c
         } else {
-            let joined = source_dir.join(url_str);
-            if joined.exists() {
-                joined.to_string_lossy().into_owned()
-            } else {
-                url_str.to_string()
+            let opened = match duckdb::Connection::open_in_memory() {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("DuckDB in-memory open failed; skipping pre-introspection: {e}");
+                    return;
+                }
+            };
+            if let Err(e) = apply_source_creds(&opened, connections) {
+                tracing::warn!("applying source creds for pre-introspection failed: {e}");
             }
+            conn.insert(opened)
         };
 
+        // Resolved a second time deliberately: the token above is about the
+        // bytes on disk, this is the string DuckDB reads, and conflating them
+        // would make a `@conn` alias silently change meaning between the two.
+        let resolved_path = resolve_for_read(&raw_uri, source_dir, connections);
         let escaped_path = resolved_path.replace('\'', "''");
         let sql = format!("DESCRIBE SELECT * FROM read_csv_auto('{escaped_path}')");
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(
-                    "DESCRIBE prepare failed for source `{source_name}` (url=`{url}`): {e}"
+                    "DESCRIBE prepare failed for source `{source_name}` (uri=`{raw_uri}`): {e}"
                 );
                 continue;
             }
@@ -215,13 +284,12 @@ fn pre_introspect_and_register(
                 continue;
             }
         };
-        let descriptor = InferredDescriptor {
-            source_name: source_name.clone(),
+        cache.insert(InferredDescriptor {
+            uri: SmolStr::from(raw_uri.as_str()),
             columns: cols,
-            content_hash: String::new(),
-        };
-        system.register_inferred_descriptor(descriptor);
-        tracing::debug!("pre-registered InferredDescriptor for `{source_name}`");
+            freshness_token: token,
+        });
+        tracing::debug!("introspected `{raw_uri}` for source `{source_name}`");
     }
 }
 
@@ -588,5 +656,93 @@ mod tests {
     fn unknown_connection_passes_through_verbatim() {
         let c = conns(&[("sales", "s3://bucket")]);
         assert_eq!(resolve_source_uri("@missing/x.csv", &c), "@missing/x.csv");
+    }
+
+    /// ADR-0050's done-when, counted rather than timed: changing the CSV and
+    /// re-running re-introspects; not changing it does not.
+    ///
+    /// `registrations()` moves only when a `DESCRIBE` actually ran, so the
+    /// assertion is on the number of reads of the source and not on how long
+    /// the second call took. The third write adds a column, which moves the
+    /// size as well as the mtime — the token is both, so the test does not
+    /// depend on the filesystem's clock resolution.
+    #[test]
+    fn a_source_is_re_introspected_when_it_changes_and_not_when_it_does_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let csv = dir.path().join("users.csv");
+        std::fs::write(&csv, "id,name\n1,ada\n").expect("write csv");
+        let program = "users := io.csv(\"users.csv\")\n";
+        let no_creds = HashMap::new();
+
+        let system = system::EngineSystem::for_program_dir(dir.path());
+        let cache = system.descriptors().expect("the engine keeps a table");
+
+        pre_introspect_and_register(&system, program, dir.path(), &no_creds);
+        assert_eq!(
+            cache.registrations(),
+            1,
+            "the first compile reads the source"
+        );
+        assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
+
+        pre_introspect_and_register(&system, program, dir.path(), &no_creds);
+        assert_eq!(
+            cache.registrations(),
+            1,
+            "an untouched source must not be read a second time"
+        );
+
+        std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
+        pre_introspect_and_register(&system, program, dir.path(), &no_creds);
+        assert_eq!(
+            cache.registrations(),
+            2,
+            "a changed source must be read again"
+        );
+        assert_eq!(
+            cache.get("users.csv").expect("registered").columns.len(),
+            3,
+            "and the new column is visible to the checker"
+        );
+    }
+
+    /// The key is the URI, so two bindings over one file cost one read — the
+    /// case a binding-name key charged twice for.
+    #[test]
+    fn two_bindings_over_one_file_introspect_once() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("u.csv"), "id\n1\n").expect("write csv");
+        let program = "a := io.csv(\"u.csv\")\nb := io.csv(\"u.csv\")\n";
+
+        let system = system::EngineSystem::for_program_dir(dir.path());
+        let cache = system.descriptors().expect("the engine keeps a table");
+        pre_introspect_and_register(&system, program, dir.path(), &HashMap::new());
+
+        assert_eq!(cache.registrations(), 1);
+        assert_eq!(cache.len(), 1);
+    }
+
+    /// A source this host cannot `stat` gets an empty token, and an empty token
+    /// is never fresh — so a remote object is re-introspected rather than
+    /// trusted. The assertion is on the token, since the DESCRIBE of an
+    /// unreachable URL fails and registers nothing.
+    #[test]
+    fn a_locator_that_cannot_be_stat_ed_yields_no_token() {
+        assert_eq!(freshness_token("https://example.org/users.csv"), "");
+        assert_eq!(freshness_token("/nonexistent/users.csv"), "");
+    }
+
+    #[test]
+    fn the_token_moves_when_the_file_does() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let csv = dir.path().join("u.csv");
+        std::fs::write(&csv, "id\n1\n").expect("write");
+        let path = csv.to_string_lossy().into_owned();
+        let first = freshness_token(&path);
+        assert!(!first.is_empty(), "a local file has a token");
+        assert_eq!(first, freshness_token(&path), "and it is stable");
+
+        std::fs::write(&csv, "id,name\n1,ada\n").expect("rewrite");
+        assert_ne!(first, freshness_token(&path));
     }
 }

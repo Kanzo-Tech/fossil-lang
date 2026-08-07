@@ -113,9 +113,9 @@ describe('FossilEditor', () => {
     };
 
     const descriptor = {
-      source_name: 'users',
+      uri: 'u.csv',
       columns: [{ name: 'id', primitive: 'integer' as const }],
-      content_hash: '',
+      freshness_token: '',
     };
 
     render(
