@@ -1921,6 +1921,7 @@ dependencies = [
  "parquet",
  "serde_yaml_ng",
  "slug",
+ "smol_str",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

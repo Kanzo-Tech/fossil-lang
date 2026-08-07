@@ -23,6 +23,9 @@
 pub mod catalog;
 pub mod files;
 pub mod literal;
+/// The relational operators executed: the walk from an emit op back to the
+/// sources it reads (`Filter` / `Project` / `Join`).
+pub mod plan;
 pub mod rdf;
 pub mod shacl;
 /// The catalog rendered for this engine: which `DataFusion` function each
@@ -39,6 +42,9 @@ pub use fossil_descriptors_output::OutputDescriptorKind;
 /// Re-exported so a host can classify a [`SourceRef`]'s format without depending
 /// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
 pub use fossil_mir::SourceFormat;
+/// The relation an op index produces — the seam a host (or a test that builds a
+/// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
+pub use plan::plan_relation;
 /// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
 /// arm of the output model; ShEx's lives in `fossil-shex`).
 pub use shacl::shacl_to_graph_schema;
@@ -226,6 +232,27 @@ pub async fn execute_vertex<'db>(
     finalize_vertex(ctx, vec![prepared]).await
 }
 
+/// Materialise the VERTEX of an op list that is already lowered and already
+/// descriptor-refined — [`execute_vertex`] without the `MappingLoc`.
+///
+/// This is the seam for an op list built by hand rather than by
+/// [`lower_to_mir_pg`]: the operators ADR-0009 defines and the lowering does
+/// not yet emit are reached this way, and that is how they are tested. `db` is
+/// still needed — a [`VProp`]'s type is an interned handle.
+///
+/// # Errors
+/// The list carries no [`Op::EmitVertex`], or any DataFusion read/plan/execute
+/// error.
+pub async fn execute_vertex_ops<'db>(
+    ctx: &SessionContext,
+    db: &'db dyn fossil_base::Db,
+    ops: &[Op<'db>],
+    connections: &HashMap<String, String>,
+) -> datafusion::error::Result<(VertexTable, NodeType)> {
+    let prepared = prepare_vertex_ops(ctx, db, ops, connections).await?;
+    finalize_vertex(ctx, vec![prepared]).await
+}
+
 /// Refuse to execute a mapping whose lowering failed.
 ///
 /// A poisoned [`MirGraph`] means lowering could not resolve something the graph
@@ -261,20 +288,33 @@ async fn prepare_vertex<'db>(
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
     let ops = apply_output_shape(mir.ops(db), descriptor);
-    let ops = ops.as_slice();
+    prepare_vertex_ops(ctx, db, &ops, connections).await
+}
 
-    let (uri, format, binding) = source_of(ops, connections);
-    let (type_name, rdf_type, id, dedup, props) = ops
+/// [`prepare_vertex`] over an op list that is already lowered and refined.
+///
+/// The projection reads the relation the `EmitVertex`'s `input` names — NOT
+/// "the mapping's source". Before F5 those coincided (`input` was always 0);
+/// with a pipeline in front of the emit they do not, and it is the index that
+/// is the contract.
+async fn prepare_vertex_ops<'db>(
+    ctx: &SessionContext,
+    db: &'db dyn fossil_base::Db,
+    ops: &[Op<'db>],
+    connections: &HashMap<String, String>,
+) -> datafusion::error::Result<PreparedVertex> {
+    let (input, type_name, rdf_type, id, dedup, props) = ops
         .iter()
         .find_map(|o| match o {
             Op::EmitVertex {
+                input,
                 type_name,
                 rdf_type,
                 id,
                 dedup,
                 props,
-                ..
             } => Some((
+                *input,
                 type_name.to_string(),
                 rdf_type.as_ref().map(ToString::to_string),
                 id.clone(),
@@ -283,9 +323,13 @@ async fn prepare_vertex<'db>(
             )),
             _ => None,
         })
-        .expect("lower_to_mir_pg always emits an EmitVertex");
+        .ok_or_else(|| {
+            DataFusionError::Plan(
+                "the op list emits no vertex: there is nothing to materialise".to_string(),
+            )
+        })?;
 
-    let df = read_source(ctx, &uri, &format, &binding).await?;
+    let df = plan_relation(ctx, ops, input, connections).await?;
     let projected = df.select(vertex_projection(render(&id), &props))?;
     let node = NodeType {
         label: type_name,
@@ -440,11 +484,10 @@ async fn execute_edges<'db>(
     let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 
-    let (uri, format, binding) = source_of(ops, connections);
-
     let mut out = Vec::new();
     for op in ops {
         if let Op::EmitEdge {
+            input,
             edge_type,
             rdf_uri,
             src_type,
@@ -452,14 +495,12 @@ async fn execute_edges<'db>(
             src_id,
             dst_id,
             single_valued,
-            ..
         } = op
         {
+            let rows = plan_relation(ctx, ops, *input, connections).await?;
             let table = execute_edge(
                 ctx,
-                &uri,
-                &format,
-                &binding,
+                rows,
                 edge_type,
                 src_type,
                 dst_type,
@@ -485,17 +526,16 @@ async fn execute_edges<'db>(
     Ok(out)
 }
 
-/// Materialise one edge type. Projects the source rows to `src_iri`/`dst_iri`,
-/// joins both against the registered vertex tables to resolve endpoint IRIs to
-/// dense ids (inner join — dangling endpoints drop, like the writer), then sorts
-/// the `(src_dense, dst_dense)` pairs into CSR (`by_source`) and CSC
-/// (`by_target`). Mirrors the writer's edge SQL (writer.rs:469-492).
+/// Materialise one edge type. Projects the edge op's input relation (`rows`) to
+/// `src_iri`/`dst_iri`, joins both against the registered vertex tables to
+/// resolve endpoint IRIs to dense ids (inner join — dangling endpoints drop,
+/// like the writer), then sorts the `(src_dense, dst_dense)` pairs into CSR
+/// (`by_source`) and CSC (`by_target`). Mirrors the writer's edge SQL
+/// (writer.rs:469-492).
 #[allow(clippy::too_many_arguments)] // the edge spec is a flat tuple, not worth a struct here
 async fn execute_edge(
     ctx: &SessionContext,
-    uri: &str,
-    format: &SourceFormat,
-    binding: &str,
+    rows: DataFrame,
     label: &str,
     src_type: &str,
     dst_type: &str,
@@ -503,7 +543,7 @@ async fn execute_edge(
     dst_id: &Expr<'_>,
     single_valued: bool,
 ) -> datafusion::error::Result<EdgeTable> {
-    let edge_src = read_source(ctx, uri, format, binding).await?.select(vec![
+    let edge_src = rows.select(vec![
         render(src_id).alias("src_iri"),
         render(dst_id).alias("dst_iri"),
     ])?;
@@ -587,17 +627,22 @@ pub fn resolve_source_uri(raw: &str, connections: &HashMap<String, String>) -> S
     }
 }
 
-/// The resolved source URI + format + binding name of a lowered mapping
-/// (`lower_to_mir_pg` always emits exactly one `Source`). The raw `@conn` alias
-/// is resolved through `connections` ([`resolve_source_uri`]) before use. The
-/// `binding` is the table name a `Provider` source is registered under (the host
-/// pre-registers it; [`read_source`] scans it); object-store formats ignore it.
-fn source_of<'db>(
+/// Every resolved source URI + format + binding name of a lowered mapping, in
+/// op order. A mapping had exactly one `Source` until a `join` gave it two
+/// (ADR-0054), so this is a list and not a lookup — the second source of a
+/// joined mapping is as much a source as the first, and a host that fetches
+/// only the first would run the program against half its inputs.
+///
+/// The raw `@conn` alias is resolved through `connections`
+/// ([`resolve_source_uri`]) before use. The `binding` is the table name a
+/// `Provider` source is registered under (the host pre-registers it;
+/// [`read_source`] scans it); object-store formats ignore it.
+fn sources_of<'db>(
     ops: &[Op<'db>],
     connections: &HashMap<String, String>,
-) -> (String, SourceFormat, String) {
+) -> Vec<(String, SourceFormat, String)> {
     ops.iter()
-        .find_map(|o| match o {
+        .filter_map(|o| match o {
             Op::Source {
                 uri,
                 format,
@@ -610,7 +655,7 @@ fn source_of<'db>(
             )),
             _ => None,
         })
-        .expect("lower_to_mir_pg always emits a Source")
+        .collect()
 }
 
 /// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`] — the
@@ -628,7 +673,7 @@ fn source_of<'db>(
 ///   [`register_rdf`] / [`provider_bindings`]). Here we simply scan that
 ///   pre-registered table — RDF stays at the I/O border, the executor never
 ///   parses it.
-async fn read_source(
+pub(crate) async fn read_source(
     ctx: &SessionContext,
     uri: &str,
     format: &SourceFormat,
@@ -773,9 +818,10 @@ pub fn program_sources(
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
         let ops = apply_output_shape(mir.ops(db), descriptor);
-        let (uri, format, _binding) = source_of(&ops, connections);
-        if !out.iter().any(|s| s.uri == uri) {
-            out.push(SourceRef { uri, format });
+        for (uri, format, _binding) in sources_of(&ops, connections) {
+            if !out.iter().any(|s| s.uri == uri) {
+                out.push(SourceRef { uri, format });
+            }
         }
     }
     out
@@ -982,7 +1028,7 @@ pub fn run_to_dir(
 /// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Total over the
 /// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
 /// reach, which is what makes a property that type-checks a property that runs.
-fn render(e: &Expr<'_>) -> DfExpr {
+pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
     match e {
         Expr::LitString(s) => lit(s.to_string()),
         // `new_unqualified` (NOT `col()`): a bare `col("hasProject")` folds the

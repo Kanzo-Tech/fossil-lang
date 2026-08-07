@@ -83,6 +83,9 @@ tokio = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
 tempfile = { workspace = true }
+# tests/pipeline.rs builds the op list by hand — the operators ADR-0009 defined
+# and no `.fossil` reaches yet — so it spells `SmolStr` directly.
+smol_str = { workspace = true }
 # tests/spill.rs asserts that a declared budget is honoured by spilling, and the
 # spill only announces itself through a `log` record from DataFusion.
 log = { workspace = true }
