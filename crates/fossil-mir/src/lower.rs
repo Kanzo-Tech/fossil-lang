@@ -141,17 +141,14 @@ pub fn lower_to_mir_pg<'db>(
 
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
 
-    // 0: Source.
-    let (uri, format) = match resolve_source(dm, db, &m.source_binding, span) {
-        Ok(v) => v,
-        Err(eg) => return poisoned(db, eg),
-    };
-    ops.push(Op::Source {
-        uri,
-        format,
-        row_type,
-        binding: m.source_binding.clone(),
-    });
+    // 0..k: the source relation. One `Op::Source` for a binding that reads a
+    // file; `Source` plus one op per verb when the binding is a pipeline.
+    let source =
+        match lower_source_chain(db, dm, file, &m.source_binding, span, prefixes, &mut ops, 0) {
+            Ok(c) => c,
+            Err(eg) => return poisoned(db, eg),
+        };
+    let source_idx = source.last;
 
     // `id` = the vertex IRI. No `iri` property (or one that does not lower) is
     // fatal: the old empty-string default produced vertices whose subject was
@@ -264,7 +261,7 @@ pub fn lower_to_mir_pg<'db>(
     // is nominal — the backend walks every EmitVertex/EmitEdge op, as the legacy
     // codegen walks every TripleEmit).
     ops.push(Op::EmitVertex {
-        input: 0,
+        input: source_idx,
         type_name: type_name.clone(),
         rdf_type: Some(m.shape_iri.clone()),
         id: id.clone(),
@@ -275,7 +272,7 @@ pub fn lower_to_mir_pg<'db>(
     // 2..N: one EmitEdge per resolved foreign-key template.
     for (pred_local, dst_type, pred_iri, dst_id) in edges {
         ops.push(Op::EmitEdge {
-            input: 0,
+            input: source_idx,
             edge_type: pred_local,
             rdf_uri: Some(pred_iri),
             src_type: type_name.clone(),
@@ -437,6 +434,136 @@ pub fn apply_output_shape<'db>(ops: &[Op<'db>], descriptor: &OutputDescriptorKin
 /// names in [`lower_to_mir_pg`].
 pub(crate) fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/']).next().unwrap_or(iri)
+}
+
+/// The relation a mapping's `from` names, lowered into the op list.
+///
+/// # The naming rule, which the backend has to agree with
+///
+/// **Every named binding is a relation known by its name.** `Op::Source` is
+/// known by its binding; a pipeline's result is known by the binding it defines.
+/// In between, a `Filter` or a `Project` does not rename — the rows are the same
+/// rows — so a predicate over `users |> where(.edad >= 18)` qualifies its columns
+/// with `users`, while one written after a `join` qualifies them with the
+/// pipeline's own name, because the join built a relation neither side was.
+struct Chain {
+    /// Index into the op list of the chain's last op — what an emit op reads.
+    last: usize,
+    /// The name the rendered SQL knows this relation by.
+    relation: SmolStr,
+}
+
+/// A pipeline deriving from a pipeline deriving from … The cycle is already a
+/// diagnostic in the checker (`fossil_hir::infer`), so reaching this depth here
+/// means the graph got past type-checking, which is a bug and says so.
+const MAX_CHAIN_DEPTH: usize = 32;
+
+/// Lower the source binding a mapping reads into `ops`, following the pipeline
+/// if it is one (ADR-0054). A binding that reads a file is one `Op::Source`; a
+/// pipeline is its base's chain followed by one op per verb.
+fn lower_source_chain<'db>(
+    db: &'db dyn fossil_base::Db,
+    dm: DefMap<'db>,
+    file: fossil_base::SourceFile,
+    binding: &SmolStr,
+    span: fossil_base::Span,
+    prefixes: &[fossil_hir::def_map::PrefixEntry],
+    ops: &mut Vec<Op<'db>>,
+    depth: usize,
+) -> Result<Chain, fossil_base::ErrorGuaranteed> {
+    use fossil_hir::lower::HirSourceOp;
+
+    let hir = lower_to_hir(db, file);
+    let pipe = hir
+        .source_pipes(db)
+        .iter()
+        .find(|p| p.name == *binding)
+        .cloned();
+
+    let Some(pipe) = pipe else {
+        let (uri, format) = resolve_source(dm, db, binding, span)?;
+        // The row type of THIS binding, not of the mapping: a pipeline's mapping
+        // sees the derived row, and the source underneath it still declares its
+        // own. Any diagnostic this would raise was already raised by the
+        // type-check, which poisons the graph before the lowering runs.
+        // `.ok().flatten()`: the taint was already raised by the type-check,
+        // which poisons the graph before the lowering runs, so here a failed row
+        // is the same as an absent one — an untyped source, as before.
+        let row_type = fossil_hir::infer::resolve_binding_row(db, file, binding.as_str(), 0)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| untyped_row(db));
+        ops.push(Op::Source {
+            uri,
+            format,
+            row_type,
+            binding: binding.clone(),
+        });
+        return Ok(Chain {
+            last: ops.len() - 1,
+            relation: binding.clone(),
+        });
+    };
+
+    if depth >= MAX_CHAIN_DEPTH {
+        return Err(fossil_base::bug(
+            db,
+            span,
+            format!("the source pipeline `{binding}` recurses past the checker's own cycle guard"),
+        ));
+    }
+
+    let mut chain = lower_source_chain(db, dm, file, &pipe.base, span, prefixes, ops, depth + 1)?;
+    for op in &pipe.ops {
+        match op {
+            HirSourceOp::Where(pred) => {
+                let pred = lower_property_value(db, pred, &chain.relation, prefixes, None);
+                ops.push(Op::Filter {
+                    input: chain.last,
+                    pred,
+                });
+            }
+            HirSourceOp::Select(cols) => ops.push(Op::Project {
+                input: chain.last,
+                cols: cols.clone(),
+            }),
+            HirSourceOp::Join { right, key } => {
+                let right_chain =
+                    lower_source_chain(db, dm, file, right, span, prefixes, ops, depth + 1)?;
+                // `on = .k` is `USING (k)`: one equality between the same column
+                // name on both sides, qualified by each side's relation. The
+                // checker has already proved `k` is on both and types the same
+                // (ADR-0054 §5), so this cannot be built wrong here.
+                ops.push(Op::Join {
+                    left: chain.last,
+                    right: right_chain.last,
+                    on: Expr::BinOp {
+                        op: fossil_hir::CmpOp::Eq,
+                        lhs: Box::new(Expr::ColRef {
+                            source: chain.relation.clone(),
+                            column: key.clone(),
+                        }),
+                        rhs: Box::new(Expr::ColRef {
+                            source: right_chain.relation.clone(),
+                            column: key.clone(),
+                        }),
+                        ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
+                    },
+                    kind: crate::op::JoinKind::Inner,
+                    left_name: chain.relation.clone(),
+                    right_name: right_chain.relation.clone(),
+                });
+                // A join builds a relation neither side was; from here on the
+                // pipeline's own name is what qualifies its columns.
+                chain.relation = pipe.name.clone();
+            }
+        }
+        chain.last = ops.len() - 1;
+    }
+    // And the finished pipeline is the relation its binding names, which is what
+    // the mapping's `from` and every property's column reference use.
+    chain.relation = pipe.name.clone();
+    Ok(chain)
 }
 
 /// Resolve the `Op::Source` URI + [`SourceFormat`] for a mapping's source
@@ -890,6 +1017,123 @@ mod tests {
             Op::Source { uri, format, .. } => (uri.clone(), format.clone()),
             other => panic!("expected Source at index 0, got {other:?}"),
         }
+    }
+
+    /// A mapping reading from a pipeline lowers the pipeline, and the emit ops
+    /// read its LAST op — not index 0.
+    ///
+    /// `input: 0` was correct while a source was exactly one op, and it is the
+    /// thing that silently drops a filter the day it stops being one: the graph
+    /// still has the `Filter`, the vertices are still written, and every row the
+    /// predicate excluded is in the corpus. So the assertion is on the wiring,
+    /// not on the op list.
+    #[test]
+    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+    fn a_mapping_over_a_pipeline_reads_the_last_op_of_the_chain() {
+        let src = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"u.csv\")
+adultos := users |> where(.edad >= 18)
+
+User : ex:Person from adultos
+    iri = `${ex:}user/${.id}`
+    ex:name = .name
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        let mapping = *dm.mappings(&db).first().expect("one mapping");
+        let mir = lower_to_mir_pg(&db, mapping);
+        let ops = mir.ops(&db);
+
+        assert!(
+            matches!(&ops[0], Op::Source { binding, uri, .. }
+                if binding.as_str() == "users" && uri.as_str() == "u.csv"),
+            "index 0 is the base source, got {:?}",
+            ops[0]
+        );
+        let Op::Filter { input, pred } = &ops[1] else {
+            panic!("index 1 is the `where`, got {:?}", ops[1]);
+        };
+        assert_eq!(*input, 0, "the filter reads the source");
+        // `.edad` reaches MIR as an UNQUALIFIED `ColRef` — CODEGEN-LOWERING-01,
+        // the convention every property in the tree already follows, and which
+        // the backend resolves against the relation the op reads.
+        assert!(
+            matches!(pred, Expr::BinOp { op: fossil_hir::CmpOp::Ge, lhs, .. }
+                if matches!(&**lhs, Expr::ColRef { column, .. } if column.as_str() == "edad")),
+            "the predicate reads `.edad`, got {pred:?}"
+        );
+        assert!(
+            matches!(&ops[2], Op::EmitVertex { input, .. } if *input == 1),
+            "the vertex reads the FILTER, not the source, got {:?}",
+            ops[2]
+        );
+    }
+
+    /// A join lowers to `Op::Join` with both sides sourced, `Inner`, and an
+    /// equality on the one key name — `on = .k` is `USING (k)` (ADR-0054 §3).
+    #[test]
+    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+    fn a_join_lowers_to_an_inner_equi_join_on_one_name() {
+        let src = "\
+prefix ex: <https://example.org/>
+
+pedidos := io.csv(\"o.csv\")
+personas := io.csv(\"p.csv\")
+ventas := pedidos |> join(personas, on = .persona_id)
+
+Venta : ex:Person from ventas
+    iri = `${ex:}venta/${.id}`
+    ex:name = .nombre
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        let mapping = *dm.mappings(&db).first().expect("one mapping");
+        let mir = lower_to_mir_pg(&db, mapping);
+        let ops = mir.ops(&db);
+
+        assert!(matches!(&ops[0], Op::Source { binding, .. } if binding.as_str() == "pedidos"));
+        assert!(matches!(&ops[1], Op::Source { binding, .. } if binding.as_str() == "personas"));
+        let Op::Join {
+            left,
+            right,
+            on,
+            kind,
+            left_name,
+            right_name,
+        } = &ops[2]
+        else {
+            panic!("index 2 is the join, got {:?}", ops[2]);
+        };
+        assert_eq!((*left, *right), (0, 1));
+        assert_eq!(*kind, crate::op::JoinKind::Inner);
+        assert_eq!(left_name.as_str(), "pedidos");
+        assert_eq!(right_name.as_str(), "personas");
+        let Expr::BinOp {
+            op: fossil_hir::CmpOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } = on
+        else {
+            panic!("the condition is one equality, got {on:?}");
+        };
+        assert!(
+            matches!(&**lhs, Expr::ColRef { source, column }
+                if source.as_str() == "pedidos" && column.as_str() == "persona_id"),
+            "got {lhs:?}"
+        );
+        assert!(
+            matches!(&**rhs, Expr::ColRef { source, column }
+                if source.as_str() == "personas" && column.as_str() == "persona_id"),
+            "the key is the SAME name on both sides, got {rhs:?}"
+        );
+        assert!(matches!(&ops[3], Op::EmitVertex { input, .. } if *input == 2));
     }
 
     #[test]

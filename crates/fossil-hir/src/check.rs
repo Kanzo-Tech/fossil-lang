@@ -83,7 +83,11 @@ pub fn typecheck_mapping<'db>(
 ) -> Result<TypeckOutput<'db>, ErrorGuaranteed> {
     let hir_body = body(db, mapping);
     let spans_table = spans(db, mapping);
-    let source_row = resolve_source_row(db, mapping);
+    // A source pipeline whose row algebra does not add up taints the mapping and
+    // stops here (ADR-0054 §4). Checking the body against a row that could not be
+    // built would report a second, invented error for every property that reads a
+    // column the join was supposed to bring.
+    let source_row = resolve_source_row(db, mapping)?;
     // The tracked query reads the descriptor through the thin `fossil_base::Db`
     // vtable, which (by ADR-0006) does NOT carry `HirDb`. To keep the descriptor
     // OUT of this query's Salsa key (`MAX_PER_MAPPING_FAN_OUT = 1`; ADR-0020),

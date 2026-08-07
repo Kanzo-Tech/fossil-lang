@@ -23,6 +23,27 @@ use smol_str::SmolStr;
 
 use crate::op::{Expr, Op};
 
+/// The one column name an `Op::Join`'s condition equates, when the condition has
+/// the only shape the language can build: `left.k = right.k` (ADR-0054 §3).
+/// `None` for a hand-constructed graph whose condition is anything else — those
+/// keep the old concatenating behaviour rather than guessing which name to drop.
+fn join_key(on: &Expr<'_>) -> Option<SmolStr> {
+    match on {
+        Expr::BinOp {
+            op: fossil_hir::CmpOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } => match (&**lhs, &**rhs) {
+            (Expr::ColRef { column: l, .. }, Expr::ColRef { column: r, .. }) if l == r => {
+                Some(l.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Output column schema of the op at `idx`.
 ///
 /// Computed by structural induction over the topo-ordered DAG
@@ -34,8 +55,9 @@ use crate::op::{Expr, Op};
 /// - `Extend` → input schema ∪ `{field}` (field appended if not already present)
 /// - `Rename` → input schema with `old` → `new`
 /// - `Filter` / `Distinct` → input schema unchanged
-/// - `Join` → left schema ∪ right schema (v0.1 unions the names; collisions are
-///   resolved by the `left_name` / `right_name` qualifiers in codegen)
+/// - `Join` → left schema ++ right schema minus the key, which `on = .k`
+///   identifies rather than duplicates (ADR-0054 §4). Any OTHER shared name is a
+///   compile error the checker raises, so this never has to break a tie.
 /// - `Union` → left schema (asserted equal to right in debug builds)
 /// - `GroupBy` → `keys`
 /// - `Aggregate` → input schema ∪ agg `out_field`s
@@ -77,9 +99,21 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => schema_of(db, ops, *input),
-        Op::Join { left, right, .. } => {
+        // `on = .k` is `USING (k)`: the key is IDENTIFIED, so it appears once
+        // (ADR-0054 §4). This concatenated both sides until 2026-08-07 and
+        // disagreed with the row the backend actually executes — the executor
+        // drops the right side's key, so a schema that kept it described a
+        // column nobody would find.
+        Op::Join {
+            left, right, on, ..
+        } => {
             let mut schema = schema_of(db, ops, *left);
-            schema.extend(schema_of(db, ops, *right));
+            let key = join_key(on);
+            for col in schema_of(db, ops, *right) {
+                if Some(&col) != key.as_ref() {
+                    schema.push(col);
+                }
+            }
             schema
         }
         Op::Union { left, right } => {

@@ -64,6 +64,7 @@ use smol_str::SmolStr;
 use fossil_graph_schema::Primitive;
 
 use crate::def_map::{MappingLoc, def_map};
+use crate::ty::display::render_ty_kind;
 use crate::ty::{Record, RecordField, Ty, TyKind};
 
 /// The source-row [`Ty`] (a `Record`) for a mapping as known from the
@@ -126,32 +127,87 @@ fn field_from_inferred<'db>(
 ///
 /// Reads `def_map(db, file)` only (NEVER walks the FILE CST from
 /// `mapping_cst_node`) — see the module docs for the Serious #6 rationale.
-#[must_use]
 pub fn resolve_source_row<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-) -> Option<Ty<'db>> {
+) -> Result<Option<Ty<'db>>, fossil_base::ErrorGuaranteed> {
     let file = mapping.file(db);
-    let dm = def_map(db, file);
 
     // 1. Find the mapping's source binding name.
     let mappings = crate::lower::lower_to_hir(db, file);
-    let hir_mapping = mappings.mappings(db).get(mapping.index(db))?;
+    let Some(hir_mapping) = mappings.mappings(db).get(mapping.index(db)) else {
+        return Ok(None);
+    };
     let source_name = hir_mapping.source_binding.clone();
+
+    resolve_binding_row(db, file, source_name.as_str(), 0)
+}
+
+/// A source pipeline that derives from a pipeline that derives from … Thirty-two
+/// is not a limit anyone will meet writing a mapping; it is the depth at which a
+/// CYCLE (`a := b |> where(…)`, `b := a |> where(…)`) stops being an infinite
+/// loop and becomes a diagnostic.
+const MAX_PIPE_DEPTH: usize = 32;
+
+/// The row type of a source BINDING, by name.
+///
+/// Split out of [`resolve_source_row`] because a pipeline's row is its base's
+/// row transformed, and the base is a binding, not a mapping. Everything below
+/// the pipeline branch is what the function has always done for a binding that
+/// reads a file.
+pub fn resolve_binding_row<'db>(
+    db: &'db dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+    source_name: &str,
+    depth: usize,
+) -> Result<Option<Ty<'db>>, fossil_base::ErrorGuaranteed> {
+    let dm = def_map(db, file);
+
+    // A binding whose right-hand side is a pipeline: the row is the base's row
+    // put through the verbs (ADR-0054). A binding with no descriptor still has
+    // no row — deriving from nothing gives nothing, and the algebra says so by
+    // returning `None` rather than inventing column names.
+    let hir = crate::lower::lower_to_hir(db, file);
+    if let Some(pipe) = hir
+        .source_pipes(db)
+        .iter()
+        .find(|p| p.name.as_str() == source_name)
+    {
+        if depth >= MAX_PIPE_DEPTH {
+            return Err(pipe_error(
+                db,
+                pipe,
+                format!(
+                    "the source pipeline `{source_name}` derives from itself, directly or \
+                     through the pipelines it names"
+                ),
+            ));
+        }
+        // A base with no descriptor has no row, and a pipeline over it has none
+        // either: there is nothing to restrict, union or check a key against.
+        // That is not an error — it is every schemaless program in the tree.
+        let Some(mut row) = resolve_binding_row(db, file, pipe.base.as_str(), depth + 1)? else {
+            return Ok(None);
+        };
+        for op in &pipe.ops {
+            row = apply_source_op(db, file, pipe, op, row, depth)?;
+        }
+        return Ok(Some(row));
+    }
 
     // Phase 13 v0.2 (ADR-0037): try the host-registered `InferredDescriptor`
     // FIRST. This is the new authoring style — the user writes `io.csv("...")`
     // and the host (browser-side `DuckDB-WASM`; native CLI `duckdb` crate)
     // pre-registers the descriptor before invoking `compile`.
-    if let Some(inferred) = lookup_inferred(db, dm, source_name.as_str()) {
+    if let Some(inferred) = lookup_inferred(db, dm, source_name) {
         // If an explicit `schema = "..."` arg is ALSO present, the
         // InferredDescriptor wins (it represents fresher truth from the
         // file itself) but we ALSO emit the `D-CSVW-DEPRECATED` warning so
         // the user knows the explicit arg is now redundant.
-        if dm.lookup_source_schema(db, source_name.as_str()).is_some() {
-            emit_csvw_deprecated_diagnostic(db, &source_name);
+        if dm.lookup_source_schema(db, source_name).is_some() {
+            emit_csvw_deprecated_diagnostic(db, &SmolStr::from(source_name));
         }
-        return Some(record_from_inferred(db, &inferred));
+        return Ok(Some(record_from_inferred(db, &inferred)));
     }
 
     // RDF destructuring source member (`{ A, B } := io.rdf(..., schema =
@@ -161,8 +217,10 @@ pub fn resolve_source_row<'db>(
     // pivoted RDF row carries (so `iri = .subject` types). This is the same
     // "schema → Record at compile time" path CSV uses — no runtime column
     // resolution in the provider.
-    if let Some(shape_iri) = dm.lookup_source_shape_iri(db, source_name.as_str()) {
-        let schema_path = dm.lookup_source_schema(db, source_name.as_str())?;
+    if let Some(shape_iri) = dm.lookup_source_shape_iri(db, source_name) {
+        let Some(schema_path) = dm.lookup_source_schema(db, source_name) else {
+            return Ok(None);
+        };
         let resolved = resolve_relative(db, file, schema_path.as_str());
         let bytes = match db.system().read_file(&resolved) {
             Ok(b) => b,
@@ -172,7 +230,7 @@ pub fn resolve_source_row<'db>(
                     Span::new(0, 0),
                     format!("cannot read ShEx `{schema_path}` for source `{source_name}`: {e}"),
                 );
-                return None;
+                return Ok(None);
             }
         };
         let desc = match fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice()) {
@@ -183,18 +241,18 @@ pub fn resolve_source_row<'db>(
                     Span::new(0, 0),
                     format!("ShEx `{schema_path}` failed to parse: {e:?}"),
                 );
-                return None;
+                return Ok(None);
             }
         };
-        return Some(record_from_shape(db, &desc, shape_iri.as_str()));
+        return Ok(Some(record_from_shape(db, &desc, shape_iri.as_str())));
     }
 
     // A destructuring member with a schema but NO resolved shape IRI is a member
     // name that matches no shape in the schema — a compile-time error (the single
     // path requires each `{…}` name to be a declared shape's local-name).
-    if let Some((Some(ctor), _)) = dm.lookup_source_call(db, source_name.as_str())
+    if let Some((Some(ctor), _)) = dm.lookup_source_call(db, source_name)
         && ctor.as_str() == "io.rdf"
-        && dm.lookup_source_schema(db, source_name.as_str()).is_some()
+        && dm.lookup_source_schema(db, source_name).is_some()
     {
         let _eg = delay_span_bug(
             db,
@@ -204,18 +262,20 @@ pub fn resolve_source_row<'db>(
                  each `{{…}}` name must be the local-name of a declared shape"
             ),
         );
-        return None;
+        return Ok(None);
     }
 
     // Phase 13 v0.2 FALLBACK PATH — legacy CSVW (deprecated; still functional).
 
     // 2. Read the `schema = "<path>"` NAMED arg from the DefMap (signatures-
     //    only — does not re-trigger body()).
-    let schema_path = dm.lookup_source_schema(db, source_name.as_str())?;
+    let Some(schema_path) = dm.lookup_source_schema(db, source_name) else {
+        return Ok(None);
+    };
 
     // Explicit CSVW path is now deprecated — warn the user that v0.2 prefers
     // the inferred-descriptor path. Compilation still proceeds via CSVW.
-    emit_csvw_deprecated_diagnostic(db, &source_name);
+    emit_csvw_deprecated_diagnostic(db, &SmolStr::from(source_name));
 
     // 3. Resolve the schema path relative to the mapping's file.
     let resolved = resolve_relative(db, file, schema_path.as_str());
@@ -230,7 +290,7 @@ pub fn resolve_source_row<'db>(
                 span,
                 format!("cannot read CSVW schema `{schema_path}` for source `{source_name}`: {e}"),
             );
-            return None;
+            return Ok(None);
         }
     };
 
@@ -244,15 +304,208 @@ pub fn resolve_source_row<'db>(
                 span,
                 format!("CSVW schema `{schema_path}` failed to parse: {e}"),
             );
-            return None;
+            return Ok(None);
         }
     };
 
-    Some(record_from_descriptor(
-        db,
-        &descriptor,
-        source_name.as_str(),
-    ))
+    Ok(Some(record_from_descriptor(db, &descriptor, source_name)))
+}
+
+/// One verb of a source pipeline applied to the row it receives (ADR-0054 §4).
+///
+/// Every refusal names the pipeline and the columns it actually has: a row
+/// algebra whose errors say "column not found" and stop is a row algebra nobody
+/// can debug from the message.
+fn apply_source_op<'db>(
+    db: &'db dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+    pipe: &crate::lower::HirSourcePipe,
+    op: &crate::lower::HirSourceOp,
+    row: Ty<'db>,
+    depth: usize,
+) -> Result<Ty<'db>, fossil_base::ErrorGuaranteed> {
+    use crate::lower::HirSourceOp;
+
+    let Some(fields) = record_fields(db, row) else {
+        return Ok(row);
+    };
+    match op {
+        // `where` keeps rows, not columns: the row type is its input's. The
+        // columns the predicate names still have to exist — a filter on a column
+        // that is not there is a program that would run and keep everything.
+        HirSourceOp::Where(pred) => {
+            let mut named = Vec::new();
+            collect_field_refs(pred, &mut named);
+            for col in named {
+                if !fields.iter().any(|f| f.name == col) {
+                    return Err(pipe_error(
+                        db,
+                        pipe,
+                        format!(
+                            "`where` in `{}` reads `.{col}`, which `{}` does not have. It has: {}",
+                            pipe.name,
+                            pipe.base,
+                            column_list(&fields),
+                        ),
+                    ));
+                }
+            }
+            Ok(row)
+        }
+        HirSourceOp::Select(cols) => {
+            let mut kept = Vec::with_capacity(cols.len());
+            for col in cols {
+                let Some(f) = fields.iter().find(|f| &f.name == col) else {
+                    return Err(pipe_error(
+                        db,
+                        pipe,
+                        format!(
+                            "`select` in `{}` names `.{col}`, which its input does not have. \
+                             It has: {}",
+                            pipe.name,
+                            column_list(&fields),
+                        ),
+                    ));
+                };
+                kept.push(f.clone());
+            }
+            Ok(Ty::new(db, TyKind::Record(Record::new(db, kept))))
+        }
+        // The join: `fila(izq) ⊎ fila(der)` with the key identified once, and any
+        // OTHER shared name an error. Both halves of that are load-bearing — the
+        // key is exempt because `on = .k` is `USING (k)`, which identifies the two
+        // columns rather than duplicating them.
+        HirSourceOp::Join { right, key } => {
+            let Some(right_row) = resolve_binding_row(db, file, right.as_str(), depth + 1)? else {
+                return Err(pipe_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`join` in `{}` joins `{right}`, whose columns are unknown — it declares \
+                         no schema, so there is nothing to check the key against",
+                        pipe.name
+                    ),
+                ));
+            };
+            let Some(right_fields) = record_fields(db, right_row) else {
+                return Ok(row);
+            };
+
+            let (Some(lk), Some(rk)) = (
+                fields.iter().find(|f| &f.name == key),
+                right_fields.iter().find(|f| &f.name == key),
+            ) else {
+                return Err(pipe_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`join` in `{}` is on `.{key}`, which has to exist on both sides. \
+                         The left has: {}. `{right}` has: {}",
+                        pipe.name,
+                        column_list(&fields),
+                        column_list(&right_fields),
+                    ),
+                ));
+            };
+            if lk.ty != rk.ty {
+                return Err(pipe_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`join` in `{}` is on `.{key}`, and the two sides type it differently: \
+                         {} against {}. There is no implicit coercion — a key compared across \
+                         two types is a join whose result nobody declared",
+                        pipe.name,
+                        render_ty_kind(db, lk.ty.kind(db)),
+                        render_ty_kind(db, rk.ty.kind(db)),
+                    ),
+                ));
+            }
+
+            let clash: Vec<&str> = right_fields
+                .iter()
+                .filter(|r| &r.name != key && fields.iter().any(|l| l.name == r.name))
+                .map(|r| r.name.as_str())
+                .collect();
+            if !clash.is_empty() {
+                return Err(pipe_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`join` in `{}` would give one row two columns called {}. \
+                         Only the key `.{key}` is identified by the join; every other name has \
+                         to be distinct, so rename one side before joining",
+                        pipe.name,
+                        clash
+                            .iter()
+                            .map(|c| format!("`{c}`"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                ));
+            }
+
+            let mut joined = fields.clone();
+            joined.extend(right_fields.iter().filter(|r| &r.name != key).cloned());
+            Ok(Ty::new(db, TyKind::Record(Record::new(db, joined))))
+        }
+    }
+}
+
+fn record_fields<'db>(db: &'db dyn fossil_base::Db, row: Ty<'db>) -> Option<Vec<RecordField<'db>>> {
+    match row.kind(db) {
+        TyKind::Record(rec) => Some(rec.fields(db).clone()),
+        _ => None,
+    }
+}
+
+fn column_list(fields: &[RecordField<'_>]) -> String {
+    if fields.is_empty() {
+        return "no columns at all".to_string();
+    }
+    fields
+        .iter()
+        .map(|f| format!("`{}`", f.name))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Every `.column` an expression names, in order, duplicates included.
+fn collect_field_refs(expr: &crate::lower::HirExpr, out: &mut Vec<SmolStr>) {
+    use crate::lower::HirExpr;
+    match expr {
+        HirExpr::FieldRef(name) => out.push(name.clone()),
+        HirExpr::BinOp { lhs, rhs, .. } => {
+            collect_field_refs(lhs, out);
+            collect_field_refs(rhs, out);
+        }
+        HirExpr::Ternary {
+            cond,
+            then,
+            otherwise,
+        } => {
+            collect_field_refs(cond, out);
+            collect_field_refs(then, out);
+            collect_field_refs(otherwise, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                collect_field_refs(a, out);
+            }
+        }
+        HirExpr::Template(_)
+        | HirExpr::StringLit(_)
+        | HirExpr::PrefixedName { .. }
+        | HirExpr::IntLit(_) => {}
+    }
+}
+
+fn pipe_error(
+    db: &dyn fossil_base::Db,
+    pipe: &crate::lower::HirSourcePipe,
+    message: String,
+) -> fossil_base::ErrorGuaranteed {
+    delay_span_bug(db, Span::new(pipe.span.0, pipe.span.1), message)
 }
 
 /// Build a `Record` [`Ty`] from a parsed [`CsvwDescriptor`].

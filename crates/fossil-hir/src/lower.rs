@@ -61,6 +61,11 @@ pub struct HirSourcePipe {
     pub name: SmolStr,
     pub base: SmolStr,
     pub ops: Vec<HirSourceOp>,
+    /// Start and end of the whole `name := ...` item, so the checker's row
+    /// algebra has somewhere to point. One span for the pipeline and not one per
+    /// stage: a wrong column is a fact about the pipeline, and per-stage spans
+    /// are ADR-0008's side table, not a field.
+    pub span: (u32, u32),
 }
 
 /// The three verbs of the first version (ADR-0054).
@@ -245,7 +250,14 @@ fn lower_source_pipe(
         ops.push(lower_source_stage(db, stage, prefixes, &name)?);
     }
 
-    Some(HirSourcePipe { name, base, ops })
+    let range = source_def.text_range();
+    let span = (range.start().into(), range.end().into());
+    Some(HirSourcePipe {
+        name,
+        base,
+        ops,
+        span,
+    })
 }
 
 /// One stage of a source pipeline — `where(...)`, `select(...)` or `join(...)`.
@@ -1554,9 +1566,10 @@ ventas := adultos |> join(personas, on = .persona_id) |> where(.total >= 100)
         let [HirSourceOp::Select(cols)] = pipes[1].ops.as_slice() else {
             panic!("expected one Select, got {:?}", pipes[1].ops);
         };
-        assert_eq!(cols.iter().map(SmolStr::as_str).collect::<Vec<_>>(), [
-            "id", "nombre"
-        ]);
+        assert_eq!(
+            cols.iter().map(SmolStr::as_str).collect::<Vec<_>>(),
+            ["id", "nombre"]
+        );
 
         assert_eq!(pipes[2].base.as_str(), "adultos");
         let [HirSourceOp::Join { right, key }, HirSourceOp::Where(pred)] = pipes[2].ops.as_slice()
@@ -1590,10 +1603,7 @@ ventas := pedidos |> join(personas, on = .persona_id == .id)
             hir.source_pipes(&db),
         );
         let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
-        let msg = diags
-            .first()
-            .map(|d| d.message.clone())
-            .unwrap_or_default();
+        let msg = diags.first().map(|d| d.message.clone()).unwrap_or_default();
         assert!(
             msg.contains("on = .<column>"),
             "the diagnostic must show the form that works, got {msg:?}"
@@ -1611,10 +1621,7 @@ raro := users |> group_by(.edad)
         let hir = lower_to_hir(&db, file);
         assert!(hir.source_pipes(&db).is_empty());
         let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
-        let msg = diags
-            .first()
-            .map(|d| d.message.clone())
-            .unwrap_or_default();
+        let msg = diags.first().map(|d| d.message.clone()).unwrap_or_default();
         assert!(
             msg.contains("group_by") && msg.contains("where"),
             "the diagnostic must name the verb and the ones that exist, got {msg:?}"
