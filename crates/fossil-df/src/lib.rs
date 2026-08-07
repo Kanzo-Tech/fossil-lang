@@ -995,6 +995,18 @@ fn render(e: &Expr<'_>) -> DfExpr {
         Expr::LitInt(v) => lit(*v),
         Expr::LitBool(b) => lit(*b),
         Expr::BinOp { op, lhs, rhs, .. } => binary_expr(render(lhs), df_operator(*op), render(rhs)),
+        // A two-armed CASE. `otherwise` is always present — fossil has no
+        // one-armed conditional, so no row can fall through to NULL.
+        Expr::Ternary {
+            cond,
+            then,
+            otherwise,
+            ..
+        } => datafusion::prelude::when(render(cond), render(then))
+            .otherwise(render(otherwise))
+            .unwrap_or_else(|e| {
+                unsupported_call("? :", &format!("could not be built as a CASE: {e}"))
+            }),
     }
 }
 

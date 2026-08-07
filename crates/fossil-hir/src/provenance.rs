@@ -219,7 +219,10 @@ fn infer_literal_type_kind<'db>(
         // A field reference needs the source row; a call needs the catalog; an
         // operator needs both sides typed. None is a literal, and this helper
         // only knows literals.
-        HirExpr::FieldRef(_) | HirExpr::Call { .. } | HirExpr::BinOp { .. } => None,
+        HirExpr::FieldRef(_)
+        | HirExpr::Call { .. }
+        | HirExpr::BinOp { .. }
+        | HirExpr::Ternary { .. } => None,
     }
 }
 

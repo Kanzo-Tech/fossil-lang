@@ -77,6 +77,30 @@ pub fn partial_eval<'db>(expr: &Expr<'db>) -> Expr<'db> {
             ty: *ty,
         },
 
+        // Ternary: fold every arm, then collapse if the condition is already
+        // constant — a branch that cannot be taken is not evaluated, which is
+        // the whole reason a conditional is not a function call.
+        Expr::Ternary {
+            cond,
+            then,
+            otherwise,
+            ty,
+        } => {
+            let cond = partial_eval(cond);
+            let then = partial_eval(then);
+            let otherwise = partial_eval(otherwise);
+            match cond {
+                Expr::LitBool(true) => then,
+                Expr::LitBool(false) => otherwise,
+                cond => Expr::Ternary {
+                    cond: Box::new(cond),
+                    then: Box::new(then),
+                    otherwise: Box::new(otherwise),
+                    ty: *ty,
+                },
+            }
+        }
+
         // BinOp: fold children, then apply the constant-folding algebra.
         Expr::BinOp { op, lhs, rhs, ty } => {
             let lhs = partial_eval(lhs);

@@ -271,6 +271,15 @@ pub enum Expr<'db> {
         rhs: Box<Expr<'db>>,
         ty: Ty<'db>,
     },
+    /// `cond ? then : otherwise`, result typed `ty`. Renders as a two-armed
+    /// `CASE` on every SQL engine; both branches have the same type by
+    /// construction (the checker refuses anything else), so the CASE is total.
+    Ternary {
+        cond: Box<Expr<'db>>,
+        then: Box<Expr<'db>>,
+        otherwise: Box<Expr<'db>>,
+        ty: Ty<'db>,
+    },
     /// Named runtime assertion (R7-R10). `span_line` carries the source line for
     /// the diagnostic. Populated by plan 04-06; until then codegen renders the
     /// `inner` expression (no-op wrapper).

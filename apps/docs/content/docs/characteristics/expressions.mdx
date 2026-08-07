@@ -5,7 +5,7 @@ direction:
   summary: An expression is a total function of one row — calls into the value library, comparisons and conditionals, and the pipeline operators — which makes the HIR eight forms, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
   decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
 today:
-  summary: The HIR has seven expression forms since 2026-08-07 — `call`, `comparison` and the integer literal it needed — so the 56 stdlib functions are reachable, `clean.slug(.name)` writes its column and `.age >= 18` writes a boolean one. What remains is dropped with an error that quotes what you wrote, which until 2026-08-06 was silent in one arm and until 2026-08-07 in another.
+  summary: All four forms landed on 2026-08-07 — `call`, `comparison` with the integer literal it needed, `conditional`, and `|>` in value position as sugar over `call`. The 56 stdlib functions are reachable and `render` in the backend is total. Arithmetic is the one form still dropped, loudly; the SOURCE-level pipeline is a relation rather than a value and belongs to F5.
   backedBy: crates/fossil-hir/src/lower.rs
 ---
 
@@ -99,8 +99,8 @@ The four that exist, plus:
 | --- | --- |
 | **call** ✅ | `clean.*` and `anon.*` — the value library that makes fossil more than RML. Landed 2026-08-07 |
 | **comparison** ✅ | the pipeline's filter, and the condition of a conditional. Landed 2026-08-07 with the integer literal it needs |
-| **conditional** | the ternary the parser already builds |
-| **pipeline operators** | `\|>` — see [the relational half](/docs/characteristics/pipeline) |
+| **conditional** ✅ | the ternary the parser already builds. Landed 2026-08-07, both branches one type, no coercion |
+| **pipeline operators** ✅ | `\|>` in value position is sugar over `call` (the LHS is the first argument), so there is no pipeline node in the HIR. The relational half is F5 — see [the pipeline](/docs/characteristics/pipeline) |
 
 Each is justified by something the language has to express. Nothing enters because the parser
 already accepts it.

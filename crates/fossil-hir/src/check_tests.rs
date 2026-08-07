@@ -890,3 +890,71 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
         diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
     );
 }
+
+/// Two branches of different types is the error, not a widening. A column whose
+/// type depends on the row is a column no shape can check.
+#[test]
+fn a_conditional_with_mismatched_branches_is_an_error() {
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
+        let row = record_from_descriptor(db, &descriptor, "users");
+        let mut cx = build_checker(db, m, Some(row), None);
+        let e = crate::lower::HirExpr::Ternary {
+            cond: Box::new(crate::lower::HirExpr::BinOp {
+                op: crate::lower::CmpOp::Ge,
+                lhs: Box::new(crate::lower::HirExpr::FieldRef("age".into())),
+                rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
+            }),
+            then: Box::new(crate::lower::HirExpr::StringLit("adult".into())),
+            otherwise: Box::new(crate::lower::HirExpr::IntLit(0)),
+        };
+        let ty = cx.synth(ExprId(0), &e)?;
+        Some(render_ty_kind(db, ty.kind(db)))
+    }
+
+    let (db, file) = db_with(HELLO);
+    assert!(
+        shim(&db, file).expect("synth").starts_with("Error"),
+        "String and Integer branches must not unify"
+    );
+    let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("different types") && d.message.contains("does not coerce")),
+        "the diagnostic must say both what differs and that fossil will not coerce, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+    );
+}
+
+/// A non-Bool condition is refused before the branches are even considered.
+#[test]
+fn a_conditional_whose_condition_is_not_bool_is_an_error() {
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
+        let row = record_from_descriptor(db, &descriptor, "users");
+        let mut cx = build_checker(db, m, Some(row), None);
+        let e = crate::lower::HirExpr::Ternary {
+            cond: Box::new(crate::lower::HirExpr::FieldRef("name".into())),
+            then: Box::new(crate::lower::HirExpr::StringLit("a".into())),
+            otherwise: Box::new(crate::lower::HirExpr::StringLit("b".into())),
+        };
+        let ty = cx.synth(ExprId(0), &e)?;
+        Some(render_ty_kind(db, ty.kind(db)))
+    }
+
+    let (db, file) = db_with(HELLO);
+    assert!(shim(&db, file).expect("synth").starts_with("Error"));
+    let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("condition of `? :` must be Bool")),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+    );
+}

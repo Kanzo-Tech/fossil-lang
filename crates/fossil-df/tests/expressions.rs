@@ -190,3 +190,95 @@ User : ex:Person from users
         "ids 1,2,3 against `>= 2` — the literal reached the plan"
     );
 }
+
+/// A conditional produces one column whose value depends on the row.
+///
+/// F2 §3: `cond ? a : b` renders as a two-armed CASE. Both branches have the
+/// same type by the time it gets here — the checker refuses anything else, so
+/// the column has one type and a shape can check it.
+#[tokio::test]
+async fn a_conditional_chooses_per_row() {
+    const TERNARY: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"tests/fixtures/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:band = .id >= 2 ? \"senior\" : \"junior\"
+";
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, TERNARY.to_string(), "tern.fossil".to_string());
+    let mapping = *def_map(&db, file)
+        .mappings(&db)
+        .first()
+        .expect("one mapping");
+
+    let ctx = SessionContext::new();
+    let (vertex, node) = fossil_df::execute_vertex(
+        &ctx,
+        &db,
+        mapping,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_vertex runs the conditional plan");
+
+    assert_eq!(node.properties[0].name, "band");
+    let batch = vertex.batches.first().expect("at least one RecordBatch");
+    let band = column::<StringArray>(batch, 2);
+    let values: Vec<&str> = (0..band.len()).map(|i| band.value(i)).collect();
+    assert_eq!(
+        values,
+        ["junior", "senior", "senior"],
+        "ids 1,2,3 — both arms were taken, so neither is dead code"
+    );
+}
+
+/// A pipeline in expression position is the call it desugars to.
+///
+/// F2 §4, and it is deliberately small: `type-system.md` §4.6 says `|>` passes
+/// the left side as the first argument, so with `call` already landed there is
+/// no new form to carry — only the desugaring. The SOURCE-level pipeline
+/// (`users |> where(...)`, a relation rather than a value) is F5.
+#[tokio::test]
+async fn a_pipeline_is_the_call_it_desugars_to() {
+    const PIPED: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"tests/fixtures/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:piped = .name |> clean.upper()
+    ex:called = clean.upper(.name)
+";
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, PIPED.to_string(), "piped.fossil".to_string());
+    let mapping = *def_map(&db, file)
+        .mappings(&db)
+        .first()
+        .expect("one mapping");
+
+    let ctx = SessionContext::new();
+    let (vertex, _) = fossil_df::execute_vertex(
+        &ctx,
+        &db,
+        mapping,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_vertex runs the piped plan");
+
+    let batch = vertex.batches.first().expect("at least one RecordBatch");
+    let piped = column::<StringArray>(batch, 2);
+    let called = column::<StringArray>(batch, 3);
+    let a: Vec<&str> = (0..piped.len()).map(|i| piped.value(i)).collect();
+    let b: Vec<&str> = (0..called.len()).map(|i| called.value(i)).collect();
+    assert_eq!(a, ["ALICE", "BOB", "CAROL"]);
+    assert_eq!(a, b, "the pipe and the call are the same program");
+}

@@ -209,7 +209,10 @@ pub fn lower_to_mir_pg<'db>(
                 rdf_uri: Some(iri.clone()),
                 single_valued: true,
             }),
-            HirExpr::StringLit(_) => props.push(VProp {
+            // A string literal and a conditional both produce a String column
+            // here: the conditional's branches agree by the time the checker is
+            // done, and without a source row that agreed type is String.
+            HirExpr::StringLit(_) | HirExpr::Ternary { .. } => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
                 ty: string_ty,
@@ -657,6 +660,37 @@ fn lower_property_value<'db>(
         // this call against — the backend derives the column's datatype from
         // it, so a call is no less typed than a column reference.
         HirExpr::IntLit(v) => Expr::LitInt(*v),
+        HirExpr::Ternary {
+            cond,
+            then,
+            otherwise,
+        } => Expr::Ternary {
+            cond: Box::new(lower_property_value(
+                db,
+                cond,
+                source_binding,
+                prefixes,
+                assert_line,
+            )),
+            then: Box::new(lower_property_value(
+                db,
+                then,
+                source_binding,
+                prefixes,
+                assert_line,
+            )),
+            otherwise: Box::new(lower_property_value(
+                db,
+                otherwise,
+                source_binding,
+                prefixes,
+                assert_line,
+            )),
+            // The branch type is the conditional's; the checker proved they
+            // agree. Without a source row neither branch types, and String is
+            // what every other untyped property gets.
+            ty: Ty::new(db, TyKind::Primitive(Primitive::String)),
+        },
         HirExpr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
             lhs: Box::new(lower_property_value(

@@ -132,6 +132,16 @@ fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
                 collect_free_cols(arg, acc);
             }
         }
+        Expr::Ternary {
+            cond,
+            then,
+            otherwise,
+            ..
+        } => {
+            collect_free_cols(cond, acc);
+            collect_free_cols(then, acc);
+            collect_free_cols(otherwise, acc);
+        }
         Expr::Assert { inner, .. } => collect_free_cols(inner, acc),
     }
 }

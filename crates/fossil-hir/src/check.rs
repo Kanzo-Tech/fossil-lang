@@ -177,7 +177,6 @@ impl<'db> Checker<'db> {
     /// Mint a fresh inference id. Phase 3 v0.1 uses this only for the closure
     /// hook; the checker is otherwise fully directional over the leaf
     /// `HirExpr` forms.
-    #[allow(dead_code)]
     const fn fresh_inference(&mut self) -> crate::ty::InferenceId {
         let id = crate::ty::InferenceId(self.next_inference);
         self.next_inference += 1;
@@ -268,6 +267,15 @@ fn expr_contains_free_field_refs(e: &HirExpr) -> bool {
         HirExpr::BinOp { lhs, rhs, .. } => {
             expr_contains_free_field_refs(lhs) || expr_contains_free_field_refs(rhs)
         }
+        HirExpr::Ternary {
+            cond,
+            then,
+            otherwise,
+        } => {
+            expr_contains_free_field_refs(cond)
+                || expr_contains_free_field_refs(then)
+                || expr_contains_free_field_refs(otherwise)
+        }
         // Phase 2 leaf forms with no `.field` descendants. (A `Template` MAY
         // contain `${.id}` placeholders textually, but those are not yet a
         // structured `FieldRef` HIR node in Phase 3 v0.1 — template parsing is
@@ -334,6 +342,16 @@ fn render_leaf_expr_text(e: &HirExpr) -> String {
             render_leaf_expr_text(lhs),
             op_text(*op),
             render_leaf_expr_text(rhs)
+        ),
+        HirExpr::Ternary {
+            cond,
+            then,
+            otherwise,
+        } => format!(
+            "{} ? {} : {}",
+            render_leaf_expr_text(cond),
+            render_leaf_expr_text(then),
+            render_leaf_expr_text(otherwise)
         ),
     }
 }
@@ -497,6 +515,16 @@ impl<'db> Checker<'db> {
                 self.synth_binop(expr_id, *op, lhs, rhs),
                 ProvenanceKind::BinaryOp {
                     op: SmolStr::new_static(op_text(*op)),
+                },
+            ),
+            HirExpr::Ternary {
+                cond,
+                then,
+                otherwise,
+            } => (
+                self.synth_ternary(expr_id, cond, then, otherwise),
+                ProvenanceKind::BinaryOp {
+                    op: SmolStr::new_static("?:"),
                 },
             ),
         };
@@ -755,6 +783,80 @@ impl<'db> Checker<'db> {
             }
         }
         bool_ty
+    }
+
+    /// T-Tern (`type-system.md` §4.8): the condition is `Bool`, both branches
+    /// have the same type, and that type is the conditional's. **No implicit
+    /// coercion** — two branches of different types is the error, not a widening
+    /// nobody asked for, because a column whose type depends on the row is a
+    /// column no shape can check.
+    ///
+    /// A branch the checker cannot type yields to the other branch, and if
+    /// neither can be typed the conditional cannot either: it is `Unknown`, not
+    /// an invented `String`.
+    fn synth_ternary(
+        &mut self,
+        expr_id: ExprId,
+        cond: &HirExpr,
+        then: &HirExpr,
+        otherwise: &HirExpr,
+    ) -> Ty<'db> {
+        let db = self.db;
+        let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
+
+        if let Some((c, _)) = self.synth_ty(expr_id, cond) {
+            if let TyKind::Error(_) = c.kind(db) {
+                return c;
+            }
+            if !subtypes(db, c, bool_ty) {
+                let eg = delay_span_bug(
+                    db,
+                    self.span_of(expr_id),
+                    format!(
+                        "the condition of `? :` must be Bool, but it is {}",
+                        render_ty_kind(db, c.kind(db)),
+                    ),
+                );
+                self.record_error(eg);
+                return Ty::new(db, TyKind::Error(eg));
+            }
+        }
+
+        let t = self.synth_ty(expr_id, then).map(|(t, _)| t);
+        let o = self.synth_ty(expr_id, otherwise).map(|(t, _)| t);
+        for ty in [t, o].into_iter().flatten() {
+            if let TyKind::Error(_) = ty.kind(db) {
+                return ty;
+            }
+        }
+
+        match (t, o) {
+            (Some(t), Some(o)) => {
+                // Same type, or one is a subtype of the other (Integer widens
+                // into Float, and a value widens into its Optional).
+                if subtypes(db, t, o) {
+                    o
+                } else if subtypes(db, o, t) {
+                    t
+                } else {
+                    let eg = delay_span_bug(
+                        db,
+                        self.span_of(expr_id),
+                        format!(
+                            "the branches of `? :` have different types: {} and {}.                              Both branches must have the same type — fossil does not coerce.",
+                            render_ty_kind(db, t.kind(db)),
+                            render_ty_kind(db, o.kind(db)),
+                        ),
+                    );
+                    self.record_error(eg);
+                    Ty::new(db, TyKind::Error(eg))
+                }
+            }
+            // One branch typed and the other not: the typed one is the best
+            // evidence available, and it is evidence, not a guess.
+            (Some(t), None) | (None, Some(t)) => t,
+            (None, None) => Ty::new(db, TyKind::Unknown(self.fresh_inference())),
+        }
     }
 
     /// Implicit closure synthesis (CORE-07, type-system.md §7 T-Closure) —

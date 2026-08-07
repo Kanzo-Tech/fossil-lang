@@ -5,7 +5,7 @@ direction:
   summary: Sources compose with a pipeline operator that our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan — so the fourteen MIR operators are the pipeline's vocabulary and stay, while the ten rewrite rules go because they duplicate an optimizer that is already underneath.
   decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
 today:
-  summary: The pipe token is in the grammar and nothing lowers it — a pipeline expression is the one construct that fails loudly rather than silently — while `rewrite()` runs on every compile and always returns its input, because all ten rules match operators the lowering never emits.
+  summary: Since 2026-08-07 a pipe in VALUE position lowers — it is sugar over a call, so `.name |> clean.trim()` is `clean.trim(.name)` — but a pipe over a SOURCE is a relation and still lowers to nothing, and `rewrite()` runs on every compile and always returns its input because all ten rules match operators the lowering never emits.
   backedBy: crates/fossil-mir/src/rewrite.rs
 ---
 
@@ -46,9 +46,12 @@ type the mapping; what it does better than we will is choose a plan.
 its input**, because all ten rules match operators the lowering never emits. The lowering emits four
 of fourteen: `Source`, `EmitVertex`, `EmitEdge`, `Sink`.
 
-That is downstream of [the expression cliff](/docs/characteristics/expressions), and the pipeline is
-the one place where the cliff produces an honest failure instead of a silent one: a pipeline
-expression raises a type error rather than being dropped on the way to the corpus.
+That was downstream of [the expression cliff](/docs/characteristics/expressions), which closed on
+2026-08-07 — but only for values. `.name |> clean.trim()` is now sugar over a call (ADR-0050) and
+runs. `adultos := users |> where(.edad >= 18)` is a **relation**, not a value: it needs a source
+binding that is not an `io.*` call, `Op::Filter` reachable from source, and types for
+`where`/`select`/`join`. That is this phase, and it opens with a decision that is not the
+compiler's: whether `join` is in the first version.
 
 There is one more mismatch worth recording because it is the shape of how the enum grew: the module
 header of `crates/fossil-mir/src/op.rs:1` says *"the complete 11-operator typed set"*, the enum has

@@ -111,6 +111,16 @@ pub enum HirExpr {
         lhs: Box<HirExpr>,
         rhs: Box<HirExpr>,
     },
+    /// `.age >= 18 ? "adult" : "minor"` — the conditional.
+    ///
+    /// Both branches must have the same type and there is no implicit coercion
+    /// (`type-system.md` §4.8), which is what makes it a total function of the
+    /// row rather than a source of nullable columns.
+    Ternary {
+        cond: Box<HirExpr>,
+        then: Box<HirExpr>,
+        otherwise: Box<HirExpr>,
+    },
 }
 
 #[salsa::tracked]
@@ -340,6 +350,8 @@ fn lower_expr_inner(
     match inner.kind() {
         SyntaxKind::POSTFIX_EXPR => lower_postfix(db, &inner, prefixes),
         SyntaxKind::BINARY_EXPR => lower_binary(db, &inner, prefixes),
+        SyntaxKind::TERNARY_EXPR => lower_ternary(db, &inner, prefixes),
+        SyntaxKind::PIPELINE_EXPR => lower_pipeline(db, &inner, prefixes),
         SyntaxKind::TEMPLATE_EXPR => {
             let tok = inner
                 .children_with_tokens()
@@ -521,6 +533,109 @@ fn lower_expr_inner(
             None
         }
     }
+}
+
+/// Lower a `PIPELINE_EXPR` — `e |> f(args)`.
+///
+/// `type-system.md` §4.6: the pipeline passes the LHS as the **first argument**
+/// to the RHS function. In expression position that is exactly a call with one
+/// more argument, so this is desugaring and not a new HIR form: `.name |>
+/// clean.trim()` IS `clean.trim(.name)`, and the checker, the MIR lowering and
+/// the backend all see the call they already know.
+///
+/// The SOURCE-level pipeline — `adultos := users |> where(.edad >= 18)`, which
+/// is a relation and not a value — is not this. It is F5 of ADR-0046, and it is
+/// blocked on a decision that is not the compiler's to make: whether `join`
+/// enters the first version.
+fn lower_pipeline(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirExpr> {
+    let range = node.text_range();
+    let span = Span::new(range.start().into(), range.end().into());
+    let source = node.text().to_string();
+    let source = source.trim().to_string();
+
+    let mut parts = node.children();
+    let lhs_node = parts.next()?;
+    let rhs_node = parts.next()?;
+    let lhs = lower_expr_inner(db, &lhs_node, prefixes)?;
+
+    // The RHS is either a call — whose arguments the LHS joins at the front —
+    // or a bare function name, which the LHS calls on its own.
+    if let Some(HirExpr::Call { func, args }) = lower_expr_inner(db, &rhs_node, prefixes) {
+        let mut piped = Vec::with_capacity(args.len() + 1);
+        piped.push(lhs);
+        piped.extend(args);
+        return Some(HirExpr::Call { func, args: piped });
+    }
+
+    // `dotted_name` reads the bare-name case without lowering it: a name on its
+    // own is not a value (that is the `lower_postfix` diagnostic), but after a
+    // pipe it is the function being called.
+    if let Some(func) = dotted_name(&rhs_node) {
+        return Some(HirExpr::Call {
+            func: SmolStr::from(func),
+            args: vec![lhs],
+        });
+    }
+
+    Diagnostic::new(
+        Severity::Error,
+        format!(
+            "the right-hand side of `|>` in `{source}` is not a function. A pipeline passes \
+             its left side as the first argument to a stdlib function, e.g. \
+             `.name |> clean.trim()`."
+        ),
+        span,
+    )
+    .accumulate(db);
+    None
+}
+
+/// Lower a `TERNARY_EXPR` — `cond ? then : otherwise`.
+///
+/// The parser leaves three expression children in order and consumes the `?`
+/// and the `:` as tokens; a recovery-path ternary (a missing `:`) has an ERROR
+/// node among them, and fewer than three expression children means the source
+/// is not a ternary the HIR can carry.
+fn lower_ternary(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirExpr> {
+    use fossil_syntax::SyntaxKind;
+
+    let parts: Vec<_> = node
+        .children()
+        .filter(|c| c.kind() != SyntaxKind::ERROR)
+        .collect();
+    if parts.len() != 3 {
+        let range = node.text_range();
+        let span = Span::new(range.start().into(), range.end().into());
+        let source = node.text().to_string();
+        Diagnostic::new(
+            Severity::Error,
+            format!(
+                "`{}` is not a complete conditional: it needs a condition, a `?` branch \
+                 and a `:` branch.",
+                source.trim()
+            ),
+            span,
+        )
+        .accumulate(db);
+        return None;
+    }
+
+    let cond = lower_expr_inner(db, &parts[0], prefixes)?;
+    let then = lower_expr_inner(db, &parts[1], prefixes)?;
+    let otherwise = lower_expr_inner(db, &parts[2], prefixes)?;
+    Some(HirExpr::Ternary {
+        cond: Box::new(cond),
+        then: Box::new(then),
+        otherwise: Box::new(otherwise),
+    })
 }
 
 /// Lower a `BINARY_EXPR` — a comparison (`.age >= 18`) or a boolean connective
