@@ -43,11 +43,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
+use fossil_graph_schema::{
+    Cardinality as GsCardinality, EdgeType, GraphSchema, NodeType, Primitive, Property,
+};
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
-use fossil_graph_schema::{
-    Cardinality as GsCardinality, DataType, EdgeType, GraphSchema, NodeType, Property,
-};
 use shex_ast::{
     NodeKind, Schema, ShExParser, Shape, ShapeDecl, ShapeExpr, ShapeExprLabel, TripleExpr,
     TripleExprLabel,
@@ -268,19 +268,19 @@ fn edge_targets(value_expr: &Option<ShapeExpr>) -> Vec<String> {
 /// the XSD lattice (unknown datatypes fall back to `String`); a `nodeKind IRI`
 /// node is an opaque IRI-valued property (`AnyUri`); anything else defaults to
 /// `String` (the permissive walking-skeleton column).
-fn datatype_of(value_expr: &Option<ShapeExpr>) -> DataType {
+fn datatype_of(value_expr: &Option<ShapeExpr>) -> Primitive {
     match value_expr {
         Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
             || {
                 if matches!(nc.node_kind(), Some(NodeKind::Iri)) {
-                    DataType::AnyUri
+                    Primitive::AnyUri
                 } else {
-                    DataType::String
+                    Primitive::String
                 }
             },
-            |dt| DataType::from_xsd_iri(&iri_ref_to_string(&dt)).unwrap_or(DataType::String),
+            |dt| Primitive::from_xsd_iri(&iri_ref_to_string(&dt)).unwrap_or(Primitive::String),
         ),
-        _ => DataType::String,
+        _ => Primitive::String,
     }
 }
 

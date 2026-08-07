@@ -13,9 +13,10 @@ use crate::infer::record_from_descriptor;
 use crate::lower::{HirExpr, HirProperty, PropertyKey};
 use crate::provenance::{expr_types, ty_origin};
 use crate::shapes::ResolvedShape;
-use crate::ty::{Primitive, ShapeId, TyKind};
+use crate::ty::{ShapeId, TyKind};
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
 use fossil_descriptors_input::CsvwDescriptor;
+use fossil_graph_schema::Primitive;
 use std::sync::Arc;
 
 const HELLO: &str = "\
@@ -785,5 +786,107 @@ fn pipeline_typechecks_in_phase_3_v0_1() {
     assert!(
         typecheck_mapping(&db, m).is_ok(),
         "hello (no closure form) type-checks ok"
+    );
+}
+
+// ── F2 §1/§2: calls and comparisons against the catalog and the row ────────
+
+/// The mistake a mapping actually makes: comparing a text column with a number.
+/// With a source row present, the checker has both types and refuses it.
+#[test]
+fn comparing_a_string_column_with_an_integer_is_an_error() {
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
+        let row = record_from_descriptor(db, &descriptor, "users");
+        let mut cx = build_checker(db, m, Some(row), None);
+        let e = crate::lower::HirExpr::BinOp {
+            op: crate::lower::CmpOp::Ge,
+            lhs: Box::new(crate::lower::HirExpr::FieldRef("name".into())),
+            rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
+        };
+        let ty = cx.synth(ExprId(0), &e)?;
+        Some(render_ty_kind(db, ty.kind(db)))
+    }
+
+    let (db, file) = db_with(HELLO);
+    let rendered = shim(&db, file).expect("synth returns a type");
+    assert!(
+        rendered.starts_with("Error"),
+        "a String/Integer comparison must taint, got {rendered}"
+    );
+    let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
+    assert!(
+        diags.iter().any(|d| d.message.contains("cannot compare")),
+        "the diagnostic must say what it could not compare, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+    );
+}
+
+/// The same shape, well typed: an integer column against an integer literal.
+#[test]
+fn comparing_an_integer_column_with_an_integer_is_bool() {
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
+        let row = record_from_descriptor(db, &descriptor, "users");
+        let mut cx = build_checker(db, m, Some(row), None);
+        let e = crate::lower::HirExpr::BinOp {
+            op: crate::lower::CmpOp::Ge,
+            lhs: Box::new(crate::lower::HirExpr::FieldRef("age".into())),
+            rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
+        };
+        let ty = cx.synth(ExprId(0), &e)?;
+        Some(render_ty_kind(db, ty.kind(db)))
+    }
+
+    let (db, file) = db_with(HELLO);
+    assert_eq!(shim(&db, file).expect("synth"), "Bool");
+}
+
+/// A call's argument is checked against the declared parameter type, and the
+/// result type is the signature's — not the argument's.
+#[test]
+fn a_call_takes_its_return_type_and_checks_its_argument() {
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<(String, String)> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
+        let row = record_from_descriptor(db, &descriptor, "users");
+        let mut cx = build_checker(db, m, Some(row), None);
+        // `clean.trim(String) -> String` applied to the String column: ok.
+        let ok = crate::lower::HirExpr::Call {
+            func: "clean.trim".into(),
+            args: vec![crate::lower::HirExpr::FieldRef("name".into())],
+        };
+        let ok_ty = cx.synth(ExprId(0), &ok)?;
+        // The same function applied to the Integer column: refused.
+        let bad = crate::lower::HirExpr::Call {
+            func: "clean.trim".into(),
+            args: vec![crate::lower::HirExpr::FieldRef("age".into())],
+        };
+        let bad_ty = cx.synth(ExprId(0), &bad)?;
+        Some((
+            render_ty_kind(db, ok_ty.kind(db)),
+            render_ty_kind(db, bad_ty.kind(db)),
+        ))
+    }
+
+    let (db, file) = db_with(HELLO);
+    let (ok, bad) = shim(&db, file).expect("synth");
+    assert_eq!(ok, "String", "the return type is the signature's");
+    assert!(
+        bad.starts_with("Error"),
+        "Integer is not a String, got {bad}"
+    );
+    let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("argument 1 of `clean.trim`")),
+        "the diagnostic must name the argument and the function, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
     );
 }

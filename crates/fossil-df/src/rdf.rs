@@ -106,7 +106,11 @@ pub fn rdf_to_batch(
             // there is exactly one per subject).
             let values: StringArray = subjects
                 .iter()
-                .map(|s| objects_of(s).and_then(|v| v.iter().min()).map(String::as_str))
+                .map(|s| {
+                    objects_of(s)
+                        .and_then(|v| v.iter().min())
+                        .map(String::as_str)
+                })
                 .collect();
             fields.push(Field::new(&column.name, DataType::Utf8, true));
             arrays.push(Arc::new(values));
@@ -152,8 +156,16 @@ mod tests {
     #[test]
     fn pivots_a_shape_to_wide_rows() {
         let columns = [
-            RdfColumn { name: "name".into(), predicate: "http://xmlns.com/foaf/0.1/name".into(), multi: false },
-            RdfColumn { name: "age".into(), predicate: "http://xmlns.com/foaf/0.1/age".into(), multi: false },
+            RdfColumn {
+                name: "name".into(),
+                predicate: "http://xmlns.com/foaf/0.1/name".into(),
+                multi: false,
+            },
+            RdfColumn {
+                name: "age".into(),
+                predicate: "http://xmlns.com/foaf/0.1/age".into(),
+                multi: false,
+            },
         ];
         let batch = rdf_to_batch(TURTLE, "https://example.org/Person", &columns).expect("pivot");
 
@@ -164,14 +176,27 @@ mod tests {
         assert_eq!(names, ["subject", "name", "age"]);
 
         let col = |i: usize| {
-            let a = batch.column(i).as_any().downcast_ref::<StringArray>().unwrap();
+            let a = batch
+                .column(i)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap();
             (0..a.len())
-                .map(|r| if a.is_null(r) { None } else { Some(a.value(r).to_string()) })
+                .map(|r| {
+                    if a.is_null(r) {
+                        None
+                    } else {
+                        Some(a.value(r).to_string())
+                    }
+                })
                 .collect::<Vec<_>>()
         };
         assert_eq!(
             col(0),
-            [Some("https://example.org/alice".into()), Some("https://example.org/bob".into())],
+            [
+                Some("https://example.org/alice".into()),
+                Some("https://example.org/bob".into())
+            ],
         );
         assert_eq!(col(1), [Some("Alice".into()), Some("Bob".into())]);
         // Bob has no foaf:age → null.
@@ -195,7 +220,11 @@ mod tests {
         let batch = rdf_to_batch(MULTI_TTL, "https://ex.org/KB", &columns).expect("pivot");
 
         assert_eq!(batch.num_rows(), 2, "two KBs");
-        let list = batch.column(1).as_any().downcast_ref::<ListArray>().expect("List col");
+        let list = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<ListArray>()
+            .expect("List col");
 
         // kb/1 → its two projects, sorted (proj/1 before proj/2 despite TTL order).
         let row0 = list.value(0);

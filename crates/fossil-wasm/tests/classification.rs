@@ -22,7 +22,7 @@ fn manifest_covers_stdlib_with_correct_tags() {
         .collect();
 
     // Same count as the registry (56 surface fns + 3 io/ sources = 59).
-    let registry = fossil_registry::FunctionRegistry::stdlib_default();
+    let registry = fossil_hir::stdlib::FunctionRegistry::stdlib_default();
     assert_eq!(manifest.len(), registry.iter().count());
     assert_eq!(by_name.len(), manifest.len(), "no duplicate names");
 

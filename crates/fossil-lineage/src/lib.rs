@@ -8,13 +8,16 @@
 //! source headers → typed refs — is identical and pure (no I/O, no `DuckDB`),
 //! so it is WASM-clean.
 //!
-//! It lives in the registry because that is where its content is:
-//! [`providers`] is a projection of [`crate::SOURCE_KINDS`], and until
-//! ADR-0045 §4 the projection sat in `fossil-ide` while the data sat here and
-//! the result type sat in `fossil-run-status` — one idea across three crates
-//! that did not know each other. Being in `fossil-ide` also made
-//! `fossil-engine` depend on the editor surface for five lines, which is the
-//! edge ADR-0045 §4 went after; nothing here is an editor feature.
+//! [`providers`] is a projection of [`fossil_hir::stdlib::SOURCE_KINDS`] and
+//! [`source_refs`] walks the def map, so its content is the language's. What
+//! keeps it out of `fossil-hir` is the other end: the result types are
+//! `fossil-run-status`, the host wire contract, and ADR-0046 F8 dissolves that
+//! into the shell. This crate is the projection onto that wire, so it moves
+//! when the wire does. Until ADR-0045 §4 the projection sat in `fossil-ide`
+//! while the data sat in the registry and the result type in
+//! `fossil-run-status` — one idea across three crates that did not know each
+//! other, and it made `fossil-engine` depend on the editor surface for five
+//! lines.
 
 use fossil_base::{Db, SourceFile};
 use fossil_run_status::{ProviderInfo, ProviderKind, RefRole, SourceRefInfo};
@@ -68,12 +71,12 @@ fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
 }
 
 /// The data-source providers fossil supports, projected from
-/// [`crate::SOURCE_KINDS`] (the single source of truth — native
+/// [`fossil_hir::stdlib::SOURCE_KINDS`] (the single source of truth — native
 /// readers AND external providers like `rdf`). Sorted for a deterministic
 /// order (the registry's own iteration order is unspecified).
 #[must_use]
 pub fn providers() -> Vec<ProviderInfo> {
-    let mut providers: Vec<ProviderInfo> = crate::SOURCE_KINDS
+    let mut providers: Vec<ProviderInfo> = fossil_hir::stdlib::SOURCE_KINDS
         .iter()
         .map(|k| ProviderInfo {
             name: k.short_name.to_string(),
@@ -95,9 +98,14 @@ mod tests {
         assert!(!p.is_empty(), "the source registry must expose providers");
         let mut sorted = p.clone();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
-        assert_eq!(p, sorted, "providers must be deterministically sorted by name");
+        assert_eq!(
+            p, sorted,
+            "providers must be deterministically sorted by name"
+        );
         let names: Vec<&str> = p.iter().map(|x| x.name.as_str()).collect();
-        assert!(names.contains(&"csv"), "csv provider must be present: {names:?}");
+        assert!(
+            names.contains(&"csv"),
+            "csv provider must be present: {names:?}"
+        );
     }
 }
-

@@ -57,8 +57,10 @@ use fossil_descriptors_input::{CsvwDescriptor, InferredDescriptor};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
+use fossil_graph_schema::Primitive;
+
 use crate::def_map::{MappingLoc, def_map};
-use crate::ty::{Primitive, Record, RecordField, Ty, TyKind};
+use crate::ty::{Record, RecordField, Ty, TyKind};
 
 /// The source-row [`Ty`] (a `Record`) for a mapping as known from the
 /// host-registered [`fossil_descriptors_input::InferredDescriptor`] ONLY.
@@ -80,32 +82,19 @@ pub fn source_row_inferred<'db>(
     let hir_mapping = mappings.mappings(db).get(mapping.index(db))?;
     let source_name = hir_mapping.source_binding.clone();
     let inferred = db.system().inferred_descriptor(source_name.as_str())?;
-    // Build the Record directly (NOT via `record_from_inferred`): IDE callers
-    // run OUTSIDE a tracked query, where salsa diagnostic accumulation panics.
-    // The Record VALUE is identical — only the `D-INFERRED-UNKNOWN-DATATYPE`
-    // warning is skipped, which belongs to type-check, not completion. Shares
-    // the per-column mapping via `field_from_inferred` (no duplicated logic).
-    let fields: Vec<RecordField<'db>> = inferred
-        .columns
-        .iter()
-        .map(|col| field_from_inferred(db, col))
-        .collect();
-    Some(Ty::new(db, TyKind::Record(Record::new(db, fields))))
+    Some(record_from_inferred(db, &inferred))
 }
 
 /// Map one [`InferredColumn`] to a [`RecordField`] — the column→field lowering
-/// shared by [`record_from_inferred`] (type-check, which ALSO warns on
-/// non-canonical primitives) and [`source_row_inferred`] (IDE, no diagnostics).
+/// shared by [`record_from_inferred`] (type-check) and [`source_row_inferred`]
+/// (IDE).
 fn field_from_inferred<'db>(
     db: &'db dyn fossil_base::Db,
     col: &fossil_descriptors_input::InferredColumn,
 ) -> RecordField<'db> {
     RecordField {
         name: col.name.clone(),
-        ty: Ty::new(
-            db,
-            TyKind::Primitive(primitive_from_name(col.primitive.as_str())),
-        ),
+        ty: Ty::new(db, TyKind::Primitive(col.primitive)),
     }
 }
 
@@ -142,7 +131,7 @@ pub fn resolve_source_row<'db>(
         if dm.lookup_source_schema(db, source_name.as_str()).is_some() {
             emit_csvw_deprecated_diagnostic(db, &source_name);
         }
-        return Some(record_from_inferred(db, &inferred, source_name.as_str()));
+        return Some(record_from_inferred(db, &inferred));
     }
 
     // RDF destructuring source member (`{ A, B } := io.rdf(..., schema =
@@ -258,25 +247,22 @@ pub(crate) fn record_from_descriptor<'db>(
 ) -> Ty<'db> {
     let mut fields: Vec<RecordField<'db>> = Vec::new();
     for col in descriptor.columns() {
-        let prim = descriptor.type_for_column(&col.name).map_or_else(
-            || {
-                // Column declared a datatype outside the v0.1 catalog (or no
-                // datatype at all). Type it as String and emit a diagnostic
-                // so the user sees WHY (P-CRIT-4: no silent coercion without
-                // a diagnostic). Continue building the rest of the row.
-                let _eg = delay_span_bug(
-                    db,
-                    Span::new(0, 0),
-                    format!(
-                        "CSVW column `{}` in source `{source_name}` has an \
+        let prim = descriptor.type_for_column(&col.name).unwrap_or_else(|| {
+            // Column declared a datatype outside the v0.1 catalog (or no
+            // datatype at all). Type it as String and emit a diagnostic
+            // so the user sees WHY (P-CRIT-4: no silent coercion without
+            // a diagnostic). Continue building the rest of the row.
+            let _eg = delay_span_bug(
+                db,
+                Span::new(0, 0),
+                format!(
+                    "CSVW column `{}` in source `{source_name}` has an \
                              unknown or missing datatype; defaulting to String",
-                        col.name
-                    ),
-                );
-                Primitive::String
-            },
-            primitive_from_name,
-        );
+                    col.name
+                ),
+            );
+            Primitive::String
+        });
         let field_ty = Ty::new(db, TyKind::Primitive(prim));
         fields.push(RecordField {
             name: SmolStr::from(col.name.as_str()),
@@ -314,7 +300,11 @@ pub(crate) fn record_from_shape<'db>(
     if let Some(binding) = desc.lookup_shape_str(shape_iri) {
         for c in &binding.constraints {
             let prim = match c.value() {
-                ConstraintValue::Datatype(iri) => primitive_from_xsd(&iri),
+                // An xsd type outside the lattice is a column all the same —
+                // String is the conservative, column-producing choice.
+                ConstraintValue::Datatype(iri) => {
+                    Primitive::from_xsd_iri(&iri).unwrap_or(Primitive::String)
+                }
                 // Shape-ref / IRI-valued node → the referenced subject's IRI.
                 ConstraintValue::Iri | ConstraintValue::Unknown => Primitive::String,
             };
@@ -325,23 +315,6 @@ pub(crate) fn record_from_shape<'db>(
         }
     }
     Ty::new(db, TyKind::Record(Record::new(db, fields)))
-}
-
-/// Map an XSD datatype IRI to a Fossil [`Primitive`] via its local name. Unknown
-/// datatypes fall back to String (the conservative, column-producing choice).
-fn primitive_from_xsd(iri: &str) -> Primitive {
-    let local = iri.rsplit(['#', '/']).next().unwrap_or(iri);
-    match local {
-        "integer" | "int" | "long" => Primitive::Integer,
-        "decimal" | "double" | "float" => Primitive::Float,
-        "boolean" => Primitive::Bool,
-        "date" => Primitive::Date,
-        "dateTime" => Primitive::DateTime,
-        "time" => Primitive::Time,
-        "gYear" => Primitive::GYear,
-        "anyURI" => Primitive::AnyURI,
-        _ => Primitive::String,
-    }
 }
 
 /// Resolve `schema_path` relative to the directory containing `file`'s path.
@@ -356,75 +329,28 @@ fn resolve_relative(
         .map_or_else(|| PathBuf::from(schema_path), |dir| dir.join(schema_path))
 }
 
-/// Inverse of `CsvwDescriptor::type_for_column`'s `&'static str` name table.
-///
-/// Lives here (in `fossil-hir`) per plan 03-01 / 03-02's cycle-avoidance
-/// design: `fossil-descriptors-input` returns the canonical [`Primitive`]
-/// variant *name* as a string to avoid importing `fossil-hir::ty::Primitive`;
-/// the string → enum conversion happens here at the consuming boundary.
-#[must_use]
-fn primitive_from_name(name: &str) -> Primitive {
-    match name {
-        "Integer" => Primitive::Integer,
-        "Float" => Primitive::Float,
-        "Bool" => Primitive::Bool,
-        "Date" => Primitive::Date,
-        "DateTime" => Primitive::DateTime,
-        "Time" => Primitive::Time,
-        "GYear" => Primitive::GYear,
-        "AnyURI" => Primitive::AnyURI,
-        // "String" and any unexpected name fall back to String.
-        _ => Primitive::String,
-    }
-}
-
-/// Returns `true` iff `name` is one of the canonical [`Primitive`] variant
-/// names recognised by [`primitive_from_name`]. Used by
-/// [`record_from_inferred`] to emit a diagnostic when a host-provided
-/// `InferredColumn.primitive` string falls outside the catalog (mirrors the
-/// CSVW path's "unknown datatype → String" behaviour in
-/// [`record_from_descriptor`]).
-#[must_use]
-fn is_canonical_primitive_name(name: &str) -> bool {
-    matches!(
-        name,
-        "Integer" | "Float" | "String" | "Bool" | "Date" | "DateTime" | "Time" | "GYear" | "AnyURI"
-    )
-}
-
 /// Build a `Record` [`Ty`] from a host-provided [`InferredDescriptor`].
 ///
 /// Phase 13 v0.2 (ADR-0037) inferred-path companion to
 /// [`record_from_descriptor`]. The two functions produce structurally
 /// equivalent Records on identical column shapes (semantic-equivalence
-/// invariant from INPUT-03). When a column carries a non-canonical
-/// `primitive` string, this function defaults to `String` and emits a
-/// `D-INFERRED-UNKNOWN-DATATYPE` diagnostic (mirrors the CSVW path's
-/// behaviour on unknown CSVW datatypes — see [`record_from_descriptor`]).
+/// invariant from INPUT-03).
+///
+/// There is no unknown-datatype branch here any more: a column carries a
+/// [`Primitive`], not the name of one, so a host that sends something outside
+/// the lattice is rejected where its JSON is deserialised — before any of this
+/// runs, and with the offending value in the error.
 #[must_use]
 pub(crate) fn record_from_inferred<'db>(
     db: &'db dyn fossil_base::Db,
     inferred: &InferredDescriptor,
-    source_name: &str,
 ) -> Ty<'db> {
-    let mut fields: Vec<RecordField<'db>> = Vec::new();
-    for col in &inferred.columns {
-        if !is_canonical_primitive_name(col.primitive.as_str()) {
-            let _eg = delay_span_bug(
-                db,
-                Span::new(0, 0),
-                format!(
-                    "D-INFERRED-UNKNOWN-DATATYPE: inferred column `{}` in source \
-                     `{source_name}` has non-canonical primitive `{}`; defaulting \
-                     to String",
-                    col.name, col.primitive
-                ),
-            );
-        }
-        fields.push(field_from_inferred(db, col));
-    }
-    let rec = Record::new(db, fields);
-    Ty::new(db, TyKind::Record(rec))
+    let fields: Vec<RecordField<'db>> = inferred
+        .columns
+        .iter()
+        .map(|col| field_from_inferred(db, col))
+        .collect();
+    Ty::new(db, TyKind::Record(Record::new(db, fields)))
 }
 
 /// Emit the `D-CSVW-DEPRECATED` warning when a source binding's explicit
@@ -500,19 +426,6 @@ mod tests {
         assert_eq!(age.ty.kind(&db), &TyKind::Primitive(Primitive::Integer));
     }
 
-    #[test]
-    fn primitive_from_name_round_trips_all_variants() {
-        assert_eq!(primitive_from_name("Integer"), Primitive::Integer);
-        assert_eq!(primitive_from_name("Float"), Primitive::Float);
-        assert_eq!(primitive_from_name("String"), Primitive::String);
-        assert_eq!(primitive_from_name("Bool"), Primitive::Bool);
-        assert_eq!(primitive_from_name("Date"), Primitive::Date);
-        assert_eq!(primitive_from_name("DateTime"), Primitive::DateTime);
-        assert_eq!(primitive_from_name("Time"), Primitive::Time);
-        assert_eq!(primitive_from_name("GYear"), Primitive::GYear);
-        assert_eq!(primitive_from_name("AnyURI"), Primitive::AnyURI);
-    }
-
     // Phase 13 v0.2 (ADR-0037, INPUT-03 semantic equivalence)
     #[test]
     fn record_from_inferred_matches_csvw_path_on_same_shape() {
@@ -530,20 +443,20 @@ mod tests {
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
-                    primitive: "Integer".into(),
+                    primitive: Primitive::Integer,
                 },
                 InferredColumn {
                     name: "name".into(),
-                    primitive: "String".into(),
+                    primitive: Primitive::String,
                 },
                 InferredColumn {
                     name: "age".into(),
-                    primitive: "Integer".into(),
+                    primitive: Primitive::Integer,
                 },
             ],
             content_hash: "test-hash".into(),
         };
-        let row_inferred = record_from_inferred(&db, &inferred, "users");
+        let row_inferred = record_from_inferred(&db, &inferred);
 
         // Both paths must produce a Record with structurally-identical fields.
         let TyKind::Record(rec_csvw) = row_csvw.kind(&db) else {
@@ -561,27 +474,28 @@ mod tests {
         }
     }
 
-    // Phase 13 v0.2 — guard the canonical-primitive table used by
-    // `record_from_inferred` for D-INFERRED-UNKNOWN-DATATYPE emission.
+    /// The unknown-primitive branch that used to live here is gone with the
+    /// string: a non-lattice name no longer reaches the checker at all, it fails
+    /// at the host boundary. `fossil-descriptors-input` owns that test now
+    /// (`a_primitive_outside_the_lattice_is_a_deserialisation_error`).
     #[test]
-    fn is_canonical_primitive_name_matches_primitive_from_name_table() {
-        for name in [
-            "Integer", "Float", "String", "Bool", "Date", "DateTime", "Time", "GYear", "AnyURI",
-        ] {
-            assert!(is_canonical_primitive_name(name), "`{name}` is canonical");
-        }
-        assert!(!is_canonical_primitive_name("integer")); // case-sensitive
-        assert!(!is_canonical_primitive_name("Decimal")); // outside catalog
-        assert!(!is_canonical_primitive_name(""));
+    fn a_column_carries_the_lattice_and_not_its_spelling() {
+        let db = db();
+        let inferred = fossil_descriptors_input::InferredDescriptor {
+            source_name: "users".into(),
+            columns: vec![fossil_descriptors_input::InferredColumn {
+                name: "born".into(),
+                primitive: Primitive::GYear,
+            }],
+            content_hash: String::new(),
+        };
+        let TyKind::Record(rec) = record_from_inferred(&db, &inferred).kind(&db) else {
+            panic!("expected Record");
+        };
+        assert_eq!(
+            rec.fields(&db)[0].ty.kind(&db),
+            &TyKind::Primitive(Primitive::GYear),
+            "the host's primitive arrives typed, with no name table in between"
+        );
     }
-
-    // Phase 13 v0.2 — `primitive_from_name` already covers the unknown-primitive
-    // → String fallback (see `primitive_from_name_round_trips_all_variants` for
-    // the canonical names; the wildcard `_ => Primitive::String` arm handles
-    // unknowns). A full `record_from_inferred` test for the unknown branch
-    // requires running inside a tracked Salsa query (the `D-INFERRED-UNKNOWN-
-    // DATATYPE` `delay_span_bug` only accumulates inside `#[salsa::tracked]`
-    // — outside one, the accumulator panics). The downstream e2e path
-    // exercised by `record_from_inferred_matches_csvw_path_on_same_shape`
-    // covers the canonical fast-path.
 }

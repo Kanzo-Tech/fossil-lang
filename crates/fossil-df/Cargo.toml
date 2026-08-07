@@ -62,6 +62,11 @@ datafusion = { version = "54", default-features = false, features = ["parquet"] 
 # write (`sink.rs`) is native-gated.
 parquet = { version = "58", default-features = false, features = ["arrow"] }
 thiserror = { workspace = true }
+# The stdlib UDFs no engine ships. Pure Rust, no C, wasm-clean — the logic is
+# the function's, not the database's, which is why it can live in the compiler
+# ring at all (`fossil-runtime`'s DuckDB trampolines wrap the same crates).
+slug = { workspace = true }
+unicode-normalization = { workspace = true }
 
 # Native-only: the fs sink writes the encoded bytes to a directory. The browser
 # path hands the same bytes to JS for signed PUT, so std::fs + tokio never reach

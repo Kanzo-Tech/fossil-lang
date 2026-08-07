@@ -1,4 +1,15 @@
-//! `fossil-registry` — the Fossil v0.1 standard-library function registry.
+//! The Fossil v0.1 standard-library catalog — every function the language
+//! declares, with its signature and how it compiles.
+//!
+//! # Why it lives in `fossil-hir` (ADR-0048)
+//!
+//! The checker resolves a `HirExpr::Call` against this catalog: arity, argument
+//! types and the result type all come from here. It used to be its own crate,
+//! `fossil-registry`, which depended on `fossil-hir` for `FnSig` — so the
+//! checker could not read it without a cycle, and for as long as that held, a
+//! call could not be typed at all. The catalog is language surface
+//! (`stdlib.md` is a spec, not a backend detail), so it moved down, not the
+//! checker up.
 //!
 //! # Phase 5 (STDL-01..07): the classification framework
 //!
@@ -56,13 +67,28 @@
 //! of the eight-namespace surface-function completeness set (`io/sql` and
 //! `io/http` are out of scope this milestone). See ADR-0015.
 
-pub mod lineage;
+use std::sync::LazyLock;
 
-pub use lineage::{providers, source_refs};
-
-use fossil_hir::FnSig;
-use fossil_hir::ty::{Primitive, Ty, TyKind};
+use fossil_graph_schema::Primitive;
 use smol_str::SmolStr;
+
+use crate::FnSig;
+use crate::ty::{Ty, TyKind};
+
+/// The process-wide catalog.
+///
+/// The checker resolves every call against this, so it is built once rather
+/// than per call. It is program-invariant in v0.1 — there is no federation and
+/// no user-defined function, so nothing about a program can change it (REG-01
+/// deferred). When that stops being true this becomes a Salsa input, and the
+/// call sites do not move.
+static STDLIB: LazyLock<FunctionRegistry> = LazyLock::new(FunctionRegistry::stdlib_default);
+
+/// The stdlib catalog. See [`STDLIB`].
+#[must_use]
+pub fn stdlib() -> &'static FunctionRegistry {
+    &STDLIB
+}
 use std::collections::HashMap;
 
 /// Registry of stdlib functions available to a Fossil program.
@@ -951,4 +977,5 @@ fn udf(name: &str) -> LoweringKind {
 }
 
 #[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

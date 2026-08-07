@@ -31,7 +31,7 @@ pub mod skeleton;
 pub use eval::{partial_eval, static_truth};
 pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
-pub use op::{AggFn, AggSpec, CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
+pub use op::{AggFn, AggSpec, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
 pub use rewrite::rewrite;
 pub use schema::{free_cols, schema_of};
 pub use skeleton::{subject_template_skeleton, template_skeleton};

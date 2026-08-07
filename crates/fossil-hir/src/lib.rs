@@ -58,6 +58,11 @@ pub mod lower;
 pub mod provenance;
 pub mod shapes;
 pub mod spans;
+/// The stdlib catalog: every function the language declares, its signature and
+/// how it compiles. It lives here because the checker resolves a call against
+/// it, and the checker cannot depend on a crate that depends on the checker —
+/// which is what `fossil-registry` was until ADR-0048.
+pub mod stdlib;
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their
@@ -68,7 +73,7 @@ pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
 pub use body::{ExprId, HirBody};
 pub use def_map::{DefMap, MappingLoc, SourceLoc};
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
-pub use lower::{HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
+pub use lower::{CmpOp, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey};
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
 };
@@ -81,4 +86,4 @@ pub use db_ext::HirDb;
 pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;
-pub use ty::{FnSig, InferenceId, Primitive, Record, RecordField, ShapeId, Ty, TyKind};
+pub use ty::{FnSig, InferenceId, Record, RecordField, ShapeId, Ty, TyKind};

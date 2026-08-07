@@ -1,0 +1,126 @@
+---
+title: The type system
+description: Three jobs — the source, the shape, and sensitivity. The third is what makes the type system worth its cost, and no mapping language has it.
+direction:
+  summary: Types come from the source descriptor and the output shape with no user annotation, the shape is the target type so a mapping that could violate it does not compile, and a shape may declare a property sensitive — in which case a raw value is not assignable to it and only a pseudonym is.
+  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+today:
+  summary: The lattice is nine xsd primitives in one enum in the leaf crate every side shares, and since 2026-08-07 it crosses the provider boundary typed rather than as a string — the seven duplicate tables are one per direction. What is still unbuilt is the other two jobs — the descriptor cache is declared and never wired, and the only output descriptor reaching the tracked typecheck path is the one that accepts everything.
+  backedBy: crates/fossil-graph-schema/src/lib.rs
+---
+
+## Why this is the core and not a feature
+
+Fossil is RML with a type system. RML validates the graph **after** producing it, when the error
+already costs a full regeneration over a source that may have millions of rows. Everything fossil
+offers over RML is the part that happens before that.
+
+So the type system is not a component. It is the thesis.
+
+## Job one — the source
+
+The descriptor says which fields exist and which primitive each carries. A `.nombre_completo` that
+is not in the source is an error in the editor, not a `NULL` in the corpus.
+
+And this is where the expensive work is, which is easy to get backwards: **the programs are small and
+the sources are large.** A fossil script is tens of lines; the CSV it points at is not. Going to the
+source and inferring its schema is the only part of a compile that costs real time.
+
+That is why it happens **before the database exists** —
+`crates/fossil-engine/src/lib.rs:365` runs `DESCRIBE SELECT * FROM read_csv_auto(...)` and hands the
+result to the host — and why its cache is deliberately outside the query system. Being outside is
+correct: it is a function of the world, not of the program text.
+
+<Callout type="warn" title="The cache is declared and never wired">
+`content_hash` — documented as the thing that drives invalidation — is `String::new()` at every
+production construction site. The fallback hashes the *resulting columns*, not the source, so it
+cannot detect a change until after re-reading. The key is the binding name, not the URI. And
+`register_inferred_descriptor` panics by default.
+
+This is the infrastructure for the work that actually costs, and it is the least-built thing in the
+tree.
+</Callout>
+
+## Job two — the shape is a contract
+
+The output shape is the **target type**, and the checker proves that no mapping can violate it: a
+property the shape does not declare, a broken cardinality, an incompatible primitive, an IRI of one
+type where another is expected.
+
+This is design principle D9 — *invisible types, total guarantees; if it compiles, it runs* — made
+true.
+
+**Today it checks nothing.** The only tracked typecheck path passes the literal
+`ACCEPT_ALL_DEFAULT` (`crates/fossil-hir/src/check.rs:96`), so inside the query system that axis has
+exactly one value.
+
+**And the shape language is SHACL, not ShEx.** SHACL 1.2 Core carries `sh:TripleTerm` as a node kind
+and a reifier-shape constraint component, so it can describe an [RDF 1.2](/docs/characteristics/rdf12)
+output; ShEx has no W3C working group and no mention of any of it. Today the investment is the wrong
+way round — `fossil-shex` is the only real output descriptor, and the SHACL variant of the kind enum
+is precisely the one nothing ever constructs.
+
+## Job three — sensitivity is a type
+
+This one falls out of the other two, and it is what makes the type system pay for itself.
+
+If the shape is a contract, the shape can declare that a property is sensitive. And then a raw value
+is **not assignable to it**. A function from the `anon.*` family does not return the type of its
+input; it returns a **pseudonym**, deterministic and keyed so that joins survive anonymisation, and
+the pseudonym is the only thing that fits there.
+
+<Callout title="What this buys">
+Anonymisation stops being a function you can forget to call and becomes something the compiler will
+not let you skip. That is *if it compiles, it runs* applied to privacy, and no mapping language
+offers it.
+</Callout>
+
+The material is in the tree and, since `call` landed, reachable:
+`crates/fossil-hir/src/stdlib.rs` catalogues `anon.hash`, `anon.hmac` and `anon.redact` alongside six
+cleaning functions. What is missing is not the plumbing but the type — see
+[the expression cliff](/docs/characteristics/expressions) for what a call now does.
+
+## The lattice, and the boundary it used to cross as text
+
+Nine xsd-aligned primitives in one enum — `String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`,
+`Time`, `GYear`, `AnyUri` (`crates/fossil-graph-schema/src/lib.rs:106`). It lives in the leaf crate
+the schema, the checker and the descriptors all depend on, so a column crosses the provider boundary
+carrying the enum itself (`crates/fossil-descriptors-input/src/inferred.rs:29`):
+
+```rust
+pub struct InferredColumn {
+    pub name: SmolStr,
+    pub primitive: Primitive,
+}
+```
+
+**Until 2026-08-07 that field was a `SmolStr`,** and the lattice of the type system travelled across
+its most important boundary as text with the invariant written in a comment. The cause was on the
+record and it was not carelessness: ADR-0007 made it a string **on purpose**, to avoid a dependency
+cycle against `fossil_hir::Primitive`. A dependency direction had untyped the core of the type
+system, and it cost seven implementations of one table — two of them inside the same crate, one of
+which existed only to assert that it agreed with another.
+
+What is left is one function per direction, both on the lattice itself:
+`Primitive::from_xsd_iri` (`crates/fossil-graph-schema/src/lib.rs:141`), which takes the full IRI,
+the `xsd:` prefixed form and the bare CSVW name; and `Primitive::to_xsd_iri`
+(`crates/fossil-graph-schema/src/lib.rs:165`). Beside them stand two mappings that are not
+duplicates but vocabularies a materializer owns: `primitive_to_graphar`
+(`crates/fossil-hir/src/shapes.rs:141`) and `duckdb_type_to_fossil_primitive`
+(`crates/fossil-engine/src/lib.rs:121`).
+
+The `D-INFERRED-UNKNOWN-DATATYPE` diagnostic went with the string. A host that sends a type fossil
+does not carry is now rejected where its JSON arrives, naming the value — not coerced to `String`
+and reported three crates later as a complaint about a column.
+
+<Callout title="Deliberately absent">
+No user type annotations — types come from descriptors. No subtyping, no global inference: the check
+is bidirectional and local to a mapping. And the introspection of job one is **never** a query in the
+incremental system; its cache is ours and its invalidation policy is explicit.
+</Callout>
+
+## What this does not settle
+
+- **How sensitivity is declared in the shape.** SHACL has no constraint component for it, so it is a
+  choice between our own annotation and an existing vocabulary.
+- **Which freshness token the descriptor cache uses** — mtime, ETag, or a content hash.

@@ -10,30 +10,30 @@ import {
 } from "../src/index.js";
 
 describe("duckdbTypeToFossilPrimitive", () => {
-  it("maps integer family to Integer", () => {
+  it("maps integer family to integer", () => {
     for (const t of ["INTEGER", "BIGINT", "INT", "SMALLINT", "TINYINT", "HUGEINT"]) {
-      expect(duckdbTypeToFossilPrimitive(t)).toBe("Integer");
+      expect(duckdbTypeToFossilPrimitive(t)).toBe("integer");
     }
   });
 
   it("maps float family + DECIMAL(p,s) to Float", () => {
     for (const t of ["DOUBLE", "FLOAT", "REAL", "DECIMAL(10,2)"]) {
-      expect(duckdbTypeToFossilPrimitive(t)).toBe("Float");
+      expect(duckdbTypeToFossilPrimitive(t)).toBe("float");
     }
   });
 
   it("maps temporal + boolean types", () => {
-    expect(duckdbTypeToFossilPrimitive("BOOLEAN")).toBe("Bool");
-    expect(duckdbTypeToFossilPrimitive("DATE")).toBe("Date");
-    expect(duckdbTypeToFossilPrimitive("TIMESTAMP")).toBe("DateTime");
-    expect(duckdbTypeToFossilPrimitive("DATETIME")).toBe("DateTime");
-    expect(duckdbTypeToFossilPrimitive("TIME")).toBe("Time");
+    expect(duckdbTypeToFossilPrimitive("BOOLEAN")).toBe("bool");
+    expect(duckdbTypeToFossilPrimitive("DATE")).toBe("date");
+    expect(duckdbTypeToFossilPrimitive("TIMESTAMP")).toBe("date_time");
+    expect(duckdbTypeToFossilPrimitive("DATETIME")).toBe("date_time");
+    expect(duckdbTypeToFossilPrimitive("TIME")).toBe("time");
   });
 
   it("falls back to String for VARCHAR + unknown types, case/space-insensitive", () => {
-    expect(duckdbTypeToFossilPrimitive("VARCHAR")).toBe("String");
-    expect(duckdbTypeToFossilPrimitive("  text ")).toBe("String");
-    expect(duckdbTypeToFossilPrimitive("STRUCT(a INT)")).toBe("String");
+    expect(duckdbTypeToFossilPrimitive("VARCHAR")).toBe("string");
+    expect(duckdbTypeToFossilPrimitive("  text ")).toBe("string");
+    expect(duckdbTypeToFossilPrimitive("STRUCT(a INT)")).toBe("string");
   });
 });
 
@@ -82,9 +82,9 @@ describe("buildDescriptor", () => {
     expect(buildDescriptor("users", rows)).toEqual({
       source_name: "users",
       columns: [
-        { name: "id", primitive: "Integer" },
-        { name: "name", primitive: "String" },
-        { name: "joined", primitive: "DateTime" },
+        { name: "id", primitive: "integer" },
+        { name: "name", primitive: "string" },
+        { name: "joined", primitive: "date_time" },
       ],
       content_hash: "",
     });
@@ -97,7 +97,7 @@ describe("buildDescriptor", () => {
       { column_type: "INT" },
     ];
     expect(buildDescriptor("s", rows).columns).toEqual([
-      { name: "ok", primitive: "Integer" },
+      { name: "ok", primitive: "integer" },
     ]);
   });
 });
@@ -123,12 +123,12 @@ describe("introspect", () => {
     expect(descriptors).toEqual([
       {
         source_name: "users",
-        columns: [{ name: "id", primitive: "Integer" }],
+        columns: [{ name: "id", primitive: "integer" }],
         content_hash: "",
       },
       {
         source_name: "orders",
-        columns: [{ name: "total", primitive: "Float" }],
+        columns: [{ name: "total", primitive: "float" }],
         content_hash: "",
       },
     ]);
@@ -148,7 +148,7 @@ describe("introspect", () => {
     expect(descriptors).toEqual([
       {
         source_name: "orders",
-        columns: [{ name: "total", primitive: "Integer" }],
+        columns: [{ name: "total", primitive: "integer" }],
         content_hash: "",
       },
     ]);

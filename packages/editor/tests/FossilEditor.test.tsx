@@ -114,7 +114,7 @@ describe('FossilEditor', () => {
 
     const descriptor = {
       source_name: 'users',
-      columns: [{ name: 'id', primitive: 'Integer' as const }],
+      columns: [{ name: 'id', primitive: 'integer' as const }],
       content_hash: '',
     };
 

@@ -27,7 +27,8 @@
 //! until plan 04-06 threads the runtime assertion; folding through it would
 //! drop the assertion name, so we preserve the node and fold only `inner`.
 
-use crate::op::{CmpOp, Expr};
+use crate::op::Expr;
+use fossil_hir::CmpOp;
 
 /// Constant-fold `expr` bottom-up, returning a (possibly) simplified `Expr`.
 ///
@@ -51,7 +52,9 @@ use crate::op::{CmpOp, Expr};
 pub fn partial_eval<'db>(expr: &Expr<'db>) -> Expr<'db> {
     match expr {
         // Leaves that are already constant or data-dependent.
-        Expr::LitString(_) | Expr::LitBool(_) | Expr::ColRef { .. } => expr.clone(),
+        Expr::LitString(_) | Expr::LitBool(_) | Expr::LitInt(_) | Expr::ColRef { .. } => {
+            expr.clone()
+        }
 
         // Concat: fold children, then collapse if both are string literals.
         Expr::Concat(lhs, rhs) => {
@@ -186,7 +189,7 @@ mod tests {
     fn bool_ty(db: &dyn fossil_base::Db) -> fossil_hir::Ty<'_> {
         fossil_hir::Ty::new(
             db,
-            fossil_hir::TyKind::Primitive(fossil_hir::Primitive::Bool),
+            fossil_hir::TyKind::Primitive(fossil_graph_schema::Primitive::Bool),
         )
     }
 

@@ -265,7 +265,10 @@ Second : ex:B from users
         let base = mapping_start_offset(&db, second);
         assert!(base > 0, "the 2nd mapping does not start at the file head");
         let absolute = &SRC[(raw.start + base) as usize..(raw.end + base) as usize];
-        assert_eq!(absolute, local, "rebased span selects the same text in the file");
+        assert_eq!(
+            absolute, local,
+            "rebased span selects the same text in the file"
+        );
 
         // And the whole-diagnostic path shifts `did_you_mean.wrong_span` too —
         // that one drives a quick-fix edit, so a stale offset corrupts source.
@@ -302,8 +305,14 @@ Second : ex:B from users
     ex:name = .other
 ";
         let (db, file) = db_with_text(SRC, "two.fossil");
-        let second = *def_map(&db, file).mappings(&db).get(1).expect("2nd mapping");
-        assert!(mapping_start_offset(&db, second) > 0, "a shift is available");
+        let second = *def_map(&db, file)
+            .mappings(&db)
+            .get(1)
+            .expect("2nd mapping");
+        assert!(
+            mapping_start_offset(&db, second) > 0,
+            "a shift is available"
+        );
 
         let span = Span::new(3, 9);
         let out = rebase_to_file(

@@ -23,3 +23,8 @@ smol_str = { workspace = true }
 # direction matches the existing fossil-hir → fossil-descriptors-input
 # direction; descriptors-input remains a leaf data crate.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+
+[dev-dependencies]
+# The `System` descriptor tests build an `InferredColumn`, whose datatype is the
+# lattice value itself (`fossil_graph_schema::Primitive`), not a name.
+fossil-graph-schema = { path = "../fossil-graph-schema" }

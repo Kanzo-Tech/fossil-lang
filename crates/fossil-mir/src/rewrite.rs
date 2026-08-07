@@ -41,8 +41,9 @@ use smol_str::SmolStr;
 
 use crate::eval::{partial_eval, static_truth};
 use crate::graph::MirGraph;
-use crate::op::{CmpOp, Expr, Op};
+use crate::op::{Expr, Op};
 use crate::schema::{free_cols, schema_of};
+use fossil_hir::CmpOp;
 
 /// Fixpoint iteration cap. A well-formed R1–R6 pass converges in far fewer
 /// passes than this (each rule strictly reduces a structural measure); the cap
@@ -668,6 +669,6 @@ fn try_r10<'db>(db: &'db dyn fossil_base::Db, ops: &mut Vec<Op<'db>>) -> bool {
 fn bool_ty(db: &dyn fossil_base::Db) -> fossil_hir::Ty<'_> {
     fossil_hir::Ty::new(
         db,
-        fossil_hir::TyKind::Primitive(fossil_hir::Primitive::Bool),
+        fossil_hir::TyKind::Primitive(fossil_graph_schema::Primitive::Bool),
     )
 }

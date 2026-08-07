@@ -25,6 +25,9 @@ pub mod files;
 pub mod literal;
 pub mod rdf;
 pub mod shacl;
+/// The catalog rendered for this engine: which `DataFusion` function each
+/// stdlib entry becomes, and the UDFs no engine ships.
+pub mod stdlib;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sink;
@@ -33,12 +36,12 @@ pub mod sink;
 /// [`execute_graph`] / [`provider_bindings`] take (ADR-0018: passed as an
 /// argument, never read through `Db::system()`).
 pub use fossil_descriptors_output::OutputDescriptorKind;
-/// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
-/// arm of the output model; ShEx's lives in `fossil-shex`).
-pub use shacl::shacl_to_graph_schema;
 /// Re-exported so a host can classify a [`SourceRef`]'s format without depending
 /// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
 pub use fossil_mir::SourceFormat;
+/// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
+/// arm of the output model; ShEx's lives in `fossil-shex`).
+pub use shacl::shacl_to_graph_schema;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -53,24 +56,23 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::memory_pool::{FairSpillPool, TrackConsumersPool};
 #[cfg(not(target_arch = "wasm32"))]
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::logical_expr::{binary_expr, Expr as DfExpr, JoinType, Operator};
+use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
 use datafusion::prelude::{
-    col, lit, CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext,
+    CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
 };
-use fossil_base::probe::Probe;
 use fossil_base::SourceFile;
+use fossil_base::probe::Probe;
 use fossil_graph_schema::{
-    Cardinality, DataType as ScalarType, EdgeType as GraphEdge, GraphSchema, NodeType,
-    Property as NodeProp,
+    Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
-use fossil_hir::shapes::{inner_primitive, primitive_to_graphar, primitive_to_xsd};
-use fossil_hir::{def_map::def_map, MappingLoc, Primitive};
-use fossil_mir::{apply_output_shape, lower_to_mir_pg, Expr, Op, VProp};
-use fossil_sinks::manifest::{
-    data_type_name, AdjList, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
-    DEFAULT_CHUNK_SIZE, GRAPHAR_VERSION,
-};
+use fossil_hir::shapes::{inner_primitive, primitive_to_graphar};
+use fossil_hir::{MappingLoc, def_map::def_map};
+use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus, WIRE_VERSION};
+use fossil_sinks::manifest::{
+    AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property, PropertyGroup,
+    VertexInfo, data_type_name,
+};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -235,7 +237,10 @@ pub async fn execute_vertex<'db>(
 ///
 /// Checking here is also what makes the `expect`s below sound: a graph that is
 /// not poisoned always carries its `Source` and `EmitVertex`.
-fn refuse_if_poisoned(mir: fossil_mir::MirGraph<'_>, db: &dyn fossil_base::Db) -> datafusion::error::Result<()> {
+fn refuse_if_poisoned(
+    mir: fossil_mir::MirGraph<'_>,
+    db: &dyn fossil_base::Db,
+) -> datafusion::error::Result<()> {
     if mir.error(db).is_some() {
         return Err(datafusion::error::DataFusionError::Plan(
             "the mapping did not compile; see the reported diagnostics".to_string(),
@@ -346,14 +351,14 @@ async fn finalize_vertex(
 }
 
 /// Build a schema [`Property`](NodeProp) for a vertex prop: peel its canonical
-/// type to a [`Primitive`] → the format-neutral [`ScalarType`] (the manifest/
+/// type to a [`Primitive`] → the format-neutral [`Primitive`] (the manifest/
 /// `RunStatus` derive graphar/xsd spellings from it); the predicate IRI + shape
 /// cardinality ride along. Falls back to `string` when the type carries no
 /// primitive (the legacy default).
 fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
     NodeProp {
         name: prop.name.to_string(),
-        datatype: inner_primitive(db, prop.ty).map_or(ScalarType::String, primitive_to_scalar),
+        datatype: inner_primitive(db, prop.ty).unwrap_or(Primitive::String),
         iri: prop.rdf_uri.as_ref().map(ToString::to_string),
         cardinality: if prop.single_valued {
             Cardinality::Single
@@ -395,7 +400,10 @@ fn prepend_dense_id(batches: Vec<RecordBatch>) -> datafusion::error::Result<Vec<
         let mut columns: Vec<ArrayRef> = vec![ids];
         columns.extend(batch.columns().iter().cloned());
 
-        out.push(RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)?);
+        out.push(RecordBatch::try_new(
+            Arc::new(Schema::new(fields)),
+            columns,
+        )?);
         offset += n;
     }
     Ok(out)
@@ -448,7 +456,15 @@ async fn execute_edges<'db>(
         } = op
         {
             let table = execute_edge(
-                ctx, &uri, &format, &binding, edge_type, src_type, dst_type, src_id, dst_id,
+                ctx,
+                &uri,
+                &format,
+                &binding,
+                edge_type,
+                src_type,
+                dst_type,
+                src_id,
+                dst_id,
                 *single_valued,
             )
             .await?;
@@ -512,8 +528,20 @@ async fn execute_edge(
     ])?;
 
     let resolved = edge_src
-        .join(src_v, JoinType::Inner, &["src_iri"], &["v_src_subject"], None)?
-        .join(dst_v, JoinType::Inner, &["dst_iri"], &["v_dst_subject"], None)?
+        .join(
+            src_v,
+            JoinType::Inner,
+            &["src_iri"],
+            &["v_src_subject"],
+            None,
+        )?
+        .join(
+            dst_v,
+            JoinType::Inner,
+            &["dst_iri"],
+            &["v_dst_subject"],
+            None,
+        )?
         .select(vec![col("src_dense"), col("dst_dense")])?;
 
     let by_source = resolved
@@ -609,8 +637,11 @@ async fn read_source(
     match format {
         SourceFormat::Csv => ctx.read_csv(uri, csv_options()).await,
         SourceFormat::Json => {
-            ctx.read_json(uri, JsonReadOptions::default().schema_infer_max_records(usize::MAX))
-                .await
+            ctx.read_json(
+                uri,
+                JsonReadOptions::default().schema_infer_max_records(usize::MAX),
+            )
+            .await
         }
         SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
         SourceFormat::Provider { name } => {
@@ -694,9 +725,12 @@ pub fn provider_bindings(
         };
 
         let Some(type_iri) = ops.iter().find_map(|o| match o {
-            Op::EmitVertex { rdf_type, .. } => {
-                Some(rdf_type.as_ref().map(ToString::to_string).unwrap_or_default())
-            }
+            Op::EmitVertex { rdf_type, .. } => Some(
+                rdf_type
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+            ),
             _ => None,
         }) else {
             continue;
@@ -925,7 +959,10 @@ pub fn run_to_dir(
     // gap between them is the executor's transient — sort buffers, and pages the
     // allocator has not returned — and the two want opposite fixes, so the mark
     // reports both rather than leaving the difference to be assumed.
-    probe.mark(&format!("execute_graph — {:.2}G in Arrow", graph.arrow_gib()));
+    probe.mark(&format!(
+        "execute_graph — {:.2}G in Arrow",
+        graph.arrow_gib()
+    ));
 
     // The executor's context still holds a `MemTable` per vertex type, and the
     // edge phase joined against them. Nothing below reads them, and the encode
@@ -942,10 +979,9 @@ pub fn run_to_dir(
     Ok(graph)
 }
 
-/// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Vertex-only covers
-/// `ColRef` / `LitString` / `Concat` / `Assert`; `Call` / `BinOp` / `LitBool` are
-/// deferred to the full paso-3 render (no vertex-only mapping uses them in
-/// id/prop positions).
+/// Render a MIR [`Expr`] to a DataFusion logical [`DfExpr`]. Total over the
+/// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
+/// reach, which is what makes a property that type-checks a property that runs.
 fn render(e: &Expr<'_>) -> DfExpr {
     match e {
         Expr::LitString(s) => lit(s.to_string()),
@@ -955,8 +991,115 @@ fn render(e: &Expr<'_>) -> DfExpr {
         Expr::ColRef { column, .. } => DfExpr::Column(Column::new_unqualified(column.as_str())),
         Expr::Concat(a, b) => binary_expr(render(a), Operator::StringConcat, render(b)),
         Expr::Assert { inner, .. } => render(inner),
-        other => unimplemented!("render MIR Expr → DataFusion (paso 3 full): {other:?}"),
+        Expr::Call { func, args, .. } => render_call(func.as_str(), args),
+        Expr::LitInt(v) => lit(*v),
+        Expr::LitBool(b) => lit(*b),
+        Expr::BinOp { op, lhs, rhs, .. } => binary_expr(render(lhs), df_operator(*op), render(rhs)),
     }
+}
+
+/// The `DataFusion` operator for a fossil one. The two sets coincide exactly —
+/// this is a spelling, not a translation, and it is total, so a new operator in
+/// the language stops compiling here rather than reaching a plan wrong.
+const fn df_operator(op: fossil_hir::CmpOp) -> Operator {
+    use fossil_hir::CmpOp;
+    match op {
+        CmpOp::Eq => Operator::Eq,
+        CmpOp::Ne => Operator::NotEq,
+        CmpOp::Lt => Operator::Lt,
+        CmpOp::Le => Operator::LtEq,
+        CmpOp::Gt => Operator::Gt,
+        CmpOp::Ge => Operator::GtEq,
+        CmpOp::And => Operator::And,
+        CmpOp::Or => Operator::Or,
+    }
+}
+
+/// Render a catalogued call. The name is fossil's (`clean.slug`); what it
+/// becomes on this engine comes from the catalog entry, via [`crate::stdlib`].
+///
+/// A call that reaches here has type-checked, so the name IS catalogued. What
+/// it can still hit is a function this engine has no implementation for — an
+/// aggregate in a scalar position, a UDF not yet ported — and that is an error
+/// carried in the plan, not a panic and not a dropped column.
+fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
+    use datafusion::logical_expr::expr::ScalarFunction;
+    use fossil_hir::stdlib::{InlineForm, LoweringKind};
+
+    let rendered: Vec<DfExpr> = args.iter().map(render).collect();
+    let Some(entry) = fossil_hir::stdlib::stdlib().lookup(func) else {
+        return unsupported_call(func, "is not in the stdlib catalog");
+    };
+
+    match &entry.lowering {
+        LoweringKind::Builtin { duckdb_name } => {
+            let Some(df_name) = crate::stdlib::datafusion_name(duckdb_name.as_str()) else {
+                return unsupported_call(func, "has no DataFusion equivalent yet");
+            };
+            let Some(udf) = datafusion::functions::all_default_functions()
+                .into_iter()
+                .find(|u| u.name() == df_name || u.aliases().iter().any(|a| a == df_name))
+            else {
+                return unsupported_call(func, "names a DataFusion builtin that does not exist");
+            };
+            DfExpr::ScalarFunction(ScalarFunction::new_udf(udf, rendered))
+        }
+        LoweringKind::Udf { udf_name } => crate::stdlib::UDFS.get(udf_name.as_str()).map_or_else(
+            || unsupported_call(func, "is a UDF this engine does not implement yet"),
+            |udf| DfExpr::ScalarFunction(ScalarFunction::new_udf(Arc::clone(udf), rendered)),
+        ),
+        LoweringKind::Inline(InlineForm::Concat) => rendered
+            .into_iter()
+            .reduce(|a, b| binary_expr(a, Operator::StringConcat, b))
+            .unwrap_or_else(|| lit("")),
+        LoweringKind::Inline(InlineForm::LiteralStr { value }) => lit(value.to_string()),
+        LoweringKind::Inline(InlineForm::Cast { sql_type }) => {
+            let Some(dt) = cast_target(sql_type.as_str()) else {
+                return unsupported_call(func, "casts to a type this engine does not map");
+            };
+            rendered.into_iter().next().map_or_else(
+                || unsupported_call(func, "was called with no argument"),
+                |a| DfExpr::Cast(datafusion::logical_expr::Cast::new(Box::new(a), dt)),
+            )
+        }
+        // Identity is the passthrough `core.iri` / `core.literal` family.
+        LoweringKind::Inline(InlineForm::Identity) => rendered
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| unsupported_call(func, "was called with no argument")),
+        // Forms whose SQL shape has no DataFusion rendering yet. Each is a
+        // named gap, not a silent one.
+        LoweringKind::Inline(
+            InlineForm::SplitPart
+            | InlineForm::JsonExtract
+            | InlineForm::BlankNode
+            | InlineForm::RequireNonNull,
+        ) => unsupported_call(
+            func,
+            "is an inline SQL form this engine does not render yet",
+        ),
+        LoweringKind::Plan(_) => unsupported_call(func, "is a plan operator, not a value"),
+    }
+}
+
+/// The Arrow type a catalogued `CAST(x AS <sql_type>)` targets.
+fn cast_target(sql_type: &str) -> Option<datafusion::arrow::datatypes::DataType> {
+    Some(match sql_type {
+        "BIGINT" => datafusion::arrow::datatypes::DataType::Int64,
+        "DOUBLE" => datafusion::arrow::datatypes::DataType::Float64,
+        "BOOLEAN" => datafusion::arrow::datatypes::DataType::Boolean,
+        "DATE" => datafusion::arrow::datatypes::DataType::Date32,
+        s if s.starts_with("DECIMAL") => datafusion::arrow::datatypes::DataType::Float64,
+        _ => return None,
+    })
+}
+
+/// A call the engine cannot make, rendered as an expression that fails the plan
+/// with fossil's own words. Not a panic: one unrunnable property must not take
+/// the whole run down before the other diagnostics are reported.
+fn unsupported_call(func: &str, why: &str) -> DfExpr {
+    DfExpr::Literal(datafusion::scalar::ScalarValue::Utf8(None), None)
+        .alias(format!("__fossil_unsupported__{func}__{why}"))
 }
 
 // ── Phase 3: manifests + RunStatus (design §C4 phase 3) ─────────────────────
@@ -984,12 +1127,14 @@ impl GraphArData {
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn arrow_gib(&self) -> f64 {
-        let batches = self
-            .vertices
-            .iter()
-            .flat_map(|v| &v.batches)
-            .chain(self.edges.iter().flat_map(|e| e.by_source.iter().chain(&e.by_target)));
-        batches.map(RecordBatch::get_array_memory_size).sum::<usize>() as f64
+        let batches = self.vertices.iter().flat_map(|v| &v.batches).chain(
+            self.edges
+                .iter()
+                .flat_map(|e| e.by_source.iter().chain(&e.by_target)),
+        );
+        batches
+            .map(RecordBatch::get_array_memory_size)
+            .sum::<usize>() as f64
             / (1024.0 * 1024.0 * 1024.0)
     }
 
@@ -1089,13 +1234,13 @@ impl GraphArData {
 
 /// A wire `ColumnStatus` for a schema property: the GraphAr `data_type` spelling
 /// with the RDF predicate/xsd the governance layer (DCAT) reads, derived from
-/// the format-neutral [`ScalarType`].
+/// the format-neutral [`Primitive`].
 fn column_status(p: &NodeProp) -> ColumnStatus {
     ColumnStatus {
         name: p.name.clone(),
         data_type: graphar_spelling(p.datatype),
         rdf_uri: p.iri.clone(),
-        xsd_datatype: Some(xsd_spelling(p.datatype)),
+        xsd_datatype: Some(p.datatype.to_xsd_iri().to_string()),
     }
 }
 
@@ -1164,7 +1309,10 @@ fn edge_info(edge: &GraphEdge) -> EdgeInfo {
         src_chunk_size: DEFAULT_CHUNK_SIZE,
         dst_chunk_size: DEFAULT_CHUNK_SIZE,
         directed: true,
-        prefix: format!("edge/{}/", edge_dir(&edge.source, &edge.label, &edge.destination)),
+        prefix: format!(
+            "edge/{}/",
+            edge_dir(&edge.source, &edge.label, &edge.destination)
+        ),
         adj_lists: vec![
             AdjList {
                 ordered: true,
@@ -1182,44 +1330,7 @@ fn edge_info(edge: &GraphEdge) -> EdgeInfo {
     }
 }
 
-/// Adapt fossil's internal [`Primitive`] to the contract's [`ScalarType`] (1:1).
-fn primitive_to_scalar(p: Primitive) -> ScalarType {
-    match p {
-        Primitive::String => ScalarType::String,
-        Primitive::Integer => ScalarType::Integer,
-        Primitive::Float => ScalarType::Float,
-        Primitive::Bool => ScalarType::Bool,
-        Primitive::Date => ScalarType::Date,
-        Primitive::DateTime => ScalarType::DateTime,
-        Primitive::Time => ScalarType::Time,
-        Primitive::GYear => ScalarType::GYear,
-        Primitive::AnyURI => ScalarType::AnyUri,
-    }
-}
-
-/// Inverse of [`primitive_to_scalar`] — lets the GraphAr materializer reuse the
-/// `Primitive → {graphar, xsd}` spelling authority (`fossil_hir::shapes`) for a
-/// schema datatype, with no duplicate spelling tables.
-const fn scalar_to_primitive(s: ScalarType) -> Primitive {
-    match s {
-        ScalarType::String => Primitive::String,
-        ScalarType::Integer => Primitive::Integer,
-        ScalarType::Float => Primitive::Float,
-        ScalarType::Bool => Primitive::Bool,
-        ScalarType::Date => Primitive::Date,
-        ScalarType::DateTime => Primitive::DateTime,
-        ScalarType::Time => Primitive::Time,
-        ScalarType::GYear => Primitive::GYear,
-        ScalarType::AnyUri => Primitive::AnyURI,
-    }
-}
-
 /// The GraphAr `data_type` spelling (`string`/`int64`/…) of a schema datatype.
-fn graphar_spelling(s: ScalarType) -> String {
-    primitive_to_graphar(scalar_to_primitive(s)).to_string()
-}
-
-/// The xsd datatype IRI of a schema datatype.
-fn xsd_spelling(s: ScalarType) -> String {
-    primitive_to_xsd(scalar_to_primitive(s))
+fn graphar_spelling(p: Primitive) -> String {
+    primitive_to_graphar(p).to_string()
 }

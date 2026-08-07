@@ -40,7 +40,8 @@ pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::render_ty_kind;
-    use crate::ty::{Primitive, Ty, TyKind};
+    use crate::ty::{Ty, TyKind};
+    use fossil_graph_schema::Primitive;
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {

@@ -22,7 +22,6 @@ fossil-hir = { path = "../fossil-hir" }
 # catalog (Phase 5). WASM-clean, so fossil-ide stays WASM-clean. The cross-file
 # symbol / prefix infrastructure (06-03) used to be `fossil-ide-db` and is now
 # the `symbol_index` / `prefix_index` / `workspace` modules here (ADR-0045 §6).
-fossil-registry = { path = "../fossil-registry" }
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
@@ -34,6 +33,8 @@ smol_str = { workspace = true }
 lsp-types = { workspace = true }
 
 [dev-dependencies]
+# Hover tests build `Ty`s over the lattice.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # Plan 06-05 (SC#4): the bidirectional-hover integration test builds a custom
 # `HirDb` whose `output_descriptor_kind()` returns a real `ShEx` schema, to
 # drive the target-side render path end-to-end (a host-wiring stand-in). Needs

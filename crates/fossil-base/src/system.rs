@@ -131,13 +131,14 @@ impl System for NativeSystem {
 mod inferred_tests {
     use super::*;
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    use fossil_graph_schema::Primitive;
 
     fn sample(source: &str) -> InferredDescriptor {
         InferredDescriptor {
             source_name: source.into(),
             columns: vec![InferredColumn {
                 name: "id".into(),
-                primitive: "Integer".into(),
+                primitive: Primitive::Integer,
             }],
             content_hash: String::new(),
         }
@@ -165,7 +166,7 @@ mod inferred_tests {
         let mut second = sample("users");
         second.columns.push(InferredColumn {
             name: "name".into(),
-            primitive: "String".into(),
+            primitive: Primitive::String,
         });
         s.register_inferred_descriptor(second);
         let got = s.inferred_descriptor("users").expect("present");

@@ -10,11 +10,12 @@
 //! Convention mirrors `crates/fossil-wasm/tests/workspace.rs` (Phase 7) and
 //! `crates/fossil-wasm/tests/classification.rs` (Phase 5).
 
+use fossil_graph_schema::Primitive;
 use fossil_wasm::FossilPlayground;
 
 fn sample_descriptor_json(source_name: &str) -> String {
     format!(
-        r#"{{"source_name":"{source_name}","columns":[{{"name":"id","primitive":"Integer"}},{{"name":"name","primitive":"String"}}],"content_hash":""}}"#
+        r#"{{"source_name":"{source_name}","columns":[{{"name":"id","primitive":"integer"}},{{"name":"name","primitive":"string"}}],"content_hash":""}}"#
     )
 }
 
@@ -29,9 +30,9 @@ fn register_inferred_descriptor_parses_and_stores() {
     assert_eq!(got.source_name.as_str(), "users");
     assert_eq!(got.columns.len(), 2);
     assert_eq!(got.columns[0].name.as_str(), "id");
-    assert_eq!(got.columns[0].primitive.as_str(), "Integer");
+    assert_eq!(got.columns[0].primitive, Primitive::Integer);
     assert_eq!(got.columns[1].name.as_str(), "name");
-    assert_eq!(got.columns[1].primitive.as_str(), "String");
+    assert_eq!(got.columns[1].primitive, Primitive::String);
 }
 
 #[test]
@@ -39,7 +40,7 @@ fn register_inferred_descriptor_overwrites_on_duplicate_source_name() {
     let pg = FossilPlayground::new();
     pg.register_inferred_descriptor_native(&sample_descriptor_json("users"))
         .expect("first ok");
-    let second = r#"{"source_name":"users","columns":[{"name":"id","primitive":"Integer"}],"content_hash":"h2"}"#;
+    let second = r#"{"source_name":"users","columns":[{"name":"id","primitive":"integer"}],"content_hash":"h2"}"#;
     pg.register_inferred_descriptor_native(second)
         .expect("second ok");
     let got = pg
@@ -77,7 +78,7 @@ fn distinct_sources_register_independently() {
     pg.register_inferred_descriptor_native(&sample_descriptor_json("users"))
         .expect("users ok");
     pg.register_inferred_descriptor_native(
-        r#"{"source_name":"products","columns":[{"name":"sku","primitive":"String"}],"content_hash":""}"#,
+        r#"{"source_name":"products","columns":[{"name":"sku","primitive":"string"}],"content_hash":""}"#,
     )
     .expect("products ok");
     assert!(pg.inferred_descriptor_native("users").is_some());

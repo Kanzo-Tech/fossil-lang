@@ -221,7 +221,8 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 let members = parse_multi_source_members(&item);
                 let schema_arg = parse_source_named_arg(&item, "schema");
                 let (constructor, uri) = parse_source_call(&item);
-                let shape_iris = resolve_member_shape_iris(db, file, schema_arg.as_deref(), &members);
+                let shape_iris =
+                    resolve_member_shape_iris(db, file, schema_arg.as_deref(), &members);
                 for (member, shape_iri) in members.into_iter().zip(shape_iris) {
                     sources.push(SourceEntry {
                         name: member,
@@ -444,9 +445,7 @@ fn resolve_member_shape_iris(
     let Ok(bytes) = db.system().read_file(&resolved) else {
         return none();
     };
-    let Ok(desc) =
-        fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice())
-    else {
+    let Ok(desc) = fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice()) else {
         return none();
     };
     // shape-IRI local-name → full IRI, for member matching.

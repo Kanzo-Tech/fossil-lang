@@ -1,0 +1,133 @@
+---
+title: What an expression is
+description: The parser builds fifteen kinds of expression node and the HIR has four. Everything else that looks broken in the compiler is downstream of that, and it fails silently.
+direction:
+  summary: An expression is a total function of one row — calls into the value library, comparisons and conditionals, and the pipeline operators — which makes the HIR eight forms, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
+  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+today:
+  summary: The HIR has seven expression forms since 2026-08-07 — `call`, `comparison` and the integer literal it needed — so the 56 stdlib functions are reachable, `clean.slug(.name)` writes its column and `.age >= 18` writes a boolean one. What remains is dropped with an error that quotes what you wrote, which until 2026-08-06 was silent in one arm and until 2026-08-07 in another.
+  backedBy: crates/fossil-hir/src/lower.rs
+---
+
+## The cliff
+
+`HirExpr` is this, entire:
+
+```rust
+pub enum HirExpr {
+    Template(SmolStr),          // a backtick template, raw text
+    FieldRef(SmolStr),          // .id
+    StringLit(SmolStr),
+    PrefixedName { iri: SmolStr },
+}
+```
+
+The parser, meanwhile, produces `BINARY_EXPR`, `UNARY_EXPR`, `TERNARY_EXPR`, `PARTIAL_EXPR`,
+`ARG_LIST`, `ARG`, `RECORD_LITERAL`, `TRIPLE_TERM`, `TYPE_ANNOTATION`, `IMPORT`, `SELECTIVE_IMPORT`,
+`AT_EXPORT`, `SHAPE_EXPR`, `IN_CLAUSE` and `ALIAS`.
+
+Grepping `crates/fossil-hir/` for any of those node kinds returns **zero**. The lowering reads four
+and drops the rest.
+
+## It used to fail silently. That part is fixed
+
+Measured on the morning of 2026-08-06, with the binary built from the tree, over
+`examples/users.csv`. Three programs identical but for the value of one property:
+
+| the mapping says | `fossil check` | `fossil run` | column in the corpus |
+| --- | --- | --- | --- |
+| `ex:name = .name` | ok | *wrote 1 vertex type* | **`name`** |
+| `ex:slug = clean.slug(.name)` | **ok** | *wrote 1 vertex type* | **none** — until `call` landed on 2026-08-07; now `slug` |
+| `ex:doble = .id * 2` | **ok** | *wrote 1 vertex type* | **none** — arithmetic is still the one form with no MIR operator to carry it |
+
+<Callout type="warn" title="This was the failure mode the whole project exists to prevent">
+The compiler declared success and wrote a corpus with the property missing, emitting no diagnostic
+at any stage. Silent data loss, in the type system's own blind spot — the checker raised nothing
+because the HIR never saw the expression.
+</Callout>
+
+**Fixed the same afternoon.** The fallback arm of the lowering is now a diagnostic that quotes the
+source text and points at it:
+
+```
+× `clean.slug(.name)` is not an expression fossil can lower yet, so this
+│ property will not be written to the corpus. A property value may be a
+│ template, a field reference, a string literal or a prefixed name.
+│ (parsed as POSTFIX_EXPR)
+   ╭─[t.fossil:7:15]
+ 7 │     ex:slug = clean.slug(.name)
+   ·               ────────┬────────
+   ·                       ╰── here
+```
+
+<Callout title="Then the first of the four forms landed">
+`call` is in the HIR since 2026-08-07 (ADR-0048): the property above now type-checks against the
+catalog, lowers to `Expr::Call`, and writes its column — `a_call_produces_its_column` asserts the
+values, not the plan. The diagnostic above still stands for the three forms that remain, and its
+regression test moved with it: `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop` now
+pins `.age >= 18`, and moves again when `comparison` lands. The day there is no form left it is
+deleted, not weakened.
+</Callout>
+
+The pipeline was already the one exception: `adultos := users |> where(.id > 1)` fails with a type
+error rather than a drop.
+
+## Three symptoms, one cause
+
+Until this was measured, these were counted as three separate problems:
+
+- **The 56 stdlib functions cannot be invoked.** Not for want of syntax — for want of an HIR that
+  carries them. **Closed on 2026-08-07:** the catalog moved to `crates/fossil-hir/src/stdlib.rs`
+  (it could not be read from the checker while it was a crate that depended on the checker), and
+  46 of the 56 run on this engine — `crates/fossil-df/src/stdlib.rs` pins which ten do not, and why.
+- **`Expr::{LitBool, Call, BinOp}` are never constructed**, and the backend answered
+  `unimplemented!()` for all three. **Closed on 2026-08-07:** all three are constructed and
+  rendered, and `render` in `crates/fossil-df/src/lib.rs` is total — there is no `unimplemented!()`
+  left to reach, which is what makes a property that type-checks a property that runs.
+- **The lowering emits four of the fourteen MIR operators** — `Source`, `EmitVertex`, `EmitEdge`,
+  `Sink` — so **all ten rewrite rules are unreachable**. `rewrite()` runs in production
+  (`crates/fossil-mir/src/lower.rs:259`) and always returns its input.
+
+One cliff, at one boundary, explains all three. It is also why the operator algebra reads as
+oversized: it was never wrong, it was never reached.
+
+## Where this is going: eight forms, not fourteen
+
+The four that exist, plus:
+
+| form | what it is for |
+| --- | --- |
+| **call** ✅ | `clean.*` and `anon.*` — the value library that makes fossil more than RML. Landed 2026-08-07 |
+| **comparison** ✅ | the pipeline's filter, and the condition of a conditional. Landed 2026-08-07 with the integer literal it needs |
+| **conditional** | the ternary the parser already builds |
+| **pipeline operators** | `\|>` — see [the relational half](/docs/characteristics/pipeline) |
+
+Each is justified by something the language has to express. Nothing enters because the parser
+already accepts it.
+
+<Callout title="Deliberately absent">
+There are no programs. No recursion, no loops, no user-defined functions. An expression is a pure
+function of **one row** and terminates by construction, which is also why every expression compiles
+to exactly one SQL expression.
+</Callout>
+
+## What leaves
+
+**Anything the HIR does not need leaves the grammar.** A token that never reaches the HIR is a
+promise the language does not keep, and today the grammar makes several: partial application,
+arrows, selective imports, type annotations on values, nested triple terms.
+
+`grammar.bnf` describes the parser, not the language. Absorbing it into the reference section of the
+book is where that stops being a footnote and becomes the page's own subject.
+
+**Discarding in silence stopped being acceptable before any of this lands, and it already has.** That
+fix was smaller than the eight forms and independent of them — it converted the table above from
+silent loss into three errors on the day it was measured. Everything else on this page is still
+ahead.
+
+## What this does not settle
+
+- **Whether `join` is in the first version of the pipeline** or whether `where` and `select` are
+  enough. That answer comes from a real mapping, not from an argument.
+- **The order of the eight.** Call is the one the value library needs and the one the book is
+  blocked on; comparison and conditional come with the pipeline. Nothing forces all eight at once.

@@ -64,9 +64,8 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 # SC#1 native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
 # per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
-# builtin fails CI on native DuckDB (Pitfall 4). fossil-registry is WASM-clean; it
+# builtin fails CI on native DuckDB (Pitfall 4). fossil-hir is WASM-clean; it
 # is a dev-dep only here so the native-only runtime's wasm32 tripwire is unaffected.
-fossil-registry = { path = "../fossil-registry" }
 # SC#4 real-files fixture (tests/graphar_decomp.rs): build a 2-shape ShEx + a
 # hand MirGraph, run the 05-08 codegen_sql_with_descriptor chunked COPY on native
 # DuckDB, and assert real Parquet files on disk. All dev-deps only — the

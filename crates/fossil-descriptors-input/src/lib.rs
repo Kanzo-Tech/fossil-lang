@@ -35,7 +35,7 @@ pub mod csvw;
 pub mod inferred;
 pub mod shex;
 
-pub use csvw::{CsvwDescriptor, CsvwMetadata, datatype_to_primitive_name};
+pub use csvw::{CsvwDescriptor, CsvwMetadata};
 pub use inferred::{InferredColumn, InferredDescriptor};
 pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 
@@ -108,8 +108,8 @@ pub enum DescriptorError {
     #[error("unsupported JSON-LD context: {0}")]
     JsonLdContextNotSupported(String),
 
-    /// A column declared a datatype that is not in the v0.1 catalog (see
-    /// [`csvw::datatype_to_primitive_name`]). Emitted by the bidirectional
+    /// A column declared a datatype that is not in the lattice (see
+    /// `fossil_graph_schema::Primitive::from_xsd_iri`). Emitted by the bidirectional
     /// checker (plan 03-05) after [`CsvwDescriptor::type_for_column`]
     /// returns `None` AND the column actually carried a `datatype` field.
     #[error("unknown CSVW datatype `{datatype}` on column `{column}`")]

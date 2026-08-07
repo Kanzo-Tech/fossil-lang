@@ -35,8 +35,8 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
       const desc: InferredDescriptorJson = {
         source_name: 'users',
         columns: [
-          { name: 'id', primitive: 'Integer' },
-          { name: 'name', primitive: 'String' },
+          { name: 'id', primitive: 'integer' },
+          { name: 'name', primitive: 'string' },
         ],
         content_hash: '',
       };
@@ -51,14 +51,14 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
     try {
       const first: InferredDescriptorJson = {
         source_name: 'users',
-        columns: [{ name: 'id', primitive: 'Integer' }],
+        columns: [{ name: 'id', primitive: 'integer' }],
         content_hash: 'h1',
       };
       const second: InferredDescriptorJson = {
         source_name: 'users',
         columns: [
-          { name: 'id', primitive: 'Integer' },
-          { name: 'email', primitive: 'String' },
+          { name: 'id', primitive: 'integer' },
+          { name: 'email', primitive: 'string' },
         ],
         content_hash: 'h2',
       };
@@ -85,12 +85,12 @@ describe('FossilPlayground.registerInferredDescriptor', () => {
     try {
       pg.registerInferredDescriptor({
         source_name: 'users',
-        columns: [{ name: 'id', primitive: 'Integer' }],
+        columns: [{ name: 'id', primitive: 'integer' }],
         content_hash: '',
       });
       pg.registerInferredDescriptor({
         source_name: 'products',
-        columns: [{ name: 'sku', primitive: 'String' }],
+        columns: [{ name: 'sku', primitive: 'string' }],
         content_hash: '',
       });
       // Both registrations should succeed; no cross-contamination. The

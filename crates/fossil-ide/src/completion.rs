@@ -6,7 +6,7 @@
 //! without a second conversion):
 //!
 //! 1. **stdlib functions** (the gleam-lsp auto-import pattern). Every
-//!    [`fossil_registry::RegistryEntry`] from [`FunctionRegistry::stdlib_default`]
+//!    [`fossil_hir::stdlib::RegistryEntry`] from [`FunctionRegistry::stdlib_default`]
 //!    becomes a `CompletionItem` (kind = Function, detail = the rendered
 //!    signature). When the function's namespace prefix is NOT yet present in the
 //!    file, the item carries an `additional_text_edits` insertion adding the
@@ -42,8 +42,8 @@ use fossil_hir::HirDb;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
+use fossil_hir::stdlib::{FunctionRegistry, WasmClass};
 use fossil_hir::ty::TyKind;
-use fossil_registry::{FunctionRegistry, WasmClass};
 use fossil_syntax::SyntaxKind;
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag, Position, Range, TextEdit};
 
@@ -285,9 +285,9 @@ fn enclosing_mapping_loc<'db>(
 }
 
 /// Render a stdlib entry's signature as a `detail` string from its `'db`-free
-/// [`fossil_registry::SigSpec`] — never touches `TyKind::Unknown` (the catalog
+/// [`fossil_hir::stdlib::SigSpec`] — never touches `TyKind::Unknown` (the catalog
 /// carries only concrete scalar types).
-fn render_sig(namespace: &str, entry: &fossil_registry::RegistryEntry) -> String {
+fn render_sig(namespace: &str, entry: &fossil_hir::stdlib::RegistryEntry) -> String {
     let params = entry
         .sig
         .params
@@ -300,10 +300,10 @@ fn render_sig(namespace: &str, entry: &fossil_registry::RegistryEntry) -> String
     format!("{}({params}) -> {ret}  [{namespace}]", entry.name)
 }
 
-/// Human-readable name for a `'db`-free [`fossil_registry::ScalarTy`]. Mirrors
+/// Human-readable name for a `'db`-free [`fossil_hir::stdlib::ScalarTy`]. Mirrors
 /// `render_ty_kind`'s surface names; never emits `Unknown`.
-fn scalar_name(s: fossil_registry::ScalarTy) -> String {
-    use fossil_registry::ScalarTy as S;
+fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
+    use fossil_hir::stdlib::ScalarTy as S;
     match s {
         S::String => "String",
         S::Integer => "Integer",
@@ -487,11 +487,11 @@ mod tests {
             columns: vec![
                 InferredColumn {
                     name: "name".into(),
-                    primitive: "String".into(),
+                    primitive: fossil_graph_schema::Primitive::String,
                 },
                 InferredColumn {
                     name: "age".into(),
-                    primitive: "Integer".into(),
+                    primitive: fossil_graph_schema::Primitive::Integer,
                 },
             ],
             content_hash: String::new(),

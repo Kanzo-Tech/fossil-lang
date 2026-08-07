@@ -618,7 +618,7 @@ mod tests {
         let pg = FossilPlayground::new();
         let params = serde_json::json!({
             "source_name": "u",
-            "columns": [{ "name": "name", "primitive": "String" }],
+            "columns": [{ "name": "name", "primitive": "string" }],
             "content_hash": ""
         });
         handle_register_inferred_descriptor(&pg, &params).expect("dispatch ok");

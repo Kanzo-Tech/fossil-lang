@@ -1,0 +1,73 @@
+---
+title: The relational half
+description: A source rarely arrives shaped the way a mapping needs it. That work lives in the language and gets typed by us — and planned by DataFusion, which is why ten rewrite rules leave.
+direction:
+  summary: Sources compose with a pipeline operator that our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan — so the fourteen MIR operators are the pipeline's vocabulary and stay, while the ten rewrite rules go because they duplicate an optimizer that is already underneath.
+  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+today:
+  summary: The pipe token is in the grammar and nothing lowers it — a pipeline expression is the one construct that fails loudly rather than silently — while `rewrite()` runs on every compile and always returns its input, because all ten rules match operators the lowering never emits.
+  backedBy: crates/fossil-mir/src/rewrite.rs
+---
+
+## The question this answers
+
+A source almost never arrives with the shape a mapping needs. Filtering, joining, grouping — that
+work has to live somewhere, and there are three somewheres: outside fossil entirely, borrowed from
+the engine through the source binding, or in the language.
+
+**It lives in the language.** `|>` composes sources, and our checker types the result end to end,
+which is the thing neither of the other two options gives.
+
+## But the plan is DataFusion's
+
+This is what makes the choice affordable, and it is easy to state backwards. **We do not need a
+planner. We need a checker.**
+
+The typed pipeline lowers to a DataFusion `LogicalPlan`, which already has predicate pushdown, join
+reordering and a cost model. We supply what DataFusion does not have — the types of the mapping — and
+borrow what it does.
+
+Two consequences, and they have to be read together or the second reads as an amputation:
+
+- **The fourteen MIR operators stay.** They are the pipeline's vocabulary, not an aspiration. This
+  reverses the reading that the operator set was over-designed: it was never reached, which is a
+  different problem with a different fix.
+- **The ten rewrite rules go.**
+
+<Callout title="Removing the rewrite rules is not giving up on optimisation">
+It is giving up on optimising **twice**. `rewrite()` was not incomplete — it was competing with an
+optimizer that sits underneath it, and losing by definition. What we can do that DataFusion cannot is
+type the mapping; what it does better than we will is choose a plan.
+</Callout>
+
+## What is true today
+
+`rewrite()` is called on every compile — `crates/fossil-mir/src/lower.rs:259` — and **always returns
+its input**, because all ten rules match operators the lowering never emits. The lowering emits four
+of fourteen: `Source`, `EmitVertex`, `EmitEdge`, `Sink`.
+
+That is downstream of [the expression cliff](/docs/characteristics/expressions), and the pipeline is
+the one place where the cliff produces an honest failure instead of a silent one: a pipeline
+expression raises a type error rather than being dropped on the way to the corpus.
+
+There is one more mismatch worth recording because it is the shape of how the enum grew: the module
+header of `crates/fossil-mir/src/op.rs:1` says *"the complete 11-operator typed set"*, the enum has
+fourteen variants, and the list the header itself enumerates has twelve names. Three numbers, none
+of them agreeing, in one file.
+
+<Callout title="Deliberately absent">
+**No planner of ours.** No cost model, no statistics, no join reordering. If any of that is ever
+needed it arrives through DataFusion or it does not arrive.
+
+**No operator the pipeline cannot express.** The enum stops growing speculatively; the gap between
+fourteen, twelve and eleven above is what growing speculatively looks like from the inside.
+</Callout>
+
+## What this does not settle
+
+- **Whether `join` is in the first version.** `where` and `select` may be enough for a while, and the
+  answer comes from a real mapping rather than from an argument. `join` is the operator that makes
+  the checker genuinely hard, so the order matters.
+- **How a pipeline's type is reported in the editor.** A source binding today has a schema from a
+  descriptor; a pipeline has a schema derived from one, and hover has to say something useful about
+  the derived one.

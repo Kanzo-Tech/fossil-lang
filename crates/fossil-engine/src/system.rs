@@ -57,7 +57,10 @@ impl SystemWithDescriptors for EngineSystem {
 }
 
 /// Build a fresh `FossilDb` over the engine [`System`] for `path` + `text`.
-pub(crate) fn open_db(text: String, path: &Path) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
+pub(crate) fn open_db(
+    text: String,
+    path: &Path,
+) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
     let system: Arc<dyn System> = Arc::new(EngineSystem::default());
     let db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());

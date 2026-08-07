@@ -20,7 +20,7 @@
 
 use std::collections::BTreeMap;
 
-use fossil_graph_schema::{Cardinality, DataType, EdgeType, GraphSchema, NodeType, Property};
+use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use oxrdf::{NamedOrBlankNode, Term};
 use oxttl::TurtleParser;
 
@@ -82,7 +82,9 @@ impl Store {
 
     /// The first object value of `(subject, predicate)`, if any.
     fn first(&self, subject: &str, predicate: &str) -> Option<&str> {
-        self.objects(subject, predicate).next().map(|o| o.value.as_str())
+        self.objects(subject, predicate)
+            .next()
+            .map(|o| o.value.as_str())
     }
 
     /// Follow an RDF list (`rdf:first`/`rdf:rest` … `rdf:nil`) from `head`,
@@ -96,7 +98,11 @@ impl Store {
             guard += 1;
             // Clone out of each borrow before reassigning `cur`, so the iterator
             // temporary (which borrows `cur`) is dropped first (E0506).
-            if let Some(first) = self.objects(&cur, RDF_FIRST).next().map(|o| o.value.clone()) {
+            if let Some(first) = self
+                .objects(&cur, RDF_FIRST)
+                .next()
+                .map(|o| o.value.clone())
+            {
                 out.push(first);
             }
             let Some(rest) = self.objects(&cur, RDF_REST).next().map(|o| o.value.clone()) else {
@@ -118,7 +124,9 @@ pub fn shacl_to_graph_schema(turtle: &str) -> Result<GraphSchema, String> {
     let mut edges = Vec::new();
 
     for (subject, preds) in &store.by_subject {
-        let is_node_shape = store.objects(subject, RDF_TYPE).any(|o| o.value == SH_NODE_SHAPE)
+        let is_node_shape = store
+            .objects(subject, RDF_TYPE)
+            .any(|o| o.value == SH_NODE_SHAPE)
             || preds.contains_key(SH_TARGET_CLASS)
             || preds.contains_key(SH_PROPERTY);
         if !is_node_shape {
@@ -212,14 +220,14 @@ fn node_target(store: &Store, node_shape: &str) -> String {
 /// The canonical datatype of a non-edge property shape: `sh:datatype` through the
 /// XSD lattice (unknown ⇒ `String`); `sh:nodeKind sh:IRI` ⇒ opaque `AnyUri`;
 /// otherwise `String`.
-fn datatype_of(store: &Store, property_shape: &str) -> DataType {
+fn datatype_of(store: &Store, property_shape: &str) -> Primitive {
     if let Some(dt) = store.first(property_shape, SH_DATATYPE) {
-        return DataType::from_xsd_iri(dt).unwrap_or(DataType::String);
+        return Primitive::from_xsd_iri(dt).unwrap_or(Primitive::String);
     }
     if store.first(property_shape, SH_NODE_KIND) == Some(SH_IRI) {
-        return DataType::AnyUri;
+        return Primitive::AnyUri;
     }
-    DataType::String
+    Primitive::String
 }
 
 /// The local name of an IRI — the substring after the last `#` or `/`.
@@ -284,7 +292,7 @@ ex:PersonShape a sh:NodeShape ;
             .iter()
             .find(|p| p.name == "name")
             .expect("name property");
-        assert_eq!(name.datatype, DataType::String);
+        assert_eq!(name.datatype, Primitive::String);
         assert_eq!(name.cardinality, Cardinality::Single);
         assert_eq!(name.iri.as_deref(), Some("https://ex.org/name"));
 
@@ -294,12 +302,19 @@ ex:PersonShape a sh:NodeShape ;
             .iter()
             .find(|p| p.name == "homepage")
             .expect("homepage property");
-        assert_eq!(homepage.datatype, DataType::AnyUri);
-        assert_eq!(homepage.cardinality, Cardinality::Multi, "no maxCount → multi");
+        assert_eq!(homepage.datatype, Primitive::AnyUri);
+        assert_eq!(
+            homepage.cardinality,
+            Cardinality::Multi,
+            "no maxCount → multi"
+        );
 
         // Edges live on the graph, not the node's properties.
         assert!(
-            !person.properties.iter().any(|p| p.name == "knows" || p.name == "contact"),
+            !person
+                .properties
+                .iter()
+                .any(|p| p.name == "knows" || p.name == "contact"),
             "edges must NOT appear as properties: {:?}",
             person.properties
         );
@@ -327,7 +342,10 @@ ex:PersonShape a sh:NodeShape ;
             gs.edges
         );
         assert!(
-            gs.edges.iter().filter(|e| e.label == "contact").all(|e| e.source == "Person"),
+            gs.edges
+                .iter()
+                .filter(|e| e.label == "contact")
+                .all(|e| e.source == "Person"),
             "all OR alternatives share the source node",
         );
     }

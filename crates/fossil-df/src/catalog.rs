@@ -10,11 +10,11 @@
 //! Replaces the former `fossil-sinks::catalog` SQL-`VALUES` `SinkPlan` builder:
 //! the data was always literal, so it never needed a query engine.
 
-use fossil_graph_schema::{Cardinality, DataType as ScalarType, Property as NodeProp};
+use fossil_graph_schema::{Cardinality, Primitive, Property as NodeProp};
 use fossil_run_status::CatalogInput;
 
-use crate::literal::{from_literal_graph, LiteralEdge, LiteralVertex};
 use crate::GraphArData;
+use crate::literal::{LiteralEdge, LiteralVertex, from_literal_graph};
 
 // ── DCAT-AP vocabulary ───────────────────────────────────────────────────────
 const DCAT_CATALOG: &str = "http://www.w3.org/ns/dcat#Catalog";
@@ -63,11 +63,11 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
         label: "Catalog".into(),
         rdf_type: Some(DCAT_CATALOG.into()),
         properties: vec![
-            prop("title", DCT_TITLE, ScalarType::String),
-            prop("description", DCT_DESCRIPTION, ScalarType::String),
-            prop("issued", DCT_ISSUED, ScalarType::DateTime),
-            prop("language", DCT_LANGUAGE, ScalarType::String),
-            prop("license", DCT_LICENSE, ScalarType::String),
+            prop("title", DCT_TITLE, Primitive::String),
+            prop("description", DCT_DESCRIPTION, Primitive::String),
+            prop("issued", DCT_ISSUED, Primitive::DateTime),
+            prop("language", DCT_LANGUAGE, Primitive::String),
+            prop("license", DCT_LICENSE, Primitive::String),
         ],
         rows: vec![vec![
             catalog_iri.clone(),
@@ -84,11 +84,11 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
             label: "Dataset".into(),
             rdf_type: Some(DCAT_DATASET.into()),
             properties: vec![
-                prop("title", DCT_TITLE, ScalarType::String),
-                prop("source", DCT_SOURCE, ScalarType::String),
-                prop("conforms_to", DCT_CONFORMS_TO, ScalarType::String),
-                prop("keywords", DCAT_KEYWORD, ScalarType::String),
-                data_col("entity_count", ScalarType::Integer),
+                prop("title", DCT_TITLE, Primitive::String),
+                prop("source", DCT_SOURCE, Primitive::String),
+                prop("conforms_to", DCT_CONFORMS_TO, Primitive::String),
+                prop("keywords", DCAT_KEYWORD, Primitive::String),
+                data_col("entity_count", Primitive::Integer),
             ],
             rows: input
                 .datasets
@@ -112,7 +112,11 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
         .iter()
         .flat_map(|ds| ds.distributions.iter())
         .map(|dist| {
-            let filename = dist.destination.rsplit('/').next().unwrap_or(&dist.destination);
+            let filename = dist
+                .destination
+                .rsplit('/')
+                .next()
+                .unwrap_or(&dist.destination);
             vec![
                 distribution_urn(&input.job_id, filename),
                 dist.destination.clone(),
@@ -125,8 +129,8 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
             label: "Distribution".into(),
             rdf_type: Some(DCAT_DISTRIBUTION.into()),
             properties: vec![
-                prop("access_url", DCAT_ACCESS_URL, ScalarType::String),
-                prop("media_type", DCAT_MEDIA_TYPE, ScalarType::String),
+                prop("access_url", DCAT_ACCESS_URL, Primitive::String),
+                prop("media_type", DCAT_MEDIA_TYPE, Primitive::String),
             ],
             rows: dist_rows,
         });
@@ -140,8 +144,8 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
         label: "Agent".into(),
         rdf_type: Some(FOAF_AGENT.into()),
         properties: vec![
-            prop("name", FOAF_NAME, ScalarType::String),
-            prop("homepage", FOAF_HOMEPAGE, ScalarType::String),
+            prop("name", FOAF_NAME, Primitive::String),
+            prop("homepage", FOAF_HOMEPAGE, Primitive::String),
         ],
         rows: vec![vec![
             agent_iri.clone(),
@@ -155,7 +159,7 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
         vertices.push(LiteralVertex {
             label: "Contact".into(),
             rdf_type: Some(VCARD_KIND.into()),
-            properties: vec![prop("email", VCARD_HAS_EMAIL, ScalarType::String)],
+            properties: vec![prop("email", VCARD_HAS_EMAIL, Primitive::String)],
             rows: vec![vec![iri.clone(), format!("mailto:{email}")]],
         });
         iri
@@ -180,9 +184,9 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
             label: "Field".into(),
             rdf_type: Some(KEASY_FIELD.into()),
             properties: vec![
-                data_col("name", ScalarType::String),
-                data_col("rdf_uri", ScalarType::String),
-                data_col("datatype", ScalarType::String),
+                data_col("name", Primitive::String),
+                data_col("rdf_uri", Primitive::String),
+                data_col("datatype", Primitive::String),
             ],
             rows: field_rows,
         });
@@ -193,32 +197,50 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
         input
             .datasets
             .iter()
-            .map(|ds| (catalog_iri.clone(), dataset_urn(&input.job_id, &ds.type_name)))
-            .collect()
-    });
-    push_edge(&mut edges, EDGE_DISTRIBUTION, "Dataset", "Distribution", None, {
-        input
-            .datasets
-            .iter()
-            .flat_map(|ds| {
-                let src = dataset_urn(&input.job_id, &ds.type_name);
-                ds.distributions.iter().map(move |dist| {
-                    let filename =
-                        dist.destination.rsplit('/').next().unwrap_or(&dist.destination);
-                    (src.clone(), distribution_urn(&input.job_id, filename))
-                })
+            .map(|ds| {
+                (
+                    catalog_iri.clone(),
+                    dataset_urn(&input.job_id, &ds.type_name),
+                )
             })
             .collect()
     });
+    push_edge(
+        &mut edges,
+        EDGE_DISTRIBUTION,
+        "Dataset",
+        "Distribution",
+        None,
+        {
+            input
+                .datasets
+                .iter()
+                .flat_map(|ds| {
+                    let src = dataset_urn(&input.job_id, &ds.type_name);
+                    ds.distributions.iter().map(move |dist| {
+                        let filename = dist
+                            .destination
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&dist.destination);
+                        (src.clone(), distribution_urn(&input.job_id, filename))
+                    })
+                })
+                .collect()
+        },
+    );
     push_edge(&mut edges, EDGE_FIELD, "Dataset", "Field", None, {
         input
             .datasets
             .iter()
             .flat_map(|ds| {
                 let src = dataset_urn(&input.job_id, &ds.type_name);
-                ds.fields
-                    .iter()
-                    .map(move |f| (src.clone(), field_urn(&input.job_id, &ds.type_name, &f.name)))
+                ds.fields.iter().map(move |f| {
+                    (
+                        src.clone(),
+                        field_urn(&input.job_id, &ds.type_name, &f.name),
+                    )
+                })
             })
             .collect()
     });
@@ -245,7 +267,7 @@ pub fn build_catalog_graph(input: &CatalogInput) -> GraphArData {
 }
 
 /// A literal-object property carrying its RDF predicate IRI.
-fn prop(name: &str, rdf_uri: &str, datatype: ScalarType) -> NodeProp {
+fn prop(name: &str, rdf_uri: &str, datatype: Primitive) -> NodeProp {
     NodeProp {
         name: name.to_string(),
         datatype,
@@ -255,7 +277,7 @@ fn prop(name: &str, rdf_uri: &str, datatype: ScalarType) -> NodeProp {
 }
 
 /// A non-RDF data column (schema metadata — no predicate IRI).
-fn data_col(name: &str, datatype: ScalarType) -> NodeProp {
+fn data_col(name: &str, datatype: Primitive) -> NodeProp {
     NodeProp {
         name: name.to_string(),
         datatype,
@@ -292,7 +314,10 @@ fn catalog_urn(job_id: &str) -> String {
     format!("urn:keasy:catalog:{job_id}")
 }
 fn dataset_urn(job_id: &str, type_name: &str) -> String {
-    format!("urn:keasy:dataset:{job_id}/{}", encode_uri_component(type_name))
+    format!(
+        "urn:keasy:dataset:{job_id}/{}",
+        encode_uri_component(type_name)
+    )
 }
 fn distribution_urn(job_id: &str, filename: &str) -> String {
     format!("urn:keasy:dist:{job_id}/{}", encode_uri_component(filename))
@@ -318,5 +343,7 @@ fn slug(s: &str) -> String {
         .to_string()
 }
 fn encode_uri_component(s: &str) -> String {
-    s.replace(' ', "%20").replace('<', "%3C").replace('>', "%3E")
+    s.replace(' ', "%20")
+        .replace('<', "%3C")
+        .replace('>', "%3E")
 }

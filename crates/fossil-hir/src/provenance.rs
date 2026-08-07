@@ -59,7 +59,9 @@ use crate::ty::Ty;
 #[cfg(test)]
 use crate::lower::HirExpr;
 #[cfg(test)]
-use crate::ty::{Primitive, TyKind};
+use crate::ty::TyKind;
+#[cfg(test)]
+use fossil_graph_schema::Primitive;
 
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
 /// type was synthesised) + a categorical [`ProvenanceKind`] (semantic reason).
@@ -210,7 +212,14 @@ fn infer_literal_type_kind<'db>(
         )),
         HirExpr::Template(_) => Some((Ty::new(db, TyKind::IriTemplate), ProvenanceKind::Literal)),
         HirExpr::PrefixedName { .. } => Some((Ty::new(db, TyKind::Iri), ProvenanceKind::Literal)),
-        HirExpr::FieldRef(_) => None,
+        HirExpr::IntLit(_) => Some((
+            Ty::new(db, TyKind::Primitive(Primitive::Integer)),
+            ProvenanceKind::Literal,
+        )),
+        // A field reference needs the source row; a call needs the catalog; an
+        // operator needs both sides typed. None is a literal, and this helper
+        // only knows literals.
+        HirExpr::FieldRef(_) | HirExpr::Call { .. } | HirExpr::BinOp { .. } => None,
     }
 }
 

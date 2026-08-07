@@ -17,7 +17,8 @@
 //! - [`HirExpr::PrefixedName`] carries the already-resolved full IRI.
 //! - [`HirExpr::StringLit`] holds the literal text without surrounding quotes.
 
-use fossil_base::{SourceFile, Span, delay_span_bug};
+use fossil_base::{Diagnostic, Severity, SourceFile, Span, delay_span_bug};
+use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use crate::def_map::{PrefixEntry, def_map};
@@ -56,6 +57,23 @@ pub enum PropertyKey {
     PrefixedName { iri: SmolStr },
 }
 
+/// Comparison and boolean operators — the language's set, defined once.
+///
+/// It lived in `fossil-mir` until F2 §2, where the HIR needed it: an operator
+/// the parser reads and the checker types cannot be defined downstream of both.
+/// `fossil-mir` and the backends name this one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum HirExpr {
     /// Backtick template, raw text including delimiters and `${...}`
@@ -68,6 +86,31 @@ pub enum HirExpr {
     StringLit(SmolStr),
     /// `ex:foo` resolved to its full IRI.
     PrefixedName { iri: SmolStr },
+    /// `clean.slug(.name)` — a stdlib function applied to positional arguments.
+    ///
+    /// `func` is the fully-qualified dotted name exactly as
+    /// [`crate::stdlib`] catalogues it (`"clean.slug"`), NOT a backend spelling:
+    /// which `DuckDB` builtin or `DataFusion` UDF it becomes is the
+    /// materializer's business, resolved from the catalog entry. Arguments are
+    /// positional and recursive — `str.concat(clean.trim(.a), "-")` nests.
+    Call { func: SmolStr, args: Vec<HirExpr> },
+    /// `18` — an integer literal.
+    ///
+    /// v0.1 carries integers only. A float literal is a diagnostic, not a
+    /// silent drop: `Expr` is `Hash + Eq` for Salsa interning and `f64` is
+    /// neither, so carrying one needs a decision about its representation
+    /// rather than a cast nobody declared.
+    IntLit(i64),
+    /// `.age >= 18` — a comparison or a boolean connective.
+    ///
+    /// Arithmetic is NOT here: `+`/`-`/`*`/`/`/`%` parse into the same CST node
+    /// and lower to a diagnostic, because MIR has no arithmetic operator to
+    /// carry them into. One form at a time, and each one all the way through.
+    BinOp {
+        op: CmpOp,
+        lhs: Box<HirExpr>,
+        rhs: Box<HirExpr>,
+    },
 }
 
 #[salsa::tracked]
@@ -256,15 +299,47 @@ fn lower_property(
 /// form (e.g. `ex:Foo`). Before this fix, the prefixed-name RHS was silently
 /// dropped from `HirBody.properties` (see the `deferred-items.md` from
 /// plan 02-06).
+///
+/// # The fallback arm is a diagnostic, not a `None`
+///
+/// The parser builds fifteen kinds of expression node and this function reads
+/// four. Everything else used to reach `_ => None`, and a `None` here means
+/// `lower_property` drops the whole property, which `body()` skips without a
+/// word — so `ex:slug = clean.slug(.name)` type-checked clean, ran, reported
+/// *wrote 1 vertex type*, and emitted a corpus with no `slug` column at all.
+/// Measured on 2026-08-06; three programs, two of them silently lossy.
+///
+/// That is the worst failure mode available to a tool whose stated principle is
+/// "if it compiles, it runs", and it happened in the type system's own blind
+/// spot: the checker raises nothing because the HIR never saw the expression.
+/// The arm now says so. The property is still dropped — closing that needs the
+/// eight HIR forms of `decisions/0046-un-nucleo-y-carcasas-finas.md` §2 — but a
+/// dropped property is now a red build instead of a quiet hole in the data.
 fn lower_expr(
     db: &dyn fossil_base::Db,
     expr_node: &fossil_syntax::SyntaxNode,
     prefixes: &[PrefixEntry],
 ) -> Option<HirExpr> {
+    let inner = expr_node.children().next()?;
+    lower_expr_inner(db, &inner, prefixes)
+}
+
+/// Lower an expression node that is already unwrapped from its `EXPR` parent.
+///
+/// Split out from [`lower_expr`] because an argument inside an `ARG_LIST` is an
+/// expression in its own right: recursion has to start below the wrapper, not
+/// above it.
+fn lower_expr_inner(
+    db: &dyn fossil_base::Db,
+    inner: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirExpr> {
     use fossil_syntax::SyntaxKind;
 
-    let inner = expr_node.children().next()?;
+    let inner = inner.clone();
     match inner.kind() {
+        SyntaxKind::POSTFIX_EXPR => lower_postfix(db, &inner, prefixes),
+        SyntaxKind::BINARY_EXPR => lower_binary(db, &inner, prefixes),
         SyntaxKind::TEMPLATE_EXPR => {
             let tok = inner
                 .children_with_tokens()
@@ -297,6 +372,38 @@ fn lower_expr(
                 let inner_text = raw.trim_start_matches('"').trim_end_matches('"');
                 return Some(HirExpr::StringLit(SmolStr::from(inner_text)));
             }
+            if let Some(n) = toks.iter().find(|t| t.kind() == SyntaxKind::INTEGER) {
+                let range = inner.text_range();
+                let span = Span::new(range.start().into(), range.end().into());
+                return match n.text().parse::<i64>() {
+                    Ok(v) => Some(HirExpr::IntLit(v)),
+                    Err(e) => {
+                        Diagnostic::new(
+                            Severity::Error,
+                            format!("`{}` is not an integer fossil can carry: {e}", n.text()),
+                            span,
+                        )
+                        .accumulate(db);
+                        None
+                    }
+                };
+            }
+            if let Some(f) = toks.iter().find(|t| t.kind() == SyntaxKind::FLOAT) {
+                let range = inner.text_range();
+                let span = Span::new(range.start().into(), range.end().into());
+                Diagnostic::new(
+                    Severity::Error,
+                    format!(
+                        "`{}` is a float literal, which fossil cannot carry yet, so this \
+                         property will not be written to the corpus. Integer literals work; \
+                         a float needs a representation decision the type system has not made.",
+                        f.text()
+                    ),
+                    span,
+                )
+                .accumulate(db);
+                return None;
+            }
             // `IDENT (SHAPE_SEP IDENT)?` — a bare or prefixed name.
             let idents: Vec<_> = toks
                 .iter()
@@ -315,6 +422,24 @@ fn lower_expr(
                 // distinguishes more precisely (variable vs field vs name).
                 Some(HirExpr::FieldRef(SmolStr::from(idents[0].text())))
             } else {
+                // Every literal shape this arm knows is handled above. Anything
+                // left is a literal the lowering does not read, and a literal it
+                // does not read is exactly the silent drop this phase exists to
+                // remove: `ex:n = 42` produced no property AND no diagnostic
+                // until 2026-08-07.
+                let range = inner.text_range();
+                let span = Span::new(range.start().into(), range.end().into());
+                let text = inner.text().to_string();
+                Diagnostic::new(
+                    Severity::Error,
+                    format!(
+                        "`{}` is a literal fossil cannot lower yet, so this property will \
+                         not be written to the corpus.",
+                        text.trim()
+                    ),
+                    span,
+                )
+                .accumulate(db);
                 None
             }
         }
@@ -377,6 +502,227 @@ fn lower_expr(
             }
             None
         }
+        other => {
+            let range = inner.text_range();
+            let span = Span::new(range.start().into(), range.end().into());
+            let source = inner.text().to_string();
+            let source = source.trim();
+            Diagnostic::new(
+                Severity::Error,
+                format!(
+                    "`{source}` is not an expression fossil can lower yet, so this property \
+                     will not be written to the corpus. A property value may be a template, \
+                     a field reference, a string literal, a prefixed name or a call. \
+                     (parsed as {other:?})"
+                ),
+                span,
+            )
+            .accumulate(db);
+            None
+        }
+    }
+}
+
+/// Lower a `BINARY_EXPR` — a comparison (`.age >= 18`) or a boolean connective
+/// (`a and b`).
+///
+/// Arithmetic parses into this same node and is NOT lowered: MIR has no
+/// operator to carry `+` into, and inventing one here would put an expression
+/// in the HIR that nothing downstream can execute. It is a diagnostic, which is
+/// what the whole phase is about.
+fn lower_binary(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirExpr> {
+    use fossil_syntax::SyntaxKind;
+
+    let range = node.text_range();
+    let span = Span::new(range.start().into(), range.end().into());
+    let source = node.text().to_string();
+    let source = source.trim().to_string();
+
+    // The operator is the node's own token; the two operands are its child
+    // nodes. A malformed binary node (recovery path) has fewer than two.
+    let op_token = node
+        .children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .find(|t| {
+            matches!(
+                t.kind(),
+                SyntaxKind::EQ
+                    | SyntaxKind::NEQ
+                    | SyntaxKind::LT
+                    | SyntaxKind::LE
+                    | SyntaxKind::GT
+                    | SyntaxKind::GE
+                    | SyntaxKind::KW_AND
+                    | SyntaxKind::KW_OR
+                    | SyntaxKind::PLUS
+                    | SyntaxKind::MINUS
+                    | SyntaxKind::STAR
+                    | SyntaxKind::SLASH
+                    | SyntaxKind::PERCENT
+            )
+        })?;
+
+    let op = match op_token.kind() {
+        SyntaxKind::EQ => CmpOp::Eq,
+        SyntaxKind::NEQ => CmpOp::Ne,
+        SyntaxKind::LT => CmpOp::Lt,
+        SyntaxKind::LE => CmpOp::Le,
+        SyntaxKind::GT => CmpOp::Gt,
+        SyntaxKind::GE => CmpOp::Ge,
+        SyntaxKind::KW_AND => CmpOp::And,
+        SyntaxKind::KW_OR => CmpOp::Or,
+        _ => {
+            Diagnostic::new(
+                Severity::Error,
+                format!(
+                    "`{source}` is arithmetic, which fossil cannot lower yet, so this \
+                     property will not be written to the corpus. Comparisons (`==`, `!=`, \
+                     `<`, `<=`, `>`, `>=`) and `and`/`or` work; `{}` does not.",
+                    op_token.text()
+                ),
+                span,
+            )
+            .accumulate(db);
+            return None;
+        }
+    };
+
+    let mut operands = node.children();
+    let lhs_node = operands.next()?;
+    let rhs_node = operands.next()?;
+    let lhs = lower_expr_inner(db, &lhs_node, prefixes)?;
+    let rhs = lower_expr_inner(db, &rhs_node, prefixes)?;
+
+    Some(HirExpr::BinOp {
+        op,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+    })
+}
+
+/// Lower a `POSTFIX_EXPR` — either a call (`clean.slug(.name)`) or the member
+/// access that names its callee (`clean.slug`).
+///
+/// The parser builds both with the same node kind, left-associatively: the call
+/// node carries an `LPAREN` token and wraps the member-access node, which in
+/// turn wraps the base `LITERAL_EXPR`. So "is this a call?" is "does this node
+/// hold an `LPAREN`", and the callee's dotted name is read off the chain below.
+fn lower_postfix(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirExpr> {
+    use fossil_syntax::SyntaxKind;
+
+    let range = node.text_range();
+    let span = Span::new(range.start().into(), range.end().into());
+    let source = node.text().to_string();
+    let source = source.trim().to_string();
+
+    let is_call = node
+        .children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .any(|t| t.kind() == SyntaxKind::LPAREN);
+
+    if !is_call {
+        // `ex:name = clean.slug` — a function named but never applied. v0.1 has
+        // no function values (ADR-0046 §2 takes partial application out of the
+        // grammar), so this is an error, not a value that quietly becomes text.
+        Diagnostic::new(
+            Severity::Error,
+            format!(
+                "`{source}` names a function but does not call it. Fossil has no function \
+                 values: write `{source}(...)` with its arguments."
+            ),
+            span,
+        )
+        .accumulate(db);
+        return None;
+    }
+
+    let callee = node.children().next()?;
+    let Some(func) = dotted_name(&callee) else {
+        Diagnostic::new(
+            Severity::Error,
+            format!(
+                "`{source}` calls something that is not a stdlib function name. Only a \
+                 catalogued name may be called, e.g. `clean.trim(.name)`."
+            ),
+            span,
+        )
+        .accumulate(db);
+        return None;
+    };
+
+    let mut args = Vec::new();
+    if let Some(list) = node.children().find(|c| c.kind() == SyntaxKind::ARG_LIST) {
+        for arg in list.children() {
+            if arg.kind() == SyntaxKind::NAMED_ARG {
+                let r = arg.text_range();
+                Diagnostic::new(
+                    Severity::Error,
+                    format!(
+                        "`{}` passes a named argument to `{func}`. v0.1 arguments are \
+                         positional.",
+                        arg.text().to_string().trim()
+                    ),
+                    Span::new(r.start().into(), r.end().into()),
+                )
+                .accumulate(db);
+                return None;
+            }
+            let inner = arg.children().next()?;
+            // An argument that does not lower has already said why (the arm
+            // above accumulates); dropping the whole call keeps the property
+            // from being written with a hole in it.
+            args.push(lower_expr_inner(db, &inner, prefixes)?);
+        }
+    }
+
+    Some(HirExpr::Call {
+        func: SmolStr::from(func),
+        args,
+    })
+}
+
+/// The dotted name a callee chain spells: `clean.slug` → `"clean.slug"`.
+///
+/// Returns `None` for anything that is not a plain name — `f(x).y`, a template,
+/// a field reference. The catalog is keyed by these strings, so a callee that
+/// cannot produce one cannot be looked up.
+fn dotted_name(node: &fossil_syntax::SyntaxNode) -> Option<String> {
+    use fossil_syntax::SyntaxKind;
+
+    let idents = |n: &fossil_syntax::SyntaxNode| -> Vec<String> {
+        n.children_with_tokens()
+            .filter_map(fossil_syntax::SyntaxElement::into_token)
+            .filter(|t| t.kind() == SyntaxKind::IDENT)
+            .map(|t| t.text().to_string())
+            .collect()
+    };
+
+    match node.kind() {
+        SyntaxKind::LITERAL_EXPR => {
+            let ids = idents(node);
+            (ids.len() == 1).then(|| ids[0].clone())
+        }
+        SyntaxKind::POSTFIX_EXPR => {
+            // A member access: the base chain, then this node's own IDENT.
+            let has_paren = node
+                .children_with_tokens()
+                .filter_map(fossil_syntax::SyntaxElement::into_token)
+                .any(|t| t.kind() == SyntaxKind::LPAREN);
+            if has_paren {
+                return None; // `f(x).y` — the base is a call, not a name
+            }
+            let base = dotted_name(&node.children().next()?)?;
+            let ids = idents(node);
+            (ids.len() == 1).then(|| format!("{base}.{}", ids[0]))
+        }
         _ => None,
     }
 }
@@ -405,6 +751,175 @@ User : ex:Person from users
             "examples/hello.fossil".to_string(),
         );
         (db, file)
+    }
+
+    /// The call that used to be a hole is now a `Call` in the HIR.
+    ///
+    /// Until 2026-08-07 this exact program was the regression fixture for a
+    /// measured data-loss bug: `ex:slug = clean.slug(.name)` was dropped from
+    /// `HirBody` in silence, `fossil check` said *ok*, `fossil run` said *wrote
+    /// 1 vertex type*, and the column was absent from the corpus. Then the drop
+    /// was made loud. This is the same program with the hole closed: the
+    /// property survives lowering, carrying the function's name and its
+    /// argument, and no diagnostic is raised at all.
+    #[test]
+    fn a_call_lowers_to_a_call_and_raises_nothing() {
+        const CALLS_A_BUILTIN: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:slug = clean.slug(.name)
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file =
+            fossil_base::SourceFile::new(&db, CALLS_A_BUILTIN.to_string(), "t.fossil".to_string());
+
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+
+        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        assert!(
+            diagnostics.is_empty(),
+            "a call the lowering understands must raise nothing, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
+
+        let props = crate::body::body(&db, mloc).properties(&db);
+        assert_eq!(props.len(), 2, "both properties survive lowering");
+        let HirExpr::Call { func, args } = &props[1].value else {
+            panic!("expected a Call, got {:?}", props[1].value);
+        };
+        assert_eq!(func.as_str(), "clean.slug");
+        assert_eq!(args.len(), 1);
+        assert_eq!(args[0], HirExpr::FieldRef(SmolStr::from("name")));
+    }
+
+    /// A comparison lowers, with its integer literal.
+    ///
+    /// The literal is half the point: until 2026-08-07 `ex:n = 42` was dropped
+    /// **with no diagnostic at all** — the 2026-08-06 fix made unknown node
+    /// KINDS loud, and a `LITERAL_EXPR` holding an integer is a known kind
+    /// whose arm returned `None`. A second silent hole in the same blind spot,
+    /// found by needing a right-hand side for this test.
+    #[test]
+    fn a_comparison_lowers_with_its_integer_literal() {
+        const COMPARES: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:adult = .age >= 18
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, COMPARES.to_string(), "t.fossil".to_string());
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+
+        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        assert!(
+            diagnostics.is_empty(),
+            "a comparison the lowering understands must raise nothing, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
+        let props = crate::body::body(&db, mloc).properties(&db);
+        assert_eq!(props.len(), 2);
+        let HirExpr::BinOp { op, lhs, rhs } = &props[1].value else {
+            panic!("expected a BinOp, got {:?}", props[1].value);
+        };
+        assert_eq!(*op, CmpOp::Ge);
+        assert_eq!(**lhs, HirExpr::FieldRef(SmolStr::from("age")));
+        assert_eq!(**rhs, HirExpr::IntLit(18));
+    }
+
+    /// The loud-drop guarantee, re-pinned on a form that is still a hole.
+    ///
+    /// `call` (F2 §1) and `comparison` (F2 §2) have landed; `conditional` and
+    /// `pipeline` follow, and arithmetic has no MIR operator to be carried
+    /// into. Until then a property whose value is one of them is still dropped
+    /// — and this asserts the drop stays **loud**, which is the difference
+    /// between a known limitation and silent corruption. The day there is no
+    /// form left, this test is deleted, not weakened.
+    #[test]
+    fn an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop() {
+        const ARITHMETIC: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:doble = .id * 2
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file =
+            fossil_base::SourceFile::new(&db, ARITHMETIC.to_string(), "t.fossil".to_string());
+
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+
+        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        assert!(
+            !diagnostics.is_empty(),
+            "an expression the lowering cannot read must produce a diagnostic",
+        );
+        let d = &diagnostics[0];
+        assert_eq!(d.severity, fossil_base::Severity::Error);
+        assert!(
+            d.message.contains(".id * 2"),
+            "the diagnostic must quote what the user wrote, got: {}",
+            d.message,
+        );
+        assert!(
+            d.span.end > d.span.start,
+            "the diagnostic must point somewhere, got {:?}",
+            d.span,
+        );
+
+        let props = crate::body::body(&db, mloc).properties(&db);
+        assert_eq!(props.len(), 1, "the unlowerable property is still dropped");
+    }
+
+    /// A name that is not catalogued is a type error, not a lowering hole: the
+    /// HIR carries the call, and the checker is what refuses it.
+    #[test]
+    fn an_uncatalogued_function_lowers_and_the_checker_refuses_it() {
+        const UNKNOWN_FN: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:slug = clean.sluggify(.name)
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file =
+            fossil_base::SourceFile::new(&db, UNKNOWN_FN.to_string(), "t.fossil".to_string());
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+
+        assert_eq!(
+            crate::body::body(&db, mloc).properties(&db).len(),
+            2,
+            "lowering carries the call; resolving the name is the checker's job"
+        );
+        let diags =
+            crate::check::typecheck_mapping::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        assert!(
+            diags.iter().any(|d| d.message.contains("clean.sluggify")
+                && d.message.contains("did you mean")),
+            "the checker must name the function and suggest one, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
     }
 
     #[test]

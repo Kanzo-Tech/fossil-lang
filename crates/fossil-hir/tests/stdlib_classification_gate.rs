@@ -19,7 +19,7 @@
 //!    untagged-function guard. `math/` = 6 (no `ceil`/`floor`); `anon.redact`
 //!    and `validate.regex` present.
 
-use fossil_registry::{DUCKDB_BUILTIN_ALLOWLIST, FunctionRegistry, LoweringKind, WasmClass};
+use fossil_hir::stdlib::{DUCKDB_BUILTIN_ALLOWLIST, FunctionRegistry, LoweringKind, WasmClass};
 
 /// SC#1 structural half: `PureSql ⟺ lowering ∈ {Builtin, Inline, Plan}`, and
 /// every `Builtin.duckdb_name` is in the curated `DuckDB`-builtin allowlist.
@@ -105,7 +105,7 @@ fn allowlist_is_aligned_to_catalog_no_ceil_floor() {
 
 /// The authoritative function set from `stdlib.md`, eight surface namespaces.
 /// `io/` is intentionally excluded (source constructors; `io.sql`/`io.http`
-/// out of scope this milestone). Mirrors `fossil-registry`'s own completeness
+/// out of scope this milestone). Mirrors `fossil-hir`'s own completeness
 /// test — the canonical untagged-function guard, asserted here as part of the
 /// SC#1 CI gate.
 fn expected_stdlib_names() -> Vec<&'static str> {

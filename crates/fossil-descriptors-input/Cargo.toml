@@ -37,3 +37,7 @@ thiserror = { workspace = true }
 # Used to derive RDF source column types from a declared shape at compile time
 # (`io.rdf(path, schema: "x.shex")`). AST-only — no runtime ShEx validation.
 fossil-shex = { path = "../fossil-shex" }
+# The primitive lattice (`Primitive`) — a column's datatype IS the enum the
+# checker types against, not the name of one. The crate is serde-only, so this
+# adds no weight and no WASM risk; it is what lets ADR-0007's string chain go.
+fossil-graph-schema = { path = "../fossil-graph-schema" }

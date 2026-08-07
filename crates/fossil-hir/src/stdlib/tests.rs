@@ -33,9 +33,9 @@ fn signature_materializes_real_fn_sig() {
     let sig = trim.signature(&db);
     // clean.trim :: String -> String.
     assert_eq!(sig.params(&db).len(), 1);
-    let want = fossil_hir::ty::Ty::new(
+    let want = crate::ty::Ty::new(
         &db,
-        fossil_hir::ty::TyKind::Primitive(fossil_hir::ty::Primitive::String),
+        crate::ty::TyKind::Primitive(fossil_graph_schema::Primitive::String),
     );
     assert_eq!(sig.return_ty(&db), want);
     assert_eq!(sig.params(&db)[0], want);

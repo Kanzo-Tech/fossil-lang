@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use fossil_base::{Db, Diagnostic, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_descriptors_output::OutputDescriptorKind;
+use fossil_graph_schema::Primitive;
 use fossil_run_status::{ProviderInfo, RunStatus, SourceRefInfo};
 use smol_str::SmolStr;
 
@@ -31,11 +32,11 @@ use system::open_db;
 // ===================================================================== providers
 
 /// List the data-source providers fossil supports. Thin native wrapper over
-/// [`fossil_registry::providers`] (the shared, WASM-clean implementation — one
+/// [`fossil_lineage::providers`] (the shared, WASM-clean implementation — one
 /// source of truth for both the CLI and the browser, ADR-0024).
 #[must_use]
 pub fn providers() -> Vec<ProviderInfo> {
-    fossil_registry::providers()
+    fossil_lineage::providers()
 }
 
 // ========================================================================= refs
@@ -52,9 +53,9 @@ pub fn refs(path: &Path) -> miette::Result<Vec<SourceRefInfo>> {
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
     let (db, file) = open_db(text, path);
     // The native host reads the file; the lineage logic (parse → typed refs,
-    // dedup) is the shared WASM-clean `fossil_registry::source_refs` — same code
+    // dedup) is the shared WASM-clean `fossil_lineage::source_refs` — same code
     // the browser runs over its in-memory db (ADR-0024).
-    Ok(fossil_registry::source_refs(&db, file))
+    Ok(fossil_lineage::source_refs(&db, file))
 }
 
 // ======================================================================== check
@@ -113,19 +114,21 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
 
 // =============================================================== pre-introspection
 
-/// Map a `DuckDB` column-type string to the canonical Fossil Primitive name
-/// (matches `fossil-hir::infer::primitive_from_name` exactly).
-fn duckdb_type_to_fossil_primitive(t: &str) -> &'static str {
+/// Map a `DuckDB` column-type string onto the lattice — the native sibling of
+/// `@fossil-lang/introspect`'s `duckdbTypeToFossilPrimitive`. A vocabulary the
+/// engine reads and nobody else does, which is why it lives here and not on
+/// [`Primitive`]; the xsd direction is the one the lattice owns.
+fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
     let upper = t.trim().to_ascii_uppercase();
     match upper.as_str() {
-        "INTEGER" | "BIGINT" | "INT" | "SMALLINT" | "TINYINT" | "HUGEINT" => "Integer",
-        "DOUBLE" | "FLOAT" | "REAL" => "Float",
-        t if t.starts_with("DECIMAL") => "Float",
-        "BOOLEAN" | "BOOL" => "Bool",
-        "DATE" => "Date",
-        "TIMESTAMP" | "DATETIME" => "DateTime",
-        "TIME" => "Time",
-        _ => "String",
+        "INTEGER" | "BIGINT" | "INT" | "SMALLINT" | "TINYINT" | "HUGEINT" => Primitive::Integer,
+        "DOUBLE" | "FLOAT" | "REAL" => Primitive::Float,
+        t if t.starts_with("DECIMAL") => Primitive::Float,
+        "BOOLEAN" | "BOOL" => Primitive::Bool,
+        "DATE" => Primitive::Date,
+        "TIMESTAMP" | "DATETIME" => Primitive::DateTime,
+        "TIME" => Primitive::Time,
+        _ => Primitive::String,
     }
 }
 
@@ -203,7 +206,7 @@ fn pre_introspect_and_register(
             let typ: String = row.get(1)?;
             Ok(InferredColumn {
                 name: SmolStr::from(name),
-                primitive: SmolStr::from(duckdb_type_to_fossil_primitive(&typ)),
+                primitive: duckdb_type_to_fossil_primitive(&typ),
             })
         }) {
             Ok(iter) => iter.filter_map(Result::ok).collect(),
@@ -239,8 +242,8 @@ fn resolve_output_descriptor(
         let is_provider = s
             .constructor
             .as_deref()
-            .and_then(fossil_registry::source_kind)
-            .is_some_and(|k| k.lowering == fossil_registry::SourceLowering::Provider);
+            .and_then(fossil_hir::stdlib::source_kind)
+            .is_some_and(|k| k.lowering == fossil_hir::stdlib::SourceLowering::Provider);
         if !is_provider {
             continue;
         }
@@ -268,7 +271,6 @@ fn resolve_output_descriptor(
         .map_err(|e| miette::miette!("parse io.rdf output shape `{locator}`: {e:?}"))?;
     Ok(OutputDescriptorKind::ShEx(desc))
 }
-
 
 /// Resolve a source-reference argument to a physical locator the cloud-capable
 /// reader accepts — UNIFORMLY for every reference, so a `@conn` alias works in
@@ -483,12 +485,14 @@ fn enrich_written_layout(
                 (adjacency(e, "by_source"), Endpoint::Src),
                 (adjacency(e, "by_target"), Endpoint::Dst),
             ]
-            .map(|(parquet, ordered_by)| fossil_runtime::layout::AdjacencyTarget {
-                parquet,
-                src_type: e.src_type.clone(),
-                dst_type: e.dst_type.clone(),
-                ordered_by,
-            })
+            .map(
+                |(parquet, ordered_by)| fossil_runtime::layout::AdjacencyTarget {
+                    parquet,
+                    src_type: e.src_type.clone(),
+                    dst_type: e.dst_type.clone(),
+                    ordered_by,
+                },
+            )
         })
         .collect();
 
@@ -515,7 +519,9 @@ fn enrich_written_layout(
 /// Returns a write error.
 pub fn catalog(dest_url: &str, req: &CatalogRequest) -> miette::Result<RunStatus> {
     let dest_dir = local_dest_dir(dest_url).ok_or_else(|| {
-        miette::miette!("the catalog writes a local directory; cloud dest `{dest_url}` is not yet wired")
+        miette::miette!(
+            "the catalog writes a local directory; cloud dest `{dest_url}` is not yet wired"
+        )
     })?;
     let graph = fossil_df::catalog::build_catalog_graph(&req.catalog);
     graph
@@ -559,14 +565,23 @@ mod tests {
     #[test]
     fn collapses_slashes_at_the_join() {
         let c = conns(&[("sales", "s3://bucket/prefix/")]);
-        assert_eq!(resolve_source_uri("@sales/x.csv", &c), "s3://bucket/prefix/x.csv");
+        assert_eq!(
+            resolve_source_uri("@sales/x.csv", &c),
+            "s3://bucket/prefix/x.csv"
+        );
     }
 
     #[test]
     fn passes_through_direct_urls_and_paths() {
         let c = conns(&[("sales", "s3://bucket")]);
-        assert_eq!(resolve_source_uri("s3://other/x.csv", &c), "s3://other/x.csv");
-        assert_eq!(resolve_source_uri("examples/users.csv", &c), "examples/users.csv");
+        assert_eq!(
+            resolve_source_uri("s3://other/x.csv", &c),
+            "s3://other/x.csv"
+        );
+        assert_eq!(
+            resolve_source_uri("examples/users.csv", &c),
+            "examples/users.csv"
+        );
     }
 
     #[test]

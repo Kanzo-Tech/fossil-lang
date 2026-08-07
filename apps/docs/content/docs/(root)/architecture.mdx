@@ -1,23 +1,23 @@
 ---
 title: The architecture
-description: Two blocks by what the code is about, three rings by where it runs, and the dependency graph fossil has today — which is the argument for both.
+description: One core and thin shells, because that is what every comparable compiler does. Why the rings are withdrawn, what `base` is supposed to mean, and the dependency graph fossil has today.
 direction:
-  summary: The tree is cut into two blocks by subject — a fossil block that is the language and its compiler, and a graph block that is the read surface over a written corpus — which compose with ADR-0044's three rings and meet at a corpus on disk rather than at an API.
-  decidedBy: decisions/0045-dos-nucleos-un-monorepo.md
+  summary: The tree is cut by what a piece of code is allowed to know rather than by where it runs, which collapses the deployment targets into shells thin enough to be uninteresting and takes twenty-four crates towards five to eight.
+  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
 today:
-  summary: Twenty-five crates, forty-three edges across five subject groups, and one pair of groups pointing at each other; `fossil-graph` reaches the rest of the tree exactly once, through its only fossil dependency, `fossil-sinks`.
+  summary: Twenty-four crates, forty-three edges across five subject groups, and one pair of groups pointing at each other; `fossil-graph` reaches the rest of the tree exactly once, through its only fossil dependency, `fossil-sinks`.
   backedBy: apps/docs/content.test.ts
 ---
 
 ## The graph today, and it is meant to look like this
 
-Grouped by what each crate is about, because twenty-five nodes drawn flat show nothing. The ugliness
-is the finding, not a failure of the drawing.
+Grouped by what each crate is about, because two dozen nodes drawn flat show nothing. The ugliness is
+the finding, not a failure of the drawing.
 
 ```mermaid
 graph LR
   L["<b>language</b> · 9 crates<br/>base · syntax · hir · mir · registry<br/>descriptors-input · descriptors-output<br/>shex · graph-schema"]
-  E["<b>editor</b> · 4 crates<br/>ide · ide-db · lsp · wasm"]
+  E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 7 crates<br/>df · df-wasm · engine · cli<br/>runtime · sinks · resolver"]
   C["<b>corpus</b> · 3 crates<br/>graph · graph-wasm · mcp"]
   X["<b>no home</b> · 2 crates<br/>run-status · xtask"]
@@ -37,164 +37,195 @@ each other. That mutual arrow is the whole of the complaint that opened
 `decisions/0045-dos-nucleos-un-monorepo.md` — *"it feels like we have two cores"*. There are two, and
 today they are stitched together in the wrong place.
 
+## Nobody cuts by deployment target
+
+`decisions/0044-tres-anillos.md` split the tree into three rings by where the code runs: language,
+native, wasm. **It is withdrawn**, and the evidence is that none of the three compilers we compared
+against does anything of the kind.
+
+| | cuts by | says so in |
+| --- | --- | --- |
+| **Gleam** | **IO and purity** — *"compiler-core… is entirely pure and has no IO so that is provided by the other Rust crates that wrap this one"* | four bullets in `docs/compiler/README.md` |
+| **Gluon** | **compiler phase** — parse → check → vm, with `base` as the shared vocabulary | one README bullet |
+| **rust-analyzer** | **semantic richness**, with three declared API Boundaries: `syntax`, `hir`, `ide` | ~500 lines of `docs/book/src/contributing/architecture.md` |
+
+All three cut by **what a piece of code is allowed to know**, and what they forbid is always the
+same: knowledge of the outside world. Gleam implements it as nine traits in an `io.rs` that the core
+declares and the shells satisfy; rust-analyzer implements it by forbidding `base-db` to produce a
+`std::path::Path`.
+
+<Callout title="When the cut is right, the shells collapse">
+Gleam's entire wasm target is **352 lines**, 130 of which are an in-memory filesystem. Its binary is
+**6 lines**. Its LSP transport is **69**. rust-analyzer's CLI is not even a crate — it is a module
+inside the LSP binary.
+</Callout>
+
+A ring rule inverts that. It makes the target the primary axis, and then you have to decide which
+ring a *feature* like the language server belongs to — and there is no good answer. Gleam puts it
+under the CLI, rust-analyzer puts it *inside* the binary, Gluon puts it in a different repository.
+
+What survives of the rings is not a ring. It is two crates with a `cfg` and a written reason:
+`crates/fossil-lsp/src/lib.rs:14`, because `lsp-server` uses crossbeam and stdio, and
+`crates/fossil-resolver/src/lib.rs:50`, because credential material is deliberately kept off the wasm
+boundary.
+
+## The rule is written first and checked second, in that order
+
+> `duckdb` and `datafusion` each appear in exactly one crate, and neither is reachable from a wasm
+> shell.
+
+It goes in `deny.toml`. But the order of importance is the one stated: **none of the three references
+checks its architecture with a test.** rust-analyzer's most-cited rule — that `ide` depends only on
+the top-level `hir` — is held up by a comment in a `Cargo.toml`, repeated verbatim in two files. What
+does the work is a document that states the invariant *and its reason*.
+
+## `base` means two opposite things, and one of them has to be ours
+
+The two references that have a crate called `base` give it contrary contents:
+
+| | `gluon_base` — 11,970 lines | rust-analyzer's `base-db` — 1,866 |
+| --- | --- | --- |
+| contents | AST, types, kinds, symbols, positions | salsa plumbing, the input queries, `CrateGraph` |
+| language vocabulary | **is** the vocabulary | **none** |
+| describes itself as | "modular" | *"Basic database traits. The concrete DB is defined by `ide`"* |
+
+And two of `base-db`'s own invariants point straight at us: *"base-db knows nothing about cargo"* and
+*"base-db doesn't know about file system and file paths"* — its VFS is **another crate**, and the
+operating-system implementation is **a third**.
+
+`fossil-base` today holds the salsa `Db` trait, the filesystem abstraction, the diagnostics, a `Files`
+struct that is empty, and the memory probe. And it knows a concrete type from a concrete provider:
+`crates/fossil-base/src/system.rs:21` imports `InferredDescriptor`, so the crate that exists in order
+to know nothing knows something.
+
+> **If a crate called `base` contains the substrate *and* the file abstraction, it is two crates that
+> have not been separated yet.**
+
+The fix is already invented two crates away: `crates/fossil-descriptors-output/src/system_ext.rs:47`
+hangs the extension off the **descriptor** side, and `fossil-base` never hears about it. The input
+direction uses the opposite pattern from the output direction for no recorded reason.
+
+## `lsp-types` in exactly one `Cargo.toml`
+
+This is the invariant rust-analyzer defends hardest, and both sentences are worth keeping whole:
+
+> *"`rust-analyzer` is the only crate that knows about LSP and JSON serialization. If you want to
+> expose a data structure `X` from ide to LSP, don't make it serializable. Instead, create a
+> serializable counterpart in `rust-analyzer` crate and manually convert between the two."*
+
+> *"Although at the moment it has only one consumer, the LSP server, **LSP does not influence its API
+> design**. Instead, we keep in mind a hypothetical ideal client."*
+
+It costs 3,180 lines of `to_proto.rs` — 0.8% of the codebase — and buys a guarantee a grep can check.
+Note the asymmetry: 3,180 lines out against 156 in. Translating *inwards* is trivial; the work is all
+on the way out.
+
+**`fossil-ide` returns `lsp_types` structs directly** —
+`crates/fossil-ide/src/completion.rs:69`. We made Gleam's mistake, which has `use lsp_types::Position`
+inside the crate its own documentation calls *"entirely pure"*, rather than rust-analyzer's choice.
+
+And that relocates one crate rather than renaming it. `fossil-run-status` holds four unrelated wire
+contracts — the output of `run`, of `providers`, of `refs`, and the **input** of `catalog`. They are
+not a crate: **they are the outbound half of a protocol**, and in rust-analyzer they would live in the
+binary. Six crates depend on it and it depends on nothing, which is not being foundational — it is
+being the place where types that did not fit were left.
+
+## The verdict, which is not the crate count
+
+**Twenty-four crates and about 45,000 lines.** Against the references: Gluon has ~11 for 90k, Gleam 15
+(six real; the rest are test harnesses and vendored libraries) for 228k, rust-analyzer 36 for 571k.
+**For 45k the honest target is five to eight.**
+
+But what makes two dozen feel like a maze is not the count:
+
+> **Four of them lie about what they are.** `fossil-ide` is not an IDE, `fossil-sinks` writes nothing,
+> `fossil-engine` is not an engine, `fossil-run-status` is not a status.
+
+A false name costs more than a surplus crate, because you cannot skip it while reading. `fossil-ide`
+is the set of LSP functions, and exists only because `fossil-lsp` does not compile to wasm32.
+`fossil-sinks` writes nothing — it is the GraphAr manifest model, and half its dependents are readers.
+`fossil-engine` is credential resolution and pre-introspection, not a façade. `fossil-run-status` is
+four wire contracts, two of which are inputs.
+
+<Callout title="Deliberately absent">
+**No numbered layers.** A rule that needs a number to explain itself is a taxonomy, not a rule.
+
+**No crate named after its deployment target.** The one crate rust-analyzer names after a process
+boundary is `proc-macro-srv-cli`, and it exists because procedural macros segfault — fault isolation,
+not a ring.
+
+**No crate that exists by imitation.** `fossil-ide-db` was created citing rust-analyzer's `ide-db`,
+which is ~20k lines shared by five crates; here there was one consumer, and it has since been folded
+back in. A crate earns its boundary from a cycle, a `cfg`, an orphan rule or a publishing frontier.
+</Callout>
+
 ## There are two cores, and the second is one landed decision from having none
 
 <Callout title="A recognition, not a proposal">
-The split below is not a refactor anyone has to be argued into. It is what the tree will look like
-the moment a decision already taken is executed.
+The split below is not a refactor anyone has to be argued into. It is what the tree will look like the
+moment a decision already taken is executed.
 </Callout>
 
 Three facts, in order:
 
-1. **`fossil-graph` (2,438 lines) has exactly one fossil dependency: `fossil-sinks`.** It does not
-   know the language — grepping its `src` for `fossil_hir|fossil_syntax|fossil_mir|fossil_base|
-   fossil_descriptors|fossil_registry` returns zero — and it does not touch the disk. It declares two
-   ports instead: `ManifestSource::fetch` and `DuckExecutor::query_json`.
-2. **That dependency is used on one production line**: `manifest.rs:16`, importing three struct types
-   from `fossil_sinks::manifest`. The other two occurrences are a `#[cfg(test)]` module and an
-   example. And `fossil-sinks` is 380 lines whose own header says what it is — *"the canonical
-   `GraphAr` manifest model"*. GraphAr, and nothing else.
+1. **`fossil-graph` has exactly one fossil dependency: `fossil-sinks`.** It does not know the language
+   — grepping its `src` for `fossil_hir|fossil_syntax|fossil_mir|fossil_base|fossil_descriptors|fossil_lineage`
+   returns zero — and it does not touch the disk. It declares two ports instead:
+   `ManifestSource::fetch` and `DuckExecutor::query_json`, **the only two real extension points in the
+   entire workspace.**
+2. **That dependency is used on one production line**: `crates/fossil-graph/src/manifest.rs:16`. The
+   other two occurrences are a `#[cfg(test)]` module and an example.
 3. **ADR-0042 §2 is titled "Parquet, plainly. GraphAr out."** The seam between the two cores is made
    of something an existing decision has already condemned.
 
 So: **when ADR-0042 §2 lands, `fossil-graph` will have no fossil dependencies at all.** Not a small
-one — zero. That is a different kind of statement from "these crates could be separated", and it is
-the reason this page exists.
+one — zero.
 
-The other half of the confirmation is already measured rather than assumed: `kanzo-ui` reads corpora
-written by fossil with **no dependency on `@fossil-lang/*`**, and three languages that do not know
-fossil exists read the same tree on 2026-08-04. The seam between the two halves is the corpus on
-disk. It was never an API.
+The other half of the confirmation is measured rather than assumed: `kanzo-ui` reads corpora written
+by fossil with **no dependency on `@fossil-lang/*`**, and three languages that do not know fossil
+exists read the same tree on 2026-08-04. The seam between the two halves is the corpus on disk. It was
+never an API.
 
 <Callout type="warn" title="A name that misleads, corrected here too">
 `fossil-graph` is **not** an implementation of GraphAr. It is the read surface over a corpus somebody
-else already wrote: a closed enum of six verbs — `schema`, `read`, `expand`, `path`, `aggregate`,
-`execute_sql` — with a JSON Schema each. The crate that writes is `fossil-df`; the crate that models
-the manifest is `fossil-sinks`. Anyone who gets lost there is being misled by the names, which is the
-next section.
+else already wrote: a closed enum of [six verbs](/docs/characteristics/verbs). The crate that writes
+is `fossil-df`; the crate that models the manifest is `fossil-sinks`.
 </Callout>
 
-## The verdict, which is not the crate count
+## One repository
 
-The proposal takes 25 crates to 21 — five disappear, one appears, four are renamed where they stand.
-That is a modest number, and the ADR says so about its own arithmetic. The answer to *"I don't know
-whether all of these are necessary"* is that most of them are, and that what makes twenty-five feel
-like a maze is not the count:
+Five projects that have already been through this were compared, and **none of them puts the
+specification in its own repository.**
 
-> **Four of them lie about what they are.** `fossil-ide` is not an IDE, `fossil-sinks` writes
-> nothing, `fossil-engine` is not an engine, `fossil-run-status` is not a status.
+- **dbt** separates **the schema, not the implementation** — `schemas.getdbt.com` is its own repo with
+  versioned URLs, while the compiler stays in `dbt-core`. Its Rust engine was recently folded *back*
+  into `dbt-core`.
+- **Delta shows that co-location does not prevent drift**: CheckpointV2 diverged from its own
+  specification while living in the same repository. What fixed it was a **process** —
+  `protocol_rfcs/`, where the specification PR lands before the implementation PR. Lance arrived at
+  the same rule independently.
+- **Lance** is two years ahead of us and still has an open, unanswered question about *what constitutes
+  the specification* — the protobufs, the docs, or some of the code.
+- **Malloy is the counterexample**, and it is our scenario if this goes wrong: its interfaces package
+  was created, killed within three months by a maintainer's issue titled *"malloy-interfaces cannot
+  have a copy of malloy_types in it"* — still open — and revived seventeen months later. Twenty-five
+  satellite repositories held in lockstep by a script, one of them frozen **159 releases** behind.
 
-A false name costs more than a surplus crate, because you cannot skip it while reading. `fossil-ide`
-is the set of LSP functions, and exists only because `fossil-lsp` does not compile to wasm32.
-`fossil-sinks` writes nothing because ADR-0017 decided fossil never writes Parquet bytes from Rust,
-and half its dependents are readers. `fossil-engine` is 842 lines of credential resolution and
-pre-introspection, not a façade over anything. `fossil-run-status` is four unrelated wire contracts,
-two of which are inputs.
-
-## Two blocks and three rings compose; neither subsumes the other
-
-**The rings say where the code runs. The blocks say what the code is about.** Both have to be kept,
-because each forbids something the other allows.
-
-|  | ring 1 · language, no engine | ring 2 · native, disk and a budget | ring 3 · wasm, addresses bytes |
-| --- | --- | --- | --- |
-| **fossil block** | `base` · `syntax` · `hir` · `mir` · `registry` · `descriptors` · `analysis` · `lsp` · `wire` | `df` · `layout` · `resolver` · `compile` · `cli` | `fossil-wasm` (language/LSP) |
-| **graph block** | — | — | `graph` · `graph-wasm` · `mcp` |
-| **the contract** | `graph-schema` · the corpus convention | | |
-
-The table makes one thing visible that neither taxonomy sees alone: **the graph block occupies a
-single cell.** It is an entire core living in one ring. That is why it reads like a separate
-repository, and why `fossil-graph` has no dependencies — not because it is well encapsulated, but
-because it crosses neither frontier.
-
-## The graph proposed
-
-```mermaid
-graph BT
-  subgraph CONTRATO["contract · what the two blocks speak"]
-    GS["fossil-graph-schema<br/>the schema, without a format"]
-    CONV["the corpus convention<br/>Parquet · dense ids · Morton · CSR/CSC<br/><i>a crate, or a document plus a guard?</i>"]
-  end
-
-  subgraph FL["fossil block · ring 1 · the language"]
-    BASE["fossil-base<br/>Db + System, and nothing else"]
-    SYN[fossil-syntax]
-    DESC["fossil-descriptors<br/>TypeProvider + impls"]
-    HIR[fossil-hir]
-    REG["fossil-registry<br/>the stdlib catalogue"]
-    MIR[fossil-mir]
-    IDE["fossil-analysis<br/>ex ide + ide-db"]
-    LSP[fossil-lsp]
-    FW[fossil-wasm]
-    WIRE["fossil-wire<br/>ex run-status"]
-  end
-
-  subgraph FC["fossil block · ring 2 · the compiler"]
-    DF[fossil-df]
-    LAY[fossil-layout]
-    RES["fossil-resolver<br/>native by threat model"]
-    CMP["fossil-compile<br/>ex fossil-engine"]
-    CLI[fossil-cli]
-  end
-
-  subgraph G["graph block · ring 3 · the corpus"]
-    GR[fossil-graph]
-    GW[fossil-graph-wasm]
-    MCP[fossil-mcp]
-  end
-
-  SYN --> BASE
-  DESC --> GS
-  HIR --> BASE
-  HIR --> SYN
-  HIR --> DESC
-  REG --> HIR
-  MIR --> HIR
-  MIR --> REG
-  MIR --> GS
-  IDE --> HIR
-  IDE --> REG
-  IDE --> WIRE
-  LSP --> IDE
-  FW --> IDE
-
-  DF --> MIR
-  DF --> CONV
-  CMP --> DF
-  CMP --> LAY
-  CMP --> RES
-  CMP --> HIR
-  CMP --> WIRE
-  CLI --> CMP
-
-  GR --> CONV
-  GW --> GR
-  MCP --> GR
-```
-
-**Nothing crosses horizontally.** Both blocks point down at the contract and neither points at the
-other, which is the entire difference from the first diagram, where the engine and the corpus pointed
-at each other.
-
-What that buys is not the crate count. It is that a newcomer can read the graph block whole — three
-crates, 2,884 lines, two ports — without opening the compiler. Today they cannot, because the graph
-does not tell them where to stop.
+> **What buys correctness is not the boundary. It is the process.** The specification lands before the
+> implementation, and conformance is round-trip.
 
 ## What is on this page and what is in the record
 
-The page is the shape. The 1,000-line record is the argument, and it holds things deliberately left
-off here: the per-crate verdict table with the fact behind each row; why `fossil-base` is not
-agnostic today and the single edge that proves it; why merging `fossil-resolver` into `fossil-base`
-is impossible (a `compile_error!` on wasm32 that no symmetry argument survives); the nine-format
-survey behind [the corpus contract](/docs/characteristics/corpus-contract); and the ADR correcting
-two of its own claims in writing.
+The page is the shape. `decisions/0046-un-nucleo-y-carcasas-finas.md` is the argument, and it holds
+what is deliberately left off here: the measurement that reordered the whole priority — a compiler
+that reports success and writes a corpus with a property missing, which is
+[the expression cliff](/docs/characteristics/expressions) — plus the scope of the incremental system,
+the shape of the extension mechanism, and the [RDF 1.2](/docs/characteristics/rdf12) design.
 
 <Callout title="Undone, all of it">
-Nothing in the proposed graph has been executed. `Status` on the record is `proposed`, the crate
-count is 25 today, and the one decision the rest hangs from — whether the corpus convention lives in
-a crate or in a document plus guards — is explicitly left open there. The measurement backing the
-sentence at the top of this page is the manifest assertion in `apps/docs/content.test.ts`: it reads
-`crates/fossil-graph/Cargo.toml` and fails if that crate's fossil dependencies are ever anything
-other than `fossil-sinks` alone — including when ADR-0042 §2 lands and the answer becomes none, at
-which point this page owes a rewrite rather than a quiet edit.
+The crate count is twenty-four today and nothing below the first diagram has been executed. The
+measurement backing the sentence at the top of this page is the manifest assertion in
+`apps/docs/content.test.ts`: it reads `crates/fossil-graph/Cargo.toml` and fails if that crate's
+fossil dependencies are ever anything other than `fossil-sinks` alone — including when ADR-0042 §2
+lands and the answer becomes none, at which point this page owes a rewrite rather than a quiet edit.
 </Callout>

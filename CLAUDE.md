@@ -80,12 +80,13 @@ verify WASM gate, file ADR if it's a major version with API changes.
 crates/
   fossil-base/             Salsa Db trait + System abstraction (per ADR-0003)
   fossil-syntax/           lossless CST + parser
-  fossil-hir/              types + name resolution + bidirectional checker (collapsed per ADR-0002)
+  fossil-hir/              types + name resolution + bidirectional checker (ADR-0002) + the
+                           stdlib catalog (`stdlib.rs`, ADR-0048 — the checker resolves calls against it)
   fossil-mir/              typed operator algebra (11 ops)
   fossil-codegen/          MIR → DuckDB SQL + GraphAr manifest
   fossil-descriptors-{input,output}/   trait + impls (CSVW, ShEx)
   fossil-sinks/            Sink trait + GraphAr writer (atop arrow + parquet)
-  fossil-registry/         function registry
+  fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-runtime/          DuckDB native execution    [NATIVE-ONLY]
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-cli/              `fossil run/check/catalog/providers` [NATIVE-ONLY]

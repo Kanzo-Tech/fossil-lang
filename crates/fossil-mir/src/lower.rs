@@ -64,12 +64,13 @@
 
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::Cardinality as GsCardinality;
+use fossil_graph_schema::Primitive;
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
 use fossil_hir::lower::lower_to_hir;
 use fossil_hir::spans::spans;
-use fossil_hir::{HirExpr, HirMapping, MappingLoc, Primitive, PropertyKey, Record, Ty, TyKind};
+use fossil_hir::{HirExpr, HirMapping, MappingLoc, PropertyKey, Record, Ty, TyKind};
 use smol_str::SmolStr;
 
 use crate::graph::MirGraph;
@@ -104,11 +105,17 @@ pub fn lower_to_mir_pg<'db>(
     let dm = def_map(db, file);
     let span = mapping_span(db, mapping);
     let Some(dense_idx) = dm.mappings(db).iter().position(|loc| *loc == mapping) else {
-        return poisoned(db, fossil_base::bug(db, span, "mapping is absent from its own DefMap"));
+        return poisoned(
+            db,
+            fossil_base::bug(db, span, "mapping is absent from its own DefMap"),
+        );
     };
     let hir = lower_to_hir(db, file);
     let Some(m) = hir.mappings(db).get(dense_idx) else {
-        return poisoned(db, fossil_base::bug(db, span, "mapping has no HIR at its DefMap index"));
+        return poisoned(
+            db,
+            fossil_base::bug(db, span, "mapping has no HIR at its DefMap index"),
+        );
     };
     let body = body(db, mapping);
     let prefixes = dm.prefixes(db);
@@ -180,9 +187,10 @@ pub fn lower_to_mir_pg<'db>(
     // descriptor wired into the lowering — a later increment).
     let field_ty = |field: &str| -> Ty<'db> {
         if let TyKind::Record(rec) = row_type.kind(db)
-            && let Some(f) = rec.fields(db).iter().find(|f| f.name == field) {
-                return f.ty;
-            }
+            && let Some(f) = rec.fields(db).iter().find(|f| f.name == field)
+        {
+            return f.ty;
+        }
         string_ty
     };
 
@@ -196,14 +204,14 @@ pub fn lower_to_mir_pg<'db>(
         match &prop.value {
             HirExpr::FieldRef(field) => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
+                value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
                 ty: field_ty(field.as_str()),
                 rdf_uri: Some(iri.clone()),
                 single_valued: true,
             }),
             HirExpr::StringLit(_) => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(&prop.value, &m.source_binding, prefixes, None),
+                value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
                 ty: string_ty,
                 rdf_uri: Some(iri.clone()),
                 single_valued: true,
@@ -211,12 +219,40 @@ pub fn lower_to_mir_pg<'db>(
             HirExpr::Template(t) => {
                 let skel = crate::skeleton::template_skeleton(t.as_str());
                 if let Some((_, dst_type)) = subject_skeletons.iter().find(|(s, _)| *s == skel) {
-                    let dst_id = lower_property_value(&prop.value, &m.source_binding, prefixes, None);
+                    let dst_id =
+                        lower_property_value(db, &prop.value, &m.source_binding, prefixes, None);
                     edges.push((pred_local, dst_type.clone(), iri.clone(), dst_id));
                 }
                 // non-matching template → dangling, no edge (v0.1)
             }
             HirExpr::PrefixedName { .. } => {} // constant IRI → not an edge
+            // A computed property: the value is whatever the function returns,
+            // typed by its catalog entry. It is never an edge — an edge is a
+            // reference to another shape's subject, and v0.1 has no function
+            // that produces one.
+            HirExpr::Call { func, .. } => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
+                ty: call_result_ty(db, func),
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            }),
+            // A comparison is a Bool column; an integer literal an Integer one.
+            // The type is the operator's and the literal's, not the row's.
+            HirExpr::BinOp { .. } => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
+                ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            }),
+            HirExpr::IntLit(_) => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
+                ty: Ty::new(db, TyKind::Primitive(Primitive::Integer)),
+                rdf_uri: Some(iri.clone()),
+                single_valued: true,
+            }),
         }
     }
 
@@ -306,10 +342,7 @@ fn mapping_span<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> 
 /// no-shape case) returns the ops unchanged — the template-skeleton edges the
 /// agnostic lowering already produced stand.
 #[must_use]
-pub fn apply_output_shape<'db>(
-    ops: &[Op<'db>],
-    descriptor: &OutputDescriptorKind,
-) -> Vec<Op<'db>> {
+pub fn apply_output_shape<'db>(ops: &[Op<'db>], descriptor: &OutputDescriptorKind) -> Vec<Op<'db>> {
     // Route every source schema language (ShEx / SHACL / accept-all) through
     // the one canonical output model. The executor classifies against this; it
     // never sees ShEx- or SHACL-specific types.
@@ -333,7 +366,12 @@ pub fn apply_output_shape<'db>(
 
     for op in ops {
         match op {
-            Op::Sink { sink: kind, .. } => sink = Some(Op::Sink { input: 0, sink: *kind }),
+            Op::Sink { sink: kind, .. } => {
+                sink = Some(Op::Sink {
+                    input: 0,
+                    sink: *kind,
+                });
+            }
             Op::EmitVertex {
                 input,
                 type_name,
@@ -405,7 +443,7 @@ fn local_name(iri: &str) -> &str {
 ///
 /// Reads the `(constructor, uri)` pair off the already-loaded [`DefMap`]
 /// (file-keyed — NO new per-mapping fan-out, RESEARCH Pitfall 3). The format is
-/// resolved by looking the constructor up in [`fossil_registry::SOURCE_KINDS`]
+/// resolved by looking the constructor up in [`fossil_hir::stdlib::SOURCE_KINDS`]
 /// (W1 single source of truth) — no string-matching here. A
 /// [`SourceLowering::NativeReader`] maps exhaustively to a [`SourceFormat`] (a
 /// new reader variant is a compile error until handled); a
@@ -447,10 +485,10 @@ fn resolve_source<'db>(
         ));
     };
     let format = match constructor.as_deref() {
-        Some(c) => match fossil_registry::source_kind(c) {
+        Some(c) => match fossil_hir::stdlib::source_kind(c) {
             Some(kind) => match kind.lowering {
-                fossil_registry::SourceLowering::NativeReader(r) => native_reader_format(r),
-                fossil_registry::SourceLowering::Provider => SourceFormat::Provider {
+                fossil_hir::stdlib::SourceLowering::NativeReader(r) => native_reader_format(r),
+                fossil_hir::stdlib::SourceLowering::Provider => SourceFormat::Provider {
                     name: SmolStr::new(kind.short_name),
                 },
             },
@@ -478,14 +516,14 @@ fn resolve_source<'db>(
     Ok((uri, format))
 }
 
-/// Exhaustive [`NativeReader`](fossil_registry::NativeReader) → [`SourceFormat`]
+/// Exhaustive [`NativeReader`](fossil_hir::stdlib::NativeReader) → [`SourceFormat`]
 /// map. A new native reader is a compile error here until handled (the W1
 /// invariant: source dispatch can't silently forget a format).
-const fn native_reader_format(r: fossil_registry::NativeReader) -> SourceFormat {
+const fn native_reader_format(r: fossil_hir::stdlib::NativeReader) -> SourceFormat {
     match r {
-        fossil_registry::NativeReader::CsvAuto => SourceFormat::Csv,
-        fossil_registry::NativeReader::JsonAuto => SourceFormat::Json,
-        fossil_registry::NativeReader::Parquet => SourceFormat::Parquet,
+        fossil_hir::stdlib::NativeReader::CsvAuto => SourceFormat::Csv,
+        fossil_hir::stdlib::NativeReader::JsonAuto => SourceFormat::Json,
+        fossil_hir::stdlib::NativeReader::Parquet => SourceFormat::Parquet,
     }
 }
 
@@ -560,6 +598,7 @@ fn lower_iri_property<'db>(
         .iter()
         .find(|p| matches!(p.key, PropertyKey::Iri))?;
     Some(lower_property_value(
+        db,
         &prop.value,
         &m.source_binding,
         prefixes,
@@ -596,6 +635,7 @@ fn lower_iri_property<'db>(
 /// (CODEGEN-LOWERING-01) and
 /// `.planning/phases/09-playground-polish-differentiators/09-01-PLAN.md`.
 fn lower_property_value<'db>(
+    db: &'db dyn fossil_base::Db,
     value: &HirExpr,
     source_binding: &SmolStr,
     prefixes: &[PrefixEntry],
@@ -613,7 +653,52 @@ fn lower_property_value<'db>(
         // A `PrefixedName` RHS resolved to its full IRI by the HIR; render it
         // as a literal string value (the IRI text).
         HirExpr::PrefixedName { iri } => Expr::LitString(iri.clone()),
+        // The result type comes from the same catalog entry the checker typed
+        // this call against — the backend derives the column's datatype from
+        // it, so a call is no less typed than a column reference.
+        HirExpr::IntLit(v) => Expr::LitInt(*v),
+        HirExpr::BinOp { op, lhs, rhs } => Expr::BinOp {
+            op: *op,
+            lhs: Box::new(lower_property_value(
+                db,
+                lhs,
+                source_binding,
+                prefixes,
+                assert_line,
+            )),
+            rhs: Box::new(lower_property_value(
+                db,
+                rhs,
+                source_binding,
+                prefixes,
+                assert_line,
+            )),
+            ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
+        },
+        HirExpr::Call { func, args } => Expr::Call {
+            func: func.clone(),
+            args: args
+                .iter()
+                .map(|a| lower_property_value(db, a, source_binding, prefixes, assert_line))
+                .collect(),
+            ty: call_result_ty(db, func),
+        },
     }
+}
+
+/// The declared return type of a catalogued function, as a `Ty`.
+///
+/// A name that is not in the catalog cannot reach here — the checker rejects it
+/// and poisons the mapping — so the fallback is unreachable in a program that
+/// type-checked. It types `String` rather than panicking because lowering runs
+/// on poisoned mappings too (the walking-skeleton invariant: never panic).
+fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> {
+    fossil_hir::stdlib::stdlib()
+        .lookup(func.as_str())
+        .map_or_else(
+            || Ty::new(db, TyKind::Primitive(Primitive::String)),
+            |e| e.sig.ret.to_ty(db),
+        )
 }
 
 /// IRI-template lowering. Parses the raw template token text (including
@@ -758,7 +843,6 @@ mod tests {
     use super::*;
     use fossil_hir::def_map::def_map;
     use std::sync::Arc;
-
 
     /// STDL-06: a mapping reading from an `io.json("...")` / `io.parquet("...")`
     /// binding lowers `Op::Source` with the real URI from the binding and the

@@ -389,8 +389,9 @@ User : ex:Person from users
         );
     }
 
+    use fossil_graph_schema::Primitive;
     use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
-    use fossil_hir::ty::{InferenceId, Primitive, Record, RecordField, Ty, TyKind};
+    use fossil_hir::ty::{InferenceId, Record, RecordField, Ty, TyKind};
 
     fn bare_db() -> fossil_base::FossilDb {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());

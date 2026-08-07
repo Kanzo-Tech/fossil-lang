@@ -17,7 +17,6 @@ fossil-syntax   = { path = "../fossil-syntax" }
 fossil-hir      = { path = "../fossil-hir" }
 # W1: source dispatch reads the single SOURCE_KINDS table (acyclic — registry's
 # dep closure is hir/base/syntax/descriptors/shex, none of which is fossil-mir).
-fossil-registry = { path = "../fossil-registry" }
 # The output descriptor (ShEx) drives the property-graph edge/cardinality
 # classification in `apply_output_shape` — passed as a function argument
 # (ADR-0018: NEVER read through `Db::system()`), so this is a plain data dep, not

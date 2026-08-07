@@ -344,9 +344,10 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
 // `result.contents.value` would carry over JSON-RPC.
 
 use fossil_base::{FossilDb, NativeSystem, Span, System};
+use fossil_graph_schema::Primitive;
 use fossil_hir::body::ExprId;
 use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
-use fossil_hir::ty::{Primitive, Ty, TyKind};
+use fossil_hir::ty::{Ty, TyKind};
 use std::sync::Arc;
 
 const USERS_CSVW: &str = r#"{
@@ -443,8 +444,9 @@ fn hover_on_csvw_fieldref_outside_closure() {
     let name_kind = descriptor
         .type_for_column("name")
         .expect("CSVW `name` column has a type");
-    assert!(
-        name_kind.to_lowercase().contains("string"),
+    assert_eq!(
+        name_kind,
+        Primitive::String,
         "CSVW `name` column must be a string type; got {name_kind:?}",
     );
 

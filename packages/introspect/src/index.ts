@@ -12,28 +12,29 @@
  * the descriptor→LSP-worker push live in `@fossil-lang/editor`; the host
  * decides how `resolve`/`query` reach its cloud + DuckDB.
  *
- * The primitive table MUST match `fossil-hir::infer::primitive_from_name`
- * (and the Rust sibling `duckdb_type_to_fossil_primitive` in fossil-cli) or
- * the bidirectional checker silently disagrees with the editor.
+ * The primitive union below is the wire form of `fossil-graph-schema`'s
+ * `Primitive`; the DuckDB mapping mirrors the Rust sibling
+ * `duckdb_type_to_fossil_primitive` in `fossil-engine`. A value outside the
+ * union is rejected when the descriptor is registered.
  */
 
 /**
- * Canonical Fossil primitive names (mirror `@fossil-lang/wasm`'s
+ * The Fossil primitive lattice (mirror `@fossil-lang/wasm`'s
  * `InferredPrimitive` — structurally identical so `introspect()` output flows
  * straight into `FossilPlayground.registerInferredDescriptor`). Consolidating
  * the single source of these types is a follow-up (see EDITOR-SCHEMA-AWARE-PLAN
  * D-2).
  */
 export type InferredPrimitive =
-  | "String"
-  | "Integer"
-  | "Float"
-  | "Bool"
-  | "Date"
-  | "DateTime"
-  | "Time"
-  | "GYear"
-  | "AnyURI";
+  | "string"
+  | "integer"
+  | "float"
+  | "bool"
+  | "date"
+  | "date_time"
+  | "time"
+  | "g_year"
+  | "any_uri";
 
 export interface InferredColumn {
   name: string;
@@ -62,8 +63,8 @@ export interface DescribeRow {
 }
 
 /**
- * Map a DuckDB column-type string to the canonical Fossil primitive name.
- * MUST match `fossil-hir::infer::primitive_from_name`.
+ * Map a DuckDB column-type string onto the Fossil lattice. MUST match the Rust
+ * sibling `duckdb_type_to_fossil_primitive` in `fossil-engine`.
  */
 export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
   const upper = t.trim().toUpperCase();
@@ -75,17 +76,17 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
     upper === "TINYINT" ||
     upper === "HUGEINT"
   ) {
-    return "Integer";
+    return "integer";
   }
-  if (upper === "DOUBLE" || upper === "FLOAT" || upper === "REAL") return "Float";
-  if (upper.startsWith("DECIMAL")) return "Float";
-  if (upper === "BOOLEAN" || upper === "BOOL") return "Bool";
-  if (upper === "DATE") return "Date";
-  if (upper === "TIMESTAMP" || upper === "DATETIME") return "DateTime";
-  if (upper === "TIME") return "Time";
+  if (upper === "DOUBLE" || upper === "FLOAT" || upper === "REAL") return "float";
+  if (upper.startsWith("DECIMAL")) return "float";
+  if (upper === "BOOLEAN" || upper === "BOOL") return "bool";
+  if (upper === "DATE") return "date";
+  if (upper === "TIMESTAMP" || upper === "DATETIME") return "date_time";
+  if (upper === "TIME") return "time";
   // VARCHAR / TEXT / STRING + any unrecognised type fall back to String
   // (matching the fossil-hir wildcard arm).
-  return "String";
+  return "string";
 }
 
 /**

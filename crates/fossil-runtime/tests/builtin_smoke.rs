@@ -3,7 +3,7 @@
 //! NATIVE-ONLY (`fossil-runtime` carries a `wasm32` `compile_error!` tripwire).
 //!
 //! The structural half of the SC#1 gate lives in
-//! `fossil-registry/tests/classification_gate.rs`: it proves every `pure_sql`
+//! `fossil-hir/tests/classification_gate.rs`: it proves every `pure_sql`
 //! `Builtin.duckdb_name` is a member of the curated `DUCKDB_BUILTIN_ALLOWLIST`.
 //! That allowlist is internally consistent, but a name could still be a typo or
 //! a builtin that a future `DuckDB` renamed/removed. THIS test closes that gap
@@ -26,7 +26,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use duckdb::Connection;
-use fossil_registry::{FunctionRegistry, LoweringKind, WasmClass};
+use fossil_hir::stdlib::{FunctionRegistry, LoweringKind, WasmClass};
 
 /// A representative `SELECT <duckdb_name>(<dummy args>)` for a given `DuckDB`
 /// builtin name. The arg shapes match each builtin's real arity (most are unary

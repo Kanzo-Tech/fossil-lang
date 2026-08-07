@@ -82,26 +82,25 @@ export interface StdlibClass {
 }
 
 /**
- * Canonical primitive names for inferred-descriptor columns. Must match the
- * lookup table in `fossil-hir::infer::primitive_from_name` (ADR-0037). Names
- * map 1:1 to the `Primitive` enum in HIR (Integer, Float, String, Bool, Date,
- * DateTime, Time, GYear, AnyURI).
+ * The primitive lattice, as `fossil-graph-schema` serialises it — the same enum
+ * the checker types against, not a set of names it looks up.
  *
- * Unknown / non-canonical strings are accepted on the wire — the Rust side
- * coerces them to `String` and emits a `D-INFERRED-UNKNOWN-DATATYPE`
- * diagnostic. Hosts SHOULD canonicalise their DuckDB `DESCRIBE` output to
- * these names before registering.
+ * A value outside this union is REJECTED when the descriptor is registered:
+ * `registerInferredDescriptor` returns the serde error naming the offending
+ * value. It is no longer coerced to `string` with a diagnostic three crates
+ * later, so a host that sends a type fossil does not carry finds out at the
+ * call, not in a compile.
  */
 export type InferredPrimitive =
-  | 'String'
-  | 'Integer'
-  | 'Float'
-  | 'Bool'
-  | 'Date'
-  | 'DateTime'
-  | 'Time'
-  | 'GYear'
-  | 'AnyURI';
+  | 'string'
+  | 'integer'
+  | 'float'
+  | 'bool'
+  | 'date'
+  | 'date_time'
+  | 'time'
+  | 'g_year'
+  | 'any_uri';
 
 /** One column from a host-introspected source. */
 export interface InferredColumnJson {

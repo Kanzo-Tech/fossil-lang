@@ -16,10 +16,12 @@ workspace = true
 fossil-base     = { path = "../fossil-base" }
 fossil-hir      = { path = "../fossil-hir" }
 fossil-mir      = { path = "../fossil-mir" }
-fossil-registry = { path = "../fossil-registry" }
+fossil-lineage = { path = "../fossil-lineage" }
 # Descriptors (input forward-propagation + output shape).
 fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# Pre-introspection types a column: the DuckDB type string lands on the lattice.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The DataFusion executor — the SINGLE `run` path (lower_to_mir_pg → execute_graph
 # → write_to_dir). Re-exports `OutputDescriptorKind`. DuckDB now serves only the
 # layout post-pass + CSV type pre-introspection.

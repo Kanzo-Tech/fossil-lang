@@ -12,6 +12,7 @@
 //! (passes a hot-path `&dyn`, NOT a `Box<dyn>` — CLAUDE.md hard rule).
 
 use crate::{DescriptorError, FieldType, InputDescriptor, InputSchema};
+use fossil_graph_schema::Primitive;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -20,13 +21,12 @@ use smol_str::SmolStr;
 pub struct InferredColumn {
     /// Column name as introspected (`DuckDB` `column_name`).
     pub name: SmolStr,
-    /// Canonical Primitive variant name — must match the lookup table in
-    /// `fossil-hir::infer::primitive_from_name`:
-    /// `"String" | "Integer" | "Float" | "Bool" | "Date" | "DateTime" |
-    ///  "Time" | "GYear" | "AnyURI"`. Unknown names → fall back to String
-    /// (with a `D-INFERRED-UNKNOWN-DATATYPE` diagnostic emitted by the
-    /// consumer; mirrors CSVW path in `infer.rs::record_from_descriptor`).
-    pub primitive: SmolStr,
+    /// The column's place in the lattice — the same enum the checker types
+    /// against, so a host sends `"integer"`, not a name the consumer has to
+    /// look up. A value outside the lattice fails here, at deserialisation,
+    /// naming itself; it does not become a `String` column and a diagnostic
+    /// three crates away.
+    pub primitive: Primitive,
 }
 
 /// A descriptor inferred from a runtime file introspection.
@@ -95,8 +95,8 @@ impl InputDescriptor for InferredDescriptor {
     fn parse(&self, _raw: &[u8]) -> Result<InputSchema, DescriptorError> {
         let mut fields = indexmap::IndexMap::new();
         for c in &self.columns {
-            let ft = match c.primitive.as_str() {
-                "Integer" => FieldType::Integer,
+            let ft = match c.primitive {
+                Primitive::Integer => FieldType::Integer,
                 _ => FieldType::String,
             };
             fields.insert(c.name.clone(), ft);
@@ -120,11 +120,11 @@ mod tests {
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
-                    primitive: "Integer".into(),
+                    primitive: Primitive::Integer,
                 },
                 InferredColumn {
                     name: "name".into(),
-                    primitive: "String".into(),
+                    primitive: Primitive::String,
                 },
             ],
             content_hash: "abc123".into(),
@@ -140,7 +140,7 @@ mod tests {
             source_name: "users".into(),
             columns: vec![InferredColumn {
                 name: "id".into(),
-                primitive: "Integer".into(),
+                primitive: Primitive::Integer,
             }],
             content_hash: String::new(),
         };
@@ -156,11 +156,11 @@ mod tests {
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
-                    primitive: "Integer".into(),
+                    primitive: Primitive::Integer,
                 },
                 InferredColumn {
                     name: "name".into(),
-                    primitive: "String".into(),
+                    primitive: Primitive::String,
                 },
             ],
             content_hash: String::new(),
@@ -169,6 +169,23 @@ mod tests {
         assert_eq!(schema.fields.len(), 2);
         assert_eq!(schema.fields.get("id").copied(), Some(FieldType::Integer));
         assert_eq!(schema.fields.get("name").copied(), Some(FieldType::String));
+    }
+
+    /// The host's wire format is the lattice itself. A name outside it is
+    /// rejected here — where the JSON arrives and the offending value is still
+    /// in hand — instead of being coerced to `String` and reported by the
+    /// checker as a diagnostic about a column.
+    #[test]
+    fn a_primitive_outside_the_lattice_is_a_deserialisation_error() {
+        let json = r#"{"source_name":"users",
+                       "columns":[{"name":"id","primitive":"decimal"}],
+                       "content_hash":""}"#;
+        let err = serde_json::from_str::<InferredDescriptor>(json)
+            .expect_err("`decimal` is not in the lattice");
+        assert!(
+            err.to_string().contains("decimal"),
+            "the error names the value the host sent: {err}"
+        );
     }
 
     #[test]

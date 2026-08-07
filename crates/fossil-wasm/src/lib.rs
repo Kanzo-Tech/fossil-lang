@@ -197,7 +197,7 @@ impl FossilPlayground {
     /// authority on what is runnable in-browser.
     ///
     /// This is pure read-only data projected from the `&'static`-ready
-    /// `fossil_registry::FunctionRegistry` — no `DuckDB`, no native UDF code,
+    /// `fossil_hir::stdlib::FunctionRegistry` — no `DuckDB`, no native UDF code,
     /// WASM-clean.
     ///
     /// # Errors
@@ -296,7 +296,6 @@ impl FossilPlayground {
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
 
-
     /// Install a user-supplied `ShEx` schema as the active output descriptor.
     /// On parse failure the previously-installed descriptor is RETAINED (no
     /// half-applied state — a broken schema must never wedge the editor;
@@ -334,8 +333,8 @@ impl FossilPlayground {
     /// {
     ///   "source_name": "users",
     ///   "columns": [
-    ///     { "name": "id", "primitive": "Integer" },
-    ///     { "name": "name", "primitive": "String" }
+    ///     { "name": "id", "primitive": "integer" },
+    ///     { "name": "name", "primitive": "string" }
     ///   ],
     ///   "content_hash": ""
     /// }
@@ -358,10 +357,7 @@ impl FossilPlayground {
     /// Implementation: thin shim over the pure-Rust
     /// [`Self::register_inferred_descriptor_native`] helper.
     #[wasm_bindgen(js_name = registerInferredDescriptor)]
-    pub fn register_inferred_descriptor(
-        &self,
-        descriptor_json: &str,
-    ) -> Result<(), JsError> {
+    pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsError> {
         self.register_inferred_descriptor_native(descriptor_json)
             .map_err(|e| JsError::new(&e.to_string()))
     }
@@ -609,14 +605,14 @@ pub struct FnClassification {
 /// Project the full stdlib registry into the serializable classification
 /// manifest: every function name + its `wasm_class` string.
 ///
-/// Read directly from `fossil_registry::FunctionRegistry::stdlib_default()`,
+/// Read directly from `fossil_hir::stdlib::FunctionRegistry::stdlib_default()`,
 /// the single source of truth (SC#1 — the playground and the native UDFs agree
 /// on which functions are `native_udf_only`).
 #[must_use]
 pub fn stdlib_classification() -> Vec<FnClassification> {
-    use fossil_registry::WasmClass;
+    use fossil_hir::stdlib::WasmClass;
 
-    let registry = fossil_registry::FunctionRegistry::stdlib_default();
+    let registry = fossil_hir::stdlib::FunctionRegistry::stdlib_default();
     let mut manifest: Vec<FnClassification> = registry
         .iter()
         .map(|entry| FnClassification {
@@ -661,7 +657,7 @@ impl Default for FossilPlayground {
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
 #[wasm_bindgen]
 pub fn providers() -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(&fossil_registry::providers()).map_err(JsError::from)
+    serde_wasm_bindgen::to_value(&fossil_lineage::providers()).map_err(JsError::from)
 }
 
 /// Parse `program` and return its external references — every data URI +
@@ -678,7 +674,7 @@ pub fn refs(program: &str) -> Result<JsValue, JsError> {
 }
 
 /// Native-reachable core of [`refs`] — builds a transient single-file db and
-/// runs the shared [`fossil_registry::source_refs`]. Cargo-tests call THIS: the
+/// runs the shared [`fossil_lineage::source_refs`]. Cargo-tests call THIS: the
 /// `#[wasm_bindgen]` wrapper's `serde_wasm_bindgen` / `JsError` calls panic on
 /// native targets (same split as `check` ↔ `check_rows`). The db is throwaway
 /// (refs is parse-only and called once per job launch, not per keystroke), so
@@ -688,9 +684,8 @@ pub fn refs_native(program: &str) -> Vec<fossil_run_status::SourceRefInfo> {
     let system = Arc::new(WasmSystem::default()) as Arc<dyn System>;
     let db = WasmDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "<refs>".to_string());
-    fossil_registry::source_refs(&db, file)
+    fossil_lineage::source_refs(&db, file)
 }
-
 
 /// One diagnostic row in the [`FossilPlayground::check`] return array.
 ///

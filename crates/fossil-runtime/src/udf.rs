@@ -1,7 +1,7 @@
 //! Native Rust UDFs for the `native_udf_only` stdlib functions (STDL-03/05).
 //!
-//! These implement the `fossil-registry` entries whose `LoweringKind` is
-//! [`Udf`](https://docs.rs/fossil-registry) — i.e. functions classified
+//! These implement the `fossil-hir` entries whose `LoweringKind` is
+//! [`Udf`](https://docs.rs/fossil-hir) — i.e. functions classified
 //! [`WasmClass::NativeUdfOnly`]. They are registered on a native `DuckDB`
 //! [`Connection`] via [`register_stdlib_udfs`] so that generated SQL of the
 //! form `fossil_slug(x)` resolves and runs natively.
@@ -19,7 +19,7 @@
 //! # UDF name ⇔ registry mapping
 //!
 //! The registered names match the `udf_name` spellings in
-//! `fossil_registry::LoweringKind::Udf` exactly (the codegen `render_expr` Call
+//! `fossil_hir::stdlib::LoweringKind::Udf` exactly (the codegen `render_expr` Call
 //! arm renders `udf_name(args)`):
 //!
 //! | registry function       | UDF name                  |

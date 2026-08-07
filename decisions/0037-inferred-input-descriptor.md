@@ -1,7 +1,7 @@
 # ADR 0037: Drop user-facing CSVW; infer input schema via host-side DuckDB DESCRIBE; introduce InferredDescriptor
 
 **Date:** 2026-05-26
-**Status:** accepted
+**Status:** accepted — `InferredColumn.primitive` is a `Primitive`, not a `SmolStr`, since ADR-0047
 **Decider:** Ángel Iglesias
 **Cite:** `.planning/phases/13-input-model-simplification/13-CONTEXT.md` §"Estrategia: deprecate user-facing, internal CSVW IR opcional"; ADR-0007 §"What's IN the v0.1 subset"; `crates/fossil-hir/src/infer.rs` doc comment about MAX_PER_MAPPING_FAN_OUT.
 

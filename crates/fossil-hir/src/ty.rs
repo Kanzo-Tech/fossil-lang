@@ -14,6 +14,12 @@
 //! `'db` lifetime per Salsa 0.20+ (ADR-0003 + RESEARCH.md §Q7).
 
 use fossil_base::ErrorGuaranteed;
+// The primitive lattice is NOT the type system's to own: the schema contract, the
+// descriptors and the checker all speak it, so it lives in the leaf they share
+// (`fossil-graph-schema`) and is imported here like any other type. Salsa is fine
+// with a foreign type: the `Update` derive falls back to `PartialEq` comparison
+// for anything that is not `salsa::Update` itself.
+use fossil_graph_schema::Primitive;
 use smol_str::SmolStr;
 
 /// Type pretty-printing.
@@ -61,30 +67,6 @@ pub enum TyKind<'db> {
     /// Phase 3 fills this in with real inference logic. Phase 2 ships the
     /// variant + cheap newtype.
     Unknown(InferenceId),
-}
-
-/// All 9 primitive types per type-system.md §2 line 41-42 (xsd-aligned).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub enum Primitive {
-    /// `xsd:string`.
-    String,
-    /// `xsd:integer`.
-    Integer,
-    /// `xsd:float` / `xsd:double`.
-    Float,
-    /// `xsd:boolean`.
-    Bool,
-    /// `xsd:date`.
-    Date,
-    /// `xsd:dateTime`.
-    DateTime,
-    /// `xsd:time`.
-    Time,
-    /// `xsd:gYear` (capitalisation: `GYear` in Rust style; XSD spelling
-    /// preserved in docs).
-    GYear,
-    /// `xsd:anyURI`.
-    AnyURI,
 }
 
 /// One named field of a [`Record`].
@@ -233,23 +215,5 @@ mod tests {
         let sig_a = FnSig::new(&db, vec![int_ty, int_ty], int_ty);
         let sig_b = FnSig::new(&db, vec![int_ty, int_ty], int_ty);
         assert_eq!(sig_a, sig_b);
-    }
-
-    #[test]
-    fn all_nine_primitive_variants_exist() {
-        // Compile-time enumeration check: every variant per
-        // type-system.md §2 line 41-42 must be present.
-        let vs = [
-            Primitive::String,
-            Primitive::Integer,
-            Primitive::Float,
-            Primitive::Bool,
-            Primitive::Date,
-            Primitive::DateTime,
-            Primitive::Time,
-            Primitive::GYear,
-            Primitive::AnyURI,
-        ];
-        assert_eq!(vs.len(), 9);
     }
 }

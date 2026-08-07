@@ -38,10 +38,10 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str = { workspace = true }
 # Phase 5 STDL-07: the stdlib classification table the playground reads to
-# disable native_udf_only functions in-browser. fossil-registry is WASM-clean
+# disable native_udf_only functions in-browser. fossil-hir is WASM-clean
 # (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does
 # NOT pull fossil-runtime or any native UDF crate (Pitfall 3).
-fossil-registry = { path = "../fossil-registry" }
+fossil-lineage = { path = "../fossil-lineage" }
 # WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
 # surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host
 # (keasy consumes the SAME structs). fossil-ide produces them; we name the
@@ -87,4 +87,6 @@ getrandom = { workspace = true }
 uuid      = { workspace = true }
 
 [dev-dependencies]
+# The lattice the descriptor JSON carries.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 wasm-bindgen-test.workspace = true

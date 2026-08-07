@@ -18,7 +18,7 @@ use datafusion::arrow::array::{
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use fossil_graph_schema::{
-    Cardinality, DataType as ScalarType, EdgeType, GraphSchema, NodeType, Property as NodeProp,
+    Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
 
 use crate::{EdgeTable, GraphArData, VertexTable};
@@ -77,14 +77,19 @@ pub fn from_literal_graph(vertices: Vec<LiteralVertex>, edges: Vec<LiteralEdge>)
             Field::new("subject", DataType::Utf8, false),
         ];
         let mut columns: Vec<ArrayRef> = vec![
-            Arc::new(UInt32Array::from_iter_values(0..u32::try_from(n).unwrap_or(u32::MAX))),
+            Arc::new(UInt32Array::from_iter_values(
+                0..u32::try_from(n).unwrap_or(u32::MAX),
+            )),
             Arc::new(subjects.iter().map(|s| Some(*s)).collect::<StringArray>()),
         ];
 
         for (i, prop) in v.properties.iter().enumerate() {
             // The literal value of this property for each row, in dense order.
             let vals = order.iter().map(|&row| {
-                v.rows[row].get(i + 1).map(String::as_str).filter(|s| !s.is_empty())
+                v.rows[row]
+                    .get(i + 1)
+                    .map(String::as_str)
+                    .filter(|s| !s.is_empty())
             });
             let (arr, dt) = literal_column(prop.datatype, vals);
             fields.push(Field::new(&prop.name, dt, true));
@@ -163,26 +168,35 @@ pub fn from_literal_graph(vertices: Vec<LiteralVertex>, edges: Vec<LiteralEdge>)
 /// `Integer` → `Int64`). Unparseable / absent values become null. Non-scalar
 /// datatypes (dates, IRIs) keep their lexical string form.
 fn literal_column<'a>(
-    datatype: ScalarType,
+    datatype: Primitive,
     values: impl Iterator<Item = Option<&'a str>>,
 ) -> (ArrayRef, DataType) {
     match datatype {
-        ScalarType::Integer => (
-            Arc::new(values.map(|v| v.and_then(|s| s.parse::<i64>().ok())).collect::<Int64Array>()),
+        Primitive::Integer => (
+            Arc::new(
+                values
+                    .map(|v| v.and_then(|s| s.parse::<i64>().ok()))
+                    .collect::<Int64Array>(),
+            ),
             DataType::Int64,
         ),
-        ScalarType::Float => (
-            Arc::new(values.map(|v| v.and_then(|s| s.parse::<f64>().ok())).collect::<Float64Array>()),
+        Primitive::Float => (
+            Arc::new(
+                values
+                    .map(|v| v.and_then(|s| s.parse::<f64>().ok()))
+                    .collect::<Float64Array>(),
+            ),
             DataType::Float64,
         ),
-        ScalarType::Bool => (
-            Arc::new(values.map(|v| v.and_then(|s| s.parse::<bool>().ok())).collect::<BooleanArray>()),
+        Primitive::Bool => (
+            Arc::new(
+                values
+                    .map(|v| v.and_then(|s| s.parse::<bool>().ok()))
+                    .collect::<BooleanArray>(),
+            ),
             DataType::Boolean,
         ),
-        _ => (
-            Arc::new(values.collect::<StringArray>()),
-            DataType::Utf8,
-        ),
+        _ => (Arc::new(values.collect::<StringArray>()), DataType::Utf8),
     }
 }
 
@@ -202,7 +216,7 @@ fn pair_batch(pairs: &[(u32, u32)]) -> Vec<RecordBatch> {
 mod tests {
     use super::*;
 
-    fn prop(name: &str, dt: ScalarType) -> NodeProp {
+    fn prop(name: &str, dt: Primitive) -> NodeProp {
         NodeProp {
             name: name.to_string(),
             datatype: dt,
@@ -216,15 +230,18 @@ mod tests {
         let cats = LiteralVertex {
             label: "Catalog".into(),
             rdf_type: Some("http://www.w3.org/ns/dcat#Catalog".into()),
-            properties: vec![prop("title", ScalarType::String)],
+            properties: vec![prop("title", Primitive::String)],
             rows: vec![vec!["urn:cat:1".into(), "My Catalog".into()]],
         };
         let datasets = LiteralVertex {
             label: "Dataset".into(),
             rdf_type: Some("http://www.w3.org/ns/dcat#Dataset".into()),
-            properties: vec![prop("count", ScalarType::Integer)],
+            properties: vec![prop("count", Primitive::Integer)],
             // Out of subject order on purpose → dense id must follow sorted IRI.
-            rows: vec![vec!["urn:ds:b".into(), "2".into()], vec!["urn:ds:a".into(), "9".into()]],
+            rows: vec![
+                vec!["urn:ds:b".into(), "2".into()],
+                vec!["urn:ds:a".into(), "9".into()],
+            ],
         };
         let edge = LiteralEdge {
             label: "dataset".into(),
@@ -242,12 +259,23 @@ mod tests {
         let graph = from_literal_graph(vec![cats, datasets], vec![edge]);
 
         // Dataset's `count` is a real Int64 column (not stringly typed).
-        let ds = graph.vertices.iter().find(|v| v.label == "Dataset").unwrap();
+        let ds = graph
+            .vertices
+            .iter()
+            .find(|v| v.label == "Dataset")
+            .unwrap();
         let batch = &ds.batches[0];
         let schema = batch.schema();
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        assert_eq!(names, ["dense_id", "subject", "count", "x", "y", "cluster_id"]);
-        let counts = batch.column(2).as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(
+            names,
+            ["dense_id", "subject", "count", "x", "y", "cluster_id"]
+        );
+        let counts = batch
+            .column(2)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
         // dense 0 = urn:ds:a (sorted first) carries 9; dense 1 = urn:ds:b carries 2.
         assert_eq!(counts.value(0), 9);
         assert_eq!(counts.value(1), 2);

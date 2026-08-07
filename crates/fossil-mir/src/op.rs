@@ -29,6 +29,7 @@
 //!   [`crate::graph::MirGraph::ops`] in topological order. Two-input ops carry
 //!   two indices.
 
+use fossil_hir::CmpOp;
 use fossil_hir::Ty;
 use smol_str::SmolStr;
 
@@ -247,6 +248,8 @@ pub enum Expr<'db> {
     LitString(SmolStr),
     /// Literal boolean. Renders `TRUE` / `FALSE`.
     LitBool(bool),
+    /// Literal integer (`18`).
+    LitInt(i64),
     /// Column reference (e.g. `users.id`).
     ColRef { source: SmolStr, column: SmolStr },
     /// String concatenation: `lhs || rhs`. Recursive via `Box` so the variant
@@ -276,17 +279,4 @@ pub enum Expr<'db> {
         span_line: u32,
         inner: Box<Expr<'db>>,
     },
-}
-
-/// Comparison / boolean operator for [`Expr::BinOp`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub enum CmpOp {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    And,
-    Or,
 }

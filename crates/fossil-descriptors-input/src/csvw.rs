@@ -8,17 +8,14 @@
 //! §"Standard Stack"), so this module hand-rolls serde-derived structs over
 //! the documented minimum subset.
 //!
-//! ## Why a string-name lookup, not `Primitive` directly
+//! ## The datatype is a [`Primitive`], not the name of one
 //!
-//! `datatype_to_primitive_name` returns `Option<&'static str>` (the canonical
-//! [`Primitive`] variant name as a string) rather than a `Primitive` /
-//! `Ty<'db>` value. The conversion from variant name to the interned `Ty<'db>`
-//! lives in `fossil-hir/src/infer.rs` (plan 03-05). This split avoids a
-//! circular dependency `fossil-descriptors-input` ↔ `fossil-hir`: the
-//! descriptor crate stays compiler-substrate-independent and free of Salsa
-//! types, while the hir crate owns the canonical type table.
-//!
-//! [`Primitive`]: ../../fossil_hir/ty/enum.Primitive.html
+//! [`CsvwDescriptor::type_for_column`] returns the lattice value itself. It used
+//! to return the canonical variant *name* as a `&'static str`, because
+//! `Primitive` lived in `fossil-hir` and this crate cannot depend on it — that
+//! cycle-avoidance is what ADR-0007 paid for with a string, and it bought seven
+//! tables that had to agree by hand. The lattice now lives in the leaf
+//! `fossil-graph-schema`, which both sides depend on, so the string is gone.
 //!
 //! ## What's IN the v0.1 subset
 //!
@@ -53,28 +50,12 @@
 //!
 //! ## Datatype catalog
 //!
-//! [`datatype_to_primitive_name`] maps CSVW datatype names (with optional
-//! `xsd:` prefix already stripped) to one of the 9 [`Primitive`] variant
-//! names per `type-system.md` §2:
-//!
-//! | CSVW datatype                                                                | Primitive |
-//! |------------------------------------------------------------------------------|-----------|
-//! | `string`                                                                     | `String`  |
-//! | `integer`, `long`, `int`, `short`, `byte`, `nonNegativeInteger`,             | `Integer` |
-//! | `positiveInteger`, `nonPositiveInteger`, `negativeInteger`                   |           |
-//! | `decimal`, `float`, `double`, `number`                                       | `Float`   |
-//! | `boolean`                                                                    | `Bool`    |
-//! | `date`                                                                       | `Date`    |
-//! | `dateTime`, `dateTimeStamp`                                                  | `DateTime`|
-//! | `time`                                                                       | `Time`    |
-//! | `gYear`                                                                      | `GYear`   |
-//! | `anyURI`                                                                     | `AnyURI`  |
-//! | (anything else)                                                              | `None`    |
-//!
-//! On `None`, the caller (plan 03-05's checker) emits a structured
-//! [`DescriptorError::UnknownDatatype`] diagnostic and types the column as
-//! `Ty::Error` (NOT silent String fallback).
+//! [`Primitive::from_xsd_iri`] is the catalog — one table, in the crate that owns
+//! the lattice, shared with the `ShEx` path and the checker. On `None` the caller
+//! emits a structured [`DescriptorError::UnknownDatatype`] diagnostic and types
+//! the column as `Ty::Error` (NOT a silent String fallback).
 
+use fossil_graph_schema::Primitive;
 use serde::Deserialize;
 
 use crate::DescriptorError;
@@ -206,7 +187,7 @@ impl CsvwDescriptor {
             .flatten()
     }
 
-    /// Look up the [`Primitive`] variant name for the given column.
+    /// Look up the [`Primitive`] for the given column.
     ///
     /// Returns `None` when:
     /// - `tableSchema` is absent.
@@ -217,57 +198,16 @@ impl CsvwDescriptor {
     /// The four cases are NOT distinguished by this function; plan 03-05's
     /// checker disambiguates via [`CsvwDescriptor::columns`] / [`Column::name`] /
     /// [`Column::datatype`] to emit a precise diagnostic.
-    ///
-    /// [`Primitive`]: ../../fossil_hir/ty/enum.Primitive.html
-    pub fn type_for_column(&self, name: &str) -> Option<&'static str> {
+    pub fn type_for_column(&self, name: &str) -> Option<Primitive> {
         let c = self.columns().find(|c| c.name == name)?;
         let dt = c.datatype.as_ref()?;
         let dt_name = match dt {
             DatatypeForm::Named(s) => s.as_str(),
             DatatypeForm::Detailed { base } => base.as_str(),
         };
-        // Strip optional "xsd:" prefix per W3C tabular-metadata spec (§ 5.11.1
-        // Datatypes; xsd is the canonical prefix when present).
-        let bare = dt_name.strip_prefix("xsd:").unwrap_or(dt_name);
-        datatype_to_primitive_name(bare)
-    }
-}
-
-/// Map a CSVW datatype name (with `xsd:` prefix already stripped) to the
-/// canonical [`Primitive`] variant name as a `&'static str`.
-///
-/// See the module-level documentation for the full catalog. Returns `None`
-/// for any unrecognised name; callers emit
-/// [`DescriptorError::UnknownDatatype`] with the column name + datatype
-/// string for a precise diagnostic.
-///
-/// The returned string is the EXACT variant name in `fossil-hir::ty::Primitive`
-/// (verified against `crates/fossil-hir/src/ty.rs` — `String`, `Integer`,
-/// `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`, `AnyURI`).
-///
-/// [`Primitive`]: ../../fossil_hir/ty/enum.Primitive.html
-pub fn datatype_to_primitive_name(name: &str) -> Option<&'static str> {
-    match name {
-        "string" => Some("String"),
-        // The xsd integer family — all collapse to Primitive::Integer for v0.1.
-        // Refinement (signed vs. unsigned, width) is Phase 3+ at the earliest
-        // per RESEARCH.md §Q4 and out of scope for Milestone 1.
-        "integer" | "long" | "int" | "short" | "byte" | "nonNegativeInteger"
-        | "positiveInteger" | "nonPositiveInteger" | "negativeInteger" => Some("Integer"),
-        // The xsd numeric family — collapse to Primitive::Float per RESEARCH.md
-        // §Example 3. CSVW's `number` is an additional alias used by some
-        // descriptors; it maps to Float because CSVW does not distinguish.
-        "decimal" | "float" | "double" | "number" => Some("Float"),
-        "boolean" => Some("Bool"),
-        "date" => Some("Date"),
-        // Both dateTime variants map to Primitive::DateTime; the W3C spec
-        // distinguishes `dateTimeStamp` (offset-required) from `dateTime`
-        // (offset-optional), but v0.1 collapses them.
-        "dateTime" | "dateTimeStamp" => Some("DateTime"),
-        "time" => Some("Time"),
-        "gYear" => Some("GYear"),
-        "anyURI" => Some("AnyURI"),
-        _ => None,
+        // `from_xsd_iri` takes the prefixed form, the full IRI and the bare name
+        // the W3C tabular-metadata spec (§5.11.1) uses, so nothing is stripped here.
+        Primitive::from_xsd_iri(dt_name)
     }
 }
 
@@ -295,7 +235,7 @@ mod tests {
         }"#;
         let d = CsvwDescriptor::parse(json).expect("happy-path CSVW should parse");
         assert_eq!(d.metadata.url.as_deref(), Some("users.csv"));
-        assert_eq!(d.type_for_column("id"), Some("String"));
+        assert_eq!(d.type_for_column("id"), Some(Primitive::String));
     }
 
     #[test]
@@ -309,7 +249,7 @@ mod tests {
             }
         }"#;
         let d = CsvwDescriptor::parse(json).unwrap();
-        assert_eq!(d.type_for_column("age"), Some("Integer"));
+        assert_eq!(d.type_for_column("age"), Some(Primitive::Integer));
     }
 
     #[test]
@@ -323,89 +263,7 @@ mod tests {
             }
         }"#;
         let d = CsvwDescriptor::parse(json).unwrap();
-        assert_eq!(d.type_for_column("birthday"), Some("Date"));
-    }
-
-    // ---- datatype_to_primitive_name catalog --------------------------------
-
-    #[test]
-    fn datatype_string_maps_to_String() {
-        assert_eq!(datatype_to_primitive_name("string"), Some("String"));
-    }
-
-    #[test]
-    fn datatype_integer_family_collapses() {
-        for name in [
-            "integer",
-            "long",
-            "int",
-            "short",
-            "byte",
-            "nonNegativeInteger",
-            "positiveInteger",
-            "nonPositiveInteger",
-            "negativeInteger",
-        ] {
-            assert_eq!(
-                datatype_to_primitive_name(name),
-                Some("Integer"),
-                "{name} should collapse to Integer"
-            );
-        }
-    }
-
-    #[test]
-    fn datatype_float_family_collapses() {
-        for name in ["decimal", "float", "double", "number"] {
-            assert_eq!(
-                datatype_to_primitive_name(name),
-                Some("Float"),
-                "{name} should collapse to Float"
-            );
-        }
-    }
-
-    #[test]
-    fn datatype_boolean_maps_to_Bool() {
-        assert_eq!(datatype_to_primitive_name("boolean"), Some("Bool"));
-    }
-
-    #[test]
-    fn datatype_date_maps_to_Date() {
-        assert_eq!(datatype_to_primitive_name("date"), Some("Date"));
-    }
-
-    #[test]
-    fn datatype_dateTime_maps_to_DateTime() {
-        assert_eq!(datatype_to_primitive_name("dateTime"), Some("DateTime"));
-        assert_eq!(
-            datatype_to_primitive_name("dateTimeStamp"),
-            Some("DateTime")
-        );
-    }
-
-    #[test]
-    fn datatype_time_maps_to_Time() {
-        assert_eq!(datatype_to_primitive_name("time"), Some("Time"));
-    }
-
-    #[test]
-    fn datatype_gYear_maps_to_GYear() {
-        assert_eq!(datatype_to_primitive_name("gYear"), Some("GYear"));
-    }
-
-    #[test]
-    fn datatype_anyURI_maps_to_AnyURI() {
-        assert_eq!(datatype_to_primitive_name("anyURI"), Some("AnyURI"));
-    }
-
-    #[test]
-    fn unknown_datatype_returns_none() {
-        // `duration` is in xsd but NOT in our v0.1 catalog. Callers must
-        // emit a diagnostic and type the column as `Ty::Error`.
-        assert_eq!(datatype_to_primitive_name("duration"), None);
-        assert_eq!(datatype_to_primitive_name(""), None);
-        assert_eq!(datatype_to_primitive_name("StringWithCase"), None);
+        assert_eq!(d.type_for_column("birthday"), Some(Primitive::Date));
     }
 
     // ---- @context validation ----------------------------------------------
@@ -505,7 +363,7 @@ mod tests {
         let col = d.columns().find(|c| c.name == "id").unwrap();
         assert!(col.titles.is_some(), "titles should deserialize");
         // `titles` is present but unused for type resolution.
-        assert_eq!(d.type_for_column("id"), Some("String"));
+        assert_eq!(d.type_for_column("id"), Some(Primitive::String));
     }
 
     #[test]
@@ -520,7 +378,7 @@ mod tests {
             }
         }"#;
         let d = CsvwDescriptor::parse(json).expect("unknown top-level field should be tolerated");
-        assert_eq!(d.type_for_column("id"), Some("String"));
+        assert_eq!(d.type_for_column("id"), Some(Primitive::String));
     }
 
     #[test]

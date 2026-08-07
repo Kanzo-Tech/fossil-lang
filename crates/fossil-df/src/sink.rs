@@ -14,8 +14,8 @@
 use std::fs;
 use std::path::Path;
 
-use crate::files::EncodeError;
 use crate::GraphArData;
+use crate::files::EncodeError;
 
 /// Errors writing the GraphAr dataset to disk: filesystem failures, or the
 /// shared byte-[`EncodeError`] (Parquet / manifest YAML).

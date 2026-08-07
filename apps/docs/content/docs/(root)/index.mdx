@@ -39,7 +39,7 @@ So the code is cut by where it runs, and each ring gets a different promise.
 ### Ring 1 — the language. It knows no engine
 
 Parsing, types, name resolution, diagnostics, lowering to MIR, and the LSP that surfaces all of it.
-`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-resolver`, `fossil-registry`, `fossil-base`,
+`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-resolver`, `fossil-lineage`, `fossil-base`,
 `fossil-shex`, the input and output descriptors, `fossil-lsp`, `fossil-ide`, `fossil-ide-db`.
 
 **No dependency on `datafusion` or on `duckdb`.** That is what lets the LSP start in milliseconds

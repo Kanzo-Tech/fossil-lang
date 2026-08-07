@@ -119,7 +119,7 @@ pub fn free_cols(expr: &Expr<'_>) -> BTreeSet<SmolStr> {
 
 fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
     match expr {
-        Expr::LitString(_) | Expr::LitBool(_) => {}
+        Expr::LitString(_) | Expr::LitBool(_) | Expr::LitInt(_) => {}
         Expr::ColRef { column, .. } => {
             acc.insert(column.clone());
         }
@@ -149,8 +149,10 @@ fn record_field_names(db: &dyn fossil_base::Db, row_type: Ty<'_>) -> Vec<SmolStr
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::op::{CmpOp, SinkRef, SourceFormat, VProp};
-    use fossil_hir::ty::{Primitive, Record, RecordField};
+    use crate::op::{SinkRef, SourceFormat, VProp};
+    use fossil_graph_schema::Primitive;
+    use fossil_hir::CmpOp;
+    use fossil_hir::ty::{Record, RecordField};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
@@ -232,8 +234,16 @@ mod tests {
         ];
         // Both Emit ops + Sink pass the input schema (post-Extend) through.
         let after_extend = schema_of(&db, &ops, 1);
-        assert_eq!(schema_of(&db, &ops, 2), after_extend, "EmitVertex passthrough");
-        assert_eq!(schema_of(&db, &ops, 3), after_extend, "EmitEdge passthrough");
+        assert_eq!(
+            schema_of(&db, &ops, 2),
+            after_extend,
+            "EmitVertex passthrough"
+        );
+        assert_eq!(
+            schema_of(&db, &ops, 3),
+            after_extend,
+            "EmitEdge passthrough"
+        );
         assert_eq!(schema_of(&db, &ops, 4), after_extend, "Sink passthrough");
     }
 

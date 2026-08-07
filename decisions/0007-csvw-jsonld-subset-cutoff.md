@@ -1,7 +1,7 @@
 # ADR 0007: Cap CSVW Metadata Vocabulary support at a literal-`@context` JSON-LD subset
 
 **Date:** 2026-05-19
-**Status:** accepted
+**Status:** accepted — §"Construction shape" (the `&'static str` name bridge) superseded by ADR-0047
 **Decider:** Ángel Iglesias
 **Cite:** `.planning/phases/03-bidirectional-type-checker-shex-target/03-RESEARCH.md` §"Standard Stack" + §"Code Examples — Example 3"; <https://www.w3.org/TR/tabular-metadata/>; `crates/fossil-descriptors-input/src/csvw.rs`
 

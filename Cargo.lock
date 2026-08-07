@@ -1857,6 +1857,7 @@ name = "fossil-base"
 version = "0.1.0"
 dependencies = [
  "fossil-descriptors-input",
+ "fossil-graph-schema",
  "salsa",
  "smol_str",
  "thiserror 1.0.69",
@@ -1870,7 +1871,6 @@ dependencies = [
  "duckdb",
  "fossil-base",
  "fossil-engine",
- "fossil-registry",
  "fossil-run-status",
  "fossil-runtime",
  "insta",
@@ -1885,6 +1885,7 @@ dependencies = [
 name = "fossil-descriptors-input"
 version = "0.1.0"
 dependencies = [
+ "fossil-graph-schema",
  "fossil-shex",
  "indexmap",
  "serde",
@@ -1919,9 +1920,11 @@ dependencies = [
  "oxttl",
  "parquet",
  "serde_yaml_ng",
+ "slug",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -1956,9 +1959,10 @@ dependencies = [
  "fossil-descriptors-input",
  "fossil-descriptors-output",
  "fossil-df",
+ "fossil-graph-schema",
  "fossil-hir",
+ "fossil-lineage",
  "fossil-mir",
- "fossil-registry",
  "fossil-resolver",
  "fossil-run-status",
  "fossil-runtime",
@@ -2014,6 +2018,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-syntax",
  "indexmap",
  "insta",
@@ -2033,14 +2038,23 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-hir",
- "fossil-registry",
  "fossil-syntax",
  "insta",
  "lsp-types",
  "rowan",
  "salsa",
  "smol_str",
+]
+
+[[package]]
+name = "fossil-lineage"
+version = "0.1.0"
+dependencies = [
+ "fossil-base",
+ "fossil-hir",
+ "fossil-run-status",
 ]
 
 [[package]]
@@ -2052,6 +2066,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
  "fossil-mir",
@@ -2090,20 +2105,8 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-registry",
  "fossil-syntax",
  "insta",
- "salsa",
- "smol_str",
-]
-
-[[package]]
-name = "fossil-registry"
-version = "0.1.0"
-dependencies = [
- "fossil-base",
- "fossil-hir",
- "fossil-run-status",
  "salsa",
  "smol_str",
 ]
@@ -2136,7 +2139,6 @@ dependencies = [
  "fossil-graph",
  "fossil-hir",
  "fossil-mir",
- "fossil-registry",
  "fossil-resolver",
  "fossil-sinks",
  "hmac",
@@ -2194,10 +2196,11 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
+ "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
+ "fossil-lineage",
  "fossil-mir",
- "fossil-registry",
  "fossil-run-status",
  "fossil-syntax",
  "getrandom 0.3.4",

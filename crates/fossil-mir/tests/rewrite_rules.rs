@@ -32,9 +32,11 @@
 
 use std::sync::Arc;
 
-use fossil_hir::{Primitive, Record, RecordField, Ty, TyKind};
+use fossil_graph_schema::Primitive;
+use fossil_hir::CmpOp;
+use fossil_hir::{Record, RecordField, Ty, TyKind};
 use fossil_mir::graph::MirGraph;
-use fossil_mir::op::{CmpOp, Expr, JoinKind, Op, SinkRef, SourceFormat};
+use fossil_mir::op::{Expr, JoinKind, Op, SinkRef, SourceFormat};
 use fossil_mir::rewrite::rewrite;
 use smol_str::SmolStr;
 

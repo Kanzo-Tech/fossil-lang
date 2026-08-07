@@ -1,6 +1,6 @@
 //! `fossil_wasm::refs_native` — the in-process (no-JS) core behind the WASM
 //! `refs()` export. Proves the BROWSER path (a transient `WasmDb` +
-//! `fossil_registry::source_refs`) produces the SAME typed lineage as the native
+//! `fossil_lineage::source_refs`) produces the SAME typed lineage as the native
 //! `fossil refs` CLI, over the SAME program shape: `@conn` data + schema refs in
 //! a destructuring `io.rdf` plus an unaliased local csv. Parse-only — no DuckDB,
 //! no JS runtime (the `#[wasm_bindgen]` `refs()` wrapper's `serde_wasm_bindgen`
@@ -47,7 +47,10 @@ fn refs_native_lists_typed_references_with_connection_aliases() {
         .iter()
         .filter(|r| r.connection.as_deref() == Some("vocab") && r.role == RefRole::Schema)
         .count();
-    assert_eq!(schema_refs, 1, "schema ref deduped across members: {refs:?}");
+    assert_eq!(
+        schema_refs, 1,
+        "schema ref deduped across members: {refs:?}"
+    );
 
     // The literal local path has no connection alias.
     let plain = refs
@@ -58,7 +61,10 @@ fn refs_native_lists_typed_references_with_connection_aliases() {
     assert_eq!(plain.role, RefRole::Data);
 
     // The distinct connections a job would attach: exactly {data, vocab}.
-    let mut conns: Vec<&str> = refs.iter().filter_map(|r| r.connection.as_deref()).collect();
+    let mut conns: Vec<&str> = refs
+        .iter()
+        .filter_map(|r| r.connection.as_deref())
+        .collect();
     conns.sort_unstable();
     conns.dedup();
     assert_eq!(conns, vec!["data", "vocab"]);

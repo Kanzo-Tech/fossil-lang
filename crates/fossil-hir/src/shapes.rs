@@ -36,8 +36,10 @@ use rudof_iri::IriS;
 use shex_ast::ShapeExpr;
 use smol_str::SmolStr;
 
+use fossil_graph_schema::Primitive;
+
 use crate::def_map::MappingLoc;
-use crate::ty::{Primitive, ShapeId, Ty, TyKind};
+use crate::ty::{ShapeId, Ty, TyKind};
 
 /// One predicate constraint converted from a `ShEx` [`ResolvedConstraint`] into
 /// Fossil type space.
@@ -125,45 +127,16 @@ fn ty_from_shape_expr<'db>(db: &'db dyn fossil_base::Db, se: &ShapeExpr) -> Opti
     };
     let datatype = nc.datatype()?;
     // `IriRef` implements `Display` — the prefixed form renders as `prefix:local`
-    // and the IRI form as the full IRI. `primitive_from_xsd_iri` handles both.
+    // and the IRI form as the full IRI. `from_xsd_iri` handles both.
     let iri_str = datatype.to_string();
-    let prim = primitive_from_xsd_iri(&iri_str)?;
+    let prim = Primitive::from_xsd_iri(&iri_str)?;
     Some(Ty::new(db, TyKind::Primitive(prim)))
 }
 
-/// Map an xsd datatype IRI (or `xsd:`-prefixed name) to a [`Primitive`].
-///
-/// Mirrors the CSVW datatype catalog (plan 03-02) so the forward (CSVW) and
-/// backward (`ShEx`) sides agree on the primitive lattice. Recognises both the
-/// full `http://www.w3.org/2001/XMLSchema#<name>` IRI and the `xsd:<name>`
-/// prefixed form.
-#[must_use]
-pub fn primitive_from_xsd_iri(iri: &str) -> Option<Primitive> {
-    let local = iri
-        .rsplit(['#', '/'])
-        .next()
-        .unwrap_or(iri)
-        .strip_prefix("xsd:")
-        .unwrap_or_else(|| iri.rsplit(['#', '/']).next().unwrap_or(iri));
-    match local {
-        "string" => Some(Primitive::String),
-        "integer" | "long" | "int" | "short" | "byte" | "nonNegativeInteger"
-        | "positiveInteger" | "nonPositiveInteger" | "negativeInteger" => Some(Primitive::Integer),
-        "decimal" | "float" | "double" | "number" => Some(Primitive::Float),
-        "boolean" => Some(Primitive::Bool),
-        "date" => Some(Primitive::Date),
-        "dateTime" | "dateTimeStamp" => Some(Primitive::DateTime),
-        "time" => Some(Primitive::Time),
-        "gYear" => Some(Primitive::GYear),
-        "anyURI" => Some(Primitive::AnyURI),
-        _ => None,
-    }
-}
-
 /// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
-/// vocabulary [`fossil_sinks::manifest::data_type_name`] emits. The forward
-/// companion of [`primitive_from_xsd_iri`]; the single authority both the SQL
-/// codegen and the `DataFusion` backend derive a vertex column's `data_type` from.
+/// vocabulary [`fossil_sinks::manifest::data_type_name`] emits. A materializer
+/// spelling, so it lives with the compiler and not on the lattice; the xsd
+/// direction is [`Primitive::to_xsd_iri`], which does.
 #[must_use]
 pub const fn primitive_to_graphar(p: Primitive) -> &'static str {
     match p {
@@ -173,35 +146,9 @@ pub const fn primitive_to_graphar(p: Primitive) -> &'static str {
         Primitive::Date => "date",
         Primitive::DateTime => "timestamp",
         Primitive::Time => "time",
-        // String / AnyURI / GYear have no narrower GraphAr spelling.
-        Primitive::String | Primitive::AnyURI | Primitive::GYear => "string",
+        // String / AnyUri / GYear have no narrower GraphAr spelling.
+        Primitive::String | Primitive::AnyUri | Primitive::GYear => "string",
     }
-}
-
-/// The canonical XSD datatype IRI for a Fossil [`Primitive`] — the output spec's
-/// literal datatype, carried into the manifest for the host's governance layer
-/// (DCAT). Mirrors [`primitive_to_graphar`] but in the RDF/XSD vocabulary.
-#[must_use]
-pub fn primitive_to_xsd(p: Primitive) -> String {
-    let local = match p {
-        Primitive::Integer => "integer",
-        Primitive::Float => "double",
-        Primitive::Bool => "boolean",
-        Primitive::Date => "date",
-        Primitive::DateTime => "dateTime",
-        Primitive::Time => "time",
-        Primitive::AnyURI => "anyURI",
-        Primitive::GYear => "gYear",
-        Primitive::String => "string",
-    };
-    format!("http://www.w3.org/2001/XMLSchema#{local}")
-}
-
-/// The XSD `string` IRI — the fallback datatype when a field's primitive is
-/// unknown or the value is a string literal.
-#[must_use]
-pub fn default_xsd_string() -> String {
-    "http://www.w3.org/2001/XMLSchema#string".to_string()
 }
 
 /// Peel `Optional`/`Seq` wrappers to the inner [`Primitive`], if any — the
@@ -304,40 +251,15 @@ fn lowering_error_targets(err: &ShExLoweringError, shape_iri: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// Every `GraphAr` spelling is reachable, and the `String`-shaped corner of
+    /// the lattice collapses on purpose. The xsd direction is not tested here —
+    /// it is one function in `fossil-graph-schema`, tested there.
     #[test]
-    fn primitive_from_xsd_iri_recognises_full_iris() {
-        assert_eq!(
-            primitive_from_xsd_iri("http://www.w3.org/2001/XMLSchema#string"),
-            Some(Primitive::String)
-        );
-        assert_eq!(
-            primitive_from_xsd_iri("http://www.w3.org/2001/XMLSchema#integer"),
-            Some(Primitive::Integer)
-        );
-        assert_eq!(
-            primitive_from_xsd_iri("http://www.w3.org/2001/XMLSchema#dateTime"),
-            Some(Primitive::DateTime)
-        );
-    }
-
-    #[test]
-    fn primitive_from_xsd_iri_recognises_prefixed_form() {
-        assert_eq!(
-            primitive_from_xsd_iri("xsd:string"),
-            Some(Primitive::String)
-        );
-        assert_eq!(
-            primitive_from_xsd_iri("xsd:integer"),
-            Some(Primitive::Integer)
-        );
-    }
-
-    #[test]
-    fn primitive_from_xsd_iri_returns_none_for_unknown() {
-        assert_eq!(
-            primitive_from_xsd_iri("http://example.org/CustomType"),
-            None
-        );
+    fn graphar_spelling_covers_the_lattice() {
+        assert_eq!(primitive_to_graphar(Primitive::Integer), "int64");
+        assert_eq!(primitive_to_graphar(Primitive::DateTime), "timestamp");
+        assert_eq!(primitive_to_graphar(Primitive::AnyUri), "string");
+        assert_eq!(primitive_to_graphar(Primitive::GYear), "string");
     }
 
     // --- ADR-0020 R2 wiring: resolve_target_shape consumes a host descriptor ---

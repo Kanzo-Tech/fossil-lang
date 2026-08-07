@@ -17,16 +17,17 @@
 
 use fossil_base::{Db, FossilDb, NativeSystem, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+use fossil_graph_schema::Primitive;
 use std::sync::Arc;
 
-fn sample(source: &str, columns: Vec<(&str, &str)>) -> InferredDescriptor {
+fn sample(source: &str, columns: Vec<(&str, Primitive)>) -> InferredDescriptor {
     InferredDescriptor {
         source_name: source.into(),
         columns: columns
             .into_iter()
             .map(|(n, p)| InferredColumn {
                 name: n.into(),
-                primitive: p.into(),
+                primitive: p,
             })
             .collect(),
         content_hash: String::new(),
@@ -47,9 +48,9 @@ fn inferred_descriptor_registers_and_round_trips_through_system() {
     let db = db_with_inferred(vec![sample(
         "users",
         vec![
-            ("id", "Integer"),
-            ("name", "String"),
-            ("age", "Integer"),
+            ("id", Primitive::Integer),
+            ("name", Primitive::String),
+            ("age", Primitive::Integer),
         ],
     )]);
 
@@ -62,18 +63,18 @@ fn inferred_descriptor_registers_and_round_trips_through_system() {
     assert_eq!(got.source_name.as_str(), "users");
     assert_eq!(got.columns.len(), 3);
     assert_eq!(got.columns[0].name.as_str(), "id");
-    assert_eq!(got.columns[0].primitive.as_str(), "Integer");
+    assert_eq!(got.columns[0].primitive, Primitive::Integer);
     assert_eq!(got.columns[1].name.as_str(), "name");
-    assert_eq!(got.columns[1].primitive.as_str(), "String");
+    assert_eq!(got.columns[1].primitive, Primitive::String);
     assert_eq!(got.columns[2].name.as_str(), "age");
-    assert_eq!(got.columns[2].primitive.as_str(), "Integer");
+    assert_eq!(got.columns[2].primitive, Primitive::Integer);
 }
 
 #[test]
 fn unknown_source_returns_none_without_panicking() {
     let db = db_with_inferred(vec![sample(
         "users",
-        vec![("id", "Integer"), ("name", "String")],
+        vec![("id", Primitive::Integer), ("name", Primitive::String)],
     )]);
     assert!(db.system().inferred_descriptor("nonexistent").is_none());
 }
@@ -81,11 +82,11 @@ fn unknown_source_returns_none_without_panicking() {
 #[test]
 fn re_registering_same_source_name_overwrites_previous_entry() {
     let system = NativeSystem::default();
-    system.register_inferred_descriptor(sample("users", vec![("id", "Integer")]));
+    system.register_inferred_descriptor(sample("users", vec![("id", Primitive::Integer)]));
     // Second registration with same source_name + extra column.
     system.register_inferred_descriptor(sample(
         "users",
-        vec![("id", "Integer"), ("email", "String")],
+        vec![("id", Primitive::Integer), ("email", Primitive::String)],
     ));
     let got = system
         .inferred_descriptor("users")

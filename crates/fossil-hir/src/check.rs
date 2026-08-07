@@ -40,12 +40,14 @@ use crate::body::{ExprId, body};
 use crate::def_map::MappingLoc;
 use crate::didyoumean::did_you_mean;
 use crate::infer::resolve_source_row;
-use crate::lower::{HirExpr, HirProperty, PropertyKey, lower_to_hir};
+use crate::lower::{CmpOp, HirExpr, HirProperty, PropertyKey, lower_to_hir};
 use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
 use crate::shapes::{ResolvedShape, resolve_target_shape};
 use crate::spans::{Spans, spans};
 use crate::ty::display::render_ty_kind;
-use crate::ty::{Primitive, ShapeId, Ty, TyKind};
+use fossil_graph_schema::Primitive;
+
+use crate::ty::{ShapeId, Ty, TyKind};
 use fossil_descriptors_output::Cardinality;
 
 /// Which side of a two-span blame a position refers to.
@@ -254,22 +256,27 @@ pub fn compatible<'db>(
 /// (otherwise it is an already-evaluated value, e.g. a literal predicate, and
 /// gets the standard `check` path).
 ///
-/// Phase 3 v0.1's [`HirExpr`] is the Phase 2 leaf surface (`Template` /
-/// `FieldRef` / `StringLit` / `PrefixedName` — all non-recursive leaves), so
-/// this is a flat match. When the Pratt-lowered expression tree extends
-/// `HirExpr` with `Call` / `Pipeline` / `Ternary` / `BinOp` (a later phase),
-/// this walker gains the recursive arms (the plan 03-06 sketch anticipated
-/// them) — but the algorithm here is identical: ANY descendant `FieldRef`
-/// triggers synthesis.
-const fn expr_contains_free_field_refs(e: &HirExpr) -> bool {
+/// The walk is recursive over the forms that carry sub-expressions (`Call`
+/// today; `Pipeline` / `Ternary` / `BinOp` as they land) — the algorithm is the
+/// same at every depth: ANY descendant `FieldRef` triggers synthesis.
+fn expr_contains_free_field_refs(e: &HirExpr) -> bool {
     match e {
         HirExpr::FieldRef(_) => true,
+        // `clean.trim(.name)` in a closure position IS row-dependent.
+        HirExpr::Call { args, .. } => args.iter().any(expr_contains_free_field_refs),
+        // `.age >= 18` is the shape a filter predicate has.
+        HirExpr::BinOp { lhs, rhs, .. } => {
+            expr_contains_free_field_refs(lhs) || expr_contains_free_field_refs(rhs)
+        }
         // Phase 2 leaf forms with no `.field` descendants. (A `Template` MAY
         // contain `${.id}` placeholders textually, but those are not yet a
         // structured `FieldRef` HIR node in Phase 3 v0.1 — template parsing is
         // deferred. A template in a closure position is treated as a value, not
         // a row-dependent predicate, until the expression tree lands.)
-        HirExpr::Template(_) | HirExpr::StringLit(_) | HirExpr::PrefixedName { .. } => false,
+        HirExpr::Template(_)
+        | HirExpr::StringLit(_)
+        | HirExpr::IntLit(_)
+        | HirExpr::PrefixedName { .. } => false,
     }
 }
 
@@ -317,6 +324,31 @@ fn render_leaf_expr_text(e: &HirExpr) -> String {
         HirExpr::StringLit(s) => format!("\"{s}\""),
         HirExpr::Template(t) => t.to_string(),
         HirExpr::PrefixedName { iri } => iri.to_string(),
+        HirExpr::Call { func, args } => {
+            let rendered: Vec<String> = args.iter().map(render_leaf_expr_text).collect();
+            format!("{func}({})", rendered.join(", "))
+        }
+        HirExpr::IntLit(v) => v.to_string(),
+        HirExpr::BinOp { op, lhs, rhs } => format!(
+            "{} {} {}",
+            render_leaf_expr_text(lhs),
+            op_text(*op),
+            render_leaf_expr_text(rhs)
+        ),
+    }
+}
+
+/// The source spelling of an operator, for diagnostics and closure display.
+const fn op_text(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "==",
+        CmpOp::Ne => "!=",
+        CmpOp::Lt => "<",
+        CmpOp::Le => "<=",
+        CmpOp::Gt => ">",
+        CmpOp::Ge => ">=",
+        CmpOp::And => "and",
+        CmpOp::Or => "or",
     }
 }
 
@@ -408,8 +440,24 @@ impl<'db> Checker<'db> {
     /// phase; the `synthesize_closure` hook (plan 03-06) is the one mode
     /// transition this plan stubs.
     pub fn synth(&mut self, expr_id: ExprId, e: &HirExpr) -> Option<Ty<'db>> {
+        let (ty, kind) = self.synth_ty(expr_id, e)?;
+        let span = self.span_of(expr_id);
+        self.entries.push(ExprTypeEntry {
+            expr_id,
+            ty,
+            provenance: Provenance { span, kind },
+        });
+        Some(ty)
+    }
+
+    /// The type and its provenance, with nothing recorded.
+    ///
+    /// [`Self::synth`] is this plus the arena entry. The split exists because a
+    /// call's arguments share the call's `expr_id` — recording them would put
+    /// several entries under one id and hover would read whichever came first.
+    fn synth_ty(&mut self, expr_id: ExprId, e: &HirExpr) -> Option<(Ty<'db>, ProvenanceKind)> {
         let db = self.db;
-        let (ty, kind) = match e {
+        let out = match e {
             HirExpr::StringLit(_) => (
                 Ty::new(db, TyKind::Primitive(Primitive::String)),
                 ProvenanceKind::Literal,
@@ -431,14 +479,28 @@ impl<'db> Checker<'db> {
                     },
                 )
             }
+            // T-App: resolve the name in the stdlib catalog, check the
+            // arguments against the declared parameter types, and take the
+            // declared return type. Every failure here is a diagnostic and an
+            // `Error` type — never a silently dropped property.
+            HirExpr::Call { func, args } => (
+                self.synth_call(expr_id, func, args),
+                ProvenanceKind::FnResult { name: func.clone() },
+            ),
+            HirExpr::IntLit(_) => (
+                Ty::new(db, TyKind::Primitive(Primitive::Integer)),
+                ProvenanceKind::Literal,
+            ),
+            // T-Comp / T-And: both sides must agree, and the result is Bool
+            // whether or not the operands could be typed.
+            HirExpr::BinOp { op, lhs, rhs } => (
+                self.synth_binop(expr_id, *op, lhs, rhs),
+                ProvenanceKind::BinaryOp {
+                    op: SmolStr::new_static(op_text(*op)),
+                },
+            ),
         };
-        let span = self.span_of(expr_id);
-        self.entries.push(ExprTypeEntry {
-            expr_id,
-            ty,
-            provenance: Provenance { span, kind },
-        });
-        Some(ty)
+        Some(out)
     }
 
     /// Checking-mode entry. Phase 3 v0.1: synth then [`compatible`].
@@ -550,6 +612,149 @@ impl<'db> Checker<'db> {
         let eg = delay_span_bug(db, self.span_of(expr_id), msg);
         self.record_error(eg);
         Some(Ty::new(db, TyKind::Error(eg)))
+    }
+
+    /// T-App: type a `clean.slug(.name)` against the stdlib catalog.
+    ///
+    /// Four things can go wrong and all four are diagnostics with an `Error`
+    /// type, so the mapping is poisoned and the property is never written from
+    /// a value nobody checked: the name is not catalogued (with a did-you-mean
+    /// over the catalog), the arity is wrong, an argument does not type, or an
+    /// argument's type is not a subtype of the declared parameter's.
+    ///
+    /// Arguments carry the CALL's `expr_id`: the body arena holds one entry per
+    /// property value, so a sub-expression has no id of its own. That makes
+    /// every diagnostic inside a call point at the whole call — imprecise, and
+    /// honestly so; per-argument spans need the arena to hold sub-expressions.
+    fn synth_call(&mut self, expr_id: ExprId, func: &SmolStr, args: &[HirExpr]) -> Ty<'db> {
+        let db = self.db;
+        let Some(entry) = crate::stdlib::stdlib().lookup(func.as_str()) else {
+            let names = crate::stdlib::stdlib().iter().map(|e| e.name.as_str());
+            let msg = crate::didyoumean::did_you_mean(func.as_str(), names).map_or_else(
+                || format!("unknown function `{func}`"),
+                |s| format!("unknown function `{func}` — did you mean `{s}`?"),
+            );
+            let eg = delay_span_bug(db, self.span_of(expr_id), msg);
+            self.record_error(eg);
+            return Ty::new(db, TyKind::Error(eg));
+        };
+
+        let params = &entry.sig.params;
+        if args.len() != params.len() {
+            let eg = delay_span_bug(
+                db,
+                self.span_of(expr_id),
+                format!(
+                    "`{func}` takes {} argument{}, but {} {} given",
+                    params.len(),
+                    if params.len() == 1 { "" } else { "s" },
+                    args.len(),
+                    if args.len() == 1 { "was" } else { "were" },
+                ),
+            );
+            self.record_error(eg);
+            return Ty::new(db, TyKind::Error(eg));
+        }
+
+        for (i, (arg, param)) in args.iter().zip(params.iter()).enumerate() {
+            let expected = param.to_ty(db);
+            // An argument with no type is not an error: without a source
+            // descriptor a `.field` synthesises nothing, and the rest of the
+            // checker lets that through rather than inventing one. An argument
+            // it cannot see is an argument it cannot check — which is what
+            // forward propagation is FOR, and F3 is what makes it always
+            // present. What it must not do is claim a problem the program does
+            // not have.
+            let Some((actual, _)) = self.synth_ty(expr_id, arg) else {
+                continue;
+            };
+            if matches!(actual.kind(db), TyKind::Error(_)) {
+                return actual;
+            }
+            if !subtypes(db, actual, expected) {
+                let eg = delay_span_bug(
+                    db,
+                    self.span_of(expr_id),
+                    format!(
+                        "argument {} of `{func}` expects {}, but this is {}",
+                        i + 1,
+                        render_ty_kind(db, expected.kind(db)),
+                        render_ty_kind(db, actual.kind(db)),
+                    ),
+                );
+                self.record_error(eg);
+                return Ty::new(db, TyKind::Error(eg));
+            }
+        }
+
+        entry.sig.ret.to_ty(db)
+    }
+
+    /// T-Comp (`type-system.md` §4.7): `Γ ⊢ a : τ`, `Γ ⊢ b : τ`, τ comparable
+    /// ⟹ `Bool`. T-And/T-Or: both sides `Bool` ⟹ `Bool`.
+    ///
+    /// An operand the checker cannot type — a `.field` with no source
+    /// descriptor — is not an error, for the same reason it is not one in a
+    /// call: forward propagation is what would give it a type, and F3 is what
+    /// makes it always present. The result is `Bool` regardless, because the
+    /// operator says so and the operands cannot change that.
+    fn synth_binop(&mut self, expr_id: ExprId, op: CmpOp, lhs: &HirExpr, rhs: &HirExpr) -> Ty<'db> {
+        let db = self.db;
+        let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
+        let l = self.synth_ty(expr_id, lhs).map(|(t, _)| t);
+        let r = self.synth_ty(expr_id, rhs).map(|(t, _)| t);
+
+        for t in [l, r].into_iter().flatten() {
+            if let TyKind::Error(_) = t.kind(db) {
+                return t;
+            }
+        }
+
+        match op {
+            // T-And / T-Or: each side must BE Bool.
+            CmpOp::And | CmpOp::Or => {
+                for (side, ty) in [("left", l), ("right", r)] {
+                    let Some(ty) = ty else { continue };
+                    if !subtypes(db, ty, bool_ty) {
+                        let eg = delay_span_bug(
+                            db,
+                            self.span_of(expr_id),
+                            format!(
+                                "the {side} side of `{}` must be Bool, but it is {}",
+                                op_text(op),
+                                render_ty_kind(db, ty.kind(db)),
+                            ),
+                        );
+                        self.record_error(eg);
+                        return Ty::new(db, TyKind::Error(eg));
+                    }
+                }
+            }
+            // T-Comp: the two sides must be comparable to each other. Integer
+            // and Float compare (the promotion `subtypes` already encodes);
+            // a string against a number does not, and that is the mistake
+            // worth catching — it is the one a mapping actually makes.
+            CmpOp::Eq | CmpOp::Ne | CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge => {
+                if let (Some(l), Some(r)) = (l, r)
+                    && !subtypes(db, l, r)
+                    && !subtypes(db, r, l)
+                {
+                    let eg = delay_span_bug(
+                        db,
+                        self.span_of(expr_id),
+                        format!(
+                            "cannot compare {} with {} using `{}`",
+                            render_ty_kind(db, l.kind(db)),
+                            render_ty_kind(db, r.kind(db)),
+                            op_text(op),
+                        ),
+                    );
+                    self.record_error(eg);
+                    return Ty::new(db, TyKind::Error(eg));
+                }
+            }
+        }
+        bool_ty
     }
 
     /// Implicit closure synthesis (CORE-07, type-system.md §7 T-Closure) —

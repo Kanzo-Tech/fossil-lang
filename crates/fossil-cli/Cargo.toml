@@ -36,7 +36,6 @@ tracing-subscriber = { workspace = true }
 # (the binary itself links none of them — they live in fossil-engine now).
 insta = { workspace = true }
 duckdb = { workspace = true }
-fossil-registry     = { path = "../fossil-registry" }
 fossil-runtime      = { path = "../fossil-runtime" }
 
 [[bin]]
