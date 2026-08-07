@@ -62,9 +62,13 @@ serde_json = { workspace = true }
 js-sys = { workspace = true }
 console_error_panic_hook = { workspace = true }
 
-# Transitive WASM enablers — keep as direct deps so feature resolution sticks
-# (the `wasm_js` getrandom backend is required by salsa→hashbrown→ahash on wasm32;
-# same belt-and-suspenders as fossil-wasm).
+# Transitive WASM enablers — keep as direct deps so feature resolution sticks.
+# The `wasm_js` backend is what lets getrandom build for wasm32 at all, and who
+# needs it is DataFusion, not salsa: `cargo tree -p fossil-df-wasm -i
+# getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
+# `datafusion-datasource`, and getrandom 0.2 through `const-random` ← `ahash` ←
+# `arrow`. Salsa's own hashbrown hashes with foldhash and draws no randomness.
+# The line here used to say salsa→hashbrown→ahash; ADR-0050 read the tree.
 getrandom = { workspace = true }
 
 [dev-dependencies]

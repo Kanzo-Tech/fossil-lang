@@ -28,8 +28,10 @@
 //! # What it does NOT measure
 //!
 //! **Not time.** It counts executions, not milliseconds, so it cannot say what
-//! removing salsa would win — only whether there is anything to win. Apollo's
-//! percentages are the shape of that answer, not ours.
+//! removing salsa would win — only whether there is anything to win. That half
+//! is `query_time.rs`, and it has since been measured: the ceiling is 3.8% of
+//! the batch compile, and the batch compile is 0.20% of `fossil check`. Apollo's
+//! −52.3% was never ours and is no longer cited as if it were (ADR-0050).
 //!
 //! **Not the editor path.** The LSP keeps one database alive across edits, and
 //! `crates/fossil-hir/tests/invalidation_regression.rs` already pins what that
@@ -40,19 +42,24 @@
 //! ```
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 
 /// A program with `n` mappings over one source, in the shape `hello.fossil` has.
+// The `${ex:}` / `${.id}` in the template are fossil's own interpolation, which
+// clippy reads as a Rust format argument that escaped its macro. It did not.
+#[allow(clippy::literal_string_with_formatting_args)]
 fn program(n: usize) -> String {
     let mut s = String::from(
         "prefix ex: <https://example.org/>\n\nusers := io.csv(\"examples/users.csv\")\n\n",
     );
     for i in 0..n {
-        s.push_str(&format!(
+        let _ = write!(
+            s,
             "M{i} : ex:Person from users\n    iri = `${{ex:}}m{i}/${{.id}}`\n    ex:name = .name\n\n"
-        ));
+        );
     }
     s
 }

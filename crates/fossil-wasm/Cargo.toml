@@ -80,9 +80,13 @@ js-sys                   = { workspace = true }
 console_error_panic_hook = { workspace = true }
 
 # Transitive WASM enablers — keep as direct deps so feature resolution sticks.
-# The `wasm_js` feature on getrandom is required by salsa→hashbrown→ahash on
-# wasm32; the `.cargo/config.toml` rustflag is the belt-and-suspenders fallback
-# for unconditioned getrandom call sites.
+# The `wasm_js` feature is what lets getrandom build for wasm32 at all, and who
+# needs it is the rudof/ShEx stack, not salsa: `cargo tree -p fossil-wasm -i
+# getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
+# `oxrdf` ← `oxrdfio` ← `rudof_rdf` ← `shex_ast`. Salsa's own hashbrown hashes
+# with foldhash and draws no randomness. The line here used to say
+# salsa→hashbrown→ahash; ADR-0050 read the tree. The `.cargo/config.toml`
+# rustflag is the belt-and-suspenders fallback for unconditioned call sites.
 getrandom = { workspace = true }
 uuid      = { workspace = true }
 

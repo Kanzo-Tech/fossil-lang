@@ -66,20 +66,8 @@ sha2 = { workspace = true }
 # per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
 # builtin fails CI on native DuckDB (Pitfall 4). fossil-hir is WASM-clean; it
 # is a dev-dep only here so the native-only runtime's wasm32 tripwire is unaffected.
-# SC#4 real-files fixture (tests/graphar_decomp.rs): build a 2-shape ShEx + a
-# hand MirGraph, run the 05-08 codegen_sql_with_descriptor chunked COPY on native
-# DuckDB, and assert real Parquet files on disk. All dev-deps only — the
-# native-only runtime's wasm32 tripwire is unaffected (these crates are WASM-gated
-# anyway). codegen_sql_with_descriptor is plain-Rust (no Salsa key for the
-# descriptor), so the runtime just calls it inside a tracked frame.
 fossil-hir = { path = "../fossil-hir" }
-fossil-mir = { path = "../fossil-mir" }
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# NOTE: fossil-sinks was a dev-dep here (real-files fixture in
-# graphar_decomp.rs); W0b/4 promotes it to a regular dep above for the
-# `materialize` module, so the dev-dep entry is dropped to avoid
-# duplication. graphar_decomp.rs continues to compile via the regular
-# fossil_sinks::manifest re-export.
-salsa = { workspace = true }
-smol_str = { workspace = true }
-tempfile = { workspace = true }
+# `salsa` was here too, and no test in this crate has ever named it: the module
+# doc says this crate runs OUTSIDE the query graph, and it does. It went with
+# `fossil-mir` / `fossil-descriptors-output` / `smol_str` / `tempfile`, which
+# served a `tests/graphar_decomp.rs` that no longer exists. ADR-0050 §3.
