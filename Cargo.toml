@@ -62,8 +62,24 @@ rudof_iri = "0.3"
 prefixmap = "0.3"
 # Turtle/N-Triples parsing for the RDF source provider (the oxigraph parser
 # rudof's srdf wraps; already resolved transitively via the ShEx crates).
-oxttl = "0.2"
-oxrdf = "0.3"
+#
+# `rdf-12` is oxttl/oxrdf's RDF 1.2 gate and it is OFF by default. Measured
+# 2026-08-07 against oxttl 0.2.3 outside this workspace: with it off, `<<( … )>>`
+# fails with "`<<(` is not a valid RDF object" and `"x"@en--ltr` with "Literal
+# base direction are only allowed in RDF 1.2"; with it on, both parse. It gates
+# `Term::Triple`, `Literal::direction`, `BaseDirection` and `rdf::DIR_LANG_STRING`,
+# and pulls in NO new dependency — `oxttl/rdf-12 = ["oxrdf/rdf-12"]` and
+# `oxrdf/rdf-12 = []`, so the wasm closure is unchanged.
+#
+# It was ALREADY on in every build of this workspace, by feature unification from
+# `rudof_iri`/`rudof_rdf`, never by our own declaration — which is why the
+# `Term::Triple` arm in `fossil-df/src/rdf.rs` compiles today. That made our RDF
+# 1.2 reach a property of rudof's dependency graph: dropping rudof, or rudof
+# dropping the feature, turns our Turtle parser back into an RDF 1.1 one and
+# breaks that arm at compile time for a reason no one would connect. Declaring it
+# here is a no-op for today's graph and the guard for tomorrow's. See ADR-0050.
+oxttl = { version = "0.2", features = ["rdf-12"] }
+oxrdf = { version = "0.3", features = ["rdf-12"] }
 
 # === Did-you-mean diagnostics (Phase 3 CORE-05) ===
 strsim = "0.11"

@@ -10,6 +10,14 @@
 //! v1 covers single-valued (scalar) columns; multi-valued predicates (ShEx
 //! `*`/`+` → an Arrow `List`) are a follow-up. `oxttl`/`oxrdf` are pure Rust, so
 //! this compiles to wasm and decodes RDF in the browser too.
+//!
+//! **RDF 1.2.** The parser is an RDF 1.2 one (`oxttl`'s `rdf-12` feature, turned
+//! on in the workspace manifest with the measurement behind it). Nothing in RDF
+//! 1.2 is a Recommendation and every concrete syntax is still a Working Draft, so
+//! what we lean on is the abstract model, not the spelling: a triple term reaches
+//! [`term_value`] as `Term::Triple` and a base direction as
+//! `Literal::direction`. Neither survives the pivot, and the second one says so
+//! rather than answering wrongly — ADR-0050.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -18,7 +26,7 @@ use datafusion::arrow::array::{ArrayRef, ListBuilder, StringArray, StringBuilder
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use oxrdf::{NamedOrBlankNode, Term};
+use oxrdf::{Literal, NamedOrBlankNode, Term};
 use oxttl::TurtleParser;
 
 /// The `rdf:type` predicate — the sole subject selector (a shape's rows are the
@@ -60,6 +68,11 @@ pub fn rdf_to_batch(
         let t = triple.map_err(|e| DataFusionError::Execution(format!("parse RDF: {e}")))?;
         let subject = subject_value(&t.subject);
         let predicate = t.predicate.as_str();
+        if let Term::Literal(l) = &t.object
+            && l.direction().is_some()
+        {
+            return Err(directional_literal_unsupported(&subject, predicate, l));
+        }
         let object = term_value(&t.object);
         if predicate == RDF_TYPE && object == type_iri {
             typed.insert(subject.clone());
@@ -131,13 +144,43 @@ fn subject_value(subject: &NamedOrBlankNode) -> String {
 
 /// The lexical value of an RDF object term: a literal's lexical form, or a
 /// node's IRI. Blank nodes render as their `_:id` label.
+///
+/// Lexical form ONLY — a language tag does not survive this, and neither would a
+/// base direction, which is why [`rdf_to_batch`] refuses one before getting here.
 fn term_value(term: &Term) -> String {
     match term {
         Term::NamedNode(n) => n.as_str().to_string(),
         Term::Literal(l) => l.value().to_string(),
         Term::BlankNode(b) => b.to_string(),
-        Term::Triple(_) => term.to_string(), // RDF-star quoted triple — surface form
+        // An RDF 1.2 triple term. It has no identity of its own (Concepts §3.1),
+        // so there is nothing to key a row by; the surface form is a placeholder
+        // and the real answer needs the reifier, which is a mapping we cannot
+        // lower yet. ADR-0046 §8.
+        Term::Triple(_) => term.to_string(),
     }
+}
+
+/// A directional language-tagged string (`"x"@he--rtl`, datatype
+/// `rdf:dirLangString`) reached a pivot column.
+///
+/// The parser keeps the direction — `rdf-12` is on — and the pivot has nowhere to
+/// put it: a column is one `Utf8` cell holding a lexical form, and `Primitive`,
+/// the one datatype lattice, has no `dirLangString`. Returning `"x"` for
+/// `"x"@he--rtl` is not a lossy convenience, it is the wrong string: base
+/// direction exists because the first strong character does not determine how the
+/// text is laid out, so an RTL value rendered as LTR reorders in the host. So the
+/// read path names the loss instead of committing it. ADR-0050 has why this is
+/// the stopping point and what would lift it.
+fn directional_literal_unsupported(
+    subject: &str,
+    predicate: &str,
+    literal: &Literal,
+) -> DataFusionError {
+    DataFusionError::NotImplemented(format!(
+        "RDF 1.2 base direction on <{subject}> <{predicate}>: {literal} is an \
+         rdf:dirLangString, and a pivot column carries a lexical form with no \
+         direction — see ADR-0050"
+    ))
 }
 
 #[cfg(test)]
@@ -234,5 +277,94 @@ mod tests {
 
         // kb/2 → empty list (no projects → no edges after UNNEST).
         assert_eq!(list.value(1).len(), 0, "kb/2 has no projects");
+    }
+
+    // ── RDF 1.2 ────────────────────────────────────────────────────────────
+    //
+    // Both of these are parse-level: they assert what the `rdf-12` feature buys,
+    // and each fails with a *parse error from oxttl* the moment the feature goes
+    // off — which is the failure the workspace manifest's comment exists to
+    // prevent. Measured off-feature (oxttl 0.2.3, 2026-08-07): "`<<(` is not a
+    // valid RDF object" and "Literal base direction are only allowed in RDF 1.2".
+
+    #[test]
+    fn a_triple_term_parses() {
+        const TTL: &str = r#"@prefix ex: <https://ex.org/> .
+            ex:claim a ex:Reifier ;
+                     ex:reifies <<( ex:alice ex:knows ex:bob )>> .
+        "#;
+
+        // The object-position-only rule of Concepts §3.1, as the parser enforces it.
+        let terms: Vec<Term> = TurtleParser::new()
+            .for_reader(TTL.as_bytes())
+            .map(|t| t.expect("RDF 1.2 Turtle parses").object)
+            .collect();
+        let quoted = terms
+            .iter()
+            .find_map(|t| match t {
+                Term::Triple(inner) => Some(inner),
+                _ => None,
+            })
+            .expect("one triple term");
+        assert_eq!(quoted.predicate.as_str(), "https://ex.org/knows");
+
+        // And the pivot does not choke on a document containing one — it renders
+        // the surface form, because a triple term has no identity to key a row by.
+        let batch = rdf_to_batch(TTL, "https://ex.org/Reifier", &[]).expect("pivot");
+        assert_eq!(batch.num_rows(), 1);
+    }
+
+    #[test]
+    fn a_base_direction_is_named_where_it_dies() {
+        use oxrdf::{BaseDirection, vocab::rdf};
+
+        const TTL: &str = r#"@prefix ex: <https://ex.org/> .
+            ex:doc a ex:Doc ; ex:title "مرحبا"@ar--rtl .
+        "#;
+
+        // It survives the parser intact, with the disjoint datatype RDF 1.2 gives
+        // it: a direction means rdf:dirLangString, its absence rdf:langString.
+        let object = TurtleParser::new()
+            .for_reader(TTL.as_bytes())
+            .map(|t| t.expect("RDF 1.2 Turtle parses").object)
+            .find_map(|t| match t {
+                Term::Literal(l) => Some(l),
+                _ => None,
+            })
+            .expect("one literal");
+        assert_eq!(object.direction(), Some(BaseDirection::Rtl));
+        assert_eq!(object.language(), Some("ar"));
+        assert_eq!(object.datatype(), rdf::DIR_LANG_STRING);
+
+        // And it dies at the pivot, loudly. The message names the subject, the
+        // predicate and the literal, because the alternative is a cell holding
+        // "مرحبا" that a host lays out left-to-right.
+        let columns = [RdfColumn {
+            name: "title".into(),
+            predicate: "https://ex.org/title".into(),
+            multi: false,
+        }];
+        let err = rdf_to_batch(TTL, "https://ex.org/Doc", &columns)
+            .expect_err("a directional literal is refused, not flattened");
+        let msg = err.to_string();
+        for expected in [
+            "https://ex.org/doc",
+            "https://ex.org/title",
+            "--rtl",
+            "ADR-0050",
+        ] {
+            assert!(msg.contains(expected), "{expected:?} missing from {msg:?}");
+        }
+
+        // The undirected sibling is untouched — the two are disjoint, so refusing
+        // one may not cost the other.
+        let plain = TTL.replace("--rtl", "");
+        let batch = rdf_to_batch(&plain, "https://ex.org/Doc", &columns).expect("pivot");
+        let title = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Utf8 col");
+        assert_eq!(title.value(0), "مرحبا");
     }
 }
