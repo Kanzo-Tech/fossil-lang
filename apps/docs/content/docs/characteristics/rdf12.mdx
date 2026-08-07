@@ -5,7 +5,7 @@ direction:
   summary: The primitive is a triple term as a value assignable only where the shape declares `rdfs:Proposition`, a reifier is an ordinary mapping so the sugar desugars to one, and in the corpus a reifier is a vertex while a triple term is the edge row it annotates — with a discriminator in the id space for the case where there is no row.
   decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
 today:
-  summary: The grammar carries an RDF-star-era `<< s p o >>` parsed as a primary expression with no decision behind it, it dies at the expression cliff like every other node kind, the corpus has no graph column at all, and the Turtle parser we depend on would reject a triple term because the feature that enables it is off by default.
+  summary: The grammar carries an RDF-star-era `<< s p o >>` parsed as a primary expression with no decision behind it, the corpus has no graph column at all, and our Turtle parser accepts a triple term today — not because anyone decided that, but because rudof enables `oxttl`'s `rdf-12` by feature unification. Since 2026-08-07 that is declared rather than inherited, and a literal with a base direction is refused at the pivot instead of being flattened into text a host lays out backwards.
   backedBy: grammar.bnf
 ---
 
@@ -20,10 +20,24 @@ The model is stable and the syntax is a moving target. The canonical serialisati
 N-Triples/N-Quads 1.2, which carry **only the primitive** — no sugar, nothing that can move under us.
 </Callout>
 
-And a dependency trap worth knowing before anyone tries: `oxttl` — which we already use — implements
-RDF 1.2 completely, **behind a feature that is off by default**. Today our Turtle parser would reject
-`<<(`. The feature is `rdf-12`; the RDF-star name is gone, and Oxigraph's own changelog says *"RDF-star
-support is now dropped in favor of RDF 1.2."*
+And a dependency trap worth knowing, which turned out to be the reverse of what this page said:
+`oxttl` implements RDF 1.2 completely, **behind a feature that is off by default** — but that feature
+has been ON in every build of this workspace, enabled by `rudof_iri`/`rudof_rdf` arriving through
+`shex_ast`, and never by us. That is why the `Term::Triple` arm in `crates/fossil-df/src/rdf.rs`
+compiles: the variant only exists behind the feature. **Our RDF level was a property of rudof's
+dependency graph, not a decision** — and the day `fossil-hir` drops ShEx for SHACL, which §8 above
+contemplates, the parser would have silently reverted to RDF 1.1. Since 2026-08-07 the feature is
+declared in `[workspace.dependencies]` (ADR-0051): a no-op for today's graph and a guard for
+tomorrow's, pulling in no new dependency. The RDF-star name is gone, and Oxigraph's own changelog says
+*"RDF-star support is now dropped in favor of RDF 1.2."*
+
+Base direction goes one step further and then stops on purpose. `"مرحبا"@ar--rtl` survives the parser
+whole — `rdf:dirLangString`, disjoint from `rdf:langString` — and **dies at the pivot**, where a cell
+is one `Utf8` lexical form and the datatype lattice has no `dirLangString`. It is refused there,
+naming subject, predicate and literal, rather than returned as `"مرحبا"`: base direction exists
+precisely because the first strong character does not determine layout, so a flattened cell is text a
+host lays out backwards with nothing downstream able to tell. The lattice does not gain the variant
+until a producer emits one or a shape declares it.
 
 ## Three things from the model that govern everything else
 
