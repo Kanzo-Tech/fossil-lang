@@ -38,8 +38,8 @@ use datafusion::execution::context::SessionContext;
 use datafusion::prelude::SessionConfig;
 use fossil_base::{FossilDb, FsError, SourceFile, System};
 use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
-use fossil_df::files::GraphArFile;
 use fossil_df::SourceFormat;
+use fossil_df::files::GraphArFile;
 use fossil_run_status::RunStatus;
 use object_store::memory::InMemory;
 use object_store::path::Path as ObjPath;
@@ -90,7 +90,7 @@ pub struct ExecOutput {
 /// the object-store / provider seams, never through `System::read_file`, and
 /// touches no clock on its path — so `read_file` is unreachable (returns
 /// `NotFound`) and `now` returns the wasm-safe `UNIX_EPOCH` placeholder
-/// (`SystemTime::now()` panics on `wasm32-unknown-unknown`). `inferred_descriptor`
+/// (`SystemTime::now()` panics on `wasm32-unknown-unknown`). `descriptors`
 /// stays at the trait default (`None`): typing falls back to the passed output
 /// descriptor / string defaults — the descriptor is an argument, not read here.
 #[derive(Debug, Default)]
@@ -159,10 +159,12 @@ pub fn program_sources_core(
     connections: &HashMap<String, String>,
 ) -> Result<Vec<(String, &'static str)>, String> {
     let (db, file, descriptor) = build_program(program, shex)?;
-    Ok(fossil_df::program_sources(&db, file, &descriptor, connections)
-        .into_iter()
-        .map(|s| (s.uri, format_kind(&s.format)))
-        .collect())
+    Ok(
+        fossil_df::program_sources(&db, file, &descriptor, connections)
+            .into_iter()
+            .map(|s| (s.uri, format_kind(&s.format)))
+            .collect(),
+    )
 }
 
 /// Build the executor's db + interned program + output descriptor — shared by
@@ -194,7 +196,9 @@ fn build_descriptor(text: &str) -> Result<OutputDescriptorKind, String> {
             || text.contains("sh:NodeShape")
             || text.contains("sh:property"));
     if looks_shacl {
-        return Ok(OutputDescriptorKind::Shacl(fossil_df::shacl_to_graph_schema(text)?));
+        return Ok(OutputDescriptorKind::Shacl(
+            fossil_df::shacl_to_graph_schema(text)?,
+        ));
     }
     Ok(OutputDescriptorKind::ShEx(
         ShExDescriptor::from_shex_source(text).map_err(|e| format!("ShEx parse error: {e:?}"))?,
@@ -225,7 +229,9 @@ async fn register_object_store_sources(
         }
         let url = Url::parse(&src.uri).map_err(|e| format!("source URI `{}`: {e}", src.uri))?;
         let base = base_url(&url)?;
-        let store = stores.entry(base).or_insert_with(|| Arc::new(InMemory::new()));
+        let store = stores
+            .entry(base)
+            .or_insert_with(|| Arc::new(InMemory::new()));
         let path = ObjPath::from(url.path().trim_start_matches('/'));
         store
             .put(&path, src.bytes.clone().into())

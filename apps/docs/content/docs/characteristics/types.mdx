@@ -27,18 +27,22 @@ the sources are large.** A fossil script is tens of lines; the CSV it points at 
 source and inferring its schema is the only part of a compile that costs real time.
 
 That is why it happens **before the database exists** —
-`crates/fossil-engine/src/lib.rs:365` runs `DESCRIBE SELECT * FROM read_csv_auto(...)` and hands the
+`crates/fossil-engine/src/lib.rs:263` runs `DESCRIBE SELECT * FROM read_csv_auto(...)` and hands the
 result to the host — and why its cache is deliberately outside the query system. Being outside is
 correct: it is a function of the world, not of the program text.
 
-<Callout type="warn" title="The cache is declared and never wired">
-`content_hash` — documented as the thing that drives invalidation — is `String::new()` at every
-production construction site. The fallback hashes the *resulting columns*, not the source, so it
-cannot detect a change until after re-reading. The key is the binding name, not the URI. And
-`register_inferred_descriptor` panics by default.
+<Callout title="The cache exists since 2026-08-07, and its token is deliberately not a hash">
+It was the least-built thing in the tree: the field that drove invalidation was `String::new()` at
+every production site, its fallback hashed the *resulting columns* rather than the source, the key
+was the binding name rather than the URI, and registering a descriptor panicked by default. All four
+are closed (ADR-0053).
 
-This is the infrastructure for the work that actually costs, and it is the least-built thing in the
-tree.
+The freshness token is **mtime + size from one `stat`** — not a content hash, because a hash reads
+the whole source to decide whether to read the source, which is the one way a cache over large
+sources can cost more than it saves. Its failure modes are stated rather than hidden: "changed when
+it didn't" costs one redundant DESCRIBE and no wrong answer; "unchanged when it did" needs mtime
+*and* size both preserved. A host with a strong `ETag` writes that instead, and one that cannot
+cheaply tell writes `""`, which reads as *never fresh*.
 </Callout>
 
 ## Job two — the shape is a contract

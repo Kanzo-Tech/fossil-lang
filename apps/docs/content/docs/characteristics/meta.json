@@ -1,4 +1,13 @@
 {
   "title": "Characteristics",
-  "pages": ["verbs", "bounded-write", "streaming", "corpus-contract"]
+  "pages": [
+    "expressions",
+    "types",
+    "pipeline",
+    "rdf12",
+    "verbs",
+    "bounded-write",
+    "streaming",
+    "corpus-contract"
+  ]
 }

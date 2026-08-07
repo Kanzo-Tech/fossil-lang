@@ -162,6 +162,59 @@ describe("the graph core reaches the rest of the tree exactly once", () => {
   });
 });
 
+/**
+ * The frontmatter registers govern one citation per page. The prose carries dozens.
+ *
+ * A page that says a thing is true at `crates/fossil-hir/src/lower.rs:60` is making the same kind of
+ * promise as a `backedBy:`, and it rots the same way — except there are a hundred of them and nobody
+ * re-reads a paragraph to check a line number. Every `` `path/to/file.ext:12` `` span in an MDX file
+ * has to name a line that exists.
+ *
+ * This caught three real errors the day it was written, two of them in pages written the same hour:
+ * a range whose end ran past the file, and a mistyped path.
+ *
+ * What it does NOT prove — and the gap is the interesting one: **it checks that the line exists, not
+ * that it says what the page claims.** A citation that drifts one line still passes. That failure
+ * mode is not hypothetical either; three enum variants were cited at real lines in the right file,
+ * permuted. Catching that needs the citation to carry what it asserts, which is a heavier convention
+ * than this one and has not earned itself yet.
+ */
+const CITATION = /`([\w./-]+\.(?:rs|toml|bnf|mjs|ts|tsx|yml|json)):(\d+)(?:-(\d+))?`/g;
+
+interface Citation {
+  /** `<page>:<line in the page>` — so a failure message points at the prose, not the target. */
+  where: string;
+  span: string;
+  path: string;
+  last: number;
+}
+
+const citations: Citation[] = mdxUnder(CONTENT_ROOT).flatMap((file) => {
+  const page = relative(repoRoot, file);
+  return readFileSync(file, "utf8").split("\n").flatMap((line, index) =>
+    [...line.matchAll(CITATION)].map((m) => ({
+      where: `${page}:${index + 1}`,
+      span: `${m[1]}:${m[2]}${m[3] ? `-${m[3]}` : ""}`,
+      path: m[1],
+      last: Number(m[3] ?? m[2]),
+    })),
+  );
+});
+
+describe("every inline file:line citation resolves", () => {
+  // Same reason as above: a regex that stops matching would turn this into a vacuous pass.
+  it("finds citations at all", () => {
+    expect(citations.length).toBeGreaterThan(0);
+  });
+
+  it.each(citations)("$where cites $span", ({ path, last }) => {
+    const target = join(repoRoot, path);
+    expect(existsSync(target), `${path} is not on disk`).toBe(true);
+    const lines = readFileSync(target, "utf8").split("\n").length;
+    expect(last, `${path} has ${lines} lines`).toBeLessThanOrEqual(lines);
+  });
+});
+
 describe("every cited path is still there", () => {
   it.each(pages)("$id cites a decision that exists", ({ data }) => {
     const decidedBy = (data.direction as { decidedBy?: string } | undefined)?.decidedBy as string;
