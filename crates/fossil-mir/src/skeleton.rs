@@ -9,7 +9,48 @@
 //! duplicated skeleton logic across crates.
 
 use fossil_hir::body::body;
+use fossil_hir::def_map::def_map;
+use fossil_hir::lower::lower_to_hir;
 use fossil_hir::{HirExpr, MappingLoc, PropertyKey};
+use smol_str::SmolStr;
+
+/// Every mapping's subject skeleton in a file, paired with the vertex type it
+/// declares — the table a property's IRI template is matched against to decide
+/// whether it is an edge.
+///
+/// **File-keyed on purpose.** Each mapping needs the whole table, so computing
+/// it per mapping made the lowering quadratic in mappings per file: measured
+/// 2026-08-07 with `cargo run --release --example query_time -p fossil-mir`,
+/// `lower_to_mir_pg` cost 1.16 ms at 100 mappings and **87 ms at 1000** — 94%
+/// of the whole compile, 78× for 10× the input. Salsa was the only thing
+/// keeping it from being worse: the n² calls were n² memo hits, and a memo hit
+/// is ~72 ns, so memoising harder would still have left 72 ms at 1000. The fix
+/// is to stop asking n times for one answer.
+///
+/// It does NOT widen the pinned per-mapping fan-out: that invariant is about
+/// `body` / `typecheck_mapping` / `expr_types`, and this is read by
+/// `lower_to_mir_pg`, which already reads `def_map(db, file)`. Editing an
+/// `iri = ...` template does invalidate this for the whole file — correctly,
+/// because that edit changes which properties of every OTHER mapping are edges
+/// to this type.
+#[salsa::tracked]
+pub fn subject_skeletons(
+    db: &dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+) -> Vec<(String, SmolStr)> {
+    let dm = def_map(db, file);
+    let hir = lower_to_hir(db, file);
+    dm.mappings(db)
+        .iter()
+        .enumerate()
+        .filter_map(|(i, loc)| {
+            let ty = SmolStr::new(crate::lower::local_name(
+                hir.mappings(db).get(i)?.shape_iri.as_str(),
+            ));
+            Some((subject_template_skeleton(db, *loc)?, ty))
+        })
+        .collect()
+}
 
 /// The IRI-template skeleton of a mapping's `iri = ...` subject property, or
 /// `None` when there is no subject or it is not a backtick template.

@@ -104,12 +104,17 @@ pub fn lower_to_mir_pg<'db>(
     let file = mapping.file(db);
     let dm = def_map(db, file);
     let span = mapping_span(db, mapping);
-    let Some(dense_idx) = dm.mappings(db).iter().position(|loc| *loc == mapping) else {
+    // `def_map` builds `MappingLoc::new(db, file, i)` in order, so a mapping's
+    // interned index IS its position in that table. The linear search this
+    // replaces was the second quadratic in this function — one full scan per
+    // mapping, for an answer the key already carried.
+    let dense_idx = mapping.index(db);
+    if dense_idx >= dm.mappings(db).len() {
         return poisoned(
             db,
             fossil_base::bug(db, span, "mapping is absent from its own DefMap"),
         );
-    };
+    }
     let hir = lower_to_hir(db, file);
     let Some(m) = hir.mappings(db).get(dense_idx) else {
         return poisoned(
@@ -165,16 +170,10 @@ pub fn lower_to_mir_pg<'db>(
 
     // Subject-template skeleton of EVERY mapping in the file → its vertex type.
     // A property whose backtick-template skeleton matches one of these is a
-    // foreign key → an edge to that type (reuses the shared skeleton-matching).
-    let subject_skeletons: Vec<(String, SmolStr)> = dm
-        .mappings(db)
-        .iter()
-        .enumerate()
-        .filter_map(|(i, loc)| {
-            let ty = SmolStr::new(local_name(hir.mappings(db).get(i)?.shape_iri.as_str()));
-            Some((crate::skeleton::subject_template_skeleton(db, *loc)?, ty))
-        })
-        .collect();
+    // foreign key → an edge to that type. File-keyed: building it here, once
+    // per mapping, is what made this function quadratic — see the query's own
+    // doc for the measurement.
+    let subject_skeletons = crate::skeleton::subject_skeletons(db, file);
 
     // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
     // IRI-template that resolves to another subject → edge; dangling template /
@@ -437,7 +436,7 @@ pub fn apply_output_shape<'db>(ops: &[Op<'db>], descriptor: &OutputDescriptorKin
 /// Local name of an IRI: the segment after the last `#` or `/` (falls back to
 /// the whole string for a bare term). Used for the vertex `type_name` + prop
 /// names in [`lower_to_mir_pg`].
-fn local_name(iri: &str) -> &str {
+pub(crate) fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/']).next().unwrap_or(iri)
 }
 
