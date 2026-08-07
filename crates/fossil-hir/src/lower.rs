@@ -27,6 +27,13 @@ use crate::def_map::{PrefixEntry, def_map};
 pub struct HirFile<'db> {
     #[returns(ref)]
     pub mappings: Vec<HirMapping>,
+    /// The source bindings whose right-hand side is a PIPELINE rather than an
+    /// `io.*` call. A binding that reads a file is `def_map`'s business — a
+    /// constructor and a URI, both signature-only; a binding that derives a
+    /// relation from another one carries expressions, and expressions are lowered
+    /// here or they are lowered twice.
+    #[returns(ref)]
+    pub source_pipes: Vec<HirSourcePipe>,
 }
 
 /// Per-mapping HEADER data. Per ADR-0005, the previous `properties` field
@@ -40,6 +47,36 @@ pub struct HirMapping {
     pub shape_iri: SmolStr,
     /// Name of the source binding referenced by `from`, e.g. `"users"`.
     pub source_binding: SmolStr,
+}
+
+/// `adultos := users |> where(.edad >= 18)` — a source binding that is a
+/// RELATION derived from another binding, not a file to read.
+///
+/// `base` is the binding at the head of the pipe; every stage after it is one
+/// [`HirSourceOp`] in written order. The head must be a name and not another
+/// call, because a pipeline whose head is `io.csv("u.csv")` would give the same
+/// relation two spellings — and `from <name>` resolves bindings, not expressions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct HirSourcePipe {
+    pub name: SmolStr,
+    pub base: SmolStr,
+    pub ops: Vec<HirSourceOp>,
+}
+
+/// The three verbs of the first version (ADR-0054).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum HirSourceOp {
+    /// `where(.edad >= 18)` — keeps the rows the predicate holds for. The row
+    /// type is unchanged, which is why it is the cheap one.
+    Where(HirExpr),
+    /// `select(.id, .nombre)` — restricts the row to the named columns.
+    Select(Vec<SmolStr>),
+    /// `join(personas, on = .persona_id)` — inner equi-join, and the key is
+    /// named ONCE: `on = .k` is `USING (k)`, so `k` must exist on both sides and
+    /// appears once in the result. Any other shared name is an error the checker
+    /// raises; `.` means *the row* and cannot mean two rows in one expression
+    /// while the language has no qualified reference (ADR-0054 §3).
+    Join { right: SmolStr, key: SmolStr },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -131,14 +168,249 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
     let prefixes = dm.prefixes(db);
 
     let mut mappings = Vec::new();
+    let mut source_pipes = Vec::new();
     for child in cst.root(db).syntax().children() {
-        if child.kind() == fossil_syntax::SyntaxKind::MAPPING
-            && let Some(m) = lower_mapping_node(&child, prefixes)
-        {
-            mappings.push(m);
+        match child.kind() {
+            fossil_syntax::SyntaxKind::MAPPING => {
+                if let Some(m) = lower_mapping_node(&child, prefixes) {
+                    mappings.push(m);
+                }
+            }
+            fossil_syntax::SyntaxKind::SOURCE_DEF => {
+                if let Some(p) = lower_source_pipe(db, &child, prefixes) {
+                    source_pipes.push(p);
+                }
+            }
+            _ => {}
         }
     }
-    HirFile::new(db, mappings)
+    HirFile::new(db, mappings, source_pipes)
+}
+
+/// Lower a `SOURCE_DEF` whose right-hand side is a pipeline. Returns `None` for
+/// the ordinary `users := io.csv("u.csv")` shape, which carries no expressions
+/// and belongs to [`crate::def_map`].
+///
+/// `PIPELINE_EXPR` nests to the LEFT — `a |> f() |> g()` is `((a |> f()) |> g())`
+/// — so the spine is walked down to the head and the stages come back out in
+/// written order.
+fn lower_source_pipe(
+    db: &dyn fossil_base::Db,
+    source_def: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+) -> Option<HirSourcePipe> {
+    use fossil_syntax::SyntaxKind;
+
+    let name = source_def
+        .children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .find(|t| t.kind() == SyntaxKind::IDENT)
+        .map(|t| SmolStr::from(t.text()))?;
+
+    let rhs = source_def
+        .children()
+        .find(|c| c.kind() == SyntaxKind::EXPR)?
+        .children()
+        .next()?;
+    if rhs.kind() != SyntaxKind::PIPELINE_EXPR {
+        return None;
+    }
+
+    let mut stages = Vec::new();
+    let mut head = rhs;
+    while head.kind() == SyntaxKind::PIPELINE_EXPR {
+        let mut parts = head.children();
+        let lhs = parts.next()?;
+        let stage = parts.next()?;
+        stages.push(stage);
+        head = lhs;
+    }
+    stages.reverse();
+
+    let Some(base) = bare_name(&head) else {
+        diagnose(
+            db,
+            &head,
+            format!(
+                "the head of the source pipeline `{name}` is not a source binding. A source \
+                 pipeline starts at a binding and derives from it, e.g. \
+                 `{name} := users |> where(.edad >= 18)`."
+            ),
+        );
+        return None;
+    };
+
+    let mut ops = Vec::with_capacity(stages.len());
+    for stage in &stages {
+        ops.push(lower_source_stage(db, stage, prefixes, &name)?);
+    }
+
+    Some(HirSourcePipe { name, base, ops })
+}
+
+/// One stage of a source pipeline — `where(...)`, `select(...)` or `join(...)`.
+fn lower_source_stage(
+    db: &dyn fossil_base::Db,
+    stage: &fossil_syntax::SyntaxNode,
+    prefixes: &[PrefixEntry],
+    pipe: &str,
+) -> Option<HirSourceOp> {
+    use fossil_syntax::SyntaxKind;
+
+    let verb = stage.children().next().as_ref().and_then(bare_name);
+    let Some(verb) = verb else {
+        diagnose(
+            db,
+            stage,
+            format!("a stage of the source pipeline `{pipe}` is not a verb call."),
+        );
+        return None;
+    };
+
+    // Positional arguments and the `on = ...` named one, kept apart: the verbs
+    // read them differently and a positional `on` is not the same word.
+    let args: Vec<fossil_syntax::SyntaxNode> = stage
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ARG_LIST)
+        .into_iter()
+        .flat_map(|l| l.children())
+        .collect();
+    let positional: Vec<fossil_syntax::SyntaxNode> = args
+        .iter()
+        .filter(|a| a.kind() == SyntaxKind::ARG)
+        .filter_map(|a| a.children().next())
+        .collect();
+    let named = |want: &str| -> Option<fossil_syntax::SyntaxNode> {
+        args.iter()
+            .filter(|a| a.kind() == SyntaxKind::NAMED_ARG)
+            .find(|a| {
+                a.children_with_tokens()
+                    .filter_map(fossil_syntax::SyntaxElement::into_token)
+                    .any(|t| t.kind() == SyntaxKind::IDENT && t.text() == want)
+            })
+            .and_then(|a| a.children().next())
+    };
+
+    match verb.as_str() {
+        "where" => {
+            if positional.len() != 1 {
+                diagnose(
+                    db,
+                    stage,
+                    format!(
+                        "`where` takes one predicate, and `{pipe}` gives it {}. \
+                         e.g. `where(.edad >= 18)`.",
+                        positional.len()
+                    ),
+                );
+                return None;
+            }
+            Some(HirSourceOp::Where(lower_expr_inner(
+                db,
+                &positional[0],
+                prefixes,
+            )?))
+        }
+        "select" => {
+            if positional.is_empty() {
+                diagnose(
+                    db,
+                    stage,
+                    format!("`select` in `{pipe}` names no column. e.g. `select(.id, .nombre)`."),
+                );
+                return None;
+            }
+            let mut cols = Vec::with_capacity(positional.len());
+            for arg in &positional {
+                let Some(HirExpr::FieldRef(col)) = lower_expr_inner(db, arg, prefixes) else {
+                    diagnose(
+                        db,
+                        arg,
+                        format!(
+                            "`select` in `{pipe}` takes column references and this is not one. \
+                             e.g. `select(.id, .nombre)`."
+                        ),
+                    );
+                    return None;
+                };
+                cols.push(col);
+            }
+            Some(HirSourceOp::Select(cols))
+        }
+        "join" => {
+            let right = positional.first().and_then(bare_name);
+            let Some(right) = right else {
+                diagnose(
+                    db,
+                    stage,
+                    format!(
+                        "`join` in `{pipe}` does not name the source binding it joins. \
+                         e.g. `join(personas, on = .persona_id)`."
+                    ),
+                );
+                return None;
+            };
+            // `on = .k` and nothing else: the first version is an equi-join whose
+            // key is named once (ADR-0054 §3). An arbitrary condition would have
+            // to say which row each `.` names, and that is a qualified reference
+            // the language does not have.
+            let Some(HirExpr::FieldRef(key)) =
+                named("on").and_then(|n| lower_expr_inner(db, &n, prefixes))
+            else {
+                diagnose(
+                    db,
+                    stage,
+                    format!(
+                        "`join` in `{pipe}` needs `on = .<column>`, a column that exists on both \
+                         sides and appears once in the result. The first version joins on \
+                         equality by name only, so `on = .a == .b` is not it yet."
+                    ),
+                );
+                return None;
+            };
+            Some(HirSourceOp::Join { right, key })
+        }
+        other => {
+            diagnose(
+                db,
+                stage,
+                format!(
+                    "`{other}` is not a source-pipeline verb. The first version has `where`, \
+                     `select` and `join`."
+                ),
+            );
+            None
+        }
+    }
+}
+
+/// The text of a node that is exactly one bare `IDENT` — a binding name or a
+/// verb. `io.csv` is a dotted callee and deliberately does NOT match.
+fn bare_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
+    use fossil_syntax::SyntaxKind;
+    if node.kind() != SyntaxKind::LITERAL_EXPR {
+        return None;
+    }
+    let toks: Vec<_> = node
+        .children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            )
+        })
+        .collect();
+    match toks.as_slice() {
+        [t] if t.kind() == SyntaxKind::IDENT => Some(SmolStr::from(t.text())),
+        _ => None,
+    }
+}
+
+fn diagnose(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode, message: String) {
+    let range = node.text_range();
+    let span = Span::new(range.start().into(), range.end().into());
+    Diagnostic::new(Severity::Error, message, span).accumulate(db);
 }
 
 fn lookup_prefix(prefixes: &[PrefixEntry], name: &str) -> Option<SmolStr> {
@@ -1234,6 +1506,118 @@ User : ex:Person from users
         assert!(
             msg.contains("undeclared") || msg.contains("undefined") || msg.contains("unknown"),
             "diagnostic must say the prefix is undeclared, got {msg:?}"
+        );
+    }
+
+    fn db_with(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "t.fossil".to_string());
+        (db, file)
+    }
+
+    /// A source pipeline lowers to its verbs, in the order they were written,
+    /// and a binding that reads a file does not become one.
+    ///
+    /// `PIPELINE_EXPR` nests to the left, so this is also the test that the
+    /// spine is walked the right way round: `join` then `where`, not the
+    /// reverse.
+    #[test]
+    fn a_source_pipeline_lowers_to_its_verbs_in_written_order() {
+        const PIPES: &str = "\
+users := io.csv(\"u.csv\")
+personas := io.csv(\"p.csv\")
+adultos := users |> where(.edad >= 18)
+breve := adultos |> select(.id, .nombre)
+ventas := adultos |> join(personas, on = .persona_id) |> where(.total >= 100)
+";
+        let (db, file) = db_with(PIPES);
+        let hir = lower_to_hir(&db, file);
+        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
+        assert!(
+            diags.is_empty(),
+            "the three verbs of the first version raise nothing, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
+
+        let pipes = hir.source_pipes(&db);
+        // Two `io.csv` bindings are NOT pipelines: they carry no expression.
+        assert_eq!(
+            pipes.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            vec!["adultos", "breve", "ventas"],
+        );
+
+        assert_eq!(pipes[0].base.as_str(), "users");
+        assert!(matches!(pipes[0].ops.as_slice(), [HirSourceOp::Where(_)]));
+
+        assert_eq!(pipes[1].base.as_str(), "adultos");
+        let [HirSourceOp::Select(cols)] = pipes[1].ops.as_slice() else {
+            panic!("expected one Select, got {:?}", pipes[1].ops);
+        };
+        assert_eq!(cols.iter().map(SmolStr::as_str).collect::<Vec<_>>(), [
+            "id", "nombre"
+        ]);
+
+        assert_eq!(pipes[2].base.as_str(), "adultos");
+        let [HirSourceOp::Join { right, key }, HirSourceOp::Where(pred)] = pipes[2].ops.as_slice()
+        else {
+            panic!("expected Join then Where, got {:?}", pipes[2].ops);
+        };
+        assert_eq!(right.as_str(), "personas");
+        assert_eq!(key.as_str(), "persona_id");
+        assert!(matches!(pred, HirExpr::BinOp { op: CmpOp::Ge, .. }));
+    }
+
+    /// `on = .a == .b` is refused, and it is refused by name.
+    ///
+    /// ADR-0054 §3: the first version joins on equality by name, so the
+    /// condition is a column and not a comparison. The point of the test is that
+    /// the pipeline does not lower — a join whose key we guessed would produce a
+    /// corpus nobody asked for, which is the failure this project exists to make
+    /// impossible.
+    #[test]
+    fn an_arbitrary_join_condition_is_a_diagnostic_and_not_a_join() {
+        const ARBITRARY: &str = "\
+pedidos := io.csv(\"o.csv\")
+personas := io.csv(\"p.csv\")
+ventas := pedidos |> join(personas, on = .persona_id == .id)
+";
+        let (db, file) = db_with(ARBITRARY);
+        let hir = lower_to_hir(&db, file);
+        assert!(
+            hir.source_pipes(&db).is_empty(),
+            "the pipeline must not lower, got {:?}",
+            hir.source_pipes(&db),
+        );
+        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
+        let msg = diags
+            .first()
+            .map(|d| d.message.clone())
+            .unwrap_or_default();
+        assert!(
+            msg.contains("on = .<column>"),
+            "the diagnostic must show the form that works, got {msg:?}"
+        );
+    }
+
+    /// A verb the first version does not have is named, not ignored.
+    #[test]
+    fn an_unknown_source_verb_is_a_diagnostic() {
+        const UNKNOWN: &str = "\
+users := io.csv(\"u.csv\")
+raro := users |> group_by(.edad)
+";
+        let (db, file) = db_with(UNKNOWN);
+        let hir = lower_to_hir(&db, file);
+        assert!(hir.source_pipes(&db).is_empty());
+        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
+        let msg = diags
+            .first()
+            .map(|d| d.message.clone())
+            .unwrap_or_default();
+        assert!(
+            msg.contains("group_by") && msg.contains("where"),
+            "the diagnostic must name the verb and the ones that exist, got {msg:?}"
         );
     }
 }
