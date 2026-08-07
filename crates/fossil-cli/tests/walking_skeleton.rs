@@ -104,12 +104,21 @@ fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
 
     // The `Person` vertex type name is derived from the mapping's shape IRI
     // (`User : ex:Person` → local name `Person`), not the mapping name.
-    let parquet = dest.join("vertex/Person.parquet");
+    //
+    // A vertex is TILES, not a file: `c416e07` made the layout pass emit one per
+    // 4,096-row `dense_id` range under `vertex/<Type>/` and delete the single
+    // staged `vertex/<Type>.parquet`. This asserted the deleted path and had been
+    // red since — the last of the five failures that commit left behind.
+    let tiles = dest.join("vertex").join("Person");
     let manifest = dest.join("vertex/Person.vertex.yml");
     assert!(
-        parquet.exists(),
-        "vertex/Person.parquet missing at {}",
-        parquet.display()
+        tiles.is_dir(),
+        "vertex tile directory missing at {}",
+        tiles.display()
+    );
+    assert!(
+        !dest.join("vertex/Person.parquet").exists(),
+        "the staged single file survived — readers would see it and the tiles"
     );
     assert!(
         manifest.exists(),
@@ -135,7 +144,7 @@ fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
     // 3. Parquet content. Open via DuckDB native. Build the path as a Display so
     //    platform-specific separators round-trip through the SQL string literal.
     let conn = duckdb::Connection::open_in_memory().expect("open in-memory duckdb");
-    let parquet_path = parquet.display().to_string().replace('\'', "''");
+    let parquet_path = format!("{}/*.parquet", tiles.display()).replace('\'', "''");
 
     // 3a. Row count == 5 (one Person per row of users.csv).
     let count: i64 = conn
