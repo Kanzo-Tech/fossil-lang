@@ -177,11 +177,22 @@ declaran. Si ese frente se retoma y dice otra cosa, el §1 es lo que hay que rel
 Cuatro frentes de investigación más volvieron después de escribir lo de arriba. Tres cosas que
 traen son del repositorio, no de la web, y están verificadas contra el fichero:
 
-**1. `use` ya existe en la gramática, así que §1 cuesta menos de lo que esta ADR decía.**
-`grammar.bnf:104-111` ya define `Import := 'use' Path SelectiveImport? Alias?` con
-`PathSegment := IDENT | STRING`, o sea que `use <personas.shex> as personas` casi parsea hoy. Sólo
-aparece en un fixture del parser (`use stdlib/seq { filter, map }`) y en ningún programa real. El §1
-no inventa una forma: enciende una que estaba escrita y apagada.
+**1. `use` ya existe en la gramática — pero no sirve tal cual, y esto lo corrige.**
+`grammar.bnf:104-111` define `Import := 'use' Path SelectiveImport? Alias?`, y sólo aparece en un
+fixture del parser (`use stdlib/seq { filter, map }`), en ningún programa real. *(Corrección del
+2026-08-08: la redacción original decía que `use <personas.shex> as personas` «casi parsea hoy». **No
+parsea**: `PathSegment := IDENT | STRING` y `<personas.shex>` lexa como `ABS_IRI`, que
+`parse_path_segment` manda a recuperación.)* Y hay tres desajustes más, medidos, que el §1 tiene que
+resolver al encenderla:
+
+- **`SelectiveImport := LBRACE IDENT (COMMA IDENT)* RBRACE` no puede deletrear `ex:Person`.** Para
+  importar miembros comprobados de un documento de formas necesita `IRIExpr`, no `IDENT`.
+- **El ancla de la segunda enmienda no tiene sitio.** `Alias?` no la cubre: hay que añadir producción.
+- **`Path` con `/` es una noción de módulo** que choca con el §4 de la segunda enmienda, donde la
+  ruta se resuelve fuera. O se quita el `/`, o se quita esa parte del §4.
+
+Así que el §1 no enciende una forma escrita: **la reescribe**, con la mitad de la producción actual
+tirada. Sigue siendo más barato que inventarla, y sigue sin ser gratis.
 
 **2. El sigilo de atributo ya está elegido, y no es `#[...]`.** `grammar.bnf:85-87` tiene
 `AT_ATTR := '@' IDENT` con el comentario *«Future attributes (@dcat, @prov, @chunked, etc.)»*. Y `#`
