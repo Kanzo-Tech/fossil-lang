@@ -90,9 +90,12 @@ backtick en posición de sujeto. `prefix` se queda para el vocabulario, que es s
 **4. Clausura, cardinalidad y `EXTRA` viven en el TIPO.** Nunca en una bandera del emisor, nunca en
 una opción de CLI. Es la condición sin la cual el criterio de terminación de §7 no significa nada.
 
-**5. Los atributos llevan lo accesorio, jamás la identidad.** Documentación y sensibilidad (F4 §3)
-son atributos; el IRI de clase y el de predicado no. Los CURIE se quedan en el programa porque son
-identidad intrínseca y escrita — el número de campo de protobuf, en nuestro dominio.
+**5. La identidad tiene que ser un nodo del modelo, y jamás derivarse de un nombre.** *(Reformulado
+el mismo día — ver la enmienda al final; la redacción original decía «los atributos nunca llevan
+identidad», que es un criterio equivocado.)* Documentación y sensibilidad (F4 §3) son accesorias; el
+IRI de clase y el de predicado son identidad, y por eso no pueden salir de una regla de casing sobre
+el nombre del campo. Que se escriban como CURIE en línea (`ex:name = .name`) o como atributo del
+modelo es elección de sintaxis, no de corrección.
 
 **6. Nada se pierde en silencio.** Lo que la importación no sepa modelar entra como **nodo opaco que
 nombra el constructo** (`Unsupported("OneOf")`, al estilo de `Unsupported("circle")` de Prisma) y
@@ -165,3 +168,73 @@ tipo y atributo— murió por límite de sesión. Lo que decidía era **si `use`
 o fuera de él**; esta ADR elige dentro, con el apoyo indirecto de Smithy, TypeSpec, Protobuf y CUE,
 que declaran sus imports en el fichero, y con el resultado negativo de LinkML y GraphQL, que no los
 declaran. Si ese frente se retoma y dice otra cosa, el §1 es lo que hay que releer.
+
+
+---
+
+## Enmienda, 2026-08-08 — cuatro hechos del propio árbol y una reformulación
+
+Cuatro frentes de investigación más volvieron después de escribir lo de arriba. Tres cosas que
+traen son del repositorio, no de la web, y están verificadas contra el fichero:
+
+**1. `use` ya existe en la gramática, así que §1 cuesta menos de lo que esta ADR decía.**
+`grammar.bnf:104-111` ya define `Import := 'use' Path SelectiveImport? Alias?` con
+`PathSegment := IDENT | STRING`, o sea que `use <personas.shex> as personas` casi parsea hoy. Sólo
+aparece en un fixture del parser (`use stdlib/seq { filter, map }`) y en ningún programa real. El §1
+no inventa una forma: enciende una que estaba escrita y apagada.
+
+**2. El sigilo de atributo ya está elegido, y no es `#[...]`.** `grammar.bnf:85-87` tiene
+`AT_ATTR := '@' IDENT` con el comentario *«Future attributes (@dcat, @prov, @chunked, etc.)»*. Y `#`
+es hostil aquí por tres razones acumuladas: un `#` suelto es **inlexable y colgaría el parser**
+(cabecera de `tests/fixtures/canonical_200.fossil`), es el carácter de comentario de Turtle y SPARQL
+—los dos idiomas que un lector de fossil lleva en la cabeza—, y es el separador de fragmento de medio
+vocabulario RDF. Cualquier atributo de esta ADR se escribe `@nombre(...)`.
+
+**3. «Anotación» ya significa otra cosa dentro de fossil.** `type-system.md:250` y
+`grammar.bnf:144-153` la usan para la reificación de RDF 1.2 (*statements about statements*). El
+vocabulario de esta ADR dice «atributo», nunca «anotación».
+
+**4. Y una contradicción de frente que hay que resolver, no esconder.**
+`apps/docs/content/docs/characteristics/types.mdx:121` lleva un callout *«Deliberately absent»* que
+dice, literal: **«No user type annotations — types come from descriptors.»** El §2 de esta ADR —que
+el tipo se pueda escribir en el lenguaje para que el documento sea opcional— **lo deroga**. La
+decisión se mantiene, porque el requisito («el documento no tiene por qué ser obligatorio, sino
+representable en el lenguaje») es explícito de Angel y es lo que hace que el `.shex` sea un origen y
+no una autoridad. Pero **la página tiene que cambiar con la implementación**, y hasta entonces el
+repositorio afirma dos cosas incompatibles en dos sitios.
+
+**La reformulación del §5.** El criterio original —«los atributos nunca llevan identidad»— no
+sobrevive al contraejemplo: Cap'n Proto dice *«any symbolic name can be changed, as long as the type
+ID / ordinal numbers stay the same»*, y bajo esa lente un `@iri(foaf:name)` **es** la separación
+nombre≠identidad que esta ADR defiende citando protobuf, con el identificador local como etiqueta
+renombrable. El criterio correcto es el que ya usaba el §6: **¿es un nodo del modelo o es trivia?**
+La identidad tiene que ser nodo. Lo que sigue prohibido, y ahora con dos medidas encima, es
+**derivarla de un nombre**:
+
+- Ninguna regla de casing puede acercarse a un IRI. El menú de `rename_all` de serde tiene 8 de las
+  12 combinaciones posibles y no puede expresar `Content-Type`, `ETag`, `$ref` ni `_meta`; con
+  identificadores no ASCII —`edad`, el ejemplo de esta ADR— **panica el compilador** (serde#2953) o
+  es un no-op silencioso. Y RDF sólo ha adoptado **concatenación**, jamás transformación: `@vocab` de
+  JSON-LD y owlready2 anteponen la base al término tal cual.
+- **Pinto**, mapeador RDF de convención pura, emitía `<tag:complexible:pinto:name>`: triple
+  sintácticamente perfecto, valor de interoperabilidad **cero**. Muerto desde 2019, y sus propios
+  docs conceden el arreglo por atributo.
+- La convención no es propiedad de tu esquema sino **de quién posee los nombres** — medido sobre 951
+  crates: 0 overrides en 798 campos cuando el vocabulario es tuyo, 20,6% cuando consumes el de otros.
+  En RDF nunca posees los nombres.
+
+**Y un aviso operativo que corrige lo que esta ADR insinuaba sobre resolver vocabularios:** prefix.cc
+sirve un certificado caducado desde el 2025-12-31 —siete meses— mientras todos los IRIs que abrevia
+responden. Los IRIs son duraderos; la capa de abreviatura se pudre. **Resolver un prefijo por red en
+tiempo de compilación queda prohibido**; como ayuda del editor, es otra cosa.
+
+**Deuda encontrada de paso, que no bloquea nada:** `PrefixedName := IDENT SHAPE_SEP LocalName` con
+`IDENT := (LETTER|'_')(LETTER|DIGIT|'_')*` significa que fossil **no puede escribir hoy**
+`dc:title-alt`, `ex:1234` ni ningún local con `.`, `-`, `%` o escapes — un subconjunto estrecho de
+`PN_LOCAL` de Turtle. Cualquier `.shex` de un tercero con esos nombres es hoy inexpresable.
+
+**Lo que sigue sin investigarse**, y por segunda vez: el frente de F# type providers y el de esquemas
+de base de datos (sqlx, Diesel, Prisma, jOOQ) se perdieron enteros con la sesión. Lo que decidían era
+el coste operativo de declarar el proveedor dentro del programa — red o disco durante la comprobación,
+hermeticidad de la build, comportamiento en el LSP. El §1 sigue en pie sobre el apoyo indirecto que
+ya tenía, más el hecho nuevo de que la forma ya está en la gramática.
