@@ -495,3 +495,70 @@ y ya está anotado en la primera enmienda.
 ADR-0054 de forma que dos columnas «compatibles» produzcan un join cuya clave no sea la misma en los
 dos lados. Hoy el join exige `Primitive` **idéntica** a propósito; si eso se relaja a `<:`, hay que
 volver aquí.
+
+---
+
+## Quinta enmienda, 2026-08-08 — un solo mecanismo: los tipos los da un proveedor
+
+Deroga el §2 y reordena el §3. Es la conclusión a la que llegó Angel tirando del hilo del §1, y es
+más simple que todo lo que esta ADR llevaba escrito.
+
+**El §2 decía «el tipo se puede escribir en el lenguaje».** Eso metía un tercer mecanismo donde ya
+había uno, y obligaba a derogar el callout de `types.mdx` que dice *«No user type annotations — types
+come from descriptors»*. Se sustituye por:
+
+> **Los tipos vienen siempre de un proveedor. Lo que varía es cuál.** El de la entrada son los datos
+> (inferencia, ADR-0037); el de la salida, un documento de formas traído por `use`.
+
+Consecuencias, y todas son borrados:
+
+- **Muere `type X { … }`.** No hay tipos escritos a mano. Si algún día hay que tipar una entrada sin
+  datos delante —un cliente que sube su CSV *después*, que es el caso real de keasy— eso **no** es
+  escribir el tipo: es apuntar `use` a un descriptor de entrada. Un mecanismo, dos lados.
+- **Muere la anotación de tipo en el binding** (`users : User := …`). Por lo mismo: nombraría algo que
+  el proveedor ya nombra.
+- **Y el callout de `types.mdx` deja de estar en contradicción con esta ADR** — vuelve a ser cierto,
+  y la contradicción que la primera enmienda registró se cierra sin tocar la página.
+
+**Sin proveedor de salida no hay contrato, y eso es una decisión, no un hueco.** Un programa sin `use`
+escribe corpus igual: no se comprueba nada, y fossil **emite** la forma que dedujo — que es
+exactamente lo que el §7 ya nos obliga a saber hacer. Lo que se pierde es la comprobación, que es lo
+que el proveedor compra.
+
+### Los prefijos, reordenados
+
+El §3 pedía `base` como ítem de nivel superior junto a `prefix`. Con `use` trayendo al ámbito los
+prefijos que el documento **ya declara**, no queda ningún prefijo de vocabulario que declarar. Sólo
+sobrevive el de **acuñar sujetos** — y ése no es del fichero, es del mapeo, porque cada mapeo acuña en
+su sitio (`/user/`, `/order/`). Así que no es `prefix` ni `base` a nivel de fichero: es un atributo
+del mapeo, con el sigilo que la cuarta enmienda fijó.
+
+```
+use <personas.shex>
+
+users := io.csv("data/*.csv")
+
+@base(<https://example.org/>)
+Person <- users
+    iri  = /user/{.id}
+    name = .name
+```
+
+**No aparece `prefix`. No aparece `type`. No hay un solo IRI escrito a mano fuera del `@base`.**
+
+### Y la flecha, con una corrección
+
+La refutación que la investigación trajo contra `Person <- User from users` iba dirigida a la forma de
+**tres piezas**, donde `User` competía con la convención `nombre : Tipo` y rompía el despacho
+name-first del parser. **Con el tipo de entrada fuera, ese argumento se queda sin objeto.**
+`Person <- users` son dos cosas y una flecha; frente a `Person from users` es cuestión de gusto. De
+aquella lista de seis razones sólo sobrevivía «`<-` es una segunda flecha teniendo `:=`», y `from` es
+una palabra, no una flecha, así que ni esa distingue.
+
+### Lo que queda abierto
+
+- **Si `@base` acaba repetido en todos los mapeos**, en cuyo caso quiere subir a fichero y volvemos a
+  tener dos sitios.
+- **Qué emite exactamente un programa sin proveedor de salida** — la forma deducida es la dirección
+  que ADR-0057 §1 rechazó *para comprobar*; emitirla es legítimo, pero hay que decir que ese documento
+  no es un contrato, es un informe.
