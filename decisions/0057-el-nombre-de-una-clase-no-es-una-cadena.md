@@ -247,3 +247,64 @@ de base de datos (sqlx, Diesel, Prisma, jOOQ) se perdieron enteros con la sesió
 el coste operativo de declarar el proveedor dentro del programa — red o disco durante la comprobación,
 hermeticidad de la build, comportamiento en el LSP. El §1 sigue en pie sobre el apoyo indirecto que
 ya tenía, más el hecho nuevo de que la forma ya está en la gramática.
+
+---
+
+## Segunda enmienda, 2026-08-08 — el `use` va anclado
+
+Un frente adversarial fue a refutar el §1 («el proveedor se declara dentro del programa») y volvió con
+un **no**: lo que refuta es una versión más débil, **«dentro, resuelto en vivo, sin ancla»**, que es
+exactamente lo que el §1 decía. Dos datos cortan el ataque de raíz:
+
+- La sección *«Mistakes and Questions»* de *The Early History of F#* (Syme, HOPL IV 2020) enumera el
+  código cerrado, SRTP, la comparación genérica y la precedencia de `<|`. **Los type providers no
+  aparecen.** El retro «buena idea, mal sitio» que buscábamos no existe.
+- Todo el daño documentado de F# es de **liveness**, no de ubicación: la deriva de esquema es
+  invisible y se arregla con un *Clean* a mano; la señal de invalidación **se ignora en `fsc.exe`** y
+  sólo la respeta el IDE, o sea que el compilador de CI nunca revalida; la red caída es un fallo de
+  compilación; el esquema se relee en cada recompilación. Y F# publicó el ancla **dentro del
+  programa**: `LocalSchemaFile` con `ForceUpdate=false`.
+
+Y «fuera» no sale mejor: `sqlx` exige una base de datos viva en tiempo de build, y su arreglo **no es
+la ubicación sino el anclaje** — `cargo sqlx prepare` escribe `.sqlx/`, que se commitea. Diesel igual,
+con `schema.rs` commiteado y el precio de dos fuentes de verdad. C# estudió los providers y entregó
+*source generators*, deliberadamente lo contrario: sólo aditivos, y **su entrada es la compilación, no
+el mundo**. Nadie está puro en ningún extremo: todos parten la cosa en **nombre dentro, ubicación
+fuera, identidad anclada** — Cap'n Proto (`using … import` con `-I`), Go (`import` + `go.sum`), Nix
+(`inputs` + `narHash` en el lock).
+
+**Enmienda al §1, en cinco puntos:**
+
+1. **`use` se queda dentro.** No refutado.
+2. **`use` lleva ancla**, y el hash es de la **forma normal RDFC-1.0**, no de los bytes. Es la lección
+   de Dhall —*«los chequeos son semánticos… no rechazan cambios que preservan el comportamiento, así
+   que refactorizar o tocar espacios y comentarios no altera el hash»*— y encaja con lo que el §7 ya
+   decidió: si el formato del `.shex` no sobrevive al viaje, un hash textual churnea en cada
+   reformateo y uno semántico no.
+3. **Caché direccionable por contenido**, y un import anclado se resuelve de caché **sin red**. La
+   regla de Dhall es la correcta y es simétrica: *un import sin ancla no se cachea*.
+4. **La ruta se resuelve fuera** (un *search path* estilo `-I`). Dentro va el nombre y la identidad;
+   fuera, dónde están los bytes — así, mover o vendorizar el documento no edita el programa.
+5. **Dependencia por contenido y fallo ruidoso.** `addDependentFile` de Template Haskell recompila por
+   *contenido del fichero, no por mtime*; F# hizo esto mal y por eso `fsc` no ve la deriva. Un `use`
+   que no resuelve es un error, nunca una degradación.
+
+**Y un detalle barato que arrastra al §6:** F# documenta que *«los type providers no pueden emitir
+avisos»* — todo diagnóstico suyo es una excepción. Nosotros necesitamos **canal de aviso**, que es por
+donde tienen que salir los `Unsupported(...)` del §6 sin abortar la compilación.
+
+**Un precedente que es literalmente nuestro caso**, y elige *fuera al generar, dentro al usar*:
+`DefinedNamespace` de rdflib lleva en la docstring *«Generated from: http://xmlns.com/foaf/spec/…
+Date: 2020-05-26»* — el vocabulario se leyó **una vez**, en tiempo de autoría, y el artefacto se
+commiteó con procedencia. Con dos matices que nos tocan: su defecto es **avisar, no fallar**
+(`_warn = True, _fail = False`; sólo FOAF y SH piden fallar), y tiene `_extras`, una lista manual de
+nombres que el lenguaje anfitrión no sabe deletrear — que es nuestro §6 un nivel más abajo, y también
+la deuda de `PN_LOCAL` de la primera enmienda.
+
+**Lo que reabre esto:** si el proveedor deja de ser un fichero y pasa a ser un servicio vivo (un
+endpoint SPARQL, un registro de formas), el ancla deja de ser opcional y el perfil de coste pasa a ser
+el de `sqlx`.
+
+**Sin verificar:** por qué Idris 2 retiró los type providers que Idris 1 tenía tras
+`%language TypeProviders` (el hecho está confirmado; la razón, no), la postura de Scala, y cualquier
+medición del coste de recompilación de F# más allá de la afirmación en `csharplang#236`.
