@@ -188,7 +188,16 @@ no inventa una forma: enciende una que estaba escrita y apagada.
 es hostil aquí por tres razones acumuladas: un `#` suelto es **inlexable y colgaría el parser**
 (cabecera de `tests/fixtures/canonical_200.fossil`), es el carácter de comentario de Turtle y SPARQL
 —los dos idiomas que un lector de fossil lleva en la cabeza—, y es el separador de fragmento de medio
-vocabulario RDF. Cualquier atributo de esta ADR se escribe `@nombre(...)`.
+vocabulario RDF. Pero **el sigilo NO queda decidido aquí**, y `@` tampoco está libre: ya carga dos significados —
+`@export` como modificador de definición (`grammar.bnf:86`) y, sobre todo, **`@conn` como alias de
+conexión**, que es la pieza de keasy y aparece en todos los ejemplos publicados
+(`io.csv("@examples/ecommerce-customers.csv")`). Formalmente no hay conflicto de parseo, porque el
+alias vive **dentro de un literal de cadena** y un atributo iría a nivel de ítem; pero para el lector
+`@` significaría tres cosas en un mismo fichero. Eso es la regla 2 de la casa —una grafía, una idea—
+así que el sigilo queda **abierto**, con tres salidas y ninguna elegida: `@nombre(...)` aceptando la
+homonimia, otro sigilo que haya que buscar (y `#` está descartado por lo de arriba), o **ninguno**:
+atributos como declaraciones ordinarias con palabra clave, que es lo que menos gramática pide y lo
+que mejor casa con la estética que este rediseño persigue. Lo decide Angel, no esta ADR.
 
 **3. «Anotación» ya significa otra cosa dentro de fossil.** `type-system.md:250` y
 `grammar.bnf:144-153` la usan para la reificación de RDF 1.2 (*statements about statements*). El
