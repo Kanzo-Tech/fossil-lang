@@ -221,10 +221,11 @@ La identidad tiene que ser nodo. Lo que sigue prohibido, y ahora con dos medidas
 **derivarla de un nombre**:
 
 - Ninguna regla de casing puede acercarse a un IRI. El menú de `rename_all` de serde tiene 8 de las
-  12 combinaciones posibles y no puede expresar `Content-Type`, `ETag`, `$ref` ni `_meta`; con
-  identificadores no ASCII —`edad`, el ejemplo de esta ADR— **panica el compilador** (serde#2953) o
-  es un no-op silencioso. Y RDF sólo ha adoptado **concatenación**, jamás transformación: `@vocab` de
-  JSON-LD y owlready2 anteponen la base al término tal cual.
+  12 combinaciones posibles y no puede expresar `Content-Type`, `ETag`, `$ref` ni `_meta` — los
+  cuatro aparecen literalmente en un corpus de 951 crates. Y con identificadores **no ASCII** panica
+  el compilador (serde#2953). *(Corrección: la redacción original ponía `edad` de ejemplo y `edad` es
+  ASCII y no panica; el caso es `año`.)* Y RDF sólo ha adoptado **concatenación**, jamás
+  transformación: `@vocab` de JSON-LD y owlready2 anteponen la base al término tal cual.
 - **Pinto**, mapeador RDF de convención pura, emitía `<tag:complexible:pinto:name>`: triple
   sintácticamente perfecto, valor de interoperabilidad **cero**. Muerto desde 2019, y sus propios
   docs conceden el arreglo por atributo.
@@ -308,3 +309,109 @@ el de `sqlx`.
 **Sin verificar:** por qué Idris 2 retiró los type providers que Idris 1 tenía tras
 `%language TypeProviders` (el hecho está confirmado; la razón, no), la postura de Scala, y cualquier
 medición del coste de recompilación de F# más allá de la afirmación en `csharplang#236`.
+
+
+---
+
+## Tercera enmienda, 2026-08-08 — el criterio del §5, otra vez, y esta sí es comprobable
+
+El segundo frente adversarial fue a por «la identidad nunca va en un atributo» y confirma la
+reformulación de la primera enmienda — pero la aprieta con una objeción justa: **«¿nodo del modelo o
+trivia?» es correcto y no es comprobable.** Nadie puede mirar una línea y decidir. Los dos criterios
+que sí lo son:
+
+**Regla A — Lo prohibido no es el atributo: es el *fallback* derivado.** Y esto obliga a corregir el
+contraejemplo de la primera enmienda: **Cap'n Proto deriva del nombre igual que LinkML.** Su
+referencia dice las dos cosas — *«any symbolic name can be changed, as long as the type ID stays the
+same»* y también *«**you cannot change the name of a type that doesn't have an explicit ID, as the
+implicit ID is generated based in part on the type name**»*. O sea: es el modelo LinkML con un escape
+explícito, y su único mérito es documentar el precio, que LinkML no documenta.
+
+**Regla B — Un atributo obligatorio en toda declaración no es un atributo: es sintaxis con
+corchetes.** RDFBeans lo demuestra: `@RDFBean("foaf:Person")` y `@RDF("foaf:name")` son requeridas, y
+sin ellas la clase no se reconoce. Un `@iri(...)` obligatorio **es** `ex:name =` con más ruido, y la
+elección pasa a ser de longitud de línea. Uno **opcional** reintroduce el fallback y cae bajo la
+Regla A. Las dos juntas resuelven el §5 entero: **si el atributo se puede omitir, está prohibido; si
+no se puede omitir, es sintaxis y la grafía da igual.**
+
+**Regla C — lo que no sobrevive a la exportación es el espacio de extensión ajeno al lenguaje, no el
+atributo.** Smithy lo prueba en las dos direcciones: sus traits *de usuario* no llegan a OpenAPI,
+pero el suyo propio `jsonName` —que es identidad pura— **sí se convierte**. Y formula la frontera
+mejor que esta ADR: *«shapes provide the structure and layout of an API, while traits provide
+refinement and style»*.
+
+### Los dos argumentos prestados, corregidos
+
+**Protobuf decía lo contrario de lo que esta ADR le hizo decir.** El número es identidad **sólo en el
+formato binario**; en cuanto llegaron JSON y TextFormat el nombre pasó a ser identidad y tuvieron que
+añadir **reserva de nombres** (*«you can also reserve the field name to allow JSON and TextFormat
+encodings to continue to parse»*), y `buf` mantiene por eso una categoría de rotura aparte,
+`WIRE_JSON`, con la regla `FIELD_SAME_NAME`. Y protobuf **sí** pone un nombre de cable en una opción:
+`[json_name = "..."]`. Conclusión correcta: protobuf apoya **«la identidad es explícita y
+permanente»**, y no dice nada sobre dónde se escribe. Para nosotros el remate es que **RDF está
+direccionado por nombre: el nombre ES el número.**
+
+**GraphQL estaba mal aplicado.** El issue es de **2017** —nueve años, no cinco— y el RFC concreto
+(#1075) se cerró sin fusionar en 2024. Pero sus ejemplos motivadores son `@sensitive` y `@cache`, que
+es exactamente lo *accesorio* que el §5 manda a atributos: GraphQL no distingue identidad de trivia,
+**no sobrevive nada**. Es evidencia sobre espacios de extensión de usuario en una especificación con
+implementaciones independientes, situación en la que fossil no está porque posee compilador y emisor.
+Lo que sí vale es el remedio: la federación de Apollo sirve `_service { sdl }`, **el texto fuente en
+crudo**, porque las directivas no viajan. Cuando la anotación no viaja, se acaba enviando el programa
+entero. *(Y queda prohibido el argumento OWL — «annotations are treated as not being present» habla
+de `owl:AnnotationProperty` en el grafo, no de atributos de un lenguaje. Sería el mismo equívoco de
+palabra que la primera enmienda ya detectó, al revés.)*
+
+### La evidencia de dominio que faltaba, y por qué no nos aplica
+
+**Los tres mapeadores objeto-RDF de Java ponen el IRI en una anotación**: JOPA (vivo, último push
+2026-08-06) con `@OWLClass(iri=…)`, RDFBeans con `@RDF(…)` obligatoria, y Pinto —el de la primera
+enmienda— que además tiene una anotación llamada literalmente `@Iri`. Tres de tres a favor del
+atributo… **por una razón léxica: Java no puede deletrear un IRI.** fossil sí: `ex:name` es un token
+del lenguaje. El precedente no transfiere, y por el mismo motivo tampoco transfiere `serde(rename)` —
+medido, **el 53,4% de sus usos son escapes del léxico anfitrión** (identificadores Rust ilegales o
+palabras reservadas).
+
+**Y JOPA contesta la duplicación esquema↔programa mejor que nadie de su familia:** un plugin genera un
+fichero `Vocabulary` desde la ontología *«para que puedan usarse en las anotaciones de mapeo»*. O sea:
+**generar símbolos y referenciar el símbolo, nunca repetir la cadena.** `use` hace eso en el lenguaje
+y sin codegen, que es estrictamente mejor.
+
+### Lo que se añade al §1, y es normativo
+
+**`import schema` de XQuery/XSLT es el §1, estandarizado desde 2007.** Importas un esquema, escribes
+un nombre cualificado corto, el compilador lo resuelve contra las declaraciones importadas, y un
+nombre desconocido es **error estático `err:XPST0008`**. XSLT 3.0 §3.15: *«names of such components
+used statically within the stylesheet must refer to an in-scope schema component»*. La identidad allí
+es un QName expandido — isomorfo a un IRI. En RDF nadie lo hace: el `IMPORT` de ShEx tiene la
+maquinaria de ámbito pero sólo para **etiquetas de forma**, no para predicados, y los prefijos no se
+importan. La pieza está a medio construir en la lengua que ya leemos.
+
+**Y una condición de diseño que hay que respetar desde la primera línea:** `use <personas.shex> as p`
+**cualificado desde el día uno**. LinkML asumió nombres únicos entre imports y lleva desde 2024
+atascado en `structured_imports`; retrofitar la cualificación es la clase de cosa que no se retrofita.
+
+### El precio de comprobar, ya con número
+
+Del frente que se había perdido dos veces: `sqlx` tiene **32,5M de descargas en 90 días frente a 6,1M
+de Diesel** — comprobar le gana 5:1 a generar, en Rust. Su dolor está catalogado por su propio
+mantenedor: compilación lenta, macros que no son puras *«porque su salida puede cambiar entre
+ejecuciones según cambie el esquema, sin que el compilador ni el IDE se enteren»*, y olvidarse de
+`cargo sqlx prepare` antes de commitear. Los type providers de F# **siguen vivos** (FSharp.Data con
+push del 2026-08-05) y su dolor es el IDE: `dotnet/fsharp#19368`, *«sustained high CPU usage
+(~150%)»*, y el PM de F# reconociendo que regenerar en cada pulsación es *«a band-aid around some more
+fundamental architectural flaws»*. **Traducción para nosotros: nuestro proveedor es un fichero, no una
+red, así que nos libramos de casi todo — lo que sí pagaremos es el IDE y la invalidación de caché.**
+
+### El coste del fallback derivado, medido en el vocabulario que mejor conocemos
+
+schema.org deriva el IRI del nombre y por eso **no puede renombrar**: 82 términos con
+`schema:supersededBy`, de los cuales **24 son renombrados puramente morfológicos**
+(`actors→actor`, `reviews→review`), hay cadenas de dos saltos, y hay **una errata convertida en
+identificador global permanente**: `clincalPharmacology → clinicalPharmacology`. Ninguno se borró.
+Eso es lo que cuesta, en el vocabulario más usado de la web.
+
+**Y una ley de serde que vale como aviso a futuro:** cuando un atributo empieza a llevar semántica,
+converge en ser una expresión de tipos — es lo que le pasó a `with`, que no componía, y el arreglo
+(`serde_as`) acabó reflejando la estructura del tipo dentro de una cadena. Corolario: **si `@iri(...)`
+alguna vez tiene que llevar algo más que una constante, ha dejado de ser un atributo.**
