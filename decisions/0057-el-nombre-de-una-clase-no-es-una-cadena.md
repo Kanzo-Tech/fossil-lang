@@ -644,3 +644,28 @@ escrito por alguien, y faltan enteros Ecto, ActiveRecord, jOOQ, Diesel y Beam.
 Y un aviso de método: los cuatro frentes que volvieron agotaron la cuota de búsqueda al arrancar y
 trabajaron por fetch directo, lo que sesga hacia documentos normativos **y en contra de quejas de foro**
 — que es donde vive el material de arrepentimiento.
+
+### Apostilla a la sexta enmienda — tres tensiones cruzadas
+
+Salen de cruzar los frentes entre sí, no de ninguno por separado, y una cambia una recomendación:
+
+**1. El binder agrava la pregunta del punto, no la alivia.** Con `u.name` y `personas.Person` en la
+misma línea, las dos formas son **léxicamente idénticas**: ya no se distingue espacio de nombres de
+fila por la posición del punto, que era exactamente el argumento que hacía inocuo `personas.Person`.
+Así que **`personas::Person` pasa de gusto a necesidad** en cuanto la fila se nombra. Las dos
+decisiones van juntas o ninguna.
+
+**2. El lado izquierdo de la cabecera hay que protegerlo de referencias a columna.** `from` sobrevive
+a la objeción de LINQ sólo porque nuestra proyección vive en el **cuerpo**. Un `@iri(/user/{.id})`
+puesto **encima** de la cabecera referenciaría una columna antes de que el binder exista — importaría
+el problema de LINQ exacto y ataría la pregunta 1 a la 4. Queda como restricción explícita: **nada a
+la izquierda de `from` dereferencia la fila.**
+
+**3. Una línea no puede empezar por `.`** El cuerpo de un mapeo es una secuencia de líneas, y Dart
+prohíbe de plano que una sentencia empiece por punto — *«mainly disallow this as an abundance of
+caution»*, por recuperación de errores. Con binder obligatorio el problema desaparece solo.
+
+Y dos matices de método que conviene arrastrar: la colocación de las `option` de protobuf dentro del
+cuerpo **es práctica, no norma** —su guía de estilo no dice nada—, y los cuatro frentes agotaron la
+cuota de búsqueda al arrancar, así que lo normativo está bien cubierto y **los arrepentimientos, que
+viven en blogs y foros, están infra-cubiertos**. Si esto se retoma, es lo primero que hay que arreglar.
