@@ -562,3 +562,85 @@ una palabra, no una flecha, así que ni esa distingue.
 - **Qué emite exactamente un programa sin proveedor de salida** — la forma deducida es la dirección
   que ADR-0057 §1 rechazó *para comprobar*; emitirla es legítimo, pero hay que decir que ese documento
   no es un contrato, es un informe.
+
+---
+
+## Sexta enmienda, 2026-08-08 — la fila se nombra, y `<-` queda descartado
+
+Investigación de sintaxis sobre cinco preguntas abiertas; cuatro volvieron verificadas.
+
+**1. `<-` está descalificado por evidencia, no por gusto.** Haskell 2010 §3.11 define
+`qual → pat <- exp` con `p :: t` y `e :: [t]`: **la izquierda es un ELEMENTO y la derecha la
+COLECCIÓN**. Scala 2.13 §6.19 igual. Así que `Person <- users` dice, en el idioma del que tomaríamos
+prestado el símbolo, que un `Person` es un elemento de `users` — al revés de lo que queremos. Y el
+glifo ya significa asignación en R y recepción de canal en Go. **No se encontró un solo lenguaje
+donde `<-` signifique «producido una vez por cada elemento de».** Además fluye derecha→izquierda
+mientras `|>` fluye al revés, en el mismo fichero.
+
+**2. La fila se nombra, y esto es el hallazgo del día.** Todos los sistemas que empezaron con receptor
+anónimo tuvieron que añadir un mecanismo de nombrado **en cuanto hubo dos filas en ámbito**, y ninguno
+hizo el camino inverso:
+
+| sistema | empezó con | tuvo que añadir | disparador |
+|---|---|---|---|
+| XSLT/XPath | `.` (nodo de contexto) | `current()` | `.` queda tapado en predicados |
+| XPath | sólo `.` | `for $x in` (2.0), `let $x :=` (3.0) | más de un ítem ligado |
+| jq | `.` | `EXP as $x` | un valor de nivel superior |
+| **R2RML** | `{column}` anónimo | `rr:child` / `rr:parent` | **join entre dos tablas** |
+| Kotlin DSL | receptor implícito | `@DslMarker` | receptores anidados resolviendo mal |
+
+Tres razones, en orden de peso:
+
+- **Michael Kay, comparando XSLT y XQuery:** el ítem de contexto *«optimiza para navegación jerárquica
+  en vez de para joins»*. fossil mapea fuentes **tabulares**: no hay jerarquía que descender, así que
+  pagamos el coste del compromiso sin cobrar el beneficio.
+- **El fallo es silencioso y lo dispara el DATO, no el código.** `./@ref` de XPath degrada calladamente
+  a `@ref`; el `with` de Delphi hace que un registro que **gana un campo** cambie el significado del
+  código que lo rodea — y Embarcadero documenta que a `TRect` le pasó de verdad con `Width`. En un
+  lenguaje cuyo trabajo es sobrevivir a la deriva de esquema, eso es el peor modo de fallo posible.
+- **Nuestro propio dominio ya perdió tres veces**: los `rr:child`/`rr:parent` de R2RML son un binder
+  sin nombre —fijos, dos, y roles en vez de nombres—, YARRRML distingue los dos lados con etiquetas
+  **posicionales** `s`/`o`, y ShExML cualifica ambos lados enteros.
+
+**El coste es un nombre y un carácter por referencia.** Y desbloquea el join con claves de nombres
+distintos que ADR-0054 dejó declarado y sin construir, sin necesitar «referencia cualificada» como
+forma nueva.
+
+**3. Dónde va el binder: al final, con `as`.** `personas.Person from users as u`. Es el
+`SOURCE … AS ?var` de SPARQL-Generate y el `BIND(… AS ?x)` de Stardog, los dos hermanos más cercanos
+del dominio. **Y no `from u in users`, aunque no costaría palabras nuevas** —`in` y `from` ya son
+reservadas (`grammar.bnf:26`)— porque **`in` ya significa otra cosa en esa misma línea**:
+`InClause := 'in' IRIExpr` es el grafo con nombre. Dos significados de `in` en una cabecera es la
+regla 2 de la casa incumplida en el sitio más visible del lenguaje.
+
+**4. `personas.Person` no colisiona con `.id`, y está probado formalmente.** La especificación de
+`dot-shorthands` de Dart 3.10 §Non-ambiguity: el `.` infijo exige una expresión completa a la
+izquierda, y el `.` inicial sólo aparece donde una expresión puede **empezar** — posiciones disjuntas,
+*«no new grammatical ambiguities»*. Zig, Dart, Swift y Elm envían los dos a la vez. **Y la regla ya
+está escrita en nuestra gramática** (`grammar.bnf:244-246`). Un solo borde real: una línea que empieza
+por `.`, que Dart prohíbe de plano por recuperación de errores.
+
+Con una salvedad: OCaml, Haskell y Elm se libran porque **exigen mayúscula inicial en los módulos** —
+el lexer te dice de qué lado del punto estás. `personas` es minúscula y parece un campo. Regla
+propuesta: **un nombre de `use … as N` queda reservado en todo el fichero** y colisiona con ruido si
+una columna se llama igual. Alternativa si eso incomoda: `personas::Person`, la respuesta de Rust,
+inequívoca contra los dos usos de `.`. Lo que **no** vale es `personas:Person`: está a un carácter de
+`personas := …`.
+
+**5. `from` se queda.** `for … in` importaría el orden fuente-primero que no necesitamos y reencuadra
+una **regla** como un **bucle** — y XSLT, que lleva 25 años con las dos formas, concluyó que la de
+regla es el mejor defecto y el bucle es la muleta. El `:-` de Datalog encaja mejor semánticamente y
+está a dos píxeles de `:=`. Nota: el argumento de IntelliSense que se le atribuye a LINQ **es folclore
+sin fuente publicada**, y en cualquier caso no nos afecta: nuestra proyección vive en el cuerpo, no
+antes del `from`.
+
+### Lo que sigue sin contestar
+
+**Dónde va la declaración del sujeto — la pregunta 1 se perdió con un agente y no se reconstruye.**
+Lo único recuperado: los atributos de bloque de Prisma (`@@id`, `@@map`) van **dentro, al final**, y
+Django articula el criterio — *«model metadata is anything that's not a field»*. Falta el porqué
+escrito por alguien, y faltan enteros Ecto, ActiveRecord, jOOQ, Diesel y Beam.
+
+Y un aviso de método: los cuatro frentes que volvieron agotaron la cuota de búsqueda al arrancar y
+trabajaron por fetch directo, lo que sesga hacia documentos normativos **y en contra de quejas de foro**
+— que es donde vive el material de arrepentimiento.
