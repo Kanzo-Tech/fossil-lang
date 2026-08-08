@@ -118,8 +118,11 @@ does not carry is now rejected where its JSON arrives, naming the value — not 
 and reported three crates later as a complaint about a column.
 
 <Callout title="Deliberately absent">
-No user type annotations — types come from descriptors. No subtyping, no global inference: the check
-is bidirectional and local to a mapping. And the introspection of job one is **never** a query in the
+No user type annotations — types come from descriptors. No global inference: the check is
+bidirectional and local to a mapping. There IS subtyping, and it is five rules wide (`type-system.md`
+§9): reflexivity, lifting to `Optional`, covariance of `Optional` and `Seq`, and `Integer <: Float`.
+`compatible` runs them on every property. This callout said "no subtyping" until 2026-08-08, which
+described an intention rather than the checker. And the introspection of job one is **never** a query in the
 incremental system; its cache is ours and its invalidation policy is explicit.
 </Callout>
 

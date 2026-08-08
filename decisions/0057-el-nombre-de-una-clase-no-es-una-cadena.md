@@ -205,10 +205,7 @@ conexión**, que es la pieza de keasy y aparece en todos los ejemplos publicados
 (`io.csv("@examples/ecommerce-customers.csv")`). Formalmente no hay conflicto de parseo, porque el
 alias vive **dentro de un literal de cadena** y un atributo iría a nivel de ítem; pero para el lector
 `@` significaría tres cosas en un mismo fichero. Eso es la regla 2 de la casa —una grafía, una idea—
-así que el sigilo queda **abierto**, con tres salidas y ninguna elegida: `@nombre(...)` aceptando la
-homonimia, otro sigilo que haya que buscar (y `#` está descartado por lo de arriba), o **ninguno**:
-atributos como declaraciones ordinarias con palabra clave, que es lo que menos gramática pide y lo
-que mejor casa con la estética que este rediseño persigue. Lo decide Angel, no esta ADR.
+así que el sigilo quedó abierto un tiempo. **Está decidido: `@nombre(...)`. Ver la cuarta enmienda.**
 
 **3. «Anotación» ya significa otra cosa dentro de fossil.** `type-system.md:250` y
 `grammar.bnf:144-153` la usan para la reificación de RDF 1.2 (*statements about statements*). El
@@ -426,3 +423,75 @@ Eso es lo que cuesta, en el vocabulario más usado de la web.
 converge en ser una expresión de tipos — es lo que le pasó a `with`, que no componía, y el arreglo
 (`serde_as`) acabó reflejando la estructura del tipo dentro de una cadena. Corolario: **si `@iri(...)`
 alguna vez tiene que llevar algo más que una constante, ha dejado de ser un atributo.**
+
+
+---
+
+## Cuarta enmienda, 2026-08-08 — el sigilo es `@`, y el subtipado existe
+
+Dos decisiones de Angel, y las escribo con la cadena entera porque las dos se tomaron sobre evidencia
+acumulada en tres enmiendas y ninguna de las dos se entiende leyendo sólo su conclusión.
+
+### 1. El sigilo de atributo es `@nombre(...)`
+
+**Lo que la decisión ya no es.** La Regla B de la tercera enmienda la había encogido antes de tomarse:
+si un atributo es **obligatorio** en toda declaración, no es un atributo — es sintaxis con corchetes,
+y `@class(ex:Person)` es `ex:Person` con más ruido. La elección de sigilo sólo pesa en los atributos
+**opcionales**, que por la Regla A son los que llevan accesorios (documentación, sensibilidad de
+F4 §3) y nunca identidad. Así que esto es una decisión de estilo sobre una superficie pequeña, no la
+decisión de fondo que parecía dos enmiendas atrás.
+
+**Por qué no `#[...]`, que era mi propuesta inicial.** Tres razones acumuladas, todas verificadas
+contra el árbol:
+
+1. **Un `#` suelto es inlexable y colgaría el parser** — la cabecera de `tests/fixtures/canonical_200.fossil` lo
+   dice literalmente, y viene de `06-07 deferred-items.md`.
+2. **`#` es el carácter de comentario de Turtle y de SPARQL**, los dos idiomas que un lector de fossil
+   lleva en la cabeza.
+3. **`#` es el separador de fragmento de medio vocabulario RDF** (`rdf-syntax-ns#type`).
+
+**Por qué `@` a pesar de la homonimia, que fue una objeción de Angel y era correcta.** `@` ya lo usan
+las **conexiones tipadas de keasy** — `io.csv("@examples/ecommerce-customers.csv")`, en todos los
+ejemplos publicados. Pero las dos capas **no se cruzan léxicamente**: el alias vive **dentro de un
+literal de cadena** y el atributo a nivel de ítem, así que no hay conflicto de parseo, sólo de
+lectura. Y el otro ocupante de `@` desapareció: `@export` se borró en `c974fdd` — no exportaba a
+nadie, porque no hay sistema de módulos. Queda además un beneficio operativo: mantener `AT_ATTR`
+lexado impide que `@` se descarte en silencio, que es exactamente la clase de fallo del `#`.
+
+**Por qué no «ninguno», que era mi recomendación.** Una palabra clave por atributo (`class ex:Person`,
+`sensitive email: String`) parece menos gramática y es más en cuanto los atributos se acumulan: cada
+uno se convierte en una palabra reservada del lenguaje. `AT_ATTR := '@' IDENT` es **una** producción
+para todos los que vengan, presentes y futuros — que es la regla de catálogo-no-producción aplicada a
+sí misma.
+
+**Lo que este sigilo NO autoriza**, y hay que releerlo junto: los atributos siguen sin poder llevar
+identidad si son omitibles (Regla A, con schema.org como coste medido: 82 términos con
+`supersededBy` y una errata congelada como identificador global permanente). Y siguen sin poder
+llevar semántica: la ley de serde de la tercera enmienda dice que un atributo que crece converge en
+una expresión de tipos — `serde_as` es la prueba. **Si `@iri(...)` alguna vez necesita algo más que
+una constante, ha dejado de ser un atributo.**
+
+**Lo que la reabre.** Que aparezca un segundo ocupante de `@` a nivel de ítem, o que el alias de
+conexión salga del literal de cadena — ahí sí habría colisión real, no homonimia.
+
+### 2. Hay subtipado, y la página mentía
+
+`apps/docs/content/docs/characteristics/types.mdx` afirmaba en un callout *«Deliberately absent … No
+subtyping»* mientras `type-system.md` §9 define cinco reglas —`S-Refl`, `S-Opt`, `S-OptCov`,
+`S-SeqCov`, `S-IntFlt`— que `compatible` (`crates/fossil-hir/src/check.rs:200`) **ejecuta en cada
+propiedad**. El callout describía una intención; el checker hace otra cosa desde hace meses.
+
+**Decisión: las reglas se quedan y la página se corrige.** No es preferencia estética — es dónde
+estaba haciendo trabajo real el subtipado: `S-Opt` es lo que permite que una expresión no opcional
+satisfaga una propiedad opcional (sin ella, cada una exigiría un `Optional` explícito), y `S-IntFlt`
+es lo que permite que una columna `Integer` alimente una propiedad declarada `xsd:float` sin una
+conversión escrita a mano. Quitarlas no simplifica el lenguaje: traslada el trabajo a cada programa.
+
+Esto **no** contradice el resto del callout: sigue sin haber inferencia global y sigue sin haber
+anotaciones de tipo de usuario *hoy* — esto último lo deroga el §2 de esta ADR cuando se implemente,
+y ya está anotado en la primera enmienda.
+
+**Lo que la reabre.** Que el subtipado empiece a interactuar con el álgebra de filas del §4 de
+ADR-0054 de forma que dos columnas «compatibles» produzcan un join cuya clave no sea la misma en los
+dos lados. Hoy el join exige `Primitive` **idéntica** a propósito; si eso se relaja a `<:`, hay que
+volver aquí.
