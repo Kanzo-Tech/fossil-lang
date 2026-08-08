@@ -260,7 +260,11 @@ TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
 (*  and      or       not      iri                                        *)
 (*                                                                         *)
 (*  There is no attribute keyword. `@name` lexes as AT_ATTR and no        *)
-(*  production accepts it; the sigil is undecided (ADR-0057, amend. 1 §2).*)
+(*  production accepts it yet. The sigil IS decided and it is `@`         *)
+(*  (ADR-0057, fourth amendment): `#` is unlexable here, is Turtle's      *)
+(*  comment character, and is RDF's fragment separator. `@` is shared     *)
+(*  with keasy's connection aliases, which live inside string literals,   *)
+(*  so the two never cross lexically.                                     *)
 
 
 (* ═══ OPERATOR PRECEDENCE TABLE ═══ *)
