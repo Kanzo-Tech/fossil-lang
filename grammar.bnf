@@ -23,7 +23,7 @@ INDENT, DEDENT := computed
 
 (* Identifiers and keywords *)
 IDENT          := (LETTER | '_') (LETTER | DIGIT | '_')*
-KEYWORD        := 'in' | 'from' | 'use' | 'as'
+KEYWORD        := 'prefix' | 'in' | 'from' | 'use' | 'as'
                 | 'and' | 'or' | 'not' | 'iri'
 
 (* Numeric literals — decimal only, optional underscores as separators *)
@@ -52,15 +52,12 @@ COMMENT        := '//' (any char except NEWLINE)*
 
 (* Operators *)
 DEFINE         := ':='
-TYPE_ANNOT     := '::'
 ASSIGN         := '='
 SHAPE_SEP      := ':'
 SHAPE_AND      := '&'
-ARROW          := '->'
 PIPE           := '|>'
 T_QUESTION     := '?'
 T_COLON        := ':'                          (* contextual with T_QUESTION *)
-PARTIAL        := '_'
 TRIPLE_OPEN    := '<<'
 TRIPLE_CLOSE   := '>>'
 
@@ -82,8 +79,8 @@ COMMA          := ','
 LPAREN, RPAREN := '(' ')'
 LBRACE, RBRACE := '{' '}'
 
-(* Attributes *)
-AT_EXPORT      := '@export'
+(* Attributes — lexed but consumed by no production yet. Which spelling an
+   attribute gets is open; see ADR-0057, first amendment §2. *)
 AT_ATTR        := '@' IDENT
 
 
@@ -94,8 +91,9 @@ AT_ATTR        := '@' IDENT
 Program             := TopLevel* EOF
 
 TopLevel            := Import
-                     | Definition
-                     | ExportedDefinition
+                     | PrefixDecl
+                     | SourceDef
+                     | MultiSourceDef
                      | Mapping
 
 
@@ -111,17 +109,14 @@ SelectiveImport     := LBRACE IDENT (COMMA IDENT)* RBRACE
 Alias               := 'as' IDENT
 
 
-(* ─── Definitions ─── *)
+(* ─── Vocabulary and bindings ─── *)
 
-Definition          := IDENT DEFINE Expression
+PrefixDecl          := 'prefix' IDENT SHAPE_SEP ABS_IRI
 
-ExportedDefinition  := AT_EXPORT TypeAnnotation? Definition
+SourceDef           := IDENT DEFINE Expression
 
-TypeAnnotation      := IDENT TYPE_ANNOT TypeExpr
-
-TypeExpr            := TypeAtom (ARROW TypeExpr)?    (* right-associative *)
-TypeAtom            := IDENT
-                     | LPAREN TypeExpr (COMMA TypeExpr)* RPAREN
+(* Destructuring source: one binding per shape declared by the source schema. *)
+MultiSourceDef      := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
 
 
 (* ─── Mappings ─── *)
@@ -204,11 +199,8 @@ PrimaryExpr         := Literal
                      | LPAREN Expression RPAREN
                      | RecordLiteral
                      | TripleTerm
-                     | PartialPlaceholder
 
 FieldRef            := DOT IDENT (DOT IDENT)*
-
-PartialPlaceholder  := PARTIAL
 
 
 (* ─── Literals ─── *)
@@ -264,13 +256,11 @@ TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
 
-(*  in       from     use      as                                         *)
+(*  prefix   in       from     use      as                                *)
 (*  and      or       not      iri                                        *)
 (*                                                                         *)
-(*  Plus the attribute marker:                                            *)
-(*  @export                                                                *)
-(*                                                                         *)
-(*  Future attributes (@dcat, @prov, @chunked, etc.) use AT_ATTR form.    *)
+(*  There is no attribute keyword. `@name` lexes as AT_ATTR and no        *)
+(*  production accepts it; the sigil is undecided (ADR-0057, amend. 1 §2).*)
 
 
 (* ═══ OPERATOR PRECEDENCE TABLE ═══ *)
@@ -296,7 +286,12 @@ TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
 (*  ExternDecl        — no `extern` declarations in MVP                    *)
 (*  WhileLoop/ForLoop — no imperative control flow                         *)
 (*  MutableBinding    — no mutation                                        *)
-(*  Type parameters   — no generics in TypeExpr                            *)
+(*  TypeAnnotation    — no `f :: T -> U` over a value; nothing reads one   *)
+(*  ExportedDefinition— no `@export`; there is no module system to export  *)
+(*                      to, so the marker named nobody                     *)
+(*  PartialPlaceholder— no `f(_, x)`; `_` is an ordinary identifier        *)
+(*  Type parameters   — no generics                                        *)
 (*                                                                         *)
-(*  Additions are backward-compatible. Future versions may introduce these *)
-(*  without breaking existing programs.                                   *)
+(*  This file describes the language, not the parser's tolerance. A form   *)
+(*  no downstream stage reads does not belong here — it is a promise the   *)
+(*  language does not keep.                                                *)

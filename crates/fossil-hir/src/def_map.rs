@@ -65,7 +65,7 @@ pub struct SourceEntry<'db> {
     /// shape_iri`. `None` for plain single-binding native sources (csv/json/…).
     pub shape_iri: Option<SmolStr>,
     /// Dotted name of the source constructor (`io.csv` / `io.json` /
-    /// `io.parquet`), if a `CALL_EXPR`-shaped RHS could be parsed. The
+    /// `io.parquet`), if a call-shaped RHS could be parsed. The
     /// constructor name selects the source FORMAT downstream
     /// (`fossil-mir::lower` maps it to `SourceFormat`). Like [`Self::schema_arg`]
     /// this is a SIGNATURE-only `SOURCE_DEF`-header datum (Phase 5 STDL-06).
@@ -169,7 +169,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
     // CONTRACT (Plan 02-04 — ADR-0005): `MappingLoc.index` is the position
     // of the mapping among MAPPING-kind CST children only, NOT among all
     // top-level children (which would include PREFIX_DECL / SOURCE_DEF /
-    // IMPORT / DEFINITION / EXPORTED_DEFINITION). This MUST match the
+    // MULTI_SOURCE_DEF / IMPORT). This MUST match the
     // ordering convention used by `crate::body::body`, which resolves a
     // mapping's body via
     //   cst.root(db).syntax().children()
@@ -265,7 +265,7 @@ fn parse_prefix_decl_node(node: &fossil_syntax::SyntaxNode) -> Option<(SmolStr, 
 
 /// Extract the bound name from a `SOURCE_DEF` node (the `users` in
 /// `users := io.csv("...")`). The first IDENT child token is the binding name;
-/// IDENTs nested inside `CALL_EXPR` belong to the callee.
+/// IDENTs nested inside the call expression belong to the callee.
 fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
     use fossil_syntax::SyntaxKind;
     let ident = node
@@ -283,7 +283,7 @@ fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 /// ADR-0005 and does not widen the per-mapping `body()` fan-out (Serious #6
 /// mitigation for plan 03-05's `resolve_source_row`).
 ///
-/// Heuristic token scan (the parser's `NAMED_ARG` / `CALL_EXPR` surface is not
+/// Heuristic token scan (the parser's `NAMED_ARG` / call surface is not
 /// yet a stable structured node in Phase 3 v0.1): find an `IDENT` whose text is
 /// `arg_name`, immediately followed (skipping trivia) by an `=`/assignment token
 /// and then a `STRING` literal. Returns the unquoted string contents.
@@ -324,12 +324,12 @@ fn parse_source_named_arg(node: &fossil_syntax::SyntaxNode, arg_name: &str) -> O
 /// Some("examples/users.csv"))`.
 ///
 /// Like [`parse_source_named_arg`] this reads ONLY the `SOURCE_DEF` header
-/// tokens (the `CALL_EXPR` on the right of `:=`), never any mapping body, so it
+/// tokens (the call expression on the right of `:=`), never any mapping body, so it
 /// is signatures-only per ADR-0005 and does NOT widen the per-mapping `body()`
 /// fan-out. The `def_map` query is file-keyed and structurally stable across
 /// body-only edits (`tests/invalidation_regression.rs`).
 ///
-/// Heuristic token scan (the parser's `CALL_EXPR` surface is not yet a stable
+/// Heuristic token scan (the parser's call surface is not yet a stable
 /// structured node):
 /// - the callee is the dotted run of `IDENT`s separated by `DOT` that begins
 ///   AFTER the `ASSIGN` token (skips the bound name's IDENT before `:=`);

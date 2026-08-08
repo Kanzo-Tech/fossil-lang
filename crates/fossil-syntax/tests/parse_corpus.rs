@@ -74,11 +74,6 @@ fixture_test!(
     "02_chained_pipes_three_deep"
 );
 fixture_test!(
-    pipe_partial_app_03,
-    "01_pipeline_postfix",
-    "03_partial_app_with_underscore"
-);
-fixture_test!(
     pipe_missing_arg_04,
     "01_pipeline_postfix",
     "04_missing_arg_recovers"
@@ -163,11 +158,6 @@ fixture_test!(
     use_selective_import_19,
     "04_prefix_iri_triple",
     "19_use_with_selective_import"
-);
-fixture_test!(
-    exported_def_type_annot_20,
-    "04_prefix_iri_triple",
-    "20_exported_definition_with_type_annot"
 );
 fixture_test!(
     triple_term_object_21,

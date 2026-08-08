@@ -11,10 +11,7 @@
 //! (offsets, trivia, error recovery in later phases).
 
 pub mod items;
-pub use items::{
-    AnnotationBlock, Definition, ExportedDefinition, Import, InClause, IriExpr, RecordLiteral,
-    ShapeExpr,
-};
+pub use items::{AnnotationBlock, Import, InClause, IriExpr, RecordLiteral, ShapeExpr};
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
@@ -77,7 +74,7 @@ impl SourceDef {
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
         // The first IDENT child token is the binding name; the call expression
-        // contributes its own IDENT tokens nested inside CALL_EXPR.
+        // contributes its own IDENT tokens nested inside its EXPR subtree.
         self.0
             .children_with_tokens()
             .filter_map(rowan::NodeOrToken::into_token)

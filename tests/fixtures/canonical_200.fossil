@@ -4,8 +4,8 @@
 //
 // Authored by plan 06-09 (Research Wave 0 gap / Phase-0 Open Question #4): no
 // realistic multi-mapping Fossil corpus existed before this. It exercises the
-// full v0.1 surface — prefix decls, exported functions, source bindings,
-// mapping headers with shape refs, IRI templates, field refs, and stdlib calls
+// full v0.1 surface — prefix decls, source bindings, mapping headers with
+// shape refs, IRI templates, field refs, and stdlib calls
 // across the io / clean / str / math / core namespaces — and type-checks
 // cleanly under AcceptAll (no sibling .shex).
 //
@@ -17,16 +17,6 @@ prefix schema: <https://schema.org/>
 prefix foaf:  <http://xmlns.com/foaf/0.1/>
 prefix org:   <https://example.org/org/>
 prefix prod:  <https://example.org/product/>
-
-// ─── Exported helper functions (cross-file reusable) ─────────────────────
-
-@export normalize_name := clean.trim(clean.upper(.raw))
-
-@export slugify := clean.slug(.title)
-
-@export full_label := str.concat(.first, .last)
-
-@export round_price := math.round(.amount)
 
 // ─── Source bindings ─────────────────────────────────────────────────────
 
@@ -135,14 +125,6 @@ PersonProfile : foaf:Person from users
     ex:displayLabel = str.concat(.name, .nick)
     ex:ageGroup = .age
     ex:homepage = `${ex:}person/${.id}/home`
-
-// ─── More exported helpers (string + math compositions) ──────────────────
-
-@export clean_email := clean.lower(clean.trim(.email))
-
-@export display_total := math.round(math.abs(.amount))
-
-@export upper_country := clean.upper(.country)
 
 // ─── Mapping 11: order line items ───────────────────────────────────────────
 

@@ -29,12 +29,11 @@ fn file(db: &fossil_base::FossilDb, name: &str, src: &str) -> SourceFile {
     SourceFile::new(db, src.to_string(), name.to_string())
 }
 
-/// File A declares the `ex` prefix and a `slugify` function; file B uses the
-/// `ex` prefix, declares a `User` mapping targeting the `ex:Person` shape, and
-/// references `.name`. The two-file set is the workspace.
+/// File A declares the `ex` prefix; file B uses the `ex` prefix, declares a
+/// `User` mapping targeting the `ex:Person` shape, and references `.name`.
+/// The two-file set is the workspace.
 const FILE_A: &str = "\
 prefix ex: <https://example.org/>
-@export slugify := .x
 ";
 
 const FILE_B: &str = "\
@@ -85,26 +84,7 @@ fn goto_def_mapping_resolves() {
     );
 }
 
-/// 3. FUNCTION: cursor on a `slugify` reference resolves to the `@export
-///    slugify := …` definition in file A. We place the cursor directly on the
-///    definition token (a self-reference is the simplest deterministic probe of
-///    the function-resolution path).
-#[test]
-fn goto_def_function_resolves() {
-    let db = db();
-    let a = file(&db, "a.fossil", FILE_A);
-    let b = file(&db, "b.fossil", FILE_B);
-
-    // File A line 1: `@export slugify := .x`. `slugify` begins at column 8;
-    // column 10 is inside it.
-    let hits = goto_definition(&db, &[a, b], a, 1, 10);
-    assert!(
-        hits.iter().any(|t| t.file == a),
-        "slugify must resolve to its @export definition in file A; got {hits:?}",
-    );
-}
-
-/// 4. SHAPE REF: cursor on `ex:Person` (file B header) resolves to the shape
+/// 3. SHAPE REF: cursor on `ex:Person` (file B header) resolves to the shape
 ///    reference recorded at that mapping site. The `ex` prefix segment ALSO
 ///    resolves to file A (prefix path) — both are valid; we assert the shape
 ///    target (file B) appears.

@@ -132,8 +132,8 @@ pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<u32> {
 
 /// Classify a leaf [`SyntaxToken`] into a legend token-type index, or `None`
 /// if it carries no color (whitespace, structural punctuation, indent/dedent,
-/// errors). Uses the token's parent node kind to disambiguate `IDENT` /
-/// `PREFIXED_NAME` (a mapping subject vs a shape type vs a stdlib call).
+/// errors). Uses the token's parent node kind to disambiguate an `IDENT`
+/// (a mapping subject vs a shape type vs a stdlib call).
 fn classify(tok: &SyntaxToken) -> Option<u32> {
     use SyntaxKind as K;
     match tok.kind() {
@@ -141,12 +141,11 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         K::COMMENT => Some(ty::COMMENT),
         K::STRING | K::TEMPLATE => Some(ty::STRING),
         K::INTEGER | K::FLOAT => Some(ty::NUMBER),
-        K::FIELD_REF => Some(ty::PROPERTY),
         K::ABS_IRI => Some(ty::NAMESPACE),
         K::ENV_VAR => Some(ty::VARIABLE),
 
         // ── keywords (prefix / from / in / use / as / and / or / not /
-        //    iri) + the @export / @attr annotation markers read as keywords ─
+        //    iri) + the `@attr` marker, read as a keyword ────────────────
         K::KW_PREFIX
         | K::KW_FROM
         | K::KW_IN
@@ -156,16 +155,13 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         | K::KW_OR
         | K::KW_NOT
         | K::KW_IRI
-        | K::AT_EXPORT
         | K::AT_ATTR => Some(ty::KEYWORD),
 
         // ── operators (pipeline, assignment, ternary, arithmetic,
-        //    comparison, type-annotation `::`, shape `&`) ─────────────────
+        //    comparison, shape `&`) ────────────────────────────────────────
         K::PIPE
-        | K::ARROW
         | K::DEFINE
         | K::ASSIGN
-        | K::TYPE_ANNOT
         | K::EQ
         | K::NEQ
         | K::LT
@@ -181,32 +177,16 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         | K::SHAPE_AND => Some(ty::OPERATOR),
 
         // ── context-sensitive names ───────────────────────────────────
-        K::PREFIXED_NAME => Some(prefixed_name_type(tok)),
         K::IDENT => Some(ident_type(tok)),
 
         _ => None,
     }
 }
 
-/// A `PREFIXED_NAME` (`ex:Person`, `ex:name`) is a shape *type* when it sits in
-/// a mapping header's `SHAPE_EXPR` (`User : ex:Person`), and a *property*
-/// otherwise (the predicate of a `PROPERTY`, e.g. `ex:name = .name`). Default to
-/// namespace if it is neither (a bare prefixed name in an expression position).
-fn prefixed_name_type(tok: &SyntaxToken) -> u32 {
-    if has_ancestor(tok, SyntaxKind::SHAPE_EXPR) {
-        ty::TYPE
-    } else if has_ancestor(tok, SyntaxKind::PROPERTY_LHS) || has_ancestor(tok, SyntaxKind::PROPERTY)
-    {
-        ty::PROPERTY
-    } else {
-        ty::NAMESPACE
-    }
-}
-
-/// Classify a bare `IDENT`. The grammar (parser/expr.rs) produces no `CALL_EXPR`
-/// / `FIELD_REF` *leaf* — calls and member access are `POSTFIX_EXPR` nodes and a
-/// primary field ref is a `FIELD_REF_EXPR`. So we read the IDENT's local tree
-/// shape, in priority order:
+/// Classify a bare `IDENT`. Calls and member access are `POSTFIX_EXPR` nodes
+/// and a primary field ref is a `FIELD_REF_EXPR` — there is no call or
+/// field-ref *leaf* token. So we read the IDENT's local tree shape, in
+/// priority order:
 ///
 /// 1. **property** — the IDENT names a record field: it is the IDENT of a
 ///    `FIELD_REF_EXPR` (`.name` in primary position) or it directly follows a

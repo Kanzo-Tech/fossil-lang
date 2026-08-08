@@ -1,3 +1,0 @@
-@export
-f :: String -> Iri
-f := iri(_)

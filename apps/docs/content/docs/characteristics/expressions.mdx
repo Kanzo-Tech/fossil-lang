@@ -22,9 +22,9 @@ pub enum HirExpr {
 }
 ```
 
-The parser, meanwhile, produces `BINARY_EXPR`, `UNARY_EXPR`, `TERNARY_EXPR`, `PARTIAL_EXPR`,
-`ARG_LIST`, `ARG`, `RECORD_LITERAL`, `TRIPLE_TERM`, `TYPE_ANNOTATION`, `IMPORT`, `SELECTIVE_IMPORT`,
-`AT_EXPORT`, `SHAPE_EXPR`, `IN_CLAUSE` and `ALIAS`.
+The parser, meanwhile, produces `BINARY_EXPR`, `UNARY_EXPR`, `TERNARY_EXPR`, `PAREN_EXPR`,
+`ARG_LIST`, `ARG`, `RECORD_LITERAL`, `TRIPLE_TERM`, `IMPORT`, `SELECTIVE_IMPORT`, `SHAPE_EXPR`,
+`IN_CLAUSE` and `ALIAS`.
 
 Grepping `crates/fossil-hir/` for any of those node kinds returns **zero**. The lowering reads four
 and drops the rest.
@@ -114,11 +114,20 @@ to exactly one SQL expression.
 ## What leaves
 
 **Anything the HIR does not need leaves the grammar.** A token that never reaches the HIR is a
-promise the language does not keep, and today the grammar makes several: partial application,
-arrows, selective imports, type annotations on values, nested triple terms.
+promise the language does not keep, and the grammar used to make several. Four are gone as of
+2026-08-08 — **partial application** (`f(_, x)`; `_` is now an ordinary identifier), **arrows**
+(`->`), **type annotations on values** (`f :: String -> Iri`) and **`@export`**, which named an
+export in a language with no module system to export to. Removing them was checked the only way it
+can be: the workspace tests, and `fossil run examples/hello.fossil` writing a byte-identical corpus.
 
-`grammar.bnf` describes the parser, not the language. Absorbing it into the reference section of the
-book is where that stops being a footnote and becomes the page's own subject.
+Still standing, and each one waiting on something: **nested triple terms** (`<< s p o >>` is the
+pre-1.2 spelling — see [RDF 1.2](/docs/characteristics/rdf12)), **record literals** in value
+position, the **annotation block** of `type-system.md` §6, and the **`in g`** named-graph clause,
+which the corpus has nowhere to put. `use` is the opposite case: dead today and deliberately kept,
+because ADR-0057 §1 turns it on to bring checked types from a shape document.
+
+`grammar.bnf` describes the language, not the parser's tolerance. Absorbing it into the reference
+section of the book is where that stops being a footnote and becomes the page's own subject.
 
 **Discarding in silence stopped being acceptable before any of this lands, and it already has.** That
 fix was smaller than the eight forms and independent of them — it converted the table above from

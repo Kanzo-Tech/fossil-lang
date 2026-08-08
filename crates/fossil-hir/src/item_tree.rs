@@ -23,7 +23,7 @@
 //! NOT.
 
 use crate::ast_id::{
-    DefinitionNode, FileAstId, ImportNode, MappingNode, PrefixDeclNode, SourceDefNode, ast_id_map,
+    FileAstId, ImportNode, MappingNode, PrefixDeclNode, SourceDefNode, ast_id_map,
 };
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxKind, SyntaxNode};
@@ -43,8 +43,6 @@ pub enum ItemHeader {
     PrefixDecl(PrefixDeclHeader),
     SourceDef(SourceDefHeader),
     Mapping(MappingHeader),
-    Definition(DefinitionHeader),
-    ExportedDefinition(ExportedDefinitionHeader),
     Import(ImportHeader),
 }
 
@@ -80,20 +78,6 @@ pub struct MappingHeader {
     /// Number of `PROPERTY` children in `MAPPING_BODY`. Counting only — the
     /// per-property contents live in [`crate::body::HirBody::properties`].
     pub body_property_count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct DefinitionHeader {
-    pub ast_id: FileAstId<DefinitionNode>,
-    pub name: SmolStr,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ExportedDefinitionHeader {
-    pub inner: DefinitionHeader,
-    /// `true` if a `TYPE_ANNOTATION` subnode was present on the
-    /// `EXPORTED_DEFINITION` node. Phase 3 type-checker uses this signal.
-    pub has_type_annotation: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -137,18 +121,6 @@ pub fn item_tree<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> ItemTre
             SyntaxKind::IMPORT => {
                 if let Some(h) = extract_import_header(&child, FileAstId::new(ast_id_raw)) {
                     items.push(ItemHeader::Import(h));
-                }
-            }
-            SyntaxKind::DEFINITION => {
-                if let Some(h) = extract_definition_header(&child, FileAstId::new(ast_id_raw)) {
-                    items.push(ItemHeader::Definition(h));
-                }
-            }
-            SyntaxKind::EXPORTED_DEFINITION => {
-                if let Some(h) =
-                    extract_exported_definition_header(&child, FileAstId::new(ast_id_raw))
-                {
-                    items.push(ItemHeader::ExportedDefinition(h));
                 }
             }
             _ => {} // trivia, ERROR nodes — ignored at the item level
@@ -315,34 +287,6 @@ fn extract_import_header(node: &SyntaxNode, ast_id: FileAstId<ImportNode>) -> Op
         ast_id,
         path: SmolStr::from(path.trim()),
         alias,
-    })
-}
-
-fn extract_definition_header(
-    node: &SyntaxNode,
-    ast_id: FileAstId<DefinitionNode>,
-) -> Option<DefinitionHeader> {
-    let name = node
-        .children_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .find(|t| t.kind() == SyntaxKind::IDENT)?;
-    Some(DefinitionHeader {
-        ast_id,
-        name: SmolStr::from(name.text()),
-    })
-}
-
-fn extract_exported_definition_header(
-    node: &SyntaxNode,
-    ast_id: FileAstId<DefinitionNode>,
-) -> Option<ExportedDefinitionHeader> {
-    let inner = extract_definition_header(node, ast_id)?;
-    let has_type_annotation = node
-        .children()
-        .any(|c| c.kind() == SyntaxKind::TYPE_ANNOTATION);
-    Some(ExportedDefinitionHeader {
-        inner,
-        has_type_annotation,
     })
 }
 

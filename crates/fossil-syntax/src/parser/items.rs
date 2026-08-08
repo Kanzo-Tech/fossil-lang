@@ -9,23 +9,17 @@
 //! Per RESEARCH.md §Q1 we keep RD here and delegate every expression slot
 //! to the Pratt sub-parser in [`super::expr::parse_expression`].
 //!
-//! # Grammar coverage (grammar.bnf lines 94-156)
+//! # Grammar coverage (grammar.bnf §GRAMMAR)
 //!
 //! ```text
 //! Program             := TopLevel* EOF
-//! TopLevel            := Import | Definition | ExportedDefinition | Mapping
+//! TopLevel            := Import | PrefixDecl | SourceDef | MultiSourceDef | Mapping
 //!
 //! Import              := 'use' Path SelectiveImport? Alias?
 //! Path                := PathSegment ('/' PathSegment)*
 //! PathSegment         := IDENT | STRING
 //! SelectiveImport     := LBRACE IDENT (COMMA IDENT)* RBRACE
 //! Alias               := 'as' IDENT
-//!
-//! Definition          := IDENT DEFINE Expression
-//! ExportedDefinition  := AT_EXPORT TypeAnnotation? Definition
-//! TypeAnnotation      := IDENT TYPE_ANNOT TypeExpr
-//! TypeExpr            := TypeAtom (ARROW TypeExpr)?     -- right-assoc
-//! TypeAtom            := IDENT | LPAREN TypeExpr (COMMA TypeExpr)* RPAREN
 //!
 //! Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
 //! MappingHeader       := IDENT SHAPE_SEP ShapeExpr InClause? 'from' Expression
@@ -41,11 +35,9 @@
 //! AnnotationItem      := IRIExpr ASSIGN Expression AnnotationBlock?
 //! ```
 //!
-//! Phase 1's `PrefixDecl` and `SourceDef` are NOT in the grammar.bnf
-//! `TopLevel` set, but they remain valid top-level items in the Fossil
-//! surface syntax (per the canonical `examples/hello.fossil`) and are
-//! preserved verbatim here. `def_map` continues to scan for `SOURCE_DEF`
-//! and `PREFIX_DECL` so the walking-skeleton invariant holds.
+//! `PrefixDecl`, `SourceDef` and `MultiSourceDef` are the vocabulary and
+//! binding half of the surface; `def_map` scans for `SOURCE_DEF` and
+//! `PREFIX_DECL`, which is what the walking-skeleton invariant rests on.
 //!
 //! # Disambiguation rules (grammar.bnf §"DISAMBIGUATION RULES")
 //!
@@ -92,25 +84,16 @@ pub(crate) fn parse_program(p: &mut Parser) {
             None => break,
             Some(SyntaxKind::KW_USE) => parse_import(p),
             Some(SyntaxKind::KW_PREFIX) => parse_prefix_decl(p),
-            Some(SyntaxKind::AT_EXPORT) => parse_exported_definition(p),
             // `{ A, B, ... } := io.rdf(...)` — a destructuring source def. A
             // top-level `{` is unambiguous: the selective-import `{` is inside
             // `use`, and record/annotation `{` only appear inside expressions /
             // mapping bodies — never at the program level.
             Some(SyntaxKind::LBRACE) => parse_multi_source_def(p),
             Some(SyntaxKind::IDENT) => match p.peek_kind(1) {
-                // `IDENT :=` → source/value definition (Phase 1 SOURCE_DEF).
+                // `IDENT :=` → source binding (SOURCE_DEF).
                 Some(SyntaxKind::DEFINE) => parse_source_def(p),
                 // `IDENT :` → start of a mapping header.
                 Some(SyntaxKind::SHAPE_SEP) => parse_mapping(p),
-                // `IDENT ::` → top-level Definition with leading
-                // TypeAnnotation (no `@export`). Grammar.bnf line 121 ties
-                // TypeAnnotation to ExportedDefinition; for symmetry we
-                // also accept a bare top-level Definition with a leading
-                // `IDENT ::` (treated as a TypeAnnotation followed by an
-                // implicit Definition on the next line). Unreachable in
-                // the Wave 0 / Phase 1 fixtures; kept defensive.
-                //
                 // Always make progress on a token we don't know what to do
                 // with at the program level — `bump_as_error` emits a single
                 // ERROR token and advances, making the outer loop monotone
@@ -182,7 +165,6 @@ fn parse_path_segment(p: &mut Parser) {
                 SyntaxKind::KW_AS,
                 SyntaxKind::KW_USE,
                 SyntaxKind::KW_PREFIX,
-                SyntaxKind::AT_EXPORT,
                 SyntaxKind::IDENT,
             ],
         ),
@@ -219,93 +201,11 @@ fn parse_selective_import(p: &mut Parser) {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// ExportedDefinition: AT_EXPORT TypeAnnotation? Definition
-// ───────────────────────────────────────────────────────────────────────
-fn parse_exported_definition(p: &mut Parser) {
-    p.start(SyntaxKind::EXPORTED_DEFINITION);
-    p.bump(); // AT_EXPORT
-    p.skip_trivia();
-    // TypeAnnotation lookahead: `IDENT ::` (with TYPE_ANNOT being `::`).
-    if p.current() == Some(SyntaxKind::IDENT) && p.peek_kind(1) == Some(SyntaxKind::TYPE_ANNOT) {
-        parse_type_annotation(p);
-    }
-    // The Definition: `IDENT := Expression`.
-    p.skip_trivia();
-    if p.current() == Some(SyntaxKind::IDENT) {
-        parse_definition(p);
-    } else {
-        recover::recover_to(p, TOP_LEVEL_ANCHORS);
-    }
-    p.finish();
-}
-
-// TypeAnnotation: IDENT TYPE_ANNOT TypeExpr
-fn parse_type_annotation(p: &mut Parser) {
-    p.start(SyntaxKind::TYPE_ANNOTATION);
-    p.bump(); // IDENT (function name)
-    p.skip_trivia();
-    p.bump(); // TYPE_ANNOT  (`::`)
-    parse_type_expr(p);
-    p.finish();
-}
-
-// TypeExpr: TypeAtom (ARROW TypeExpr)?   -- right-associative
-fn parse_type_expr(p: &mut Parser) {
-    p.start(SyntaxKind::TYPE_EXPR);
-    parse_type_atom(p);
-    p.skip_trivia();
-    if p.current() == Some(SyntaxKind::ARROW) {
-        p.bump();
-        parse_type_expr(p); // right-assoc
-    }
-    p.finish();
-}
-
-fn parse_type_atom(p: &mut Parser) {
-    p.skip_trivia();
-    p.start(SyntaxKind::TYPE_ATOM);
-    match p.current() {
-        Some(SyntaxKind::IDENT) => p.bump(),
-        Some(SyntaxKind::LPAREN) => {
-            p.bump();
-            parse_type_expr(p);
-            loop {
-                p.skip_trivia();
-                if p.current() != Some(SyntaxKind::COMMA) {
-                    break;
-                }
-                p.bump();
-                parse_type_expr(p);
-            }
-            recover::expect_or_recover(
-                p,
-                SyntaxKind::RPAREN,
-                &[SyntaxKind::ARROW, SyntaxKind::IDENT],
-            );
-        }
-        _ => recover::recover_to(p, &[SyntaxKind::ARROW, SyntaxKind::IDENT]),
-    }
-    p.finish();
-}
-
-// Definition: IDENT DEFINE Expression
-fn parse_definition(p: &mut Parser) {
-    p.start(SyntaxKind::DEFINITION);
-    recover::expect_or_recover(p, SyntaxKind::IDENT, TOP_LEVEL_ANCHORS);
-    recover::expect_or_recover(p, SyntaxKind::DEFINE, TOP_LEVEL_ANCHORS);
-    p.parse_expr();
-    p.finish();
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// SourceDef (Phase 1 / Fossil-specific): IDENT DEFINE Expression
+// SourceDef: IDENT DEFINE Expression
 //
-// In the unified grammar.bnf line 119, `IDENT DEFINE Expression` is
-// `Definition`. Phase 1's `def_map` keys source bindings on the SOURCE_DEF
-// node kind, so we keep SOURCE_DEF for top-level (i.e. non-`@export`)
-// `IDENT :=` items; the grammar.bnf `Definition` shape is reserved for the
-// body of `ExportedDefinition`. This decision is documented in
-// `02-03-SUMMARY.md` and the Salsa key (`def_map.rs`) is unaffected.
+// The one binding form. `users := io.csv("u.csv")` reads a file and
+// `adultos := users |> where(...)` derives a relation; both are a name, `:=`
+// and an expression, and `def_map` keys both on SOURCE_DEF.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_source_def(p: &mut Parser) {
     p.start(SyntaxKind::SOURCE_DEF);

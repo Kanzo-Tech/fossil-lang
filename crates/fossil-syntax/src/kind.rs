@@ -1,13 +1,15 @@
 //! `SyntaxKind` — the kind tag for every node and token in the Fossil CST,
 //! plus the `rowan::Language` impl that wires it into the green/red tree.
 //!
-//! Phase 1 carried the subset of grammar.bnf needed for `examples/hello.fossil`:
-//! prefix decls, source defs, mappings (header + body of properties).
-//! Phase 2 adds the full operator/expression/annotation token surface plus
-//! composite node kinds for the Pratt expression sub-parser and the full
-//! item parser. Phase 1 numeric IDs are preserved (existing variants keep
-//! their `repr(u16)` values) so any callers that cached raw values do not
-//! break; Phase 2 variants are APPENDED before `__LAST`.
+//! Every variant here is a kind the lexer or the parser actually produces.
+//! The `repr(u16)` values are an implementation detail of the rowan green
+//! tree and are NOT a compatibility surface: nothing persists a raw value
+//! across a build, so adding or removing a variant renumbers the rest, and
+//! the only thing that has to move in lockstep is [`SyntaxKind::from_raw_value`]
+//! (guarded by `syntax_kind_round_trip_for_all_variants`).
+//!
+//! The one cross-language pin is on the LEXER's `Token` discriminants, not on
+//! these — see `packages/codemirror-fossil/src/tags.ts`.
 
 // SCREAMING_SNAKE_CASE is the rust-analyzer / rowan-ecosystem convention for
 // SyntaxKind variants (matches the BNF terminal naming in `grammar.bnf`).
@@ -16,22 +18,22 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
-    // ─── Phase 1 variants (IDs frozen) ────────────────────────────────
-    // Trivia
+    // ─── Trivia ───────────────────────────────────────────────────────
     WHITESPACE = 0,
     NEWLINE,
     COMMENT,
 
-    // Lexical tokens (Phase 1 subset)
+    // ─── Lexical tokens ───────────────────────────────────────────────
     IDENT,
     INTEGER,
+    FLOAT,
     STRING,
     TEMPLATE,
     ABS_IRI,
-    PREFIXED_NAME,
-    FIELD_REF,
+    ENV_VAR,
+    AT_ATTR,
 
-    // Punctuation
+    // ─── Punctuation / operators ──────────────────────────────────────
     DEFINE,
     ASSIGN,
     SHAPE_SEP,
@@ -41,48 +43,7 @@ pub enum SyntaxKind {
     RPAREN,
     LBRACE,
     RBRACE,
-    LANGLE,
-    RANGLE,
-
-    // Keywords
-    KW_PREFIX,
-    KW_FROM,
-
-    // Virtual (post-lexer)
-    INDENT,
-    DEDENT,
-
-    // Composite nodes (Phase 1)
-    PROGRAM,
-    PREFIX_DECL,
-    SOURCE_DEF,
-    MAPPING,
-    MAPPING_HEADER,
-    MAPPING_BODY,
-    PROPERTY,
-    PROPERTY_LHS,
-    EXPR,
-    CALL_EXPR,
-    TEMPLATE_EXPR,
-    IRI_EXPR,
-    LITERAL_EXPR,
-    FIELD_REF_EXPR,
-
-    // Error / sentinel
-    ERROR,
-    EOF,
-
-    // ─── Phase 2: lexical tokens ──────────────────────────────────────
-    FLOAT,
-    ENV_VAR,
-    PARTIAL,
-    AT_EXPORT,
-    AT_ATTR,
-
-    // ─── Phase 2: punctuation / operators ─────────────────────────────
     PIPE,
-    ARROW,
-    TYPE_ANNOT,
     TRIPLE_OPEN,
     TRIPLE_CLOSE,
     EQ,
@@ -99,7 +60,9 @@ pub enum SyntaxKind {
     T_QUESTION,
     SHAPE_AND,
 
-    // ─── Phase 2: keywords ────────────────────────────────────────────
+    // ─── Keywords ─────────────────────────────────────────────────────
+    KW_PREFIX,
+    KW_FROM,
     KW_IN,
     KW_USE,
     KW_AS,
@@ -108,14 +71,43 @@ pub enum SyntaxKind {
     KW_NOT,
     KW_IRI,
 
-    // ─── Phase 2: composite expression nodes (Pratt-built) ────────────
+    // ─── Virtual (post-lexer) ─────────────────────────────────────────
+    INDENT,
+    DEDENT,
+
+    // ─── Composite item nodes ─────────────────────────────────────────
+    PROGRAM,
+    PREFIX_DECL,
+    SOURCE_DEF,
+    /// `{ A, B, ... } := io.rdf(uri, schema = shex)` — a destructuring source
+    /// definition binding N members (one per declared shape) to a single source.
+    MULTI_SOURCE_DEF,
+    MAPPING,
+    MAPPING_HEADER,
+    MAPPING_BODY,
+    PROPERTY,
+    PROPERTY_LHS,
+    IMPORT,
+    IMPORT_PATH,
+    SELECTIVE_IMPORT,
+    ALIAS,
+    SHAPE_EXPR,
+    IN_CLAUSE,
+    ANNOTATION_BLOCK,
+    ANNOTATION_ITEM,
+
+    // ─── Composite expression nodes ───────────────────────────────────
+    EXPR,
+    TEMPLATE_EXPR,
+    IRI_EXPR,
+    LITERAL_EXPR,
+    FIELD_REF_EXPR,
     PIPELINE_EXPR,
     TERNARY_EXPR,
     BINARY_EXPR,
     UNARY_EXPR,
     POSTFIX_EXPR,
     PAREN_EXPR,
-    PARTIAL_EXPR,
     RECORD_LITERAL,
     RECORD_FIELD,
     TRIPLE_TERM,
@@ -123,24 +115,9 @@ pub enum SyntaxKind {
     ARG,
     NAMED_ARG,
 
-    // ─── Phase 2: composite item nodes ────────────────────────────────
-    IMPORT,
-    IMPORT_PATH,
-    SELECTIVE_IMPORT,
-    ALIAS,
-    DEFINITION,
-    EXPORTED_DEFINITION,
-    TYPE_ANNOTATION,
-    TYPE_EXPR,
-    TYPE_ATOM,
-    SHAPE_EXPR,
-    IN_CLAUSE,
-    ANNOTATION_BLOCK,
-    ANNOTATION_ITEM,
-
-    /// `{ A, B, ... } := io.rdf(uri, schema = shex)` — a destructuring source
-    /// definition binding N members (one per declared shape) to a single source.
-    MULTI_SOURCE_DEF,
+    // ─── Error / sentinel ─────────────────────────────────────────────
+    ERROR,
+    EOF,
 
     /// Sentinel — must be the last variant. Used for round-trip bounds checks.
     #[doc(hidden)]
@@ -165,110 +142,89 @@ impl SyntaxKind {
     /// the `syntax_kind_round_trip_for_all_variants` unit test guards this.
     fn from_raw_value(v: u16) -> Self {
         match v {
-            // Phase 1 (IDs 0..=40)
             0 => Self::WHITESPACE,
             1 => Self::NEWLINE,
             2 => Self::COMMENT,
             3 => Self::IDENT,
             4 => Self::INTEGER,
-            5 => Self::STRING,
-            6 => Self::TEMPLATE,
-            7 => Self::ABS_IRI,
-            8 => Self::PREFIXED_NAME,
-            9 => Self::FIELD_REF,
-            10 => Self::DEFINE,
-            11 => Self::ASSIGN,
-            12 => Self::SHAPE_SEP,
-            13 => Self::DOT,
-            14 => Self::COMMA,
-            15 => Self::LPAREN,
-            16 => Self::RPAREN,
-            17 => Self::LBRACE,
-            18 => Self::RBRACE,
-            19 => Self::LANGLE,
-            20 => Self::RANGLE,
-            21 => Self::KW_PREFIX,
-            22 => Self::KW_FROM,
-            23 => Self::INDENT,
-            24 => Self::DEDENT,
-            25 => Self::PROGRAM,
-            26 => Self::PREFIX_DECL,
-            27 => Self::SOURCE_DEF,
-            28 => Self::MAPPING,
-            29 => Self::MAPPING_HEADER,
-            30 => Self::MAPPING_BODY,
-            31 => Self::PROPERTY,
-            32 => Self::PROPERTY_LHS,
-            33 => Self::EXPR,
-            34 => Self::CALL_EXPR,
-            35 => Self::TEMPLATE_EXPR,
-            36 => Self::IRI_EXPR,
-            37 => Self::LITERAL_EXPR,
-            38 => Self::FIELD_REF_EXPR,
-            39 => Self::ERROR,
-            40 => Self::EOF,
-            // Phase 2: lexical tokens
-            41 => Self::FLOAT,
-            42 => Self::ENV_VAR,
-            43 => Self::PARTIAL,
-            44 => Self::AT_EXPORT,
-            45 => Self::AT_ATTR,
-            // Phase 2: punctuation / operators
-            46 => Self::PIPE,
-            47 => Self::ARROW,
-            48 => Self::TYPE_ANNOT,
-            49 => Self::TRIPLE_OPEN,
-            50 => Self::TRIPLE_CLOSE,
-            51 => Self::EQ,
-            52 => Self::NEQ,
-            53 => Self::LT,
-            54 => Self::LE,
-            55 => Self::GT,
-            56 => Self::GE,
-            57 => Self::PLUS,
-            58 => Self::MINUS,
-            59 => Self::STAR,
-            60 => Self::SLASH,
-            61 => Self::PERCENT,
-            62 => Self::T_QUESTION,
-            63 => Self::SHAPE_AND,
-            // Phase 2: keywords
-            64 => Self::KW_IN,
-            65 => Self::KW_USE,
-            66 => Self::KW_AS,
-            67 => Self::KW_AND,
-            68 => Self::KW_OR,
-            69 => Self::KW_NOT,
-            70 => Self::KW_IRI,
-            // Phase 2: composite expression nodes
-            71 => Self::PIPELINE_EXPR,
-            72 => Self::TERNARY_EXPR,
-            73 => Self::BINARY_EXPR,
-            74 => Self::UNARY_EXPR,
-            75 => Self::POSTFIX_EXPR,
-            76 => Self::PAREN_EXPR,
-            77 => Self::PARTIAL_EXPR,
-            78 => Self::RECORD_LITERAL,
-            79 => Self::RECORD_FIELD,
-            80 => Self::TRIPLE_TERM,
-            81 => Self::ARG_LIST,
-            82 => Self::ARG,
-            83 => Self::NAMED_ARG,
-            // Phase 2: composite item nodes
-            84 => Self::IMPORT,
-            85 => Self::IMPORT_PATH,
-            86 => Self::SELECTIVE_IMPORT,
-            87 => Self::ALIAS,
-            88 => Self::DEFINITION,
-            89 => Self::EXPORTED_DEFINITION,
-            90 => Self::TYPE_ANNOTATION,
-            91 => Self::TYPE_EXPR,
-            92 => Self::TYPE_ATOM,
-            93 => Self::SHAPE_EXPR,
-            94 => Self::IN_CLAUSE,
-            95 => Self::ANNOTATION_BLOCK,
-            96 => Self::ANNOTATION_ITEM,
-            97 => Self::MULTI_SOURCE_DEF,
+            5 => Self::FLOAT,
+            6 => Self::STRING,
+            7 => Self::TEMPLATE,
+            8 => Self::ABS_IRI,
+            9 => Self::ENV_VAR,
+            10 => Self::AT_ATTR,
+            11 => Self::DEFINE,
+            12 => Self::ASSIGN,
+            13 => Self::SHAPE_SEP,
+            14 => Self::DOT,
+            15 => Self::COMMA,
+            16 => Self::LPAREN,
+            17 => Self::RPAREN,
+            18 => Self::LBRACE,
+            19 => Self::RBRACE,
+            20 => Self::PIPE,
+            21 => Self::TRIPLE_OPEN,
+            22 => Self::TRIPLE_CLOSE,
+            23 => Self::EQ,
+            24 => Self::NEQ,
+            25 => Self::LT,
+            26 => Self::LE,
+            27 => Self::GT,
+            28 => Self::GE,
+            29 => Self::PLUS,
+            30 => Self::MINUS,
+            31 => Self::STAR,
+            32 => Self::SLASH,
+            33 => Self::PERCENT,
+            34 => Self::T_QUESTION,
+            35 => Self::SHAPE_AND,
+            36 => Self::KW_PREFIX,
+            37 => Self::KW_FROM,
+            38 => Self::KW_IN,
+            39 => Self::KW_USE,
+            40 => Self::KW_AS,
+            41 => Self::KW_AND,
+            42 => Self::KW_OR,
+            43 => Self::KW_NOT,
+            44 => Self::KW_IRI,
+            45 => Self::INDENT,
+            46 => Self::DEDENT,
+            47 => Self::PROGRAM,
+            48 => Self::PREFIX_DECL,
+            49 => Self::SOURCE_DEF,
+            50 => Self::MULTI_SOURCE_DEF,
+            51 => Self::MAPPING,
+            52 => Self::MAPPING_HEADER,
+            53 => Self::MAPPING_BODY,
+            54 => Self::PROPERTY,
+            55 => Self::PROPERTY_LHS,
+            56 => Self::IMPORT,
+            57 => Self::IMPORT_PATH,
+            58 => Self::SELECTIVE_IMPORT,
+            59 => Self::ALIAS,
+            60 => Self::SHAPE_EXPR,
+            61 => Self::IN_CLAUSE,
+            62 => Self::ANNOTATION_BLOCK,
+            63 => Self::ANNOTATION_ITEM,
+            64 => Self::EXPR,
+            65 => Self::TEMPLATE_EXPR,
+            66 => Self::IRI_EXPR,
+            67 => Self::LITERAL_EXPR,
+            68 => Self::FIELD_REF_EXPR,
+            69 => Self::PIPELINE_EXPR,
+            70 => Self::TERNARY_EXPR,
+            71 => Self::BINARY_EXPR,
+            72 => Self::UNARY_EXPR,
+            73 => Self::POSTFIX_EXPR,
+            74 => Self::PAREN_EXPR,
+            75 => Self::RECORD_LITERAL,
+            76 => Self::RECORD_FIELD,
+            77 => Self::TRIPLE_TERM,
+            78 => Self::ARG_LIST,
+            79 => Self::ARG,
+            80 => Self::NAMED_ARG,
+            81 => Self::ERROR,
+            82 => Self::EOF,
             _ => panic!("invalid SyntaxKind raw value: {v}"),
         }
     }

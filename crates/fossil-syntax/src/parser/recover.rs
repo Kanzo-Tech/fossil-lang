@@ -32,15 +32,11 @@ use super::diag::ParseDiagnostic;
 /// Token kinds that start a top-level item. After a parse error inside or
 /// between items, the parser bumps until it sees one of these (or EOF).
 ///
-/// `IDENT` and `AT_EXPORT` are deliberately included even though `IDENT` is
-/// ambiguous at lookahead-0 — `parse_program` re-disambiguates IDENT into
-/// `Definition` / `Mapping` / fallthrough-error on the next iteration.
-pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[
-    SyntaxKind::KW_USE,
-    SyntaxKind::KW_PREFIX,
-    SyntaxKind::AT_EXPORT,
-    SyntaxKind::IDENT,
-];
+/// `IDENT` is deliberately included even though it is ambiguous at
+/// lookahead-0 — `parse_program` re-disambiguates IDENT into `SourceDef` /
+/// `Mapping` / fallthrough-error on the next iteration.
+pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] =
+    &[SyntaxKind::KW_USE, SyntaxKind::KW_PREFIX, SyntaxKind::IDENT];
 
 /// Token kinds that end a property inside a `MAPPING_BODY` (or annotation
 /// body): either the `NEWLINE` separator or the `DEDENT` closing the body

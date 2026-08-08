@@ -229,7 +229,7 @@ fn source_field_completions(
 
 /// True when the cursor sits at a field reference — the `.` token itself
 /// (completion triggered right after typing `.`) or anywhere inside a
-/// `FIELD_REF` / `FIELD_REF_EXPR`. Bounded by the enclosing `MAPPING` so a stray
+/// `FIELD_REF_EXPR`. Bounded by the enclosing `MAPPING` so a stray
 /// dot elsewhere does not fire source-field completion.
 fn at_field_ref_context(db: &dyn HirDb, file: SourceFile, line: u32, character: u32) -> bool {
     let Some(token) = token_at_position(db, file, line, character) else {
@@ -241,7 +241,7 @@ fn at_field_ref_context(db: &dyn HirDb, file: SourceFile, line: u32, character: 
     let mut current = token.parent();
     while let Some(node) = current {
         match node.kind() {
-            SyntaxKind::FIELD_REF_EXPR | SyntaxKind::FIELD_REF => return true,
+            SyntaxKind::FIELD_REF_EXPR => return true,
             SyntaxKind::MAPPING => return false,
             _ => current = node.parent(),
         }

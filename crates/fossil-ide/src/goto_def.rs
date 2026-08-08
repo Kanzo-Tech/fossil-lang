@@ -7,16 +7,14 @@
 //! [`crate::WorkspaceIndex`] (built by 06-03), returning every matching
 //! definition's owning file + byte range.
 //!
-//! # The four symbol kinds (SC#4)
+//! # The three symbol kinds (SC#4)
 //!
 //! 1. **prefix** — the `ex` in `ex:Person` / `ex:name`, or a bare prefix token.
 //!    Resolved via [`WorkspaceIndex::resolve_prefix`] to the declaring
 //!    `prefix ex: <...>` site (cross-file: declared in file A, used in file B).
 //! 2. **mapping** — a mapping-header name (`User`). Resolved via
 //!    [`WorkspaceIndex::resolve`] to the `User : ... from ...` header.
-//! 3. **function** — a top-level (`@export f := …`) definition name. Same
-//!    `resolve` path.
-//! 4. **shape ref** — the `ex:Person` prefixed name in a mapping header. The
+//! 3. **shape ref** — the `ex:Person` prefixed name in a mapping header. The
 //!    06-03 [`crate::SymbolIndex`] records shape refs under their full
 //!    surface text (`"ex:Person"`), so `resolve` lands on the declaring mapping
 //!    site.
@@ -74,8 +72,8 @@ pub fn goto_definition(
     };
 
     // The set of name candidates to resolve. A prefixed name like `ex:Person`
-    // is several leaf tokens (`ex`, `:`, `Person`) under an `IRI_EXPR` /
-    // `PREFIXED_NAME` node, so the bare token under the cursor (`Person`) does
+    // is several leaf tokens (`ex`, `:`, `Person`) under an `IRI_EXPR`
+    // node, so the bare token under the cursor (`Person`) does
     // NOT match the index entry, which is keyed by the full surface text. We
     // therefore try the raw token text PLUS the text of each ancestor node up to
     // the enclosing prefixed-name node — covering a cursor anywhere inside
@@ -104,7 +102,7 @@ pub fn goto_definition(
             }
         }
 
-        // 2/3/4. Mapping / function / shape-ref names. Shape-ref index entries
+        // 2/3. Mapping / shape-ref names. Shape-ref index entries
         //    are keyed by their full surface text (`ex:Person`); mapping +
         //    function names by their bare IDENT.
         for (decl_file, entry) in ws.resolve(candidate) {
@@ -123,7 +121,7 @@ pub fn goto_definition(
 
 /// Build the ordered set of name candidates for the token under the cursor: the
 /// token's own text, then the (whitespace-trimmed) text of each ancestor node up
-/// to and including the enclosing `IRI_EXPR` / `PREFIXED_NAME` node. This lets a
+/// to and including the enclosing `IRI_EXPR` node. This lets a
 /// cursor on any leaf of a multi-token prefixed name (`ex` or `Person` in
 /// `ex:Person`) resolve the whole name (the shape-ref case).
 fn name_candidates(token: &fossil_syntax::SyntaxToken) -> Vec<String> {
@@ -131,7 +129,7 @@ fn name_candidates(token: &fossil_syntax::SyntaxToken) -> Vec<String> {
     let mut out = vec![token.text().to_string()];
     let mut node = token.parent();
     while let Some(n) = node {
-        if matches!(n.kind(), SyntaxKind::IRI_EXPR | SyntaxKind::PREFIXED_NAME) {
+        if n.kind() == SyntaxKind::IRI_EXPR {
             let text = n.text().to_string();
             let trimmed = text.trim();
             if !trimmed.is_empty() && !out.iter().any(|c| c == trimmed) {

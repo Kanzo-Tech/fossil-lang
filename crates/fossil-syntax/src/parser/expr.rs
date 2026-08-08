@@ -309,11 +309,6 @@ fn parse_primary(p: &mut Parser) {
         }
         Some(SyntaxKind::LBRACE) => parse_record_literal(p),
         Some(SyntaxKind::TRIPLE_OPEN) => parse_triple_term(p),
-        Some(SyntaxKind::PARTIAL) => {
-            p.start(SyntaxKind::PARTIAL_EXPR);
-            p.bump();
-            p.finish();
-        }
         _ => {
             // Recovery: emit ERROR with the current token (or empty if EOF).
             p.bump_as_error();
@@ -499,12 +494,5 @@ mod tests {
             vec![SyntaxKind::LITERAL_EXPR, SyntaxKind::LITERAL_EXPR],
             "non-assoc comparison must not chain"
         );
-    }
-
-    #[test]
-    fn pratt_primary_partial_underscore() {
-        let node = parse_expr_node("_");
-        let outer = node.first_child().expect("an expression child");
-        assert_eq!(outer.kind(), SyntaxKind::PARTIAL_EXPR);
     }
 }

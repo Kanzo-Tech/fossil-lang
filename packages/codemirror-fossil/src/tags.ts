@@ -16,7 +16,7 @@
  * Mapping philosophy (v0.1):
  *   - Keywords (`prefix`, `from`, `in`, `use`, `as`, `and`, `or`, `not`,
  *     `iri`) → `'keyword'`
- *   - Attribute markers (`@export`, `@dcat`, …) → `'meta'` (semantic
+ *   - Attribute markers (`@dcat`, …) → `'meta'` (semantic
  *     decoration, not a value)
  *   - Numeric / string / template literals → `'number'` / `'string'`
  *   - Absolute IRIs (`<https://…>`) → `'string'` (they are URI literals)
@@ -25,7 +25,6 @@
  *   - Punctuation (parens / braces / dot / comma / colon) → `'punctuation'`
  *   - Identifiers → `null` (no opinionated highlight; the LSP semantic-tokens
  *     overlay in 08-09 paints these as `variable`/`function`/`type` etc.)
- *   - `Partial` (`_`) → `'keyword'` (it's a language-level placeholder)
  *   - Trivia (`Whitespace` / `Newline` / `Comment`) — `Comment` → `'comment'`;
  *     the indent pass also keeps `Whitespace` and `Newline` tokens, but those
  *     are stripped by the lexer before `tokenize()` returns (the raw_lex
@@ -53,49 +52,45 @@ export enum FossilKind {
   KwOr = 9,
   KwNot = 10,
   KwIri = 11,
-  // Attribute markers
-  AtExport = 12,
-  AtAttr = 13,
+  // Attribute marker
+  AtAttr = 12,
   // Numeric literals
-  Float = 14,
-  Integer = 15,
-  // Identifier / partial-application placeholder
-  Ident = 16,
-  Partial = 17,
+  Float = 13,
+  Integer = 14,
+  // Identifier
+  Ident = 15,
   // String / template / IRI / env-var literals
-  String = 18,
-  Template = 19,
-  AbsIri = 20,
-  EnvVar = 21,
+  String = 16,
+  Template = 17,
+  AbsIri = 18,
+  EnvVar = 19,
   // Multi-character operators (longer-first per logos longest-match)
-  Define = 22,
-  TypeAnnot = 23,
-  Eq = 24,
-  Neq = 25,
-  Le = 26,
-  Ge = 27,
-  Arrow = 28,
-  Pipe = 29,
-  TripleOpen = 30,
-  TripleClose = 31,
+  Define = 20,
+  Eq = 21,
+  Neq = 22,
+  Le = 23,
+  Ge = 24,
+  Pipe = 25,
+  TripleOpen = 26,
+  TripleClose = 27,
   // Single-character operators / punctuation
-  Assign = 32,
-  Colon = 33,
-  Dot = 34,
-  Comma = 35,
-  LParen = 36,
-  RParen = 37,
-  LBrace = 38,
-  RBrace = 39,
-  Lt = 40,
-  Gt = 41,
-  Plus = 42,
-  Minus = 43,
-  Star = 44,
-  Slash = 45,
-  Percent = 46,
-  Question = 47,
-  ShapeAnd = 48,
+  Assign = 28,
+  Colon = 29,
+  Dot = 30,
+  Comma = 31,
+  LParen = 32,
+  RParen = 33,
+  LBrace = 34,
+  RBrace = 35,
+  Lt = 36,
+  Gt = 37,
+  Plus = 38,
+  Minus = 39,
+  Star = 40,
+  Slash = 41,
+  Percent = 42,
+  Question = 43,
+  ShapeAnd = 44,
 }
 
 /**
@@ -126,10 +121,9 @@ export const KIND_TO_TAG: Record<number, string | null> = {
   [FossilKind.KwNot]: 'keyword',
   [FossilKind.KwIri]: 'keyword',
 
-  // Attribute markers — semantic decoration, not value. `meta` is the
+  // Attribute marker — semantic decoration, not value. `meta` is the
   // canonical Lezer tag for "language-machinery markers" (preprocessor
   // directives, attributes, derive macros etc.).
-  [FossilKind.AtExport]: 'meta',
   [FossilKind.AtAttr]: 'meta',
 
   // Numeric literals
@@ -141,10 +135,6 @@ export const KIND_TO_TAG: Record<number, string | null> = {
   // `type`/`property` based on HIR resolution.
   [FossilKind.Ident]: null,
 
-  // Partial-application placeholder `_` — it's a language-level token, not
-  // an identifier. `operator` is the closest match in Lezer's vocabulary.
-  [FossilKind.Partial]: 'operator',
-
   // String / template / IRI literals — all string-shaped values.
   [FossilKind.String]: 'string',
   [FossilKind.Template]: 'string',
@@ -155,14 +145,12 @@ export const KIND_TO_TAG: Record<number, string | null> = {
   // the @lezer/highlight built-in for "variable in scope".
   [FossilKind.EnvVar]: 'variableName',
 
-  // Operators (assignment, comparison, arrow, pipe, triple-quoting, etc.)
+  // Operators (assignment, comparison, pipe, triple-quoting, etc.)
   [FossilKind.Define]: 'operator',
-  [FossilKind.TypeAnnot]: 'operator',
   [FossilKind.Eq]: 'operator',
   [FossilKind.Neq]: 'operator',
   [FossilKind.Le]: 'operator',
   [FossilKind.Ge]: 'operator',
-  [FossilKind.Arrow]: 'operator',
   [FossilKind.Pipe]: 'operator',
   [FossilKind.TripleOpen]: 'operator',
   [FossilKind.TripleClose]: 'operator',

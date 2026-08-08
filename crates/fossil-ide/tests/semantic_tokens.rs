@@ -13,7 +13,7 @@ use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_ide::{decode_tokens, legend_type_name, semantic_tokens};
 
 /// A fixture exercising every legend token type: comment, keyword (`prefix` /
-/// `from` / `@export`), namespace (prefix name + abs IRI), type (shape ref),
+/// `from`), namespace (prefix name + abs IRI), type (shape ref),
 /// property (`ex:name`), function (stdlib call), number, string, operators
 /// (`:=`, `=`, `|>`), field ref (`.name`), variable (mapping subject).
 const FIXTURE: &str = "\

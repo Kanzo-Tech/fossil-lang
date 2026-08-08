@@ -7,24 +7,18 @@
 //! and `Newline` as real tokens (NOT `#[logos(skip)]`) because the indent
 //! pass needs them to measure leading columns.
 //!
-//! Phase 2 expansion (grammar.bnf lines 53-87, plus the additional keywords
-//! on lines 25-27 and the attribute markers on lines 85-87): added one
-//! `Token` variant per terminal Phase 1 lacks. Critical ordering rules
-//! (logos uses longest-match, with declaration order as tiebreaker for
-//! equal-length matches):
+//! One `Token` variant per terminal of `grammar.bnf` §LEXICAL LAYER that a
+//! production actually consumes. Critical ordering rules (logos uses
+//! longest-match, with declaration order as tiebreaker for equal-length
+//! matches):
 //!
 //! - Two-char operators come BEFORE their one-char prefixes
 //!   (`<=` before `<`, `>=` before `>`, `<<` before `<`, `>>` before `>`,
-//!   `==` before `=`, `!=` before `!`, `->` before `-`, `::` before `:`,
-//!   `|>` before `|`, `:=` before `:`).
+//!   `==` before `=`, `!=` before `!`, `|>` before `|`, `:=` before `:`).
 //! - `Float` regex comes BEFORE `Integer` regex (longest-match selects
 //!   `Float` for `1.0` because both regexes start with the same digit).
 //! - All keyword `#[token]`s come BEFORE the `Ident` regex so the keyword
 //!   wins on equal-length matches.
-//! - `AtExport` literal comes BEFORE the `AtAttr` regex so `@export` is
-//!   classified as the dedicated keyword rather than a generic attribute.
-//! - `Partial` (`_`) is declared AFTER `Ident` so `_foo` stays an `Ident`
-//!   (longer match) while the bare `_` falls through to `Partial`.
 
 use logos::Logos;
 
@@ -78,12 +72,12 @@ pub enum Token {
     KwIri,
 
     // ───────────────────────────────────────────────────────────────────
-    // Attribute markers (grammar.bnf lines 85-87). `@export` literal MUST
-    // come before the `AtAttr` regex so logos picks the keyword.
+    // Attribute marker. The `@` sigil is lexable but no production consumes
+    // an `AtAttr` yet — which spelling attributes get is open (ADR-0057,
+    // first amendment §2). Keeping the token means a stray `@foo` reaches the
+    // parser as one unexpected token instead of being dropped by logos, and
+    // a dropped byte is the parser-hang class of bug (`tests/recovery.rs`).
     // ───────────────────────────────────────────────────────────────────
-    #[token("@export")]
-    AtExport,
-
     #[regex(r"@[A-Za-z_][A-Za-z0-9_]*")]
     AtAttr,
 
@@ -99,20 +93,10 @@ pub enum Token {
     Integer,
 
     // Identifiers — declared AFTER all keywords so longer-or-equal keyword
-    // matches win the tiebreaker.
+    // matches win the tiebreaker. A bare `_` is an ordinary one-character
+    // identifier: there is no partial application, so nothing else claims it.
     #[regex(r"[A-Za-z_][A-Za-z0-9_]*")]
     Ident,
-
-    /// Partial-application placeholder.
-    ///
-    /// Logos detects an ambiguity between the bare `_` (this variant) and
-    /// the `Ident` regex (which also accepts `_` as a valid single-character
-    /// identifier). We resolve in favour of `Partial` for the standalone
-    /// case via an explicit higher `priority` than the regex's default of 2.
-    /// `_foo` still wins as `Ident` via longest-match, since the regex
-    /// matches 4 characters and this literal matches only 1.
-    #[token("_", priority = 3)]
-    Partial,
 
     // Double-quoted string literal.
     #[regex(r#""([^"\\]|\\.)*""#)]
@@ -138,9 +122,6 @@ pub enum Token {
     #[token(":=")]
     Define,
 
-    #[token("::")]
-    TypeAnnot,
-
     #[token("==")]
     Eq,
 
@@ -152,9 +133,6 @@ pub enum Token {
 
     #[token(">=")]
     Ge,
-
-    #[token("->")]
-    Arrow,
 
     #[token("|>")]
     Pipe,
@@ -309,13 +287,12 @@ mod tests {
     }
 
     #[test]
-    fn lexes_arrow() {
-        assert_eq!(just_kinds("->"), vec![Token::Arrow]);
-    }
-
-    #[test]
-    fn lexes_type_annot() {
-        assert_eq!(just_kinds("::"), vec![Token::TypeAnnot]);
+    fn arrow_and_double_colon_are_not_tokens() {
+        // There are no type annotations on values and no function arrows, so
+        // neither spelling is lexed as one token: `->` is `-` `>` and `::`
+        // is two colons. Both are parse errors wherever they appear.
+        assert_eq!(just_kinds("->"), vec![Token::Minus, Token::Gt]);
+        assert_eq!(just_kinds("::"), vec![Token::Colon, Token::Colon]);
     }
 
     #[test]
@@ -364,10 +341,12 @@ mod tests {
     }
 
     #[test]
-    fn lexes_at_export_vs_at_attr() {
-        assert_eq!(just_kinds("@export"), vec![Token::AtExport]);
+    fn lexes_at_attr() {
         assert_eq!(just_kinds("@dcat"), vec![Token::AtAttr]);
         assert_eq!(just_kinds("@_x"), vec![Token::AtAttr]);
+        // `@export` is no longer a keyword: it lexes as an ordinary attribute
+        // marker, which no production accepts, so it is a parse error.
+        assert_eq!(just_kinds("@export"), vec![Token::AtAttr]);
     }
 
     #[test]
@@ -405,17 +384,9 @@ mod tests {
     }
 
     #[test]
-    fn partial_vs_ident_underscore() {
-        // standalone `_` → Partial; `_foo` → Ident (longer match).
-        assert_eq!(just_kinds("_"), vec![Token::Partial]);
+    fn underscore_is_an_ordinary_ident() {
+        assert_eq!(just_kinds("_"), vec![Token::Ident]);
         assert_eq!(just_kinds("_foo"), vec![Token::Ident]);
-    }
-
-    #[test]
-    fn at_export_keyword_distinct_from_ident_export() {
-        // `@export` is the dedicated keyword; bare `export` (no `@`) is an Ident.
-        assert_eq!(just_kinds("@export"), vec![Token::AtExport]);
-        assert_eq!(just_kinds("export"), vec![Token::Ident]);
     }
 
     #[test]

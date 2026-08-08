@@ -8,10 +8,8 @@
 //! sub-nodes (`MappingHeader.shape_expr()`, `Mapping.body()`, etc.).
 //!
 //! The `Mapping`, `MappingHeader`, `MappingBody`, `Property`, `PrefixDecl`,
-//! `SourceDef` views live in `super` (`crates/fossil-syntax/src/ast/mod.rs`)
-//! and stay there for back-compat with the Phase 1 callers. New plan 02-03
-//! views (`Import`, `Definition`, `ExportedDefinition`, `RecordLiteral`,
-//! `AnnotationBlock`) live in this file.
+//! `SourceDef` views live in `super` (`crates/fossil-syntax/src/ast/mod.rs`);
+//! the item views added alongside the full item parser live here.
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
@@ -39,8 +37,6 @@ macro_rules! ast_node {
 }
 
 ast_node!(Import, IMPORT);
-ast_node!(Definition, DEFINITION);
-ast_node!(ExportedDefinition, EXPORTED_DEFINITION);
 ast_node!(RecordLiteral, RECORD_LITERAL);
 ast_node!(AnnotationBlock, ANNOTATION_BLOCK);
 ast_node!(ShapeExpr, SHAPE_EXPR);
@@ -59,28 +55,6 @@ impl Import {
             .filter_map(rowan::NodeOrToken::into_token)
             .find(|t| t.kind() == SyntaxKind::IDENT || t.kind() == SyntaxKind::STRING)
             .map(|t| smol_str::SmolStr::from(t.text()))
-    }
-}
-
-impl Definition {
-    /// The name on the LHS of `:=` (the IDENT preceding DEFINE).
-    #[must_use]
-    pub fn name(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT)
-            .map(|t| smol_str::SmolStr::from(t.text()))
-    }
-}
-
-impl ExportedDefinition {
-    /// The wrapped `Definition` (the `f := …` after the optional
-    /// `TypeAnnotation`). May be `None` in malformed inputs that hit
-    /// recovery.
-    #[must_use]
-    pub fn definition(&self) -> Option<Definition> {
-        self.0.children().find_map(Definition::cast)
     }
 }
 

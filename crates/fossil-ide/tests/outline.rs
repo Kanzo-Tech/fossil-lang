@@ -12,14 +12,12 @@ use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_ide::document_symbols;
 use lsp_types::SymbolKind;
 
-/// A multi-item fixture: a prefix decl, a source def, two mappings (each with a
-/// shape ref), and an exported function definition.
+/// A multi-item fixture: a prefix decl, a source def, and two mappings (each
+/// with a shape ref).
 const FIXTURE: &str = "\
 prefix ex: <https://example.org/>
 
 users := io.csv(\"users.csv\")
-
-@export greet := .name
 
 User : ex:Person from users
     ex:name = .name

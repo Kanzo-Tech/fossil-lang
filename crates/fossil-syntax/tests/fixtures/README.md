@@ -1,19 +1,17 @@
 # `fossil-syntax` parser corpus
 
-30-fixture parser corpus that drives `tests/parse_corpus.rs`. Layout follows
-RESEARCH.md §Q10 (5 buckets × 6 fixtures = 30, plus a separate 10-mapping
-invalidation pair in `crates/fossil-hir/tests/fixtures/`).
-
-## Bucket layout
-
-Each bucket has 6 fixtures: 3 happy-path (NN_*) and 3 recovery (NN_*_recovers).
+28-fixture parser corpus that drives `tests/parse_corpus.rs`. Layout follows
+RESEARCH.md §Q10 (5 buckets, plus a separate 10-mapping invalidation pair in
+`crates/fossil-hir/tests/fixtures/`). Two of the original 30 exercised forms
+the language no longer has — partial application (`map(_, f)`) and
+`@export` with a type annotation — and went with them.
 
 | Bucket | Path | Theme |
 |--------|------|-------|
-| 1 | `01_pipeline_postfix/`     | Pratt L1 (`\|>`) + L9 (postfix, calls, member access, partial app) |
+| 1 | `01_pipeline_postfix/`     | Pratt L1 (`\|>`) + L9 (postfix, calls, member access) |
 | 2 | `02_ternary_arithmetic/`   | Pratt L2 (ternary) through L7 (arithmetic) precedence walk |
 | 3 | `03_mappings_annotations/` | Mapping headers with `in`/shape intersection + annotation blocks |
-| 4 | `04_prefix_iri_triple/`    | Imports, exported definitions, IRI templates, RDF 1.2 triple terms |
+| 4 | `04_prefix_iri_triple/`    | Imports, IRI templates, RDF 1.2 triple terms |
 | 5 | `05_toplevel_indent/`      | Multiple top-level items, record literals, INDENT/DEDENT edge cases |
 
 ## File pairs

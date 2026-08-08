@@ -25,18 +25,16 @@ use smol_str::SmolStr;
 
 /// The classification of a [`SymbolEntry`].
 ///
-/// Mirrors the LSP `SymbolKind` axes the outline maps onto later (plan 06-06):
-/// `Prefix → Namespace`, `Mapping → Class/Struct`, `Function → Function`,
-/// `Shape → Interface`. Kept as a Fossil-native enum so the index itself owes
-/// nothing to `lsp-types` — [`crate::outline`] is where the translation lives.
+/// Mirrors the LSP `SymbolKind` axes the outline maps onto (plan 06-06):
+/// `Prefix → Namespace`, `Mapping → Class/Struct`, `Shape → Interface`. Kept
+/// as a Fossil-native enum so the index itself owes nothing to `lsp-types` —
+/// [`crate::outline`] is where the translation lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
     /// A `prefix xx: <iri>` declaration.
     Prefix,
     /// A mapping header name (`User` in `User : ex:Person from users`).
     Mapping,
-    /// A top-level function definition (`f := …`, exported or not).
-    Function,
     /// A shape reference used in a mapping header (`ex:Person`).
     Shape,
 }
@@ -45,7 +43,7 @@ pub enum SymbolKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolEntry {
     /// The symbol's surface name (`ex` for a prefix, `User` for a mapping,
-    /// `ex:Person` for a shape ref, `f` for a function).
+    /// `ex:Person` for a shape ref).
     pub name: SmolStr,
     /// What kind of definition this is.
     pub kind: SymbolKind,
@@ -108,20 +106,6 @@ impl SymbolIndex {
                         }
                     }
                 }
-                // Functions: both bare `f := …` (DEFINITION) and exported
-                // `@export f := …` (EXPORTED_DEFINITION). The exported wrapper
-                // contains the DEFINITION; reach through to its name.
-                SyntaxKind::DEFINITION => {
-                    push_function(&mut entries, &item);
-                }
-                SyntaxKind::EXPORTED_DEFINITION => {
-                    if let Some(def) = item.children().find(|c| c.kind() == SyntaxKind::DEFINITION)
-                    {
-                        // Range spans the whole exported item so goto-def lands
-                        // on the `@export` line.
-                        push_function_with_range(&mut entries, &def, node_range(&item));
-                    }
-                }
                 _ => {}
             }
         }
@@ -143,23 +127,6 @@ impl SymbolIndex {
     /// All entries of a given kind.
     pub fn of_kind(&self, kind: SymbolKind) -> impl Iterator<Item = &SymbolEntry> {
         self.entries.iter().filter(move |e| e.kind == kind)
-    }
-}
-
-/// Record a function definition from a `DEFINITION` node (range = the node).
-fn push_function(entries: &mut Vec<SymbolEntry>, node: &SyntaxNode) {
-    push_function_with_range(entries, node, node_range(node));
-}
-
-/// Record a function definition from a `DEFINITION` node with an explicit range
-/// (used for the `EXPORTED_DEFINITION` wrapper case).
-fn push_function_with_range(entries: &mut Vec<SymbolEntry>, def: &SyntaxNode, range: Range<u32>) {
-    if let Some(name) = fossil_syntax::ast::Definition::cast(def.clone()).and_then(|d| d.name()) {
-        entries.push(SymbolEntry {
-            name,
-            kind: SymbolKind::Function,
-            range,
-        });
     }
 }
 
@@ -226,15 +193,4 @@ Org : ex:Organization from users
         assert_eq!(entry.kind, SymbolKind::Mapping);
     }
 
-    #[test]
-    fn enumerates_function_definitions() {
-        // A top-level function definition is an EXPORTED_DEFINITION
-        // (`@export f := …`); a bare `IDENT := …` parses as a SOURCE_DEF per
-        // the parser's Phase-1/2 split (parser/items.rs).
-        let src = "@export ident := .x\n";
-        let idx = index_of(src);
-        let funcs: Vec<_> = idx.of_kind(SymbolKind::Function).collect();
-        assert_eq!(funcs.len(), 1);
-        assert_eq!(funcs[0].name.as_str(), "ident");
-    }
 }

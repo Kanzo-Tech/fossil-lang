@@ -100,9 +100,6 @@ pub struct SourceDefNode;
 /// Marker type — `FileAstId<PrefixDeclNode>`.
 #[derive(Debug)]
 pub struct PrefixDeclNode;
-/// Marker type — `FileAstId<DefinitionNode>`.
-#[derive(Debug)]
-pub struct DefinitionNode;
 /// Marker type — `FileAstId<ImportNode>`.
 #[derive(Debug)]
 pub struct ImportNode;
@@ -154,8 +151,6 @@ pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdM
             SyntaxKind::MAPPING
             | SyntaxKind::SOURCE_DEF
             | SyntaxKind::PREFIX_DECL
-            | SyntaxKind::DEFINITION
-            | SyntaxKind::EXPORTED_DEFINITION
             | SyntaxKind::IMPORT => {
                 entries.push(AstIdEntry {
                     kind: child.kind(),
