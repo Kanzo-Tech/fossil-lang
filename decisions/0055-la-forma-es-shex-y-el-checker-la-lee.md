@@ -146,6 +146,11 @@ consulta trackeada no registra dependencia —es la misma regla que ADR-0053 esc
 
 ### 5. El documento de forma se declara una vez por programa, y hoy no hay dónde
 
+> **Superado por ADR-0057 §2.** Este apartado da por supuesto que el documento es la autoridad y que
+> sólo falta decir dónde está. ADR-0057 invierte eso: el documento es un ORIGEN de tipos, el tipo se
+> puede escribir en el lenguaje, y entonces no hay nada que declarar. Lo que sigue se conserva porque
+> el diagnóstico —un programa con fuente CSV no tiene dónde escribir su contrato— es el que llevó ahí.
+
 El motor ya trata la forma como *program-resident* y rechaza dos formas distintas en un programa
 (`lib.rs:322-328`). Lo que falta es el sitio para escribirla cuando la fuente no es RDF. **No se
 recicla `schema =`**: significa ya el descriptor de entrada de esa fuente, y un argumento que
