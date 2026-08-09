@@ -79,8 +79,12 @@ COMMA          := ','
 LPAREN, RPAREN := '(' ')'
 LBRACE, RBRACE := '{' '}'
 
-(* Attributes — lexed but consumed by no production yet. Which spelling an
-   attribute gets is open; see ADR-0057, first amendment §2. *)
+(* Attributes — lexed but consumed by no production yet. The spelling is NOT
+   open: it is `@`, decided in ADR-0057's fourth amendment for the reasons
+   restated under RESERVED KEYWORDS below. What a production will accept is
+   bounded by the seventh amendment: an attribute takes constants only, so a
+   form that dereferences the row is syntax wearing the sigil, not an
+   attribute. *)
 AT_ATTR        := '@' IDENT
 
 
