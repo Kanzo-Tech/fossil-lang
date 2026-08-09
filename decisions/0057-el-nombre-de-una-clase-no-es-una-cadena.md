@@ -669,3 +669,58 @@ Y dos matices de método que conviene arrastrar: la colocación de las `option` 
 cuerpo **es práctica, no norma** —su guía de estilo no dice nada—, y los cuatro frentes agotaron la
 cuota de búsqueda al arrancar, así que lo normativo está bien cubierto y **los arrepentimientos, que
 viven en blogs y foros, están infra-cubiertos**. Si esto se retoma, es lo primero que hay que arreglar.
+
+---
+
+## Séptima enmienda, 2026-08-09 — el proveedor es un constructor, y la interpolación lo resuelve todo
+
+Deroga el §1 y las enmiendas primera y segunda. Escrita en bruto al final de una sesión larga: lleva
+las decisiones y no la cadena entera, y eso hay que arreglarlo antes de implementar.
+
+**1. El proveedor es un constructor del catálogo, en posición de tipo.**
+
+```
+type { Person, City } = io.shex("personas.shex")
+```
+
+Simetría exacta con `users := io.csv(...)`: un catálogo (`io.*`), dos ligadores — `:=` para valores,
+`type … =` para tipos. **Un formato de proveedor nuevo es una fila del catálogo, jamás una
+producción.** El destructuring ya existe en el árbol (`{ A, B } := io.rdf(...)`), y el nombre **busca**
+la forma en el documento en vez de derivarla: si `City` no está declarada, es error de compilación —
+lo que la distingue de la trampa de LinkML. El ancla de la segunda enmienda pasa a ser argumento
+nombrado: `io.shex("p.shex", sha256 = "…")`.
+
+**2. `use` vuelve a lo que era: importar módulos.** Los cuatro «desajustes» de la primera enmienda no
+eran defectos de `use` — era meter un documento por una puerta de módulos. `PathSegment` con `/` es
+correcto para `stdlib/seq` y equivocado para `personas.shex`. `use` queda muerto hasta que haya
+módulos, y ya no hay nada que reescribir en él.
+
+**3. No hay plantilla de IRI: hay interpolación, resuelta en compilación.** Una sola grafía, `{expr}`,
+en toda cadena, **siempre activa**, con `{{` como escape. Muere el backtick y muere `${}`. Los huecos
+son expresiones sobre la fila, así que el checker ya los comprueba — como `format!` de Rust, que valida
+la cadena en compilación. Lo que la interpolación no da es que el resultado sea un IRI válido, y eso lo
+aporta **la posición**, no un mecanismo nuevo. Con esto mueren `base`, el CURIE con agujeros y `iri!()`.
+
+**4. La frontera atributo/sintaxis: lo que toca la fila es sintaxis; lo que no, atributo.** Los
+atributos aceptan **sólo constantes** (`@sensitive`, `@doc("…")`), lo que protege ese espacio de
+convertirse en `serde_as`. `@subject(iri = "…{u.id}")` sobrevive **porque es sintaxis con sigilo** — la
+Regla B: obligatorio en toda declaración, luego no es un atributo. Va como primera línea del bloque, no
+encima, porque `u` se liga en la cabecera.
+
+```
+type { Person } = io.shex("personas.shex")
+
+users := io.csv("data/*.csv")
+
+Person from users as u
+    @subject(iri = "https://example.org/user/{u.id}")
+    name = u.name
+```
+
+**Lo que queda abierto:** si el IRI completo en cada `@subject` cansa y quiere volver una base de
+fichero; y la pregunta 1 de la investigación —dónde va la identidad— sigue sin arte previo, porque su
+frente se perdió dos veces.
+
+**Lo que esta enmienda no tiene y las otras sí:** la cadena de evidencia. Está en la conversación del
+2026-08-08/09 y en los informes de los frentes; redactarla es la primera tarea, antes de tocar
+gramática.
