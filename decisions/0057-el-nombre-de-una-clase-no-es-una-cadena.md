@@ -867,3 +867,77 @@ investigación —dónde va la identidad— sigue sin arte previo, porque su fre
   de la interpolación siempre activa, este trabajo no lo habría encontrado. El único indicio en esa
   dirección es el escape multi-dólar de Kotlin — y es de su propia documentación, no de una queja.
 
+---
+
+## Octava enmienda, 2026-08-09 — dos huecos que abrió la séptima, y una promesa de la sexta que se retira
+
+No decide ninguna de las dos formas: las acota. Salen de escribir tres programas completos en la
+superficie que las siete enmiendas dejan, que es la primera vez que se hace.
+
+### 1. El destructuring liga nombres pelados, y la tercera enmienda prohibió justo eso
+
+`type { Person, City } = io.shex("personas.shex")` mete `Person` en ámbito **sin cualificar**. Dos
+documentos que declaren `Person` colisionan, y no hay forma de escribir cuál se quiere. Eso es
+literalmente la trampa que la tercera enmienda citó para prohibirla, con LinkML como caso: *«asumió
+nombres únicos entre imports y lleva desde 2024 atascado en `structured_imports`; retrofitar la
+cualificación es la clase de cosa que no se retrofita»*. La séptima no la contradijo — la pasó por alto
+al cambiar de puerta.
+
+**A cambio disolvió el problema contrario, y eso hay que apuntarlo en el haber.** La apostilla de la
+sexta había concluido que `personas::Person` pasaba «de gusto a necesidad» porque `personas.Person` y
+`u.name` son léxicamente idénticos en la misma línea. Sin nombre de documento en el programa esa
+ambigüedad no existe: **`::` deja de hacer falta**, y la apostilla queda resuelta por borrado.
+
+Lo que el hueco pide **no es un sistema de módulos**, es renombrado en el destructuring —
+`type { Person as P } = …`. La palabra ya está en el árbol dos veces (`Alias := 'as' IDENT`,
+`grammar.bnf:109`, y el binder de fila de la sexta). Lo que no está es el renombrado en
+`MultiSourceDef` (`grammar.bnf:119`): la producción liga `IDENT` y nada más, ni para valores ni para
+tipos. **Hueco reconocido, forma propuesta, sin decidir.**
+
+### 2. La sexta enmienda prometió un join que su binder no puede dar
+
+Dijo que nombrar la fila «desbloquea el join con claves de nombres distintos que ADR-0054 dejó
+declarado y sin construir». **No lo desbloquea**, y el motivo es de ámbito: el binder de la sexta va en
+la **cabecera del mapeo** (`Person from users as u`), y el join vive en la **tubería de fuente**, que
+es una relación de nivel superior sin mapeo alrededor — `adultos := users |> where(.edad >= 18)` es el
+ejemplo de la propia ADR-0054. En esa línea no hay ninguna cabecera donde colgar un `as`, así que no
+hay nada que nombre los dos lados. La promesa se retira.
+
+**Lo que sí queda establecido: la condición de reapertura de ADR-0054 está cumplida.** Esa ADR dice
+«lo que la reabre: el primer mapping real cuyas claves no comparten nombre. **No un argumento**: un
+`.fossil` que alguien quiera escribir y no pueda». Es `examples/users.csv` (`id`) contra
+`examples/orders.csv` (`user_id`) — los ficheros que ya están en el repositorio, y la foránea que la
+propia ADR-0054 llama «el caso corriente». Escribir el ejemplo de dos mapeos con esos dos ficheros es
+imposible hoy.
+
+**Y el arte previo acota la extensión mejor de lo que ADR-0054 la dejó, con un coste que no dijo.**
+
+- **`USING` es azúcar de `ON`, no al revés.** PostgreSQL: *«The `USING` clause is a shorthand … joining
+  `T1` and `T2` with `USING (a, b)` produces the join condition `ON T1.a = T2.a AND T1.b = T2.b`»*.
+  ADR-0054 eligió el azúcar primero, que es el orden correcto y conviene decirlo.
+- **Pero las dos formas tienen álgebras de fila distintas, y ése es el coste real.** *«`JOIN USING`
+  produces one output column for each of the listed column pairs … while `JOIN ON` produces all columns
+  from `T1` followed by all columns from `T2`»*. El §4 de ADR-0054 —`fila(izq) ⊎ fila(der)` con `k`
+  identificada, y cualquier otro nombre compartido es un error— **es el álgebra de `USING`**. Pasar a
+  `on = o.user_id == u.id` no es añadir una condición: **es cambiar el álgebra**, porque las dos claves
+  sobreviven y los nombres compartidos dejan de poder ser un error para pasar a necesitar
+  cualificación. Lo que hay que decidir es eso, no la sintaxis.
+- **Dónde va el binder ya tiene respuesta, y es coherente con la sexta.** SQL lo introduce **donde la
+  relación entra** —*«FROM `table_reference` AS `alias`»*—, no al final de la consulta. Aplicado aquí,
+  `orders |> join(users as u, on = …)` liga `u` donde `users` entra, y el lado izquierdo necesita el
+  suyo. La sexta puso el binder «al final, con `as`» **de la cabecera**, que es donde la fuente entra en
+  el mapeo: la misma regla, no una contraria.
+- **Y contesta de paso una pregunta que la sexta dejó a votación.** Proponía que «un nombre de
+  `use … as N` quede reservado en todo el fichero» y no sabía si eso incomodaría. SQL hace exactamente
+  eso: *«The alias becomes the new name of the table reference so far as the current query is concerned
+  — it is not allowed to refer to the table by the original name elsewhere in the query»*.
+
+**Estado: la promesa de la sexta se retira, la reapertura de ADR-0054 se declara cumplida, y la forma
+sigue sin decidir.**
+
+### Lo que no se verificó
+
+- **Sólo PostgreSQL**, no el texto de SQL:2023, que es de pago. El comportamiento de `USING`/`ON` que
+  se cita lo implementan también SQLite, MySQL y DuckDB, pero no se comprobó uno por uno.
+- **El renombrado en destructuring se propone por simetría con el propio árbol**, no por arte previo:
+  Rust, Python y los módulos de ES lo tienen, y para esta enmienda no se verificó ninguno.
