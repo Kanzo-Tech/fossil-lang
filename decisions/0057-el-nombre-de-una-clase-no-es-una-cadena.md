@@ -674,10 +674,14 @@ viven en blogs y foros, están infra-cubiertos**. Si esto se retoma, es lo prime
 
 ## Séptima enmienda, 2026-08-09 — el proveedor es un constructor, y la interpolación lo resuelve todo
 
-Deroga el §1 y las enmiendas primera y segunda. Escrita en bruto al final de una sesión larga: lleva
-las decisiones y no la cadena entera, y eso hay que arreglarlo antes de implementar.
+Deroga el §1 y las enmiendas primera y segunda.
 
-**1. El proveedor es un constructor del catálogo, en posición de tipo.**
+*(Escrita en bruto el 2026-08-09 al final de una sesión larga, con las decisiones y sin la cadena de
+evidencia. La cadena se redactó el mismo día y es lo que sigue; ninguna decisión cambió al escribirla,
+pero sí cambiaron dos hechos que las apoyaban —marcados «corrección»— y apareció un límite del
+precedente de Rust que la redacción en bruto no vio.)*
+
+### 1. El proveedor es un constructor del catálogo, en posición de tipo
 
 ```
 type { Person, City } = io.shex("personas.shex")
@@ -685,27 +689,153 @@ type { Person, City } = io.shex("personas.shex")
 
 Simetría exacta con `users := io.csv(...)`: un catálogo (`io.*`), dos ligadores — `:=` para valores,
 `type … =` para tipos. **Un formato de proveedor nuevo es una fila del catálogo, jamás una
-producción.** El destructuring ya existe en el árbol (`{ A, B } := io.rdf(...)`), y el nombre **busca**
-la forma en el documento en vez de derivarla: si `City` no está declarada, es error de compilación —
-lo que la distingue de la trampa de LinkML. El ancla de la segunda enmienda pasa a ser argumento
-nombrado: `io.shex("p.shex", sha256 = "…")`.
+producción.** El nombre **busca** la forma en el documento en vez de derivarla: si `City` no está
+declarada, es error de compilación — lo que lo separa de la trampa de LinkML de la primera enmienda y
+del `implicit ID … generated based in part on the type name` de Cap'n Proto que corrigió la tercera.
 
-**2. `use` vuelve a lo que era: importar módulos.** Los cuatro «desajustes» de la primera enmienda no
-eran defectos de `use` — era meter un documento por una puerta de módulos. `PathSegment` con `/` es
-correcto para `stdlib/seq` y equivocado para `personas.shex`. `use` queda muerto hasta que haya
-módulos, y ya no hay nada que reescribir en él.
+**Por qué esto no es una forma nueva: tres cuartas partes ya están construidas, y están verificadas
+contra el fichero.**
 
-**3. No hay plantilla de IRI: hay interpolación, resuelta en compilación.** Una sola grafía, `{expr}`,
-en toda cadena, **siempre activa**, con `{{` como escape. Muere el backtick y muere `${}`. Los huecos
-son expresiones sobre la fila, así que el checker ya los comprueba — como `format!` de Rust, que valida
-la cadena en compilación. Lo que la interpolación no da es que el resultado sea un IRI válido, y eso lo
-aporta **la posición**, no un mecanismo nuevo. Con esto mueren `base`, el CURIE con agujeros y `iri!()`.
+- **El destructuring existe.** `MultiSourceDef := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression`
+  (`grammar.bnf:119`), con parser propio (`crates/fossil-syntax/src/parser/items.rs:220-229`, comentado
+  con el ejemplo `{ A, B, ... } := io.rdf(...)`) y nodo propio (`SyntaxKind::MULTI_SOURCE_DEF`,
+  `kind.rs:84`). Lo único que el §1 añade encima es el ligador `type … =`.
+- **El nombre del formato ya es dato, no producción.** `SourceFormat::Provider { name: SmolStr }`
+  (`crates/fossil-mir/src/op.rs:222`) documenta literalmente nuestro caso: «*A format DuckDB cannot
+  read natively (e.g. RDF), backed by an external source provider named `name` (`io.<name>(...)`)*».
+  `io.shex(...)` no es un constructo que haya que admitir en ningún sitio: es un valor de `name`. Y
+  quien lo lee, `DefMap::lookup_source_call` (`crates/fossil-hir/src/def_map.rs:147`), devuelve
+  `(constructor, uri)` como dos `Option<SmolStr>` — **busca en una tabla, no despacha sobre una
+  gramática**, que es la regla catálogo-no-producción ya implementada.
+- **El ancla de la segunda enmienda no cuesta gramática.** `io.shex("p.shex", sha256 = "…")` es
+  `NamedArg := IDENT ASSIGN Expression` (`grammar.bnf:191`), que ya está. La segunda enmienda exigía
+  anclar y dejó abierto cómo se escribe; se escribe con lo que hay.
 
-**4. La frontera atributo/sintaxis: lo que toca la fila es sintaxis; lo que no, atributo.** Los
-atributos aceptan **sólo constantes** (`@sensitive`, `@doc("…")`), lo que protege ese espacio de
-convertirse en `serde_as`. `@subject(iri = "…{u.id}")` sobrevive **porque es sintaxis con sigilo** — la
-Regla B: obligatorio en toda declaración, luego no es un atributo. Va como primera línea del bloque, no
-encima, porque `u` se liga en la cabecera.
+**Y el despacho no obliga a reservar `type`.** `type { … } = …` empieza por IDENT, igual que
+`SourceDef := IDENT DEFINE Expression` y que la cabecera de mapeo, pero el token siguiente lo decide
+—`{` frente a `:=` frente a `:`— y `IDENT LBRACE` a nivel superior está libre hoy. Conviene no
+reservarlo: `type` es un nombre de columna plausible en un lenguaje cuyo predicado más usado es
+`rdf:type`.
+
+### 2. `use` vuelve a lo que era: importar módulos
+
+Los cuatro «desajustes» de la primera enmienda no eran defectos de `use` — era meter un documento por
+una puerta de módulos. `PathSegment` con `/` (`grammar.bnf:104-105`) es correcto para `stdlib/seq` y
+equivocado para `personas.shex`; `SelectiveImport := LBRACE IDENT (COMMA IDENT)* RBRACE` (`:107`) no
+puede deletrear `ex:Person` porque **no tiene que poder**: importa nombres de módulo. Los cuatro
+desaparecen al sacar el documento de esa puerta, y ninguno pedía reescribir la producción.
+
+**El arte previo ya separaba las dos puertas, y lo teníamos citado apoyando lo contrario.** La tercera
+enmienda trajo `import schema` de XQuery/XSLT como precedente normativo del §1 —importas, escribes un
+nombre corto, un nombre desconocido es error estático—. Lo que no se leyó entonces es que **XQuery
+tiene dos producciones de importación, no una**: `SchemaImport` (§4.11) y `ModuleImport` (§4.12), con
+ámbitos distintos — la primera mete tipos del esquema, la segunda «*function declarations and variable
+declarations from imported modules*». La cita sigue valiendo, pero vale para «un documento de formas
+se importa», no para «se importa con la sintaxis de módulos». **La lengua que citábamos hace
+exactamente lo que esta enmienda decide.**
+
+*(Corrección de la primera enmienda: decía que `use` «sólo aparece en un fixture del parser». Son dos —
+`use stdlib/seq { filter, map }` en `04_prefix_iri_triple/19_use_with_selective_import.fossil:1` y
+`use stdlib/core` en `05_toplevel_indent/25_mixed_top_level_items.fossil:1`. No cambia la conclusión —
+sigue sin aparecer en ningún programa real — pero el número era falso.)*
+
+`use` queda muerto hasta que haya módulos, y ya no hay nada que reescribir en él. `grammar.bnf:294` ya
+registra por qué se borró `@export` —«*there is no module system to export to, so the marker named
+nobody*»—; `use` está en la misma situación y la gramática todavía no lo dice.
+
+### 3. No hay plantilla de IRI: hay interpolación, resuelta en compilación
+
+Una sola grafía, `{expr}`, en toda cadena, **siempre activa**, con `{{` como escape. Muere el backtick
+y muere `${}`. Con ella mueren también `base`, el CURIE con agujeros del §3 del cuerpo y `iri!()`.
+
+**Los dos ejes del arte previo, y dónde nos ponemos en cada uno.** Marcada o siempre activa: Python
+(`f"…"`), C# (`$"…"`) y Scala (`s"…"`) piden marca; Kotlin y Swift interpolan toda cadena — la
+documentación de Kotlin dice que los templates funcionan en cadenas normales y multilínea **sin marca
+ni prefijo**. Llaves o sigilo: Rust y C# usan `{expr}`; Kotlin `$name` / `${expr}`; Swift `\(expr)`.
+Elegimos **siempre activa y con llaves**, y las dos elecciones se justifican abajo por separado porque
+tienen precios distintos.
+
+**Zig es el contraejemplo, y hay que decirlo porque se propuso en voz alta como modelo.** Zig **no
+interpola**: la referencia del lenguaje enseña `std.debug.print("Hello, {s}!\n", .{"World"})` — huecos
+posicionales con especificador de tipo y los valores en una tupla aparte. Es coherente con su filosofía
+y no nos sirve: en un lenguaje de mapeo **la plantilla es el contenido**, y separar los valores de sus
+huecos vuelve ilegible justo la línea que más se lee. Lo que sí se le toma prestado es la postura sobre
+la cadena: es comptime-conocida y se parsea en compilación, con `@compileError` sobre el propio literal.
+
+**La comprobación en compilación es real, y el precedente exacto es más estrecho de lo que la
+redacción en bruto le atribuyó.** Rust valida la cadena de formato **porque exige que sea un literal**:
+«*It is required by the compiler for this to be a string literal; it cannot be a variable passed in (in
+order to perform validity checking)*». Y captura identificadores del ámbito desde 1.58 — «*Format
+strings can now capture arguments simply by writing `{ident}` in the string*». Pero el mismo anuncio
+pone el límite: «*Format strings can only capture plain identifiers, not arbitrary paths or
+expressions*». **Nuestros huecos son rutas** (`{u.id}`), así que `format!` no es nuestro precedente.
+El precedente correcto es el otro grupo —C#, Kotlin, Scala, Swift—, donde el hueco es una expresión
+ordinaria y se comprueba **porque el compilador compila expresiones**, no porque nadie valide una
+plantilla. Es una garantía peor de enunciar y mejor de tener: **no hay mini-lenguaje de formato que
+validar, así que no hay nada que se pueda desincronizar del checker.**
+
+**Por qué llaves, y esto no es gusto: el dominio ya lo decidió.** Nuestras cadenas interpoladas
+producen IRIs, y `{` y `}` **no pueden aparecer en un IRI**. RFC 3986 no los pone ni en `unreserved`
+(`ALPHA / DIGIT / "-" / "." / "_" / "~"`) ni en `reserved` (`gen-delims` / `sub-delims`), así que
+ninguna producción los genera sin escapar; RFC 2396 los nombraba explícitamente —el conjunto `unwise`
+es `{` `}` `|` `\` `^` `[` `]` y el backtick—, excluidos «*because gateways and other transport agents
+are known to sometimes modify such characters, or they are used as delimiters*». Y la
+IETF ya usó esa libertad para exactamente nuestro problema: RFC 6570 define la expresión de una
+plantilla de URI como «*the text between '{' and '}'*» y excluye las llaves de los literales
+copiables. **La llave es el delimitador que el dominio dejó libre a propósito.**
+
+El contraste cierra el argumento. La misma RFC 6570 dice: «*The expression syntax specifically excludes
+use of the dollar ("$") and parentheses … so that they remain available for use outside the scope of
+this specification*». `$` está disponible **porque otros lo usan** — y entre esos otros estamos
+nosotros: `ENV_VAR := '$' IDENT` (`grammar.bnf:48`). Elegir `$` sería importar la homonimia que la
+cuarta enmienda aceptó a regañadientes para `@`, y aquí sin necesidad.
+
+**El precio de «siempre activa», medido en el único lenguaje que la hizo con nuestra forma.** Kotlin
+interpola toda cadena sin marca, y su documentación de hoy tiene un apartado de **interpolación
+multi-dólar** que no estaba en el diseño: se añadió porque `$` aparece de verdad en el contenido de la
+gente, y el ejemplo de sus propios docs es un JSON Schema con `$schema`, `$id` y `$dynamicAnchor`. La
+lección no es «no siempre activa»: es que **siempre-activa se paga cuando el sigilo ocurre en las
+cadenas del dominio, y se paga tarde**. Las tres RFC de arriba son justamente la medida de ese riesgo
+para nosotros, y dicen que `{` no ocurre en un IRI. Donde sí puede ocurrir es en un literal que se
+emite tal cual, y para eso está `{{`, que es la convención de Rust («*the `{` character is escaped with
+`{{`*»), de Python y de C#.
+
+**Y una lección de método de Python, que decide cómo se implementa.** PEP 701 formalizó las f-strings
+dentro de la gramática porque «*the current implementation in CPython relies on tokenising f-strings as
+STRING tokens and a post processing of these tokens*» — código C escrito a mano, caro de mantener e
+incapaz de aprovechar los mensajes de error del parser PEG. Hoy nuestro
+`INTERPOLATION := '${' Expression '}'` (`grammar.bnf:42`) vive **dentro** del token `TEMPLATE` (`:39`),
+que es exactamente el diseño del que Python tardó siete años en salir. **Si la interpolación entra,
+entra en la gramática, no en el lexer.**
+
+**Lo que muere, con línea.** `TEMPLATE` y sus tres reglas —el literal delimitado por backticks, su
+escape y `INTERPOLATION`— (`grammar.bnf:39-42`); `TEMPLATE` como alternativa de `Literal` (`:208`) y de
+`IRIExpr` (`:215`); y `'iri'` como palabra
+reservada (`:27`) y como `PropertyLhs` (`:136`), que pasa a `@subject(iri = …)`.
+
+### 4. La frontera atributo/sintaxis: lo que toca la fila es sintaxis; lo que no, atributo
+
+Los atributos aceptan **sólo constantes** (`@sensitive`, `@doc("…")`). `@subject(iri = "…{u.id}")`
+sobrevive **porque es sintaxis con sigilo**, no un atributo.
+
+**Esta parte no trae evidencia nueva, y hay que decirlo:** se deriva entera de material que las
+enmiendas anteriores ya citaron, y por eso es la más frágil de las cuatro.
+
+- «Obligatorio en toda declaración ⇒ no es un atributo» es la **Regla B** de la tercera enmienda, con
+  RDFBeans como caso medido. `@subject` es obligatorio, luego es sintaxis y su grafía da igual.
+- «Sólo constantes» es la **ley de serde** de la tercera enmienda ascendida de aviso a regla: un
+  atributo que empieza a llevar semántica converge en una expresión de tipos, y `serde_as` es la
+  prueba. Prohibir la expresión es prohibir esa convergencia por construcción en vez de por disciplina.
+- «Lo que toca la fila es sintaxis» es la restricción 2 de la apostilla de la sexta leída al derecho
+  —*nada a la izquierda de `from` dereferencia la fila*— y coincide con la frontera de Smithy que la
+  tercera enmienda ya prefería a la nuestra: «*shapes provide the structure and layout of an API, while
+  traits provide refinement and style*».
+
+De ahí sale la colocación: `@subject` va como **primera línea del cuerpo**, no encima de la cabecera,
+porque `u` se liga en la cabecera y encima todavía no existe. Es la única de las cuatro decisiones cuya
+colocación sigue **sin arte previo**: la pregunta 1 de la sexta enmienda se perdió dos veces y lo único
+recuperado son los atributos de bloque de Prisma (`@@id`, `@@map`, dentro y al final) y el criterio de
+Django, «*model metadata is anything that's not a field*».
 
 ```
 type { Person } = io.shex("personas.shex")
@@ -717,10 +847,23 @@ Person from users as u
     name = u.name
 ```
 
-**Lo que queda abierto:** si el IRI completo en cada `@subject` cansa y quiere volver una base de
-fichero; y la pregunta 1 de la investigación —dónde va la identidad— sigue sin arte previo, porque su
-frente se perdió dos veces.
+### Lo que queda abierto
 
-**Lo que esta enmienda no tiene y las otras sí:** la cadena de evidencia. Está en la conversación del
-2026-08-08/09 y en los informes de los frentes; redactarla es la primera tarea, antes de tocar
-gramática.
+Si el IRI completo en cada `@subject` cansa y quiere volver una base de fichero; y la pregunta 1 de la
+investigación —dónde va la identidad— sigue sin arte previo, porque su frente se perdió dos veces.
+
+### Lo que no se verificó
+
+- **La validación en comptime de Zig.** La referencia del lenguaje sólo da el ejemplo
+  `std.debug.print("Hello, {s}!\n", .{"World"})`, que basta para el hecho que usamos —Zig no
+  interpola— y no para el que anotamos de paso; el `@compileError` de `Placeholder.parse()` sale del
+  rastreador de `ziglang/zig` y de documentación de terceros, no de la referencia.
+- **Las EBNF de `SchemaImport` y `ModuleImport`.** Está confirmado que son dos producciones distintas
+  con ámbitos distintos (XQuery 3.1 §4.11 y §4.12); no se leyó su gramática literal.
+- **Swift y Scala** se citan de memoria de la conversación. Sólo Kotlin, Rust y Python están
+  verificados contra su documentación, y las tres RFC contra su texto.
+- **Nadie buscó el arrepentimiento**, y esta vez el sesgo es peor que el que avisó la sexta enmienda:
+  todas las fuentes de arriba son normativas o documentación oficial. Si algún lenguaje se arrepintió
+  de la interpolación siempre activa, este trabajo no lo habría encontrado. El único indicio en esa
+  dirección es el escape multi-dólar de Kotlin — y es de su propia documentación, no de una queja.
+
