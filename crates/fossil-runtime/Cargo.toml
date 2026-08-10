@@ -70,4 +70,4 @@ fossil-hir = { path = "../fossil-hir" }
 # `salsa` was here too, and no test in this crate has ever named it: the module
 # doc says this crate runs OUTSIDE the query graph, and it does. It went with
 # `fossil-mir` / `fossil-descriptors-output` / `smol_str` / `tempfile`, which
-# served a `tests/graphar_decomp.rs` that no longer exists. ADR-0050 §3.
+# served a `tests/graphar_decomp.rs` that no longer exists. ADR-0052 §3.
