@@ -25,11 +25,3 @@ fossil-shex = { path = "../fossil-shex" }
 # The canonical, format-neutral output model the executor consumes. ShEx lowers
 # into it (`ShExDescriptor::to_graph_schema`); SHACL produces it pre-lowered.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-
-# Plan 03-03 Task 2 step 3 (Option B mandate — cycle-safe): the
-# `SystemWithDescriptors` extension trait depends on `fossil_base::System`.
-# The natural dependency direction is `fossil-descriptors-output ->
-# fossil-base` (descriptors are a concrete impl of base abstractions). We
-# do NOT invert this by putting the descriptor accessor on
-# `fossil-base::System`. See ADR-0006.
-fossil-base = { path = "../fossil-base" }

@@ -25,7 +25,6 @@
 //! tidy; refactor in Phase 3 if cross-crate sharing proves painful).
 
 pub mod kind;
-pub mod system_ext;
 
 pub use kind::OutputDescriptorKind;
 // The ShEx decode now lives in the neutral `fossil-shex` crate (shared with the
@@ -34,7 +33,6 @@ pub use fossil_shex::{
     Cardinality, ConstraintValue, OneOfRejection, ResolvedConstraint, ShExDescriptor,
     ShExLoweringError, ShapeBinding, SuggestionSeed, generate_split_suggestion,
 };
-pub use system_ext::SystemWithDescriptors;
 
 /// Output-side shape descriptor.
 ///

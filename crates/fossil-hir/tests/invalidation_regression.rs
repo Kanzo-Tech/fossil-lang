@@ -117,14 +117,12 @@
 //! Phase 6 was audited against P-CRIT-3 (the load-bearing fan-out invariant)
 //! when the SC#3 regression was grown (plan 06-04). Findings:
 //!
-//!   * Plan 06-01 wired the output descriptor into `resolve_target_shape` so
-//!     it returns `Some` in production (ADR-0020). The descriptor is exposed
-//!     via a NON-Salsa `HirDb::output_descriptor_kind()` accessor — a plain
-//!     host-supplied value (the ADR-0018 "descriptor as argument, not key"
-//!     seam). It is NOT a `#[salsa::tracked]` query, NOT a per-mapping Salsa
-//!     key, and adds NO new tracked query to the per-mapping fan-out set.
-//!     The ten-mapping fixture declares no `ShEx` schema, so the in-query
-//!     path still observes `AcceptAll` → `resolve_target_shape` returns `None`
+//!   * `resolve_target_shape` returns `Some` in production because it READS the
+//!     shape document the program names, through `System::read_file`
+//!     (ADR-0055). A `System` read registers no Salsa input dependency: it is
+//!     NOT a `#[salsa::tracked]` query, NOT a per-mapping Salsa key, and adds
+//!     NO new tracked query to the per-mapping fan-out set. The ten-mapping
+//!     fixture names no document, so `resolve_target_shape` returns `None`
 //!     here, exactly as in Phase 3/4. Fan-out is provably unchanged.
 //!   * Plans 06-02 (CLI) and 06-03 (`fossil_ide::WorkspaceIndex`) touch
 //!     only native CLI / WASM-clean IDE-index code; neither introduces a

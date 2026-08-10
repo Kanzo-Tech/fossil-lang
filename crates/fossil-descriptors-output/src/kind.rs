@@ -27,9 +27,8 @@ use fossil_shex::ShExDescriptor;
 // `large_enum_variant`: the `ShEx(ShExDescriptor)` variant carries a
 // `shex_ast::Schema` + a resolved `HashMap<String, ShapeBinding>` — large
 // compared to the unit-struct `AcceptAll` variant. Boxing the larger
-// variant would add an allocation per `ShExDescriptor` construction (which
-// already lives behind a long-lived `Arc<SystemWithDescriptors-impl>` on
-// the host); the size asymmetry is intentional and stable.
+// variant would add an allocation per `ShExDescriptor` construction, which
+// happens once per compile; the size asymmetry is intentional and stable.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum OutputDescriptorKind {
@@ -49,9 +48,10 @@ pub enum OutputDescriptorKind {
 }
 
 impl OutputDescriptorKind {
-    /// Inherent `const` default, returned by
-    /// [`crate::SystemWithDescriptors`]'s default impl when the host hasn't
-    /// loaded a `ShEx` schema.
+    /// Inherent `const` default: the descriptor an executor uses when the
+    /// program declares no output shape (`fossil_engine`'s `output_shape`,
+    /// `fossil_df_wasm`'s `build_program`). Backward checking is a no-op and
+    /// the produced graph is accepted whole.
     ///
     /// This is const-evaluable because [`AcceptAllDescriptor`] is a unit
     /// struct (no fields, no heap, no non-const constructors). If a future
@@ -146,11 +146,11 @@ mod tests {
         assert!(!kind.accepts_anything());
     }
 
-    /// SC#5 structural property: the enum supports swapping descriptors at
-    /// the host wiring layer (CLI vs playground vs degraded fallback)
-    /// without `fossil-hir` source changes. This test exercises the swap
-    /// pattern — building both variants and matching on them in the same
-    /// function body — which IS the swap surface.
+    /// SC#5 structural property: the enum supports swapping descriptors
+    /// (a parsed `ShEx` document against the no-contract fallback) without
+    /// `fossil-hir` source changes. This test exercises the swap pattern —
+    /// building both variants and matching on them in the same function
+    /// body — which IS the swap surface.
     #[test]
     fn output_descriptor_kind_swap_does_not_require_fossil_hir_change() {
         let schema_src = r#"{
@@ -174,9 +174,8 @@ mod tests {
         }
     }
 
-    /// `OutputDescriptorKind` must be `Send + Sync` because
-    /// `fossil_base::System: Send + Sync` and the descriptor accessor lives
-    /// on a `System` extension trait.
+    /// `OutputDescriptorKind` must be `Send + Sync` because the executor
+    /// carries one across the thread boundary its plan is run on.
     #[test]
     fn output_descriptor_kind_send_sync() {
         const fn assert_send_sync<T: Send + Sync>() {}

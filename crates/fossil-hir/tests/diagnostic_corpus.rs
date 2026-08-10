@@ -22,13 +22,12 @@
 //! `schema = "..."` argument resolve, then drains the diagnostics the query
 //! accumulated. These fixtures are labelled **Db-wired**.
 //!
-//! Backward ShEx checking (SC#2) and ShEx OneOf rejection (SC#4) CANNOT be
-//! driven end-to-end through `typecheck_mapping` over a `.fossil` source in
-//! Phase 3 v0.1: `resolve_target_shape` returns `None` because
-//! `fossil_base::Db::system()` does not yet carry the `SystemWithDescriptors`
-//! vtable (ADR-0006 Option B; the `Db`-trait widening is deferred to Phase 6
-//! per plan 03-05). So these buckets drive the **same plain-Rust descriptor
-//! logic the production checker uses** — `ShExDescriptor::from_reader` →
+//! Backward ShEx checking (SC#2) and ShEx OneOf rejection (SC#4) are NOT driven
+//! end-to-end here: these fixtures name no output shape document, so
+//! `resolve_target_shape` returns `None` for them (the end-to-end path has its
+//! own fixtures under `tests/fixtures/output_shape/`). So these buckets drive
+//! the **same plain-Rust descriptor logic the production checker uses** —
+//! `ShExDescriptor::from_reader` →
 //! `ResolvedShape::from_binding` → `one_of_rejections` /
 //! `generate_split_suggestion` — directly over the fixture's `shape.shex`.
 //! These fixtures are labelled **helper-proven**. The `Checker` struct itself

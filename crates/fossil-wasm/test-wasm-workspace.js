@@ -1,8 +1,8 @@
 // Phase 7 plan 07-02 — WASM Workspace lifecycle smoke (WASM-02 / SC#5 first half).
 //
 // Companion to test-wasm.js (Phase 1) — verifies the ty_wasm-shaped lifecycle
-// (open_file / update_file / close_file / check / compile_file / diagnostics_for /
-// set_target_shex) round-trips through wasm-bindgen + serde-wasm-bindgen
+// (open_file / update_file / close_file / check / compile_file /
+// diagnostics_for) round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
 // `crates/fossil-wasm/tests/workspace.rs` (catches API regressions on every
 // PR without needing the wasm-bindgen toolchain); this script is the
@@ -29,28 +29,6 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 
 const { FossilPlayground } = require('./pkg/fossil_wasm.js');
-
-const MINIMAL_SHEX_JSON = JSON.stringify({
-    '@context': 'http://www.w3.org/ns/shex.jsonld',
-    type: 'Schema',
-    shapes: [
-        {
-            type: 'ShapeDecl',
-            id: 'http://example.org/Person',
-            shapeExpr: {
-                type: 'Shape',
-                expression: {
-                    type: 'TripleConstraint',
-                    predicate: 'http://example.org/name',
-                    valueExpr: {
-                        type: 'NodeConstraint',
-                        datatype: 'http://www.w3.org/2001/XMLSchema#string',
-                    },
-                },
-            },
-        },
-    ],
-});
 
 function fail(msg) {
     console.error(`FAIL: ${msg}`);
@@ -106,15 +84,6 @@ function main() {
     // Every row drained for h1 carries h1's URI; same for h2 (per-file scoping).
     for (const d of perFileA) assert.equal(d.uri, 'a.fossil');
     for (const d of perFileB) assert.equal(d.uri, 'b.fossil');
-
-    // ----- set_target_shex -----
-    pg.set_target_shex(MINIMAL_SHEX_JSON);  // must not throw on a valid ShExJ schema
-    // Failure path — garbage input should throw and NOT wedge the playground.
-    let threw = false;
-    try { pg.set_target_shex('definitely not shex'); } catch (_e) { threw = true; }
-    assert.ok(threw, 'set_target_shex with garbage throws');
-    // Re-install after failure still works (descriptor not half-applied).
-    pg.set_target_shex(MINIMAL_SHEX_JSON);
 
     // ----- close_file -----
     pg.close_file(h1);

@@ -21,7 +21,8 @@
 //!    offered as auto-importable (a `prefix <p>: <iri>` `additional_text_edits`
 //!    insertion when not already declared).
 //! 3. **shape properties** — when the cursor is in a mapping whose target `ShEx`
-//!    shape resolves (the 06-01 / ADR-0020 R2 `HirDb` wiring), the shape's
+//!    shape resolves (the program names its output document with
+//!    `type { … } = io.shex("…")`, ADR-0055), the shape's
 //!    `constraints[].predicate` names are offered as `Field` completions.
 //!
 //! # Domain + WASM boundary
@@ -29,16 +30,15 @@
 //! Returns `lsp_types::CompletionItem` directly; no stdio / JSON-RPC. The stdlib
 //! source needs only the static catalog (`stdlib_default()`, no db); the prefix
 //! source needs the `WorkspaceIndex` (a CST-walk struct, no Salsa query); the
-//! shape-property source reads `HirDb::output_descriptor_kind()` →
-//! `resolve_target_shape` (the existing ADR-0020 accessor — NOT a new
-//! per-mapping Salsa key). The per-mapping `body()` fan-out is unchanged
+//! shape-property source calls `resolve_target_shape`, which reads the document
+//! the program names through `System::read_file` — no Salsa input dependency,
+//! so no new per-mapping key. The per-mapping `body()` fan-out is unchanged
 //! (Research Pitfall #3). All type rendering routes through
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
 //! `detail` string (Risk Register).
 
 use crate::{PrefixIndex, WELL_KNOWN_PREFIXES, WorkspaceIndex};
 use fossil_base::SourceFile;
-use fossil_hir::HirDb;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
@@ -52,16 +52,14 @@ use crate::position::{node_at_position, token_at_position};
 /// Compute completion items at an LSP position, merging the three SC#4 sources.
 ///
 /// `files` is the host's open-file set (for cross-file prefix resolution);
-/// `file` is the file the cursor is in. Takes `&dyn HirDb` (like
-/// [`crate::hover_bidirectional`]) so the shape-property source can reach the
-/// host descriptor; a host without a descriptor (the `AcceptAll` default) simply
-/// contributes no shape-property items — the stdlib + prefix sources are
-/// unconditional.
+/// `file` is the file the cursor is in. A program that names no output shape
+/// document simply contributes no shape-property items — the stdlib + prefix
+/// sources are unconditional.
 ///
 /// `line` / `character` are UTF-16 LSP coordinates.
 #[must_use]
 pub fn completions(
-    db: &dyn HirDb,
+    db: &dyn fossil_base::Db,
     files: &[SourceFile],
     file: SourceFile,
     line: u32,
@@ -119,7 +117,7 @@ fn stdlib_completions(prefixes: &PrefixIndex, items: &mut Vec<CompletionItem>) {
 /// Source 2: declared (cross-file) prefixes + well-known prefixes (the latter
 /// auto-importable when not yet declared).
 fn prefix_completions(
-    db: &dyn HirDb,
+    db: &dyn fossil_base::Db,
     files: &[SourceFile],
     local: &PrefixIndex,
     items: &mut Vec<CompletionItem>,
@@ -161,9 +159,9 @@ fn prefix_completions(
 }
 
 /// Source 3: shape predicate names, when the enclosing mapping's target `ShEx`
-/// shape resolves. Reads the host descriptor via the ADR-0020 accessor.
+/// shape resolves against the document the program names.
 fn shape_property_completions(
-    db: &dyn HirDb,
+    db: &dyn fossil_base::Db,
     file: SourceFile,
     line: u32,
     character: u32,
@@ -196,7 +194,7 @@ fn shape_property_completions(
 /// host did not pre-introspect the source): the editor stays quiet rather than
 /// guessing field names.
 fn source_field_completions(
-    db: &dyn HirDb,
+    db: &dyn fossil_base::Db,
     file: SourceFile,
     line: u32,
     character: u32,
@@ -231,7 +229,12 @@ fn source_field_completions(
 /// (completion triggered right after typing `.`) or anywhere inside a
 /// `FIELD_REF_EXPR`. Bounded by the enclosing `MAPPING` so a stray
 /// dot elsewhere does not fire source-field completion.
-fn at_field_ref_context(db: &dyn HirDb, file: SourceFile, line: u32, character: u32) -> bool {
+fn at_field_ref_context(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    line: u32,
+    character: u32,
+) -> bool {
     let Some(token) = token_at_position(db, file, line, character) else {
         return false;
     };
@@ -254,7 +257,7 @@ fn at_field_ref_context(db: &dyn HirDb, file: SourceFile, line: u32, character: 
 /// ADR-0005, without the property-level resolution).
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn enclosing_mapping_loc<'db>(
-    db: &'db dyn HirDb,
+    db: &'db dyn fossil_base::Db,
     file: SourceFile,
     line: u32,
     character: u32,
@@ -351,12 +354,10 @@ mod tests {
     use fossil_base::{Files, NativeSystem, System};
     use std::sync::Arc;
 
-    // A minimal `HirDb` host stand-in. `fossil-hir` only impls `HirDb` for
-    // `FossilDb` under its own `#[cfg(test)]`, so the IDE crate supplies its own
-    // host db. The default `output_descriptor_kind()` yields the degraded
-    // `AcceptAll` fallback — sufficient for the stdlib + prefix sources (which
-    // are unconditional); the shape-property source is exercised end-to-end
-    // against a real `ShEx` descriptor in `tests/completion.rs`.
+    // A minimal host db stand-in, so these unit tests exercise the stdlib +
+    // prefix sources (which are unconditional) without a filesystem fixture.
+    // The shape-property source needs a program naming a real document on
+    // disk, and is exercised end-to-end in `tests/completion.rs`.
     #[salsa::db]
     #[derive(Clone)]
     struct HostDb {
@@ -384,8 +385,6 @@ mod tests {
         }
     }
 
-    impl HirDb for HostDb {}
-
     fn db() -> HostDb {
         HostDb {
             storage: salsa::Storage::default(),
@@ -398,8 +397,8 @@ mod tests {
         SourceFile::new(db, src.to_string(), "c.fossil".to_string())
     }
 
-    /// Under `AcceptAll` there are no shape properties, but the stdlib + prefix
-    /// sources are unconditional.
+    /// These programs name no output document, so there are no shape
+    /// properties; the stdlib + prefix sources are unconditional.
     #[test]
     fn offers_stdlib_with_auto_import_for_unimported_namespace() {
         let db = db();

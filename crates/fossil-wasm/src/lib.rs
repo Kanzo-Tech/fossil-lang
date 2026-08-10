@@ -13,7 +13,6 @@
 //! | [`FossilPlayground::close_file`]| `()`                                 | `textDocument/didClose`    |
 //! | [`FossilPlayground::check`]     | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
 //! | [`FossilPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (07-03 drain) |
-//! | [`FossilPlayground::set_target_shex`] | `()`                              | Schema panel install |
 //!
 //! The Phase-1 `compile(&str)` + `classification()` methods are RETAINED
 //! verbatim — the Phase-1 smoke test and the STDL-07 classification path
@@ -35,11 +34,7 @@
 //! `didChange` path uses (ADR-0022 — the revision bump is the cancellation
 //! trigger). NO new tracked queries land in the lifecycle path, so
 //! `MAX_PER_MAPPING_FAN_OUT` stays at 1 (verified by
-//! `fossil-hir::tests::invalidation_regression`, 3/3). The descriptor
-//! storage on [`WasmDb`] mirrors `LspDb` byte-for-byte (06-09):
-//! `Arc<OutputDescriptorKind>`, read once per query through the
-//! [`fossil_hir::HirDb`] accessor, never interned, never a Salsa key
-//! (ADR-0020).
+//! `fossil-hir::tests::invalidation_regression`, 3/3).
 //!
 //! See `decisions/rudof-wasm.md` for the Phase 0 spike that validated the
 //! WASM-first architecture, and RESEARCH.md §"WASM API scope" / Example 17
@@ -61,8 +56,6 @@ pub use crate::tokenize::{TokenRow, tokenize_native};
 use std::sync::Arc;
 
 use fossil_base::{Diagnostic, Files, Severity, SourceFile, Span, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
-use fossil_hir::HirDb;
 use fossil_ide::{LineIndex, Utf16Position};
 use wasm_bindgen::prelude::*;
 
@@ -72,27 +65,17 @@ use crate::workspace::OpenFiles;
 
 /// The Salsa database the WASM host owns.
 ///
-/// Mirrors `fossil-lsp::LspDb` byte-for-byte (06-09): a fresh `#[salsa::db]`
-/// struct (cannot be `fossil_base::FossilDb` because the
-/// `impl HirDb for FossilDb` is `#[cfg(test)]`-only — production hosts must
-/// own their own db). Carries the Salsa runtime + the host [`System`] (here
-/// [`WasmSystem`]) + an `Arc<OutputDescriptorKind>` it returns from the
-/// [`HirDb`] override. Lets `fossil-ide` features (hover, completion,
-/// goto-def) read the host's output descriptor so the target-side `ShEx`
-/// type/properties are reachable once the user installs a schema via
-/// [`FossilPlayground::set_target_shex`].
+/// Mirrors `fossil-lsp::LspDb` (06-09): the Salsa runtime + the host
+/// [`System`] (here [`WasmSystem`]). The target-side `ShEx` type/properties
+/// `fossil-ide` surfaces are reachable because the PROGRAM names its output
+/// document and `resolve_target_shape` reads it through the system
+/// (ADR-0055) — the playground supplies a filesystem, not a contract.
 #[salsa::db]
 #[derive(Clone)]
 struct WasmDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
-    /// The user-installed output descriptor. Starts at the degraded
-    /// `AcceptAll` default; replaced atomically on each
-    /// [`FossilPlayground::set_target_shex`] call. Stored behind `Arc` so
-    /// `Clone` of `WasmDb` (Salsa's `Snapshot` mechanism) shares the
-    /// schema by reference, not by deep clone.
-    descriptor: Arc<OutputDescriptorKind>,
 }
 
 impl std::fmt::Debug for WasmDb {
@@ -114,36 +97,22 @@ impl fossil_base::Db for WasmDb {
     }
 }
 
-impl HirDb for WasmDb {
-    fn output_descriptor_kind(&self) -> &OutputDescriptorKind {
-        &self.descriptor
-    }
-}
-
 impl WasmDb {
     fn new(system: Arc<dyn System>) -> Self {
         Self {
             storage: salsa::Storage::default(),
             system,
             files: Files::default(),
-            descriptor: Arc::new(OutputDescriptorKind::ACCEPT_ALL_DEFAULT),
         }
-    }
-
-    /// Replace the host output descriptor (e.g. after the user pastes a
-    /// `ShEx` schema in the Schema panel). Re-`Arc`s a new descriptor;
-    /// cheap and rare (per-install).
-    fn set_descriptor(&mut self, kind: OutputDescriptorKind) {
-        self.descriptor = Arc::new(kind);
     }
 }
 
 /// JS-facing handle for the Fossil compiler running inside a WASM module.
 ///
-/// One instance owns one [`WasmDb`] (Salsa store + injected [`WasmSystem`]
-/// + `Arc<OutputDescriptorKind>`). Hosts construct a single playground per
-/// browser tab / Node process and reuse it across all method calls to
-/// amortise the Salsa interning + memoisation overhead.
+/// One instance owns one [`WasmDb`] (Salsa store + injected [`WasmSystem`]).
+/// Hosts construct a single playground per browser tab / Node process and
+/// reuse it across all method calls to amortise the Salsa interning +
+/// memoisation overhead.
 #[wasm_bindgen]
 pub struct FossilPlayground {
     db: WasmDb,
@@ -294,27 +263,6 @@ impl FossilPlayground {
             .diagnostics_for_rows(handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
-    }
-
-    /// Install a user-supplied `ShEx` schema as the active output descriptor.
-    /// On parse failure the previously-installed descriptor is RETAINED (no
-    /// half-applied state — a broken schema must never wedge the editor;
-    /// same contract as `fossil-lsp`'s `load_sibling_shex` in 06-09).
-    ///
-    /// The schema is parsed via
-    /// [`fossil_descriptors_output::ShExDescriptor::from_reader`] (no
-    /// network access — Pitfall 1) and wrapped in
-    /// [`OutputDescriptorKind::ShEx`]. The resulting `Arc` is swapped into
-    /// the [`WasmDb`]'s descriptor slot atomically; future `fossil-ide`
-    /// feature calls (hover, completion) reading
-    /// [`HirDb::output_descriptor_kind`] see the new schema.
-    ///
-    /// # Errors
-    ///
-    /// Returns a JS error if the text is not a parseable `ShEx` schema.
-    pub fn set_target_shex(&mut self, text: &str) -> Result<(), JsError> {
-        self.set_target_shex_native(text)
-            .map_err(|e| JsError::new(&e))
     }
 
     // ----- Phase 13 (ADR-0037) — register a host-introspected descriptor -----
@@ -509,14 +457,9 @@ impl FossilPlayground {
         self.files.get(handle)
     }
 
-    /// `HirDb` accessor for hover / completion (they take `&dyn HirDb` for
-    /// the target-aware descriptor read — ADR-0020).
-    pub(crate) fn hir_db(&self) -> &dyn HirDb {
-        &self.db
-    }
-
-    /// Base `fossil_base::Db` accessor for goto-def / document-symbol /
-    /// semantic-tokens / code-action (they take `&dyn fossil_base::Db`).
+    /// Base `fossil_base::Db` accessor for every `fossil-ide` free function
+    /// (hover, completion, goto-def, document-symbol, semantic-tokens,
+    /// code-action — they all take `&dyn fossil_base::Db`).
     pub(crate) fn base_db(&self) -> &dyn fossil_base::Db {
         &self.db
     }
@@ -533,24 +476,6 @@ impl FossilPlayground {
     /// drops — mirrors fossil-lsp's `diagnostics_for` in 06-09.
     pub(crate) fn drain_diagnostics_for_file(&self, file: SourceFile) -> Vec<Diagnostic> {
         diagnostics_for_file(&self.db, file)
-    }
-
-    /// Native-reachable `ShEx` install — pure-Rust mirror of
-    /// `set_target_shex`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the lowering error string when the schema does not parse;
-    /// the previously-installed descriptor is RETAINED (no half-applied
-    /// state).
-    pub fn set_target_shex_native(&mut self, text: &str) -> Result<(), String> {
-        match ShExDescriptor::from_reader(text.as_bytes()) {
-            Ok(d) => {
-                self.db.set_descriptor(OutputDescriptorKind::ShEx(d));
-                Ok(())
-            }
-            Err(e) => Err(format!("ShEx parse error: {e:?}")),
-        }
     }
 
     // ----- Phase 13 (ADR-0037) — inferred-descriptor registration -----

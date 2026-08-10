@@ -13,7 +13,6 @@ use std::time::SystemTime;
 
 use fossil_base::{FsError, System};
 use fossil_descriptors_input::DescriptorCache;
-use fossil_descriptors_output::SystemWithDescriptors;
 
 /// The descriptor cache for programs living in `program_dir`, created on first
 /// sight of that directory and shared by every compile of every program in it.
@@ -48,10 +47,9 @@ fn descriptor_cache(program_dir: &Path) -> Arc<DescriptorCache> {
     )
 }
 
-/// Native [`System`] for the engine. ALSO implements [`SystemWithDescriptors`] so
-/// the bidirectional checker reaches the output-descriptor accessor via the
-/// extension trait (Option B from plan 03-03; see ADR-0006). The default
-/// `output_descriptor_kind()` returns `ACCEPT_ALL_DEFAULT`.
+/// Native [`System`] for the engine. Reading files IS the whole contract: the
+/// bidirectional checker reaches the output shape by reading the document the
+/// program names, through [`System::read_file`] (ADR-0055).
 #[derive(Debug)]
 pub(crate) struct EngineSystem {
     descriptors: Arc<DescriptorCache>,
@@ -82,10 +80,6 @@ impl System for EngineSystem {
     fn descriptors(&self) -> Option<&DescriptorCache> {
         Some(&self.descriptors)
     }
-}
-
-impl SystemWithDescriptors for EngineSystem {
-    // Default impl returns AcceptAll — see `SystemWithDescriptors`.
 }
 
 /// Build a fresh `FossilDb` over the engine [`System`] for `path` + `text`.

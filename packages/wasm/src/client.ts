@@ -184,14 +184,6 @@ export class FossilPlayground {
   }
 
   /**
-   * Install a user-supplied ShEx schema as the active output descriptor. On
-   * parse failure the previously-installed descriptor is RETAINED.
-   */
-  setTargetShex(text: string): void {
-    this._inner.set_target_shex(text);
-  }
-
-  /**
    * Register an {@link InferredDescriptorJson} for a source binding name BEFORE
    * invoking {@link check}. The Rust compiler reads from this during forward
    * type propagation.

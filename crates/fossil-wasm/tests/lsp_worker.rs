@@ -285,54 +285,6 @@ fn shutdown_request_responds_null() {
     assert_eq!(resp.result, Some(serde_json::Value::Null));
 }
 
-/// 07-06 Task 1 — the third custom LSP request (`fossil/setTargetShex`)
-/// routes through `dispatch` to `FossilPlayground::set_target_shex_native`.
-/// Without this route, the SC#5 "testable from a browser headless test" half
-/// cannot be discharged (07-10 SC#5 browser spec exercises this path).
-#[test]
-fn fossil_set_target_shex_routes() {
-    // The descriptor is parsed via `ShExDescriptor::from_reader`, which
-    // accepts ShExJ (JSON-LD), NOT ShExC. Use a minimal valid ShExJ
-    // schema — one ShapeDecl with one TripleConstraint.
-    const SHEXJ: &str = r#"{
-      "@context": "http://www.w3.org/ns/shex.jsonld",
-      "type": "Schema",
-      "shapes": [
-        {
-          "type": "ShapeDecl",
-          "id": "http://example.org/S",
-          "shapeExpr": {
-            "type": "Shape",
-            "expression": {
-              "type": "TripleConstraint",
-              "predicate": "http://example.org/p",
-              "valueExpr": {
-                "type": "NodeConstraint",
-                "datatype": "http://www.w3.org/2001/XMLSchema#string"
-              }
-            }
-          }
-        }
-      ]
-    }"#;
-    let mut pg = FossilPlayground::new();
-    let out = fossil_wasm::__dispatch_for_test(
-        &mut pg,
-        req(
-            "fossil/setTargetShex",
-            1,
-            serde_json::json!({ "text": SHEXJ }),
-        ),
-    );
-    let resp = out.response.expect("fossil/setTargetShex must respond");
-    assert!(
-        resp.error.is_none(),
-        "fossil/setTargetShex must not error: {:?}",
-        resp.error,
-    );
-    assert_eq!(resp.result, Some(serde_json::Value::Null));
-}
-
 /// Sibling sanity — `fossil/checkAll` route returns an array (possibly empty).
 #[test]
 fn fossil_check_all_routes() {

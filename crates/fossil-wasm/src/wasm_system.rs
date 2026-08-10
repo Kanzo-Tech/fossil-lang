@@ -25,7 +25,6 @@ use std::time::SystemTime;
 
 use fossil_base::{FsError, System};
 use fossil_descriptors_input::DescriptorCache;
-use fossil_descriptors_output::SystemWithDescriptors;
 
 // `pub(crate)` is the deliberate visibility: `WasmSystem` is an
 // implementation detail of the `fossil-wasm` crate. The clippy
@@ -69,16 +68,6 @@ impl System for WasmSystem {
         Some(&self.descriptors)
     }
 }
-
-/// Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` impl
-/// on its concrete `WasmSystem` struct. Default `output_descriptor_kind()`
-/// returns `AcceptAll` for Phase 3 v0.1 — plan 03-05's tests construct
-/// `ShExDescriptor` directly. Phase 7 plan 07-02 (this commit) wires the
-/// user-supplied `ShEx` text via [`crate::FossilPlayground::set_target_shex`]
-/// — but the swappable storage lives on the host's `WasmDb`
-/// (`Arc<OutputDescriptorKind>`, mirroring `LspDb`), not on the `System`
-/// trait object. The accessor is on `HirDb`, not `Db::system()` (ADR-0020).
-impl SystemWithDescriptors for WasmSystem {}
 
 #[allow(clippy::redundant_pub_crate)]
 impl WasmSystem {

@@ -1898,7 +1898,6 @@ dependencies = [
 name = "fossil-descriptors-output"
 version = "0.1.0"
 dependencies = [
- "fossil-base",
  "fossil-graph-schema",
  "fossil-shex",
 ]
@@ -2066,7 +2065,6 @@ dependencies = [
  "crossbeam-channel",
  "fossil-base",
  "fossil-descriptors-input",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
@@ -2191,7 +2189,6 @@ dependencies = [
  "console_error_panic_hook",
  "fossil-base",
  "fossil-descriptors-input",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",

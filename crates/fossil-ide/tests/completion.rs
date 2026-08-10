@@ -9,11 +9,10 @@
 //!   (d) when the cursor's mapping resolves a target `ShEx` shape, the shape's
 //!       predicate names appear as completions.
 //!
-//! Case (d) needs the `HirDb` descriptor wiring (06-01 / ADR-0020 R2), so the
-//! test builds a `ShExHostDb` host stand-in mirroring the production host-wrapper
-//! contract (the same pattern as `tests/hover_bidirectional.rs`). Cases (a)-(c)
-//! only need the stdlib catalog + the cross-file prefix index, which a degraded
-//! `AcceptAll` host already provides.
+//! Case (d) needs a program that NAMES its output shape document (ADR-0055) and
+//! a db over a real filesystem, so the test builds a `HostDb` stand-in reading
+//! `tests/fixtures/person.shex`. Cases (a)-(c) only need the stdlib catalog +
+//! the cross-file prefix index, which any db provides.
 
 #![cfg(not(target_arch = "wasm32"))]
 // The `.fossil` fixtures contain `${ex:}` / `${.id}` template placeholders —
@@ -23,32 +22,29 @@
 use std::sync::Arc;
 
 use fossil_base::{Files, NativeSystem, SourceFile, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
-use fossil_hir::HirDb;
 use lsp_types::{CompletionItemKind, CompletionItemTag};
 
-/// A host db stand-in carrying a host-supplied output descriptor, returned via
-/// the `HirDb` override (mirrors the production host-wrapper contract).
+/// A host db stand-in: a real Salsa db over a `NativeSystem`, so the shape
+/// document the program names is readable from disk.
 #[salsa::db]
 #[derive(Clone)]
-struct ShExHostDb {
+struct HostDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
-    descriptor: Arc<OutputDescriptorKind>,
 }
 
-impl std::fmt::Debug for ShExHostDb {
+impl std::fmt::Debug for HostDb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShExHostDb").finish_non_exhaustive()
+        f.debug_struct("HostDb").finish_non_exhaustive()
     }
 }
 
 #[salsa::db]
-impl salsa::Database for ShExHostDb {}
+impl salsa::Database for HostDb {}
 
 #[salsa::db]
-impl fossil_base::Db for ShExHostDb {
+impl fossil_base::Db for HostDb {
     fn system(&self) -> &dyn System {
         &*self.system
     }
@@ -57,52 +53,19 @@ impl fossil_base::Db for ShExHostDb {
     }
 }
 
-impl HirDb for ShExHostDb {
-    fn output_descriptor_kind(&self) -> &OutputDescriptorKind {
-        &self.descriptor
-    }
-}
-
-impl ShExHostDb {
-    fn new(descriptor: OutputDescriptorKind) -> Self {
+impl HostDb {
+    fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
             system: Arc::new(NativeSystem::default()),
             files: Files::default(),
-            descriptor: Arc::new(descriptor),
         }
     }
 }
 
-/// A `ShEx` schema declaring `ex:Person` (`http://example.org/Person`) with a
-/// `ex:name` triple constraint narrowed to `xsd:integer`.
-const SHEX_SRC: &str = r#"{
-  "@context": "http://www.w3.org/ns/shex.jsonld",
-  "type": "Schema",
-  "shapes": [
-    {
-      "type": "ShapeDecl",
-      "id": "http://example.org/Person",
-      "shapeExpr": {
-        "type": "Shape",
-        "expression": {
-          "type": "TripleConstraint",
-          "predicate": "http://example.org/name",
-          "valueExpr": {
-            "type": "NodeConstraint",
-            "datatype": "http://www.w3.org/2001/XMLSchema#integer"
-          }
-        }
-      }
-    }
-  ]
-}"#;
-
-/// The program NAMES its output shape document. It used to arrive from the host
-/// instead, through `HirDb::output_descriptor_kind`, and the program said
-/// nothing — but a host that supplies a contract the program never asked for is
-/// the second source of truth ADR-0057 spends ten amendments refusing. Since
-/// `resolve_target_shape` reads what the program names (ADR-0055, F4), the
+/// The program NAMES its output shape document — `tests/fixtures/person.shex`,
+/// which declares `ex:Person` with an `ex:name` triple constraint narrowed to
+/// `xsd:integer`. `resolve_target_shape` reads it (ADR-0055, F4), so the
 /// completion path resolves a shape here for the same reason the compiler does,
 /// and stops resolving one when the program stops asking.
 ///
@@ -115,12 +78,7 @@ User : ex:Person from users
     ex:name = .name
 ";
 
-fn shex_db() -> ShExHostDb {
-    let shex = ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("ShEx parses");
-    ShExHostDb::new(OutputDescriptorKind::ShEx(shex))
-}
-
-fn file(db: &ShExHostDb, src: &str) -> SourceFile {
+fn file(db: &HostDb, src: &str) -> SourceFile {
     SourceFile::new(db, src.to_string(), "complete.fossil".to_string())
 }
 
@@ -128,7 +86,7 @@ fn file(db: &ShExHostDb, src: &str) -> SourceFile {
 ///     auto-import `additional_text_edits` (the gleam-lsp pattern).
 #[test]
 fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
-    let db = shex_db();
+    let db = HostDb::new();
     let f = file(&db, SRC);
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
@@ -153,7 +111,7 @@ fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
 ///     it out.
 #[test]
 fn native_only_stdlib_entry_is_tagged() {
-    let db = shex_db();
+    let db = HostDb::new();
     let f = file(&db, SRC);
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
@@ -172,7 +130,7 @@ fn native_only_stdlib_entry_is_tagged() {
 /// (c) A declared prefix appears as a completion.
 #[test]
 fn declared_prefix_is_offered() {
-    let db = shex_db();
+    let db = HostDb::new();
     let f = file(&db, SRC);
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
@@ -187,7 +145,7 @@ fn declared_prefix_is_offered() {
 ///     predicate names appear as Field completions.
 #[test]
 fn shape_property_names_are_offered_when_shape_resolves() {
-    let db = shex_db();
+    let db = HostDb::new();
     let f = file(&db, SRC);
     // Line 3 (`    ex:name = .name`) is inside the `User : ex:Person` mapping
     // whose target shape resolves to `ex:Person`; column 14 is inside the body.
@@ -213,12 +171,9 @@ fn shape_property_names_are_offered_when_shape_resolves() {
 /// A program that names NO document contributes no shape properties, while
 /// stdlib and prefixes still do — the "if reachable" hedge.
 ///
-/// This test used to hand the host `ACCEPT_ALL_DEFAULT` and assert the same
-/// thing. The condition has moved from the host to the program, which is the
-/// whole of ADR-0055's F4: what turns backward checking off is the program
-/// declaring no output contract, not a literal the checker was handed because
-/// it had nothing to thread. The assertion is unchanged because the RULE is
-/// unchanged — only what decides it.
+/// What turns backward checking off is the program declaring no output
+/// contract — ADR-0055's F4. There is nowhere else for that condition to come
+/// from any more.
 #[test]
 fn a_program_naming_no_document_yields_no_shape_properties_but_keeps_stdlib() {
     const NO_DOCUMENT: &str = "\
@@ -226,7 +181,7 @@ prefix ex: <http://example.org/>
 User : ex:Person from users
     ex:name = .name
 ";
-    let db = shex_db();
+    let db = HostDb::new();
     let f = file(&db, NO_DOCUMENT);
     // One line shorter than `SRC` — the body is line 2 here.
     let items = fossil_ide::completions(&db, &[f], f, 2, 14);
@@ -236,7 +191,7 @@ User : ex:Person from users
             .iter()
             .any(|i| i.kind == Some(CompletionItemKind::FIELD)),
         "a program with no output contract must contribute no shape-property \
-         (Field) completions, whatever the host holds",
+         (Field) completions",
     );
     assert!(
         items.iter().any(|i| i.label == "clean.trim"),

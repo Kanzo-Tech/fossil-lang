@@ -10,38 +10,14 @@
 //! PR without needing the wasm-bindgen + node toolchain installed. Each test
 //! exercises the lifecycle through the pure-Rust `*_native` / `*_rows` /
 //! `*_result` helpers — the `#[wasm_bindgen]` wrappers (`open_file`,
-//! `update_file`, `close_file`, `check`, `diagnostics_for`, `compile_file`,
-//! `set_target_shex`) merely translate to/from `JsError` + `JsValue` via
-//! wasm-bindgen, which panics on native targets ("cannot call wasm-bindgen
+//! `update_file`, `close_file`, `check`, `diagnostics_for`, `compile_file`)
+//! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
+//! panics on native targets ("cannot call wasm-bindgen
 //! imported functions on non-wasm targets" — wasm-bindgen 0.2 lib.rs:101).
 //! The split mirrors the Phase-5 `classification()` ↔
 //! `stdlib_classification()` precedent.
 
 use fossil_wasm::{FossilPlayground, WorkspaceError};
-
-/// Minimal `ShEx` schema in JSON-LD form (`ShExJ` — the format
-/// `ShExDescriptor::from_reader` parses).
-const MINIMAL_SHEX_JSON: &str = r#"{
-  "@context": "http://www.w3.org/ns/shex.jsonld",
-  "type": "Schema",
-  "shapes": [
-    {
-      "type": "ShapeDecl",
-      "id": "http://example.org/Person",
-      "shapeExpr": {
-        "type": "Shape",
-        "expression": {
-          "type": "TripleConstraint",
-          "predicate": "http://example.org/name",
-          "valueExpr": {
-            "type": "NodeConstraint",
-            "datatype": "http://www.w3.org/2001/XMLSchema#string"
-          }
-        }
-      }
-    }
-  ]
-}"#;
 
 /// Read `examples/hello.fossil` from the repo root. The cargo-test cwd is the
 /// crate directory (`crates/fossil-wasm/`), so the fixture is two levels up.
@@ -153,28 +129,4 @@ fn workspace_multi_file_isolation() {
         pg.diagnostics_for_rows(h1).is_none(),
         "diagnostics_for_rows of closed handle is None"
     );
-}
-
-/// `set_target_shex_native` happy path + parse-failure path.
-#[test]
-fn workspace_set_target_shex_smoke() {
-    let mut pg = FossilPlayground::new();
-
-    // Happy path — a valid ShExJ schema parses and installs.
-    pg.set_target_shex_native(MINIMAL_SHEX_JSON)
-        .expect("minimal ShEx JSON parses + installs");
-
-    // Failure path — garbage input returns Err. The previously-installed
-    // descriptor is retained (no half-applied state — same contract as
-    // fossil-lsp's load_sibling_shex in 06-09); we can't directly observe
-    // that the old descriptor stayed without reaching into private state,
-    // but a follow-up Ok() install proves the playground isn't wedged.
-    assert!(
-        pg.set_target_shex_native("definitely not shex").is_err(),
-        "garbage ShEx must return Err"
-    );
-
-    // Installing a fresh schema after the failure still works.
-    pg.set_target_shex_native(MINIMAL_SHEX_JSON)
-        .expect("re-install after failure still works");
 }

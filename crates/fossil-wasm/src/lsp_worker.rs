@@ -217,7 +217,6 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
         // are listed here so the plan-stated method-not-found surface is
         // accurate. 07-06 fills in the handlers.)
         "fossil/checkAll" => handle_check_all(pg),
-        "fossil/setTargetShex" => handle_set_target_shex(pg, params),
         "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(pg, &params),
         other => Err(LspError {
             code: -32601, // MethodNotFound
@@ -368,7 +367,7 @@ fn handle_hover(
     let Some(file) = pg.lookup_file_by_uri(&uri) else {
         return Ok(serde_json::Value::Null);
     };
-    let info = fossil_ide::hover_bidirectional(pg.hir_db(), file, pos.line, pos.character);
+    let info = fossil_ide::hover_bidirectional(pg.base_db(), file, pos.line, pos.character);
     let payload = info.map(|hi| {
         let index = fossil_ide::line_index(pg.base_db(), file);
         Hover {
@@ -431,7 +430,7 @@ fn handle_completion(
     };
     let files = pg.open_source_files();
     let items = fossil_ide::completions(
-        pg.hir_db(),
+        pg.base_db(),
         &files,
         file,
         p.position.line,
@@ -531,25 +530,9 @@ fn handle_check_all(pg: &FossilPlayground) -> Result<serde_json::Value, LspError
     Ok(serde_json::to_value(&rows).unwrap_or(serde_json::Value::Null))
 }
 
-fn handle_set_target_shex(
-    pg: &mut FossilPlayground,
-    params: serde_json::Value,
-) -> Result<serde_json::Value, LspError> {
-    #[derive(serde::Deserialize)]
-    struct SetTargetShexParams {
-        text: String,
-    }
-    let p: SetTargetShexParams = serde_json::from_value(params).map_err(|e| invalid_params(&e))?;
-    pg.set_target_shex_native(&p.text).map_err(|e| LspError {
-        code: -32000,
-        message: e,
-    })?;
-    Ok(serde_json::Value::Null)
-}
-
 /// `fossil/registerInferredDescriptor` — host-injected source schema (the
-/// connection's catalog). Mirrors [`handle_set_target_shex`]: the symmetric
-/// input-side counterpart to the output-side target-shape. `params` IS the
+/// connection's catalog): the columns the playground introspected with
+/// DuckDB-WASM, which the program cannot name for itself. `params` IS the
 /// `InferredDescriptorJson` object (`{ uri, columns, freshness_token }`);
 /// the native API takes the JSON string, so we re-serialise the already-parsed
 /// value rather than threading a second param shape. Once registered on the

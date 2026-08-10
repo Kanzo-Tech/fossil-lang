@@ -27,10 +27,6 @@ fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-# Plan 03-03 Task 2 step 6: WASM host wires `SystemWithDescriptors` on its
-# `WasmSystem` struct. Default `output_descriptor_kind()` returns AcceptAll
-# for Phase 3 v0.1 — Phase 7+ playground wires user-supplied ShEx text.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # Phase 13 INPUT-01 (ADR-0037): WasmSystem stores InferredDescriptors registered
 # by the browser-side playground orchestration BEFORE invoking compile() — the
 # Rust forward-propagation path (13-02) reads them through the System trait
@@ -54,9 +50,9 @@ fossil-run-status = { path = "../fossil-run-status" }
 # same range shape the LSP Worker (07-03) republishes verbatim.
 fossil-ide = { path = "../fossil-ide" }
 # Plan 07-02: `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` in
-# 06-09 — production hosts own their own db; `impl HirDb for FossilDb` is
-# `#[cfg(test)]`-only). Needs the `salsa::Storage<Self>` field + the
-# `Database` derive macro at the trait-object level.
+# 06-09 — production hosts own their own db). Needs the
+# `salsa::Storage<Self>` field + the `Database` derive macro at the
+# trait-object level.
 salsa = { workspace = true }
 
 # Plan 07-03 (WASM-02 / PLAY-01): the WASM LSP transport speaks raw LSP

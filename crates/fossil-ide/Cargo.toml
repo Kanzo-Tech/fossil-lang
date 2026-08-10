@@ -35,10 +35,9 @@ lsp-types = { workspace = true }
 [dev-dependencies]
 # Hover tests build `Ty`s over the lattice.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# Plan 06-05 (SC#4): the bidirectional-hover integration test builds a custom
-# `HirDb` whose `output_descriptor_kind()` returns a real `ShEx` schema, to
-# drive the target-side render path end-to-end (a host-wiring stand-in). Needs
-# `OutputDescriptorKind` + `ShExDescriptor`, plus `salsa` for the custom db.
+# The code-action test drives `generate_split_suggestion` over a
+# `ShExDescriptor` it builds directly, the same plain-Rust helper the checker
+# calls once it has resolved the document the program names.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # Source-field completion (4th source) test: builds an `InferredDescriptor` and
 # registers it on the test `System`, driving the `.<field>` completion path

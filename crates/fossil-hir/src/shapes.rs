@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(primitive_to_graphar(Primitive::GYear), "string");
     }
 
-    // --- ADR-0020 R2 wiring: resolve_target_shape consumes a host descriptor ---
+    // --- resolve_target_shape reads the document the program names (ADR-0055) ---
 
     use std::sync::Arc;
 

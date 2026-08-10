@@ -17,9 +17,9 @@
 //!   `Setter` (`set_text`), which BUMPS THE REVISION — the real cancellation
 //!   trigger (ADR-0022; NOT a fictional `db.cancel_pending()`) — then republishes
 //!   diagnostics.
-//! - `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (the LSP db
-//!   carries an `Arc<OutputDescriptorKind>` so the target-side `ShEx` type is
-//!   reachable when a schema is loaded).
+//! - `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (the
+//!   target-side `ShEx` type is reachable whenever the program names its output
+//!   document — the editor supplies a filesystem, not a contract).
 //! - `textDocument/definition` → [`fossil_ide::goto_definition`] → `Location`s.
 //! - `textDocument/completion` → [`fossil_ide::completions`].
 //! - `textDocument/documentSymbol` → [`fossil_ide::document_symbols`].
@@ -43,8 +43,6 @@ use std::error::Error;
 use std::sync::Arc;
 
 use fossil_base::{Diagnostic, Files, NativeSystem, Severity, SourceFile, Span, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
-use fossil_hir::HirDb;
 use fossil_ide::{LineIndex, Utf16Position};
 use lsp_server::{Connection, ErrorCode, ExtractError, Message, Notification, Request, Response};
 use lsp_types::notification::{
@@ -66,21 +64,17 @@ use lsp_types::{
 
 /// The LSP database.
 ///
-/// A `#[salsa::db]` struct (it cannot be `FossilDb` because `fossil-hir` only
-/// `impl HirDb for FossilDb` under `#[cfg(test)]`) that carries the Salsa
-/// runtime + the host [`System`] + an `Arc<OutputDescriptorKind>` it returns
-/// from the [`HirDb`] override. This is the production realisation of the
-/// host-wrapper contract the 06-05 `ShExHostDb` integration test stands in for:
-/// it lets [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`]
-/// read the host's output descriptor so the target-side `ShEx` type/properties
-/// are reachable when a schema is loaded (`AcceptAll` → source-only otherwise).
+/// A `#[salsa::db]` struct carrying the Salsa runtime + the host [`System`].
+/// The system is the whole of what the editor owes the compiler: the target
+/// shape reaches [`fossil_ide::hover_bidirectional`] /
+/// [`fossil_ide::completions`] because the PROGRAM names its output document
+/// and `resolve_target_shape` reads it through `System::read_file` (ADR-0055).
 #[salsa::db]
 #[derive(Clone)]
 struct LspDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
-    descriptor: Arc<OutputDescriptorKind>,
 }
 
 impl std::fmt::Debug for LspDb {
@@ -102,26 +96,13 @@ impl fossil_base::Db for LspDb {
     }
 }
 
-impl HirDb for LspDb {
-    fn output_descriptor_kind(&self) -> &OutputDescriptorKind {
-        &self.descriptor
-    }
-}
-
 impl LspDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
             system: Arc::new(NativeSystem::default()),
             files: Files::default(),
-            descriptor: Arc::new(OutputDescriptorKind::ACCEPT_ALL_DEFAULT),
         }
-    }
-
-    /// Replace the host output descriptor (e.g. after loading a `ShEx` schema
-    /// sibling). Re-`Arc`s a new descriptor; cheap and rare (per-`didOpen`).
-    fn set_descriptor(&mut self, kind: OutputDescriptorKind) {
-        self.descriptor = Arc::new(kind);
     }
 }
 
@@ -143,13 +124,10 @@ impl LspState {
         }
     }
 
-    /// Record a newly-opened file: intern a fresh `SourceFile` and try to load
-    /// a sibling `<stem>.shex` output descriptor so target-side hover/completion
-    /// resolve when a schema is present (`AcceptAll` otherwise — source-only).
+    /// Record a newly-opened file: intern a fresh `SourceFile`. The path is
+    /// kept because the shape and CSVW documents the program names are read
+    /// relative to it.
     fn open(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
-        if let Some(kind) = load_sibling_shex(&path) {
-            self.db.set_descriptor(kind);
-        }
         let file = SourceFile::new(&self.db, text, path);
         self.files.insert(uri.as_str().to_string(), file);
         file
@@ -181,26 +159,6 @@ impl LspState {
     /// completion (ADR-0023: workspace == open files).
     fn open_files(&self) -> Vec<SourceFile> {
         self.files.values().copied().collect()
-    }
-}
-
-/// Try to read + parse a sibling `<stem>.shex` next to the opened `.fossil`
-/// file. Mirrors the CLI's `--shape` auto-discovery. Returns `None` (→ the
-/// `AcceptAll` default stays) when there is no sibling or it fails to parse —
-/// a missing/broken schema must never break the editor.
-fn load_sibling_shex(path: &str) -> Option<OutputDescriptorKind> {
-    let p = std::path::Path::new(path);
-    let shex = p.with_extension("shex");
-    let bytes = std::fs::read(&shex).ok()?;
-    match ShExDescriptor::from_reader(bytes.as_slice()) {
-        Ok(d) => {
-            tracing::debug!(shape = %shex.display(), "loaded sibling ShEx descriptor");
-            Some(OutputDescriptorKind::ShEx(d))
-        }
-        Err(e) => {
-            tracing::warn!(shape = %shex.display(), "sibling ShEx failed to parse: {e:?}");
-            None
-        }
     }
 }
 
@@ -338,8 +296,9 @@ fn handle_request(
     }
 }
 
-/// `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (target-aware via
-/// the LSP db's `HirDb` descriptor). Renders Markdown with a UTF-16 range.
+/// `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (target-aware
+/// whenever the program names an output document). Renders Markdown with a
+/// UTF-16 range.
 fn handle_hover(
     connection: &Connection,
     state: &LspState,

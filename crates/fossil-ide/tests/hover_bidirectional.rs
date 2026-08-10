@@ -19,16 +19,14 @@
 //!      target block, no error (the "if reachable" hedge).
 //!   3. No `Unknown` literal leaks into either output.
 //!
-//! Case 2 used to be "under `AcceptAll`", a mode the HOST selected. The rule is
-//! unchanged; what decides it moved to the program, which is the whole of F4.
+//! Case 2 is decided by the program alone — there is no host mode that can turn
+//! backward checking on or off behind it. That is the whole of F4.
 //!
-//! # The db stand-in (`ShExHostDb`)
+//! # The db stand-in (`HostDb`)
 //!
 //! A `#[salsa::db]` struct carrying a `NativeSystem`, so the CSVW schema and the
-//! `ShEx` document are both readable from disk. It still implements `HirDb` and
-//! still holds an `OutputDescriptorKind`, and NEITHER is read any more —
-//! `resolve_target_shape` stopped taking a descriptor. That dead host-descriptor
-//! mechanism is a deletion of its own, not something to leave standing.
+//! `ShEx` document are both readable from disk. That is all a host owes the
+//! checker now: a filesystem. It holds no descriptor of its own.
 
 #![cfg(not(target_arch = "wasm32"))]
 // The `.fossil` fixture sources contain `${ex:}` / `${.id}` template
@@ -38,33 +36,28 @@
 use std::sync::Arc;
 
 use fossil_base::{Files, NativeSystem, SourceFile, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
-use fossil_hir::HirDb;
 
-/// A host db stand-in: a real Salsa db (so tracked queries run) that also
-/// carries a host-supplied output descriptor, returned via the `HirDb`
-/// override. Mirrors the production host-wrapper contract (see
-/// `fossil_hir::db_ext`).
+/// A host db stand-in: a real Salsa db (so tracked queries run) over a
+/// `NativeSystem` (so the documents the program names are readable).
 #[salsa::db]
 #[derive(Clone)]
-struct ShExHostDb {
+struct HostDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
-    descriptor: Arc<OutputDescriptorKind>,
 }
 
-impl std::fmt::Debug for ShExHostDb {
+impl std::fmt::Debug for HostDb {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ShExHostDb").finish_non_exhaustive()
+        f.debug_struct("HostDb").finish_non_exhaustive()
     }
 }
 
 #[salsa::db]
-impl salsa::Database for ShExHostDb {}
+impl salsa::Database for HostDb {}
 
 #[salsa::db]
-impl fossil_base::Db for ShExHostDb {
+impl fossil_base::Db for HostDb {
     fn system(&self) -> &dyn System {
         &*self.system
     }
@@ -73,19 +66,12 @@ impl fossil_base::Db for ShExHostDb {
     }
 }
 
-impl HirDb for ShExHostDb {
-    fn output_descriptor_kind(&self) -> &OutputDescriptorKind {
-        &self.descriptor
-    }
-}
-
-impl ShExHostDb {
-    fn new(descriptor: OutputDescriptorKind) -> Self {
+impl HostDb {
+    fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
             system: Arc::new(NativeSystem::default()),
             files: Files::default(),
-            descriptor: Arc::new(descriptor),
         }
     }
 }
@@ -109,11 +95,10 @@ const USERS_CSVW: &str = r#"{
 /// visibly distinct (source renders `Integer`, target renders `Float`).
 ///
 /// The pair used to be `String` against `Integer`, which is not merely distinct
-/// but INCOMPATIBLE. That was harmless while the checker was handed
-/// `ACCEPT_ALL_DEFAULT` and never looked; once `resolve_target_shape` reads the
-/// document the program names (ADR-0055, F4), the mismatch is a real error, the
-/// expression stops typing, and hover has no type to show. An unchecked
-/// mismatch is no longer a state this language can be in.
+/// but INCOMPATIBLE. Now that `resolve_target_shape` reads the document the
+/// program names (ADR-0055, F4), the mismatch is a real error, the expression
+/// stops typing, and hover has no type to show. An unchecked mismatch is no
+/// longer a state this language can be in.
 ///
 /// `Integer` against `Float` keeps the two blocks distinct AND well-typed, via
 /// `S-IntFlt` — the subtyping rule ADR-0057's fourth amendment kept precisely so
@@ -146,12 +131,11 @@ const SHEX_SRC: &str = r#"{
 /// `ex:Person` (so target-side resolution finds the `ShEx` shape). Both the
 /// CSVW file AND the shape document are written next to the `.fossil`, because
 /// both are read by relative path from the program.
-fn fixture(dir: &std::path::Path) -> (ShExHostDb, SourceFile, OutputDescriptorKind) {
+fn fixture(dir: &std::path::Path) -> (HostDb, SourceFile) {
     std::fs::write(dir.join("users.csvw"), USERS_CSVW).expect("write CSVW");
-    // The shape document sits beside the program, and the PROGRAM names it.
-    // It used to reach the checker from the host alone; `resolve_target_shape`
-    // now reads what the program declares (ADR-0055, F4), so hover resolves a
-    // target type for the same reason the compiler does.
+    // The shape document sits beside the program, and the PROGRAM names it:
+    // `resolve_target_shape` reads what the program declares (ADR-0055, F4), so
+    // hover resolves a target type for the same reason the compiler does.
     std::fs::write(dir.join("person.shex"), SHEX_SRC).expect("write ShEx");
     let fossil_path = dir.join("person.fossil");
     let src = "\
@@ -162,20 +146,13 @@ User : ex:Person from users
     iri = `${ex:}u/${.id}`
     ex:name = .name
 ";
-    let shex = ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("ShEx parses");
-    let kind = OutputDescriptorKind::ShEx(shex);
-    // The db OWNS one descriptor; we hand back a SECOND independent ShEx
-    // descriptor for callers that want to assert on it (cheap to re-parse).
-    let owned = OutputDescriptorKind::ShEx(
-        ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("ShEx parses"),
-    );
-    let db = ShExHostDb::new(owned);
+    let db = HostDb::new();
     let file = SourceFile::new(
         &db,
         src.to_string(),
         fossil_path.to_string_lossy().into_owned(),
     );
-    (db, file, kind)
+    (db, file)
 }
 
 /// Hover position for `.name` on line 5 (`    ex:name = .name`). Column 14 is
@@ -195,7 +172,7 @@ const NAME_COL: u32 = 14;
 fn hover_shows_source_and_target_type_when_shape_resolves() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-bidi-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).expect("mk tmp");
-    let (db, file, _kind) = fixture(&tmp);
+    let (db, file) = fixture(&tmp);
 
     let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE, NAME_COL)
         .expect("hover on `.name` with a CSVW schema must return Some");
@@ -234,16 +211,14 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
 }
 
 /// Case 2 — the program names no output document: hover shows the source-side
-/// block ONLY (no target block, no error — the "if reachable" hedge).
-///
-/// This used to be "under `AcceptAll`", a mode the HOST chose. The rule is
-/// unchanged; what decides it moved to the program, which is ADR-0055's F4.
+/// block ONLY (no target block, no error — the "if reachable" hedge). What
+/// decides it is the program, and nothing else: ADR-0055's F4.
 #[test]
 fn hover_shows_source_only_when_the_program_names_no_document() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-accept-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).expect("mk tmp");
 
-    // Same fixture, but the host db carries the degraded AcceptAll default.
+    // Same fixture, minus the `type { … } = io.shex(…)` line.
     std::fs::write(tmp.join("users.csvw"), USERS_CSVW).expect("write CSVW");
     let fossil_path = tmp.join("person.fossil");
     let src = "\
@@ -253,7 +228,7 @@ User : ex:Person from users
     iri = `${ex:}u/${.id}`
     ex:name = .name
 ";
-    let db = ShExHostDb::new(OutputDescriptorKind::ACCEPT_ALL_DEFAULT);
+    let db = HostDb::new();
     let file = SourceFile::new(
         &db,
         src.to_string(),

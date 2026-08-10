@@ -53,7 +53,6 @@
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_hir::HirDb;
 use fossil_hir::body::{ExprId, body};
 use fossil_hir::def_map::def_map;
 use fossil_hir::lower::PropertyKey;
@@ -87,11 +86,10 @@ pub struct HoverInfo {
 /// cursor on whitespace, on a `FieldRef` whose type Phase 2 cannot
 /// synthesise, or on a position outside any MAPPING).
 ///
-/// This entry takes `&dyn fossil_base::Db`, which (per ADR-0006) does NOT
-/// carry the descriptor vtable, so it renders the source-side type only —
-/// exactly the degraded `AcceptAll` behaviour. A host that has loaded a `ShEx`
-/// schema calls [`hover_bidirectional`] with its [`HirDb`] to also surface the
-/// target-side (`ShEx`) type (SC#4).
+/// This entry renders the source-side type ONLY — it never resolves the
+/// mapping's target shape, even for a program that names one. A caller that
+/// wants the target-side (`ShEx`) type too calls [`hover_bidirectional`]
+/// (SC#4).
 #[must_use]
 pub fn hover(
     db: &dyn fossil_base::Db,
@@ -110,23 +108,23 @@ pub fn hover(
 
 /// Compute **bidirectional** hover info at an LSP position (SC#4).
 ///
-/// Like [`hover`], but takes a [`HirDb`] so it can read the host's output
-/// descriptor ([`HirDb::output_descriptor_kind`], the 06-01 / ADR-0020 R2
-/// wiring) and resolve the mapping's target `ShEx` shape via
-/// [`resolve_target_shape`]. When the hovered `.field`'s predicate matches a
-/// shape constraint carrying a value type, the rendered Markdown appends a
-/// SECOND fenced block showing the **target-side** type (from
+/// Like [`hover`], but also resolves the mapping's target `ShEx` shape via
+/// [`resolve_target_shape`], which reads the document the PROGRAM names
+/// (ADR-0055). When the hovered `.field`'s predicate matches a shape
+/// constraint carrying a value type, the rendered Markdown appends a SECOND
+/// fenced block showing the **target-side** type (from
 /// `ShapeConstraint::value_ty`).
 ///
-/// The "if reachable" hedge (truth #2): if no shape resolves (`AcceptAll`, or
-/// the schema omits the mapping's shape, or the predicate has no constraint),
-/// the hover shows the source-side block only — best-effort, no error.
+/// The "if reachable" hedge (truth #2): if no shape resolves (the program
+/// names no document, or the document omits the mapping's shape, or the
+/// predicate has no constraint), the hover shows the source-side block only —
+/// best-effort, no error.
 ///
 /// All type rendering routes through [`render_ty_kind`], so `TyKind::Unknown`
 /// never leaks (truth #4 / STATE.md "Do NOT expose `Unknown`").
 #[must_use]
 pub fn hover_bidirectional(
-    db: &dyn HirDb,
+    db: &dyn fossil_base::Db,
     file: SourceFile,
     line: u32,
     character: u32,
@@ -278,7 +276,7 @@ pub fn render_markdown(db: &dyn fossil_base::Db, entry: &ExprTypeEntry<'_>) -> S
 /// `*target type (ShEx shape constraint)*` tagline is appended, so the user
 /// sees BOTH the source-side type (from the CSVW descriptor provenance) AND the
 /// target-side type (from the resolved `ShEx` shape). When `target_ty` is
-/// `None` (no shape resolved — `AcceptAll` / unreachable, the "if reachable"
+/// `None` (no shape resolved — no document named / unreachable, the "if reachable"
 /// hedge), only the source-side block is rendered — no error.
 ///
 /// `target_ty` is always pre-rendered through [`render_ty_kind`] by the caller,
