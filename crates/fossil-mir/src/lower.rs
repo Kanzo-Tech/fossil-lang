@@ -198,13 +198,18 @@ pub fn lower_to_mir_pg<'db>(
         };
         let pred_local = SmolStr::new(local_name(iri));
         match &prop.value {
-            HirExpr::FieldRef(field) => props.push(VProp {
-                name: pred_local,
-                value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
-                ty: field_ty(field.as_str()),
-                rdf_uri: Some(iri.clone()),
-                single_valued: true,
-            }),
+            // The qualified spelling lowers identically: the checker has
+            // already established that the binding IS this mapping's source
+            // (ADR-0057, ninth amendment), so only the column reaches MIR.
+            HirExpr::ColumnRef { column: field, .. } | HirExpr::FieldRef(field) => {
+                props.push(VProp {
+                    name: pred_local,
+                    value: lower_property_value(db, &prop.value, &m.source_binding, prefixes, None),
+                    ty: field_ty(field.as_str()),
+                    rdf_uri: Some(iri.clone()),
+                    single_valued: true,
+                });
+            }
             // A string literal and a conditional both produce a String column
             // here: the conditional's branches agree by the time the checker is
             // done, and without a source row that agreed type is String.
@@ -770,7 +775,7 @@ fn lower_property_value<'db>(
     assert_line: Option<u32>,
 ) -> Expr<'db> {
     match value {
-        HirExpr::FieldRef(field) => Expr::ColRef {
+        HirExpr::ColumnRef { column: field, .. } | HirExpr::FieldRef(field) => Expr::ColRef {
             // CODEGEN-LOWERING-01: empty source — codegen's `default_source`
             // (the view name from `derive_view_name(uri)`) substitutes.
             source: SmolStr::default(),

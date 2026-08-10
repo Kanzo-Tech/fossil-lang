@@ -220,6 +220,7 @@ fn infer_literal_type_kind<'db>(
         // operator needs both sides typed. None is a literal, and this helper
         // only knows literals.
         HirExpr::FieldRef(_)
+        | HirExpr::ColumnRef { .. }
         | HirExpr::Call { .. }
         | HirExpr::BinOp { .. }
         | HirExpr::Ternary { .. } => None,

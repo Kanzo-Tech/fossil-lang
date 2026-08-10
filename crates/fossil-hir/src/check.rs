@@ -259,7 +259,9 @@ pub fn compatible<'db>(
 /// same at every depth: ANY descendant `FieldRef` triggers synthesis.
 fn expr_contains_free_field_refs(e: &HirExpr) -> bool {
     match e {
-        HirExpr::FieldRef(_) => true,
+        // Both spellings of a column reference are row-dependent. They will be
+        // one spelling once `FieldRef` goes (ADR-0057, ninth amendment).
+        HirExpr::FieldRef(_) | HirExpr::ColumnRef { .. } => true,
         // `clean.trim(.name)` in a closure position IS row-dependent.
         HirExpr::Call { args, .. } => args.iter().any(expr_contains_free_field_refs),
         // `.age >= 18` is the shape a filter predicate has.
@@ -328,6 +330,7 @@ fn rewrite_field_refs_to_row_dot(text: &str) -> String {
 fn render_leaf_expr_text(e: &HirExpr) -> String {
     match e {
         HirExpr::FieldRef(name) => format!(".{name}"),
+        HirExpr::ColumnRef { binding, column } => format!("{binding}.{column}"),
         HirExpr::StringLit(s) => format!("\"{s}\""),
         HirExpr::Template(t) => t.to_string(),
         HirExpr::PrefixedName { iri } => iri.to_string(),
@@ -484,6 +487,38 @@ impl<'db> Checker<'db> {
             HirExpr::Template(_) => (Ty::new(db, TyKind::IriTemplate), ProvenanceKind::Literal),
             // T-PrefixedName: an IRI literal.
             HirExpr::PrefixedName { .. } => (Ty::new(db, TyKind::Iri), ProvenanceKind::Literal),
+            // T-Column: the qualified spelling. Same resolution as T-Field,
+            // plus the check the anonymous form could never make — that the
+            // name on the left is the row this mapping actually reads. That
+            // check is the point of qualifying (ADR-0057, ninth amendment).
+            //
+            // It is an equality only because one row is in scope today. §1 of
+            // that amendment puts two there — `join` leaves both named — so
+            // this becomes a lookup over the scope when step 4 lands.
+            HirExpr::ColumnRef { binding, column } => {
+                let source_name = self.source_binding_name();
+                if binding != &source_name {
+                    let eg = delay_span_bug(
+                        db,
+                        self.span_of(expr_id),
+                        format!(
+                            "`{binding}.{column}` reads a row this mapping does not \
+                             have; it maps `{source_name}`. Name that row, or bring \
+                             `{binding}` in."
+                        ),
+                    );
+                    self.record_error(eg);
+                    return None;
+                }
+                let ty = self.lookup_field(expr_id, column)?;
+                (
+                    ty,
+                    ProvenanceKind::InputDescriptor {
+                        source_name,
+                        column: column.clone(),
+                    },
+                )
+            }
             // T-Field: resolve against the source row (CSVW).
             HirExpr::FieldRef(name) => {
                 let ty = self.lookup_field(expr_id, name)?;

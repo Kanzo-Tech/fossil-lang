@@ -146,6 +146,72 @@ fn fieldref_csvw_typo_emits_did_you_mean() {
     );
 }
 
+// ── Qualified column references (ADR-0057, ninth amendment) ────────────────
+
+#[test]
+fn a_column_ref_naming_a_foreign_row_is_rejected() {
+    // The check the anonymous `.name` could never make: `orders.user_id` in a
+    // mapping that reads `users` names a row this mapping does not have. It
+    // fires before the column is resolved, so it does not need a schema.
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return false;
+        };
+        let mut cx = build_checker(db, m, None, None);
+        let prop = HirProperty {
+            key: PropertyKey::PrefixedName {
+                iri: smol_str::SmolStr::from("https://example.org/x"),
+            },
+            value: HirExpr::ColumnRef {
+                binding: smol_str::SmolStr::from("orders"),
+                column: smol_str::SmolStr::from("user_id"),
+            },
+        };
+        cx.check_property(ExprId(0), &prop);
+        cx.first_error.is_some()
+    }
+
+    let (db, file) = db_with(HELLO);
+    assert!(shim(&db, file), "a foreign row must record an error");
+    let diags = shim::accumulated::<Diagnostic>(&db, file);
+    assert_eq!(diags.len(), 1, "exactly one foreign-row diagnostic");
+    let msg = &diags[0].message;
+    assert!(
+        msg.contains("orders.user_id") && msg.contains("users"),
+        "the diagnostic must name the row asked for AND the row mapped, got {msg:?}"
+    );
+}
+
+#[test]
+fn a_column_ref_naming_the_source_row_is_accepted() {
+    // `users.name` in a mapping that reads `users`. HELLO declares no CSVW
+    // schema, so it synthesises no type — exactly what `.name` does (see
+    // `fieldref_without_schema_synthesises_no_type_phase_2_compat`). What is
+    // asserted here is that qualifying it raises no error of its own.
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return true;
+        };
+        let mut cx = build_checker(db, m, None, None);
+        let prop = HirProperty {
+            key: PropertyKey::PrefixedName {
+                iri: smol_str::SmolStr::from("https://example.org/x"),
+            },
+            value: HirExpr::ColumnRef {
+                binding: smol_str::SmolStr::from("users"),
+                column: smol_str::SmolStr::from("name"),
+            },
+        };
+        cx.check_property(ExprId(0), &prop);
+        cx.first_error.is_some()
+    }
+
+    let (db, file) = db_with(HELLO);
+    assert!(!shim(&db, file), "the mapping's own row must not error");
+}
+
 // ── Subtyping rules (type-system.md §9) ────────────────────────────────────
 
 #[test]

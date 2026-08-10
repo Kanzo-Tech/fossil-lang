@@ -481,6 +481,7 @@ fn collect_field_refs(expr: &crate::lower::HirExpr, out: &mut Vec<SmolStr>) {
     use crate::lower::HirExpr;
     match expr {
         HirExpr::FieldRef(name) => out.push(name.clone()),
+        HirExpr::ColumnRef { column, .. } => out.push(column.clone()),
         HirExpr::BinOp { lhs, rhs, .. } => {
             collect_field_refs(lhs, out);
             collect_field_refs(rhs, out);

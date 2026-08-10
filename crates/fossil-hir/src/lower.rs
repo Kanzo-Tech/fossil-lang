@@ -123,7 +123,25 @@ pub enum HirExpr {
     /// tree; Phase 1 codegen parses the template at SQL-emission time.
     Template(SmolStr),
     /// `.id` → field name `"id"`.
+    ///
+    /// The anonymous row. ADR-0057's ninth amendment ends it: every reference
+    /// becomes qualified, and this variant goes with the last fixture that
+    /// spells one. It is still here because the surface is being replaced in
+    /// stages — see [`Self::ColumnRef`].
     FieldRef(SmolStr),
+    /// `orders.user_id` → the `user_id` column of the row `orders` names.
+    ///
+    /// The qualified reference (ADR-0057, ninth amendment). It shares its CST
+    /// shape with a call's callee — `io.csv` is the same `IDENT DOT IDENT` —
+    /// so what separates them is the parenthesis, and what separates it from
+    /// `clean.slug` (a stdlib function named but not applied) is whether the
+    /// head is a catalogued namespace.
+    ///
+    /// Both spellings are accepted while the surface is replaced in stages.
+    /// That is two spellings for one idea, which this house does not keep: the
+    /// sequence ends by deleting `FieldRef`, and until it does the language in
+    /// this tree is mid-move, not finished.
+    ColumnRef { binding: SmolStr, column: SmolStr },
     /// `"hello"` → literal text without surrounding quotes.
     StringLit(SmolStr),
     /// `ex:foo` resolved to its full IRI.
@@ -1028,6 +1046,25 @@ fn lower_postfix(
         .any(|t| t.kind() == SyntaxKind::LPAREN);
 
     if !is_call {
+        // `orders.user_id` — a qualified column reference (ADR-0057, ninth
+        // amendment). It reaches here because the CST cannot tell it from a
+        // call's callee: both are `IDENT DOT IDENT`. The parenthesis separates
+        // those two, and the stdlib catalogue separates this from the case
+        // below: `clean` is a namespace, `orders` is not.
+        if let Some(dotted) = dotted_name(node) {
+            let mut parts = dotted.split('.');
+            if let (Some(head), Some(column), None) = (parts.next(), parts.next(), parts.next())
+                && crate::stdlib::stdlib()
+                    .iter()
+                    .all(|e| !e.name.starts_with(&format!("{head}.")))
+            {
+                return Some(HirExpr::ColumnRef {
+                    binding: SmolStr::from(head),
+                    column: SmolStr::from(column),
+                });
+            }
+        }
+
         // `ex:name = clean.slug` — a function named but never applied. v0.1 has
         // no function values (ADR-0046 §2 takes partial application out of the
         // grammar), so this is an error, not a value that quietly becomes text.
@@ -1140,6 +1177,49 @@ User : ex:Person from users
     iri = `${ex:}user/${.id}`
     ex:name = .name
 ";
+
+    fn lower_src(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        (db, file)
+    }
+
+    /// `users.name` lowers to a qualified column reference (ADR-0057, ninth
+    /// amendment). It arrives at the parser as `IDENT DOT IDENT` — the very
+    /// shape of a call's callee — so this pins the branch that separates them.
+    #[test]
+    fn a_qualified_reference_lowers_to_a_column_ref() {
+        let (db, file) = lower_src(
+            "prefix ex: <https://example.org/>\n\nusers := io.csv(\"u.csv\")\n\nUser : ex:Person from users\n    ex:name = users.name\n",
+        );
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let body = crate::body::body(&db, mapping);
+        assert_eq!(
+            body.properties(&db)[0].value,
+            HirExpr::ColumnRef {
+                binding: "users".into(),
+                column: "name".into()
+            }
+        );
+    }
+
+    /// And the diagnostic it shares a CST shape with SURVIVES: `clean.slug` is
+    /// a catalogued namespace, so it is still a function named but not applied,
+    /// not a column of a row called `clean`. The stdlib catalogue is what tells
+    /// the two apart.
+    #[test]
+    fn a_stdlib_name_without_its_call_is_still_an_error() {
+        let (db, file) = lower_src(
+            "prefix ex: <https://example.org/>\n\nusers := io.csv(\"u.csv\")\n\nUser : ex:Person from users\n    ex:name = clean.slug\n",
+        );
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let body = crate::body::body(&db, mapping);
+        assert!(
+            body.properties(&db).is_empty(),
+            "a function named but not called must not lower to a value"
+        );
+    }
 
     fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
