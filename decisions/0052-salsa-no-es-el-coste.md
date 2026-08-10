@@ -1,7 +1,7 @@
 # ADR 0052: Salsa no es el coste, y el −52% nunca fue nuestro
 
 **Date:** 2026-08-07
-**Status:** proposed
+**Status:** accepted
 **Decider:** Angel Iglesias (Kanzo)
 **Cite:** Revisa ADR-0046 §6 y detiene F6 §§1–2. Las cifras son de este árbol, medidas el 2026-08-07
 en release sobre Darwin 25.2 (Apple silicon), con `crates/fossil-mir/examples/query_time.rs` (dentro
