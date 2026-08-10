@@ -39,7 +39,11 @@ fn lit(path: &Path) -> String {
 
 /// Write the three Parquets a single-type corpus consists of, with `dense_id`
 /// in IRI order and the placeholder layout columns the W0b writer emits.
-fn write_corpus(conn: &Connection, root: &Path, edges: &[(u32, u32)]) -> (PathBuf, PathBuf, PathBuf) {
+fn write_corpus(
+    conn: &Connection,
+    root: &Path,
+    edges: &[(u32, u32)],
+) -> (PathBuf, PathBuf, PathBuf) {
     let vertices = root.join("Node.parquet");
     let by_source = root.join("by_source.parquet");
     let by_target = root.join("by_target.parquet");
@@ -164,7 +168,9 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     assert_eq!(
         scalar(
             &conn,
-            &format!("SELECT count(*) FROM read_parquet('{all}') WHERE dense_id NOT BETWEEN 0 AND 5")
+            &format!(
+                "SELECT count(*) FROM read_parquet('{all}') WHERE dense_id NOT BETWEEN 0 AND 5"
+            )
         ),
         0,
         "dense_id left the range 0..n-1",

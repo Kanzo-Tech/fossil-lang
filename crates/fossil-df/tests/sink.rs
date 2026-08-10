@@ -34,7 +34,15 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new()).await.expect("execute_graph");
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_graph");
 
     let dir = tempfile::tempdir().expect("tempdir");
     graph.write_to_dir(dir.path()).expect("write_to_dir");
@@ -62,7 +70,10 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     assert!(yaml.contains("name: dense_id"), "{yaml}");
 
     // Edges round-trip: 4 orders → 4 CSR rows.
-    let edges = read_parquet_rows(&dir.path().join("edge/Order_placedBy_Person/by_source.parquet"));
+    let edges = read_parquet_rows(
+        &dir.path()
+            .join("edge/Order_placedBy_Person/by_source.parquet"),
+    );
     assert_eq!(edges, 4);
 }
 

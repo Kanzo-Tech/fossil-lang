@@ -37,9 +37,15 @@ async fn execute_vertex_materialises_graphar_shape() {
         .expect("hello.fossil must contain one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(&ctx, &db, mapping, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
-        .await
-        .expect("execute_vertex runs the DataFusion plan");
+    let (vertex, node) = fossil_df::execute_vertex(
+        &ctx,
+        &db,
+        mapping,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_vertex runs the DataFusion plan");
 
     // The node's metadata is the graph-schema contract; the table holds the data.
     assert_eq!(vertex.label, "Person");
@@ -77,7 +83,10 @@ async fn execute_vertex_materialises_graphar_shape() {
     );
 }
 
-fn column<A: Array + 'static>(batch: &datafusion::arrow::record_batch::RecordBatch, i: usize) -> &A {
+fn column<A: Array + 'static>(
+    batch: &datafusion::arrow::record_batch::RecordBatch,
+    i: usize,
+) -> &A {
     batch
         .column(i)
         .as_any()

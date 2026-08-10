@@ -19,7 +19,6 @@ pub enum MaterializeError {
     Secret { name: String, source: duckdb::Error },
 }
 
-
 /// Install a [`ResolvedPath`]'s scoped `CREATE SECRET` on a `DuckDB` connection
 /// under the given `name`, BEFORE any `read_*`/`COPY` that dereferences a cloud
 /// URL under it. A no-op when the path carries no secret (local / public URLs).
@@ -48,4 +47,3 @@ pub fn install_secret(
     }
     Ok(())
 }
-

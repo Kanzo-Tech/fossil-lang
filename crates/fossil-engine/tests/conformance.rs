@@ -292,7 +292,8 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     );
     for k in 0..expected_tiles {
         assert!(
-            dest.join(format!("vertex/Person/chunk{k}.parquet")).exists(),
+            dest.join(format!("vertex/Person/chunk{k}.parquet"))
+                .exists(),
             "tile {k} is missing, so the ids it holds are not addressable"
         );
     }
@@ -325,7 +326,10 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         &conn,
         &format!("SELECT count(DISTINCT src_dense >> {shift}) FROM '{by_source}'"),
     );
-    assert!(occupied >= 3, "non-vacuity: {occupied} occupied edge tile(s)");
+    assert!(
+        occupied >= 3,
+        "non-vacuity: {occupied} occupied edge tile(s)"
+    );
     assert_eq!(
         files_in(&edge_tiles) as i64,
         occupied,

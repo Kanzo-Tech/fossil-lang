@@ -138,20 +138,32 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         .iter()
         .filter_map(|c| c["name"].as_str())
         .collect();
-    assert_eq!(kb_cols, vec!["label"], "KB carries its own column; got: {kb_cols:?}");
+    assert_eq!(
+        kb_cols,
+        vec!["label"],
+        "KB carries its own column; got: {kb_cols:?}"
+    );
 
     let project = vertices
         .iter()
         .find(|v| v["type"] == "Project")
         .expect("Project vertex");
-    assert_eq!(project["count"].as_i64(), Some(2), "two Projects; got: {project}");
+    assert_eq!(
+        project["count"].as_i64(),
+        Some(2),
+        "two Projects; got: {project}"
+    );
     let proj_cols: Vec<&str> = project["columns"]
         .as_array()
         .expect("project columns")
         .iter()
         .filter_map(|c| c["name"].as_str())
         .collect();
-    assert_eq!(proj_cols, vec!["title"], "Project carries its own column; got: {proj_cols:?}");
+    assert_eq!(
+        proj_cols,
+        vec!["title"],
+        "Project carries its own column; got: {proj_cols:?}"
+    );
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB.
     assert!(

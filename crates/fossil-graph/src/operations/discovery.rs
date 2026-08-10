@@ -72,7 +72,9 @@ pub struct ExpandParams {
 }
 
 /// Which edges an expansion keeps — Neo4j's `Expand(All)` / `Expand(Into)`.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpandMode {
     /// Walk outward: every edge leaving the frontier, up to `depth`.

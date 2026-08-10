@@ -20,19 +20,17 @@ use std::fmt::Write;
 
 use serde_json::Value;
 
+use crate::manifest::RESERVED_VERTEX_COLUMNS;
 use crate::manifest::{Manifest, edge_table_name};
-use crate::operations::aggregate::{
-    AggregateParams, AggregateResult, AggregateRow, Aggregation,
-};
+use crate::operations::aggregate::{AggregateParams, AggregateResult, AggregateRow, Aggregation};
 use crate::operations::discovery::{
     ExpandMode, ExpandParams, ExpandResult, GraphEdge, GraphVertex, PathParams, PathResult,
     ReadParams, ReadResult,
 };
-use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::operations::schema::{
     EdgeTypeSummary, FieldRole, FieldStat, SchemaParams, SchemaResult, VertexTypeSummary,
 };
-use crate::manifest::RESERVED_VERTEX_COLUMNS;
+use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::{GraphError, Operation, Result};
 
 /// `(column_name, column_type)` descriptors paired with the JSON result rows —
@@ -49,10 +47,7 @@ pub trait DuckExecutor {
     ///
     /// Returns [`GraphError::Execution`] (carrying the binding's stringified
     /// DB error) when the query fails.
-    fn query_json(
-        &self,
-        sql: &str,
-    ) -> impl std::future::Future<Output = Result<Vec<Value>>>;
+    fn query_json(&self, sql: &str) -> impl std::future::Future<Output = Result<Vec<Value>>>;
 
     /// Run `sql`, returning `(column_name, column_type)` descriptors alongside
     /// the rows. Only [`Operation::ExecuteSql`] needs column types; the default
@@ -62,10 +57,7 @@ pub trait DuckExecutor {
     /// # Errors
     ///
     /// As [`DuckExecutor::query_json`].
-    fn query_columns(
-        &self,
-        sql: &str,
-    ) -> impl std::future::Future<Output = Result<ColumnedRows>> {
+    fn query_columns(&self, sql: &str) -> impl std::future::Future<Output = Result<ColumnedRows>> {
         async move {
             let rows = self.query_json(sql).await?;
             let columns = rows
@@ -276,7 +268,10 @@ impl<E: DuckExecutor> Context<'_, E> {
         match p.bins {
             None => self.aggregate_by_value(p).await,
             // `limit` caps rows in both arms, so it caps bins here: one meaning.
-            Some(bins) => self.aggregate_by_range(p, bins.clamp(1, p.limit.max(1))).await,
+            Some(bins) => {
+                self.aggregate_by_range(p, bins.clamp(1, p.limit.max(1)))
+                    .await
+            }
         }
     }
 
@@ -351,7 +346,9 @@ impl<E: DuckExecutor> Context<'_, E> {
         };
 
         let width = (hi - lo) / f64::from(bins);
-        let edges = (0..=bins).map(|i| f64::from(i).mul_add(width, lo)).collect();
+        let edges = (0..=bins)
+            .map(|i| f64::from(i).mul_add(width, lo))
+            .collect();
         let mut values = vec![0.0_f64; bins as usize];
 
         if width > 0.0 {
@@ -517,7 +514,13 @@ impl<E: DuckExecutor> Context<'_, E> {
             p.limit
         );
         Ok(ExpandResult {
-            edges: self.exec.query_json(&sql).await?.iter().filter_map(row_to_edge).collect(),
+            edges: self
+                .exec
+                .query_json(&sql)
+                .await?
+                .iter()
+                .filter_map(row_to_edge)
+                .collect(),
             vertices: seeds,
         })
     }
@@ -840,10 +843,13 @@ fn agg_expr(p: &AggregateParams) -> Result<String> {
     Ok(match p.agg {
         Aggregation::Count => "count(*)".to_string(),
         measured => {
-            let measure = p.measure.as_deref().ok_or_else(|| GraphError::InvalidParams {
-                verb: "aggregate",
-                detail: format!("agg `{}` requires a `measure` column", agg_fn(measured)),
-            })?;
+            let measure = p
+                .measure
+                .as_deref()
+                .ok_or_else(|| GraphError::InvalidParams {
+                    verb: "aggregate",
+                    detail: format!("agg `{}` requires a `measure` column", agg_fn(measured)),
+                })?;
             format!("{}({})", agg_fn(measured), quote_ident(measure))
         }
     })
@@ -1128,7 +1134,13 @@ mod tests {
             &FakeExec,
         )
         .unwrap_err();
-        assert!(matches!(err, GraphError::InvalidParams { verb: "aggregate", .. }));
+        assert!(matches!(
+            err,
+            GraphError::InvalidParams {
+                verb: "aggregate",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1280,7 +1292,10 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            GraphError::InvalidParams { verb: "aggregate", .. }
+            GraphError::InvalidParams {
+                verb: "aggregate",
+                ..
+            }
         ));
     }
 
@@ -1383,21 +1398,48 @@ mod tests {
     #[test]
     fn infer_role_full_heuristic() {
         // id/uri/iri name wins, case-insensitive, at token boundaries.
-        assert_eq!(infer_role("user_id", "string", None, None), FieldRole::Identifier);
-        assert_eq!(infer_role("IRI", "string", None, None), FieldRole::Identifier);
-        assert_eq!(infer_role("home.uri", "string", None, None), FieldRole::Identifier);
+        assert_eq!(
+            infer_role("user_id", "string", None, None),
+            FieldRole::Identifier
+        );
+        assert_eq!(
+            infer_role("IRI", "string", None, None),
+            FieldRole::Identifier
+        );
+        assert_eq!(
+            infer_role("home.uri", "string", None, None),
+            FieldRole::Identifier
+        );
         // "candid" contains "id" but not at a boundary → not an identifier.
-        assert_eq!(infer_role("candidate", "string", Some(1), Some(10)), FieldRole::Dimension);
+        assert_eq!(
+            infer_role("candidate", "string", Some(1), Some(10)),
+            FieldRole::Dimension
+        );
         // numeric → measure (GraphAr spellings, incl. the int64 bug-fix case).
         assert_eq!(infer_role("age", "int64", None, None), FieldRole::Measure);
-        assert_eq!(infer_role("score", "double", None, None), FieldRole::Measure);
+        assert_eq!(
+            infer_role("score", "double", None, None),
+            FieldRole::Measure
+        );
         // bool / temporal → dimension.
-        assert_eq!(infer_role("active", "bool", None, None), FieldRole::Dimension);
+        assert_eq!(
+            infer_role("active", "bool", None, None),
+            FieldRole::Dimension
+        );
         assert_eq!(infer_role("born", "date", None, None), FieldRole::Dimension);
         // high cardinality → identifier; low → dimension.
-        assert_eq!(infer_role("email", "string", Some(95), Some(100)), FieldRole::Identifier);
-        assert_eq!(infer_role("dept", "string", Some(3), Some(100)), FieldRole::Dimension);
-        assert_eq!(infer_role("huge", "string", Some(201), Some(100_000)), FieldRole::Identifier);
+        assert_eq!(
+            infer_role("email", "string", Some(95), Some(100)),
+            FieldRole::Identifier
+        );
+        assert_eq!(
+            infer_role("dept", "string", Some(3), Some(100)),
+            FieldRole::Dimension
+        );
+        assert_eq!(
+            infer_role("huge", "string", Some(201), Some(100_000)),
+            FieldRole::Identifier
+        );
     }
 
     #[test]
@@ -1405,7 +1447,10 @@ mod tests {
         let m = fixture();
         let exec = FnExec(|sql: &str| {
             if sql.contains("WITH RECURSIVE") {
-                assert!(sql.contains("WHERE src IN ('urn:a')"), "seeded by set: {sql}");
+                assert!(
+                    sql.contains("WHERE src IN ('urn:a')"),
+                    "seeded by set: {sql}"
+                );
                 // depth-1 out-neighbours of the origin.
                 vec![serde_json::json!({
                     "src": "urn:a",
@@ -1542,5 +1587,4 @@ mod tests {
         assert_eq!(r.rows.len(), 2);
         assert_eq!(r.columns.len(), 2);
     }
-
 }

@@ -95,7 +95,10 @@ fn refs_lists_typed_references_with_connection_aliases() {
         .iter()
         .filter(|r| r["connection"] == "vocab" && r["role"] == "schema")
         .count();
-    assert_eq!(schema_refs, 1, "schema ref deduped across members: {refs:?}");
+    assert_eq!(
+        schema_refs, 1,
+        "schema ref deduped across members: {refs:?}"
+    );
 
     // The literal local path has no connection alias.
     let plain = refs

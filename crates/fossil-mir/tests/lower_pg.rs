@@ -11,7 +11,7 @@ use std::sync::Arc;
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
 use fossil_hir::def_map::def_map;
-use fossil_mir::{apply_output_shape, lower_to_mir_pg, Op};
+use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
 
 const HELLO: &str = "\
 prefix ex: <https://example.org/>
@@ -50,7 +50,10 @@ fn lower_pg_emits_source_vertex_sink() {
     else {
         panic!("op[1] must be EmitVertex, got {:?}", ops[1]);
     };
-    assert_eq!(type_name, "Person", "vertex type = subject shape local name");
+    assert_eq!(
+        type_name, "Person",
+        "vertex type = subject shape local name"
+    );
     assert_eq!(
         rdf_type.as_deref(),
         Some("https://example.org/Person"),
@@ -111,7 +114,11 @@ Thing : ex:Thing from filtered
     // The specific regression: never reach for the fixture path.
     for op in mir.ops(&db) {
         if let Op::Source { uri, .. } = op {
-            assert_ne!(uri.as_str(), "examples/users.csv", "the Phase-1 default is gone");
+            assert_ne!(
+                uri.as_str(),
+                "examples/users.csv",
+                "the Phase-1 default is gone"
+            );
         }
     }
 }
@@ -164,7 +171,11 @@ fn lower_pg_classifies_edge_vs_prop() {
         })
         .expect("an EmitVertex");
     assert_eq!(vtype, "Order");
-    assert_eq!(prop_names, ["total"], "only the literal property is a vertex prop");
+    assert_eq!(
+        prop_names,
+        ["total"],
+        "only the literal property is a vertex prop"
+    );
 
     // placedBy → Person edge; external is dangling → no edge.
     let edges: Vec<(String, String)> = ops
@@ -262,7 +273,11 @@ fn apply_output_shape_reclassifies_shape_ref_to_edge() {
     let names: Vec<&str> = props.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["label"], "the shape-ref left the vertex props");
     assert!(
-        props.iter().find(|p| p.name == "label").unwrap().single_valued,
+        props
+            .iter()
+            .find(|p| p.name == "label")
+            .unwrap()
+            .single_valued,
         "label is Exact(1) → single-valued"
     );
 

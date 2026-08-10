@@ -79,7 +79,10 @@ fn manifest() -> Manifest {
         vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
     );
     let mut map = HashMap::new();
-    map.insert("graph.graph.yml".into(), graph.to_yaml().unwrap().into_bytes());
+    map.insert(
+        "graph.graph.yml".into(),
+        graph.to_yaml().unwrap().into_bytes(),
+    );
     map.insert(
         "vertex/Person.vertex.yml".into(),
         person.to_yaml().unwrap().into_bytes(),
@@ -183,7 +186,11 @@ fn aggregate_count_by_name() {
         }),
     );
     assert_eq!(r.rows.len(), 3);
-    assert!(r.rows.iter().all(|row| (row.value - 1.0).abs() < f64::EPSILON));
+    assert!(
+        r.rows
+            .iter()
+            .all(|row| (row.value - 1.0).abs() < f64::EPSILON)
+    );
 }
 
 #[test]

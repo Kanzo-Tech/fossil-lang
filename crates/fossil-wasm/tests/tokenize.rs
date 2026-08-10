@@ -74,7 +74,10 @@ fn tokenize_handles_unicode_in_comments() {
     let src = "// comentário ñ\nprefix ex: <https://example.org/>\n";
     let rows = tokenize_native(src);
 
-    assert!(!rows.is_empty(), "source with comment + prefix decl emits tokens");
+    assert!(
+        !rows.is_empty(),
+        "source with comment + prefix decl emits tokens"
+    );
 
     let max_end = rows.iter().map(|r| r.end).max().expect("non-empty");
     assert!(

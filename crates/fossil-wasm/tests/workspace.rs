@@ -178,4 +178,3 @@ fn workspace_set_target_shex_smoke() {
     pg.set_target_shex_native(MINIMAL_SHEX_JSON)
         .expect("re-install after failure still works");
 }
-

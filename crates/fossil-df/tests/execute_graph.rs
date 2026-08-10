@@ -39,9 +39,15 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
-        .await
-        .expect("execute_graph runs both phases");
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_graph runs both phases");
 
     // Two vertex types (source order: Person, Order); one edge (placedBy).
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -54,9 +60,15 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
     assert_eq!(edge.dst_type, "Person");
     // The edge's predicate IRI lives in the canonical schema, not the data table.
     let schema_edge = graph.schema.edge("placedBy").expect("placedBy in schema");
-    assert_eq!(schema_edge.iri.as_deref(), Some("https://example.org/placedBy"));
     assert_eq!(
-        (schema_edge.source.as_str(), schema_edge.destination.as_str()),
+        schema_edge.iri.as_deref(),
+        Some("https://example.org/placedBy")
+    );
+    assert_eq!(
+        (
+            schema_edge.source.as_str(),
+            schema_edge.destination.as_str()
+        ),
         ("Order", "Person"),
     );
 
@@ -84,9 +96,15 @@ async fn execute_graph_emits_manifests_and_run_status() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
-        .await
-        .expect("execute_graph");
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_graph");
 
     // ── Manifests: graph index + per-type YAML, W0b paths (Type casing) ──
     let manifests = graph.manifests().expect("manifests serialize");
@@ -102,7 +120,10 @@ async fn execute_graph_emits_manifests_and_run_status() {
     );
     let person_yml = &manifests[1].yaml;
     assert!(person_yml.contains("type: Person"), "{person_yml}");
-    assert!(person_yml.contains("iri: https://example.org/Person"), "{person_yml}");
+    assert!(
+        person_yml.contains("iri: https://example.org/Person"),
+        "{person_yml}"
+    );
     assert!(person_yml.contains("name: dense_id"), "{person_yml}");
     assert!(person_yml.contains("version: gar/v1"), "{person_yml}");
 
@@ -114,7 +135,10 @@ async fn execute_graph_emits_manifests_and_run_status() {
     assert_eq!(person.vertex_type, "Person");
     assert_eq!(person.file, "vertex/Person.parquet");
     assert_eq!(person.count, Some(3));
-    assert_eq!(person.rdf_type.as_deref(), Some("https://example.org/Person"));
+    assert_eq!(
+        person.rdf_type.as_deref(),
+        Some("https://example.org/Person")
+    );
     let name = person
         .columns
         .iter()
@@ -137,8 +161,14 @@ async fn execute_graph_emits_manifests_and_run_status() {
 
     let edge = &status.edges[0];
     assert_eq!(edge.edge_type, "placedBy");
-    assert_eq!(edge.by_source, "edge/Order_placedBy_Person/by_source.parquet");
-    assert_eq!(edge.by_target, "edge/Order_placedBy_Person/by_target.parquet");
+    assert_eq!(
+        edge.by_source,
+        "edge/Order_placedBy_Person/by_source.parquet"
+    );
+    assert_eq!(
+        edge.by_target,
+        "edge/Order_placedBy_Person/by_target.parquet"
+    );
     assert_eq!(edge.count, Some(4));
 }
 

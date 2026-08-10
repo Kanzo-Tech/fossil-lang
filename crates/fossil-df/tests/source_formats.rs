@@ -31,9 +31,15 @@ async fn reads_an_ndjson_source() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(&ctx, &db, mapping, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
-        .await
-        .expect("io.json reads via read_json");
+    let (vertex, node) = fossil_df::execute_vertex(
+        &ctx,
+        &db,
+        mapping,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("io.json reads via read_json");
 
     assert_eq!(node.label, "Person");
     let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();
@@ -42,7 +48,10 @@ async fn reads_an_ndjson_source() {
     let batch = vertex.batches.first().unwrap();
     let schema = batch.schema();
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-    assert_eq!(names, ["dense_id", "subject", "name", "x", "y", "cluster_id"]);
+    assert_eq!(
+        names,
+        ["dense_id", "subject", "name", "x", "y", "cluster_id"]
+    );
 
     let name = batch
         .column(2)

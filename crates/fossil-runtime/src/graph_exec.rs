@@ -42,7 +42,8 @@ impl DuckExecutor for DuckRuntime<'_> {
     }
 
     async fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
-        self.run(sql).map_err(|e| GraphError::Execution(e.to_string()))
+        self.run(sql)
+            .map_err(|e| GraphError::Execution(e.to_string()))
     }
 }
 

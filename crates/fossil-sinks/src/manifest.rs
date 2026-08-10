@@ -396,7 +396,10 @@ mod tests {
         assert!(yaml.contains("type: Person"), "{yaml}");
         // Asserted against the constant, not a literal: the value is a measured trade-off
         // (see DEFAULT_CHUNK_SIZE) and this test is about the spec *spelling* of the key.
-        assert!(yaml.contains(&format!("chunk_size: {DEFAULT_CHUNK_SIZE}")), "{yaml}");
+        assert!(
+            yaml.contains(&format!("chunk_size: {DEFAULT_CHUNK_SIZE}")),
+            "{yaml}"
+        );
         assert!(yaml.contains("prefix: vertex/person/"), "{yaml}");
         assert!(yaml.contains("property_groups:"), "{yaml}");
         assert!(yaml.contains("data_type: int64"), "{yaml}");

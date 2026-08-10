@@ -17,8 +17,8 @@
 //! to shrink the graph.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use fossil_runtime::layout::community_hierarchy;
 
@@ -79,7 +79,10 @@ fn planted(n: u32, mean_degree: u32, block: u32) -> Vec<(u32, u32)> {
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let n: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(1_000_000);
+    let n: u32 = args
+        .next()
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(1_000_000);
     let mean_degree: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(14);
     let block: u32 = 128;
 
@@ -95,10 +98,7 @@ fn main() {
         gib(after_edges),
         gib(after_edges - baseline)
     );
-    println!(
-        "  the Vec alone   {:.2} GiB",
-        gib(edges.len() as u64 * 8)
-    );
+    println!("  the Vec alone   {:.2} GiB", gib(edges.len() as u64 * 8));
 
     // Sampled from a second thread while the call runs, because the number that matters is the
     // peak *inside* it. Reading RSS after it returns measures what survived, and a contraction

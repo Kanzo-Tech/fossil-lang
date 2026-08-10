@@ -6,7 +6,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use fossil_df_wasm::{execute_core, program_sources_core, SourceInput, SourceKind};
+use fossil_df_wasm::{SourceInput, SourceKind, execute_core, program_sources_core};
 
 const PROGRAM: &str = "\
 prefix ex: <https://example.org/>
@@ -97,7 +97,10 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     // `@mybucket/users.csv` resolves to `{base}/users.csv` via the ref-map —
     // both `sources()` (enumeration) and `run()` (staging + read) must agree.
     let mut refs = std::collections::HashMap::new();
-    refs.insert("mybucket".to_string(), "https://data.example.com".to_string());
+    refs.insert(
+        "mybucket".to_string(),
+        "https://data.example.com".to_string(),
+    );
 
     let listed = program_sources_core(CONN_PROGRAM, None, &refs).expect("sources");
     assert_eq!(listed.len(), 1);
@@ -113,7 +116,11 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     let out = execute_core(CONN_PROGRAM, None, sources, "s3://jobs/run-1", &refs)
         .await
         .expect("executor runs the @conn-aliased program");
-    let person = out.run_status.vertices.iter().find(|v| v.vertex_type == "Person");
+    let person = out
+        .run_status
+        .vertices
+        .iter()
+        .find(|v| v.vertex_type == "Person");
     assert_eq!(person.and_then(|v| v.count), Some(3));
 }
 

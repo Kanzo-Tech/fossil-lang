@@ -192,5 +192,4 @@ Org : ex:Organization from users
         let entry = idx.lookup("Org").expect("Org is defined");
         assert_eq!(entry.kind, SymbolKind::Mapping);
     }
-
 }

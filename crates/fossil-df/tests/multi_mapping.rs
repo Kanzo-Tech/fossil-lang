@@ -35,18 +35,31 @@ async fn same_type_from_two_sources_merges_into_one_table() {
     let file = SourceFile::new(&db, PROGRAM.to_string(), "merge.fossil".to_string());
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT, &std::collections::HashMap::new())
-        .await
-        .expect("execute_graph");
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_graph");
 
     // Exactly ONE Person vertex table (not one per mapping).
-    assert_eq!(graph.vertices.len(), 1, "the two Person mappings merge into one table");
+    assert_eq!(
+        graph.vertices.len(),
+        1,
+        "the two Person mappings merge into one table"
+    );
     let person = &graph.vertices[0];
     assert_eq!(person.label, "Person");
 
     // 5 distinct subjects (person/3 deduped across the two sources), dense 0..4.
     let total: usize = person.batches.iter().map(|b| b.num_rows()).sum();
-    assert_eq!(total, 5, "union of {{1,2,3}} and {{3,4,5}} deduped by subject = 5");
+    assert_eq!(
+        total, 5,
+        "union of {{1,2,3}} and {{3,4,5}} deduped by subject = 5"
+    );
 
     let subjects: Vec<String> = person
         .batches
@@ -57,7 +70,9 @@ async fn same_type_from_two_sources_merges_into_one_table() {
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .expect("subject is a string");
-            (0..col.len()).map(|i| col.value(i).to_string()).collect::<Vec<_>>()
+            (0..col.len())
+                .map(|i| col.value(i).to_string())
+                .collect::<Vec<_>>()
         })
         .collect();
     assert_eq!(

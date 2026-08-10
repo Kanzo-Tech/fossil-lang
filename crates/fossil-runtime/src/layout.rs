@@ -89,7 +89,9 @@ pub fn weakly_connected_components(vertex_count: u32, edges: &[(u32, u32)]) -> V
     let mut out = vec![0u32; n];
     for i in 0..n {
         let root = find(&mut parent, i as u32);
-        let id = if let Some(id) = label[root as usize] { id } else {
+        let id = if let Some(id) = label[root as usize] {
+            id
+        } else {
             let id = next;
             label[root as usize] = Some(id);
             next += 1;
@@ -285,7 +287,9 @@ pub enum LayoutError {
     MissingOrientation { target: String },
     /// A tile size that is not a power of two, so `dense_id >> shift` does not
     /// name a tile.
-    #[error("vertex type `{vertex_type}` declares a tile of {rows} rows, which is not a power of two")]
+    #[error(
+        "vertex type `{vertex_type}` declares a tile of {rows} rows, which is not a power of two"
+    )]
     TileSize { vertex_type: String, rows: u64 },
     /// A tile prefix that could not be created on the local filesystem.
     #[error("creating the tile directory `{prefix}` failed: {source}")]
@@ -576,8 +580,10 @@ pub fn enrich_layout(
         // Free the staged vertices before the next target (each type can be
         // large; the temp tables are single-use per iteration). The mapping stays
         // — phase two needs every type's at once.
-        conn.execute_batch("DROP TABLE IF EXISTS __fossil_vertices; DROP TABLE IF EXISTS __fossil_enriched")
-            .map_err(duck)?;
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS __fossil_vertices; DROP TABLE IF EXISTS __fossil_enriched",
+        )
+        .map_err(duck)?;
     }
 
     let index_of = |name: &str, target: &str| {
@@ -738,7 +744,10 @@ const fn shift_for(rows: u64) -> Option<u32> {
 /// the separator appended, which cannot happen from the writer and is not worth
 /// an error variant nobody can reach.
 fn tile_prefix(adjacency: &str) -> String {
-    format!("{}/", adjacency.strip_suffix(".parquet").unwrap_or(adjacency))
+    format!(
+        "{}/",
+        adjacency.strip_suffix(".parquet").unwrap_or(adjacency)
+    )
 }
 
 /// Create the directory a local prefix names, so `COPY` has somewhere to put a
@@ -1713,7 +1722,12 @@ mod hierarchy_tests {
             }
             assert!(seen.iter().all(|s| *s), "level {l} ids must be dense");
             if let Some(next) = levels.get(l + 1) {
-                assert_eq!(next.len(), count, "level {} indexes level {l}'s output", l + 1);
+                assert_eq!(
+                    next.len(),
+                    count,
+                    "level {} indexes level {l}'s output",
+                    l + 1
+                );
             }
         }
     }
@@ -1723,7 +1737,10 @@ mod hierarchy_tests {
     #[test]
     fn the_same_graph_gives_the_same_hierarchy() {
         let edges: Vec<(u32, u32)> = (0..40u32).map(|i| (i % 10, (i * 7) % 10)).collect();
-        assert_eq!(community_hierarchy(10, &edges), community_hierarchy(10, &edges));
+        assert_eq!(
+            community_hierarchy(10, &edges),
+            community_hierarchy(10, &edges)
+        );
     }
 
     /// The budget picks a level, and picking is the whole job: a hierarchy has
@@ -1778,7 +1795,10 @@ mod hierarchy_tests {
         // Each family occupies one contiguous run, so the sequence changes hands
         // exactly once.
         let switches = families.windows(2).filter(|w| w[0] != w[1]).count();
-        assert_eq!(switches, 1, "families must not be interleaved: {families:?}");
+        assert_eq!(
+            switches, 1,
+            "families must not be interleaved: {families:?}"
+        );
     }
 
     /// Z-order is what turns "consecutive" into "nearby" on the grid: the first

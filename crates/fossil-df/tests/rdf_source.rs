@@ -37,7 +37,8 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
     let accept_all = fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
-    let bindings = fossil_df::provider_bindings(&db, file, &accept_all, &std::collections::HashMap::new());
+    let bindings =
+        fossil_df::provider_bindings(&db, file, &accept_all, &std::collections::HashMap::new());
     assert_eq!(bindings.len(), 1, "one io.rdf source");
     let b = &bindings[0];
     assert_eq!(b.binding, "people");
@@ -60,12 +61,24 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The host reads the bytes (here: from the filesystem) and registers the
     // decoded relation. Then the executor scans it.
     let ctx = SessionContext::new();
-    fossil_df::register_provider_sources(&ctx, &db, file, &accept_all, &std::collections::HashMap::new())
-        .expect("register io.rdf source");
+    fossil_df::register_provider_sources(
+        &ctx,
+        &db,
+        file,
+        &accept_all,
+        &std::collections::HashMap::new(),
+    )
+    .expect("register io.rdf source");
 
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &accept_all, &std::collections::HashMap::new())
-        .await
-        .expect("execute_graph over an io.rdf source");
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &accept_all,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_graph over an io.rdf source");
 
     // One vertex type; no edges. Subject selection by rdf:type drops the Org.
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -79,10 +92,17 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     let batch = vertex.batches.first().unwrap();
     let schema = batch.schema();
     let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-    assert_eq!(names, ["dense_id", "subject", "name", "age", "x", "y", "cluster_id"]);
+    assert_eq!(
+        names,
+        ["dense_id", "subject", "name", "age", "x", "y", "cluster_id"]
+    );
 
     let col = |i: usize| {
-        let a = batch.column(i).as_any().downcast_ref::<StringArray>().unwrap();
+        let a = batch
+            .column(i)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
         (0..a.len())
             .map(|r| (!a.is_null(r)).then(|| a.value(r).to_string()))
             .collect::<Vec<_>>()
@@ -142,17 +162,33 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
     );
 
     let ctx = SessionContext::new();
-    fossil_df::register_provider_sources(&ctx, &db, file, &descriptor, &std::collections::HashMap::new())
-        .expect("register both io.rdf shapes");
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor, &std::collections::HashMap::new())
-        .await
-        .expect("execute_graph with the ShEx descriptor");
+    fossil_df::register_provider_sources(
+        &ctx,
+        &db,
+        file,
+        &descriptor,
+        &std::collections::HashMap::new(),
+    )
+    .expect("register both io.rdf shapes");
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &descriptor,
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .expect("execute_graph with the ShEx descriptor");
 
     // Two vertex types, each from ITS shape: KB carries `label` (NOT hasProject —
     // that's an edge), Project carries `title`.
     let kb = graph.schema.node("KB").expect("KB node");
     let kb_cols: Vec<&str> = kb.properties.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(kb_cols, ["label"], "hasProject left KB's columns (it's an edge)");
+    assert_eq!(
+        kb_cols,
+        ["label"],
+        "hasProject left KB's columns (it's an edge)"
+    );
     let kb_count: usize = graph
         .vertices
         .iter()
@@ -175,7 +211,13 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
         .iter()
         .find(|e| e.label == "hasProject")
         .expect("hasProject edge");
-    assert_eq!((edge.src_type.as_str(), edge.dst_type.as_str()), ("KB", "Project"));
+    assert_eq!(
+        (edge.src_type.as_str(), edge.dst_type.as_str()),
+        ("KB", "Project")
+    );
     let edge_count: usize = edge.by_source.iter().map(|b| b.num_rows()).sum();
-    assert_eq!(edge_count, 2, "kb/1 → {{proj/1, proj/2}} unrolls to 2 edges");
+    assert_eq!(
+        edge_count, 2,
+        "kb/1 → {{proj/1, proj/2}} unrolls to 2 edges"
+    );
 }

@@ -75,8 +75,10 @@ pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), St
             .iter()
             .map(|(k, v)| (k.clone(), SecretString::from(v.clone())))
             .collect();
-        let resolved =
-            ResolvedPath::with_secret(&dataset.dest, CloudSecret::new(spec.secret_type.clone(), params));
+        let resolved = ResolvedPath::with_secret(
+            &dataset.dest,
+            CloudSecret::new(spec.secret_type.clone(), params),
+        );
         fossil_runtime::install_secret(&conn, &resolved, "__fossil_mcp_dest")
             .map_err(|e| e.to_string())?;
     }
@@ -219,7 +221,9 @@ mod tests {
     #[test]
     fn register_views_sql_uses_writer_layout() {
         use fossil_graph::manifest::ManifestSource as _;
-        use fossil_sinks::manifest::{DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo};
+        use fossil_sinks::manifest::{
+            DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+        };
 
         let mut person = VertexInfo::new(
             "Person",
@@ -257,8 +261,14 @@ mod tests {
             vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
         );
         let mut map = HashMap::new();
-        map.insert("graph.graph.yml".to_string(), graph.to_yaml().unwrap().into_bytes());
-        map.insert("vertex/Person.vertex.yml".to_string(), person.to_yaml().unwrap().into_bytes());
+        map.insert(
+            "graph.graph.yml".to_string(),
+            graph.to_yaml().unwrap().into_bytes(),
+        );
+        map.insert(
+            "vertex/Person.vertex.yml".to_string(),
+            person.to_yaml().unwrap().into_bytes(),
+        );
         map.insert(
             "edge/Person_knows_Person/Person_knows_Person.edge.yml".to_string(),
             edge.to_yaml().unwrap().into_bytes(),

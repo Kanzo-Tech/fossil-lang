@@ -156,7 +156,11 @@ fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
             }
         }
     }
-    assert!(!out.is_empty(), "no output written under {}", root.display());
+    assert!(
+        !out.is_empty(),
+        "no output written under {}",
+        root.display()
+    );
     out
 }
 
