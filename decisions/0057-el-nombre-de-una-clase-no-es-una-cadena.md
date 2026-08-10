@@ -1054,3 +1054,114 @@ orders |> join(users, on = orders.user_id == users.id)
   aviso de método de la sexta enmienda: este trabajo cubre lo normativo y no cubre los foros.
 - **El número 35/46 es de hoy** y se cuenta con un grep de `.campo` sobre los `.fossil` del árbol; no
   distingue fixtures de recuperación de errores, que son varios y cuyo texto es inválido a propósito.
+
+
+---
+
+## Décima enmienda, 2026-08-10 — la ligadura es por orden, y el §1 estaba construido al revés
+
+Cierra las cuatro preguntas que dejaron abiertas la octava y la novena, y **deroga la frase del §1 que
+era el titular de esta ADR**: «el nombre busca la forma en el documento». No la busca. Lo que se
+comprueba se mueve de sitio, y la garantía sobrevive.
+
+### 1. El destructuring liga por ORDEN, y el nombre local es libre
+
+```
+type { Persona } = io.shex("es.shex")
+type { Human }   = io.shex("en.shex")
+```
+
+`type { A, B } = io.shex(…)` liga `A` a la primera forma declarada y `B` a la segunda. **El nombre no
+selecciona nada**: es una etiqueta local, y por eso dos documentos no pueden colisionar — les pones
+nombres distintos y ya. Con eso muere la pregunta del renombrado que la octava dejó abierta: no hace
+falta `as` porque no hay dos cosas que separar.
+
+**Y encaja con el principio de esta ADR mejor que lo que decía el §1.** Cap'n Proto: *«any symbolic
+name can be changed, as long as the type ID … stays the same»*. El nombre local es exactamente eso, un
+símbolo renombrable, y la identidad —el IRI que se emite como `rdf:type`— sigue viniendo del documento
+y jamás del nombre que escribas. Que ADR-0057 prohíba **derivar** la identidad de un nombre nunca
+implicó **seleccionar** por nombre.
+
+**La comprobación no desaparece: se mueve, y a dos sitios.**
+
+- **En el uso**, que es donde estaba el ejemplo motivador de toda la ADR: `Persn from users` es un
+  nombre no ligado y por tanto error de compilación. El `ex:Persn` que emitía RDF válido con cero
+  instancias sigue cazado.
+- **En la declaración**, por aridad: nombrar tres miembros de un documento que declara dos es un
+  error. Es la comprobación que el modelo posicional regala y la que el modelo por nombre no tenía.
+
+**Lo que se pierde, y hay que decirlo porque es lo que un día la reabrirá:** reordenar las formas
+dentro del `.shex` **religa todo el programa en silencio**, sin que el programa cambie. Es el fallo
+posicional que la novena enmienda citó de Ecto —empezó con bindings posicionales y tuvo que añadir los
+nombrados porque componer los rompía— y que allí fue decisivo para descartar `this`/`that` de PRQL.
+Aquí se acepta a sabiendas: el documento es un fichero anclado por `sha256`, no una superficie que se
+reordena sola, y ése es el argumento que separa los dos casos.
+
+### 2. `on` admite una conjunción de igualdades
+
+`on = a.x == b.x and a.y == b.y`. No un booleano cualquiera. La clave compuesta es el caso corriente y
+**el azúcar de SQL ya la admitía**: `USING (a, b)` toma una lista, y PostgreSQL la desazucara a
+`ON T1.a = T2.a AND T1.b = T2.b`. Se rechaza el `ON` general de SQL y PRQL —*«the most general kind of
+join condition: it takes a Boolean value expression of the same kind as is used in a `WHERE`
+clause»*— porque `on = a.fecha > b.alta` deja de ser un equi-join, cambia la clase de plan y quita al
+checker la propiedad de que la condición nombra claves.
+
+### 3. No hay atajo para las claves que se llaman igual
+
+`on = orders.id == users.id`, y ya. El azúcar de ADR-0054 existía porque `.k` era la **única** forma
+escribible; ahora hay una general, y añadir la corta es añadir una segunda manera de decir lo mismo.
+Se rechazó `using = k` porque en SQL `USING` además **fusiona** la columna —*«JOIN USING produces one
+output column for each of the listed column pairs»*— y aquí no fusionaría nada: la palabra prometería
+algo que no hace. Y `==k` de PRQL, porque es un operador que sólo existiría en una posición.
+
+### 4. `select` cualifica y aplana
+
+```
+orders |> join(users, on = orders.user_id == users.id)
+       |> select(orders.amount, users.name)
+```
+
+`select` pasa a ser **el único sitio del lenguaje donde aparece una fila plana**, y es explícito:
+nombras lo que te llevas. Es SQL (`SELECT u.name, o.amount FROM …`) y es LINQ, que obliga a proyectar.
+El aplanado deja de ocurrir por defecto dentro del join y pasa a ser un acto que se escribe. Una
+colisión al proyectar se resuelve a mano, `select(orders.id as pedido, users.id as persona)` — y ese
+`as` es el mismo de siempre: dar nombre local a algo donde entra.
+
+### El hallazgo que cambia el coste, verificado contra el fichero
+
+**El §1 ya está construido, y construido al revés.** Hoy el destructuring resuelve **por nombre**:
+`by_local.get(m.as_str())` casa el miembro contra el local name del IRI de la forma
+(`crates/fossil-hir/src/def_map.rs:459-462`), con el comentario *«the member's local-name resolves to
+a shape IRI in the schema (COMPILE TIME)»*. O sea que el mecanismo existe, hace lo contrario de lo que
+esta enmienda decide, y **además no comprueba nada**: las cuatro rutas de fallo —sin `schema =`,
+fichero ilegible, descriptor no parseable, nombre no encontrado— devuelven `None` sin un solo
+diagnóstico, y aguas abajo `infer.rs:220` es un `if let Some(...)` que simplemente sigue. Es el mismo
+hallazgo que ADR-0055 hizo con `ACCEPT_ALL_DEFAULT`, en otro sitio del mismo árbol.
+
+**Y un bloqueo que hay que quitar ANTES de implementar el §1, o el resultado no es determinista.**
+`ShExDescriptor.shapes` es un `HashMap<String, ShapeBinding>` y `shapes()` es `self.shapes.values()`
+(`crates/fossil-shex/src/lib.rs:348` y `:482-484`). El hasher por defecto de Rust va sembrado al azar
+por proceso, así que **ligar por orden sobre eso haría que el mismo programa emitiera corpus distintos
+entre ejecuciones**. El orden sí llega desde arriba —`for decl in schema.shapes().into_iter().flatten()`
+(`:447`) recorre las declaraciones de rudof en orden— y somos nosotros quienes lo tiramos al insertar.
+Es un `Vec`, no un rediseño.
+
+**Deuda que muere con la decisión:** `shape_local_name` corta el IRI por el último `#` o `/`, así que
+dos formas de vocabularios distintos con el mismo local name colapsan hoy en la misma clave del
+`HashMap` y una gana en silencio. Con la ligadura por orden, `by_local` desaparece entero y el problema
+con él.
+
+### Lo que queda abierto
+
+- Si el IRI completo en cada `@subject` cansa y quiere volver una base de fichero (de la séptima).
+- Dónde va la identidad del sujeto — sigue sin arte previo, y su frente se perdió dos veces.
+- Cuántas filas puede acumular un ámbito antes de que encadenar joins deje de leerse.
+
+### Lo que no se verificó
+
+- **Que rudof preserve el orden de declaración a través del parseo.** Lo que está comprobado es que
+  `from_schema` recorre `schema.shapes()` como secuencia y que fossil destruye ese orden después; que
+  el orden que entrega rudof sea el del fichero **no se ha comprobado**, y si no lo fuera, la ligadura
+  por orden no es implementable contra ShEx en absoluto. Es lo primero que hay que medir.
+- **La aridad como comprobación no tiene arte previo buscado.** Se propone porque el modelo posicional
+  la regala, no porque nadie la haya validado.
