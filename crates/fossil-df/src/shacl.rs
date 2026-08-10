@@ -10,8 +10,8 @@
 //! - `sh:property [ sh:path p ; sh:nodeKind sh:IRI ]`   → an `AnyUri` [`Property`].
 //! - `sh:property [ sh:path p ; sh:class C | sh:node S ]`→ an [`EdgeType`] → C.
 //! - `sh:property [ sh:path p ; sh:or ( [sh:class A] [sh:class B] ) ]`
-//!     → one edge per alternative (the reference RDF→property-graph union model,
-//!       identical to ShEx's `@<A> OR @<B>`).
+//!   → one edge per alternative (the reference RDF→property-graph union model,
+//!   identical to ShEx's `@<A> OR @<B>`).
 //! - `sh:maxCount 1` ⇒ `Single`, otherwise `Multi`.
 //!
 //! Constraint features outside the graph's *shape* (`sh:minCount`, `sh:pattern`,

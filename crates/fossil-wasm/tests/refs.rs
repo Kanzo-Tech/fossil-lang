@@ -2,7 +2,7 @@
 //! `refs()` export. Proves the BROWSER path (a transient `WasmDb` +
 //! `fossil_lineage::source_refs`) produces the SAME typed lineage as the native
 //! `fossil refs` CLI, over the SAME program shape: `@conn` data + schema refs in
-//! a destructuring `io.rdf` plus an unaliased local csv. Parse-only — no DuckDB,
+//! a destructuring `io.rdf` plus an unaliased local csv. Parse-only — no `DuckDB`,
 //! no JS runtime (the `#[wasm_bindgen]` `refs()` wrapper's `serde_wasm_bindgen`
 //! call panics on native, so we exercise the `refs_native` core — the same
 //! `check` ↔ `check_rows` split this crate uses throughout).

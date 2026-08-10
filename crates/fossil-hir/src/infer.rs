@@ -596,7 +596,6 @@ pub(crate) fn record_from_shape<'db>(
     Ty::new(db, TyKind::Record(Record::new(db, fields)))
 }
 
-/// Resolve `schema_path` relative to the directory containing `file`'s path.
 // `resolve_relative` lived here as a byte-identical twin of `def_map`'s, with a
 // comment conceding the duplication to avoid a cross-module `pub`. It is now
 // `crate::def_map::resolve_relative`, imported above — a third reader made the

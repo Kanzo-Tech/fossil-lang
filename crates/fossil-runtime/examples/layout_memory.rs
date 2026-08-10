@@ -1,7 +1,7 @@
 //! What the layout core costs in memory, per level, with nothing else in the process.
 //!
 //! Writing a ten-million-vertex corpus peaks at 16.4 GiB for 713 MB of output
-//! (`kanzo-ui/BENCHMARKS.md`). That number is the whole build — the generator, DuckDB, the Parquet
+//! (`kanzo-ui/BENCHMARKS.md`). That number is the whole build — the generator, `DuckDB`, the Parquet
 //! writer and this — so it says where to look and nothing more. ADR-0042 names larger-than-RAM as
 //! the architecture's central untested claim and predicts the risk is here, in a Louvain that runs
 //! in memory over the whole graph. This isolates it: no I/O, no database, one synthetic graph, and
@@ -40,6 +40,9 @@ fn rss_bytes() -> u64 {
         * 1024
 }
 
+// Precision loss is the point: this prints a human-readable GiB figure for a
+// benchmark, where the 53rd significant bit of a byte count is noise.
+#[allow(clippy::cast_precision_loss)]
 fn gib(bytes: u64) -> f64 {
     bytes as f64 / (1024.0 * 1024.0 * 1024.0)
 }
@@ -58,6 +61,10 @@ fn planted(n: u32, mean_degree: u32, block: u32) -> Vec<(u32, u32)> {
         state ^= state << 17;
         state
     };
+    // Every `as u32` below is a modulus by a `u32`-derived bound, so the value
+    // is in range by construction — `try_from` here would be an unwrap wearing a
+    // longer name.
+    #[allow(clippy::cast_possible_truncation)]
     for v in 0..n {
         let home = v / block;
         for _ in 0..(mean_degree / 2) {

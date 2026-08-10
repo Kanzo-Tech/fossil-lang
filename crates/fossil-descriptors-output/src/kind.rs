@@ -39,7 +39,7 @@ pub enum OutputDescriptorKind {
     /// A canonical output model, already lowered (the SHACL path produces this
     /// directly — SHACL is RDF, walked into [`GraphSchema`] — and any future
     /// pre-resolved source can reuse it). The executor consumes it as-is;
-    /// `fossil-hir`'s ShEx backward checker treats it like `AcceptAll`.
+    /// `fossil-hir`'s `ShEx` backward checker treats it like `AcceptAll`.
     Shacl(GraphSchema),
     /// Phase 1 stub — accepts any graph. Used when no shape target is loaded
     /// (the walking-skeleton case) or as the degraded fallback if a host
@@ -82,7 +82,7 @@ impl OutputDescriptorKind {
 
     /// Lower this descriptor to the canonical, format-neutral [`GraphSchema`] —
     /// the single output model the executor (`apply_output_shape`) consumes,
-    /// independent of the source schema language. ShEx lowers through its
+    /// independent of the source schema language. `ShEx` lowers through its
     /// resolved table; SHACL is already a `GraphSchema`; `AcceptAll` is empty
     /// (no node/edge typing → every predicate stays a vertex property, the
     /// walking-skeleton behaviour).

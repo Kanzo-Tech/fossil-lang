@@ -157,7 +157,7 @@ pub struct AdjList {
 /// Published as arithmetic and not as prose, because that is the difference
 /// between an implementation somebody can copy and one they have to re-derive
 /// (ADR-0045, «Decidido el 2026-08-05» §4 — Iceberg publishes Murmur3 with a
-/// vector table and every port agrees; PMTiles links Wikipedia for its Hilbert
+/// vector table and every port agrees; `PMTiles` links Wikipedia for its Hilbert
 /// curve and every port differs).
 ///
 /// **The operands, spelled out.** The input is an unsigned 64-bit `dense_id`,

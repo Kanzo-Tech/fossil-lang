@@ -481,9 +481,9 @@ pub fn run(
     Ok(graph.run_status(dest_url))
 }
 
-/// Run the W3 layout enrichment over the just-written GraphAr tree: for each
-/// vertex type, point DuckDB at its `vertex/<Type>.parquet` plus the CSR Parquet
-/// of any self-edge, and rewrite the placeholder x/y/cluster_id with a real
+/// Run the W3 layout enrichment over the just-written `GraphAr` tree: for each
+/// vertex type, point `DuckDB` at its `vertex/<Type>.parquet` plus the CSR Parquet
+/// of any self-edge, and rewrite the placeholder `x/y/cluster_id` with a real
 /// layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
 ///
 /// `memory_bytes` is the run's budget again, applied to the second engine — the
@@ -580,7 +580,7 @@ fn enrich_written_layout(
 /// Materialise a DCAT-AP catalog graph from a [`CatalogRequest`]. The catalog's
 /// shape lives in fossil; the host supplies governance values + dataset
 /// structure. The catalog is "just another graph": built from literal rows and
-/// written by the SAME GraphAr path as [`run`] — `fossil_df` (Arrow), no DuckDB
+/// written by the SAME `GraphAr` path as [`run`] — `fossil_df` (Arrow), no `DuckDB`
 /// executor, no second materialiser.
 ///
 /// # Errors

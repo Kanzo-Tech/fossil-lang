@@ -331,7 +331,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "non-vacuity: {occupied} occupied edge tile(s)"
     );
     assert_eq!(
-        files_in(&edge_tiles) as i64,
+        i64::try_from(files_in(&edge_tiles)).expect("a directory listing fits in i64"),
         occupied,
         "the edge tiles emitted are not the tiles the sources occupy — either one \
          is missing, or an empty one was written and every reader pays a request \

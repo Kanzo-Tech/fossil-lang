@@ -1,6 +1,6 @@
 //! Cloud-secret installation for a `DuckDB` connection — scoping a destination
 //! or source's `CREATE SECRET` so a later `read_*` over a cloud URL
-//! authenticates. The native GraphAr *writer* (the DuckDB COPY executor) was
+//! authenticates. The native `GraphAr` *writer* (the `DuckDB` COPY executor) was
 //! retired when both the run and catalog paths moved to the `fossil-df`
 //! (DataFusion/Arrow) materializer; this module now carries only the secret
 //! seam, still shared by the CLI (`@conn` source creds) and `fossil-mcp`.

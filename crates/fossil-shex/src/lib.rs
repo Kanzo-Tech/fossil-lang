@@ -250,7 +250,7 @@ fn local_name(iri: &str) -> &str {
 /// (`ShapeOr` of refs) yields all of them, so the canonical model emits one edge
 /// type per destination. `ShapeAnd`/`ShapeNot`/`NodeConstraint`/inline `Shape`
 /// are not inter-shape edges.
-fn edge_targets(value_expr: &Option<ShapeExpr>) -> Vec<String> {
+fn edge_targets(value_expr: Option<&ShapeExpr>) -> Vec<String> {
     match value_expr {
         Some(ShapeExpr::Ref(label)) => vec![shape_label_iri(label)],
         Some(ShapeExpr::ShapeOr { shape_exprs }) => shape_exprs
@@ -268,7 +268,7 @@ fn edge_targets(value_expr: &Option<ShapeExpr>) -> Vec<String> {
 /// the XSD lattice (unknown datatypes fall back to `String`); a `nodeKind IRI`
 /// node is an opaque IRI-valued property (`AnyUri`); anything else defaults to
 /// `String` (the permissive walking-skeleton column).
-fn datatype_of(value_expr: &Option<ShapeExpr>) -> Primitive {
+fn datatype_of(value_expr: Option<&ShapeExpr>) -> Primitive {
     match value_expr {
         Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
             || {
@@ -414,11 +414,11 @@ impl ShExDescriptor {
                 } else {
                     GsCardinality::Multi
                 };
-                let targets = edge_targets(&c.value_expr);
+                let targets = edge_targets(c.value_expr.as_ref());
                 if targets.is_empty() {
                     properties.push(Property {
                         name,
-                        datatype: datatype_of(&c.value_expr),
+                        datatype: datatype_of(c.value_expr.as_ref()),
                         iri: Some(pred_iri),
                         cardinality,
                     });

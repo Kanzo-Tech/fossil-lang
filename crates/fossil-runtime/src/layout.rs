@@ -698,12 +698,11 @@ pub fn enrich_layout(
                     sql_lit(aurl)
                 ))
                 .map_err(duck)?;
-            let rows = stmt
-                .query_map([], |r| r.get::<_, u64>(0))
+
+            stmt.query_map([], |r| r.get::<_, u64>(0))
                 .map_err(duck)?
                 .collect::<Result<Vec<u64>, _>>()
-                .map_err(duck)?;
-            rows
+                .map_err(duck)?
         };
 
         let mut emission = String::new();

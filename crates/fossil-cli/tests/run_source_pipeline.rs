@@ -90,12 +90,10 @@ fn subjects(dest: &Path, vtype: &str) -> Vec<String> {
             glob.replace('\'', "''")
         ))
         .expect("prepare");
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
+    stmt.query_map([], |r| r.get::<_, String>(0))
         .expect("query")
         .collect::<Result<Vec<_>, _>>()
-        .expect("rows");
-    rows
+        .expect("rows")
 }
 
 /// `where` reaches the corpus: two of five people are under 18 and are not in it.

@@ -116,6 +116,10 @@ impl System for ExecutorSystem {
 /// # Errors
 /// `ShEx` parse, URL parse, object-store staging, `DataFusion` execution, or
 /// Parquet encode failures — all surfaced as a message string for the JS host.
+// The hasher is not ours to choose: `connections` arrives from
+// `parse_refs(&JsValue)`, which builds a plain `HashMap`. Generalising the
+// signature over `BuildHasher` would add a parameter no caller can vary.
+#[allow(clippy::implicit_hasher)]
 pub async fn execute_core(
     program: &str,
     shex: Option<&str>,
@@ -153,6 +157,7 @@ pub async fn execute_core(
 ///
 /// # Errors
 /// `ShEx` parse failures.
+#[allow(clippy::implicit_hasher)] // same as `execute_core` above
 pub fn program_sources_core(
     program: &str,
     shex: Option<&str>,
@@ -312,6 +317,9 @@ impl FossilExecutor {
     ///
     /// # Errors
     /// A JS `Error` if the `ShEx` schema fails to parse.
+    // `wasm_bindgen` dictates these by value: it owns the JS→Rust conversion
+    // and cannot hand out borrows across the boundary.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn sources(
         &self,
         program: String,

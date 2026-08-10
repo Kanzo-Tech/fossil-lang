@@ -24,7 +24,7 @@ workspace = true
 # The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
 fossil-df = { path = "../fossil-df" }
 # FossilDb (production salsa db) + SourceFile + the System trait. The executor
-# the output descriptor is passed as an argument (ADR-0018).
+# takes the output descriptor as an argument (ADR-0018), never off the db.
 fossil-base = { path = "../fossil-base" }
 # The program-resident output descriptor: ShEx text → OutputDescriptorKind,
 # threaded into execute_graph (drives edge/cardinality classification).

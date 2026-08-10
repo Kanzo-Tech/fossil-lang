@@ -258,6 +258,10 @@ fn lowering_error_targets(err: &ShExLoweringError, shape_iri: &str) -> bool {
     }
 }
 
+// The `.fossil` sources below contain `${ex:}` / `${.id}` template placeholders
+// and `type { … }` braces — LITERAL Fossil source, not Rust format-string args.
+// Same allow, same reason, as the two `fossil-ide` integration tests.
+#[allow(clippy::literal_string_with_formatting_args)]
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -306,10 +310,10 @@ User : ex:Person from users
         fossil_base::FossilDb::new(system)
     }
 
-    fn first_mapping<'db>(
-        db: &'db fossil_base::FossilDb,
+    fn first_mapping(
+        db: &fossil_base::FossilDb,
         src: String,
-    ) -> (fossil_base::SourceFile, MappingLoc<'db>) {
+    ) -> (fossil_base::SourceFile, MappingLoc<'_>) {
         let file = fossil_base::SourceFile::new(db, src, "person.fossil".to_string());
         let mapping = crate::def_map::def_map(db, file).mappings(db)[0];
         (file, mapping)
