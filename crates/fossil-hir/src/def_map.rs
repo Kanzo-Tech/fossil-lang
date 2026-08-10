@@ -43,6 +43,27 @@ pub struct PrefixEntry {
     pub iri: SmolStr,
 }
 
+/// Why a destructuring member bound no shape.
+///
+/// Four causes used to collapse into one `None`, and the single diagnostic that
+/// existed blamed the member's NAME for all of them — so an unreadable file
+/// reported "matches no shape in the schema". They are separated here because
+/// the reader cannot act on a message that names the wrong thing (ADR-0057,
+/// tenth amendment, and the correction it carries).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum ShapeBindError {
+    /// The constructor carries no `schema = "…"`, so there is no document.
+    NoSchema,
+    /// The document is named but could not be read.
+    Unreadable { path: SmolStr, cause: SmolStr },
+    /// The document was read but is not a `ShEx` schema we can parse.
+    Unparseable { path: SmolStr, cause: SmolStr },
+    /// The binding names more shapes than the document declares. Binding is
+    /// POSITIONAL (tenth amendment), so this is the check that model gives
+    /// away free: the Nth name wants an Nth shape and there is none.
+    Arity { declared: usize, named: usize },
+}
+
 /// One entry in the source-binding table (`users := io.csv(...)`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct SourceEntry<'db> {
@@ -64,6 +85,9 @@ pub struct SourceEntry<'db> {
     /// COMPILE TIME against the `ShEx`. Subject selection is always by `rdf:type ==
     /// shape_iri`. `None` for plain single-binding native sources (csv/json/…).
     pub shape_iri: Option<SmolStr>,
+    /// Set iff this is a destructuring member and [`Self::shape_iri`] is `None`
+    /// — why it is `None`. `None` here for every non-member binding.
+    pub shape_error: Option<ShapeBindError>,
     /// Dotted name of the source constructor (`io.csv` / `io.json` /
     /// `io.parquet`), if a call-shaped RHS could be parsed. The
     /// constructor name selects the source FORMAT downstream
@@ -137,6 +161,20 @@ impl<'db> DefMap<'db> {
             .and_then(|e| e.shape_iri.clone())
     }
 
+    /// Why a destructuring member bound no shape. `None` when it bound one, or
+    /// when the binding never named a shape at all.
+    #[must_use]
+    pub fn lookup_source_shape_error(
+        self,
+        db: &'db dyn fossil_base::Db,
+        name: &str,
+    ) -> Option<ShapeBindError> {
+        self.sources(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .and_then(|e| e.shape_error.clone())
+    }
+
     /// Look up the `(constructor, uri)` pair bound to a source name (e.g.
     /// `users` → `("io.csv", "examples/users.csv")`). Used by Phase 5
     /// `fossil-mir::lower` (STDL-06) to resolve `Op::Source`'s format + URI
@@ -205,6 +243,9 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         loc: SourceLoc::new(db, file, source_idx),
                         schema_arg,
                         shape_iri: None,
+                        // A single binding names no shape, so it cannot fail to
+                        // bind one. Absence here is not an error.
+                        shape_error: None,
                         constructor,
                         uri,
                     });
@@ -223,12 +264,13 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 let (constructor, uri) = parse_source_call(&item);
                 let shape_iris =
                     resolve_member_shape_iris(db, file, schema_arg.as_deref(), &members);
-                for (member, shape_iri) in members.into_iter().zip(shape_iris) {
+                for (member, (shape_iri, shape_error)) in members.into_iter().zip(shape_iris) {
                     sources.push(SourceEntry {
                         name: member,
                         loc: SourceLoc::new(db, file, source_idx),
                         schema_arg: schema_arg.clone(),
                         shape_iri,
+                        shape_error,
                         constructor: constructor.clone(),
                         uri: uri.clone(),
                     });
@@ -436,37 +478,66 @@ fn resolve_member_shape_iris(
     file: fossil_base::SourceFile,
     schema_arg: Option<&str>,
     members: &[SmolStr],
-) -> Vec<Option<SmolStr>> {
-    let none = || members.iter().map(|_| None).collect::<Vec<_>>();
+) -> Vec<(Option<SmolStr>, Option<ShapeBindError>)> {
+    let all = |e: &ShapeBindError| {
+        members
+            .iter()
+            .map(|_| (None, Some(e.clone())))
+            .collect::<Vec<_>>()
+    };
     let Some(schema_path) = schema_arg else {
-        return none();
+        return all(&ShapeBindError::NoSchema);
     };
     let resolved = resolve_relative(db, file, schema_path);
-    let Ok(bytes) = db.system().read_file(&resolved) else {
-        return none();
+    let bytes = match db.system().read_file(&resolved) {
+        Ok(b) => b,
+        Err(e) => {
+            return all(&ShapeBindError::Unreadable {
+                path: SmolStr::from(schema_path),
+                cause: SmolStr::from(e.to_string()),
+            });
+        }
     };
-    let Ok(desc) = fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice()) else {
-        return none();
+    let desc = match fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice()) {
+        Ok(d) => d,
+        Err(e) => {
+            return all(&ShapeBindError::Unparseable {
+                path: SmolStr::from(schema_path),
+                cause: SmolStr::from(format!("{e:?}")),
+            });
+        }
     };
-    // shape-IRI local-name → full IRI, for member matching.
-    let by_local: std::collections::HashMap<String, SmolStr> = desc
+
+    // POSITIONAL: the Nth name binds the Nth shape the document declares. The
+    // name is a free local label and is NOT looked up — which is why there is
+    // no "matches no shape" case left, and why two documents can no longer
+    // collide (ADR-0057, tenth amendment).
+    //
+    // This is only sound because `ShExDescriptor::shapes()` yields declaration
+    // order. It did not until `fix(shex)`: it was a `HashMap`, and six parses
+    // gave six orders. Do not reintroduce a map here.
+    let declared: Vec<SmolStr> = desc
         .shapes()
-        .map(|b| {
-            let iri = b.iri.to_string();
-            (shape_local_name(&iri).to_string(), SmolStr::from(iri))
-        })
+        .map(|b| SmolStr::from(b.iri.to_string()))
         .collect();
-    members
-        .iter()
-        .map(|m| by_local.get(m.as_str()).cloned())
+    let arity = ShapeBindError::Arity {
+        declared: declared.len(),
+        named: members.len(),
+    };
+    (0..members.len())
+        .map(|i| {
+            declared.get(i).map_or_else(
+                || (None, Some(arity.clone())),
+                |iri| (Some(iri.clone()), None),
+            )
+        })
         .collect()
 }
 
-/// The local name of a shape IRI — the substring after the last `#` or `/`
-/// (`http://ifcowl.../IfcBeam` → `IfcBeam`).
-fn shape_local_name(iri: &str) -> &str {
-    iri.rsplit(['#', '/']).next().unwrap_or(iri)
-}
+// `shape_local_name` lived here and cut a shape IRI at the last `#` or `/` so a
+// member name could be matched against it. Positional binding retired it, and
+// the bug it carried with it: two shapes from different vocabularies sharing a
+// local name collapsed into one key of the lookup map, and one won in silence.
 
 /// Resolve `schema_path` relative to the directory containing `file`'s path.
 /// Mirrors [`crate::infer`]'s resolver (kept local to avoid a cross-module pub).
@@ -566,6 +637,89 @@ b := io.parquet(\"b.parquet\")
         assert_eq!(
             dm.lookup_source_schema(&db, "u").as_deref(),
             Some("u.csvw.json")
+        );
+    }
+
+    /// The document declares `Zeta` then `Alpha`. The binding names them
+    /// `primero` and `segundo` — words that appear nowhere in it. Under the old
+    /// by-name rule both would resolve to `None`; under positional binding the
+    /// first name takes the first DECLARED shape, so the names being free is
+    /// exactly what this asserts (ADR-0057, tenth amendment).
+    #[test]
+    fn a_destructuring_member_binds_by_position_and_its_name_is_free() {
+        let src = "{ primero, segundo } := io.rdf(\"g.ttl\", \
+                   schema = \"tests/fixtures/positional_binding/two_shapes.shex\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert_eq!(
+            dm.lookup_source_shape_iri(&db, "primero").as_deref(),
+            Some("https://example.org/Zeta"),
+            "the first name takes the first declared shape, whatever it is called"
+        );
+        assert_eq!(
+            dm.lookup_source_shape_iri(&db, "segundo").as_deref(),
+            Some("https://example.org/Alpha")
+        );
+        assert_eq!(dm.lookup_source_shape_error(&db, "primero"), None);
+    }
+
+    /// Naming more shapes than the document declares is the check the positional
+    /// model gives away free, and it reports the two counts rather than blaming
+    /// the last name for being misspelt.
+    #[test]
+    fn naming_more_shapes_than_the_document_declares_is_an_arity_error() {
+        let src = "{ a, b, c } := io.rdf(\"g.ttl\", \
+                   schema = \"tests/fixtures/positional_binding/two_shapes.shex\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert!(
+            dm.lookup_source_shape_iri(&db, "b").is_some(),
+            "b is second"
+        );
+        assert_eq!(
+            dm.lookup_source_shape_error(&db, "c"),
+            Some(ShapeBindError::Arity {
+                declared: 2,
+                named: 3
+            })
+        );
+    }
+
+    /// The four causes used to be one `None` behind one message that blamed the
+    /// member's name. A document that is not there is not a misspelt name.
+    #[test]
+    fn a_document_that_cannot_be_read_says_so_instead_of_blaming_the_name() {
+        let src = "{ a } := io.rdf(\"g.ttl\", schema = \"tests/fixtures/does_not_exist.shex\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert!(matches!(
+            dm.lookup_source_shape_error(&db, "a"),
+            Some(ShapeBindError::Unreadable { .. })
+        ));
+    }
+
+    /// And a constructor with no `schema =` has no document at all — a third
+    /// distinct cause, not the same `None` as the other three.
+    #[test]
+    fn a_destructuring_source_without_a_schema_argument_says_that() {
+        let src = "{ a } := io.rdf(\"g.ttl\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert_eq!(
+            dm.lookup_source_shape_error(&db, "a"),
+            Some(ShapeBindError::NoSchema)
         );
     }
 

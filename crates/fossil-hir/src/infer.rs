@@ -63,7 +63,7 @@ use smol_str::SmolStr;
 
 use fossil_graph_schema::Primitive;
 
-use crate::def_map::{MappingLoc, def_map};
+use crate::def_map::{MappingLoc, ShapeBindError, def_map};
 use crate::ty::display::render_ty_kind;
 use crate::ty::{Record, RecordField, Ty, TyKind};
 
@@ -247,21 +247,29 @@ pub fn resolve_binding_row<'db>(
         return Ok(Some(record_from_shape(db, &desc, shape_iri.as_str())));
     }
 
-    // A destructuring member with a schema but NO resolved shape IRI is a member
-    // name that matches no shape in the schema — a compile-time error (the single
-    // path requires each `{…}` name to be a declared shape's local-name).
-    if let Some((Some(ctor), _)) = dm.lookup_source_call(db, source_name)
-        && ctor.as_str() == "io.rdf"
-        && dm.lookup_source_schema(db, source_name).is_some()
-    {
-        let _eg = delay_span_bug(
-            db,
-            Span::new(0, 0),
-            format!(
-                "io.rdf member `{source_name}` matches no shape in the schema; \
-                 each `{{…}}` name must be the local-name of a declared shape"
+    // A destructuring member that bound no shape, reported by CAUSE. One
+    // message used to cover all four and blamed the member's name for every
+    // one of them, so an unreadable file read as a misspelt name. Binding is
+    // positional now (ADR-0057, tenth amendment), so "matches no shape" is not
+    // among the causes any more — the name is a free local label.
+    if let Some(err) = dm.lookup_source_shape_error(db, source_name) {
+        let message = match err {
+            ShapeBindError::NoSchema => format!(
+                "destructuring source `{source_name}` has no `schema = \"…\"`, \
+                 so there is no document to take shapes from"
             ),
-        );
+            ShapeBindError::Unreadable { path, cause } => {
+                format!("cannot read shape document `{path}` for `{source_name}`: {cause}")
+            }
+            ShapeBindError::Unparseable { path, cause } => {
+                format!("shape document `{path}` for `{source_name}` failed to parse: {cause}")
+            }
+            ShapeBindError::Arity { declared, named } => format!(
+                "the binding names {named} shape(s) and the document declares {declared}; \
+                 names bind by position, so `{source_name}` has no shape to bind"
+            ),
+        };
+        let _eg = delay_span_bug(db, Span::new(0, 0), message);
         return Ok(None);
     }
 
