@@ -1132,11 +1132,17 @@ colisión al proyectar se resuelve a mano, `select(orders.id as pedido, users.id
 **El §1 ya está construido, y construido al revés.** Hoy el destructuring resuelve **por nombre**:
 `by_local.get(m.as_str())` casa el miembro contra el local name del IRI de la forma
 (`crates/fossil-hir/src/def_map.rs:459-462`), con el comentario *«the member's local-name resolves to
-a shape IRI in the schema (COMPILE TIME)»*. O sea que el mecanismo existe, hace lo contrario de lo que
-esta enmienda decide, y **además no comprueba nada**: las cuatro rutas de fallo —sin `schema =`,
-fichero ilegible, descriptor no parseable, nombre no encontrado— devuelven `None` sin un solo
-diagnóstico, y aguas abajo `infer.rs:220` es un `if let Some(...)` que simplemente sigue. Es el mismo
-hallazgo que ADR-0055 hizo con `ACCEPT_ALL_DEFAULT`, en otro sitio del mismo árbol.
+a shape IRI in the schema (COMPILE TIME)»*. El mecanismo existe y hace lo contrario de lo que esta
+enmienda decide.
+
+*(Corrección del 2026-08-10, el mismo día: la redacción original de este párrafo decía que «además no
+comprueba nada». **Falso**, y la corrijo aquí porque una ADR que exagera un hallazgo es peor que una
+que no lo tiene.* `infer.rs:250-266` **sí** emite un diagnóstico —«`io.rdf member X matches no shape in
+the schema`»— para el miembro que no casa. Lo que sí es cierto, y basta para el argumento, es que ese
+diagnóstico es **el único**, que está acotado a `io.rdf`, y que **atribuye mal las otras tres causas de
+fallo**: sin `schema =` no se emite nada, y con el fichero ilegible o el descriptor no parseable se
+emite ése, que culpa al nombre del miembro de un problema que es del fichero. `resolve_member_shape_iris`
+devuelve `None` por las cuatro razones y quien lo lee no puede distinguirlas.*)
 
 **Y un bloqueo que había que quitar ANTES de implementar el §1 — medido, y ya quitado.**
 `ShExDescriptor.shapes` era un `HashMap<String, ShapeBinding>` y `shapes()` era `self.shapes.values()`.
