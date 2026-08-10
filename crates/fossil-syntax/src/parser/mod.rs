@@ -168,6 +168,26 @@ impl Parser {
         }
     }
 
+    /// The text of the current non-trivia token. `None` at EOF.
+    ///
+    /// Only contextual keywords need this: `type` is NOT reserved (ADR-0057's
+    /// seventh amendment — it is a plausible column name in a language whose
+    /// commonest predicate is `rdf:type`), so `type {` is told from any other
+    /// `IDENT {` by the identifier's spelling and nothing else.
+    pub(crate) fn current_text(&self) -> Option<&str> {
+        let mut i = self.pos;
+        while let Some(t) = self.tokens.get(i) {
+            if !matches!(
+                t.kind,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            ) {
+                return Some(t.text.as_str());
+            }
+            i += 1;
+        }
+        None
+    }
+
     /// Lookahead at `offset` non-trivia tokens past `pos`. Returns `None` at EOF.
     pub(crate) fn peek_kind(&self, offset: usize) -> Option<SyntaxKind> {
         let mut depth = 0;

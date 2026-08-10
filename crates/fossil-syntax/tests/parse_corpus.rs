@@ -211,6 +211,15 @@ fixture_test!(
     "05_toplevel_indent",
     "30_two_top_level_items_one_broken_other_fine"
 );
+// `type` is contextual, and this fixture is the proof: the same file uses it
+// as the type binder AND as an ordinary binding name. If `type` were ever
+// reserved, the second line stops parsing — which matters in a language whose
+// commonest predicate is `rdf:type` (ADR-0057, seventh amendment).
+fixture_test!(
+    type_def_and_type_as_a_name_31,
+    "05_toplevel_indent",
+    "31_type_def_and_type_as_a_binding_name"
+);
 
 // =====================================================================
 // Diagnostic-accumulator coverage for recovery fixtures (plan 02-03 Task 3)

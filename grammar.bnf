@@ -98,6 +98,7 @@ TopLevel            := Import
                      | PrefixDecl
                      | SourceDef
                      | MultiSourceDef
+                     | TypeDef
                      | Mapping
 
 
@@ -121,6 +122,16 @@ SourceDef           := IDENT DEFINE Expression
 
 (* Destructuring source: one binding per shape declared by the source schema. *)
 MultiSourceDef      := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
+
+(* Type binding: the same destructuring, in type position. One catalogue
+   (`io.*`), two binders — `:=` for values, `type … =` for types (ADR-0057,
+   seventh amendment). Binding is POSITIONAL: the Nth name binds the Nth shape
+   the document declares, and the name is a free local label (tenth amendment).
+   `type` is NOT a reserved word: at top level `IDENT LBRACE` is free, and the
+   next token separates this from `SourceDef` (`:=`) and from a mapping header
+   (`:`). That matters — `type` is a plausible column name in a language whose
+   commonest predicate is `rdf:type`. *)
+TypeDef             := 'type' LBRACE IDENT (COMMA IDENT)* RBRACE ASSIGN Expression
 
 
 (* ─── Mappings ─── *)

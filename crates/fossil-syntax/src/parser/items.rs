@@ -94,6 +94,15 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 Some(SyntaxKind::DEFINE) => parse_source_def(p),
                 // `IDENT :` → start of a mapping header.
                 Some(SyntaxKind::SHAPE_SEP) => parse_mapping(p),
+                // `type { A, B } = …` → a type binding (TYPE_DEF). `type` is a
+                // CONTEXTUAL keyword, not a reserved word: the slot `IDENT {`
+                // was free at top level, and any other identifier followed by
+                // `{` still falls through to the error arm below. So a column
+                // or binding called `type` keeps working, which matters where
+                // `rdf:type` is the commonest predicate there is.
+                Some(SyntaxKind::LBRACE) if p.current_text() == Some("type") => {
+                    parse_type_def(p);
+                }
                 // Always make progress on a token we don't know what to do
                 // with at the program level — `bump_as_error` emits a single
                 // ERROR token and advances, making the outer loop monotone
@@ -252,6 +261,52 @@ fn parse_multi_source_def(p: &mut Parser) {
     recover::expect_or_recover(p, SyntaxKind::RBRACE, TOP_LEVEL_ANCHORS);
     p.skip_trivia();
     recover::expect_or_recover(p, SyntaxKind::DEFINE, TOP_LEVEL_ANCHORS);
+    p.parse_expr();
+    p.finish();
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// TypeDef (type binding): `type { Person, City } = io.shex("s.shex")`
+//   TypeDef := 'type' LBRACE IDENT (COMMA IDENT)* RBRACE ASSIGN Expression
+//
+// The same destructuring as `MultiSourceDef`, in type position — one catalogue
+// (`io.*`), two binders, `:=` for values and `type … =` for types (ADR-0057,
+// seventh amendment). The brace list is byte-for-byte the loop above; the two
+// differences are the leading contextual `type` and `=` instead of `:=`.
+//
+// `=` and not `:=` on purpose: `:=` binds a value and this binds a type, so
+// giving them one spelling would be the one-idea-one-spelling rule read
+// backwards — two ideas wearing the same glyph.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_type_def(p: &mut Parser) {
+    p.start(SyntaxKind::TYPE_DEF);
+    p.bump(); // IDENT `type` — contextual, checked by the caller
+    p.skip_trivia();
+    p.bump(); // LBRACE — the caller's lookahead already saw it
+    recover::expect_or_recover(
+        p,
+        SyntaxKind::IDENT,
+        &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
+    );
+    loop {
+        p.skip_trivia();
+        if p.current() != Some(SyntaxKind::COMMA) {
+            break;
+        }
+        p.bump(); // COMMA
+        p.skip_trivia();
+        if p.current() == Some(SyntaxKind::RBRACE) {
+            break; // trailing comma allowed
+        }
+        recover::expect_or_recover(
+            p,
+            SyntaxKind::IDENT,
+            &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
+        );
+    }
+    recover::expect_or_recover(p, SyntaxKind::RBRACE, TOP_LEVEL_ANCHORS);
+    p.skip_trivia();
+    recover::expect_or_recover(p, SyntaxKind::ASSIGN, TOP_LEVEL_ANCHORS);
     p.parse_expr();
     p.finish();
 }
