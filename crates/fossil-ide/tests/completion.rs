@@ -98,8 +98,19 @@ const SHEX_SRC: &str = r#"{
   ]
 }"#;
 
+/// The program NAMES its output shape document. It used to arrive from the host
+/// instead, through `HirDb::output_descriptor_kind`, and the program said
+/// nothing — but a host that supplies a contract the program never asked for is
+/// the second source of truth ADR-0057 spends ten amendments refusing. Since
+/// `resolve_target_shape` reads what the program names (ADR-0055, F4), the
+/// completion path resolves a shape here for the same reason the compiler does,
+/// and stops resolving one when the program stops asking.
+///
+/// The line numbers below are load-bearing for the cursor positions in these
+/// tests: the mapping body is line 3 now, not line 2.
 const SRC: &str = "\
 prefix ex: <http://example.org/>
+type { Person } = io.shex(\"tests/fixtures/person.shex\")
 User : ex:Person from users
     ex:name = .name
 ";
@@ -119,7 +130,7 @@ fn file(db: &ShExHostDb, src: &str) -> SourceFile {
 fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
     let db = shex_db();
     let f = file(&db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, 14);
+    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     let trim = items
         .iter()
@@ -144,7 +155,7 @@ fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
 fn native_only_stdlib_entry_is_tagged() {
     let db = shex_db();
     let f = file(&db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, 14);
+    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     // `clean.slug` lowers to a Rust UDF → NativeUdfOnly.
     let slug = items
@@ -163,7 +174,7 @@ fn native_only_stdlib_entry_is_tagged() {
 fn declared_prefix_is_offered() {
     let db = shex_db();
     let f = file(&db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, 14);
+    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     assert!(
         items.iter().any(|i| i.label == "ex:"),
@@ -178,9 +189,9 @@ fn declared_prefix_is_offered() {
 fn shape_property_names_are_offered_when_shape_resolves() {
     let db = shex_db();
     let f = file(&db, SRC);
-    // Line 2 (`    ex:name = .name`) is inside the `User : ex:Person` mapping
+    // Line 3 (`    ex:name = .name`) is inside the `User : ex:Person` mapping
     // whose target shape resolves to `ex:Person`; column 14 is inside the body.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 14);
+    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     let shape_prop = items
         .iter()
@@ -199,22 +210,36 @@ fn shape_property_names_are_offered_when_shape_resolves() {
     );
 }
 
-/// Under `AcceptAll` (no descriptor) the shape-property source contributes
-/// nothing, but stdlib + prefixes still do — the "if reachable" hedge.
+/// A program that names NO document contributes no shape properties, while
+/// stdlib and prefixes still do — the "if reachable" hedge.
+///
+/// This test used to hand the host `ACCEPT_ALL_DEFAULT` and assert the same
+/// thing. The condition has moved from the host to the program, which is the
+/// whole of ADR-0055's F4: what turns backward checking off is the program
+/// declaring no output contract, not a literal the checker was handed because
+/// it had nothing to thread. The assertion is unchanged because the RULE is
+/// unchanged — only what decides it.
 #[test]
-fn accept_all_yields_no_shape_properties_but_keeps_stdlib() {
-    let db = ShExHostDb::new(OutputDescriptorKind::ACCEPT_ALL_DEFAULT);
-    let f = file(&db, SRC);
+fn a_program_naming_no_document_yields_no_shape_properties_but_keeps_stdlib() {
+    const NO_DOCUMENT: &str = "\
+prefix ex: <http://example.org/>
+User : ex:Person from users
+    ex:name = .name
+";
+    let db = shex_db();
+    let f = file(&db, NO_DOCUMENT);
+    // One line shorter than `SRC` — the body is line 2 here.
     let items = fossil_ide::completions(&db, &[f], f, 2, 14);
 
     assert!(
         !items
             .iter()
             .any(|i| i.kind == Some(CompletionItemKind::FIELD)),
-        "AcceptAll must contribute no shape-property (Field) completions",
+        "a program with no output contract must contribute no shape-property \
+         (Field) completions, whatever the host holds",
     );
     assert!(
         items.iter().any(|i| i.label == "clean.trim"),
-        "stdlib completions must still be offered under AcceptAll",
+        "stdlib completions must still be offered",
     );
 }

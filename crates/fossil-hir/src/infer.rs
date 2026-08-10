@@ -54,8 +54,6 @@
 //! invalidation. (When the host wants to invalidate, it bumps the source
 //! file's text via `set_text`, which Salsa already tracks.)
 
-use std::path::PathBuf;
-
 use fossil_base::{Span, delay_span_bug};
 use fossil_descriptors_input::{CsvwDescriptor, InferredDescriptor};
 use salsa::Accumulator;
@@ -63,7 +61,7 @@ use smol_str::SmolStr;
 
 use fossil_graph_schema::Primitive;
 
-use crate::def_map::{MappingLoc, ShapeBindError, def_map};
+use crate::def_map::{MappingLoc, ShapeBindError, def_map, resolve_relative};
 use crate::ty::display::render_ty_kind;
 use crate::ty::{Record, RecordField, Ty, TyKind};
 
@@ -599,16 +597,10 @@ pub(crate) fn record_from_shape<'db>(
 }
 
 /// Resolve `schema_path` relative to the directory containing `file`'s path.
-fn resolve_relative(
-    db: &dyn fossil_base::Db,
-    file: fossil_base::SourceFile,
-    schema_path: &str,
-) -> PathBuf {
-    let file_path = PathBuf::from(file.path(db));
-    file_path
-        .parent()
-        .map_or_else(|| PathBuf::from(schema_path), |dir| dir.join(schema_path))
-}
+// `resolve_relative` lived here as a byte-identical twin of `def_map`'s, with a
+// comment conceding the duplication to avoid a cross-module `pub`. It is now
+// `crate::def_map::resolve_relative`, imported above — a third reader made the
+// trade stop paying.
 
 /// Build a `Record` [`Ty`] from a host-provided [`InferredDescriptor`].
 ///

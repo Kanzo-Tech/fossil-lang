@@ -635,7 +635,13 @@ fn resolve_member_shape_iris(
 
 /// Resolve `schema_path` relative to the directory containing `file`'s path.
 /// Mirrors [`crate::infer`]'s resolver (kept local to avoid a cross-module pub).
-fn resolve_relative(
+/// The one resolver for a path a program writes, relative to the program.
+///
+/// There were two byte-identical copies of this — here and in
+/// [`crate::infer`] — with a comment on the second conceding the duplication to
+/// avoid a cross-module `pub`. A third reader ([`crate::shapes`], reading the
+/// output shape document) is what made that trade stop paying.
+pub(crate) fn resolve_relative(
     db: &dyn fossil_base::Db,
     file: fossil_base::SourceFile,
     schema_path: &str,

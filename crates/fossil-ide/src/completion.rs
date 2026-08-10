@@ -172,7 +172,7 @@ fn shape_property_completions(
     let Some(mapping) = enclosing_mapping_loc(db, file, line, character) else {
         return;
     };
-    let Some(shape) = resolve_target_shape(db, mapping, db.output_descriptor_kind()) else {
+    let Some(shape) = resolve_target_shape(db, mapping) else {
         return;
     };
     for constraint in &shape.constraints {

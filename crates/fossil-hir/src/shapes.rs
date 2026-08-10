@@ -4,24 +4,31 @@
 //! carrying the per-predicate constraint table converted from the `ShEx`
 //! [`fossil_descriptors_output::ShapeBinding`].
 //!
-//! # Dispatch on the host-supplied descriptor (R2 — ADR-0020)
+//! # The document the program names (ADR-0055, F4)
 //!
-//! Backward shape checking dispatches on
-//! [`fossil_descriptors_output::OutputDescriptorKind`]:
-//!   - `ShEx(d)`     → `d.lookup_shape(&iri)` → `Option<&ShapeBinding>`
-//!   - `AcceptAll(_)`→ `None` (skip backward checking)
+//! [`resolve_target_shape`] reads the shape document the PROGRAM brings in with
+//! `type { … } = io.shex("…")`, through `System::read_file`, exactly as the
+//! neighbouring [`crate::infer`] already reads the INPUT descriptor.
 //!
-//! [`resolve_target_shape`] receives the descriptor kind as a PLAIN borrowed
-//! ARGUMENT (read once at the top), supplied by the host through the
-//! [`crate::HirDb`] extension trait (ADR-0020 — the R2 wiring that resolves the
-//! Phase-3 deferral #3 / #8). It is NOT read via a `#[salsa::tracked]` query,
-//! NOT interned, and NEVER a Salsa key — exactly the ADR-0018 "descriptor as
-//! argument, not key" seam, so `MAX_PER_MAPPING_FAN_OUT` stays `1`. A host that
-//! loads a `ShEx` schema now gets `Some(ResolvedShape)`; a host on the degraded
-//! `AcceptAll` default (the walking-skeleton + ten-mapping invalidation
-//! fixture) still gets `None` — backward checking remains a correct no-op
-//! there. ADR-0006 keeps `fossil-base` descriptor-ignorant: the accessor lives
-//! on the `fossil-hir`-owned [`crate::HirDb`], never on `fossil_base::Db`.
+//! It used to take the descriptor as a borrowed ARGUMENT instead, threaded in
+//! by the host (ADR-0020's R2 wiring). The seam was sound — a plain argument is
+//! never interned and never a Salsa key, so `MAX_PER_MAPPING_FAN_OUT` stayed
+//! `1` — but the in-query caller had no descriptor to thread and passed
+//! `OutputDescriptorKind::ACCEPT_ALL_DEFAULT`. One literal, and backward
+//! checking was off for every program compiled through the checker: the axis
+//! ADR-0055 found with exactly one value.
+//!
+//! Reading here keeps what the argument bought. A `System` read registers no
+//! Salsa input dependency (see [`crate::infer`]'s module docs), so the fan-out
+//! is unchanged and `tests/invalidation_regression.rs` still holds. And it buys
+//! what the argument could not: a CSV-sourced program had nowhere to name a
+//! document at all until `type … =` existed, which is the hole ADR-0055 named
+//! and ADR-0057 filled.
+//!
+//! Naming no document is still `None` — backward checking is a correct no-op,
+//! and ADR-0057's fifth amendment calls that a decision rather than a gap: the
+//! program writes its corpus and nothing is checked. What is gone is that this
+//! used to be the only outcome available.
 //!
 //! The backward-check LOGIC (constraint-table conversion, `OneOf` surfacing)
 //! is also exposed as plain-Rust helpers ([`ResolvedShape::from_binding`],
@@ -29,8 +36,7 @@
 //! constructed [`fossil_descriptors_output::ShExDescriptor`].
 
 use fossil_descriptors_output::{
-    Cardinality, OneOfRejection, OutputDescriptorKind, ResolvedConstraint, ShExLoweringError,
-    ShapeBinding,
+    Cardinality, OneOfRejection, ResolvedConstraint, ShExLoweringError, ShapeBinding,
 };
 use rudof_iri::IriS;
 use shex_ast::ShapeExpr;
@@ -178,35 +184,29 @@ pub fn one_of_rejections(errors: &[ShExLoweringError]) -> Vec<&OneOfRejection> {
         .collect()
 }
 
-/// Resolve a mapping's target shape against the host-supplied descriptor.
+/// Resolve a mapping's target shape against the document the PROGRAM names.
 ///
-/// R2 wiring (ADR-0020 — resolves Phase-3 deferral #3 / #8). The descriptor
-/// `kind` is a PLAIN borrowed argument (read once here), threaded in by the
-/// host via [`crate::HirDb::output_descriptor_kind`]; it is never interned and
-/// never a Salsa key, so `MAX_PER_MAPPING_FAN_OUT` stays `1`.
+/// The descriptor used to arrive as a borrowed argument the host threaded in,
+/// and the in-query caller had nothing to thread, so it passed
+/// `ACCEPT_ALL_DEFAULT` — one literal that turned backward checking off for
+/// every program compiled through the checker. ADR-0055 said what to do
+/// instead, and this is it: read the document here, through
+/// `System::read_file`, exactly as the neighbouring [`crate::infer`] already
+/// reads the INPUT descriptor.
 ///
-/// - `OutputDescriptorKind::ShEx(d)`: look up the mapping's fully-resolved
-///   shape IRI in the descriptor. Returns `Some(ResolvedShape)` iff the
-///   descriptor declares that shape (otherwise `None` — the mapping targets a
-///   shape the schema does not define).
-/// - `OutputDescriptorKind::AcceptAll(_)`: `None` — backward checking is a
-///   correct no-op (the degraded fallback; the walking-skeleton + the
-///   ten-mapping invalidation fixture both land here).
+/// That does not widen the Salsa key, which is why the argument existed. A
+/// `System` read registers no Salsa input dependency (see `infer`'s module
+/// docs), so `MAX_PER_MAPPING_FAN_OUT` stays `1` and
+/// `tests/invalidation_regression.rs` still holds.
+///
+/// Returns `None` — backward checking is a correct no-op — when the program
+/// names no document, when the mapping has no shape clause, or when the
+/// document does not declare the shape the mapping targets.
 #[must_use]
 pub fn resolve_target_shape<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    kind: &OutputDescriptorKind,
 ) -> Option<ResolvedShape<'db>> {
-    // Read the descriptor as a plain value — AcceptAll short-circuits.
-    let descriptor = match kind {
-        OutputDescriptorKind::ShEx(d) => d,
-        // SHACL is consumed as a pre-lowered GraphSchema by the executor; the
-        // ShEx-specific backward checker has no resolved table to read, so it
-        // short-circuits like AcceptAll (SHACL backward checking is future work).
-        OutputDescriptorKind::Shacl(_) | OutputDescriptorKind::AcceptAll(_) => return None,
-    };
-
     // The mapping's fully-resolved target shape IRI (prefix already expanded by
     // `lower_to_hir`). A mapping with no shape clause yields no resolution.
     let file = mapping.file(db);
@@ -216,6 +216,17 @@ pub fn resolve_target_shape<'db>(
     if shape_iri.is_empty() {
         return None;
     }
+
+    // The document is whatever `type { … } = io.shex("…")` brought in. A
+    // program that names none has no output contract — which ADR-0057's fifth
+    // amendment calls a decision, not a hole: it writes its corpus and nothing
+    // is checked.
+    let dm = crate::def_map::def_map(db, file);
+    let document = dm.output_shape_document(db)?;
+    let resolved = crate::def_map::resolve_relative(db, file, document.as_str());
+    let bytes = db.system().read_file(&resolved).ok()?;
+    let descriptor =
+        fossil_descriptors_output::ShExDescriptor::from_reader(bytes.as_slice()).ok()?;
 
     // Dispatch into the ShEx descriptor's resolved shape table.
     let iri = IriS::new_unchecked(shape_iri.as_str());
@@ -266,12 +277,23 @@ mod tests {
 
     use std::sync::Arc;
 
-    use fossil_descriptors_output::ShExDescriptor;
+    /// A `.fossil` program whose single mapping targets `ex:Person` and which
+    /// NAMES its output shape document. The document is the whole point: before
+    /// this, a CSV-sourced program had nowhere to declare one, so the checker
+    /// was handed `ACCEPT_ALL_DEFAULT` and checked nothing.
+    fn src_naming(document: &str) -> String {
+        format!(
+            "prefix ex: <http://example.org/>\n\
+             type {{ Person }} = io.shex(\"{document}\")\n\
+             users := io.csv(\"x.csv\")\n\
+             User : ex:Person from users\n    \
+             iri = `${{ex:}}u/${{.id}}`\n    \
+             ex:name = .name\n"
+        )
+    }
 
-    /// A minimal `.fossil` source whose single mapping targets `ex:Person`,
-    /// resolving to `http://example.org/Person` — the shape the `ShEx` fixture
-    /// below declares.
-    const SRC: &str = "\
+    /// The same program with no `type` line — it names no document at all.
+    const SRC_WITHOUT_DOCUMENT: &str = "\
 prefix ex: <http://example.org/>
 users := io.csv(\"x.csv\")
 User : ex:Person from users
@@ -279,80 +301,58 @@ User : ex:Person from users
     ex:name = .name
 ";
 
-    /// A `ShEx` schema declaring exactly `ex:Person` (full IRI
-    /// `http://example.org/Person`) with one triple constraint `ex:name`.
-    const SHEX_SRC: &str = r#"{
-      "@context": "http://www.w3.org/ns/shex.jsonld",
-      "type": "Schema",
-      "shapes": [
-        {
-          "type": "ShapeDecl",
-          "id": "http://example.org/Person",
-          "shapeExpr": {
-            "type": "Shape",
-            "expression": {
-              "type": "TripleConstraint",
-              "predicate": "http://example.org/name"
-            }
-          }
-        }
-      ]
-    }"#;
-
     fn new_db() -> fossil_base::FossilDb {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 
-    #[test]
-    fn resolve_target_shape_returns_some_for_matching_shex_kind() {
-        let db = new_db();
-        let file = fossil_base::SourceFile::new(&db, SRC.to_string(), "person.fossil".to_string());
-        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
-        let shex = ShExDescriptor::from_reader(SHEX_SRC.as_bytes()).expect("schema parses");
-        let kind = OutputDescriptorKind::ShEx(shex);
+    fn first_mapping<'db>(
+        db: &'db fossil_base::FossilDb,
+        src: String,
+    ) -> (fossil_base::SourceFile, MappingLoc<'db>) {
+        let file = fossil_base::SourceFile::new(db, src, "person.fossil".to_string());
+        let mapping = crate::def_map::def_map(db, file).mappings(db)[0];
+        (file, mapping)
+    }
 
-        let resolved = resolve_target_shape(&db, mapping, &kind);
+    #[test]
+    fn the_target_shape_comes_from_the_document_the_program_names() {
+        let db = new_db();
+        let (_file, mapping) =
+            first_mapping(&db, src_naming("tests/fixtures/output_shape/person.shex"));
+
+        let resolved = resolve_target_shape(&db, mapping);
         assert!(
             resolved.is_some(),
-            "a host ShEx descriptor declaring the mapping's target shape must \
-             resolve to Some (ADR-0020 R2 wiring; Phase-3 deferral #3 resolved)"
+            "the program names a document declaring its target shape, so backward \
+             checking must have something to check against"
         );
-        let resolved = resolved.unwrap();
         assert!(
-            resolved.constraint_for("http://example.org/name").is_some(),
+            resolved
+                .unwrap()
+                .constraint_for("http://example.org/name")
+                .is_some(),
             "the resolved shape must carry the ex:name constraint"
         );
     }
 
+    /// Naming no document is a DECISION, not a hole (ADR-0057, fifth amendment):
+    /// the program still writes its corpus, and nothing is checked. What is gone
+    /// is that this used to be the only outcome, for every program.
     #[test]
-    fn resolve_target_shape_returns_none_for_accept_all() {
+    fn a_program_that_names_no_document_has_no_output_contract() {
         let db = new_db();
-        let file = fossil_base::SourceFile::new(&db, SRC.to_string(), "person.fossil".to_string());
-        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
-        let kind = OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
-        assert!(
-            resolve_target_shape(&db, mapping, &kind).is_none(),
-            "AcceptAll is the degraded fallback — backward checking is a no-op"
-        );
+        let (_file, mapping) = first_mapping(&db, SRC_WITHOUT_DOCUMENT.to_string());
+        assert!(resolve_target_shape(&db, mapping).is_none());
     }
 
     #[test]
-    fn resolve_target_shape_returns_none_when_schema_omits_the_shape() {
+    fn a_document_that_omits_the_target_shape_resolves_to_none() {
         let db = new_db();
-        let file = fossil_base::SourceFile::new(&db, SRC.to_string(), "person.fossil".to_string());
-        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
-        // A ShEx schema that declares NO shapes — the mapping's target is absent.
-        let empty = r#"{
-          "@context": "http://www.w3.org/ns/shex.jsonld",
-          "type": "Schema",
-          "shapes": []
-        }"#;
-        let shex = ShExDescriptor::from_reader(empty.as_bytes()).expect("schema parses");
-        let kind = OutputDescriptorKind::ShEx(shex);
-        assert!(
-            resolve_target_shape(&db, mapping, &kind).is_none(),
-            "a ShEx descriptor lacking the target shape must resolve to None"
+        let (_file, mapping) = first_mapping(
+            &db,
+            src_naming("tests/fixtures/output_shape/no_shapes.shex"),
         );
+        assert!(resolve_target_shape(&db, mapping).is_none());
     }
 }

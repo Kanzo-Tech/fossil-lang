@@ -88,19 +88,14 @@ pub fn typecheck_mapping<'db>(
     // built would report a second, invented error for every property that reads a
     // column the join was supposed to bring.
     let source_row = resolve_source_row(db, mapping)?;
-    // The tracked query reads the descriptor through the thin `fossil_base::Db`
-    // vtable, which (by ADR-0006) does NOT carry `HirDb`. To keep the descriptor
-    // OUT of this query's Salsa key (`MAX_PER_MAPPING_FAN_OUT = 1`; ADR-0020),
-    // the in-query path supplies the degraded `AcceptAll` default — so the
-    // ten-mapping invalidation fixture sees `None` and the fan-out is unchanged.
-    // A host that has loaded a `ShEx` schema drives the `Some` path by calling
-    // `resolve_target_shape` directly with its `HirDb::output_descriptor_kind()`
-    // (the descriptor is a plain argument, never interned).
-    let resolved_shape = resolve_target_shape(
-        db,
-        mapping,
-        &fossil_descriptors_output::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-    );
+    // This used to pass `ACCEPT_ALL_DEFAULT` — one literal that turned backward
+    // checking off for every program compiled through the checker, because the
+    // in-query path had no descriptor to thread and the argument demanded one.
+    // `resolve_target_shape` now reads the document the PROGRAM names, through
+    // `System::read_file`, which registers no Salsa input dependency — so
+    // `MAX_PER_MAPPING_FAN_OUT` is still `1` and the ten-mapping invalidation
+    // fixture is unmoved. That was the whole reason for the argument.
+    let resolved_shape = resolve_target_shape(db, mapping);
     let target_shape_id = resolved_shape.as_ref().map(|r| r.shape_id);
 
     let mut cx = Checker {

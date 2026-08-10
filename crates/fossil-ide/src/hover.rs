@@ -137,7 +137,7 @@ pub fn hover_bidirectional(
     // Target-side: resolve the mapping's ShEx shape against the host descriptor
     // and find the constraint matching the hovered property's predicate IRI.
     let target_block = resolved.predicate_iri.as_deref().and_then(|pred| {
-        let shape = resolve_target_shape(db, resolved.mapping, db.output_descriptor_kind())?;
+        let shape = resolve_target_shape(db, resolved.mapping)?;
         let constraint = shape.constraint_for(pred)?;
         // `value_ty == None` means "any value" (no datatype narrowing) — render
         // it as `Iri` (the constraint's default node type), consistent with the
