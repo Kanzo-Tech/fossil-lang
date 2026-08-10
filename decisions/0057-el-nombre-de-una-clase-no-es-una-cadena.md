@@ -1138,13 +1138,35 @@ fichero ilegible, descriptor no parseable, nombre no encontrado— devuelven `No
 diagnóstico, y aguas abajo `infer.rs:220` es un `if let Some(...)` que simplemente sigue. Es el mismo
 hallazgo que ADR-0055 hizo con `ACCEPT_ALL_DEFAULT`, en otro sitio del mismo árbol.
 
-**Y un bloqueo que hay que quitar ANTES de implementar el §1, o el resultado no es determinista.**
-`ShExDescriptor.shapes` es un `HashMap<String, ShapeBinding>` y `shapes()` es `self.shapes.values()`
-(`crates/fossil-shex/src/lib.rs:348` y `:482-484`). El hasher por defecto de Rust va sembrado al azar
-por proceso, así que **ligar por orden sobre eso haría que el mismo programa emitiera corpus distintos
-entre ejecuciones**. El orden sí llega desde arriba —`for decl in schema.shapes().into_iter().flatten()`
-(`:447`) recorre las declaraciones de rudof en orden— y somos nosotros quienes lo tiramos al insertar.
-Es un `Vec`, no un rediseño.
+**Y un bloqueo que había que quitar ANTES de implementar el §1 — medido, y ya quitado.**
+`ShExDescriptor.shapes` era un `HashMap<String, ShapeBinding>` y `shapes()` era `self.shapes.values()`.
+El hasher por defecto de Rust va sembrado al azar por proceso, así que ligar por orden sobre eso habría
+hecho que el mismo programa emitiera corpus distintos entre ejecuciones.
+
+`crates/fossil-shex/examples/declaration_order.rs` lo mide, con cinco formas cuyo orden de declaración,
+orden alfabético y orden de IRI son los tres distintos para que un orden equivocado no pase por
+casualidad. **Seis parseos dieron seis órdenes distintos**, y ninguno era el del fichero:
+
+```
+declarado : Zeta  Alpha Mu    Beta  Omega
+run 1     : Mu    Omega Zeta  Beta  Alpha
+run 2     : Zeta  Mu    Alpha Beta  Omega
+run 3     : Beta  Mu    Omega Zeta  Alpha
+```
+
+**Y rudof sí preserva el orden de declaración, en las DOS sintaxis** — `ShExC` y `ShExJ` devuelven
+`Zeta Alpha Mu Beta Omega` a través de `Schema::shapes()`, que es un `Option<Vec<ShapeDecl>>`. Éramos
+nosotros quienes lo tirábamos al insertar en el mapa. Así que la ligadura por orden **es implementable
+contra ShEx**, que era la duda que podía tumbar el §1 entero.
+
+El arreglo está hecho: `shapes` pasa a `Vec<ShapeBinding>` en orden de declaración más un
+`index: HashMap<String, usize>` que sólo se consulta y nunca se itera. Un IRI repetido conserva su
+**primera** declaración y su primer sitio; el `insert` anterior dejaba ganar al último, en silencio, y
+las dos reglas son arbitrarias pero sólo una deja el orden en paz.
+
+**Y esto no era sólo un bloqueo futuro: era un fallo presente.** `to_graph_schema` construye `nodes` y
+`edges` iterando `self.shapes()`, así que **el `GraphSchema` se venía produciendo en orden aleatorio**
+en cada ejecución, sin que ninguna prueba lo notara.
 
 **Deuda que muere con la decisión:** `shape_local_name` corta el IRI por el último `#` o `/`, así que
 dos formas de vocabularios distintos con el mismo local name colapsan hoy en la misma clave del
@@ -1159,9 +1181,9 @@ con él.
 
 ### Lo que no se verificó
 
-- **Que rudof preserve el orden de declaración a través del parseo.** Lo que está comprobado es que
-  `from_schema` recorre `schema.shapes()` como secuencia y que fossil destruye ese orden después; que
-  el orden que entrega rudof sea el del fichero **no se ha comprobado**, y si no lo fuera, la ligadura
-  por orden no es implementable contra ShEx en absoluto. Es lo primero que hay que medir.
 - **La aridad como comprobación no tiene arte previo buscado.** Se propone porque el modelo posicional
   la regala, no porque nadie la haya validado.
+- **El orden de rudof se midió con cinco formas y un solo documento por sintaxis.** No se probó qué
+  pasa con `imports` —un `.shex` que importa otro—, que es justo donde un orden de declaración podría
+  dejar de ser el del fichero que tú escribiste. Con `imports` en juego, la ligadura por orden vuelve a
+  estar sin verificar.

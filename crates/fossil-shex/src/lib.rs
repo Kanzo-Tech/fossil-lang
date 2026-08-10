@@ -347,9 +347,18 @@ pub struct SuggestionSeed {
 #[derive(Debug)]
 pub struct ShExDescriptor {
     schema: Schema,
-    /// Keyed by the shape's resolved IRI as a string (`HashMap` convenience —
-    /// the structured `IriS` lives in the binding's `iri` field).
-    shapes: HashMap<String, ShapeBinding>,
+    /// In the order the document declares them. A `HashMap` lived here until
+    /// `crates/fossil-shex/examples/declaration_order.rs` measured what that
+    /// cost: `values()` handed back six different orders in six parses, because
+    /// Rust seeds its hasher per process. Anything downstream that iterates —
+    /// [`Self::to_graph_schema`] builds `nodes`/`edges` from this — was
+    /// non-deterministic across runs, and ADR-0057's tenth amendment binds
+    /// `type { A, B } = io.shex(...)` positionally, which needs this order to
+    /// be the file's. rudof preserves it for both `ShExC` and `ShExJ`; we were
+    /// the ones throwing it away on insert.
+    shapes: Vec<ShapeBinding>,
+    /// Resolved IRI → index into `shapes`. Lookup only; never iterated.
+    index: HashMap<String, usize>,
     errors: Vec<ShExLoweringError>,
 }
 
@@ -441,18 +450,29 @@ impl ShExDescriptor {
     /// so consuming mappings can see the non-rejected parts of each shape.
     pub fn from_schema(schema: Schema) -> Result<Self, ShExLoweringError> {
         let prefixmap = schema.prefixmap().unwrap_or_default();
-        let mut shapes: HashMap<String, ShapeBinding> = HashMap::new();
+        let mut shapes: Vec<ShapeBinding> = Vec::new();
+        let mut index: HashMap<String, usize> = HashMap::new();
         let mut errors: Vec<ShExLoweringError> = Vec::new();
 
+        // Declaration order, because the caller may bind by position. A repeated
+        // IRI keeps its FIRST declaration and its first slot — the old `insert`
+        // let the last one win silently, and either rule is arbitrary, but only
+        // one of them leaves the order alone.
         for decl in schema.shapes().into_iter().flatten() {
             if let Some(binding) = lower_shape_decl(&decl, &prefixmap, &mut errors) {
-                shapes.insert(binding.iri.to_string(), binding);
+                let iri = binding.iri.to_string();
+                if index.contains_key(&iri) {
+                    continue;
+                }
+                index.insert(iri, shapes.len());
+                shapes.push(binding);
             }
         }
 
         Ok(Self {
             schema,
             shapes,
+            index,
             errors,
         })
     }
@@ -467,7 +487,7 @@ impl ShExDescriptor {
     /// Look up a shape by its resolved IRI.
     #[must_use]
     pub fn lookup_shape(&self, iri: &IriS) -> Option<&ShapeBinding> {
-        self.shapes.get(&iri.to_string())
+        self.lookup_shape_str(&iri.to_string())
     }
 
     /// Look up a shape by its resolved IRI string — for callers that hold the
@@ -475,12 +495,13 @@ impl ShExDescriptor {
     /// construct an [`IriS`].
     #[must_use]
     pub fn lookup_shape_str(&self, iri: &str) -> Option<&ShapeBinding> {
-        self.shapes.get(iri)
+        self.index.get(iri).map(|&i| &self.shapes[i])
     }
 
-    /// Iterator over every resolved shape binding.
+    /// Iterator over every resolved shape binding, **in declaration order**.
+    /// Callers may rely on that: ADR-0057's tenth amendment binds by position.
     pub fn shapes(&self) -> impl Iterator<Item = &ShapeBinding> {
-        self.shapes.values()
+        self.shapes.iter()
     }
 
     /// Errors discovered at construction time. Plan 03-05 surfaces these as
