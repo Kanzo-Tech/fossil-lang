@@ -941,3 +941,116 @@ sigue sin decidir.**
   se cita lo implementan también SQLite, MySQL y DuckDB, pero no se comprobó uno por uno.
 - **El renombrado en destructuring se propone por simetría con el propio árbol**, no por arte previo:
   Rust, Python y los módulos de ES lo tienen, y para esta enmienda no se verificó ninguno.
+
+
+---
+
+## Novena enmienda, 2026-08-10 — el join no aplana, y la fila anónima muere
+
+Cierra las dos preguntas que la octava dejó acotadas y sin decidir. **Deroga los §§3 y 4 de ADR-0054,
+que está `accepted` y cuyo `join` está implementado y documentado** — no es una decisión sobre papel.
+
+### 1. El join no aplana: produce un ámbito de filas nombradas
+
+No hay `fila(izq) ⊎ fila(der)`. `orders |> join(users, on = orders.user_id == users.id)` deja en
+ámbito **dos filas**, `orders` y `users`, y cada referencia dice de cuál viene.
+
+**El precedente es Malloy, y su argumento es de nuestro dominio.** No aplana porque *«Malloy retains
+the graph nature and hierarchy of the data relationships»*, frente a SQL, que *«flattens everything
+into a single table space»*. Un lenguaje que escribe grafos no tiene por qué pasar por la mesa plana
+para llegar a ellos.
+
+**Lo que se descarta, con su medida.** Renombrar en silencio —`_x`/`_y` de pandas, `.x`/`.y` de
+dplyr, los dos **por defecto**, y pandas sólo lanza si desactivas los sufijos a mano— es el modo de
+fallo que la sexta enmienda condenó en el `with` de Delphi: lo dispara el dato y no se ve. Y aplanar
+cualificando, que es SQL y PRQL, es defendible y no lo elegimos: una fila con dos `id` es una fila que
+hay que aprender a leer.
+
+**Y una prohibición accidental se va con el álgebra.** El §4 de ADR-0054 decía que «cualquier otro
+nombre compartido es un error», y de ahí derivaba «gratis» que el self-join es un error. Sin unión no
+hay colisión: `a as x |> join(a as y, on = x.k == y.k)` pasa a ser legal, y sobre todo **los dos
+ficheros de `examples/` vuelven a ser unibles** — `users.csv` es `id,name` y `orders.csv` es
+`id,user_id,amount`, comparten `id`, y bajo el §4 no se podían unir ni con la condición cualificada.
+Eso no era una decisión: era una consecuencia que nadie midió.
+
+### 2. El alias va donde la relación entra, y el nombre de la relación es su binder por defecto
+
+Los cuatro parientes coinciden y ninguno lo pone al final: SQL (`FROM table_reference AS alias`), PRQL
+(`a=artists`, alias opcional), Malloy (`is`) y Ecto (`as:`). Como en SQL, **el nombre de la relación ya
+es su binder**, así que `as` sólo hace falta para renombrar: self-join, o nombres largos.
+
+Eso hace que la sexta enmienda y ésta sean **la misma regla en dos niveles**, no dos reglas: el binder
+va donde la fuente entra — en la cabecera cuando entra en el mapeo, en la tubería cuando entra en el
+join.
+
+**`this`/`that` de PRQL se descarta con evidencia, no por gusto.** Es posicional, y Ecto es la medida
+de lo que cuesta: empezó con bindings posicionales y tuvo que añadir los nombrados porque componer
+—**añadiendo un join**, nuestro caso exacto— los rompe. Es además la sexta fila de la tabla de la sexta
+enmienda, con el mismo disparador que R2RML.
+
+### 3. `.campo` muere: toda referencia se cualifica
+
+No hay fila anónima en ninguna posición del lenguaje. `HirExpr::FieldRef` desaparece.
+
+Esto **no contradice la sexta enmienda: la completa.** Su tabla mostraba cinco sistemas que empezaron
+con receptor anónimo y tuvieron que añadir nombrado en cuanto hubo dos filas en ámbito, y ninguno hizo
+el camino inverso. Lo que hacemos es saltarnos el rodeo entero en vez de recorrerlo. Y la alternativa
+—`.campo` legal con una fila y error con dos— se descartó por la regla 2 de la casa: una grafía cuya
+legalidad depende del contexto es una grafía que hay que explicar cada vez.
+
+```
+users as u |> where(u.edad >= 18)
+
+orders |> join(users, on = orders.user_id == users.id)
+```
+
+### Lo que deroga de ADR-0054, punto por punto
+
+- **§3 muere en su grafía, sobrevive en su intención.** `on = .k` no se puede escribir porque `.k` ya
+  no existe. Lo que decía —inner, igualdad, no una condición arbitraria— sigue en pie, y la razón que
+  daba para no admitir la condición general («`.` no puede significar dos filas distintas mientras no
+  exista la referencia cualificada») queda satisfecha: **la referencia cualificada es justo lo que esta
+  enmienda mete.** El azúcar `USING` se va con ella; si vuelve algún día será con la grafía de PRQL,
+  `(==col)`, y eso no está decidido.
+- **§4 muere entero.** No hay álgebra de filas porque no hay unión de filas.
+- **§2 y §5 no se tocan.** Sólo `Inner`, y las dos claves con la misma `Primitive`.
+
+### Lo que ya está construido, verificado contra el fichero
+
+- **El MIR se escribió para este modelo.** `Op::Join { left, right, on, kind, left_name, right_name }`
+  (`crates/fossil-mir/src/op.rs:84`), con el comentario *«`left_name` / `right_name` qualify the two
+  input streams for collision-safe schema union»*. Los lados ya van nombrados.
+- **La sintaxis ya parsea.** `orders.user_id` es `PostfixExpr` sobre `IDENT`, y la regla 2 de
+  desambiguación de `grammar.bnf` lo dice: *«`namespace.ident` → PostfixOp on `namespace`»*.
+- **El hueco está en HIR**, exactamente donde ADR-0054 lo dejó anotado: `HirExpr::FieldRef(SmolStr)` y
+  nada más (`crates/fossil-hir/src/lower.rs:126`), «`.id` → `"id"`».
+
+### Lo que se paga
+
+- **Rompe 35 de los 46 ficheros `.fossil` del repositorio**, contados hoy: fixtures del parser, del
+  HIR, del CLI, y `examples/hello.fossil`. No es daño colateral, es la superficie cambiando.
+- **`pipeline.mdx` afirma lo contrario desde el 2026-08-07** — «its key is named once», «with the key
+  identified and any other shared name refused» — y su lista de preguntas abiertas lleva «how two keys
+  with different names are joined» como primer punto. La página cambia con la implementación, igual que
+  `types.mdx` en la primera enmienda; hasta entonces el repositorio afirma dos cosas incompatibles.
+- **Los nombres viajan con la relación.** `pedidos := orders |> join(users, on = …)` mete `orders` y
+  `users` en el ámbito de todo mapeo que use `pedidos`, así que **renombrar una fuente es un cambio
+  incompatible aguas abajo**. Es el modelo de Malloy y es su precio, no un descuido.
+- **Verbosidad.** `users |> where(users.edad >= 18)` repite el nombre en la misma línea. Para eso está
+  `as`, y por eso `as` no es opcional por casualidad.
+
+### Lo que queda abierto
+
+- **Si `on` admite una conjunción** (`a.x == b.x and a.y == b.y`) o sigue siendo una sola igualdad.
+  ADR-0054 §1 dijo «es una igualdad» cuando la condición general era imposible; ahora es posible y
+  nadie ha decidido si se quiere.
+- **Si vuelve un atajo para claves del mismo nombre**, y con qué grafía.
+- **Cuántas filas puede acumular un ámbito** antes de que encadenar joins deje de leerse.
+
+### Lo que no se verificó
+
+- **Malloy se leyó en su documentación de lenguaje, no en su implementación**, y no se buscó ninguna
+  queja sobre el coste de no aplanar — que es justo donde viviría el arrepentimiento. Sigue vigente el
+  aviso de método de la sexta enmienda: este trabajo cubre lo normativo y no cubre los foros.
+- **El número 35/46 es de hoy** y se cuenta con un grep de `.campo` sobre los `.fossil` del árbol; no
+  distingue fixtures de recuperación de errores, que son varios y cuyo texto es inválido a propósito.

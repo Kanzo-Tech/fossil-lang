@@ -1,7 +1,7 @@
 # ADR 0054: `join` entra en la primera versión, y es una igualdad por nombre
 
 **Date:** 2026-08-07
-**Status:** accepted
+**Status:** accepted — §§3-4 superseded by ADR-0057's ninth amendment (2026-08-10); §§1, 2 and 5 stand
 **Decider:** Angel Iglesias (Kanzo)
 **Cite:** Cierra la pregunta que ADR-0050 §3 dejó abierta y que
 `apps/docs/content/docs/characteristics/pipeline.mdx` §"What this does not settle" lleva como primer
@@ -75,3 +75,33 @@ coincidir antes, en la fuente o en su descriptor. La extensión está declarada 
 **Lo que la reabre.** El primer mapping real cuyas claves no comparten nombre. No un argumento: un
 `.fossil` que alguien quiera escribir y no pueda. Si llega antes que F4, la reapertura es la
 referencia cualificada; si llega después, puede que sea el join externo y la nulabilidad a la vez.
+
+---
+
+## Reabierta y resuelta, 2026-08-10 — ver la novena enmienda de ADR-0057
+
+La condición de arriba se cumplió por su propio criterio: `examples/users.csv` (`id,name`) contra
+`examples/orders.csv` (`id,user_id,amount`), ficheros de este repositorio, con la foránea que esta ADR
+llama «el caso corriente». Llegó **antes** que F4, así que la reapertura fue la que este documento
+predijo — la referencia cualificada.
+
+Y al medirlo apareció algo que esta ADR no vio: **bajo el §4, esos dos ficheros no se pueden unir ni
+con la condición cualificada**, porque comparten `id` y «cualquier otro nombre compartido es un
+error». No era una decisión; era una consecuencia sin medir que prohibía unir dos tablas con clave
+primaria, o sea todas.
+
+Lo que decidió la novena enmienda de ADR-0057:
+
+- **§3 muere en su grafía y sobrevive en su intención.** `on = .k` no se puede escribir porque `.campo`
+  deja de existir en el lenguaje. Inner, igualdad y clave única siguen. La razón que este §3 daba para
+  rechazar la condición general —«`.` no puede significar dos filas distintas mientras no exista la
+  referencia cualificada»— queda satisfecha, no contradicha.
+- **§4 muere entero.** El join no aplana: produce un ámbito de filas nombradas (el modelo de Malloy),
+  así que no hay `fila(izq) ⊎ fila(der)` y no hay colisión posible. Con el álgebra se va la
+  prohibición del self-join, que este documento derivaba «gratis» de ella.
+- **§§1, 2 y 5 no se tocan.** `join` en la primera versión, sólo `Inner`, y las dos claves con la
+  misma `Primitive`.
+
+`Op::Join { …, left_name, right_name }` ya estaba escrito para esto: «*qualify the two input streams
+for collision-safe schema union*». Lo que falta sigue siendo lo que el contexto de arriba anotó — no
+existe la referencia cualificada en HIR.
