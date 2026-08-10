@@ -101,6 +101,26 @@ pub struct SourceEntry<'db> {
     pub uri: Option<SmolStr>,
 }
 
+/// One name bound by a type binding (`type { Person, City } = io.shex("s.shex")`).
+///
+/// The value side of the language binds sources; this binds TYPES. One
+/// catalogue (`io.*`), two binders (ADR-0057, seventh amendment).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct TypeEntry {
+    /// The local label. Free — it does not have to name anything in the
+    /// document, because binding is by position (tenth amendment). This is
+    /// what lets two documents that both declare `Person` coexist.
+    pub name: SmolStr,
+    /// The shape IRI this name binds: the Nth declared shape for the Nth name.
+    pub shape_iri: Option<SmolStr>,
+    /// Why it bound nothing, when it bound nothing. Never a bare `None`.
+    pub shape_error: Option<ShapeBindError>,
+    /// The document the constructor names — `io.shex("personas.shex")`. This is
+    /// the datum that gives a CSV-sourced program somewhere to declare its
+    /// output shape, which is the hole ADR-0055 named and left open.
+    pub document: Option<SmolStr>,
+}
+
 #[salsa::tracked(debug)]
 pub struct DefMap<'db> {
     #[returns(ref)]
@@ -109,6 +129,8 @@ pub struct DefMap<'db> {
     pub sources: Vec<SourceEntry<'db>>,
     #[returns(ref)]
     pub mappings: Vec<MappingLoc<'db>>,
+    #[returns(ref)]
+    pub types: Vec<TypeEntry>,
 }
 
 impl<'db> DefMap<'db> {
@@ -192,6 +214,40 @@ impl<'db> DefMap<'db> {
             .find(|e| e.name.as_str() == name)
             .map(|e| (e.constructor.clone(), e.uri.clone()))
     }
+
+    /// The shape IRI a `type { … } = io.shex(…)` name binds.
+    #[must_use]
+    pub fn lookup_type(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<SmolStr> {
+        self.types(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .and_then(|e| e.shape_iri.clone())
+    }
+
+    /// Why a type name bound nothing. `None` when it bound a shape.
+    #[must_use]
+    pub fn lookup_type_error(
+        self,
+        db: &'db dyn fossil_base::Db,
+        name: &str,
+    ) -> Option<ShapeBindError> {
+        self.types(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .and_then(|e| e.shape_error.clone())
+    }
+
+    /// The first shape document the file brings in, if any.
+    ///
+    /// This is what a mapping's OUTPUT shape is resolved against when the source
+    /// is a CSV — the case that had nowhere to declare a shape at all, named as
+    /// a hole by ADR-0055 and left open. One document per file for now: a second
+    /// `type … =` is legal and binds its own names, but which document backs the
+    /// output contract is not something any program has had to say yet.
+    #[must_use]
+    pub fn output_shape_document(self, db: &'db dyn fossil_base::Db) -> Option<SmolStr> {
+        self.types(db).iter().find_map(|e| e.document.clone())
+    }
 }
 
 #[salsa::tracked]
@@ -201,6 +257,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
     let mut prefixes: Vec<PrefixEntry> = Vec::new();
     let mut sources: Vec<SourceEntry<'db>> = Vec::new();
     let mut mappings: Vec<MappingLoc<'db>> = Vec::new();
+    let mut types: Vec<TypeEntry> = Vec::new();
 
     // Per-kind dense indices.
     //
@@ -252,6 +309,24 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     source_idx += 1;
                 }
             }
+            SyntaxKind::TYPE_DEF => {
+                // `type { Person, City } = io.shex("personas.shex")`. Binds TYPES,
+                // not sources, so it produces no `SourceEntry` and takes no slot
+                // in `source_idx` — nothing downstream may read a type name as a
+                // source. The document is the constructor's first positional
+                // string, exactly as a source's URI is.
+                let members = parse_brace_member_names(&item);
+                let (_ctor, document) = parse_call_after(&item, SyntaxKind::ASSIGN);
+                let bound = resolve_member_shape_iris(db, file, document.as_deref(), &members);
+                for (name, (shape_iri, shape_error)) in members.into_iter().zip(bound) {
+                    types.push(TypeEntry {
+                        name,
+                        shape_iri,
+                        shape_error,
+                        document: document.clone(),
+                    });
+                }
+            }
             SyntaxKind::MULTI_SOURCE_DEF => {
                 // `{ A, B, ... } := io.rdf(uri, schema = "x.shex")`. Each member
                 // becomes its own `SourceEntry` sharing the one source's URI +
@@ -259,7 +334,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 // shape IRI in the schema (COMPILE TIME). Each member then lowers
                 // to its own `Op::Source` and `from <member>` resolves uniformly
                 // via the existing per-source lookups.
-                let members = parse_multi_source_members(&item);
+                let members = parse_brace_member_names(&item);
                 let schema_arg = parse_source_named_arg(&item, "schema");
                 let (constructor, uri) = parse_source_call(&item);
                 let shape_iris =
@@ -285,7 +360,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
         }
     }
 
-    DefMap::new(db, prefixes, sources, mappings)
+    DefMap::new(db, prefixes, sources, mappings, types)
 }
 
 /// Extract `(prefix-name, expanded-IRI)` from a `PREFIX_DECL` node.
@@ -379,6 +454,18 @@ fn parse_source_named_arg(node: &fossil_syntax::SyntaxNode, arg_name: &str) -> O
 ///   `STRING` immediately preceded by `=`/`ASSIGN` is a named-argument value
 ///   (e.g. `schema = "users.csvw.json"`) and is skipped.
 fn parse_source_call(node: &fossil_syntax::SyntaxNode) -> (Option<SmolStr>, Option<SmolStr>) {
+    parse_call_after(node, fossil_syntax::SyntaxKind::DEFINE)
+}
+
+/// [`parse_source_call`] with the binder spelled out, because a `TYPE_DEF` uses
+/// `=` where a `SOURCE_DEF` uses `:=` (ADR-0057: `:=` binds a value, `type … =`
+/// binds a type). The FIRST occurrence is the binder — later `ASSIGN`s inside
+/// the call are named-argument separators, which the URI scan below already
+/// knows to skip.
+fn parse_call_after(
+    node: &fossil_syntax::SyntaxNode,
+    binder: fossil_syntax::SyntaxKind,
+) -> (Option<SmolStr>, Option<SmolStr>) {
     use fossil_syntax::SyntaxKind;
     let toks: Vec<_> = node
         .descendants_with_tokens()
@@ -391,9 +478,8 @@ fn parse_source_call(node: &fossil_syntax::SyntaxNode) -> (Option<SmolStr>, Opti
         })
         .collect();
 
-    // Find the `:=` (DEFINE) that separates the bound name from the RHS call.
-    // (`=`/`ASSIGN` is the NAMED-ARG separator, handled below — not this one.)
-    let Some(define_pos) = toks.iter().position(|t| t.kind() == SyntaxKind::DEFINE) else {
+    // The binder separates the bound name(s) from the RHS call.
+    let Some(define_pos) = toks.iter().position(|t| t.kind() == binder) else {
         return (None, None);
     };
     let rhs = &toks[define_pos + 1..];
@@ -441,10 +527,15 @@ fn parse_source_call(node: &fossil_syntax::SyntaxNode) -> (Option<SmolStr>, Opti
     (constructor, uri)
 }
 
-/// Extract the brace-list member names from a `MULTI_SOURCE_DEF` node — the
-/// IDENTs between `{` and `}` (before the `:=`). The constructor's callee IDENTs
-/// (`io` / `rdf`) come AFTER the `DEFINE`, so we stop at the first `DEFINE`.
-fn parse_multi_source_members(node: &fossil_syntax::SyntaxNode) -> Vec<SmolStr> {
+/// The brace-list names of a destructuring binding — the IDENTs strictly
+/// between `{` and `}`.
+///
+/// Serves `MULTI_SOURCE_DEF` (`{ A, B } := …`) and `TYPE_DEF`
+/// (`type { A, B } = …`) alike. Scoping to the braces rather than to "before
+/// the binder" is what makes one function cover both: a `TYPE_DEF` carries the
+/// contextual `type` IDENT before its `{`, and taking everything before the
+/// binder would bind a phantom member called `type`.
+fn parse_brace_member_names(node: &fossil_syntax::SyntaxNode) -> Vec<SmolStr> {
     use fossil_syntax::SyntaxKind;
     let toks: Vec<_> = node
         .descendants_with_tokens()
@@ -456,11 +547,14 @@ fn parse_multi_source_members(node: &fossil_syntax::SyntaxNode) -> Vec<SmolStr> 
             )
         })
         .collect();
-    let define_pos = toks
+    let Some(open) = toks.iter().position(|t| t.kind() == SyntaxKind::LBRACE) else {
+        return Vec::new();
+    };
+    let close = toks
         .iter()
-        .position(|t| t.kind() == SyntaxKind::DEFINE)
+        .position(|t| t.kind() == SyntaxKind::RBRACE)
         .unwrap_or(toks.len());
-    toks[..define_pos]
+    toks[open + 1..close.max(open + 1)]
         .iter()
         .filter(|t| t.kind() == SyntaxKind::IDENT)
         .map(|t| SmolStr::from(t.text()))
@@ -720,6 +814,81 @@ b := io.parquet(\"b.parquet\")
         assert_eq!(
             dm.lookup_source_shape_error(&db, "a"),
             Some(ShapeBindError::NoSchema)
+        );
+    }
+
+    /// `type { … } = io.shex(…)` reaches the `DefMap`, binds positionally like
+    /// its value-side twin, and carries the document. The document is the datum
+    /// that matters: it is where a CSV-sourced program declares its output
+    /// shape, which ADR-0055 named as a hole and left open.
+    #[test]
+    fn a_type_binding_reaches_the_def_map_and_binds_positionally() {
+        let src = "type { uno, dos } = \
+                   io.shex(\"tests/fixtures/positional_binding/two_shapes.shex\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert_eq!(
+            dm.lookup_type(&db, "uno").as_deref(),
+            Some("https://example.org/Zeta")
+        );
+        assert_eq!(
+            dm.lookup_type(&db, "dos").as_deref(),
+            Some("https://example.org/Alpha")
+        );
+        assert_eq!(
+            dm.output_shape_document(&db).as_deref(),
+            Some("tests/fixtures/positional_binding/two_shapes.shex")
+        );
+    }
+
+    /// A type name is not a source name. Reading one as the other would let a
+    /// mapping say `from Person` and get a row out of a shape document, so the
+    /// two tables stay disjoint and `source_idx` never advances for a `TYPE_DEF`.
+    #[test]
+    fn a_type_name_is_not_a_source_and_does_not_take_a_source_slot() {
+        let src = "type { Person } = \
+                   io.shex(\"tests/fixtures/positional_binding/two_shapes.shex\")\n\
+                   users := io.csv(\"u.csv\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert!(dm.lookup_source(&db, "Person").is_none());
+        assert!(dm.lookup_type(&db, "users").is_none());
+        assert_eq!(
+            dm.lookup_source(&db, "users").map(|l| l.index(&db)),
+            Some(0),
+            "the type binding must not consume a source index"
+        );
+    }
+
+    /// The arity check applies on the type side too, and `type` remains usable
+    /// as an ordinary binding name in the same file.
+    #[test]
+    fn a_type_binding_reports_arity_and_type_is_still_a_usable_name() {
+        let src = "type { a, b, c } = \
+                   io.shex(\"tests/fixtures/positional_binding/two_shapes.shex\")\n\
+                   type := io.csv(\"type.csv\")\n";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+
+        assert_eq!(
+            dm.lookup_type_error(&db, "c"),
+            Some(ShapeBindError::Arity {
+                declared: 2,
+                named: 3
+            })
+        );
+        assert_eq!(
+            dm.lookup_source_call(&db, "type"),
+            Some((Some("io.csv".into()), Some("type.csv".into()))),
+            "`type` is contextual, so it is still a binding name"
         );
     }
 
