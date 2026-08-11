@@ -35,21 +35,19 @@ use super::diag::ParseDiagnostic;
 /// `IDENT` is deliberately included even though it is ambiguous at
 /// lookahead-0 — `parse_program` re-disambiguates IDENT into `SourceDef` /
 /// `Mapping` / fallthrough-error on the next iteration.
-pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] =
-    &[SyntaxKind::KW_USE, SyntaxKind::KW_PREFIX, SyntaxKind::IDENT];
+pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[SyntaxKind::KW_PREFIX, SyntaxKind::IDENT];
 
-/// Token kinds that end a property inside a `MAPPING_BODY` (or annotation
-/// body): either the `NEWLINE` separator or the `DEDENT` closing the body
-/// block. Note `peek_kind` skips `NEWLINE` as trivia, so for property-level
-/// recovery the practical anchor is `DEDENT` plus whatever starts the next
-/// property (`IDENT` / `KW_IRI`).
+/// Token kinds that end a property inside a `MAPPING_BODY`: either the
+/// `NEWLINE` separator or the `DEDENT` closing the body block. Note
+/// `peek_kind` skips `NEWLINE` as trivia, so for property-level recovery the
+/// practical anchor is `DEDENT` plus whatever starts the next property
+/// (`IDENT` / `KW_IRI`).
 pub(crate) const MAPPING_BODY_ANCHORS: &[SyntaxKind] =
     &[SyntaxKind::DEDENT, SyntaxKind::IDENT, SyntaxKind::KW_IRI];
 
-/// Token kinds that close balanced brackets — used when recovering inside a
-/// `{ ... }` annotation block or `( ... )` call args.
-pub(crate) const CLOSE_BRACKET_ANCHORS: &[SyntaxKind] =
-    &[SyntaxKind::RBRACE, SyntaxKind::RPAREN, SyntaxKind::DEDENT];
+// There was a `CLOSE_BRACKET_ANCHORS` here — `RBRACE` / `RPAREN` / `DEDENT`,
+// for recovering inside a `{ … }` annotation block. The annotation block was
+// its only caller and it went with the form.
 
 /// Consume tokens into an `ERROR` node until the current token is in
 /// `anchors` (or EOF). The anchor token itself is NOT consumed — it remains

@@ -490,7 +490,6 @@ fn lower_mapping_node(
     //     SHAPE_EXPR
     //       IRI_EXPR
     //         IDENT "ex" SHAPE_SEP ":" IDENT "Person"
-    //     (optional) IN_CLAUSE
     //     KW_FROM "from"
     //     EXPR
     //       LITERAL_EXPR
@@ -504,18 +503,23 @@ fn lower_mapping_node(
         .find(|t| t.kind() == SyntaxKind::IDENT)
         .map(|t| SmolStr::from(t.text()))?;
 
-    // ShapeExpr → first IRI_EXPR → its (prefix-name, local-name) tokens. For
+    // ShapeExpr → its IRI_EXPR → its (prefix-name, local-name) tokens. For
     // the Phase 1 hello.fossil + Wave 1 fixtures this is the lexer-contiguous
     // `IDENT SHAPE_SEP IDENT` shape; degenerate single-IDENT IRIExprs (from
     // the recovery path) cause us to bail with `None` (Phase 3 promotes to
     // a real diagnostic).
+    //
+    // `.find(…)` used to mean "the first of however many the intersection
+    // had", and the rest were dropped here without a word — `A & B` checked
+    // against `A` alone. The `&` left the grammar rather than the drop being
+    // made loud, so there is now one IRI_EXPR and `find` takes all of it.
     let shape_expr = header
         .children()
         .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)?;
-    let first_iri = shape_expr
+    let shape_iri_node = shape_expr
         .children()
         .find(|c| c.kind() == SyntaxKind::IRI_EXPR)?;
-    let iri_idents: Vec<_> = first_iri
+    let iri_idents: Vec<_> = shape_iri_node
         .children_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
         .filter(|t| t.kind() == SyntaxKind::IDENT)
@@ -712,6 +716,19 @@ fn lower_expr_inner(
     match inner.kind() {
         SyntaxKind::POSTFIX_EXPR => lower_postfix(db, &inner, prefixes),
         SyntaxKind::BINARY_EXPR => lower_binary(db, &inner, prefixes),
+        // Grouping is not a form. `(.a and .b)` means what `.a and .b` means,
+        // so the parens are tokens and the one child node is the whole of it.
+        //
+        // This arm is not a deletion's leftover — it is a hole being closed.
+        // `PAREN_EXPR` was parsed and then refused by the fallback below, which
+        // meant a language that lowers `and` and `or` could not parenthesise
+        // them. A recovery-path `(` with nothing inside leaves no child, and
+        // `None` there is right: its diagnostic was already emitted by the
+        // parser.
+        SyntaxKind::PAREN_EXPR => inner
+            .children()
+            .next()
+            .and_then(|grouped| lower_expr_inner(db, &grouped, prefixes)),
         SyntaxKind::TERNARY_EXPR => lower_ternary(db, &inner, prefixes),
         SyntaxKind::PIPELINE_EXPR => lower_pipeline(db, &inner, prefixes),
         SyntaxKind::TEMPLATE_EXPR => {
@@ -1541,6 +1558,49 @@ User : ex:Person from users
         assert_eq!(*op, CmpOp::Ge);
         assert_eq!(**lhs, HirExpr::FieldRef(SmolStr::from("age")));
         assert_eq!(**rhs, HirExpr::IntLit(18));
+    }
+
+    /// Grouping is not a form, and the parentheses leave no trace.
+    ///
+    /// `PAREN_EXPR` had no arm in the lowering, so a parenthesised expression
+    /// was refused by the fallback diagnostic — in a language that already
+    /// lowers `and` and `or`, which are exactly what you reach for parentheses
+    /// to group. This is the hole closed: the tree is the tree the same source
+    /// without parens would have produced.
+    #[test]
+    fn parentheses_group_and_then_disappear() {
+        const GROUPED: &str = "\
+prefix ex: <https://example.org/>
+
+users := io.csv(\"examples/users.csv\")
+
+User : ex:Person from users
+    iri = `${ex:}user/${.id}`
+    ex:adult = (.age >= 18)
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, GROUPED.to_string(), "t.fossil".to_string());
+        let dm = crate::def_map::def_map(&db, file);
+        let mloc = *dm.mappings(&db).first().expect("one mapping");
+
+        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        assert!(
+            diagnostics.is_empty(),
+            "`(.age >= 18)` must lower without a word, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
+        let props = crate::body::body(&db, mloc).properties(&db);
+        assert_eq!(props.len(), 2);
+        assert_eq!(
+            props[1].value,
+            HirExpr::BinOp {
+                op: CmpOp::Ge,
+                lhs: Box::new(HirExpr::FieldRef(SmolStr::from("age"))),
+                rhs: Box::new(HirExpr::IntLit(18)),
+            },
+            "the parens must leave no trace in the HIR",
+        );
     }
 
     /// The loud-drop guarantee, re-pinned on a form that is still a hole.

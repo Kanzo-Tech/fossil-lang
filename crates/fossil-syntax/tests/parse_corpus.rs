@@ -1,4 +1,5 @@
-//! 30-fixture parser corpus driver — per RESEARCH.md §Q10.
+//! Parser corpus driver — per RESEARCH.md §Q10. Twenty fixtures; it was
+//! thirty until the forms the HIR never read left the grammar.
 //!
 //! Each fixture pairs a `.fossil` source file with a `.cst.txt` snapshot.
 //! Wave 0 (plan 02-01) shipped placeholder snapshots that Wave 1 plans
@@ -121,31 +122,11 @@ fixture_test!(
     "12_double_minus_unary_recovers"
 );
 
-// ─── Bucket 3: mappings + annotations ─────────────────────────────────
-fixture_test!(
-    mapping_in_clause_13,
-    "03_mappings_annotations",
-    "13_mapping_with_in_clause"
-);
-fixture_test!(
-    mapping_shape_intersection_14,
-    "03_mappings_annotations",
-    "14_mapping_with_shape_intersection"
-);
-fixture_test!(
-    property_nested_annot_15,
-    "03_mappings_annotations",
-    "15_property_with_nested_annotation"
-);
+// ─── Bucket 3: mappings ───────────────────────────────────────────────
 fixture_test!(
     mapping_missing_from_16,
     "03_mappings_annotations",
     "16_mapping_missing_from_recovers"
-);
-fixture_test!(
-    annotation_unclosed_17,
-    "03_mappings_annotations",
-    "17_annotation_unclosed_brace_recovers"
 );
 fixture_test!(
     malformed_property_lhs_18,
@@ -153,12 +134,7 @@ fixture_test!(
     "18_malformed_property_lhs_recovers"
 );
 
-// ─── Bucket 4: prefix + IRI + triple ──────────────────────────────────
-fixture_test!(
-    use_selective_import_19,
-    "04_prefix_iri_triple",
-    "19_use_with_selective_import"
-);
+// ─── Bucket 4: prefix + IRI ───────────────────────────────────────────
 fixture_test!(
     broken_template_22,
     "04_prefix_iri_triple",
@@ -175,16 +151,6 @@ fixture_test!(
     mixed_top_level_25,
     "05_toplevel_indent",
     "25_mixed_top_level_items"
-);
-fixture_test!(
-    record_literal_26,
-    "05_toplevel_indent",
-    "26_record_literal_in_property_value"
-);
-fixture_test!(
-    multi_line_annotation_27,
-    "05_toplevel_indent",
-    "27_multi_line_annotation_body"
 );
 fixture_test!(
     inconsistent_dedent_28,
@@ -215,7 +181,7 @@ fixture_test!(
 // Diagnostic-accumulator coverage for recovery fixtures (plan 02-03 Task 3)
 // =====================================================================
 //
-// The 30 `fixture_test!`s above verify the SHAPE of the resulting CST
+// The `fixture_test!`s above verify the SHAPE of the resulting CST
 // (snapshot tests). This test verifies the BLAME PATH — that every
 // recovery fixture actually pushes a `Diagnostic` into the public
 // accumulator via the wrapping `parse()` Salsa query (RESEARCH.md §Q11
@@ -223,8 +189,8 @@ fixture_test!(
 // accumulator, so the recovery + diagnostic plumbing must be exercised
 // independently of CST shape.
 //
-// Coverage: 15 of the 18 corpus recovery fixtures emit ≥1 diagnostic.
-// The remaining 3 are documented exceptions (see plan 02-03 SUMMARY):
+// Coverage: 11 of the 13 corpus recovery fixtures emit ≥1 diagnostic.
+// The remaining 2 are documented exceptions (see plan 02-03 SUMMARY):
 //
 //   - `12_double_minus_unary_recovers.fossil` (`iri = - - x`) parses
 //     cleanly under the grammar: unary `-` is right-associative L8
@@ -252,7 +218,7 @@ use salsa::Accumulator;
 
 #[test]
 fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
-    // 13 fixtures expected to emit ≥1 diagnostic. See module-level
+    // 11 fixtures expected to emit ≥1 diagnostic. See module-level
     // comment above for why fixtures 12 + 22 are excluded.
     let recovery_fixtures: &[(&str, &str)] = &[
         ("01_pipeline_postfix", "04_missing_arg_recovers"),
@@ -263,10 +229,6 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
         (
             "03_mappings_annotations",
             "16_mapping_missing_from_recovers",
-        ),
-        (
-            "03_mappings_annotations",
-            "17_annotation_unclosed_brace_recovers",
         ),
         (
             "03_mappings_annotations",

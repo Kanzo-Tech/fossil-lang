@@ -1,5 +1,5 @@
 prefix ex: <https://example.org/>
 User : ex:Person from users
-    ex:name = .name { ex:lang = "en"
+    ex:name = *
 Item : ex:Item from items
     iri = .id

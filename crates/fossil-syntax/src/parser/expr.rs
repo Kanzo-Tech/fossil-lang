@@ -80,9 +80,10 @@ pub(crate) fn parse_expression(p: &mut Parser, min_bp: Bp) {
             p.bump(); // `?`
             parse_expression(p, TERNARY_RBP + 1); // then-branch — cannot itself be a ternary at the same level
             p.skip_trivia();
-            // Disambiguation rule #3 (grammar.bnf line 251): `:` in this
-            // context is T_COLON, paired with the just-consumed `?`. The
-            // lexer emits it as `SHAPE_SEP`; we consume it as such here.
+            // Disambiguation rule #3: the `:` here is a `SHAPE_SEP`, the same
+            // token a mapping header takes, paired with the just-consumed `?`.
+            // The grammar used to declare a separate `T_COLON` terminal for
+            // this position that the lexer never emitted.
             if p.current() == Some(SyntaxKind::SHAPE_SEP) {
                 p.bump();
             } else {
@@ -303,7 +304,10 @@ fn parse_primary(p: &mut Parser) {
             p.expect(SyntaxKind::RPAREN);
             p.finish();
         }
-        Some(SyntaxKind::LBRACE) => parse_record_literal(p),
+        // `{` used to open a RecordLiteral here — the blank node in value
+        // position. It went with the annotation block it shared a brace with,
+        // so a `{` in an expression falls to the recovery arm like any other
+        // token nothing claims.
         _ => {
             // Recovery: emit ERROR with the current token (or empty if EOF).
             p.bump_as_error();
@@ -375,52 +379,6 @@ fn parse_interpolation_body(p: &mut Parser) {
         return;
     }
     parse_expression(p, 0);
-}
-
-/// `RecordLiteral := LBRACE RecordBody RBRACE` (grammar.bnf line 232-236).
-/// `RecordField := (IDENT | IRIExpr) ASSIGN Expression`.
-fn parse_record_literal(p: &mut Parser) {
-    p.start(SyntaxKind::RECORD_LITERAL);
-    p.expect(SyntaxKind::LBRACE);
-    loop {
-        p.skip_trivia();
-        match p.current() {
-            None | Some(SyntaxKind::RBRACE) => break,
-            // A field starts with IDENT (possibly followed by SHAPE_SEP IDENT
-            // for a prefixed-name LHS) or an absolute IRI.
-            Some(SyntaxKind::IDENT | SyntaxKind::ABS_IRI) => {
-                p.start(SyntaxKind::RECORD_FIELD);
-                // LHS — bare IDENT, prefixed name (lexer-contiguous), or ABS_IRI.
-                if p.current() == Some(SyntaxKind::IDENT)
-                    && p.peek_contiguous(3)
-                    && p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
-                    && p.peek_kind(2) == Some(SyntaxKind::IDENT)
-                {
-                    p.start(SyntaxKind::IRI_EXPR);
-                    p.bump();
-                    p.bump();
-                    p.bump();
-                    p.finish();
-                } else {
-                    p.bump();
-                }
-                p.expect(SyntaxKind::ASSIGN);
-                parse_expression(p, 0);
-                p.finish(); // RECORD_FIELD
-                // RecordSep := COMMA | NEWLINE (grammar.bnf line 235).
-                p.skip_trivia();
-                if p.current() == Some(SyntaxKind::COMMA) {
-                    p.bump();
-                }
-            }
-            _ => {
-                p.bump_as_error();
-                break;
-            }
-        }
-    }
-    p.expect(SyntaxKind::RBRACE);
-    p.finish();
 }
 
 #[cfg(test)]

@@ -198,15 +198,14 @@ HIR Mapping body `iri = expr; pᵢ = eᵢ`
            TripleEmitOp(source, subject=iri_expr_lowered, 
                                 predicate=pᵢ, 
                                 object_expr=eᵢ_lowered,
-                                graph=graph_iri_or_None)
+                                graph=None)
+           (`graph` is always None: the `in g` clause left `grammar.bnf`,
+            and GraphAr's vertex and edge tables carry no graph name.)
 
-HIR Annotation block on triple (s, p, o):
-    → MIR  for each (a = v) in block:
-           TripleEmitOp(source, subject=TripleTerm(s, p, o),
-                                predicate=a,
-                                object_expr=v_lowered,
-                                graph=...)
-           (recursive for nested annotations)
+(There was an annotation-block lowering here, emitting one triple per
+ `a = v` with `subject=TripleTerm(s, p, o)`. Both the annotation block and
+ the triple term left `grammar.bnf`, so neither the input nor the subject
+ term this rule needed exists.)
 ```
 
 Function applications in property expressions become `ExtendOp`s preceding the `TripleEmitOp`, so function-applied values are available as fields before emission.

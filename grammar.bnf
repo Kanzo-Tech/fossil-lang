@@ -23,7 +23,7 @@ INDENT, DEDENT := computed
 
 (* Identifiers and keywords *)
 IDENT          := (LETTER | '_') (LETTER | DIGIT | '_')*
-KEYWORD        := 'prefix' | 'in' | 'from' | 'use' | 'as'
+KEYWORD        := 'prefix' | 'from'
                 | 'and' | 'or' | 'not' | 'iri'
 
 (* Numeric literals — decimal only, optional underscores as separators *)
@@ -63,10 +63,8 @@ COMMENT        := '//' (any char except NEWLINE)*
 DEFINE         := ':='
 ASSIGN         := '='
 SHAPE_SEP      := ':'
-SHAPE_AND      := '&'
 PIPE           := '|>'
 T_QUESTION     := '?'
-T_COLON        := ':'                          (* contextual with T_QUESTION *)
 
 EQ             := '=='
 NEQ            := '!='
@@ -101,24 +99,18 @@ AT_ATTR        := '@' IDENT
 
 Program             := TopLevel* EOF
 
-TopLevel            := Import
-                     | PrefixDecl
+TopLevel            := PrefixDecl
                      | SourceDef
                      | MultiSourceDef
                      | TypeDef
                      | Mapping
 
-
-(* ─── Imports ─── *)
-
-Import              := 'use' Path SelectiveImport? Alias?
-
-Path                := PathSegment ('/' PathSegment)*
-PathSegment         := IDENT | STRING
-
-SelectiveImport     := LBRACE IDENT (COMMA IDENT)* RBRACE
-
-Alias               := 'as' IDENT
+(* There is no import production. `use foo/bar { a, b } as c` parsed into
+   IMPORT / IMPORT_PATH / SELECTIVE_IMPORT / ALIAS and nothing below the parser
+   read any of them: a file is compiled alone, and there is no module system for
+   a name to come from. ADR-0057's second amendment says `use` stays dead until
+   modules exist, and when they exist the form comes back with something that
+   resolves it. `use` and `as` are ordinary identifiers again. *)
 
 
 (* ─── Vocabulary and bindings ─── *)
@@ -145,11 +137,18 @@ TypeDef             := 'type' LBRACE IDENT (COMMA IDENT)* RBRACE ASSIGN Expressi
 
 Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
 
-MappingHeader       := IDENT SHAPE_SEP ShapeExpr InClause? 'from' Expression
+MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
 
-ShapeExpr           := IRIExpr (SHAPE_AND IRIExpr)*    (* intersection *)
+(* One shape, not an intersection. `A & B` parsed and then lowered to `A`
+   alone, silently, because the lowering took the first IRI and dropped the
+   rest — a mapping that type-checked against half of what it declared. The
+   node stays because the header needs somewhere to put its one shape; the
+   `& IRIExpr` tail is gone, and `&` is not a token.
 
-InClause            := 'in' IRIExpr
+   There is no `in g` either. The named graph clause parsed into an IN_CLAUSE
+   nothing read, and the corpus has nowhere to put a graph name: GraphAr is
+   vertex and edge tables, not quads. `in` is an ordinary identifier again. *)
+ShapeExpr           := IRIExpr
 
 MappingBody         := SubjectAttr? Property+
 
@@ -163,22 +162,17 @@ MappingBody         := SubjectAttr? Property+
 SubjectAttr         := AT_ATTR LPAREN 'iri' ASSIGN Expression RPAREN
                        (* AT_ATTR is `@subject`; any other name is an error *)
 
-Property            := PropertyLhs ASSIGN Expression AnnotationBlock?
+Property            := PropertyLhs ASSIGN Expression
 
 PropertyLhs         := 'iri'                     (* retired by SubjectAttr *)
                      | IRIExpr
 
-AnnotationBlock     := LBRACE AnnotationBody RBRACE
-
-AnnotationBody      := AnnotationList                              (* single-line *)
-                     | NEWLINE INDENT (AnnotationItem NEWLINE)+ DEDENT   (* multi-line *)
-
-AnnotationList      := AnnotationItem (AnnotationSep AnnotationItem)*
-
-AnnotationSep       := COMMA | NEWLINE
-
-AnnotationItem      := IRIExpr ASSIGN Expression AnnotationBlock?
-                       (* recursive — supports nested annotations *)
+(* There is no annotation block. `p = e { a = v }` was a statement about a
+   statement, and saying one needs a term that names the base triple —
+   RDF-star's, which left this grammar with the triple term. Nothing below the
+   parser ever read an ANNOTATION_BLOCK, and `type-system.md` §6's T-Annot
+   spells its conclusion with a `<<s p o>>` this language no longer writes. It
+   comes back when there is something to reify with. *)
 
 
 (* ─── Expressions (precedence-ordered, low binding → high) ─── *)
@@ -189,8 +183,11 @@ Expression          := PipelineExpr
 PipelineExpr        := TernaryExpr (PIPE PipelineTarget)*
 PipelineTarget      := PostfixExpr
 
-(* L2 — Ternary, right-assoc *)
-TernaryExpr         := OrExpr (T_QUESTION OrExpr T_COLON TernaryExpr)?
+(* L2 — Ternary, right-assoc. The `:` is SHAPE_SEP — the same token the mapping
+   header takes. There is no T_COLON: it was declared as a terminal of its own
+   and nothing ever produced one, so the grammar named a token the lexer does
+   not emit. What separates the two readings is the node, not the lexeme. *)
+TernaryExpr         := OrExpr (T_QUESTION OrExpr SHAPE_SEP TernaryExpr)?
 
 (* L3 — Or *)
 OrExpr              := AndExpr ('or' AndExpr)*
@@ -228,7 +225,6 @@ PrimaryExpr         := Literal
                      | IDENT
                      | IRIExpr
                      | LPAREN Expression RPAREN
-                     | RecordLiteral
 
 FieldRef            := DOT IDENT (DOT IDENT)*
 
@@ -264,32 +260,29 @@ LocalName           := IDENT
 
 (* ─── Record literals (blank node value position) ─── *)
 
-RecordLiteral       := LBRACE RecordBody RBRACE
-RecordBody          := RecordField (RecordSep RecordField)*
-                     | (* empty *)
-RecordSep           := COMMA | NEWLINE
-RecordField         := (IDENT | IRIExpr) ASSIGN Expression
-
-
-(* ─── Triple terms (RDF 1.2 quoted triple) ─── *)
-
+(* There is no record literal. `{ k = v }` in value position was the blank node,
+   and a blank node is a vertex with no IRI — which GraphAr's vertex table has no
+   row shape for and `MappingBody` has no way to declare. It went with the
+   annotation block it shared a `{` with: the one disambiguation rule this
+   grammar had existed only to tell the two apart, and with neither of them
+   there is nothing to tell apart. *)
 
 
 (* ═══ DISAMBIGUATION RULES (parser context) ═══ *)
 
-(*  1. RecordLiteral vs AnnotationBlock                                   *)
-(*     - `prop = { ... }`     → RecordLiteral  (LBRACE immediately after  *)
-(*                                              ASSIGN)                   *)
-(*     - `prop = expr { ... }` → AnnotationBlock (LBRACE after an         *)
-(*                                                Expression)             *)
+(*  (There used to be a rule 1 here: RecordLiteral vs AnnotationBlock, on  *)
+(*   whether the `{` came straight after `=` or after an expression. Both  *)
+(*   forms are gone, and a rule that told two absent things apart is not   *)
+(*   a rule. A `{` in a mapping body is now an error, and only one.)       *)
 (*                                                                         *)
 (*  2. DOT IDENT vs FieldRef                                              *)
 (*     - `namespace.ident`    → PostfixOp on `namespace`                   *)
 (*     - `.ident` (no preceding expression) → FieldRef (current row)      *)
 (*                                                                         *)
-(*  3. SHAPE_SEP `:` vs T_COLON `:`                                       *)
-(*     - `Name : Shape`       → SHAPE_SEP in MappingHeader                 *)
-(*     - `cond ? a : b`       → T_COLON in TernaryExpr (paired with `?`)  *)
+(*  3. `:` in a header vs `:` in a ternary                                *)
+(*     - Both are SHAPE_SEP; the lexer emits one token and only one.      *)
+(*     - `Name : Shape`       → consumed by MappingHeader                  *)
+(*     - `cond ? a : b`       → consumed by TernaryExpr, paired with `?`   *)
 (*                                                                         *)
 (*  (There used to be a rule 4 here: `<<` vs `<`. The triple term went     *)
 (*   with the RDF-specific surface, so `<<` claims nothing and `<` has     *)
@@ -298,8 +291,11 @@ RecordField         := (IDENT | IRIExpr) ASSIGN Expression
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
 
-(*  prefix   in       from     use      as                                *)
-(*  and      or       not      iri                                        *)
+(*  prefix   from     and      or       not      iri                      *)
+(*                                                                         *)
+(*  `in`, `use` and `as` were reserved for the named-graph clause and the  *)
+(*  import, and both went. A word reserved for a form the language does    *)
+(*  not have costs every program that wanted it as a column name.          *)
 (*                                                                         *)
 (*  There is no attribute keyword. `@name` lexes as AT_ATTR and the only  *)
 (*  production that accepts one is SubjectAttr, whose name must be        *)

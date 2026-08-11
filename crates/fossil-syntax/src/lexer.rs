@@ -50,15 +50,9 @@ pub enum Token {
     #[token("from")]
     KwFrom,
 
-    #[token("in")]
-    KwIn,
-
-    #[token("use")]
-    KwUse,
-
-    #[token("as")]
-    KwAs,
-
+    // `in`, `use` and `as` were keywords here. The named-graph clause and the
+    // import went with the forms nothing below the parser read, and a reserved
+    // word with no production is a column name the language refuses for free.
     #[token("and")]
     KwAnd,
 
@@ -187,9 +181,10 @@ pub enum Token {
 
     #[token("?")]
     Question,
-
-    #[token("&")]
-    ShapeAnd,
+    // `&` was `ShapeAnd`, the shape intersection's separator. The intersection
+    // was lowered by taking the first shape and dropping the rest without a
+    // word, so the token claimed a meaning the compiler did not keep.
+    //
     // Logos automatically rejects anything not matched; the indent pass
     // drops the `Err` variants from the `spanned()` iterator below.
 }
@@ -314,8 +309,12 @@ mod tests {
     }
 
     #[test]
-    fn lexes_shape_and() {
-        assert_eq!(just_kinds("&"), vec![Token::ShapeAnd]);
+    fn ampersand_is_not_a_token() {
+        // `&` was the shape intersection's separator and the intersection is
+        // gone, so nothing claims the byte and logos rejects it. Pinning the
+        // absence is the half of the old `lexes_shape_and` worth keeping: the
+        // day something wants `&` back, this test is where it announces itself.
+        assert_eq!(just_kinds("&"), vec![]);
     }
 
     #[test]
@@ -336,13 +335,20 @@ mod tests {
 
     #[test]
     fn lexes_new_keywords() {
-        assert_eq!(just_kinds("in"), vec![Token::KwIn]);
-        assert_eq!(just_kinds("use"), vec![Token::KwUse]);
-        assert_eq!(just_kinds("as"), vec![Token::KwAs]);
         assert_eq!(just_kinds("and"), vec![Token::KwAnd]);
         assert_eq!(just_kinds("or"), vec![Token::KwOr]);
         assert_eq!(just_kinds("not"), vec![Token::KwNot]);
         assert_eq!(just_kinds("iri"), vec![Token::KwIri]);
+    }
+
+    #[test]
+    fn in_use_and_as_are_ordinary_identifiers() {
+        // Three words this lexer used to reserve. The named-graph clause and
+        // the import took them, and both forms went — so a table with an `in`
+        // column, or a binding called `use`, parses like any other name.
+        assert_eq!(just_kinds("in"), vec![Token::Ident]);
+        assert_eq!(just_kinds("use"), vec![Token::Ident]);
+        assert_eq!(just_kinds("as"), vec![Token::Ident]);
     }
 
     // ─── Disambiguation / longest-match guards ────────────────────────

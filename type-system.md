@@ -196,15 +196,9 @@ Templates produce `String` by default. In contexts requiring `Iri` (e.g., `iri =
                   Γ ⊢ <<s p o>> : TripleTerm
 ```
 
-### 4.11 Record literals (blank nodes)
+### 4.11 Record literals (blank nodes) — retired
 
-```
-                  Γ ⊢ vᵢ : τᵢ for each (kᵢ = vᵢ) in record
-   T-Record: ────────────────────────────────────────────
-                  Γ ⊢ {k₁ = v₁, ..., kₙ = vₙ} : Record({kᵢ : τᵢ})
-```
-
-When assigned to a property typed `Shape(S)` where S is a blank-node shape, the record is checked against S's property types.
+There was a `T-Record` rule here, typing `{k₁ = v₁, ..., kₙ = vₙ}` as `Record({kᵢ : τᵢ})` and checking it against a blank-node shape. The record literal left `grammar.bnf`: the parser built a `RECORD_LITERAL` no stage below it read, and a blank node is a vertex with no IRI, which the GraphAr vertex table has no row shape for. A typing rule for a form the language does not accept is a rule nothing can reach.
 
 ### 4.12 Source operations (pipeline over sources)
 
@@ -235,8 +229,10 @@ The headline judgment: `Γ ⊢ M ok` for a complete mapping.
                       every predicate in body ∈ S's declared properties
                   iri_expr position satisfied exactly once
    T-Mapping: ──────────────────────────────────────────────────────────────────
-              Γ ⊢ "Name : S in g from source_expr  { iri = iri_expr; pᵢ = eᵢ }" ok
+              Γ ⊢ "Name : S from source_expr  { iri = iri_expr; pᵢ = eᵢ }" ok
 ```
+
+The header carries no `in g`. The named-graph clause left `grammar.bnf` — the parser built an `IN_CLAUSE` nothing below it read, and the corpus this compiler writes is GraphAr's vertex and edge tables, which have nowhere to put a graph name. `S` is one shape and not an intersection, for the same reason: `A & B` was lowered by keeping `A` and dropping the rest without a diagnostic.
 
 **`compatible(τ, τ', c)`** is the property-type compatibility relation. Defined as:
 - If `c` allows `0`: `τ` may be `Optional<τ'>` or `τ' <: τ`
@@ -247,20 +243,13 @@ The headline judgment: `Γ ⊢ M ok` for a complete mapping.
 
 ---
 
-## 6. Annotations (statements about statements)
+## 6. Annotations (statements about statements) — retired
 
-```
-                  Γ; row : R ⊢ "p = e" produces triple T_base
-                  for each annotation aⱼ = vⱼ in block:
-                      Γ; row : R ⊢ vⱼ : σⱼ
-                      target shape declares aⱼ : σⱼ' with cardinality (over T_base subject)
-                      compatible(σⱼ, σⱼ', card)
-   T-Annot:  ───────────────────────────────────────────────────────────────
-                  Γ; row : R ⊢ "p = e { aⱼ = vⱼ }" produces T_base plus
-                              {<<T_base.subject T_base.pred T_base.object>> aⱼ vⱼ}
-```
+There was a `T-Annot` rule here, typing `p = e { aⱼ = vⱼ }` as the base triple plus one triple per annotation, whose subject was written `<<T_base.subject T_base.pred T_base.object>>`.
 
-Annotations are recursive: an annotation's value can itself have annotations.
+Both halves of that conclusion are gone. The triple term left `grammar.bnf` with the rest of the RDF-star surface, and the annotation block followed it: a statement about a statement needs a term that names the base triple, and this language no longer writes one. The parser built `ANNOTATION_BLOCK` and `ANNOTATION_ITEM` nodes that nothing below it read.
+
+When reification comes back it comes back with a term to reify with, and this rule is written against that term rather than against the one that went.
 
 ---
 
@@ -323,10 +312,6 @@ function typecheck_mapping(M):
   for (p, e) in M.body.properties:
     expected = property_type_in_shape(target_shape, p)
     check(Γ_global, {row: R}, e, expected)
-    
-    for (a, av) in annotations_of(p, e):
-      annot_expected = annotation_type(target_shape, p, a)
-      check(Γ_global, {row: R}, av, annot_expected)
   
   if target_shape is closed:
     for p in M.body.predicates:

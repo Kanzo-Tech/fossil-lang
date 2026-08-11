@@ -1,3 +1,0 @@
-prefix ex: <https://example.org/>
-User : ex:Person from users
-    ex:author = { name = .author, year = 2026 }

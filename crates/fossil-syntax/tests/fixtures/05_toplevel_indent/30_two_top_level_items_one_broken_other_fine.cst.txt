@@ -26,21 +26,8 @@ PROGRAM
             IDENT "name"
         ASSIGN "="
         EXPR
-          FIELD_REF_EXPR
-            DOT "."
-            IDENT "name"
-        ANNOTATION_BLOCK
-          LBRACE "{"
-          ANNOTATION_ITEM
-            IRI_EXPR
-              IDENT "ex"
-              SHAPE_SEP ":"
-              IDENT "lang"
-            ASSIGN "="
-            EXPR
-              LITERAL_EXPR
-                STRING "\"en\""
           ERROR
+            STAR "*"
   MAPPING
     MAPPING_HEADER
       IDENT "Item"

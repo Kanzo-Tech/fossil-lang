@@ -336,9 +336,6 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
         // Keywords
         Token::KwPrefix => SyntaxKind::KW_PREFIX,
         Token::KwFrom => SyntaxKind::KW_FROM,
-        Token::KwIn => SyntaxKind::KW_IN,
-        Token::KwUse => SyntaxKind::KW_USE,
-        Token::KwAs => SyntaxKind::KW_AS,
         Token::KwAnd => SyntaxKind::KW_AND,
         Token::KwOr => SyntaxKind::KW_OR,
         Token::KwNot => SyntaxKind::KW_NOT,
@@ -375,7 +372,6 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
         Token::Slash => SyntaxKind::SLASH,
         Token::Percent => SyntaxKind::PERCENT,
         Token::Question => SyntaxKind::T_QUESTION,
-        Token::ShapeAnd => SyntaxKind::SHAPE_AND,
     }
 }
 

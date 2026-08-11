@@ -22,12 +22,13 @@ pub enum HirExpr {
 }
 ```
 
-The parser, meanwhile, produces `BINARY_EXPR`, `UNARY_EXPR`, `TERNARY_EXPR`, `PAREN_EXPR`,
+The parser, meanwhile, produced `BINARY_EXPR`, `UNARY_EXPR`, `TERNARY_EXPR`, `PAREN_EXPR`,
 `ARG_LIST`, `ARG`, `RECORD_LITERAL`, `TRIPLE_TERM`, `IMPORT`, `SELECTIVE_IMPORT`, `SHAPE_EXPR`,
 `IN_CLAUSE` and `ALIAS`.
 
-Grepping `crates/fossil-hir/` for any of those node kinds returns **zero**. The lowering reads four
-and drops the rest.
+Grepping `crates/fossil-hir/` for any of those node kinds returned **zero**. The lowering read four
+and dropped the rest. That list is the subject of the section at the bottom of this page: most of
+those node kinds no longer exist.
 
 ## It used to fail silently. That part is fixed
 
@@ -120,11 +121,23 @@ promise the language does not keep, and the grammar used to make several. Four a
 export in a language with no module system to export to. Removing them was checked the only way it
 can be: the workspace tests, and `fossil run examples/hello.fossil` writing a byte-identical corpus.
 
-Still standing, and each one waiting on something: **nested triple terms** (`<< s p o >>` is the
-pre-1.2 spelling — see [RDF 1.2](/docs/characteristics/rdf12)), **record literals** in value
-position, the **annotation block** of `type-system.md` §6, and the **`in g`** named-graph clause,
-which the corpus has nowhere to put. `use` is the opposite case: dead today and deliberately kept,
-because ADR-0057 §1 turns it on to bring checked types from a shape document.
+Seven more went on 2026-08-11, and the list is now short. **`$VAR`** and the **triple term**
+(`<< s p o >>`, the pre-1.2 spelling — see [RDF 1.2](/docs/characteristics/rdf12)) left first.
+Then: the **`in g`** named-graph clause, which the corpus has nowhere to put; the **`&` shape
+intersection**, which was not merely unread but *lossy* — `User : ex:Person & ex:Employee`
+type-checked and emitted `ex:Person` alone, because the lowering took the first IRI and dropped
+the rest with no diagnostic; the **annotation block** of `type-system.md` §6 and the **record
+literal** in value position, which went together because they were the two readings of one `{`;
+`use` with its path, selective import and alias, because ADR-0057's second amendment says it stays
+dead until there is a module system for a name to come from; and `T_COLON`, which the grammar
+declared as a terminal and the lexer never emitted — the ternary's `:` is the same `SHAPE_SEP`
+the mapping header takes.
+
+Two of the thirteen were not dead surface but **holes**, and they were fixed rather than deleted.
+`PAREN_EXPR` had no arm in the lowering, so `(.a and .b)` was refused by the fallback diagnostic in
+a language that already lowers `and` and `or` — grouping is not a form, so the arm unwraps to the
+expression inside. `UNARY_EXPR` is the one still open: `not …` parses and there is no `HirExpr`
+variant to lower it to, and adding one is a decision about the HIR, not a missing arm.
 
 `grammar.bnf` describes the language, not the parser's tolerance. Absorbing it into the reference
 section of the book is where that stops being a footnote and becomes the page's own subject.

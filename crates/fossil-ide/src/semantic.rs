@@ -148,13 +148,14 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         K::INTEGER | K::FLOAT => Some(ty::NUMBER),
         K::ABS_IRI => Some(ty::NAMESPACE),
 
-        // ── keywords (prefix / from / in / use / as / and / or / not /
-        //    iri) + the `@attr` marker, read as a keyword ────────────────
+        // ── keywords (prefix / from / and / or / not / iri) + the `@attr`
+        //    marker, read as a keyword ─────────────────────────────────────
+        //
+        // `in`, `use` and `as` were here. They stopped being keywords when the
+        // named-graph clause and the import left the grammar, and an `in`
+        // painted as a keyword would now be a lie about an ordinary column.
         K::KW_PREFIX
         | K::KW_FROM
-        | K::KW_IN
-        | K::KW_USE
-        | K::KW_AS
         | K::KW_AND
         | K::KW_OR
         | K::KW_NOT
@@ -162,7 +163,7 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         | K::AT_ATTR => Some(ty::KEYWORD),
 
         // ── operators (pipeline, assignment, ternary, arithmetic,
-        //    comparison, shape `&`) ────────────────────────────────────────
+        //    comparison) ───────────────────────────────────────────────────
         K::PIPE
         | K::DEFINE
         | K::ASSIGN
@@ -180,8 +181,7 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         | K::T_QUESTION
         // The hole's opener: an operator, because it is what separates the
         // expression inside from the text around it.
-        | K::INTERP_OPEN
-        | K::SHAPE_AND => Some(ty::OPERATOR),
+        | K::INTERP_OPEN => Some(ty::OPERATOR),
 
         // ── context-sensitive names ───────────────────────────────────
         K::IDENT => Some(ident_type(tok)),

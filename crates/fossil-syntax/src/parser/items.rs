@@ -13,55 +13,48 @@
 //!
 //! ```text
 //! Program             := TopLevel* EOF
-//! TopLevel            := Import | PrefixDecl | SourceDef | MultiSourceDef | Mapping
-//!
-//! Import              := 'use' Path SelectiveImport? Alias?
-//! Path                := PathSegment ('/' PathSegment)*
-//! PathSegment         := IDENT | STRING
-//! SelectiveImport     := LBRACE IDENT (COMMA IDENT)* RBRACE
-//! Alias               := 'as' IDENT
+//! TopLevel            := PrefixDecl | SourceDef | MultiSourceDef | TypeDef | Mapping
 //!
 //! Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
-//! MappingHeader       := IDENT SHAPE_SEP ShapeExpr InClause? 'from' Expression
-//! ShapeExpr           := IRIExpr (SHAPE_AND IRIExpr)*
-//! InClause            := 'in' IRIExpr
-//! MappingBody         := Property+
-//! Property            := PropertyLhs ASSIGN Expression AnnotationBlock?
+//! MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
+//! ShapeExpr           := IRIExpr
+//! MappingBody         := SubjectAttr? Property+
+//! Property            := PropertyLhs ASSIGN Expression
 //! PropertyLhs         := 'iri' | IRIExpr
-//! AnnotationBlock     := LBRACE AnnotationBody RBRACE
-//! AnnotationBody      := AnnotationList | NEWLINE INDENT (AnnotationItem NEWLINE)+ DEDENT
-//! AnnotationList      := AnnotationItem (AnnotationSep AnnotationItem)*
-//! AnnotationSep       := COMMA | NEWLINE
-//! AnnotationItem      := IRIExpr ASSIGN Expression AnnotationBlock?
 //! ```
 //!
 //! `PrefixDecl`, `SourceDef` and `MultiSourceDef` are the vocabulary and
 //! binding half of the surface; `def_map` scans for `SOURCE_DEF` and
 //! `PREFIX_DECL`, which is what the walking-skeleton invariant rests on.
 //!
+//! There is no `parse_import`. `use foo/bar { a, b } as c` built four node
+//! kinds and no stage below the parser read one of them; ADR-0057's second
+//! amendment keeps `use` dead until there is a module system for a name to
+//! come from.
+//!
 //! # Disambiguation rules (grammar.bnf §"DISAMBIGUATION RULES")
 //!
-//! All four rules are implemented in this module + `super::expr` and
+//! The surviving rules are implemented in this module + `super::expr` and
 //! exercised by the unit tests in `mod disambiguation` at the bottom of
 //! this file (Task 2a per plan 02-03 Blocker 1):
 //!
-//! 1. `RecordLiteral` vs `AnnotationBlock`: `prop = { … }` (LBRACE
-//!    immediately after ASSIGN) is a `RECORD_LITERAL`; `prop = expr { … }`
-//!    (LBRACE after an Expression) is an `ANNOTATION_BLOCK`. Implemented
-//!    in [`parse_property`].
+//! (Rule 1 was `RecordLiteral` vs `AnnotationBlock` — whether the `{` came
+//! straight after `=` or after an expression. Both forms went, and telling
+//! two absent things apart is not a rule. A `{` in a mapping body is now
+//! one thing: an error.)
 //! 2. `.IDENT` `FieldRef` vs `expr.IDENT` postfix member access: handled
 //!    in `super::expr::parse_primary` (leading `DOT`) vs
 //!    `super::expr::parse_postfix` (`DOT` after primary).
-//! 3. `SHAPE_SEP` `:` in `MappingHeader` vs `T_COLON` `:` in a ternary:
-//!    the same lexeme `:` is consumed by [`parse_mapping_header`] for
-//!    rule (3a) and by [`super::expr::parse_expression`]'s ternary
-//!    handler for rule (3b).
+//! 3. `:` in a `MappingHeader` vs `:` in a ternary: one lexeme, one token
+//!    (`SHAPE_SEP`), consumed by [`parse_mapping_header`] in the first case
+//!    and by [`super::expr::parse_expression`]'s ternary handler in the
+//!    second. The node is what tells them apart, not the token.
 //! (Rule 4 was `<<` vs `<`, and it is gone with the triple term.)
 
 use crate::kind::SyntaxKind;
 
 use super::Parser;
-use super::recover::{self, CLOSE_BRACKET_ANCHORS, MAPPING_BODY_ANCHORS, TOP_LEVEL_ANCHORS};
+use super::recover::{self, MAPPING_BODY_ANCHORS, TOP_LEVEL_ANCHORS};
 
 /// Top-level entry point for the item parser. Wraps a `PROGRAM` node around
 /// a `*`-loop over `TopLevel` productions. Called by `Parser::parse_program`
@@ -80,12 +73,11 @@ pub(crate) fn parse_program(p: &mut Parser) {
         }
         match p.current() {
             None => break,
-            Some(SyntaxKind::KW_USE) => parse_import(p),
             Some(SyntaxKind::KW_PREFIX) => parse_prefix_decl(p),
             // `{ A, B, ... } := io.rdf(...)` — a destructuring source def. A
-            // top-level `{` is unambiguous: the selective-import `{` is inside
-            // `use`, and record/annotation `{` only appear inside expressions /
-            // mapping bodies — never at the program level.
+            // top-level `{` is the only `{` there is now: the selective-import
+            // brace went with `use`, and the record and annotation braces went
+            // with the forms that opened them.
             Some(SyntaxKind::LBRACE) => parse_multi_source_def(p),
             Some(SyntaxKind::IDENT) => match p.peek_kind(1) {
                 // `IDENT :=` → source binding (SOURCE_DEF).
@@ -124,90 +116,6 @@ pub(crate) fn parse_program(p: &mut Parser) {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// Import: 'use' Path SelectiveImport? Alias?
-// ───────────────────────────────────────────────────────────────────────
-fn parse_import(p: &mut Parser) {
-    p.start(SyntaxKind::IMPORT);
-    p.bump(); // KW_USE
-    parse_path(p);
-    p.skip_trivia();
-    if p.current() == Some(SyntaxKind::LBRACE) {
-        parse_selective_import(p);
-    }
-    p.skip_trivia();
-    if p.current() == Some(SyntaxKind::KW_AS) {
-        p.start(SyntaxKind::ALIAS);
-        p.bump(); // KW_AS
-        recover::expect_or_recover(p, SyntaxKind::IDENT, TOP_LEVEL_ANCHORS);
-        p.finish();
-    }
-    p.finish();
-}
-
-// Path: PathSegment ('/' PathSegment)*
-fn parse_path(p: &mut Parser) {
-    p.start(SyntaxKind::IMPORT_PATH);
-    parse_path_segment(p);
-    loop {
-        p.skip_trivia();
-        if p.current() == Some(SyntaxKind::SLASH) {
-            p.bump();
-            parse_path_segment(p);
-        } else {
-            break;
-        }
-    }
-    p.finish();
-}
-
-fn parse_path_segment(p: &mut Parser) {
-    p.skip_trivia();
-    match p.current() {
-        Some(SyntaxKind::IDENT | SyntaxKind::STRING) => p.bump(),
-        _ => recover::recover_to(
-            p,
-            &[
-                SyntaxKind::SLASH,
-                SyntaxKind::LBRACE,
-                SyntaxKind::KW_AS,
-                SyntaxKind::KW_USE,
-                SyntaxKind::KW_PREFIX,
-                SyntaxKind::IDENT,
-            ],
-        ),
-    }
-}
-
-// SelectiveImport: LBRACE IDENT (COMMA IDENT)* RBRACE
-fn parse_selective_import(p: &mut Parser) {
-    p.start(SyntaxKind::SELECTIVE_IMPORT);
-    p.bump(); // LBRACE
-    recover::expect_or_recover(
-        p,
-        SyntaxKind::IDENT,
-        &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
-    );
-    loop {
-        p.skip_trivia();
-        if p.current() != Some(SyntaxKind::COMMA) {
-            break;
-        }
-        p.bump(); // COMMA
-        p.skip_trivia();
-        if p.current() == Some(SyntaxKind::RBRACE) {
-            break; // trailing comma allowed
-        }
-        recover::expect_or_recover(
-            p,
-            SyntaxKind::IDENT,
-            &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
-        );
-    }
-    recover::expect_or_recover(p, SyntaxKind::RBRACE, TOP_LEVEL_ANCHORS);
-    p.finish();
-}
-
-// ───────────────────────────────────────────────────────────────────────
 // SourceDef: IDENT DEFINE Expression
 //
 // The one binding form. `users := io.csv("u.csv")` reads a file and
@@ -229,7 +137,7 @@ fn parse_source_def(p: &mut Parser) {
 //
 // Each IDENT in the brace list names a member bound to the single source on
 // the right of `:=` (the local-name of a shape declared in the source's
-// schema). The brace/comma loop mirrors `parse_selective_import`; the `:= expr`
+// schema). The brace/comma loop is shared with `parse_type_def`; the `:= expr`
 // tail mirrors `parse_source_def`.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_multi_source_def(p: &mut Parser) {
@@ -351,7 +259,7 @@ fn parse_mapping(p: &mut Parser) {
     p.finish();
 }
 
-// MappingHeader: IDENT SHAPE_SEP ShapeExpr InClause? 'from' Expression
+// MappingHeader: IDENT SHAPE_SEP ShapeExpr 'from' Expression
 fn parse_mapping_header(p: &mut Parser) {
     p.start(SyntaxKind::MAPPING_HEADER);
     recover::expect_or_recover(
@@ -366,9 +274,6 @@ fn parse_mapping_header(p: &mut Parser) {
     );
     parse_shape_expr(p);
     p.skip_trivia();
-    if p.current() == Some(SyntaxKind::KW_IN) {
-        parse_in_clause(p);
-    }
     // `from` is required by the grammar but absent in some recovery
     // fixtures (e.g. fixture 16). Emit an ExpectedToken diagnostic and
     // recover toward INDENT or the next top-level anchor.
@@ -384,25 +289,14 @@ fn parse_mapping_header(p: &mut Parser) {
     p.finish();
 }
 
-// ShapeExpr: IRIExpr (SHAPE_AND IRIExpr)*
+// ShapeExpr: IRIExpr
+//
+// One shape. The `(SHAPE_AND IRIExpr)*` tail parsed an intersection the HIR
+// then reduced to its first element, silently — so `User : ex:Person &
+// ex:Employee` checked against `ex:Person` alone and nobody was told. The node
+// stays because the header needs a place for its one shape; the `&` does not.
 fn parse_shape_expr(p: &mut Parser) {
     p.start(SyntaxKind::SHAPE_EXPR);
-    parse_iri_expr(p);
-    loop {
-        p.skip_trivia();
-        if p.current() != Some(SyntaxKind::SHAPE_AND) {
-            break;
-        }
-        p.bump(); // `&`
-        parse_iri_expr(p);
-    }
-    p.finish();
-}
-
-// InClause: 'in' IRIExpr
-fn parse_in_clause(p: &mut Parser) {
-    p.start(SyntaxKind::IN_CLAUSE);
-    p.bump(); // KW_IN
     parse_iri_expr(p);
     p.finish();
 }
@@ -433,9 +327,7 @@ fn parse_iri_expr(p: &mut Parser) {
         _ => recover::recover_to(
             p,
             &[
-                SyntaxKind::SHAPE_AND,
                 SyntaxKind::KW_FROM,
-                SyntaxKind::KW_IN,
                 SyntaxKind::ASSIGN,
                 SyntaxKind::COMMA,
                 SyntaxKind::RBRACE,
@@ -511,28 +403,17 @@ fn parse_subject_attr(p: &mut Parser) {
     p.finish();
 }
 
-// Property: PropertyLhs ASSIGN Expression AnnotationBlock?
+// Property: PropertyLhs ASSIGN Expression
+//
+// There is no `AnnotationBlock?` tail and no record-literal primary, so a `{`
+// anywhere in a property is an error rather than a fork. The old disambiguation
+// rule 1 asked which of the two a `{` opened; with neither of them left the
+// question has one answer, and `parse_mapping_body`'s recovery arm gives it.
 fn parse_property(p: &mut Parser) {
     p.start(SyntaxKind::PROPERTY);
     parse_property_lhs(p);
     recover::expect_or_recover(p, SyntaxKind::ASSIGN, MAPPING_BODY_ANCHORS);
-    // DISAMBIGUATION RULE 1 — RecordLiteral vs AnnotationBlock:
-    //   ASSIGN immediately followed by LBRACE → the RecordLiteral primary
-    //     is consumed by `expr::parse_primary` (which dispatches on LBRACE).
-    //     The resulting CST has `EXPR > RECORD_LITERAL`.
-    //   ASSIGN followed by anything else → an Expression. If a LBRACE
-    //     follows the resulting Expression, that LBRACE is the
-    //     AnnotationBlock attached to the property — consumed below.
-    //
-    // Both arms go through `p.parse_expr()`; the dispatch happens INSIDE
-    // the Pratt parser via `parse_primary`'s LBRACE arm. The visible split
-    // between record vs annotation is "is there a LBRACE LEFT after the
-    // expression?" which we check below.
     p.parse_expr();
-    p.skip_trivia();
-    if p.current() == Some(SyntaxKind::LBRACE) {
-        parse_annotation_block(p);
-    }
     p.finish();
 }
 
@@ -548,80 +429,15 @@ fn parse_property_lhs(p: &mut Parser) {
     p.finish();
 }
 
-// AnnotationBlock: LBRACE AnnotationBody RBRACE
-// AnnotationBody: AnnotationList | NEWLINE INDENT (AnnotationItem NEWLINE)+ DEDENT
-fn parse_annotation_block(p: &mut Parser) {
-    p.start(SyntaxKind::ANNOTATION_BLOCK);
-    p.bump(); // LBRACE
-    // Disambiguate single-line vs multi-line on the token right after
-    // LBRACE (note: `peek_kind` skips NEWLINE as trivia, so the multi-line
-    // form surfaces as an INDENT directly after the LBRACE in the
-    // post-indent stream).
-    if p.current() == Some(SyntaxKind::INDENT) {
-        p.bump();
-        parse_annotation_items_multiline(p);
-        recover::expect_or_recover(p, SyntaxKind::DEDENT, CLOSE_BRACKET_ANCHORS);
-    } else if p.current() != Some(SyntaxKind::RBRACE) {
-        parse_annotation_list(p);
-    }
-    recover::expect_or_recover(p, SyntaxKind::RBRACE, MAPPING_BODY_ANCHORS);
-    p.finish();
-}
-
-fn parse_annotation_list(p: &mut Parser) {
-    parse_annotation_item(p);
-    loop {
-        p.skip_trivia();
-        // AnnotationSep := COMMA | NEWLINE; the NEWLINE is trivia so we
-        // only see COMMA here. RBRACE ends the list.
-        if p.current() != Some(SyntaxKind::COMMA) {
-            break;
-        }
-        p.bump();
-        p.skip_trivia();
-        if p.current() == Some(SyntaxKind::RBRACE) {
-            break; // trailing comma allowed
-        }
-        parse_annotation_item(p);
-    }
-}
-
-fn parse_annotation_items_multiline(p: &mut Parser) {
-    loop {
-        p.skip_trivia();
-        match p.current() {
-            None | Some(SyntaxKind::DEDENT | SyntaxKind::RBRACE) => break,
-            _ => parse_annotation_item(p),
-        }
-    }
-}
-
-// AnnotationItem: IRIExpr ASSIGN Expression AnnotationBlock?  (recursive)
-fn parse_annotation_item(p: &mut Parser) {
-    p.start(SyntaxKind::ANNOTATION_ITEM);
-    parse_iri_expr(p);
-    recover::expect_or_recover(
-        p,
-        SyntaxKind::ASSIGN,
-        &[SyntaxKind::COMMA, SyntaxKind::RBRACE, SyntaxKind::DEDENT],
-    );
-    p.parse_expr();
-    p.skip_trivia();
-    if p.current() == Some(SyntaxKind::LBRACE) {
-        parse_annotation_block(p); // recursive — annotations on annotations
-    }
-    p.finish();
-}
-
 // =====================================================================
 // Disambiguation-rule unit tests (Task 2a per Blocker 1)
 // =====================================================================
 //
-// These four pairs of tests prove the parser implements all four grammar.bnf
-// DISAMBIGUATION RULES BEFORE Task 3 regenerates the 24 fixture snapshots.
-// Independent assertions on structural CST kinds catch the silent-bug class
-// where `UPDATE_EXPECT=1` would otherwise bake the wrong shape into the
-// snapshot baseline. See plan 02-03 §"Why these tests are required HERE".
+// These tests prove the parser implements the grammar.bnf DISAMBIGUATION
+// RULES BEFORE Task 3 regenerates the fixture snapshots. Independent
+// assertions on structural CST kinds catch the silent-bug class where
+// `UPDATE_EXPECT=1` would otherwise bake the wrong shape into the snapshot
+// baseline. See plan 02-03 §"Why these tests are required HERE".
 
 #[cfg(test)]
 mod disambiguation {
@@ -656,40 +472,43 @@ mod disambiguation {
         find_first_kind(root, want).is_some()
     }
 
-    // ── RULE 1 — RecordLiteral vs AnnotationBlock ────────────────────
+    // ── `{` claims nothing in a property, in either position ──────────
+    //
+    // There used to be a rule 1 here: `prop = { … }` was a RECORD_LITERAL and
+    // `prop = expr { … }` was an ANNOTATION_BLOCK, and a pair of tests pinned
+    // that each was not the other. Both forms went — the record literal is a
+    // blank node the corpus has no row for, the annotation block a statement
+    // about a statement with no term to name one. With neither left, a rule
+    // that told them apart asserts nothing.
+    //
+    // What survives is the one answer that replaced the fork: in a property, a
+    // `{` opens nothing at all, in EITHER position. That is worth pinning,
+    // because a language where a brace has exactly zero readings is what makes
+    // deleting the rule safe.
 
     #[test]
-    fn rule1_lbrace_after_assign_is_record_literal() {
+    fn brace_after_assign_is_an_error() {
         let src = "User : ex:Shape from users\n    ex:rec = { name = .n }\n";
         let root = parse_str(src);
-        let property =
-            find_first_kind(&root, SyntaxKind::PROPERTY).expect("expected at least one PROPERTY");
-        // The PROPERTY's first EXPR descendant must contain RECORD_LITERAL
-        // and MUST NOT contain ANNOTATION_BLOCK.
         assert!(
-            descendant_kind_exists(&property, SyntaxKind::RECORD_LITERAL),
-            "expected RECORD_LITERAL inside PROPERTY for `{{ name = .n }}` immediately after `=`",
-        );
-        assert!(
-            !descendant_kind_exists(&property, SyntaxKind::ANNOTATION_BLOCK),
-            "did NOT expect ANNOTATION_BLOCK here (rule 1 violation)",
+            descendant_kind_exists(&root, SyntaxKind::ERROR),
+            "`= {{ … }}` must be an error: nothing opens a brace in value position",
         );
     }
 
     #[test]
-    fn rule1_lbrace_after_expression_is_annotation_block() {
+    fn brace_after_an_expression_is_an_error() {
         let src = "User : ex:Shape from users\n    ex:name = .name { ex:lang = \"en\" }\n";
         let root = parse_str(src);
         let property = find_first_kind(&root, SyntaxKind::PROPERTY).expect("expected a PROPERTY");
+        // The property itself still parses — `.name` is its whole value.
         assert!(
-            descendant_kind_exists(&property, SyntaxKind::ANNOTATION_BLOCK),
-            "expected ANNOTATION_BLOCK in PROPERTY for `.name {{ … }}`",
+            descendant_kind_exists(&property, SyntaxKind::FIELD_REF_EXPR),
+            "expected the property's value `.name` to parse as a FIELD_REF_EXPR",
         );
-        // The expression `.name` is a FIELD_REF_EXPR — make sure no
-        // RECORD_LITERAL was conjured up by mistake.
         assert!(
-            !descendant_kind_exists(&property, SyntaxKind::RECORD_LITERAL),
-            "did NOT expect RECORD_LITERAL here (rule 1 violation)",
+            descendant_kind_exists(&root, SyntaxKind::ERROR),
+            "`.name {{ … }}` must be an error: the annotation block is gone",
         );
     }
 
@@ -717,7 +536,7 @@ mod disambiguation {
         );
     }
 
-    // ── RULE 3 — SHAPE_SEP in MappingHeader vs T_COLON in TernaryExpr ─
+    // ── RULE 3 — `:` in a MappingHeader vs `:` in a ternary ───────────
 
     #[test]
     fn rule3_colon_in_mapping_header_is_shape_sep() {
@@ -742,10 +561,11 @@ mod disambiguation {
         let root = parse_str(src);
         let ternary =
             find_first_kind(&root, SyntaxKind::TERNARY_EXPR).expect("expected TERNARY_EXPR");
-        // The colon in a TERNARY_EXPR is conceptually T_COLON; the lexer
-        // emits the same lexeme as SHAPE_SEP. The disambiguator is the
-        // surrounding node (TERNARY_EXPR existed at all). Additionally
-        // assert T_QUESTION is one of the TERNARY_EXPR's token children
+        // The colon in a TERNARY_EXPR is a SHAPE_SEP — the same token the
+        // header takes. The grammar used to declare a `T_COLON` terminal for
+        // this position and nothing ever produced one, so the disambiguator
+        // was always the surrounding node (TERNARY_EXPR existed at all), never
+        // the token. Additionally assert T_QUESTION is one of its token children
         // — without `?` there is no ternary, by construction.
         let token_kinds: Vec<SyntaxKind> = ternary
             .children_with_tokens()

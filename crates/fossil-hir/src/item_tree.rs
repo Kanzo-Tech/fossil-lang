@@ -22,9 +22,7 @@
 //! Editing the value of an existing property is NOT structural and MUST
 //! NOT.
 
-use crate::ast_id::{
-    FileAstId, ImportNode, MappingNode, PrefixDeclNode, SourceDefNode, ast_id_map,
-};
+use crate::ast_id::{FileAstId, MappingNode, PrefixDeclNode, SourceDefNode, ast_id_map};
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
@@ -43,7 +41,6 @@ pub enum ItemHeader {
     PrefixDecl(PrefixDeclHeader),
     SourceDef(SourceDefHeader),
     Mapping(MappingHeader),
-    Import(ImportHeader),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -64,13 +61,6 @@ pub struct MappingHeader {
     pub ast_id: FileAstId<MappingNode>,
     /// `User` in `User : ex:Person from users`.
     pub name: SmolStr,
-    /// Surface text of each `IRI_EXPR` in the `SHAPE_EXPR`. For a shape
-    /// intersection `A & B` this carries both elements in source order.
-    /// Resolution to fully-qualified IRIs is the responsibility of the
-    /// downstream HIR `lower_to_hir` query — keeping `ItemTree`'s view at
-    /// "surface text" means `item_tree(file)` does not depend on the prefix
-    /// table (which is computed by `def_map`).
-    pub shape_iris: Vec<SmolStr>,
     /// Source binding name from the `from` clause if it's a simple `IDENT`;
     /// `None` if the source is a complex `Expression`. Phase 3 handles
     /// complex sources.
@@ -80,15 +70,10 @@ pub struct MappingHeader {
     pub body_property_count: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ImportHeader {
-    pub ast_id: FileAstId<ImportNode>,
-    /// Joined path text (e.g. `stdlib/seq`). Phase 3 splits this into
-    /// segments.
-    pub path: SmolStr,
-    /// Alias from `as IDENT` if present.
-    pub alias: Option<SmolStr>,
-}
+// There was an `ImportHeader` here — the `use foo/bar as baz` signature. It
+// carried a path and an alias and nothing ever read either: a file is compiled
+// alone, so there is no second file for a path to name. It went with the
+// `use` form itself.
 
 /// Build the per-file `ItemTree` by walking top-level CST children once and
 /// extracting each one's signature-only summary.
@@ -116,11 +101,6 @@ pub fn item_tree<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> ItemTre
             SyntaxKind::MAPPING => {
                 if let Some(h) = extract_mapping_header(&child, FileAstId::new(ast_id_raw)) {
                     items.push(ItemHeader::Mapping(h));
-                }
-            }
-            SyntaxKind::IMPORT => {
-                if let Some(h) = extract_import_header(&child, FileAstId::new(ast_id_raw)) {
-                    items.push(ItemHeader::Import(h));
                 }
             }
             _ => {} // trivia, ERROR nodes — ignored at the item level
@@ -191,22 +171,11 @@ fn extract_mapping_header(
         .find(|t| t.kind() == SyntaxKind::IDENT)?;
     let name = SmolStr::from(name_tok.text());
 
-    // Shape IRIs: each IRI_EXPR inside SHAPE_EXPR carries one shape. Surface
-    // text is captured (no prefix expansion at the ItemTree level — that's
-    // a downstream concern that depends on def_map's prefix table).
-    let mut shape_iris: Vec<SmolStr> = Vec::new();
-    if let Some(shape_expr) = header
-        .children()
-        .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)
-    {
-        for iri_node in shape_expr
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::IRI_EXPR)
-        {
-            let raw = iri_node.text().to_string();
-            shape_iris.push(SmolStr::from(raw.trim()));
-        }
-    }
+    // There was a `shape_iris: Vec<SmolStr>` collected here, one entry per
+    // IRI_EXPR in the SHAPE_EXPR, because a shape could be an intersection.
+    // Nothing ever read the field, and the intersection is gone: a header has
+    // one shape, and `lower_to_hir` resolves it against the prefix table this
+    // query deliberately does not depend on.
 
     // Source binding: scan tokens after KW_FROM for a single IDENT. Complex
     // expressions are signalled as `None`; Phase 3 handles them via the body
@@ -254,39 +223,8 @@ fn extract_mapping_header(
     Some(MappingHeader {
         ast_id,
         name,
-        shape_iris,
         source_binding,
         body_property_count,
-    })
-}
-
-fn extract_import_header(node: &SyntaxNode, ast_id: FileAstId<ImportNode>) -> Option<ImportHeader> {
-    // Path text — concatenated text of the IMPORT_PATH subnode (preserves
-    // segments + slashes verbatim; Phase 3 splits if needed).
-    let path_node = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::IMPORT_PATH)?;
-    let path: String = path_node.text().to_string();
-    // Alias: first IDENT after KW_AS at this node's token sequence.
-    let mut alias = None;
-    let mut after_as = false;
-    for tok in node
-        .children_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-    {
-        if tok.kind() == SyntaxKind::KW_AS {
-            after_as = true;
-            continue;
-        }
-        if after_as && tok.kind() == SyntaxKind::IDENT {
-            alias = Some(SmolStr::from(tok.text()));
-            break;
-        }
-    }
-    Some(ImportHeader {
-        ast_id,
-        path: SmolStr::from(path.trim()),
-        alias,
     })
 }
 
@@ -362,7 +300,6 @@ User : ex:Person from users
             other => panic!("expected Mapping in items_b[2], got {other:?}"),
         };
         assert_eq!(m_a.name, m_b.name);
-        assert_eq!(m_a.shape_iris, m_b.shape_iris);
         assert_eq!(m_a.body_property_count, m_b.body_property_count);
         assert_eq!(m_a.source_binding, m_b.source_binding);
     }

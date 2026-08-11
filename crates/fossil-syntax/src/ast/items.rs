@@ -36,32 +36,18 @@ macro_rules! ast_node {
     };
 }
 
-ast_node!(Import, IMPORT);
-ast_node!(RecordLiteral, RECORD_LITERAL);
-ast_node!(AnnotationBlock, ANNOTATION_BLOCK);
+// `Import`, `RecordLiteral`, `AnnotationBlock` and `InClause` were views here.
+// Each wrapped a node kind the parser built and the HIR never cast, and all
+// four node kinds are gone — see `grammar.bnf` for what each one was and what
+// it would take to bring it back.
+
 ast_node!(ShapeExpr, SHAPE_EXPR);
-ast_node!(InClause, IN_CLAUSE);
 ast_node!(IriExpr, IRI_EXPR);
 
-impl Import {
-    /// The first IDENT token in the import — the head segment of the
-    /// `use foo/bar` path. Plan 02-04's `ItemTree` will lift this to a
-    /// proper `Path::segments()` iterator once it walks `IMPORT_PATH`
-    /// composite children.
-    #[must_use]
-    pub fn head_segment(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .descendants_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT || t.kind() == SyntaxKind::STRING)
-            .map(|t| smol_str::SmolStr::from(t.text()))
-    }
-}
-
 impl ShapeExpr {
-    /// The shape's first (and, for the simple `Name : Shape` case, only)
-    /// IRI expression. The `&`-intersection alternative shapes follow as
-    /// additional [`IriExpr`] siblings.
+    /// The shape's IRI expression. There is exactly one: the `&` intersection
+    /// went when the lowering was found to keep the first element and drop the
+    /// rest without a diagnostic.
     #[must_use]
     pub fn primary_iri(&self) -> Option<IriExpr> {
         self.0.children().find_map(IriExpr::cast)

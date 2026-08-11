@@ -100,9 +100,8 @@ pub struct SourceDefNode;
 /// Marker type — `FileAstId<PrefixDeclNode>`.
 #[derive(Debug)]
 pub struct PrefixDeclNode;
-/// Marker type — `FileAstId<ImportNode>`.
-#[derive(Debug)]
-pub struct ImportNode;
+// There was an `ImportNode` marker here. `use` left the grammar, so there is
+// no `IMPORT` node to point a `FileAstId` at.
 
 /// Per-file stable map: records the DFS top-level insertion order of every
 /// signature-carrying CST node.
@@ -148,10 +147,7 @@ pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdM
         // We DO NOT inspect child.children() or child.text() here. Body
         // content does not contribute to AstIdMap's input.
         match child.kind() {
-            SyntaxKind::MAPPING
-            | SyntaxKind::SOURCE_DEF
-            | SyntaxKind::PREFIX_DECL
-            | SyntaxKind::IMPORT => {
+            SyntaxKind::MAPPING | SyntaxKind::SOURCE_DEF | SyntaxKind::PREFIX_DECL => {
                 entries.push(AstIdEntry {
                     kind: child.kind(),
                     local_index: u32::try_from(idx).expect("file with > u32::MAX top-level items"),

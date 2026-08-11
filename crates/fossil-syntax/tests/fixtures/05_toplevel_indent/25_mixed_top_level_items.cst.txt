@@ -1,15 +1,25 @@
 PROGRAM
-  IMPORT
-    KW_USE "use"
-    IMPORT_PATH
-      IDENT "stdlib"
-      SLASH "/"
-      IDENT "core"
   PREFIX_DECL
     KW_PREFIX "prefix"
     IDENT "ex"
     SHAPE_SEP ":"
     ABS_IRI "<https://example.org/>"
+  SOURCE_DEF
+    IDENT "users"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "csv"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"users.csv\""
+        RPAREN ")"
   MAPPING
     MAPPING_HEADER
       IDENT "User"

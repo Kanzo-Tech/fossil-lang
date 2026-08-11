@@ -11,7 +11,7 @@
 //! (offsets, trivia, error recovery in later phases).
 
 pub mod items;
-pub use items::{AnnotationBlock, Import, InClause, IriExpr, RecordLiteral, ShapeExpr};
+pub use items::{IriExpr, ShapeExpr};
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
@@ -113,17 +113,11 @@ impl MappingHeader {
             .map(|t| smol_str::SmolStr::from(t.text()))
     }
 
-    /// The header's `ShapeExpr` (`ex:Person` or `ex:Person & ex:Employee`).
+    /// The header's `ShapeExpr` (`ex:Person`).
     /// Plan 02-04's `ItemTree` consumes this to build `Mapping.shape_id`.
     #[must_use]
     pub fn shape_expr(&self) -> Option<items::ShapeExpr> {
         self.0.children().find_map(items::ShapeExpr::cast)
-    }
-
-    /// The optional `in <IriExpr>` clause (`in ex:Graph`).
-    #[must_use]
-    pub fn in_clause(&self) -> Option<items::InClause> {
-        self.0.children().find_map(items::InClause::cast)
     }
 
     /// The expression on the right of `from` — the source-binding
