@@ -110,14 +110,8 @@ fn allowlist_is_aligned_to_catalog_no_ceil_floor() {
 /// SC#1 CI gate.
 fn expected_stdlib_names() -> Vec<&'static str> {
     vec![
-        // core/ (8)
-        "core.iri",
-        "core.triple",
-        "core.blank",
-        "core.literal",
-        "core.typed",
+        // core/ (2)
         "core.lang",
-        "core.emit",
         "core.require",
         // seq/ (13)
         "seq.filter",
@@ -203,7 +197,7 @@ fn every_stdlib_function_is_tagged_exactly_once() {
         "stdlib catalog must equal the stdlib.md eight-namespace set exactly.\n  \
          MISSING (untagged/omitted): {missing:?}\n  EXTRA (not in stdlib.md): {extra:?}",
     );
-    assert_eq!(catalog.len(), 56, "8+13+6+7+6+8+5+3 = 56 surface functions");
+    assert_eq!(catalog.len(), 50, "2+13+6+7+6+8+5+3 = 50 surface functions");
 
     // math/ = exactly 6, no ceil/floor.
     let math_count = catalog.iter().filter(|n| n.starts_with("math.")).count();

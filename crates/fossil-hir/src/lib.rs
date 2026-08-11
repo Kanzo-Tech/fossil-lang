@@ -7,7 +7,7 @@
 //! # Phase 2 scope (current)
 //!
 //! - Full 11-kind [`Ty`] ADT (`Primitive`, `Optional`, `Seq`, `Record`,
-//!   `Iri`, `IriTemplate`, `Shape`, `Fn`, `TripleTerm`, `Error`, `Unknown`)
+//!   `Iri`, `IriTemplate`, `Fn`, `Error`, `Unknown`)
 //!   per CORE-03 + plan 02-05.
 //! - [`DefMap`] = prefix table + source bindings + mapping list, populated by
 //!   the [`def_map`] Salsa query.

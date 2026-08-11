@@ -552,9 +552,7 @@ User : ex:Person from users
             TyKind::Record(rec),
             TyKind::Iri,
             TyKind::IriTemplate,
-            TyKind::Shape(fossil_hir::ty::ShapeId(0)),
             TyKind::Fn(sig),
-            TyKind::TripleTerm,
             TyKind::Unknown(InferenceId(7)),
         ];
         // 10 surface-constructible variants + Error (constructed below) = 11.

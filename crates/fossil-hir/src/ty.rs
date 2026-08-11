@@ -51,13 +51,8 @@ pub enum TyKind<'db> {
     Iri,
     /// An IRI template — backtick string with `${...}` placeholders.
     IriTemplate,
-    /// Satisfies `ShEx` shape S. [`ShapeId`] is a stub in Phase 2; Phase 3
-    /// resolves it via `fossil-descriptors-output`.
-    Shape(ShapeId),
     /// Function signature — interned separately for fast equality.
     Fn(FnSig<'db>),
-    /// RDF 1.2 quoted triple-as-term, type-system.md §2 + §4.10.
-    TripleTerm,
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
     /// promotion of Phase 1's local taint-wrapper newtype — see ADR-0004 +
     /// RESEARCH.md §Q6).
@@ -135,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn all_eleven_ty_kinds_exist() {
+    fn every_ty_kind_exists() {
         let db = db();
         let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
         let _: TyKind<'_> = TyKind::Primitive(Primitive::String);
@@ -145,10 +140,8 @@ mod tests {
         let _: TyKind<'_> = TyKind::Record(rec);
         let _: TyKind<'_> = TyKind::Iri;
         let _: TyKind<'_> = TyKind::IriTemplate;
-        let _: TyKind<'_> = TyKind::Shape(ShapeId::placeholder(0));
         let sig = FnSig::new(&db, vec![int_ty], int_ty);
         let _: TyKind<'_> = TyKind::Fn(sig);
-        let _: TyKind<'_> = TyKind::TripleTerm;
         // Reference the helper so the dead-code lint doesn't flag it.
         let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
         let _: TyKind<'_> = TyKind::Unknown(InferenceId(0));

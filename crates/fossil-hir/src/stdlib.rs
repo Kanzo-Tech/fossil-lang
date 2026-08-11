@@ -191,7 +191,6 @@ pub enum ScalarTy {
     /// An IRI value.
     Iri,
     /// An RDF 1.2 triple-as-term.
-    TripleTerm,
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -208,7 +207,6 @@ impl ScalarTy {
             Self::Date => TyKind::Primitive(Primitive::Date),
             Self::DateTime => TyKind::Primitive(Primitive::DateTime),
             Self::Iri => TyKind::Iri,
-            Self::TripleTerm => TyKind::TripleTerm,
             Self::SeqString => {
                 let s = Ty::new(db, TyKind::Primitive(Primitive::String));
                 TyKind::Seq(s)
@@ -492,58 +490,22 @@ impl FunctionRegistry {
         };
         let e = &mut reg.entries;
 
-        // ── core/ (8) — foundational RDF primitives ───────────────────────
-        // iri: validated cast; codegen identity when arg is already an IRI
-        // template (stdlib.md §core/iri). v0.1 lowers as Inline(Identity).
-        add(
-            e,
-            "core.iri",
-            vec![S::String],
-            S::Iri,
-            L::Inline(IF::Identity),
-        );
-        add(
-            e,
-            "core.triple",
-            vec![S::Iri, S::Iri, S::Iri],
-            S::TripleTerm,
-            L::Inline(IF::Concat),
-        );
+        // ── core/ (2) ─────────────────────────────────────────────────────
+        //
+        // This used to be eight, and the six that went were RDF term
+        // constructors — `iri`, `triple`, `blank`, `literal`, `typed`, `emit`.
+        // Not one of the 119 `.fossil` programs in the tree called any of them,
+        // and three could not even lower: `triple`/`emit` are `Plan(Map)`, which
+        // codegen refuses as "a plan operator, not a value", and `blank` hits
+        // the same wall. They were a term algebra for one output format,
+        // catalogued and never wired.
         // blank: () -> Iri / String -> Iri. v0.1 takes the named (String) form.
-        add(
-            e,
-            "core.blank",
-            vec![S::String],
-            S::Iri,
-            L::Inline(IF::BlankNode),
-        );
-        add(
-            e,
-            "core.literal",
-            vec![S::String, S::Iri],
-            S::String,
-            L::Inline(IF::Identity),
-        );
-        add(
-            e,
-            "core.typed",
-            vec![S::String, S::Iri],
-            S::String,
-            L::Inline(IF::Identity),
-        );
         add(
             e,
             "core.lang",
             vec![S::String, S::String],
             S::String,
             L::Inline(IF::Identity),
-        );
-        add(
-            e,
-            "core.emit",
-            vec![S::Iri, S::Iri, S::Iri],
-            S::TripleTerm,
-            L::Plan(P::Map),
         );
         // require: forall T. T? -> T. v0.1 scalar approximation String -> String.
         add(

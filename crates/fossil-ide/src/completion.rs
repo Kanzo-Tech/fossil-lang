@@ -315,7 +315,6 @@ fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
         S::Date => "Date",
         S::DateTime => "DateTime",
         S::Iri => "Iri",
-        S::TripleTerm => "TripleTerm",
         S::SeqString => "Seq<String>",
     }
     .to_string()

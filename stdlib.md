@@ -24,43 +24,12 @@ This document specifies the standard library of Fossil v0.1. ~55 functions acros
 
 ---
 
-## `core/` — Foundational RDF primitives
+## `core/` — the two that are not a term algebra
 
-### `iri`
-```
-iri :: String -> Iri
-```
-Cast a string to an absolute IRI. Validates RFC 3986 well-formedness. Runtime error if invalid.
-- **Lowering:** udf (`fossil_iri_validate`); also recognized by codegen as identity when arg is `template :: Iri`.
-
-### `triple`
-```
-triple :: (Iri, Iri, Iri | Literal | TripleTerm) -> TripleTerm
-```
-Construct an RDF 1.2 triple-term. Equivalent to surface syntax `<<s p o>>`.
-- **Lowering:** inline (emitted as triple-term subject column where supported, or as composite ID).
-
-### `blank`
-```
-blank :: () -> Iri          (anonymous bnode)
-blank :: String -> Iri      (named bnode with stable label per row)
-```
-Construct a blank node IRI. Named form uses the string as a stable bnode label scoped to the mapping's source.
-- **Lowering:** inline (`'_:bnode_' || row_id` or similar).
-
-### `literal`
-```
-literal :: (Any, Datatype) -> Literal
-```
-Construct a typed literal. Generic constructor; usually invoked via more specific functions (`typed`, `lang`).
-- **Lowering:** inline expression with explicit type cast.
-
-### `typed`
-```
-typed :: (Any, Datatype) -> Literal
-```
-Construct a literal with explicit `xsd:` datatype. `Datatype` is an Iri value, conventionally an `xsd:*` IRI.
-- **Lowering:** inline cast in SQL (`CAST(value AS target_sql_type)`) plus datatype annotation column for output.
+This namespace held eight. Six were RDF term constructors — `iri`, `triple`,
+`blank`, `literal`, `typed`, `emit` — and no program in the corpus ever called
+one; three could not even lower. They are gone, and with them the surface
+`<<s p o>>` that `triple` mirrored.
 
 ### `lang`
 ```
@@ -69,14 +38,6 @@ lang :: (String, String, dir: String) -> LangLiteral
 ```
 Construct a language-tagged literal. Optional `dir` argument for RDF 1.2 direction-tagged literals (`ltr` or `rtl`).
 - **Lowering:** inline; emits literal with `lang_tag` column and optional `direction` column.
-
-### `emit`
-```
-emit :: (Iri, Iri, Iri | Literal | TripleTerm) -> ()
-emit :: (Iri, Iri, Iri | Literal | TripleTerm, Iri) -> ()      (with graph)
-```
-Emit a raw triple/quad. Escape hatch for dynamic predicates or other cases not expressible via standard property syntax. Used in mapping body as a statement.
-- **Lowering:** plan-level — adds a `TripleEmitOp` to the MIR.
 
 ### `require`
 ```
@@ -517,7 +478,7 @@ Fetch from REST endpoint. Schema inferred from response or provided via `schema:
 
 | Namespace | Count | Lowering profile |
 |---|---|---|
-| `core/`       | 7 | mix of inline, udf, plan |
+| `core/`       | 2 | inline |
 | `seq/`        | 12 | mostly plan (operator algebra) |
 | `clean/`      | 6 | mostly builtin, some udf |
 | `anon/`       | 3 | udf |
@@ -534,14 +495,14 @@ Fetch from REST endpoint. Schema inferred from response or provided via `schema:
 
 **Phase A (MVP critical path):**
 1. `seq/` — entire namespace (pipeline operations). No mapping works without these.
-2. `core/` — `iri`, `triple`, `literal`, `typed`, `lang`, `blank`. RDF primitives.
+2. `core/` — `lang`, `require`.
 3. `io/csv` — minimum source.
 4. `clean/{trim, lower}` + `parse/{integer, float, date}` — most common transforms.
 
 **Phase B (round out):**
 5. Remaining `clean/`, `parse/`, `str/`, `math/`.
 6. `validate/` namespace.
-7. `core/{emit, require}`.
+
 8. `anon/` namespace.
 9. `io/{json, parquet}`.
 

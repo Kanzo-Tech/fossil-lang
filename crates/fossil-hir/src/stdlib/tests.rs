@@ -8,14 +8,17 @@ fn db() -> fossil_base::FossilDb {
     fossil_base::FossilDb::new(system)
 }
 
+/// The registry answers, and says no when it should.
+///
+/// This was `back_compat_phase1_entries_present` and it pinned four
+/// "historical" entries, three of which were RDF term constructors no program
+/// ever called. A house with no backwards compatibility should not have a test
+/// with that name; what it needs pinned is that the source constructor the
+/// walking skeleton depends on is there and that a miss is a miss.
 #[test]
-fn back_compat_phase1_entries_present() {
+fn the_registry_answers_and_refuses() {
     let r = FunctionRegistry::stdlib_default();
-    // The historical four entries must survive (walking-skeleton / lower.rs).
     assert!(r.lookup("io.csv").is_some());
-    assert!(r.lookup("core.iri").is_some());
-    assert!(r.lookup("core.triple").is_some());
-    assert!(r.lookup("core.literal").is_some());
     assert!(r.lookup("nonexistent").is_none());
     // phase1_default is now a thin alias for stdlib_default.
     assert!(
@@ -92,14 +95,8 @@ fn math_namespace_has_exactly_six_no_ceil_floor() {
 /// out of scope this milestone).
 fn expected_stdlib_names() -> Vec<&'static str> {
     vec![
-        // core/ (8)
-        "core.iri",
-        "core.triple",
-        "core.blank",
-        "core.literal",
-        "core.typed",
+        // core/ (2)
         "core.lang",
-        "core.emit",
         "core.require",
         // seq/ (13)
         "seq.filter",
@@ -182,10 +179,10 @@ fn catalog_is_bidirectionally_complete_against_stdlib_md() {
         missing.is_empty() && extra.is_empty(),
         "catalog must equal the stdlib.md eight-namespace set exactly.\n  MISSING (omissions): {missing:?}\n  EXTRA (not in stdlib.md): {extra:?}"
     );
-    // Sanity on the count: 8 + 13 + 6 + 7 + 6 + 8 + 5 + 3 = 56 surface functions.
-    assert_eq!(catalog.len(), 56);
+    // Sanity on the count: 2 + 13 + 6 + 7 + 6 + 8 + 5 + 3 = 50 surface functions.
+    assert_eq!(catalog.len(), 50);
     // The three io/ constructors are retained on top.
-    assert_eq!(r.iter().count(), 56 + 3);
+    assert_eq!(r.iter().count(), 50 + 3);
 }
 
 #[test]
