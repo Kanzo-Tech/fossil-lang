@@ -287,7 +287,7 @@ async fn prepare_vertex<'db>(
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), descriptor);
+    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
     prepare_vertex_ops(ctx, db, &ops, connections).await
 }
 
@@ -481,7 +481,7 @@ async fn execute_edges<'db>(
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), descriptor);
+    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
     let ops = ops.as_slice();
 
     let mut out = Vec::new();
@@ -752,10 +752,11 @@ pub fn provider_bindings(
     connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
     let mappings = def_map(db, file).mappings(db).clone();
+    let schema = descriptor.to_graph_schema();
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
-        let ops = apply_output_shape(mir.ops(db), descriptor);
+        let ops = apply_output_shape(mir.ops(db), &schema);
 
         let Some((uri, binding)) = ops.iter().find_map(|o| match o {
             Op::Source {
@@ -814,10 +815,11 @@ pub fn program_sources(
     connections: &HashMap<String, String>,
 ) -> Vec<SourceRef> {
     let mappings = def_map(db, file).mappings(db).clone();
+    let schema = descriptor.to_graph_schema();
     let mut out: Vec<SourceRef> = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
-        let ops = apply_output_shape(mir.ops(db), descriptor);
+        let ops = apply_output_shape(mir.ops(db), &schema);
         for (uri, format, _binding) in sources_of(&ops, connections) {
             if !out.iter().any(|s| s.uri == uri) {
                 out.push(SourceRef { uri, format });

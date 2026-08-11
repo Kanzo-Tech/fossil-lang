@@ -2101,7 +2101,6 @@ name = "fossil-mir"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-syntax",

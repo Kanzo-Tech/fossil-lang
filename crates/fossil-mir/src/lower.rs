@@ -62,9 +62,8 @@
 //! ) -> MirGraph<'db>;
 //! ```
 
-use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::Cardinality as GsCardinality;
-use fossil_graph_schema::Primitive;
+use fossil_graph_schema::{GraphSchema, Primitive};
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
@@ -90,10 +89,10 @@ use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 /// SQL codegen + corpus stay byte-identical). This increment covers the
 /// VERTEX-only shape: the `iri = ...` template becomes the vertex `id`, and every
 /// other property becomes a [`VProp`]. EDGE classification (a property whose
-/// value points at another shape → [`Op::EmitEdge`]) + the descriptor-driven
-/// cardinality/types refinement are the NEXT increment (they need the
-/// `OutputDescriptorKind` / skeleton-match the codegen `vertex_edge_decomp`
-/// already has). Reuses the same `resolve_source` / `lower_iri_property` /
+/// value points at another node type → [`Op::EmitEdge`]) + the cardinality/types
+/// refinement are a separate pass, [`apply_output_shape`], because they need a
+/// [`GraphSchema`] this query has no way to read. Reuses the same
+/// `resolve_source` / `lower_iri_property` /
 /// `lower_property_value` helpers so there is ZERO duplicated lowering logic.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors lower_to_mir
@@ -325,32 +324,31 @@ fn mapping_span<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> 
     )
 }
 
-/// Refine an agnostic [`lower_to_mir_pg`] op list with the program-resident
-/// **output descriptor** (ShEx): reclassify the `EmitVertex`'s properties into
-/// edges + set their cardinality from the shape's constraints.
+/// Refine an agnostic [`lower_to_mir_pg`] op list against a
+/// [`GraphSchema`]: reclassify the `EmitVertex`'s properties into edges + set
+/// their cardinality from the schema's node/edge types.
 ///
 /// The agnostic lowering types every property as a single-valued vertex column
-/// (it has no shape knowledge — `iri`-templates aside, an `ex:hasProject = .x`
-/// `FieldRef` value looks like a column). The `ShEx` descriptor is what knows that
-/// `ex:hasProject` is a **shape-ref** (→ a typed edge) and that `*`/`+`
+/// (it has no schema knowledge — `iri`-templates aside, an `ex:hasProject = .x`
+/// `FieldRef` value looks like a column). The schema is what knows that
+/// `ex:hasProject` **references another node type** (→ a typed edge) and that its
 /// cardinality is **multi-valued**. This is the same edge-vs-property decision
-/// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, sharing the
-/// one authority ([`ResolvedConstraint::edge_target`] +
-/// [`Cardinality::is_single_valued`]).
+/// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, taken against
+/// the one shared model.
 ///
-/// Passed the descriptor as an **argument** (ADR-0018 — the descriptor is NEVER
-/// read through `Db::system()`), so this is a plain `Vec<Op>`→`Vec<Op>` pass: it
-/// never constructs a [`MirGraph`] (a Salsa tracked struct, illegal outside a
-/// tracked query) and never touches Salsa. `AcceptAll` (the walking-skeleton /
-/// no-shape case) returns the ops unchanged — the template-skeleton edges the
+/// Takes the **schema**, not the document that produced it: a caller holding a
+/// ShEx or SHACL descriptor calls `to_graph_schema()` itself. MIR is a property
+/// graph in the middle and never learns which output format or schema language
+/// is on either side of it — the dependency says so, not just the intent.
+///
+/// The schema arrives as an **argument** (ADR-0018 — it is NEVER read through
+/// `Db::system()`), so this is a plain `Vec<Op>`→`Vec<Op>` pass: it never
+/// constructs a [`MirGraph`] (a Salsa tracked struct, illegal outside a tracked
+/// query) and never touches Salsa. An empty schema (the walking-skeleton /
+/// accept-all case) returns the ops unchanged — the template-skeleton edges the
 /// agnostic lowering already produced stand.
 #[must_use]
-pub fn apply_output_shape<'db>(ops: &[Op<'db>], descriptor: &OutputDescriptorKind) -> Vec<Op<'db>> {
-    // Route every source schema language (ShEx / SHACL / accept-all) through
-    // the one canonical output model. The executor classifies against this; it
-    // never sees ShEx- or SHACL-specific types.
-    let schema = descriptor.to_graph_schema();
-
+pub fn apply_output_shape<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<'db>> {
     // The vertex's shape IRI keys its node type; without it (or a node the
     // model doesn't declare) there is nothing to refine.
     let shape_iri = ops.iter().find_map(|o| match o {

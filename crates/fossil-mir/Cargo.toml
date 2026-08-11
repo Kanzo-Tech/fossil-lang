@@ -14,16 +14,14 @@ workspace = true
 [dependencies]
 fossil-base     = { path = "../fossil-base" }
 fossil-syntax   = { path = "../fossil-syntax" }
+# W1: source dispatch reads the single `stdlib::n` table that lives here.
 fossil-hir      = { path = "../fossil-hir" }
-# W1: source dispatch reads the single SOURCE_KINDS table (acyclic — registry's
-# dep closure is hir/base/syntax/descriptors/shex, none of which is fossil-mir).
-# The output descriptor (ShEx) drives the property-graph edge/cardinality
-# classification in `apply_output_shape` — passed as a function argument
-# (ADR-0018: NEVER read through `Db::system()`), so this is a plain data dep, not
-# a Salsa input. Acyclic: descriptors-output's closure is shex/base, not mir.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# The canonical output model `apply_output_shape` classifies against (the
-# descriptor lowers to it, regardless of source schema language).
+# The canonical, format-neutral model `apply_output_shape` classifies against —
+# and the ONLY schema dependency the middle of the compiler has. It is passed as
+# a function argument (ADR-0018: NEVER read through `Db::system()`), so this is a
+# plain data dep, not a Salsa input. No schema-language crate belongs here:
+# whichever document (ShEx, SHACL, accept-all) produced the schema is the caller's
+# business, and depending on one would drag ShEx into a crate that never names it.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 salsa           = { workspace = true }
 smol_str        = { workspace = true }

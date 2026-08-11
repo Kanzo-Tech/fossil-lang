@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
+use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use fossil_hir::def_map::def_map;
 use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
 
@@ -196,12 +196,12 @@ fn lower_pg_classifies_edge_vs_prop() {
     );
 }
 
-// ── Descriptor-driven refinement (ShEx → edges + cardinality) ───────────────
+// ── Schema-driven refinement (GraphSchema → edges + cardinality) ────────────
 
-// An io.rdf mapping: the shape-ref property `ex:hasProject` is written as a
+// An io.rdf mapping: the reference property `ex:hasProject` is written as a
 // plain `FieldRef` (`.hasProject`), so the agnostic lowering CANNOT tell it from
-// a literal column — only the ShEx descriptor knows it's an edge to `Project`
-// (and multi-valued). This is the run_rdf.rs case at the MIR level.
+// a literal column — only the graph schema knows it's an edge to `Project` (and
+// multi-valued). This is the run_rdf.rs case at the MIR level.
 const KB_FOSSIL: &str = "\
 prefix ex: <https://ex.org/>
 
@@ -213,16 +213,48 @@ KB : ex:KB from kb
     ex:hasProject = .hasProject
 ";
 
-// `KB`: a literal `label` + a multi-valued (`max:-1`) shape-ref `hasProject` →
-// `Project` (an edge); `Project`: a literal `title`.
-const KB_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type": "Schema", "shapes": [
-  {"type":"ShapeDecl","id":"https://ex.org/KB","shapeExpr":{"type":"Shape","expression":{"type":"EachOf","expressions":[
-     {"type":"TripleConstraint","predicate":"https://ex.org/label","valueExpr":{"type":"NodeConstraint","datatype":"http://www.w3.org/2001/XMLSchema#string"}},
-     {"type":"TripleConstraint","predicate":"https://ex.org/hasProject","valueExpr":"https://ex.org/Project","min":0,"max":-1}
-  ]}}},
-  {"type":"ShapeDecl","id":"https://ex.org/Project","shapeExpr":{"type":"Shape","expression":{
-     "type":"TripleConstraint","predicate":"https://ex.org/title","valueExpr":{"type":"NodeConstraint","datatype":"http://www.w3.org/2001/XMLSchema#string"}}}}
-] }"#;
+// `KB`: a single-valued literal `label` + a multi-valued edge `hasProject` →
+// `Project`; `Project`: a literal `title`. Written as the schema itself, not as
+// the ShEx document that would derive it: which schema language produced this is
+// exactly what MIR must not know (the ShEx path is covered end-to-end by
+// `fossil-df/tests/rdf_source.rs`).
+fn kb_schema() -> GraphSchema {
+    let string_prop = |name: &str, iri: &str, cardinality| Property {
+        name: name.to_string(),
+        datatype: Primitive::String,
+        iri: Some(iri.to_string()),
+        cardinality,
+    };
+    GraphSchema {
+        nodes: vec![
+            NodeType {
+                label: "KB".to_string(),
+                iri: Some("https://ex.org/KB".to_string()),
+                properties: vec![string_prop(
+                    "label",
+                    "https://ex.org/label",
+                    Cardinality::Single,
+                )],
+            },
+            NodeType {
+                label: "Project".to_string(),
+                iri: Some("https://ex.org/Project".to_string()),
+                properties: vec![string_prop(
+                    "title",
+                    "https://ex.org/title",
+                    Cardinality::Single,
+                )],
+            },
+        ],
+        edges: vec![EdgeType {
+            label: "hasProject".to_string(),
+            iri: Some("https://ex.org/hasProject".to_string()),
+            source: "KB".to_string(),
+            destination: "Project".to_string(),
+            cardinality: Cardinality::Multi,
+        }],
+    }
+}
 
 #[test]
 fn apply_output_shape_reclassifies_shape_ref_to_edge() {
@@ -256,11 +288,8 @@ fn apply_output_shape_reclassifies_shape_ref_to_edge() {
         "agnostic lowering synthesises no edge for a FieldRef value"
     );
 
-    // The ShEx descriptor reclassifies `hasProject` into a typed, multi-valued edge.
-    let desc = OutputDescriptorKind::ShEx(
-        ShExDescriptor::from_reader(KB_SHEX.as_bytes()).expect("parse ShEx"),
-    );
-    let refined = apply_output_shape(ops, &desc);
+    // The schema reclassifies `hasProject` into a typed, multi-valued edge.
+    let refined = apply_output_shape(ops, &kb_schema());
 
     // `label` stays a vertex prop (single-valued); `hasProject` is gone from props.
     let Op::EmitVertex { props, .. } = refined
@@ -278,7 +307,7 @@ fn apply_output_shape_reclassifies_shape_ref_to_edge() {
             .find(|p| p.name == "label")
             .unwrap()
             .single_valued,
-        "label is Exact(1) → single-valued"
+        "label is Cardinality::Single → single-valued"
     );
 
     // `hasProject` is now a typed edge KB→Project, multi-valued (max:-1).

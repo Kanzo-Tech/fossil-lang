@@ -29,8 +29,9 @@ fossil-run-status = { path = "../fossil-run-status" }
 # manifest/RunStatus materialize from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The program-resident output descriptor (ShEx) that drives edge/cardinality
-# classification, threaded into execute_graph as an argument (ADR-0018) and
-# applied via `fossil_mir::apply_output_shape`.
+# classification, threaded into execute_graph as an argument (ADR-0018). This
+# crate is where it stops: `to_graph_schema()` is called here and only the
+# format-neutral schema crosses into `fossil_mir::apply_output_shape`.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows. Pure Rust,
 # WASM-clean (the oxigraph parsers rudof's ShEx already pulls) — RDF is decoded
