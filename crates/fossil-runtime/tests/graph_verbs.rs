@@ -377,7 +377,6 @@ fn execute_sql_real_columns_and_cap() {
         &Operation::ExecuteSql(ExecuteSqlParams {
             sql: "SELECT name, age FROM \"Person\" ORDER BY age".into(),
             row_cap: 100,
-            timeout_ms: 10_000,
         }),
     );
     assert!(!r.truncated);
@@ -393,7 +392,6 @@ fn execute_sql_real_columns_and_cap() {
         &Operation::ExecuteSql(ExecuteSqlParams {
             sql: "SELECT * FROM \"Person\"".into(),
             row_cap: 2,
-            timeout_ms: 10_000,
         }),
     );
     assert!(capped.truncated);

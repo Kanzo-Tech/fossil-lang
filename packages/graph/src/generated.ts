@@ -132,10 +132,6 @@ export interface ExecuteSqlParams {
    */
   row_cap?: number;
   sql: string;
-  /**
-   * Hard cap on wall-clock execution time, milliseconds.
-   */
-  timeout_ms?: number;
 }
 export interface ExecuteSqlResult {
   columns: ColumnDescriptor[];

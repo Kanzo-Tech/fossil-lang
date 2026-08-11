@@ -25,16 +25,9 @@ pub struct ExecuteSqlParams {
     /// outer `LIMIT` regardless of what the user's SQL contains.
     #[serde(default = "default_row_cap")]
     pub row_cap: u32,
-    /// Hard cap on wall-clock execution time, milliseconds.
-    #[serde(default = "default_timeout_ms")]
-    pub timeout_ms: u32,
 }
 
 const fn default_row_cap() -> u32 {
-    10_000
-}
-
-const fn default_timeout_ms() -> u32 {
     10_000
 }
 

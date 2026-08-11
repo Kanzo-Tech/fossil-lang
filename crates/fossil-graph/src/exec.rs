@@ -402,8 +402,9 @@ impl<E: DuckExecutor> Context<'_, E> {
     async fn execute_sql(&self, p: &ExecuteSqlParams) -> Result<ExecuteSqlResult> {
         let cap = u64::from(p.row_cap);
         // Wrap so the row cap is enforced regardless of the user's own LIMIT;
-        // fetch one extra row to detect truncation. (timeout_ms is enforced by
-        // bindings that can set a statement timeout — the native runtime does.)
+        // fetch one extra row to detect truncation. Rows are the only bound:
+        // neither host can interrupt a running statement, so a query that is
+        // slow rather than large runs to completion.
         let wrapped = format!("SELECT * FROM ({}) AS _q LIMIT {}", p.sql, cap + 1);
         let (columns, mut rows) = self.exec.query_columns(&wrapped).await?;
         let truncated = u64::try_from(rows.len()).unwrap_or(u64::MAX) > cap;
@@ -1576,7 +1577,6 @@ mod tests {
             &Operation::ExecuteSql(ExecuteSqlParams {
                 sql: "SELECT * FROM t".into(),
                 row_cap: 2,
-                timeout_ms: 10_000,
             }),
             &m,
             &exec,

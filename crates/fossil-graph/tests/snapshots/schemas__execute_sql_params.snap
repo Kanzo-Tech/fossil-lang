@@ -16,10 +16,4 @@ properties:
     minimum: 0
   sql:
     type: string
-  timeout_ms:
-    description: "Hard cap on wall-clock execution time, milliseconds."
-    default: 10000
-    type: integer
-    format: uint32
-    minimum: 0
 additionalProperties: false
