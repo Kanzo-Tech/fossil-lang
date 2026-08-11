@@ -456,6 +456,7 @@ fn parse_mapping_body(p: &mut Parser) {
         p.skip_trivia();
         match p.current() {
             None | Some(SyntaxKind::DEDENT) => break,
+            Some(SyntaxKind::AT_ATTR) => parse_subject_attr(p),
             Some(SyntaxKind::IDENT | SyntaxKind::KW_IRI | SyntaxKind::ABS_IRI) => {
                 parse_property(p);
             }
@@ -481,6 +482,34 @@ fn parse_mapping_body(p: &mut Parser) {
             }
         }
     }
+    p.finish();
+}
+
+/// `@subject(iri = Expression)` — the mapping's subject, as the first line of
+/// the body (ADR-0057, seventh amendment §4).
+///
+/// It is the FIRST production to accept the `@` sigil; until now `grammar.bnf`
+/// said outright that `@name` lexes as `AT_ATTR` and nothing accepts it. It is
+/// syntax with a sigil, NOT an attribute: the amendment's Rule B says a thing
+/// required in every declaration is not an attribute, and attributes may carry
+/// only constants while this dereferences the row.
+///
+/// It goes inside the body rather than above the header because the row binder
+/// is introduced BY the header — above it, `u` does not exist yet.
+///
+/// It produces the same `PROPERTY` node as `iri = …`, so nothing below the
+/// parser learns there are two spellings. `iri` stays a keyword until the
+/// fixtures stop using it.
+fn parse_subject_attr(p: &mut Parser) {
+    p.start(SyntaxKind::PROPERTY);
+    p.start(SyntaxKind::PROPERTY_LHS);
+    p.bump(); // AT_ATTR
+    p.finish();
+    recover::expect_or_recover(p, SyntaxKind::LPAREN, MAPPING_BODY_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::KW_IRI, MAPPING_BODY_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::ASSIGN, MAPPING_BODY_ANCHORS);
+    p.parse_expr();
+    recover::expect_or_recover(p, SyntaxKind::RPAREN, MAPPING_BODY_ANCHORS);
     p.finish();
 }
 

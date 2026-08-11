@@ -156,11 +156,21 @@ ShapeExpr           := IRIExpr (SHAPE_AND IRIExpr)*    (* intersection *)
 
 InClause            := 'in' IRIExpr
 
-MappingBody         := Property+
+MappingBody         := SubjectAttr? Property+
+
+(* The subject, as the FIRST line of the body — not above the header, because
+   the row binder is introduced BY the header and above it does not exist yet
+   (ADR-0057, seventh amendment §4). It is syntax with a sigil, not an
+   attribute: it is required in every mapping, and it dereferences the row,
+   which an attribute may never do.
+
+   This is the first production to accept `@`. *)
+SubjectAttr         := AT_ATTR LPAREN 'iri' ASSIGN Expression RPAREN
+                       (* AT_ATTR is `@subject`; any other name is an error *)
 
 Property            := PropertyLhs ASSIGN Expression AnnotationBlock?
 
-PropertyLhs         := 'iri'
+PropertyLhs         := 'iri'                     (* retired by SubjectAttr *)
                      | IRIExpr
 
 AnnotationBlock     := LBRACE AnnotationBody RBRACE
@@ -299,8 +309,9 @@ TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
 (*  prefix   in       from     use      as                                *)
 (*  and      or       not      iri                                        *)
 (*                                                                         *)
-(*  There is no attribute keyword. `@name` lexes as AT_ATTR and no        *)
-(*  production accepts it yet. The sigil IS decided and it is `@`         *)
+(*  There is no attribute keyword. `@name` lexes as AT_ATTR and the only  *)
+(*  production that accepts one is SubjectAttr, whose name must be        *)
+(*  `subject`. The sigil IS decided and it is `@`                         *)
 (*  (ADR-0057, fourth amendment): `#` is unlexable here, is Turtle's      *)
 (*  comment character, and is RDF's fragment separator. `@` is shared     *)
 (*  with keasy's connection aliases, which live inside string literals,   *)

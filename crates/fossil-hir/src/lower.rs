@@ -600,6 +600,30 @@ fn lower_property(
         && (lhs_toks[0].kind() == SyntaxKind::KW_IRI || lhs_toks[0].text() == "iri")
     {
         PropertyKey::Iri
+    } else if lhs_toks.len() == 1 && lhs_toks[0].kind() == SyntaxKind::AT_ATTR {
+        // `@subject(iri = …)` — the same subject, respelled (ADR-0057, seventh
+        // amendment §4). Both spellings produce `PropertyKey::Iri`, so nothing
+        // below this line knows there are two.
+        //
+        // Any other `@name` is an error rather than a dropped property: the
+        // sigil now parses, and a thing that parses and vanishes is the failure
+        // this file's fallback arm exists to prevent.
+        if lhs_toks[0].text() != "@subject" {
+            let range = lhs_node.text_range();
+            let span = Span::new(range.start().into(), range.end().into());
+            let name = lhs_toks[0].text();
+            Diagnostic::new(
+                Severity::Error,
+                format!(
+                    "`{name}` is not something a mapping body declares. The only \
+                     one is `@subject(iri = …)`."
+                ),
+                span,
+            )
+            .accumulate(db);
+            return None;
+        }
+        PropertyKey::Iri
     } else if lhs_toks.len() == 3 && lhs_toks[1].kind() == SyntaxKind::SHAPE_SEP {
         let prefix = lhs_toks[0].text();
         let local = lhs_toks[2].text();
@@ -1369,6 +1393,57 @@ User : ex:Person from users
             parts.first(),
             Some(&InterpolationPart::Text("{x}".into())),
             "and so does one that has a hole after it"
+        );
+    }
+
+    /// `@subject(iri = …)` and `iri = …` are the same subject, and they must
+    /// lower to the same thing — otherwise the fixture rewrite in the next
+    /// commit would change meaning while it changes spelling.
+    #[test]
+    fn the_two_subject_spellings_lower_identically() {
+        const HEAD: &str = "prefix ex: <https://example.org/>\n\nusers := io.csv(\"u.csv\")\n\nUser : ex:Person from users\n";
+        let (db_old, old) = lower_src(&format!(
+            "{HEAD}    iri = \"https://example.org/u/{{users.id}}\"\n"
+        ));
+        let (db_new, new) = lower_src(&format!(
+            "{HEAD}    @subject(iri = \"https://example.org/u/{{users.id}}\")\n"
+        ));
+        let props_of = |db: &fossil_base::FossilDb, file| {
+            let m = crate::def_map::def_map(db, file).mappings(db)[0];
+            crate::body::body(db, m).properties(db).clone()
+        };
+        let old_props = props_of(&db_old, old);
+        let new_props = props_of(&db_new, new);
+        assert!(
+            matches!(new_props[0].key, PropertyKey::Iri),
+            "`@subject` is the subject key, got {:?}",
+            new_props[0].key
+        );
+        assert_eq!(
+            old_props, new_props,
+            "the sigil is a spelling, not a different property"
+        );
+    }
+
+    /// The sigil now parses, so an unknown one must be an ERROR and not a
+    /// property that quietly disappears — the failure this file's fallback arm
+    /// exists to prevent.
+    #[test]
+    fn an_unknown_attribute_is_a_diagnostic_and_not_a_dropped_property() {
+        let (db, file) = lower_src(
+            "prefix ex: <https://example.org/>\n\nusers := io.csv(\"u.csv\")\n\nUser : ex:Person from users\n    @sensitive(iri = \"x\")\n    ex:name = users.name\n",
+        );
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let body = crate::body::body(&db, mapping);
+        assert_eq!(
+            body.properties(&db).len(),
+            1,
+            "the good property survives; only the bad attribute drops"
+        );
+        let diags = crate::body::body::accumulated::<Diagnostic>(&db, mapping);
+        assert!(
+            diags.iter().any(|d| d.message.contains("@sensitive")),
+            "the diagnostic must name the attribute, got {diags:?}"
         );
     }
 
