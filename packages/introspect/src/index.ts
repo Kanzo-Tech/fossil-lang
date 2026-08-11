@@ -8,9 +8,9 @@
  * injects only the DATA PLANE (URL resolution + a DuckDB executor), the same
  * shape as `@fossil-lang/graph`'s injected `DuckExecutor`.
  *
- * Framework-agnostic + zero @fossil-lang deps (a true leaf). React glue +
- * the descriptor→LSP-worker push live in `@fossil-lang/editor`; the host
- * decides how `resolve`/`query` reach its cloud + DuckDB.
+ * Framework-agnostic + zero @fossil-lang deps (a true leaf). The React glue
+ * and the descriptor→LSP-worker push are the HOST's, not ours (ADR-0040); the
+ * host decides how `resolve`/`query` reach its cloud + DuckDB.
  *
  * The primitive union below is the wire form of `fossil-graph-schema`'s
  * `Primitive`; the DuckDB mapping mirrors the Rust sibling
