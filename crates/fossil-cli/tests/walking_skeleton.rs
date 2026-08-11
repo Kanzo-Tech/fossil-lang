@@ -23,6 +23,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod common;
+
 /// Locate the repo root from `CARGO_MANIFEST_DIR` (= `.../crates/fossil-cli`).
 /// Walks up two levels.
 fn repo_root() -> PathBuf {
@@ -58,13 +60,12 @@ fn fossil_binary() -> &'static PathBuf {
 }
 
 /// Materialise a fresh per-test working directory containing
-/// `examples/hello.fossil` + `examples/users.csv`. Distinct test-name prefix
-/// so concurrent test runs do not stomp on each other's artefacts in
-/// `std::env::temp_dir()`.
+/// `examples/hello.fossil` + `examples/users.csv`. The path is unique per
+/// process — see `common::unique_workdir`, which explains why the test name
+/// alone was not enough.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
-    let tmp = std::env::temp_dir().join(format!("fossil-walking-skeleton-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
+    let tmp = common::unique_workdir("fossil-walking-skeleton", test_name);
     std::fs::create_dir_all(tmp.join("examples")).expect("create examples subdir");
     std::fs::copy(
         root.join("examples").join("hello.fossil"),

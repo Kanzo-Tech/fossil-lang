@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod common;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -45,9 +47,7 @@ fn fossil_binary() -> &'static PathBuf {
 /// 5 rows in, 3 after the filter, 2 after the join, and `Eve` is the row the
 /// join drops but the filter keeps.
 fn workdir(name: &str, program: &str) -> PathBuf {
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-pipeline-{name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create workdir");
+    let tmp = common::unique_workdir("fossil-cli-pipeline", name);
     std::fs::write(
         tmp.join("users.csv"),
         "id,name,edad,persona_id\n1,Alice,30,1\n2,Bob,12,2\n3,Carol,45,3\n4,Dave,7,4\n5,Eve,18,5\n",

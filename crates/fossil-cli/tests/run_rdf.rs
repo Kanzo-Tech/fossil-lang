@@ -23,6 +23,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+mod common;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -46,9 +48,7 @@ fn fossil_binary() -> &'static PathBuf {
 }
 
 fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-rdf-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create workdir");
+    let tmp = common::unique_workdir("fossil-cli-rdf", test_name);
     for (rel, contents) in files {
         let path = tmp.join(rel);
         if let Some(parent) = path.parent() {

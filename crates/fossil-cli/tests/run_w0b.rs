@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+mod common;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -46,8 +48,7 @@ fn fossil_binary() -> &'static PathBuf {
 /// Per-test workdir with the canonical hello.fossil + users.csv.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-w0b-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
+    let tmp = common::unique_workdir("fossil-cli-w0b", test_name);
     std::fs::create_dir_all(tmp.join("examples")).expect("create examples subdir");
     // The CLI reads `examples/users.csv` (the io.csv binding in
     // hello.fossil resolves to this path).
@@ -238,9 +239,7 @@ fn run_w0b_output_json_is_parseable() {
 /// A workdir seeded with arbitrary `(rel_path, contents)` files (for the
 /// multi-mapping fixture below, which is not part of the canonical examples).
 fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let tmp = std::env::temp_dir().join(format!("fossil-cli-w0b-{test_name}"));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).expect("create workdir");
+    let tmp = common::unique_workdir("fossil-cli-w0b", test_name);
     for (rel, contents) in files {
         let path = tmp.join(rel);
         if let Some(parent) = path.parent() {

@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+mod common;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -52,9 +54,7 @@ KB : ex:KB from KB
 #[test]
 fn refs_lists_typed_references_with_connection_aliases() {
     let bin = fossil_binary();
-    let dir = std::env::temp_dir().join("fossil-cli-refs");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("create workdir");
+    let dir = common::unique_workdir("fossil-cli-refs", "typed-references");
     let prog = dir.join("p.fossil");
     std::fs::write(&prog, PROGRAM).expect("write program");
 
