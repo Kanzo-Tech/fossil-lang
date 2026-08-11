@@ -77,7 +77,7 @@ prefixmap = "0.3"
 # 1.2 reach a property of rudof's dependency graph: dropping rudof, or rudof
 # dropping the feature, turns our Turtle parser back into an RDF 1.1 one and
 # breaks that arm at compile time for a reason no one would connect. Declaring it
-# here is a no-op for today's graph and the guard for tomorrow's. See ADR-0050.
+# here is a no-op for today's graph and the guard for tomorrow's. See ADR-0051.
 oxttl = { version = "0.2", features = ["rdf-12"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 

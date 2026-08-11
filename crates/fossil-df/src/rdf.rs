@@ -7,9 +7,10 @@
 //! DataFusion-native, WASM-clean counterpart of `fossil-provider-rdf`, which
 //! pivots into DuckDB).
 //!
-//! v1 covers single-valued (scalar) columns; multi-valued predicates (ShEx
-//! `*`/`+` → an Arrow `List`) are a follow-up. `oxttl`/`oxrdf` are pure Rust, so
-//! this compiles to wasm and decodes RDF in the browser too.
+//! A column is scalar or multi-valued: a ShEx `*`/`+` cardinality pivots into an
+//! Arrow `List<Utf8>` of every object, a single-valued one into a `Utf8` cell.
+//! `oxttl`/`oxrdf` are pure Rust, so this compiles to wasm and decodes RDF in the
+//! browser too.
 //!
 //! **RDF 1.2.** The parser is an RDF 1.2 one (`oxttl`'s `rdf-12` feature, turned
 //! on in the workspace manifest with the measurement behind it). Nothing in RDF
@@ -17,7 +18,7 @@
 //! what we lean on is the abstract model, not the spelling: a triple term reaches
 //! [`term_value`] as `Term::Triple` and a base direction as
 //! `Literal::direction`. Neither survives the pivot, and the second one says so
-//! rather than answering wrongly — ADR-0050.
+//! rather than answering wrongly — ADR-0051.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -169,7 +170,7 @@ fn term_value(term: &Term) -> String {
 /// `"x"@he--rtl` is not a lossy convenience, it is the wrong string: base
 /// direction exists because the first strong character does not determine how the
 /// text is laid out, so an RTL value rendered as LTR reorders in the host. So the
-/// read path names the loss instead of committing it. ADR-0050 has why this is
+/// read path names the loss instead of committing it. ADR-0051 has why this is
 /// the stopping point and what would lift it.
 fn directional_literal_unsupported(
     subject: &str,
@@ -179,7 +180,7 @@ fn directional_literal_unsupported(
     DataFusionError::NotImplemented(format!(
         "RDF 1.2 base direction on <{subject}> <{predicate}>: {literal} is an \
          rdf:dirLangString, and a pivot column carries a lexical form with no \
-         direction — see ADR-0050"
+         direction — see ADR-0051"
     ))
 }
 
@@ -351,7 +352,7 @@ mod tests {
             "https://ex.org/doc",
             "https://ex.org/title",
             "--rtl",
-            "ADR-0050",
+            "ADR-0051",
         ] {
             assert!(msg.contains(expected), "{expected:?} missing from {msg:?}");
         }
