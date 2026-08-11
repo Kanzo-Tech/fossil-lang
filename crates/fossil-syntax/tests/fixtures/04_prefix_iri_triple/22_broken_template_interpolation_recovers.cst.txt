@@ -18,5 +18,13 @@ PROGRAM
           KW_IRI "iri"
         ASSIGN "="
         EXPR
-          TEMPLATE_EXPR
-            TEMPLATE "`prefix${.id`"
+          INTERP_STRING_EXPR
+            STRING_OPEN "`"
+            STRING_TEXT "prefix"
+            INTERPOLATION
+              INTERP_OPEN "${"
+              FIELD_REF_EXPR
+                DOT "."
+                IDENT "id"
+              ERROR
+            STRING_CLOSE "`"

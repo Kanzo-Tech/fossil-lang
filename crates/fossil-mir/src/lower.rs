@@ -68,7 +68,7 @@ use fossil_graph_schema::Primitive;
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, PrefixEntry, def_map};
-use fossil_hir::lower::lower_to_hir;
+use fossil_hir::lower::{InterpolationPart, lower_to_hir};
 use fossil_hir::spans::spans;
 use fossil_hir::{HirExpr, HirMapping, MappingLoc, PropertyKey, Record, Ty, TyKind};
 use smol_str::SmolStr;
@@ -220,8 +220,8 @@ pub fn lower_to_mir_pg<'db>(
                 rdf_uri: Some(iri.clone()),
                 single_valued: true,
             }),
-            HirExpr::Template(t) => {
-                let skel = crate::skeleton::template_skeleton(t.as_str());
+            HirExpr::Interpolation(parts) => {
+                let skel = crate::skeleton::template_skeleton(parts);
                 if let Some((_, dst_type)) = subject_skeletons.iter().find(|(s, _)| *s == skel) {
                     let dst_id =
                         lower_property_value(db, &prop.value, &m.source_binding, prefixes, None);
@@ -782,7 +782,9 @@ fn lower_property_value<'db>(
             column: field.clone(),
         },
         HirExpr::StringLit(s) => Expr::LitString(s.clone()),
-        HirExpr::Template(raw) => lower_iri_template(raw, source_binding, prefixes, assert_line),
+        HirExpr::Interpolation(parts) => {
+            lower_interpolation(db, parts, source_binding, prefixes, assert_line)
+        }
         // A `PrefixedName` RHS resolved to its full IRI by the HIR; render it
         // as a literal string value (the IRI text).
         HirExpr::PrefixedName { iri } => Expr::LitString(iri.clone()),
@@ -865,114 +867,68 @@ fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> 
         )
 }
 
-/// IRI-template lowering. Parses the raw template token text (including
-/// surrounding backticks and `${...}` placeholders) and emits a left-leaning
-/// [`Expr::Concat`] chain of literal segments and column references.
+/// Lower an interpolated string to the concat-chain of its parts.
 ///
-/// Recognised placeholder forms:
-/// - `${prefix:}` → the prefix's resolved IRI from the per-file prefix table
-/// - `${.field}` → [`Expr::ColRef`] against the mapping's source binding
-fn lower_iri_template<'db>(
-    raw: &str,
+/// This replaced `lower_iri_template` + `lower_placeholder`, which took the
+/// template's raw text and scanned it for `${`, hand-parsing each hole at
+/// MIR-lowering time. Two things were wrong with that beyond the duplication.
+/// Its default arm echoed an unrecognised hole back as literal text, so
+/// anything that was not `.field` or `prefix:` reached the output unexamined —
+/// a mini format language nobody type-checked. And the prefix table had to be
+/// carried into MIR so a lowering could resolve `${ex:}`, which is a HIR
+/// concern that MIR now no longer sees.
+///
+/// `assert_line` is `Some(N)` in the subject position, where a hole that is
+/// NULL at runtime would produce a malformed IRI. v0.1 cannot discharge
+/// non-nullness statically, so every per-row hole is conservatively wrapped in
+/// a named runtime assertion (SC#4); codegen renders it as
+/// `CASE WHEN <expr> IS NOT NULL THEN <expr> ELSE error(...) END`.
+fn lower_interpolation<'db>(
+    db: &'db dyn fossil_base::Db,
+    parts: &[InterpolationPart],
     source_binding: &SmolStr,
     prefixes: &[PrefixEntry],
     assert_line: Option<u32>,
 ) -> Expr<'db> {
-    // Strip the surrounding backticks (the HIR keeps them on the raw token).
-    let inner = raw.trim_start_matches('`').trim_end_matches('`');
-
-    let mut parts: Vec<Expr<'db>> = Vec::new();
-    let mut cursor = 0usize;
-    while cursor < inner.len() {
-        // Find the next `${` placeholder start.
-        let Some(open_off) = inner[cursor..].find("${") else {
-            // No more placeholders — push the remaining literal tail.
-            let tail = &inner[cursor..];
-            if !tail.is_empty() {
-                parts.push(Expr::LitString(SmolStr::from(tail)));
+    let lowered = parts
+        .iter()
+        .map(|part| match part {
+            InterpolationPart::Text(t) => Expr::LitString(t.clone()),
+            InterpolationPart::Hole(e) => {
+                let value = lower_property_value(db, e, source_binding, prefixes, None);
+                match (assert_line, is_per_row(e)) {
+                    (Some(line), true) => Expr::Assert {
+                        name: SmolStr::new_static("iri_template_unbound"),
+                        span_line: line,
+                        inner: Box::new(value),
+                    },
+                    _ => value,
+                }
             }
-            break;
-        };
-        let open = cursor + open_off;
-        // Push the literal segment before the placeholder.
-        if open > cursor {
-            let lit = &inner[cursor..open];
-            parts.push(Expr::LitString(SmolStr::from(lit)));
-        }
-        // Find the matching `}`.
-        let after_open = open + 2; // skip "${"
-        let Some(close_off) = inner[after_open..].find('}') else {
-            // Unterminated placeholder; treat the rest as a literal tail.
-            let tail = &inner[open..];
-            parts.push(Expr::LitString(SmolStr::from(tail)));
-            break;
-        };
-        let close = after_open + close_off;
-        let placeholder = &inner[after_open..close];
-        parts.push(lower_placeholder(
-            placeholder,
-            source_binding,
-            prefixes,
-            assert_line,
-        ));
-        cursor = close + 1; // skip past `}`
-    }
-
-    fold_concat_left(parts)
+        })
+        .collect();
+    fold_concat_left(lowered)
 }
 
-/// Lower one placeholder body (the text between `${` and `}`).
-///
-/// - `.field` → `ColRef` against the mapping's source binding, wrapped in an
-///   `Expr::Assert { name: "iri_template_unbound", .. }` when `assert_line` is
-///   `Some` (the IRI-template subject context — SC#4 / P-CRIT-4). The assertion
-///   name is a FIXED `snake_case` identifier; NO type text is ever interpolated
-///   (RESEARCH Pitfall 5).
-/// - `prefix:` → the prefix's resolved IRI from the per-file prefix table.
-/// - anything else → echo the placeholder back as a literal.
-fn lower_placeholder<'db>(
-    body: &str,
-    source_binding: &SmolStr,
-    prefixes: &[PrefixEntry],
-    assert_line: Option<u32>,
-) -> Expr<'db> {
-    // `source_binding` is retained as a parameter for symmetry with
-    // `lower_property_value` and future multi-source disambiguation. It is NOT
-    // emitted into the ColRef — see CODEGEN-LOWERING-01 doc on
-    // `lower_property_value` above. The binding name stays a HIR concern;
-    // codegen's `default_source` (view name) is the SQL qualifier.
-    let _ = source_binding;
-    if let Some(field) = body.strip_prefix('.') {
-        let col_ref = Expr::ColRef {
-            // CODEGEN-LOWERING-01: empty source — codegen substitutes the
-            // view name via `default_source`.
-            source: SmolStr::default(),
-            column: SmolStr::from(field),
-        };
-        // SC#4: in the IRI-template subject context, a `${.field}` whose value
-        // may be NULL at runtime would produce a malformed IRI. We cannot
-        // statically discharge non-nullness here (Optional-tracking on
-        // `source_row` is thin in v0.1), so CONSERVATIVELY wrap every template
-        // field ref in a named runtime assertion. Codegen renders this as
-        // `CASE WHEN <field> IS NOT NULL THEN <field> ELSE error(...) END`.
-        return match assert_line {
-            Some(line) => Expr::Assert {
-                name: SmolStr::new_static("iri_template_unbound"),
-                span_line: line,
-                inner: Box::new(col_ref),
-            },
-            None => col_ref,
-        };
+/// Whether an expression's value can differ from row to row — the question the
+/// old text scan answered by looking for a leading `.`, which called
+/// `clean.slug(.name)` constant.
+fn is_per_row(e: &HirExpr) -> bool {
+    match e {
+        HirExpr::FieldRef(_) | HirExpr::ColumnRef { .. } => true,
+        HirExpr::Call { args, .. } => args.iter().any(is_per_row),
+        HirExpr::BinOp { lhs, rhs, .. } => is_per_row(lhs) || is_per_row(rhs),
+        HirExpr::Ternary {
+            cond,
+            then,
+            otherwise,
+        } => is_per_row(cond) || is_per_row(then) || is_per_row(otherwise),
+        HirExpr::Interpolation(parts) => parts.iter().any(|p| match p {
+            InterpolationPart::Text(_) => false,
+            InterpolationPart::Hole(e) => is_per_row(e),
+        }),
+        HirExpr::StringLit(_) | HirExpr::IntLit(_) | HirExpr::PrefixedName { .. } => false,
     }
-    // `prefix:` form — resolve against the real prefix table (replaces the
-    // Phase 1 hardcoded `ex:` branch). The prefix table stores `name` WITHOUT
-    // the trailing colon.
-    if let Some(name) = body.strip_suffix(':')
-        && let Some(entry) = prefixes.iter().find(|e| e.name.as_str() == name)
-    {
-        return Expr::LitString(entry.iri.clone());
-    }
-    Expr::LitString(SmolStr::from(format!("${{{body}}}")))
 }
 
 /// Fold a list of expression parts into a left-leaning Concat chain with
@@ -1175,13 +1131,23 @@ User : ex:Person from rows
         assert_eq!(format, SourceFormat::Parquet);
     }
 
+    /// A db for the lowering helpers, which need one to type a `Ternary`.
+    fn test_db() -> fossil_base::FossilDb {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        fossil_base::FossilDb::new(system)
+    }
+
     #[test]
-    fn template_lowering_handles_trailing_literal() {
-        // `${.id}/profile` → Concat(ColRef(users.id), LitString("/profile"))
-        let raw = "`${.id}/profile`";
+    fn interpolation_lowering_handles_trailing_literal() {
+        // `{.id}/profile` → Concat(ColRef(users.id), LitString("/profile"))
+        let db = test_db();
+        let parts = vec![
+            InterpolationPart::Hole(HirExpr::FieldRef("id".into())),
+            InterpolationPart::Text("/profile".into()),
+        ];
         let binding = SmolStr::new_static("users");
         // `assert_line = None` → object-position lowering (no Assert wrapper).
-        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &[], None);
+        let lowered: Expr<'_> = lower_interpolation(&db, &parts, &binding, &[], None);
         match lowered {
             Expr::Concat(l, r) => {
                 assert!(matches!(l.as_ref(), Expr::ColRef { .. }));
@@ -1192,14 +1158,18 @@ User : ex:Person from rows
     }
 
     #[test]
-    fn template_field_ref_wraps_in_named_assertion_when_subject_context() {
-        // `assert_line = Some(N)` (the IRI-template subject context) → the
-        // `${.id}` field ref is wrapped in `Assert { name:
-        // "iri_template_unbound", span_line: N }` (SC#4 / P-CRIT-4). The
-        // assertion NAME is a fixed snake_case identifier — never type text.
-        let raw = "`${.id}/profile`";
+    fn a_per_row_hole_wraps_in_a_named_assertion_when_subject_context() {
+        // `assert_line = Some(N)` (the subject position) → the hole is wrapped
+        // in `Assert { name: "iri_template_unbound", span_line: N }` (SC#4 /
+        // P-CRIT-4). The assertion NAME is a fixed snake_case identifier —
+        // never type text.
+        let db = test_db();
+        let parts = vec![
+            InterpolationPart::Hole(HirExpr::FieldRef("id".into())),
+            InterpolationPart::Text("/profile".into()),
+        ];
         let binding = SmolStr::new_static("users");
-        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &[], Some(3));
+        let lowered: Expr<'_> = lower_interpolation(&db, &parts, &binding, &[], Some(3));
         match lowered {
             Expr::Concat(l, r) => {
                 match l.as_ref() {
@@ -1222,19 +1192,22 @@ User : ex:Person from rows
     }
 
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
-    fn template_lowering_resolves_real_prefix_table() {
-        // `${ex:}user/${.id}` with ex -> https://example.org/ resolves the
-        // prefix from the table (not a hardcoded branch).
-        let raw = "`${ex:}user/${.id}`";
+    fn a_constant_hole_takes_no_assertion_and_fuses_with_its_neighbours() {
+        // The prefix arrives RESOLVED — HIR did that lookup, against the prefix
+        // table that lives there. What MIR still owes is the fusion codegen's
+        // snapshots depend on: one literal, not three concatenated.
+        let db = test_db();
+        let parts = vec![
+            InterpolationPart::Hole(HirExpr::PrefixedName {
+                iri: "https://example.org/".into(),
+            }),
+            InterpolationPart::Text("user/".into()),
+            InterpolationPart::Hole(HirExpr::FieldRef("id".into())),
+        ];
         let binding = SmolStr::new_static("users");
-        let prefixes = vec![PrefixEntry {
-            name: SmolStr::new_static("ex"),
-            iri: SmolStr::new_static("https://example.org/"),
-        }];
-        // `assert_line = None` → bare ColRef (object-position semantics) so this
-        // test stays focused on prefix-table resolution + literal fusion.
-        let lowered: Expr<'_> = lower_iri_template(raw, &binding, &prefixes, None);
+        // Subject position: the constant hole must NOT get an assertion, only
+        // the per-row one would.
+        let lowered: Expr<'_> = lower_interpolation(&db, &parts, &binding, &[], Some(3));
         match lowered {
             Expr::Concat(l, r) => {
                 assert!(
@@ -1243,7 +1216,10 @@ User : ex:Person from rows
                     l.as_ref()
                 );
                 assert!(
-                    matches!(r.as_ref(), Expr::ColRef { column, .. } if column.as_str() == "id")
+                    matches!(r.as_ref(), Expr::Assert { inner, .. }
+                        if matches!(inner.as_ref(), Expr::ColRef { column, .. } if column.as_str() == "id")),
+                    "got {:?}",
+                    r.as_ref()
                 );
             }
             other => panic!("expected Concat, got {other:?}"),

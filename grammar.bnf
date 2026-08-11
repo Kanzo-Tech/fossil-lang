@@ -30,16 +30,28 @@ KEYWORD        := 'prefix' | 'in' | 'from' | 'use' | 'as'
 INTEGER        := DIGIT (DIGIT | '_')*
 FLOAT          := INTEGER '.' INTEGER
 
-(* String literals *)
+(* String literals. Interpolation is ALWAYS ACTIVE and `{{` is the escape for a
+   literal '{' (ADR-0057, seventh amendment §3). A closing '}' needs no escape:
+   outside a hole it has only one reading.
+
+   A string with no hole is one STRING token. One WITH a hole is carved by the
+   post-lexer pass into the run below, so the hole's expression is read by the
+   ordinary expression parser — the interpolation is IN THIS GRAMMAR, not in the
+   lexer, which is the lesson PEP 701 paid seven years for. *)
 STRING         := '"' STRING_CONTENT* '"'
-STRING_CONTENT := REGULAR_CHAR | ESCAPE
+STRING_CONTENT := REGULAR_CHAR | ESCAPE | '{{'
 ESCAPE         := '\n' | '\t' | '\r' | '\\' | '\"'
 
-(* Template literals — strings with interpolation *)
+STRING_OPEN    := '"' | '`'
+STRING_TEXT    := (REGULAR_CHAR | ESCAPE | '{{')*
+INTERP_OPEN    := '{' | '${'                (* '${' dies with TEMPLATE *)
+STRING_CLOSE   := '"' | '`'
+
+(* Template literals — RETIRED by ADR-0057's seventh amendment; the spelling
+   survives only until the fixtures are rewritten. *)
 TEMPLATE       := '`' TPL_CONTENT* '`'
-TPL_CONTENT    := REGULAR_CHAR | TPL_ESCAPE | INTERPOLATION
+TPL_CONTENT    := REGULAR_CHAR | TPL_ESCAPE | Interpolation
 TPL_ESCAPE     := ESCAPE | '\`' | '\$' | '\${'
-INTERPOLATION  := '${' Expression '}'
 
 (* IRI literals *)
 ABS_IRI        := '<' IRI_CHARS '>'           (* RFC 3986 chars *)
@@ -221,6 +233,18 @@ FieldRef            := DOT IDENT (DOT IDENT)*
 (* ─── Literals ─── *)
 
 Literal             := INTEGER | FLOAT | STRING | TEMPLATE
+                     | InterpolatedString
+
+(* A string with at least one hole. Both delimiters produce the same node, so
+   nothing above the parser learns there were two spellings. *)
+InterpolatedString  := STRING_OPEN (STRING_TEXT | Interpolation)* STRING_CLOSE
+Interpolation       := INTERP_OPEN (Expression | PrefixRef) RBRACE
+
+(* `${ex:}` — a prefix with no local part. It is NOT an expression, and it is
+   admitted HERE and nowhere else: it is the CURIE-with-holes that the seventh
+   amendment retires along with the backtick, and it dies with the last fixture
+   that spells one. *)
+PrefixRef           := IDENT SHAPE_SEP
 
 
 (* ─── IRI expressions ─── *)
@@ -228,6 +252,7 @@ Literal             := INTEGER | FLOAT | STRING | TEMPLATE
 IRIExpr             := ABS_IRI
                      | PrefixedName
                      | TEMPLATE                  (* yielding IRI per context type *)
+                     | InterpolatedString        (* likewise — the position types it *)
 
 PrefixedName        := IDENT SHAPE_SEP LocalName
                        (* lexer-level: no whitespace between IDENT and ':' *)

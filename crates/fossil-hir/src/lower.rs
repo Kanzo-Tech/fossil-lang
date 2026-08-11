@@ -116,12 +116,29 @@ pub enum CmpOp {
     Or,
 }
 
+/// One piece of an [`HirExpr::Interpolation`]: literal text, or a hole.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub enum InterpolationPart {
+    /// A literal run, with `{{` already resolved to `{`.
+    Text(SmolStr),
+    /// A hole. It is an expression like any other, and is typed like one.
+    Hole(HirExpr),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum HirExpr {
-    /// Backtick template, raw text including delimiters and `${...}`
-    /// placeholders. Phase 4 lifts template parsing into a real expression
-    /// tree; Phase 1 codegen parses the template at SQL-emission time.
-    Template(SmolStr),
+    /// An interpolated string — its literal runs and its holes, in order.
+    ///
+    /// Both surface spellings arrive here: `"…{u.id}…"` and the backtick
+    /// `` `…${.id}…` `` that ADR-0057's seventh amendment retires. A hole holds
+    /// an ordinary [`HirExpr`], parsed by the parser, so nothing downstream has
+    /// to know a template is made of text.
+    ///
+    /// It replaced a raw `Template(SmolStr)` that carried the token verbatim
+    /// and was scanned again at MIR-lowering time. That is why two walkers used
+    /// to be blind to the columns a subject IRI reads: there was no node to
+    /// walk. Now there is.
+    Interpolation(Vec<InterpolationPart>),
     /// `.id` → field name `"id"`.
     ///
     /// The anonymous row. ADR-0057's ninth amendment ends it: every reference
@@ -638,6 +655,25 @@ fn lower_expr(
 
 /// Lower an expression node that is already unwrapped from its `EXPR` parent.
 ///
+/// `{{` is how a literal `{` is written — the escape Rust, Python and C# share
+/// (ADR-0057, seventh amendment §3). The CST keeps the source text verbatim, so
+/// resolving it is the HIR's job, and it happens once for every string whether
+/// or not that string has a hole.
+///
+/// **`}}` is NOT an escape here, and that is a departure from the convention
+/// the amendment cites.** Rust doubles the closing brace because its format
+/// grammar gives `}` meaning wherever it appears; ours gives it meaning only
+/// after an opener, so a lone `}` in text has exactly one reading and demanding
+/// `}}` would reject text nothing was ambiguous about. If that asymmetry ever
+/// surprises someone more than the ceremony would have, this is one line.
+fn unescape_braces(text: &str) -> SmolStr {
+    if text.contains("{{") {
+        SmolStr::from(text.replace("{{", "{"))
+    } else {
+        SmolStr::from(text)
+    }
+}
+
 /// Split out from [`lower_expr`] because an argument inside an `ARG_LIST` is an
 /// expression in its own right: recursion has to start below the wrapper, not
 /// above it.
@@ -655,11 +691,41 @@ fn lower_expr_inner(
         SyntaxKind::TERNARY_EXPR => lower_ternary(db, &inner, prefixes),
         SyntaxKind::PIPELINE_EXPR => lower_pipeline(db, &inner, prefixes),
         SyntaxKind::TEMPLATE_EXPR => {
+            // A backtick literal the carve left whole: it has no hole, so it is
+            // one literal run and nothing else.
             let tok = inner
                 .children_with_tokens()
                 .filter_map(fossil_syntax::SyntaxElement::into_token)
                 .find(|t| t.kind() == SyntaxKind::TEMPLATE)?;
-            Some(HirExpr::Template(SmolStr::from(tok.text())))
+            let text = tok.text().trim_matches('`');
+            Some(HirExpr::Interpolation(vec![InterpolationPart::Text(
+                unescape_braces(text),
+            )]))
+        }
+        SyntaxKind::INTERP_STRING_EXPR => {
+            let mut parts = Vec::new();
+            for child in inner.children_with_tokens() {
+                match child {
+                    fossil_syntax::SyntaxElement::Token(t)
+                        if t.kind() == SyntaxKind::STRING_TEXT =>
+                    {
+                        parts.push(InterpolationPart::Text(unescape_braces(t.text())));
+                    }
+                    fossil_syntax::SyntaxElement::Node(n)
+                        if n.kind() == SyntaxKind::INTERPOLATION =>
+                    {
+                        // The hole's expression is the one node inside it; the
+                        // braces are tokens. A hole that failed to parse leaves
+                        // no node, and its diagnostic is already recorded.
+                        let hole = n
+                            .children()
+                            .find_map(|e| lower_expr_inner(db, &e, prefixes))?;
+                        parts.push(InterpolationPart::Hole(hole));
+                    }
+                    _ => {}
+                }
+            }
+            Some(HirExpr::Interpolation(parts))
         }
         SyntaxKind::FIELD_REF_EXPR => {
             // `DOT IDENT` — capture the IDENT.
@@ -684,7 +750,10 @@ fn lower_expr_inner(
             if let Some(s) = toks.iter().find(|t| t.kind() == SyntaxKind::STRING) {
                 let raw = s.text();
                 let inner_text = raw.trim_start_matches('"').trim_end_matches('"');
-                return Some(HirExpr::StringLit(SmolStr::from(inner_text)));
+                // A string with no hole still spells `{` as `{{`: an escape
+                // whose meaning depended on whether the string happened to
+                // contain a hole would be a spelling you have to explain twice.
+                return Some(HirExpr::StringLit(unescape_braces(inner_text)));
             }
             if let Some(n) = toks.iter().find(|t| t.kind() == SyntaxKind::INTEGER) {
                 let range = inner.text_range();
@@ -811,6 +880,28 @@ fn lower_expr_inner(
                     db,
                     span,
                     format!("undeclared prefix `{prefix}:` in IRI expression `{prefix}:{local}`"),
+                );
+                return None;
+            }
+            // `ex:` — a prefix with no local part, which only the parser's
+            // interpolation body admits. It resolves to the namespace IRI
+            // itself. This is where MIR's `lower_placeholder` used to do the
+            // same lookup, against a prefix table MIR had no business holding:
+            // the table is threaded through every function in THIS file.
+            if toks.len() == 2
+                && toks[0].kind() == SyntaxKind::IDENT
+                && toks[1].kind() == SyntaxKind::SHAPE_SEP
+            {
+                let prefix = toks[0].text();
+                if let Some(prefix_iri) = lookup_prefix(prefixes, prefix) {
+                    return Some(HirExpr::PrefixedName { iri: prefix_iri });
+                }
+                let range = inner.text_range();
+                let span = Span::new(range.start().into(), range.end().into());
+                let _eg = delay_span_bug(
+                    db,
+                    span,
+                    format!("undeclared prefix `{prefix}:` in interpolation `{{{prefix}:}}`"),
                 );
                 return None;
             }
@@ -1221,6 +1312,66 @@ User : ex:Person from users
         );
     }
 
+    /// The spelling the seventh amendment replaces the backtick with: a plain
+    /// string, interpolated with `{expr}`, resolved at compile time.
+    ///
+    /// The IRI is written in full — no `base`, no CURIE with holes — and the
+    /// hole is a QUALIFIED reference, which is only expressible because the
+    /// hole is parsed by the expression parser. The old `${…}` scan understood
+    /// exactly two shapes and echoed anything else back as text.
+    #[test]
+    fn a_quoted_string_interpolates_and_its_hole_is_an_expression() {
+        let (db, file) = lower_src(
+            "prefix ex: <https://example.org/>\n\nusers := io.csv(\"u.csv\")\n\nUser : ex:Person from users\n    iri = \"https://example.org/user/{users.id}\"\n",
+        );
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let body = crate::body::body(&db, mapping);
+        let HirExpr::Interpolation(parts) = &body.properties(&db)[0].value else {
+            panic!(
+                "expected an interpolation, got {:?}",
+                body.properties(&db)[0].value
+            );
+        };
+        assert_eq!(
+            parts,
+            &vec![
+                InterpolationPart::Text("https://example.org/user/".into()),
+                InterpolationPart::Hole(HirExpr::ColumnRef {
+                    binding: "users".into(),
+                    column: "id".into(),
+                }),
+            ]
+        );
+    }
+
+    /// `{{` is a literal brace whether or not the string has a hole — an escape
+    /// whose meaning depended on that would be a spelling you explain twice
+    /// (house rule 2) — and `}` needs no escape at all, because outside a hole
+    /// it has only one reading. See `unescape_braces` for why that asymmetry is
+    /// deliberate rather than half a convention copied badly.
+    #[test]
+    fn a_doubled_brace_is_one_brace_and_a_closing_brace_needs_no_escape() {
+        let (db, file) = lower_src(
+            "prefix ex: <https://example.org/>\n\nusers := io.csv(\"u.csv\")\n\nUser : ex:Person from users\n    ex:a = \"{{literal}\"\n    ex:b = \"{{x}{users.id}\"\n",
+        );
+        let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
+        let body = crate::body::body(&db, mapping);
+        let props = body.properties(&db);
+        assert_eq!(
+            props[0].value,
+            HirExpr::StringLit("{literal}".into()),
+            "a string with no hole still resolves `{{{{`, and keeps a lone `}}`"
+        );
+        let HirExpr::Interpolation(parts) = &props[1].value else {
+            panic!("expected an interpolation, got {:?}", props[1].value);
+        };
+        assert_eq!(
+            parts.first(),
+            Some(&InterpolationPart::Text("{x}".into())),
+            "and so does one that has a hole after it"
+        );
+    }
+
     fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -1434,9 +1585,27 @@ User : ex:Person from users
         let body = crate::body::body(&db, mloc);
         let p0 = &body.properties(&db)[0];
         assert!(matches!(p0.key, PropertyKey::Iri));
+        // The subject is parts now, not text: the prefix resolved to its IRI at
+        // lowering time and the hole is a `FieldRef` node, so this asserts on
+        // the tree rather than on a substring of the token.
         match &p0.value {
-            HirExpr::Template(t) => assert!(t.contains("${.id}"), "template text was {t:?}"),
-            other => panic!("expected Template, got {other:?}"),
+            HirExpr::Interpolation(parts) => {
+                assert_eq!(
+                    parts.first(),
+                    Some(&InterpolationPart::Hole(HirExpr::PrefixedName {
+                        iri: "https://example.org/".into()
+                    })),
+                    "the prefix hole resolves to the prefix IRI, in HIR"
+                );
+                assert!(
+                    parts.iter().any(|p| matches!(
+                        p,
+                        InterpolationPart::Hole(HirExpr::FieldRef(f)) if f == "id"
+                    )),
+                    "the field hole is a field reference, got {parts:?}"
+                );
+            }
+            other => panic!("expected an interpolation, got {other:?}"),
         }
     }
 

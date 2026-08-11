@@ -210,16 +210,16 @@ fn infer_literal_type_kind<'db>(
             Ty::new(db, TyKind::Primitive(Primitive::String)),
             ProvenanceKind::Literal,
         )),
-        HirExpr::Template(_) => Some((Ty::new(db, TyKind::IriTemplate), ProvenanceKind::Literal)),
         HirExpr::PrefixedName { .. } => Some((Ty::new(db, TyKind::Iri), ProvenanceKind::Literal)),
         HirExpr::IntLit(_) => Some((
             Ty::new(db, TyKind::Primitive(Primitive::Integer)),
             ProvenanceKind::Literal,
         )),
         // A field reference needs the source row; a call needs the catalog; an
-        // operator needs both sides typed. None is a literal, and this helper
-        // only knows literals.
-        HirExpr::FieldRef(_)
+        // operator needs both sides typed; an interpolation needs the position
+        // it sits in. None is a literal, and this helper only knows literals.
+        HirExpr::Interpolation(_)
+        | HirExpr::FieldRef(_)
         | HirExpr::ColumnRef { .. }
         | HirExpr::Call { .. }
         | HirExpr::BinOp { .. }

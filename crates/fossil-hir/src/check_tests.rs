@@ -69,6 +69,7 @@ fn build_checker<'db>(
         entries: Vec::new(),
         next_inference: 0,
         first_error: None,
+        subject_position: false,
     }
 }
 
@@ -599,8 +600,19 @@ fn expr_contains_free_field_refs_visits_all_arms() {
     assert!(!expr_contains_free_field_refs(&HirExpr::StringLit(
         smol_str::SmolStr::from("hi")
     )));
-    assert!(!expr_contains_free_field_refs(&HirExpr::Template(
-        smol_str::SmolStr::from("`x`")
+    // An interpolation of pure text has no row dependency...
+    assert!(!expr_contains_free_field_refs(&HirExpr::Interpolation(
+        vec![crate::lower::InterpolationPart::Text(
+            smol_str::SmolStr::from("x")
+        )]
+    )));
+    // ...and one whose hole reads a column does. This is the case the old
+    // `Template(SmolStr)` could not express: the `${.id}` was text, so this
+    // walker answered `false` for every subject IRI in the corpus.
+    assert!(expr_contains_free_field_refs(&HirExpr::Interpolation(
+        vec![crate::lower::InterpolationPart::Hole(HirExpr::FieldRef(
+            smol_str::SmolStr::from("id")
+        ))]
     )));
     assert!(!expr_contains_free_field_refs(&HirExpr::PrefixedName {
         iri: smol_str::SmolStr::from("https://example.org/Foo"),

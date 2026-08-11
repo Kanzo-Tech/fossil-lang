@@ -40,7 +40,7 @@ use crate::body::{ExprId, body};
 use crate::def_map::MappingLoc;
 use crate::didyoumean::did_you_mean;
 use crate::infer::resolve_source_row;
-use crate::lower::{CmpOp, HirExpr, HirProperty, PropertyKey, lower_to_hir};
+use crate::lower::{CmpOp, HirExpr, HirProperty, InterpolationPart, PropertyKey, lower_to_hir};
 use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
 use crate::shapes::{ResolvedShape, resolve_target_shape};
 use crate::spans::{Spans, spans};
@@ -107,6 +107,7 @@ pub fn typecheck_mapping<'db>(
         entries: Vec::new(),
         next_inference: 0,
         first_error: None,
+        subject_position: false,
     };
 
     // Surface OneOf rejections (SC#4) before checking the body — they are
@@ -154,6 +155,16 @@ pub struct Checker<'db> {
     /// `ErrorGuaranteed`. Every error also pushes a diagnostic, so any
     /// `Some(eg)` here implies ≥1 emitted `Diagnostic`.
     pub(crate) first_error: Option<ErrorGuaranteed>,
+    /// Whether the expression being synthesised sits in the subject position
+    /// (`iri = …`, which ADR-0057's seventh amendment respells `@subject`).
+    ///
+    /// It exists because an interpolation's type is not a property of the
+    /// expression: `"…{u.id}"` yields an IRI under `iri =` and a string
+    /// anywhere else. That is the amendment's §3 read literally — "there is no
+    /// IRI template: there is interpolation" — and the alternative is a value
+    /// position typed `IriTemplate`, which would fail against any shape that
+    /// declares its predicate a string.
+    pub(crate) subject_position: bool,
 }
 
 impl<'db> Checker<'db> {
@@ -277,15 +288,17 @@ fn expr_contains_free_field_refs(e: &HirExpr) -> bool {
                 || expr_contains_free_field_refs(then)
                 || expr_contains_free_field_refs(otherwise)
         }
-        // Phase 2 leaf forms with no `.field` descendants. (A `Template` MAY
-        // contain `${.id}` placeholders textually, but those are not yet a
-        // structured `FieldRef` HIR node in Phase 3 v0.1 — template parsing is
-        // deferred. A template in a closure position is treated as a value, not
-        // a row-dependent predicate, until the expression tree lands.)
-        HirExpr::Template(_)
-        | HirExpr::StringLit(_)
-        | HirExpr::IntLit(_)
-        | HirExpr::PrefixedName { .. } => false,
+        // An interpolation is row-dependent exactly when one of its holes is.
+        // This used to read "a `Template` MAY contain `${.id}` textually, but
+        // those are not yet a structured `FieldRef` HIR node — template parsing
+        // is deferred". The tree landed; the hole is an expression, and it is
+        // walked like every other.
+        HirExpr::Interpolation(parts) => parts.iter().any(|p| match p {
+            InterpolationPart::Text(_) => false,
+            InterpolationPart::Hole(e) => expr_contains_free_field_refs(e),
+        }),
+        // Leaf forms with no `.field` descendants.
+        HirExpr::StringLit(_) | HirExpr::IntLit(_) | HirExpr::PrefixedName { .. } => false,
     }
 }
 
@@ -332,7 +345,18 @@ fn render_leaf_expr_text(e: &HirExpr) -> String {
         HirExpr::FieldRef(name) => format!(".{name}"),
         HirExpr::ColumnRef { binding, column } => format!("{binding}.{column}"),
         HirExpr::StringLit(s) => format!("\"{s}\""),
-        HirExpr::Template(t) => t.to_string(),
+        // Rendered in the spelling that survives, not the one it was written
+        // in: the backtick and `${` are on their way out.
+        HirExpr::Interpolation(parts) => {
+            let body: String = parts
+                .iter()
+                .map(|p| match p {
+                    InterpolationPart::Text(t) => t.replace('{', "{{"),
+                    InterpolationPart::Hole(e) => format!("{{{}}}", render_leaf_expr_text(e)),
+                })
+                .collect();
+            format!("\"{body}\"")
+        }
         HirExpr::PrefixedName { iri } => iri.to_string(),
         HirExpr::Call { func, args } => {
             let rendered: Vec<String> = args.iter().map(render_leaf_expr_text).collect();
@@ -482,9 +506,22 @@ impl<'db> Checker<'db> {
                 Ty::new(db, TyKind::Primitive(Primitive::String)),
                 ProvenanceKind::Literal,
             ),
-            // T-Template: a backtick template in IRI position yields IriTemplate
-            // (Phase 3 v0.1 default — refined by the caller's check context).
-            HirExpr::Template(_) => (Ty::new(db, TyKind::IriTemplate), ProvenanceKind::Literal),
+            // T-Interp: the holes are typed like the expressions they are, and
+            // the interpolation's own type comes from where it sits — IRI under
+            // `iri =`, a string anywhere else.
+            HirExpr::Interpolation(parts) => {
+                for part in parts {
+                    if let InterpolationPart::Hole(e) = part {
+                        self.synth_ty(expr_id, e);
+                    }
+                }
+                let kind = if self.subject_position {
+                    TyKind::IriTemplate
+                } else {
+                    TyKind::Primitive(Primitive::String)
+                };
+                (Ty::new(db, kind), ProvenanceKind::Literal)
+            }
             // T-PrefixedName: an IRI literal.
             HirExpr::PrefixedName { .. } => (Ty::new(db, TyKind::Iri), ProvenanceKind::Literal),
             // T-Column: the qualified spelling. Same resolution as T-Field,
@@ -615,7 +652,9 @@ impl<'db> Checker<'db> {
     pub fn check_property(&mut self, expr_id: ExprId, prop: &HirProperty) {
         // Always synth the RHS so its type is recorded in `entries` (provenance
         // / hover consume this even when there is no backward constraint).
+        self.subject_position = matches!(prop.key, PropertyKey::Iri);
         let actual = self.synth(expr_id, &prop.value);
+        self.subject_position = false;
 
         // Backward check against the resolved shape, if any.
         let predicate_iri = match &prop.key {

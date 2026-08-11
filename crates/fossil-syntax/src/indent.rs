@@ -96,7 +96,14 @@ pub fn lex_with_indents(input: &str) -> Vec<LexedToken> {
                     emit_indent_changes(&mut out, &mut indent_stack, 0, range.start);
                     at_line_start = false;
                 }
-                push_simple(&mut out, token_to_kind(tok), &input[range.clone()], range);
+                let carved = match tok {
+                    Token::String => carve_interpolations(&mut out, input, &range, "{"),
+                    Token::Template => carve_interpolations(&mut out, input, &range, "${"),
+                    _ => false,
+                };
+                if !carved {
+                    push_simple(&mut out, token_to_kind(tok), &input[range.clone()], range);
+                }
                 i += 1;
             }
         }
@@ -112,6 +119,160 @@ pub fn lex_with_indents(input: &str) -> Vec<LexedToken> {
         });
     }
     out
+}
+
+/// Carve a string literal that has at least one hole into the token run
+/// `STRING_OPEN (STRING_TEXT | INTERP_OPEN <expr tokens> RBRACE)* STRING_CLOSE`,
+/// returning whether it carved.
+///
+/// This is PEP 701's division of labour, and the reason it is here rather than
+/// in `lexer.rs`: the lexer finds the boundaries, and everything between them
+/// is re-lexed into ORDINARY tokens so the ordinary expression parser reads it.
+/// Python spent seven years leaving f-strings to a hand-written post-pass over
+/// STRING tokens; ADR-0057's seventh amendment says not to repeat it, and the
+/// cost of repeating it is measurable in this tree — see the `lower_placeholder`
+/// this commit deletes, which parsed holes at MIR-lowering time and echoed back
+/// as literal text anything it did not recognise.
+///
+/// The other reason it is here and not in `lexer.rs`: `fossil-wasm`'s
+/// `tokenize` feeds the editor from `raw_lex` DIRECTLY, and its `Token`
+/// discriminants are pinned across the language boundary to
+/// `packages/codemirror-fossil/src/tags.ts`. Only the parser reads this pass,
+/// so carving here leaves that pin untouched.
+///
+/// `open_marker` is `{` for the quoted spelling and `${` for the backtick one
+/// that the seventh amendment retires; both carve to the same shape, so the
+/// parser and everything above it never learn there were two.
+fn carve_interpolations(
+    out: &mut Vec<LexedToken>,
+    input: &str,
+    range: &std::ops::Range<usize>,
+    open_marker: &str,
+) -> bool {
+    let text = &input[range.clone()];
+    // The delimiter is one byte in both spellings (`"` and a backtick).
+    let (Some(open), Some(close)) = (text.get(..1), text.len().checked_sub(1)) else {
+        return false;
+    };
+    if close < 1 {
+        return false; // not a delimited literal at all
+    }
+    let inner = &text[1..close];
+    let base = range.start + 1;
+    let Some(first) = find_hole(inner, open_marker) else {
+        return false; // no hole — it stays the single token it has always been
+    };
+
+    push_simple(out, SyntaxKind::STRING_OPEN, open, range.start..base);
+
+    let mut cursor = 0usize;
+    let mut hole = Some(first);
+    while let Some(at) = hole {
+        if at > cursor {
+            push_simple(
+                out,
+                SyntaxKind::STRING_TEXT,
+                &inner[cursor..at],
+                base + cursor..base + at,
+            );
+        }
+        let body_start = at + open_marker.len();
+        push_simple(
+            out,
+            SyntaxKind::INTERP_OPEN,
+            open_marker,
+            base + at..base + body_start,
+        );
+
+        // The hole's body: re-lexed into ordinary tokens, spans kept absolute.
+        let body_end = match_closing_brace(inner, body_start);
+        for (tok, r) in raw_lex(&inner[body_start..body_end]) {
+            push_simple(
+                out,
+                token_to_kind(tok),
+                &inner[body_start + r.start..body_start + r.end],
+                base + body_start + r.start..base + body_start + r.end,
+            );
+        }
+        if body_end < inner.len() {
+            push_simple(
+                out,
+                SyntaxKind::RBRACE,
+                "}",
+                base + body_end..base + body_end + 1,
+            );
+            cursor = body_end + 1;
+        } else {
+            // Unterminated hole. Nothing is invented here: the run stops and
+            // the parser's `expect(RBRACE)` reports it, which is the whole
+            // point of the hole being the parser's business.
+            cursor = body_end;
+        }
+        hole = find_hole(&inner[cursor..], open_marker).map(|h| cursor + h);
+    }
+    if cursor < inner.len() {
+        push_simple(
+            out,
+            SyntaxKind::STRING_TEXT,
+            &inner[cursor..],
+            base + cursor..base + inner.len(),
+        );
+    }
+    push_simple(
+        out,
+        SyntaxKind::STRING_CLOSE,
+        &text[close..],
+        range.start + close..range.end,
+    );
+    true
+}
+
+/// Byte offset of the next hole opener in `s`, skipping `{{` — the escape Rust,
+/// Python and C# all spell the same way (ADR-0057, seventh amendment §3).
+///
+/// `{{` is only an escape for the quoted spelling; in the backtick spelling the
+/// opener is `${`, and a bare `{` there is ordinary text.
+fn find_hole(s: &str, open_marker: &str) -> Option<usize> {
+    let mut i = 0usize;
+    while i < s.len() {
+        if s[i..].starts_with("{{") && open_marker == "{" {
+            i += 2;
+            continue;
+        }
+        if s[i..].starts_with(open_marker) {
+            return Some(i);
+        }
+        i += 1;
+        while !s.is_char_boundary(i) {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Byte offset of the `}` that closes the hole opened before `from`, counting
+/// nesting and skipping quoted strings so a record literal or a string argument
+/// inside a hole does not end it early. Returns `s.len()` when there is none.
+fn match_closing_brace(s: &str, from: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut depth = 0usize;
+    let mut i = from;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'{' => depth += 1,
+            b'}' if depth == 0 => return i,
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    s.len()
 }
 
 fn emit_indent_changes(out: &mut Vec<LexedToken>, stack: &mut Vec<usize>, col: usize, pos: usize) {

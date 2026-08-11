@@ -250,14 +250,13 @@ fn parse_primary(p: &mut Parser) {
             p.finish();
         }
         Some(SyntaxKind::TEMPLATE) => {
-            // Wave 1: TEMPLATE is consumed atomically; interpolation
-            // inner-expression parsing is deferred (grammar.bnf line 42 says
-            // `INTERPOLATION := '${' Expression '}'` — the lexer ships the
-            // whole backtick-delimited form as one TEMPLATE token).
+            // A backtick literal with no hole in it. It carries no expression,
+            // so there is nothing to carve and it stays one token.
             p.start(SyntaxKind::TEMPLATE_EXPR);
             p.bump();
             p.finish();
         }
+        Some(SyntaxKind::STRING_OPEN) => parse_interpolated_string(p),
         Some(SyntaxKind::DOT) => {
             // FieldRef: `.IDENT (. IDENT)*` per grammar.bnf line 209.
             // At primary position, `.` always starts a FieldRef (disambig
@@ -314,6 +313,72 @@ fn parse_primary(p: &mut Parser) {
             p.bump_as_error();
         }
     }
+}
+
+/// `InterpolatedString := STRING_OPEN (STRING_TEXT | Interpolation)*
+/// STRING_CLOSE`, and `Interpolation := INTERP_OPEN Expression RBRACE`.
+///
+/// The hole holds an ordinary expression, read by the ordinary expression
+/// parser. That is the whole content of ADR-0057's seventh amendment §3: there
+/// is no format mini-language, so there is nothing that can drift out of step
+/// with the checker.
+fn parse_interpolated_string(p: &mut Parser) {
+    p.start(SyntaxKind::INTERP_STRING_EXPR);
+    p.bump(); // STRING_OPEN
+    loop {
+        match p.current() {
+            Some(SyntaxKind::STRING_TEXT) => p.bump(),
+            Some(SyntaxKind::INTERP_OPEN) => {
+                p.start(SyntaxKind::INTERPOLATION);
+                p.bump(); // INTERP_OPEN
+                parse_interpolation_body(p);
+                // The closing delimiter is the anchor, and it must survive: a
+                // hole left unclosed should not also cost the string its end.
+                crate::parser::recover::expect_or_recover(
+                    p,
+                    SyntaxKind::RBRACE,
+                    &[SyntaxKind::STRING_CLOSE],
+                );
+                p.finish();
+            }
+            Some(SyntaxKind::STRING_CLOSE) => {
+                p.bump();
+                break;
+            }
+            // EOF, or a token the carve cannot have produced. Stop rather than
+            // spin; the missing STRING_CLOSE is reported by `expect`.
+            _ => {
+                p.expect(SyntaxKind::STRING_CLOSE);
+                break;
+            }
+        }
+    }
+    p.finish();
+}
+
+/// The body of one hole.
+///
+/// `${ex:}` — a prefix with no local part — is the commonest hole in today's
+/// corpus (115 of 215) and is NOT an expression: `PrefixedName` requires a
+/// local part. It is accepted HERE and nowhere else, because the backtick
+/// spelling that produces it is retired by the seventh amendment and the
+/// CURIE-with-holes goes with it: the replacement writes the IRI in full,
+/// `"https://example.org/user/{u.id}"`. This arm dies with the last backtick
+/// fixture — it is the one thing in this function that is not meant to last.
+fn parse_interpolation_body(p: &mut Parser) {
+    p.skip_trivia();
+    if p.current() == Some(SyntaxKind::IDENT)
+        && p.peek_contiguous(2)
+        && p.peek_kind(1) == Some(SyntaxKind::SHAPE_SEP)
+        && p.peek_kind(2) == Some(SyntaxKind::RBRACE)
+    {
+        p.start(SyntaxKind::IRI_EXPR);
+        p.bump(); // IDENT
+        p.bump(); // SHAPE_SEP
+        p.finish();
+        return;
+    }
+    parse_expression(p, 0);
 }
 
 /// `RecordLiteral := LBRACE RecordBody RBRACE` (grammar.bnf line 232-236).

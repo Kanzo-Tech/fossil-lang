@@ -500,10 +500,16 @@ fn collect_field_refs(expr: &crate::lower::HirExpr, out: &mut Vec<SmolStr>) {
                 collect_field_refs(a, out);
             }
         }
-        HirExpr::Template(_)
-        | HirExpr::StringLit(_)
-        | HirExpr::PrefixedName { .. }
-        | HirExpr::IntLit(_) => {}
+        // A subject IRI reads columns, and until the holes were parsed this
+        // walker could not see a single one of them.
+        HirExpr::Interpolation(parts) => {
+            for p in parts {
+                if let crate::lower::InterpolationPart::Hole(e) = p {
+                    collect_field_refs(e, out);
+                }
+            }
+        }
+        HirExpr::StringLit(_) | HirExpr::PrefixedName { .. } | HirExpr::IntLit(_) => {}
     }
 }
 

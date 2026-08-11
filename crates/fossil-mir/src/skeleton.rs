@@ -10,6 +10,7 @@
 
 use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
+use fossil_hir::lower::InterpolationPart;
 use fossil_hir::lower::lower_to_hir;
 use fossil_hir::{HirExpr, MappingLoc, PropertyKey};
 use smol_str::SmolStr;
@@ -52,8 +53,8 @@ pub fn subject_skeletons(
         .collect()
 }
 
-/// The IRI-template skeleton of a mapping's `iri = ...` subject property, or
-/// `None` when there is no subject or it is not a backtick template.
+/// The IRI-template skeleton of a mapping's subject property, or `None` when
+/// there is no subject.
 #[allow(clippy::elidable_lifetime_names)]
 pub fn subject_template_skeleton<'db>(
     db: &'db dyn fossil_base::Db,
@@ -62,7 +63,7 @@ pub fn subject_template_skeleton<'db>(
     for prop in body(db, mapping).properties(db) {
         if matches!(prop.key, PropertyKey::Iri) {
             return match &prop.value {
-                HirExpr::Template(t) => Some(template_skeleton(t.as_str())),
+                HirExpr::Interpolation(parts) => Some(template_skeleton(parts)),
                 _ => None,
             };
         }
@@ -70,57 +71,83 @@ pub fn subject_template_skeleton<'db>(
     None
 }
 
-/// Replace dynamic field placeholders (`${.field}`) in a backtick-template's raw
-/// text with a uniform marker, keeping static prefix expansions (`${pfx:}`) and
-/// literal segments verbatim. Two templates that interpolate different columns at
-/// the same positions therefore share a skeleton — the basis for resolving an
-/// IRI-template property to its target vertex type (the `${...}` inner of a field
-/// reference begins with `.`; a prefix expansion does not).
+/// Replace every per-row hole with one marker, keeping literal text and
+/// constant holes verbatim. Two subject IRIs that interpolate different columns
+/// at the same positions therefore share a skeleton — the basis for resolving
+/// an IRI property to its target vertex type.
+///
+/// It used to take the template's RAW TEXT and scan it for `${`, calling a hole
+/// dynamic when its inner text began with `.`. Now the parts arrive parsed, so
+/// "is this hole per-row?" is a question about the expression, which is the
+/// only place that question has an answer: a `Call` over a column is per-row
+/// too, and the text scan called it constant.
 #[must_use]
-pub fn template_skeleton(text: &str) -> String {
-    const FIELD_MARKER: char = '\u{1}';
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(open) = rest.find("${") {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 2..];
-        let Some(close) = after.find('}') else {
-            out.push_str(&rest[open..]); // unterminated — keep verbatim
-            return out;
-        };
-        let inner = &after[..close];
-        if inner.trim_start().starts_with('.') {
-            out.push(FIELD_MARKER); // dynamic per-row field → wildcard
-        } else {
-            out.push_str("${"); // static prefix expansion → keep verbatim
-            out.push_str(inner);
-            out.push('}');
+pub fn template_skeleton(parts: &[InterpolationPart]) -> String {
+    const HOLE_MARKER: char = '\u{1}';
+    let mut out = String::new();
+    for part in parts {
+        match part {
+            InterpolationPart::Text(t) => out.push_str(t),
+            // A constant hole contributes its value; it is the same for every
+            // row, so two mappings only match if it matches.
+            InterpolationPart::Hole(HirExpr::PrefixedName { iri }) => out.push_str(iri),
+            InterpolationPart::Hole(HirExpr::StringLit(s)) => out.push_str(s),
+            InterpolationPart::Hole(_) => out.push(HOLE_MARKER),
         }
-        rest = &after[close + 1..];
     }
-    out.push_str(rest);
     out
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-// The `${.id}` / `${ex:}` template fixtures are skeleton syntax, not Rust format args.
-#[allow(clippy::literal_string_with_formatting_args)]
 mod tests {
-    use super::template_skeleton;
+    use super::{HirExpr, InterpolationPart, template_skeleton};
+
+    /// `"https://example.org/{path}/{<column>}"` — the shape every subject IRI
+    /// in the corpus has, built from parts rather than from text.
+    fn subject(path: &str, column: &str) -> Vec<InterpolationPart> {
+        vec![
+            InterpolationPart::Hole(HirExpr::PrefixedName {
+                iri: "https://example.org/".into(),
+            }),
+            InterpolationPart::Text(format!("{path}/").into()),
+            InterpolationPart::Hole(HirExpr::FieldRef(column.into())),
+        ]
+    }
 
     #[test]
     fn templates_with_same_shape_share_skeleton() {
-        // Different field, same prefix + positions → same skeleton (so an FK
+        // Different column, same prefix + positions → same skeleton (so an FK
         // template resolves to the matching subject's vertex type).
-        let a = template_skeleton("${ex:}person/${.id}");
-        let b = template_skeleton("${ex:}person/${.user_id}");
-        assert_eq!(a, b);
+        assert_eq!(
+            template_skeleton(&subject("person", "id")),
+            template_skeleton(&subject("person", "user_id"))
+        );
     }
 
     #[test]
     fn different_prefix_paths_differ() {
-        let a = template_skeleton("${ex:}person/${.id}");
-        let b = template_skeleton("${ex:}order/${.id}");
-        assert_ne!(a, b);
+        assert_ne!(
+            template_skeleton(&subject("person", "id")),
+            template_skeleton(&subject("order", "id"))
+        );
+    }
+
+    /// The qualified spelling is the same hole as the anonymous one: a subject
+    /// written `{users.id}` must match one written `{.id}`, or the ninth
+    /// amendment's fixture rewrite would silently drop every edge in the file.
+    #[test]
+    fn a_qualified_hole_matches_an_anonymous_one() {
+        let anonymous = subject("person", "id");
+        let qualified = vec![
+            InterpolationPart::Hole(HirExpr::PrefixedName {
+                iri: "https://example.org/".into(),
+            }),
+            InterpolationPart::Text("person/".into()),
+            InterpolationPart::Hole(HirExpr::ColumnRef {
+                binding: "users".into(),
+                column: "id".into(),
+            }),
+        ];
+        assert_eq!(template_skeleton(&anonymous), template_skeleton(&qualified));
     }
 }
