@@ -1,3 +1,0 @@
-prefix ex: <https://example.org/>
-User : ex:Person from users
-    iri = <<.s ex:p

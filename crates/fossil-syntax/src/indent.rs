@@ -350,13 +350,10 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
         Token::String => SyntaxKind::STRING,
         Token::Template => SyntaxKind::TEMPLATE,
         Token::AbsIri => SyntaxKind::ABS_IRI,
-        Token::EnvVar => SyntaxKind::ENV_VAR,
         Token::AtAttr => SyntaxKind::AT_ATTR,
         // Multi-char operators
         Token::Define => SyntaxKind::DEFINE,
         Token::Pipe => SyntaxKind::PIPE,
-        Token::TripleOpen => SyntaxKind::TRIPLE_OPEN,
-        Token::TripleClose => SyntaxKind::TRIPLE_CLOSE,
         Token::Eq => SyntaxKind::EQ,
         Token::Neq => SyntaxKind::NEQ,
         Token::Le => SyntaxKind::LE,

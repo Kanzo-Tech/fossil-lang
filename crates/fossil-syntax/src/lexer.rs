@@ -111,10 +111,6 @@ pub enum Token {
     #[regex(r"<[^>\s]*>")]
     AbsIri,
 
-    /// Environment-variable reference `$IDENT` (grammar.bnf line 48).
-    #[regex(r"\$[A-Za-z_][A-Za-z0-9_]*")]
-    EnvVar,
-
     // ───────────────────────────────────────────────────────────────────
     // Multi-character operators. Each MUST be declared before its one-char
     // prefix so logos's longest-match rule selects the multi-char form.
@@ -136,12 +132,6 @@ pub enum Token {
 
     #[token("|>")]
     Pipe,
-
-    #[token("<<")]
-    TripleOpen,
-
-    #[token(">>")]
-    TripleClose,
 
     // ───────────────────────────────────────────────────────────────────
     // Single-character operators / punctuation.
@@ -296,12 +286,6 @@ mod tests {
     }
 
     #[test]
-    fn lexes_triple_open_and_close() {
-        assert_eq!(just_kinds("<<"), vec![Token::TripleOpen]);
-        assert_eq!(just_kinds(">>"), vec![Token::TripleClose]);
-    }
-
-    #[test]
     fn lexes_eq_and_neq() {
         assert_eq!(just_kinds("=="), vec![Token::Eq]);
         assert_eq!(just_kinds("!="), vec![Token::Neq]);
@@ -332,12 +316,6 @@ mod tests {
     #[test]
     fn lexes_shape_and() {
         assert_eq!(just_kinds("&"), vec![Token::ShapeAnd]);
-    }
-
-    #[test]
-    fn lexes_env_var() {
-        assert_eq!(just_kinds("$HOME"), vec![Token::EnvVar]);
-        assert_eq!(just_kinds("$_under"), vec![Token::EnvVar]);
     }
 
     #[test]
@@ -378,7 +356,9 @@ mod tests {
 
     #[test]
     fn lexes_double_le_correctly() {
-        assert_eq!(just_kinds("<<"), vec![Token::TripleOpen]);
+        // `<<` is no longer a token of its own: the triple term went with the
+        // RDF-specific surface, so nothing claims it and it is two `<`.
+        assert_eq!(just_kinds("<<"), vec![Token::Lt, Token::Lt]);
         assert_eq!(just_kinds("<"), vec![Token::Lt]);
         assert_eq!(just_kinds("<="), vec![Token::Le]);
     }

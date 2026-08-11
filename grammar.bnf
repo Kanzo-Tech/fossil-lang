@@ -56,9 +56,6 @@ TPL_ESCAPE     := ESCAPE | '\`' | '\$' | '\${'
 (* IRI literals *)
 ABS_IRI        := '<' IRI_CHARS '>'           (* RFC 3986 chars *)
 
-(* Environment variable reference *)
-ENV_VAR        := '$' IDENT
-
 (* Comments — discarded by lexer *)
 COMMENT        := '//' (any char except NEWLINE)*
 
@@ -70,8 +67,6 @@ SHAPE_AND      := '&'
 PIPE           := '|>'
 T_QUESTION     := '?'
 T_COLON        := ':'                          (* contextual with T_QUESTION *)
-TRIPLE_OPEN    := '<<'
-TRIPLE_CLOSE   := '>>'
 
 EQ             := '=='
 NEQ            := '!='
@@ -230,12 +225,10 @@ NamedArg            := IDENT ASSIGN Expression
 (* Primary expressions *)
 PrimaryExpr         := Literal
                      | FieldRef
-                     | ENV_VAR
                      | IDENT
                      | IRIExpr
                      | LPAREN Expression RPAREN
                      | RecordLiteral
-                     | TripleTerm
 
 FieldRef            := DOT IDENT (DOT IDENT)*
 
@@ -280,7 +273,6 @@ RecordField         := (IDENT | IRIExpr) ASSIGN Expression
 
 (* ─── Triple terms (RDF 1.2 quoted triple) ─── *)
 
-TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
 
 
 (* ═══ DISAMBIGUATION RULES (parser context) ═══ *)
@@ -299,9 +291,9 @@ TripleTerm          := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE
 (*     - `Name : Shape`       → SHAPE_SEP in MappingHeader                 *)
 (*     - `cond ? a : b`       → T_COLON in TernaryExpr (paired with `?`)  *)
 (*                                                                         *)
-(*  4. Triple-term `<<` vs comparison `<`                                  *)
-(*     - Lexer-level: `<<` is single token TRIPLE_OPEN                     *)
-(*     - Single `<` is LT                                                  *)
+(*  (There used to be a rule 4 here: `<<` vs `<`. The triple term went     *)
+(*   with the RDF-specific surface, so `<<` claims nothing and `<` has     *)
+(*   only ever one reading.)                                              *)
 
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)

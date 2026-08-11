@@ -160,11 +160,6 @@ fixture_test!(
     "19_use_with_selective_import"
 );
 fixture_test!(
-    triple_term_object_21,
-    "04_prefix_iri_triple",
-    "21_triple_term_in_object_position"
-);
-fixture_test!(
     broken_template_22,
     "04_prefix_iri_triple",
     "22_broken_template_interpolation_recovers"
@@ -173,11 +168,6 @@ fixture_test!(
     unterminated_iri_23,
     "04_prefix_iri_triple",
     "23_unterminated_iri_recovers"
-);
-fixture_test!(
-    half_triple_term_24,
-    "04_prefix_iri_triple",
-    "24_half_triple_term_recovers"
 );
 
 // ─── Bucket 5: top-level + indent ─────────────────────────────────────
@@ -283,7 +273,6 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
             "18_malformed_property_lhs_recovers",
         ),
         ("04_prefix_iri_triple", "23_unterminated_iri_recovers"),
-        ("04_prefix_iri_triple", "24_half_triple_term_recovers"),
         ("05_toplevel_indent", "28_inconsistent_dedent_recovers"),
         ("05_toplevel_indent", "29_mapping_body_de_indented_recovers"),
         (

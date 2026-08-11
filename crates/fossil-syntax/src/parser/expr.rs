@@ -239,12 +239,9 @@ fn parse_arg(p: &mut Parser) {
 fn parse_primary(p: &mut Parser) {
     p.skip_trivia();
     match p.current() {
-        // Literal-like primary tokens: numeric literals, strings, and
-        // environment-variable references (`$VAR`). All wrap as
-        // LITERAL_EXPR with a single token payload.
-        Some(
-            SyntaxKind::INTEGER | SyntaxKind::FLOAT | SyntaxKind::STRING | SyntaxKind::ENV_VAR,
-        ) => {
+        // Literal-like primary tokens: numeric literals and strings. Both
+        // wrap as LITERAL_EXPR with a single token payload.
+        Some(SyntaxKind::INTEGER | SyntaxKind::FLOAT | SyntaxKind::STRING) => {
             p.start(SyntaxKind::LITERAL_EXPR);
             p.bump();
             p.finish();
@@ -307,7 +304,6 @@ fn parse_primary(p: &mut Parser) {
             p.finish();
         }
         Some(SyntaxKind::LBRACE) => parse_record_literal(p),
-        Some(SyntaxKind::TRIPLE_OPEN) => parse_triple_term(p),
         _ => {
             // Recovery: emit ERROR with the current token (or empty if EOF).
             p.bump_as_error();
@@ -424,21 +420,6 @@ fn parse_record_literal(p: &mut Parser) {
         }
     }
     p.expect(SyntaxKind::RBRACE);
-    p.finish();
-}
-
-/// `TripleTerm := TRIPLE_OPEN Expression Expression Expression TRIPLE_CLOSE`
-/// (grammar.bnf line 241).
-fn parse_triple_term(p: &mut Parser) {
-    p.start(SyntaxKind::TRIPLE_TERM);
-    p.expect(SyntaxKind::TRIPLE_OPEN);
-    // Three sub-expressions: s p o. Use high min_bp so each sub-expression
-    // does not absorb the next via postfix/infix (the `<<` and `>>` tokens
-    // are not parsed as binary operators).
-    parse_expression(p, 0);
-    parse_expression(p, 0);
-    parse_expression(p, 0);
-    p.expect(SyntaxKind::TRIPLE_CLOSE);
     p.finish();
 }
 

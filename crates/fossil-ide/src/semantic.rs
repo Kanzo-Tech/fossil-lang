@@ -139,10 +139,14 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
     match tok.kind() {
         // ── unambiguous lexical classes ───────────────────────────────
         K::COMMENT => Some(ty::COMMENT),
-        K::STRING | K::TEMPLATE => Some(ty::STRING),
+        // A string with a hole is carved into a run of tokens, so every part
+        // of it has to be named here or the literal loses its colour halfway
+        // through — which is what happened when the carve landed.
+        K::STRING | K::TEMPLATE | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => {
+            Some(ty::STRING)
+        }
         K::INTEGER | K::FLOAT => Some(ty::NUMBER),
         K::ABS_IRI => Some(ty::NAMESPACE),
-        K::ENV_VAR => Some(ty::VARIABLE),
 
         // ── keywords (prefix / from / in / use / as / and / or / not /
         //    iri) + the `@attr` marker, read as a keyword ────────────────
@@ -174,6 +178,9 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         | K::SLASH
         | K::PERCENT
         | K::T_QUESTION
+        // The hole's opener: an operator, because it is what separates the
+        // expression inside from the text around it.
+        | K::INTERP_OPEN
         | K::SHAPE_AND => Some(ty::OPERATOR),
 
         // ── context-sensitive names ───────────────────────────────────

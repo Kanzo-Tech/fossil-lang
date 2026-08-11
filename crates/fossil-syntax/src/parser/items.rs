@@ -56,9 +56,7 @@
 //!    the same lexeme `:` is consumed by [`parse_mapping_header`] for
 //!    rule (3a) and by [`super::expr::parse_expression`]'s ternary
 //!    handler for rule (3b).
-//! 4. `<<` `TRIPLE_OPEN` vs `<` `LT`: the lexer (Wave 0 plan 02-01) emits
-//!    `TRIPLE_OPEN` as a single token; `LT` is the comparison operator.
-//!    `<<` is consumed by [`super::expr::parse_triple_term`].
+//! (Rule 4 was `<<` vs `<`, and it is gone with the triple term.)
 
 use crate::kind::SyntaxKind;
 
@@ -760,18 +758,13 @@ mod disambiguation {
         );
     }
 
-    // ── RULE 4 — TRIPLE_OPEN vs LT ────────────────────────────────────
-
-    #[test]
-    fn rule4_double_lt_is_triple_open() {
-        let src = "User : ex:Shape from users\n    iri = <<.s ex:p .o>>\n";
-        let root = parse_str(src);
-        let property = find_first_kind(&root, SyntaxKind::PROPERTY).expect("expected a PROPERTY");
-        assert!(
-            descendant_kind_exists(&property, SyntaxKind::TRIPLE_TERM),
-            "expected TRIPLE_TERM for `<<.s ex:p .o>>`",
-        );
-    }
+    // ── `<` is the only thing `<` can be ──────────────────────────────
+    //
+    // There used to be a rule 4 here — `<<` was `TRIPLE_OPEN`, and a test
+    // pinned that a single `<` was not mistaken for it. The triple term went
+    // with the RDF-specific surface, so `<<` claims nothing and the
+    // disambiguation it needed is gone. What survives is the half worth
+    // keeping: `<` is a comparison operator.
 
     #[test]
     fn rule4_single_lt_is_comparison_operator() {
@@ -788,10 +781,6 @@ mod disambiguation {
         assert!(
             token_kinds.contains(&SyntaxKind::LT),
             "expected LT token in BINARY_EXPR, got {token_kinds:?}",
-        );
-        assert!(
-            !token_kinds.contains(&SyntaxKind::TRIPLE_OPEN),
-            "single `<` MUST NOT be tokenised as TRIPLE_OPEN, got {token_kinds:?}",
         );
     }
 }
