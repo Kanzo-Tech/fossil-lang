@@ -17,6 +17,9 @@ Cargo.lock.bak
 # Claude Code local files
 CLAUDE.local.md
 
+# The RETURNING.md ritual (CLAUDE.md) says local-only, and nothing enforced it.
+RETURNING.md
+
 # GSD planning artifacts (commit_docs=false per .planning/config.json)
 .planning/
 
