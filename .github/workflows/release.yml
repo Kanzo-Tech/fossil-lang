@@ -87,11 +87,10 @@ jobs:
       - name: Build all packages (recursive)
         run: pnpm -r build
 
-      # Exclude @fossil-lang/examples — its variations harness builds fossil-cli
-      # (datafusion/duckdb, minutes); the dedicated cached `examples.yml` already
-      # owns that gate. Same exclusion as pnpm-ci.yml.
-      - name: Test (gate before publishing, except examples)
-        run: pnpm --filter "!@fossil-lang/examples" -r test
+      # No exclusion: `@fossil-lang/examples` and its `examples.yml` gate are
+      # both deleted. Same as pnpm-ci.yml.
+      - name: Test (gate before publishing)
+        run: pnpm -r test
 
       # The tag (e.g. v0.3.0-alpha.5) is the single source of truth: strip the
       # leading `v` to get the version, and derive the dist-tag from a prerelease

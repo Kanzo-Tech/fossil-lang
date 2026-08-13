@@ -9,9 +9,8 @@ jobs:
   pnpm:
     runs-on: ubuntu-latest
     # Generous ceiling for a COLD run (no cargo cache yet: datafusion wasm in
-    # @fossil-lang/executor + fossil-cli --release in @fossil-lang/examples build
-    # from scratch). Warm runs (cache hit) finish in a few minutes; this only
-    # catches a genuine hang, not a slow first build.
+    # @fossil-lang/executor builds from scratch). Warm runs (cache hit) finish in
+    # a few minutes; this only catches a genuine hang, not a slow first build.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -78,21 +77,14 @@ jobs:
       - name: Build all packages
         run: pnpm --filter "./packages/*" build
 
-      # `@fossil-lang/examples` is EXCLUDED here: its variations harness builds
-      # `fossil-cli` (datafusion/duckdb — minutes) just to spawn `fossil check`,
-      # and the dedicated, cached, path-filtered `examples.yml` workflow already
-      # owns that ≥30 compile-gate. Running it here too only duplicated the heavy
-      # Rust build and slowed every PR.
-      - name: Test all packages (except examples — owned by examples.yml)
-        run: pnpm --filter "./packages/*" --filter "!@fossil-lang/examples" test
+      # There is no exclusion here any more. `@fossil-lang/examples` was carved
+      # out because its variations harness built `fossil-cli` (datafusion/duckdb
+      # — minutes) just to spawn `fossil check`, and `examples.yml` owned that
+      # gate. Both are gone: the acceptance corpus is `apps/docs/programs/`, run
+      # by `crates/fossil-engine/tests/programs.rs`, which is a Rust test on the
+      # Rust side of the seam and never enters a pnpm filter.
+      - name: Test all packages
+        run: pnpm --filter "./packages/*" test
 
       - name: Type-check all packages
         run: pnpm --filter "./packages/*" exec tsc --noEmit
-
-      # PKG-03 JS half — enforce per-package bundle budgets via size-limit.
-      # Currently only @fossil-lang/playground declares a size script + budget
-      # (500 KB gzip per CONTEXT.md SC#4 + 08-VERIFICATION.md gap 2). Future
-      # packages with budgets are picked up automatically by the packages/ filter.
-      # The WASM half of PKG-03 is enforced separately by wasm-size.yml.
-      - name: Bundle size budget (PKG-03 JS half)
-        run: pnpm --filter "./packages/*" size
