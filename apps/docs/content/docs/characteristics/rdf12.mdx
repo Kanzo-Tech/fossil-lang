@@ -3,9 +3,9 @@ title: RDF 1.2
 description: One new expression form and one new value type. Where a statement goes in a language of mappings, and where it goes in a corpus of vertices and edges — which are two questions and only one has a spec.
 direction:
   summary: The primitive is a triple term as a value assignable only where the shape declares `rdfs:Proposition`, a reifier is an ordinary mapping so the sugar desugars to one, and in the corpus a reifier is a vertex while a triple term is the edge row it annotates — with a discriminator in the id space for the case where there is no row.
-  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+  arguedIn: /docs/design/corpus
 today:
-  summary: The grammar carries an RDF-star-era `<< s p o >>` parsed as a primary expression with no decision behind it, the corpus has no graph column at all, and our Turtle parser accepts a triple term today — not because anyone decided that, but because rudof enables `oxttl`'s `rdf-12` by feature unification. Since 2026-08-07 that is declared rather than inherited, and a literal with a base direction is refused at the pivot instead of being flattened into text a host lays out backwards.
+  summary: There is no triple-term syntax — the RDF-star-era `<< s p o >>` went with the RDF-specific surface, so `<<` is not a token and `<` is only comparison — the corpus has no graph column at all, and our Turtle parser accepts a triple term on the way in — not because anyone decided that, but because rudof enables `oxttl`'s `rdf-12` by feature unification. Since 2026-08-07 that is declared rather than inherited, and a literal with a base direction is refused at the pivot instead of being flattened into text a host lays out backwards.
   backedBy: grammar.bnf
 ---
 
@@ -27,7 +27,7 @@ has been ON in every build of this workspace, enabled by `rudof_iri`/`rudof_rdf`
 compiles: the variant only exists behind the feature. **Our RDF level was a property of rudof's
 dependency graph, not a decision** — and the day `fossil-hir` drops ShEx for SHACL, which §8 above
 contemplates, the parser would have silently reverted to RDF 1.1. Since 2026-08-07 the feature is
-declared in `[workspace.dependencies]` (ADR-0051): a no-op for today's graph and a guard for
+declared in `[workspace.dependencies]`: a no-op for today's graph and a guard for
 tomorrow's, pulling in no new dependency. The RDF-star name is gone, and Oxigraph's own changelog says
 *"RDF-star support is now dropped in favor of RDF 1.2."*
 
@@ -53,8 +53,11 @@ RDF 1.2 diverged from the 2021 RDF-star Community Group report in four places: s
 **dropped**, the mediating predicate was **introduced**, referential opacity was abandoned, and
 `{| |}` survived with the same spelling but a different expansion.
 
-**Our `<< … >>` is from the old design** — `grammar.bnf:241`, parsed as a primary expression
-(`crates/fossil-syntax/src/parser/expr.rs:311`), with no decision behind it.
+**We have no triple term at all, and the one we used to have was from the old design.** The
+RDF-star-era `<< … >>` went with the RDF-specific surface: `<<` is not a token, the lexer reads it as
+two `<`, and `<` is the comparison operator and nothing else (`grammar.bnf, § DISAMBIGUATION RULES`
+retires the rule that once told the two apart). So everything below is a form the language would gain,
+not one it has.
 
 ## The primitive is one form and one type
 

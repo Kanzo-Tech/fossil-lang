@@ -9,7 +9,8 @@
 
 export interface Direction {
   summary: string;
-  decidedBy: string;
+  /** A route on this site. The argument is a page here, never a record kept somewhere else. */
+  arguedIn: string;
 }
 
 export interface Today {
@@ -28,7 +29,7 @@ export function Registers({ direction, today }: { direction?: Direction; today?:
           <span className="register__label">Where this is going</span>
           <p className="m-0">{direction.summary}</p>
           <span className="register__cite">
-            Decided by <code>{direction.decidedBy}</code>
+            The argument is in <a href={direction.arguedIn}>{direction.arguedIn}</a>
           </span>
         </div>
       ) : null}

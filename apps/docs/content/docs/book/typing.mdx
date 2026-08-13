@@ -1,0 +1,280 @@
+---
+title: The typing rules
+description: The static semantics, normative, and the sibling of the grammar — the judgments, the rules, the subtyping relation, the property-compatibility relation, and the exact statement of what a successful compile promises.
+---
+
+`grammar.bnf` defines well-formed **syntax**. This page defines well-formed **meaning**, and it
+stands in the same relation to the checker that the grammar stands in to the parser: the checker
+implements it, it does not describe the checker. A rule written here and absent from `crates/` is
+work outstanding, not an error on this page.
+
+The conformance set is the same one the grammar names — the eighteen programs under
+`apps/docs/programs/`, five of which are expected to fail and carry the diagnostic they must
+produce.
+
+## The commitment, stated once
+
+> **A well-typed fossil program cannot fail at execution because of a type or a shape violation.**
+
+The user writes no types. Both ends of every type already exist as documents somebody else
+maintains — the source, read by a provider, and the shape document, read as a constraint table —
+and the compiler derives, propagates and verifies. [Statically typed](/docs/design/types) is the
+argument for that; this page is the mechanism.
+
+## Types
+
+```
+τ  ::=  Primitive(p)          a value of the datatype lattice
+     |  Optional(τ)           may be absent
+     |  Seq(τ)                repeated
+     |  Record({fᵢ : τᵢ})     a row
+     |  Relation(Record(R))   a stream of rows
+     |  Iri                   an absolute IRI
+     |  Shape(S)              satisfies the shape S
+     |  Fn((τ₁, …, τₙ) → τ)   a catalogue signature
+     |  Error                 the taint left behind by a diagnostic
+
+p  ::=  String | Integer | Float | Bool
+     |  Date | DateTime | Time | gYear | AnyURI
+```
+
+`Error` is not a type a program can name. It is what a checked expression becomes once a diagnostic
+has been emitted about it, and it absorbs every rule it meets — which is what stops one mistake
+producing a page of consequences.
+
+<Callout title="Where polymorphism lives, and where it does not">
+`Fn` and its type variables belong to the **catalogue**, never to a program. `where` has one entry
+and one signature, generic in the row type, and it is generic because it must apply to every source;
+the argument that reaches it is an ordinary expression of that row type. But a program declares no
+functions at all, so there is nowhere in fossil to *write* a type variable, and nowhere to write a
+signature. Both halves are load-bearing: the library is polymorphic so that it can stay small, and
+the surface is not, so that there is nothing to infer.
+</Callout>
+
+**No sum types.** A disjunctive shape is refused with a diagnostic that suggests splitting it into
+several mappings.
+
+**Facets are not in the ADT.** A shape's `MININCLUSIVE`, `PATTERN` and the rest are carried beside
+the type as constraints during checking. Those that cannot be discharged statically become checks
+emitted into the generated SQL, and they are the reason the commitment above is stated as *cannot
+fail because of a type or shape violation* rather than *cannot fail*.
+
+## Judgments
+
+```
+Γ ⊢ e : τ            e has type τ in the environment Γ
+Γ ⊢ M ok             the mapping M is well-formed
+```
+
+`Γ` carries the names a program introduces and nothing else: the source bindings, the type bindings,
+and the catalogue. There is no separate row context. A row is reached through the name its binding
+introduced — `User := io.csv("data/users.csv")` puts `User` in `Γ` as both a type and a relation, so
+`User.age` is an ordinary member access and `from User` an ordinary use of the name.
+
+That is the whole of the reason there is no rule for synthesising a closure on this page. There used
+to be one: an argument containing free `.field` references was wrapped into a single-parameter
+lambda, because the row had no name to be reached by. With the row named, the free reference does
+not exist, and the rule it needed went with it.
+
+## Rules
+
+### Literals and names
+
+```
+                                              x : τ ∈ Γ
+T-Lit:  ─────────────────           T-Var:  ────────────
+        Γ ⊢ ⟨literal⟩ : p                   Γ ⊢ x : τ
+```
+
+### Member access, which is one operator
+
+```
+        Γ ⊢ e : τ      τ declares member m of type τ'
+T-Dot:  ───────────────────────────────────────────
+        Γ ⊢ e.m : τ'
+```
+
+One rule, and the receiver decides what the members are: a namespace gives its functions, a row type
+gives its fields, a relation gives its verbs. `io` is the namespace of the providers, and they have
+no receiver because they create the thing.
+
+### Calls
+
+```
+        Γ ⊢ f : Fn((τ₁, …, τₙ) → τ)      Γ ⊢ eᵢ : σᵢ      σᵢ <: τᵢ
+T-Call: ──────────────────────────────────────────────────────────
+        Γ ⊢ f(e₁, …, eₙ) : τ
+```
+
+Named arguments resolve by name against the declared parameter. Arity and types are checked against
+the catalogue entry, so a verb is a row in a table rather than a production in the grammar, and a
+new verb costs no syntax.
+
+### Arithmetic, comparison, boolean
+
+```
+        Γ ⊢ a : Numeric   Γ ⊢ b : Numeric          Γ ⊢ a : τ   Γ ⊢ b : τ   τ comparable
+T-Arith: ─────────────────────────────────  T-Comp: ──────────────────────────────────
+        Γ ⊢ a ⊕ b : promoted(a, b)                 Γ ⊢ a ⊙ b : Bool
+
+        ⊕ ∈ {+, -, *, /, %}                        ⊙ ∈ {==, !=, <, <=, >, >=}
+
+
+        Γ ⊢ a : Bool   Γ ⊢ b : Bool               Γ ⊢ a : Bool
+T-Bool: ───────────────────────────       T-Not:  ─────────────
+        Γ ⊢ a ⊗ b : Bool                          Γ ⊢ not a : Bool
+
+        ⊗ ∈ {and, or}
+```
+
+`Numeric` is the join of `Integer` and `Float`, and `promoted(Integer, Float) = Float`. That is the
+only implicit widening in the language.
+
+### The conditional
+
+```
+        Γ ⊢ c : Bool      Γ ⊢ a : τ      Γ ⊢ b : τ
+T-Tern: ──────────────────────────────────────────
+        Γ ⊢ c ? a : b : τ
+```
+
+Both branches, one type. No implicit coercion — the widening above is the exception and it is
+between two numbers.
+
+### Interpolation
+
+```
+        for every hole eᵢ of the string: Γ ⊢ eᵢ : τᵢ, τᵢ stringifiable
+        the context expects τ_target ∈ {String, Iri}
+T-Str:  ──────────────────────────────────────────────────────────────
+        Γ ⊢ "…{eᵢ}…" : τ_target
+```
+
+Interpolation is always on, `{{` escapes a brace, and there is one string form rather than a
+separate template. Where the context expects an `Iri` — the identity slot, or a property whose shape
+declares an IRI — the holes are percent-encoded.
+
+## The mapping
+
+The headline judgment, and everything above exists to serve it.
+
+```
+        Γ ⊢ src : Relation(Record(R))
+        S ∈ Γ, introduced by a `type { … }` binding
+        Γ, row : R ⊢ subject_expr : Iri
+        for every (pᵢ = eᵢ) in the body:
+            S declares the predicate named pᵢ with type τᵢ' and cardinality cᵢ
+            Γ, row : R ⊢ eᵢ : τᵢ
+            compatible(τᵢ, τᵢ', cᵢ)
+        if S is CLOSED:
+            every predicate written in the body is declared by S
+        every predicate S requires is written in the body
+        exactly one @subject, and it is the first line of the body
+T-Map:  ──────────────────────────────────────────────────────────────────────
+        Γ ⊢ "Name : S from src" ok
+```
+
+Four conditions on that rule are worth reading twice, because each one is a class of error that no
+mapping language catches:
+
+**`S ∈ Γ`.** The shape is a *name* the program bound, not an opaque IRI string. A misspelling is a
+name resolution failure at the header, rather than a valid graph with zero instances of the class
+you meant.
+
+**`pᵢ` is a bare name.** It is the last segment of a predicate IRI the shape declares. Two predicates
+whose last segments coincide are an error naming both IRIs; the compiler never disambiguates, and
+the repair is `@rename` in the program. [What was discarded](/docs/design/discarded) carries the
+measurement that settles it.
+
+**Closure is a property of the shape, not a flag.** An undeclared property is an error *if and only
+if* `S` is `CLOSED`. RDF is open-world, and a checker that rejected every undeclared predicate would
+make the open world illegal.
+
+**One identity per type.** Two mappings that produce `S` must declare the same `@subject`, and its
+expression must be deterministic and bounded to the row. Disagreement is an error naming both
+mappings and both expressions — not a warning. The `errors/two-identities` conformance program is
+the one that pins it.
+
+### `compatible(τ, τ', c)`
+
+The property-compatibility relation, which is where cardinality is decided:
+
+| `c` | the obligation |
+| --- | --- |
+| allows `0` | `τ` may be `Optional(τ')`, or `τ' <: τ` |
+| requires `1+` | `τ' <: τ`, or a coercion the catalogue provides |
+| allows many | `Seq(τ') <: τ`, or a singleton lifted into one |
+
+`compatible` also **returns proof obligations** — the facet constraints it could not discharge. They
+are not dropped and they are not assumed: they are emitted as checks into the generated SQL, and the
+soundness statement below is conditioned on them passing.
+
+## Subtyping
+
+```
+S-Refl:  ──────         S-Opt:  ─────────────────        S-IntFlt:  ─────────────────
+         τ <: τ                 τ <: Optional(τ)                    Integer <: Float
+
+
+              τ₁ <: τ₂                            τ₁ <: τ₂
+S-OptCov: ──────────────────────────  S-SeqCov: ──────────────────
+          Optional(τ₁) <: Optional(τ₂)           Seq(τ₁) <: Seq(τ₂)
+```
+
+Five rules, and the two absences are deliberate:
+
+**No auto-lifting `τ <: Seq(τ)`.** It would mask exactly the class of bug the cardinality half of a
+shape exists to catch — one value silently satisfying a slot that wanted many, or the reverse.
+
+**No function subtyping.** A catalogue signature matches exactly. There is no user-written function
+for the rule to be useful to, so it would be a rule with no call site.
+
+## What a successful compile promises, exactly
+
+> If `Γ ⊢ M ok`, and `M` is executed against sources whose actual types match what the provider read
+> from them, and execution terminates, then the graph it writes satisfies the shape `M` declares.
+
+Two conditions in that sentence are load-bearing and are stated rather than buried:
+
+- **Modulo the provider.** If the file has drifted from what the provider read — a column that is
+  now text where it was an integer — the guarantee is void. Provider integrity is assumed because
+  nothing in the language can check it.
+- **Modulo the emitted checks.** The facet obligations `compatible` could not discharge are runtime
+  checks. Soundness holds when they pass, and their failure is a diagnostic rather than a corrupt
+  graph.
+
+Everything the compile does **not** promise is on [statically typed](/docs/design/types), and it is
+worth reading beside this page: a compile says nothing about whether the source is the right source,
+whether the mapping means what the author intended, or whether the data is true.
+
+## The shape subset
+
+The constraint table is read from a ShEx document. What is read:
+
+- triple constraints with datatype predicates;
+- cardinality — `?`, `*`, `+`, `{n}`, `{n,m}`;
+- shape references;
+- node kinds — IRI, blank node, literal;
+- value sets;
+- datatype facets — `MININCLUSIVE`, `MAXLENGTH`, `PATTERN` and the rest;
+- `CLOSED`;
+- `EXTRA`;
+- `extends`, flattened into one combined shape at check time;
+- imports.
+
+What is not, each with what happens instead:
+
+| not read | what happens |
+| --- | --- |
+| `OneOf` | a diagnostic suggesting the mapping be split |
+| shapes recursive through a direct cycle | rejected; the shape graph must be acyclic |
+| complex nested `EachOf` grouping | rejected at decomposition |
+| ShapeMap features | out of scope — a shape map selects nodes in a graph that already exists |
+
+## Where the numbers and the reading are
+
+This page is the specification. The evidence that any given rule is *implemented* is on the
+characteristic pages, which carry it per rule and mark plainly which of them are still ahead — start
+with [the type system](/docs/characteristics/types) and [what an expression
+is](/docs/characteristics/expressions). The published work this design is built on, named, is in
+[prior art](/docs/design/prior-art).

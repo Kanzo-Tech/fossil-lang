@@ -1,0 +1,148 @@
+---
+title: The mapping algebra
+description: Fourteen operators over typed schemas, a conservative typed elaboration of a published operational semantics for knowledge-graph construction — and why an algebra rather than a template engine.
+---
+
+Underneath the language there is an algebra. A fossil program is not translated to SQL directly; it
+is elaborated into a tree of operators, each of which takes relations with schemas and produces a
+relation with a schema, and it is that tree the rest of the compiler talks about.
+
+Three of fossil's seven reasons for existing — static typing, inference from shapes, generic
+functions — are claims about types, and a type has to be attached to something. This page is what
+they are attached to.
+
+## What a graph-construction algebra is
+
+Relational algebra is the ancestor and it settles the pattern. Selection, projection and join are
+not features of a query language; they are operators with a defined meaning over relations, and SQL
+is one surface syntax that denotes them. Because the operators are defined independently of the
+syntax, two questions become answerable that are otherwise arguments: *do these two programs mean
+the same thing*, and *is this rewrite sound*.
+
+Knowledge-graph construction — the act of turning tables and documents into an RDF or property graph
+— had surface syntaxes long before it had that. The mapping languages in wide use are configuration
+formats whose meaning is defined by whichever engine reads them, which is why two mappers can read
+the same mapping document and disagree about what it produces.
+
+**Min Oo and Hartig, *An Algebraic Foundation for Knowledge Graph Construction*** (arXiv
+2503.10385; ESWC 2025, Best Research Award) closed that gap. They define an operational semantics
+for knowledge-graph construction that is language-agnostic: a set of operators, what each does to
+the data flowing through it, and therefore what a mapping *means* without reference to the tool that
+ran it.
+
+fossil's middle is their algebra with a type on every operator's schema.
+
+## The fourteen operators
+
+Each operator takes zero or more input relations and produces one. What it does to the **schema** —
+the set of typed columns — is as much a part of its definition as what it does to the rows, and that
+column is the one this page is about.
+
+| Operator | Schema in ⟶ schema out | The SQL shape it lowers to |
+| --- | --- | --- |
+| `Source` | none ⟶ the type the provider generated for the file | a scan or a view over the file |
+| `Project` | drops columns not named | the `SELECT` list |
+| `Extend` | adds one column, whose type is the expression's | a computed column in the `SELECT` list |
+| `Rename` | one column changes name, the type unchanged | `AS` |
+| `Filter` | unchanged; the predicate must be boolean | `WHERE` |
+| `Join` | the union of two schemas, qualified | `JOIN … ON` |
+| `Union` | both inputs must carry the same schema | `UNION ALL` |
+| `GroupBy` | the grouping columns, plus what `Aggregate` adds | `GROUP BY` |
+| `Aggregate` | adds one column whose type the aggregate decides | an aggregate in the `SELECT` list |
+| `Distinct` | unchanged | `SELECT DISTINCT` |
+| `EmitVertex` | a schema of graph terms, not of source columns | a projection into the vertex encoding |
+| `EmitEdge` | a schema of two identities and a predicate | a projection into the adjacency encoding |
+| `Sink` | none — it consumes | the write |
+| `Empty` | the empty relation, with a schema and no rows | the identity of `Union` |
+
+Two of them deserve a note. **`EmitVertex` and `EmitEdge` are where the algebra stops being
+relational**: everything above them is a relation of source columns and everything below is a
+relation of graph terms — an identity, a predicate, a value. That is the seam the whole type system
+runs through, because it is the only place where the type of the input and the type of the output
+have to agree about the same thing. And **`Empty` looks like ceremony and is not**: without a unit
+for `Union`, a mapping whose filter excludes every row is a special case in every operator that
+consumes it, and special cases are where operational semantics stop being provable.
+
+The typing rules have one shape. An operator's schema-out is a function of its schemas-in and of the
+types of the expressions it carries; a rule that cannot produce a schema is a compile error, and the
+error is attributed to the expression whose type made it impossible:
+
+```
+        Γ ⊢ r : {a₁:τ₁, …, aₙ:τₙ}       Γ, r ⊢ e : σ
+Extend  ─────────────────────────────────────────────
+        Γ ⊢ Extend(r, b, e) : {a₁:τ₁, …, aₙ:τₙ, b:σ}
+
+        Γ ⊢ r : R      Γ, r ⊢ e : Bool
+Filter  ──────────────────────────────
+        Γ ⊢ Filter(r, e) : R
+```
+
+`Filter`'s premise is the whole reason a predicate cannot be a string with holes in it: `Bool` is a
+type, and a type is a thing an expression either has or does not.
+
+## "A conservative typed elaboration", and what it costs to claim it
+
+That phrase is a strong claim with two independent halves, and it is worth separating them, because
+each is doing different work.
+
+### Conservative: the types annotate, and never alter the meaning
+
+Every operator in fossil's middle carries type information that theirs does not. **None of it
+changes what the operator does to the rows.** A schema is not consulted at run time, no operator
+behaves differently because a column is `Float` rather than `Integer`, and no operator exists in
+fossil's set that does not exist in theirs. The types are a decoration on the tree, checked before
+anything runs and discarded when the SQL is generated.
+
+The obligation that puts on the design is concrete: **any feature that would make a type
+operationally significant is out of bounds.** A coercion inserted by the checker, a dispatch that
+picks a different implementation based on a type, a run-time type test — each would be a place where
+erasing the annotation changes the answer, and the claim would be false.
+
+### Operationally equivalent under erasure: their soundness argument is ours
+
+The second half is what the first half buys. **Erase the type annotations from a fossil operator
+tree and what remains is an expression in their algebra**, with the same operators and the same
+meaning. Their results about that algebra are therefore results about fossil's middle: what a
+mapping denotes, when two mappings denote the same graph, and which rewrites preserve it.
+
+This is the ordinary shape of an elaboration argument — the same shape as saying a typed calculus
+erases to an untyped one — and it is worth having for the ordinary reason. A published semantics
+carries proofs. Re-deriving them for a bespoke operator set is work nobody does, which is why
+bespoke operator sets are usually justified by their implementation rather than by an argument.
+
+The cost of the claim is that it constrains the algebra permanently. An operator fossil wanted that
+theirs does not have would either have to be shown derivable from the ones that are, or the claim
+weakens from *is* their algebra to *resembles* it. That is a real design constraint and it is
+accepted deliberately, because the alternative — a set of operators justified by nothing but the
+code that implements them — is exactly the state the field was in before the paper.
+
+## Why an algebra, and not a template engine
+
+This is the page's real job, and it is worth stating without hedging.
+
+A template is a string with holes in it. `http://example.org/user/{id}` is a template, and so — in
+most mapping languages — is the entire specification of a mapped property: name the source, name the
+column, name the predicate, and the engine concatenates. It is a perfectly good way to describe a
+transformation, and it has exactly one checkable property: **that the holes are filled.** You can
+verify that every placeholder names a column that exists. You cannot verify anything about the value
+that will arrive, because the template has no notion of a value having a kind — a hole is a hole.
+
+That ceiling is why "type-checked mapping" tends to mean spell-checking placeholder names. There is
+nothing else in the artifact to check.
+
+An algebra has operators, and operators have schemas. A schema is a set of names **with types**, and
+a type is the thing you can state a rule about: this operator's output column has the type of the
+expression that produced it; this predicate must be `Bool`; this property assignment must produce a
+value the shape's constraint admits. None of those sentences can even be written about a template,
+and all of them become compile errors here.
+
+That is the whole trade. A template engine is smaller, and everything downstream of it — every
+guarantee, every editor affordance, every diagnostic that can say *what* was expected and *why* —
+has to be given up with it.
+
+---
+
+The pages that stand on this one: [what compiling guarantees](/docs/design/types) is the checker
+running over these operators; [inference from shapes](/docs/design/shapes) is where the target
+schema of `EmitVertex` comes from; and [generic functions](/docs/design/generic-functions) is why
+the expressions inside `Extend` and `Filter` can be polymorphic without the operator set growing.

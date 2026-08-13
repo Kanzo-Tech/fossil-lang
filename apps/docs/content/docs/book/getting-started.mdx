@@ -1,0 +1,62 @@
+---
+title: Getting started
+description: Install fossil, run one seven-line program against three rows of CSV, and see the graph it writes.
+---
+
+fossil is a small language for turning tables into a graph. You point it at the data you have and at
+a document describing the graph you want, and it writes the graph.
+
+## Install
+
+fossil is one binary, built from the repository:
+
+```bash
+cargo install --git https://github.com/Kanzo-Tech/fossil-lang fossil-cli
+```
+
+That puts `fossil` on your path. Check it:
+
+```bash
+fossil --version
+```
+
+## A program, and the two files beside it
+
+Make a directory and put three files in it.
+
+<Program src="hello/hello.fossil" title="hello.fossil" />
+
+<Program src="hello/hello.shex" title="hello.shex" />
+
+<Program src="hello/data/people.csv" title="data/people.csv" />
+
+## Check it
+
+`fossil check` reads the program, the shape document and the CSV, and tells you whether they agree.
+
+```bash
+fossil check hello.fossil
+```
+
+Silence and an exit code of zero mean they do. If they do not, you get a diagnostic pointing at the
+line — that is [When it does not compile](/docs/book/diagnostics), and it is worth reading early.
+
+## Run it
+
+```bash
+fossil run hello.fossil --dest file:///tmp/hello
+```
+
+```
+wrote 1 vertex type(s), 0 edge type(s) to file:///tmp/hello
+```
+
+Under `/tmp/hello` is a corpus: columnar files and a manifest, three `Person` nodes in them, one per
+row of `people.csv`. There is nothing between `run` and that directory — no build step, no
+intermediate object, nothing of fossil's own for you to keep.
+
+## Where to go next
+
+[Your first program](/docs/book/first-program) accounts for every token of the program above.
+[The anatomy of a fossil program](/docs/book/anatomy) is the one to read end to end: it takes a
+larger program and grows it a section at a time.

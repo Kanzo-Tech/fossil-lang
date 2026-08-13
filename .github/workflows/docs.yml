@@ -9,17 +9,18 @@ name: docs
 # datafusion. So the two gates are separate and each one only runs when its own
 # inputs move.
 #
-# The paths below include `decisions/` and `crates/` even though this job compiles
+# The paths below include `crates/` and `grammar.bnf` even though this job compiles
 # no Rust. That is the point of the guard: `content.test.ts` asserts that every path
-# a page cites — an ADR under `decisions/`, a test or source file under `crates/` —
-# is still on disk. Deleting or renaming one has to turn this red, and it cannot if
-# the workflow never runs on that change.
+# a page cites — a test or source file under `crates/`, the grammar — is still on
+# disk. Deleting or renaming one has to turn this red, and it cannot if the workflow
+# never runs on that change. A `direction` cites a page of this site rather than a
+# file outside it, so nothing outside these paths can break one.
 on:
   pull_request:
     paths:
       - 'apps/docs/**'
-      - 'decisions/**'
       - 'crates/**'
+      - 'grammar.bnf'
       - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs.yml'
@@ -27,8 +28,8 @@ on:
     branches: [main]
     paths:
       - 'apps/docs/**'
-      - 'decisions/**'
       - 'crates/**'
+      - 'grammar.bnf'
       - 'pnpm-workspace.yaml'
       - 'pnpm-lock.yaml'
       - '.github/workflows/docs.yml'

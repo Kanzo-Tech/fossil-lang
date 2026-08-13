@@ -1,0 +1,101 @@
+---
+title: Prior art
+description: Every published system, specification and paper this design was read against, named — because "seven languages, no exception" is not a checkable claim until the seven are on the page.
+---
+
+The rest of this section argues in the abstract on purpose: *seven languages, no exception*; *the
+most-downloaded candidate*; *one editor maintains ten simultaneous ABI versions*. That reads better
+and it is unfalsifiable, which is the failure this whole site is built to avoid. So the names live
+here, once, with the single claim each one settles and where that claim is used.
+
+This page is a bibliography, not an argument. It carries no opinion the other pages do not already
+carry, and if a source is named here and used nowhere, it should be deleted rather than kept for
+completeness.
+
+## The algebra
+
+| source | what it settles |
+| --- | --- |
+| **Min Oo & Hartig**, *An Algebraic Foundation for Knowledge Graph Construction* ([arXiv:2503.10385](https://arxiv.org/abs/2503.10385)), ESWC 2025 Best Research Award | The set fossil's middle elaborates. Nine operators plus the refinements the typed sink needs; the claim that erasing fossil's type annotations yields an expression in *their* algebra is what lets their soundness results carry over rather than be re-derived. [The mapping algebra](/docs/design/algebra) is the argument. |
+| **Milner (1978)**, *A theory of type polymorphism in programming* | The form of the soundness commitment: well-typed programs do not fail for the reasons the types are about. |
+| **Pierce (2002)**, *Types and Programming Languages* | The bidirectional presentation — synthesis and checking as two modes with named switch points — used in [the typing rules](/docs/book/typing). |
+
+## Types from data
+
+| source | what it settles |
+| --- | --- |
+| **F# type providers**, and **Petricek et al., PLDI 2016 §6.5** (*Types from data*) | Both halves of the naming rule. Their published criterion is that a provider must avoid anything that lets *a small change in the sample cause a large change in the provided types* — and their own collision scheme broke it: a numeric suffix made a member's name depend on which other members existed, their singulariser produced `Purchasis` and `Sourcis`, and a minor version bump renamed members and broke a program in production. So fossil takes only the last segment of the predicate IRI, never a plural heuristic, and a collision is an **error** rather than a suffix. |
+| **F#'s `CsvProvider<…>` plus `.Load(…)`** | The one place fossil departs, and why: F# separates the type from the file because a type is reused across files. Here a binding *is* one concrete source, so `User := io.csv(…)` binds both and the separation would be ceremony. |
+| **Prisma `@map`** | The shape of the repair when a derived name is wrong: an attribute above the declaration, all constants, in the program rather than in the vocabulary — which is `@rename`. |
+
+## Identity
+
+The claim on [identity](/docs/design/identity) is that no reviewed language admits a per-instance
+expression in an attribute argument. These are the languages, and the control experiment.
+
+| source | what it settles |
+| --- | --- |
+| **Java — JLS §9.7.1** | An annotation argument must be a constant expression. The specification calls the restriction a deliberate syntactic device, so this is a decision rather than an accident of the grammar. |
+| **Jakarta Persistence `@Id`** | The annotation is *literally empty*: identity is expressed by **where it is placed**, not by an argument. |
+| **Prisma** | No expression language at all in this position — nine closed names implemented in the engine. |
+| **Django** | The criterion for keeping a language-owned namespace separate from user-declared names, which is what the `@` sigil does against the bare keys a shape declares. |
+| **JSON-LD** | The solution shape for the same problem: a reserved, sigil-marked keyword space beside arbitrary vocabulary terms. |
+| **Ecto (Elixir)** — the control experiment | Elixir *does* evaluate expressions in attribute arguments. `default: DateTime.utc_now` compiles, and it is wrong: it freezes **one value for every row**. Ecto documents it as a trap. The experiment matters because it shows the restriction elsewhere is not an accident of parsing. |
+| **R2RML, RML and their mappers** | No precedent anywhere in the mapping world for *one identity per type* as a check; the community closed the request as out of scope. |
+| **Ontop** | Computes the property and wires it only to the optimiser — detected, never diagnosed. |
+| **Apollo Federation** | The counterexample, answered rather than ignored: it shipped this check in v1 and **removed it in v2**. It does not transfer, because its `@key`s are alternative ways to locate the *same* entity and its subgraphs deploy separately, so nobody ever holds the whole set. Here the compiler sees the whole program. |
+
+## Shapes, and the surface around them
+
+| source | what it settles |
+| --- | --- |
+| **ShEx** — Staworko & Boneva (ICDT 2015); Boneva, Labra Gayo & Prud'hommeaux (ISWC 2017) | The semantics of the constraint table fossil reads as a target type. |
+| **[`rudof`](https://github.com/rudof-project/rudof)** — the WESO group's Rust ShEx implementation (Universidad de Oviedo, José Emilio Labra Gayo) | The implementation the checker reads shape documents through. It is also where our RDF 1.2 support came from without anyone deciding it — see the `oxttl` row below. |
+| **SHACL 1.2 Core**, and its `sh:TripleTerm` node kind | The cost of the choice, stated plainly: SHACL is the W3C Recommendation with the active working group. What decides against it is expressiveness in this one job — it cannot distinguish "one" from "one or more", and closure has three states rather than two. [What was discarded](/docs/design/discarded) carries the three conditions that would reverse it. |
+| **shexTest** | The termination criterion for the checker's shape support is a percentage of a published suite, not "round-trips textually", which nobody achieves. |
+| **CUE** | The model for import soundness — what it means for a document to be accepted without silently losing what it declared. |
+| **RDFC-1.0** | Canonicalisation, and therefore what "a fixed point modulo canonical form" means as an acceptance test. |
+| **LinkML** and **TypeSpec** | Both put closure and cardinality in an emitter flag rather than in the type, and both demonstrate that round-tripping is then impossible **by construction**. That is why those live in the type here and never in a flag. |
+| **schema.org** | The measured cost of a vocabulary you do not control: 82 terms carrying `supersededBy`, 24 morphological renames, and a typo frozen forever as a global identifier. It is the argument for `@rename` living in the program. |
+| **Haskell §3.11** and **Scala §6.19** | Both define the left of `<-` as the **element** and the right as the collection. Borrowing that arrow for a source binding, where the left names the relation, would say the opposite of what it means. |
+| **Rust — `s.len()` ≡ `str::len(&s)`** | One catalogue entry reachable by two paths, which is the model for member-call dispatch by receiver type. |
+| **17 mapping languages and 12 schema-as-code systems** surveyed | 15 of the 17 treat a class IRI as an opaque string, and every one of them **derives** the shape from the mapping. Checking the mapping *against* the shape is the inversion, and it is the thesis. |
+
+## RDF 1.2
+
+| source | what it settles |
+| --- | --- |
+| **RDF 1.2 Concepts §3.1**, and the Turtle 1.2 drafts | A triple term appears in object position only; a triple term has no identity of its own; `rdf:reifies` mediates. The concrete syntaxes are Working Drafts, which is why the design is written against the abstract model. |
+| **Oxigraph / `oxttl`** | The dependency trap: RDF 1.2 support sits behind a feature that was enabled here by a transitive dependency and never by us. Its changelog is also where the name change is recorded — *"RDF-star support is now dropped in favor of RDF 1.2."* |
+| **MillenniumDB** | The reference for a discriminator in the identifier space: 8-byte identifiers whose first byte declares the class, with edge ids dense and consecutive by row position. |
+| **The Wikidata singleton-property study** | A distinct predicate per statement broke four of five engines. It is the first-principles argument against singleton property in a dictionary-encoded column. |
+| **StarBench** | Double nesting alone broke two of four engines, which is the evidence for an explicit nesting cap with a number rather than unbounded recursion. |
+| **ISO GQL and openCypher** | `N ∩ E = ∅` — an edge cannot be the endpoint of another edge *by definition*, which is why the corpus question is ours and not a lookup. |
+
+## The corpus, and how a format ships
+
+| source | what it settles |
+| --- | --- |
+| **Iceberg** | The model for publishing arithmetic: the formula, the widths, the sign, **and a table of vectors** — `34 → 2017239379` turns up in the tests of independent implementations that copied it. |
+| **PMTiles** | The counterexample: a Hilbert curve dispatched with a link to an encyclopedia, and every port re-deriving it. |
+| **H3 against S2** | One compiled oracle almost nobody reimplements, against four oracles in a chain with no shared vectors and divergences open for years. H3 also settles the 64-bit boundary by decree, typing its index as a string before anyone could get it wrong. |
+| **`node-s2`** | A *binding* — not a port — that returned wrong cell ids anyway, because JavaScript's `number` holds 53 bits and a cell id holds 64. It is why `BigInt` at the TypeScript boundary is a rule and not a precaution. |
+| **Arrow, Parquet, Delta, Zarr, MVT, GraphAr** | The nine-format survey behind [the corpus contract](/docs/characteristics/corpus-contract). GraphAr in particular gave vocabulary and stopped giving contract: its manifest carries no vertex count and does not say how a reader discovers chunks. |
+| **dbt, Delta, Lance, Malloy** | Five projects that have already been through "does the specification get its own repository". None of them separates the implementation. Delta shows co-location does not prevent drift and that what fixes it is a **process** (`protocol_rfcs/`, specification PR before implementation PR); Malloy is the counterexample, with twenty-five satellite repositories and one frozen 159 releases behind. |
+
+## Compilers, and how they cut a tree
+
+| source | what it settles |
+| --- | --- |
+| **Gleam** | Cuts by **IO and purity** — a core that is entirely pure, IO supplied by wrapping crates. Also the collapse evidence: its wasm surface is around 352 lines, its binary six, its language-server transport sixty-nine. And it is the cautionary half — `lsp_types` appears inside the crate its own documentation calls entirely pure. |
+| **Gluon** | Cuts by **compiler phase**, with `base` as the shared vocabulary. It is the model for an embedded language, because being embedded in a host application is its whole problem statement. |
+| **rust-analyzer** | Cuts by **semantic richness**, with three declared API boundaries. Source of the invariant fossil copies hardest — one crate knows the protocol, and translating outward costs it ~3,180 lines against 156 inward — and of the caution that none of the three enforces its architecture with a test. |
+| **Kùzu (`SEMI_MASKER`) and Neo4j** | The justification for the `expand{into}` mode, which does not transfer to our engine — recorded on the mode itself rather than in a note, because the reasoning is what would otherwise be lost. |
+
+## Tooling
+
+| source | what it settles |
+| --- | --- |
+| **`lsp-server` against `tower-lsp`** | The ergonomic framework had roughly three years without maintenance, and all three reference implementations use the low-level library. The ban is explicit so that reintroducing it takes a decision rather than an import. |
+| **`@codemirror/lsp-client`** | Probed rather than read: 27 exports and 17 prototype methods, **none** matching semantic tokens; the generic request escape hatch does work. The transferable part is the technique — probe a package by its exports before adopting it. |
+| **Salsa** | The incremental core. The 52% saving borrowed from a comparable project does not transfer, and measuring locally says why: there, compilation *is* the process; here it is two thousandths of a command dominated by process start-up. |

@@ -1,0 +1,108 @@
+---
+title: Tooling for machines
+description: A machine reader is a first-class consumer of fossil — through diagnostics that are repairable rather than merely descriptive, a typed verb surface over a protocol, and a documentation index that cannot drift from the pages.
+---
+
+An agent reading and writing fossil is a consumer the design accounts for, not a use case that
+happens to work. Three surfaces carry that, and they make one argument: **a machine consumer is owed
+what a human consumer is owed, stated precisely enough to act on.**
+
+## A diagnostic is an API
+
+A type error that says *type mismatch* is a message. A type error that names the expression, the type
+it has, the constraint that expected otherwise and where that constraint came from is **a
+machine-repairable error** — the receiver has everything needed to propose the edit.
+
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+Every element of that is load-bearing for an automated reader. **Two spans**, because the repair may
+belong at either end — the value could be converted, or the shape could be wrong, and only the caller
+knows which. **The expected type and the actual type**, because "incompatible" does not narrow the
+edit. **The origin of the expectation**, because a constraint traced back to a line in a shape
+document is a constraint an agent can go and read. And a **suggested repair naming a real function**,
+because the conversion that closes a gap between two known types is derivable rather than guessed.
+
+This is why [bidirectional checking](/docs/design/types) matters beyond its effect on what compiles.
+A checker that only works forwards knows what arrived and not what was wanted; one that only works
+backwards knows the reverse. Only one holding both can write a message that names both — and a
+message that names both is the difference between a diagnostic a machine can act on and one it can
+only report.
+
+The corollary is a rule about how diagnostics evolve: their text is an interface. Rewording an error
+message is a change to something a consumer parses, in the same sense that renaming a field is.
+
+## The verb surface, and where the secrets go
+
+The second surface is querying a corpus that has already been written.
+
+The generic answer would be *give the agent SQL*. It works, and it costs the agent the whole of the
+layout: which files exist, how identifiers are laid out, how adjacency is stored in each direction,
+what a tile is. An agent writing SQL against a corpus has to learn a physical schema before it can
+ask a question, and every answer it gets is only as correct as its model of that schema.
+
+fossil exposes its graph verbs over the **Model Context Protocol** instead: a small set of typed
+operations whose arguments and results are described, so an agent calls *the operation for the
+question it has* rather than reconstructing it from the layout. The typing is the point — the
+protocol carries the shape of each call, so a malformed request is rejected at the boundary rather
+than producing a plausible wrong answer.
+
+One invariant travels with it and is not negotiable:
+
+> **Credentials ride the protocol message. Never argv, never the environment.**
+
+That is the same invariant the command-line surface holds, and it is not caution for its own sake. A
+survey of twelve RDF and knowledge-graph tools found the rule to be **universal**: not one of them
+puts credentials in the mapping or query text. They live in a side-car file, in a server-side store,
+or in a form bound to browser storage — but never in the artifact that describes the work. An
+argument vector is visible to every process on the machine, and an environment is inherited by every
+child; both are places a secret is copied to by accident.
+
+The same survey found the harder fact, and it is worth carrying because it constrains what a
+browser-only tool can honestly offer: every tool in it that was browser-only **and** touched
+non-public data either required the data's operator to configure cross-origin access, or shipped a
+proxy, or kept credentials in browser storage with no real protection. **None solved it without a
+backend.** Two tools tried to be both browser-only and credential-aware and paid all three costs at
+once. That is not a gap in those tools; it is the shape of the problem, and a design that offers a
+credentialed browser experience without a server is claiming something the survey says nobody has.
+
+## The documentation as an artifact
+
+The third surface is this documentation, and it is part of the product rather than a compliance item
+— *tooling for machines* is one of the seven declared reasons the project exists, so an agent-readable
+index of it is in scope by construction.
+
+Two properties make it worth reading rather than merely present.
+
+**Every fossil program shown here is a real file that compiles.** No page contains a hand-written
+program. Pages transclude files from an acceptance corpus, by path and region, at build time — so a
+program that stopped compiling breaks the build, and a region that no longer exists breaks the build,
+and neither can decay into an example that once worked. For a machine reader, that is the difference
+between a corpus of examples and a corpus of *evidence*: the code on the page is the code that ran.
+
+**The index is generated from the pages.** An index maintained by hand drifts from what it indexes,
+and drift is invisible to a reader who only has the index. Generating it means the failure mode is a
+build error rather than a wrong answer delivered confidently.
+
+And what a machine consumer is owed, stated as the three obligations those properties discharge:
+
+- **Stable names.** An identifier that changes meaning between versions is worse than one that
+  disappears, because disappearance is detectable and redefinition is not.
+- **Complete programs.** A fragment that needs surrounding context to compile is a fragment a machine
+  cannot use, and it is exactly what an extraction-based documentation pipeline produces.
+- **An index that cannot go stale relative to the pages it indexes.**
+
+## The failure this is designed against
+
+There is a specific way documentation becomes hostile to an automated reader, and it is worth naming
+because it is not the obvious one.
+
+It is not omission. It is **describing intent in the present tense**. A document that says a system
+does something it was designed to do, written before it did, is indistinguishable — to any reader,
+human or machine — from a document describing what it does. The failure compounds because such a
+document is not re-read: it was written down, so it is finished, and the distinction between the plan
+and the state stops being recoverable from the text.
+
+The defence is a register rule rather than a tool: **describe the thing as it is, and where something
+is genuinely undecided, write it as a design question with what would settle it.** A design question
+is useful to an agent. An unmarked aspiration is a lie with a straight face, and the only way to
+detect it is to go and read the code — which is the cost this document exists to remove.

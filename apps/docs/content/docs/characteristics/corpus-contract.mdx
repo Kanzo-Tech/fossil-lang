@@ -3,7 +3,7 @@ title: The corpus contract
 description: The corpus is a promise made to strangers. How the format ships — spec, published vectors, one compiled oracle, round-trip conformance — and which quarter of it exists.
 direction:
   summary: The format ships as a specification with published test vectors and a single compiled oracle every reader calls, with round-trip conformance between the writer and every reader gating a merge.
-  decidedBy: decisions/0045-dos-nucleos-un-monorepo.md
+  arguedIn: /docs/design/corpus
 today:
   summary: An artefact validator exists and runs on every pull request — it reads the produced tree with plain SQL over DuckDB and never through our own reader — which is the first half of the fourth obligation; the other three are undone and no test vector is published.
   backedBy: crates/fossil-engine/tests/conformance.rs
@@ -22,9 +22,9 @@ Parquet, Iceberg, Delta, MVT, PMTiles, Zarr, GraphAr, and H3 against S2.
 ## The destination: four obligations, none optional
 
 <Callout title="Decided, not built">
-All four are `decisions/0045-dos-nucleos-un-monorepo.md`, the fourth of the decisions recorded in
-its 2026-08-05 review. One of them has a first half on disk; the rest are a plan, and the section
-below this one says exactly which.
+All four are one decision, argued from those nine formats in [the corpus](/docs/design/corpus). One
+of them has a first half on disk; the rest are a plan, and the section below this one says exactly
+which.
 </Callout>
 
 ### 1. The arithmetic publishes as Iceberg publishes it, not as PMTiles does
@@ -106,8 +106,8 @@ than pass by construction.
 Said plainly, because the register matters more here than anywhere else on this site:
 
 - **No test vector is published.** Not for `morton2`, not for chunk addressing. This is deliberate
-  rather than pending: the same ADR put the Morton quantisation in motion (it may widen if flattened
-  ids are adopted) and is retiring the chunk for a 4,096-row tile. **Vectors for an arithmetic that
+  rather than pending: the Morton quantisation is in motion (it may widen if flattened ids are
+  adopted) and the chunk is being retired for a 4,096-row tile. **Vectors for an arithmetic that
   is about to change would be precisely wrong rather than honestly absent.**
 - **`BigInt` at the TypeScript boundary is decided and not enforced.** There is no lint rule.
 - **There is no second reader in this repository.** The validator is one writer read by one

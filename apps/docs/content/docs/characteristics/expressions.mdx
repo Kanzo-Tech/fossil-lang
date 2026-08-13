@@ -3,7 +3,7 @@ title: What an expression is
 description: The parser builds fifteen kinds of expression node and the HIR has four. Everything else that looks broken in the compiler is downstream of that, and it fails silently.
 direction:
   summary: An expression is a total function of one row — calls into the value library, comparisons and conditionals, and the pipeline operators — which makes the HIR eight forms, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
-  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+  arguedIn: /docs/design/generic-functions
 today:
   summary: All four forms landed on 2026-08-07 — `call`, `comparison` with the integer literal it needed, `conditional`, and `|>` in value position as sugar over `call`. The 56 stdlib functions are reachable and `render` in the backend is total. Arithmetic is the one form still dropped, loudly; the SOURCE-level pipeline is a relation rather than a value and belongs to F5.
   backedBy: crates/fossil-hir/src/lower.rs
@@ -62,7 +62,7 @@ source text and points at it:
 ```
 
 <Callout title="Then the first of the four forms landed">
-`call` is in the HIR since 2026-08-07 (ADR-0048): the property above now type-checks against the
+`call` is in the HIR since 2026-08-07: the property above now type-checks against the
 catalog, lowers to `Expr::Call`, and writes its column — `a_call_produces_its_column` asserts the
 values, not the plan. The diagnostic above still stands for the three forms that remain, and its
 regression test moved with it: `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop` now
@@ -126,10 +126,10 @@ Seven more went on 2026-08-11, and the list is now short. **`$VAR`** and the **t
 Then: the **`in g`** named-graph clause, which the corpus has nowhere to put; the **`&` shape
 intersection**, which was not merely unread but *lossy* — `User : ex:Person & ex:Employee`
 type-checked and emitted `ex:Person` alone, because the lowering took the first IRI and dropped
-the rest with no diagnostic; the **annotation block** of `type-system.md` §6 and the **record
+the rest with no diagnostic; the **annotation block** and the **record
 literal** in value position, which went together because they were the two readings of one `{`;
-`use` with its path, selective import and alias, because ADR-0057's second amendment says it stays
-dead until there is a module system for a name to come from; and `T_COLON`, which the grammar
+`use` with its path, selective import and alias, which stay dead until there is a module system for
+a name to come from; and `T_COLON`, which the grammar
 declared as a terminal and the lexer never emitted — the ternary's `:` is the same `SHAPE_SEP`
 the mapping header takes.
 

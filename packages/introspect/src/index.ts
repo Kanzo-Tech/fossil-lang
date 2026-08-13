@@ -3,14 +3,14 @@
  *
  * "Given a `.fossil` mapping + a way to read its sources, produce an
  * `InferredDescriptor` per source binding" is a single fossil capability. It
- * previously lived duplicated across `fossil-cli` (Rust), the playground hook
+ * previously lived duplicated across the native side (Rust), the playground hook
  * (TS), and ad-hoc host copies. This package is the canonical TS home; the host
  * injects only the DATA PLANE (URL resolution + a DuckDB executor), the same
  * shape as `@fossil-lang/graph`'s injected `DuckExecutor`.
  *
  * Framework-agnostic + zero @fossil-lang deps (a true leaf). The React glue
- * and the descriptor→LSP-worker push are the HOST's, not ours (ADR-0040); the
- * host decides how `resolve`/`query` reach its cloud + DuckDB.
+ * and the descriptor→LSP-worker push are the HOST's, not ours — fossil ships
+ * no UI; the host decides how `resolve`/`query` reach its cloud + DuckDB.
  *
  * The primitive union below is the wire form of `fossil-graph-schema`'s
  * `Primitive`; the DuckDB mapping mirrors the Rust sibling
@@ -21,9 +21,8 @@
 /**
  * The Fossil primitive lattice (mirror `@fossil-lang/wasm`'s
  * `InferredPrimitive` — structurally identical so `introspect()` output flows
- * straight into `FossilPlayground.registerInferredDescriptor`). Consolidating
- * the single source of these types is a follow-up (see EDITOR-SCHEMA-AWARE-PLAN
- * D-2).
+ * straight into `FossilPlayground.registerInferredDescriptor`). Collapsing the
+ * two into one source is still open.
  */
 export type InferredPrimitive =
   | "string"
@@ -45,8 +44,10 @@ export interface InferredDescriptor {
   /**
    * The source URI exactly as the program writes it (`data/users.csv` from
    * `users := io.csv("data/users.csv")`) — the key the compiler looks the
-   * descriptor up under, and NOT the resolved URL this package fetched.
-   * ADR-0050.
+   * descriptor up under, and NOT the resolved URL this package fetched. The
+   * written URI is the only string the host and the checker both see: the
+   * checker has neither the `@conn` credentials nor the program directory the
+   * resolution needs.
    */
   uri: string;
   /** Ordered, position-significant columns. */
@@ -100,7 +101,8 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
 
 /**
  * Scrape source-binding RHS URLs from a `.fossil` text. Mirrors the Rust
- * sibling `extract_source_refs` (crates/fossil-cli/src/main.rs).
+ * sibling `extract_source_refs` (crates/fossil-engine/src/lib.rs) — the two
+ * regexes are character-for-character the same and must move together.
  *
  * LIMITATIONS (regex placeholder; an AST walk supersedes it): no multi-line
  * constructor, no interleaved comments between `:=` and `io.csv(`, no
@@ -122,7 +124,7 @@ export function extractSourceRefs(text: string): SourceRef[] {
  * The canonical DESCRIBE SQL for a resolved source URL. `read_csv_auto` is
  * single-quote-escaped (a SQL string literal, not a prepared parameter).
  *
- * NOTE: matches the fossil-cli + playground reference, which uses
+ * NOTE: matches the `fossil-engine` + playground reference, which uses
  * `read_csv_auto` for both csv and json refs today; a json-aware variant is a
  * cross-home change (must land in all impls at once to preserve parity).
  */

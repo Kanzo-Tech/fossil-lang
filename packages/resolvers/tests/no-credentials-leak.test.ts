@@ -13,8 +13,8 @@ beforeEach(() => {
  * contains a string matching any of these AFTER a normal resolve flow,
  * CONN-01 is violated.
  *
- * This is the structural proof of ADR-0029's invariant: "The component
- * NEVER sees plaintext credentials." Even when a host passes a presigned
+ * This is the structural proof of the resolver invariant: the component
+ * NEVER sees plaintext credentials. Even when a host passes a presigned
  * URL containing credential-shape query params, the resolver MUST treat
  * it as ephemeral — return it in the ResolvedSource and forget it; never
  * cache it in a property a downstream consumer can read back via the

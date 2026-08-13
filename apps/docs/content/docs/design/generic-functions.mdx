@@ -1,0 +1,98 @@
+---
+title: Generic functions
+description: Why the standard library is a set of polymorphic higher-order functions rather than a list of built-ins, why the user declares none of their own, and what the alternative costs a mapping language specifically.
+---
+
+fossil's standard library is generic and higher-order, and **the user declares no functions at
+all**. Both halves of that are deliberate, and they are the same decision seen from two sides.
+
+## One entry, every source
+
+`where` filters a relation. Not a relation of a particular row type — *any* relation, whatever its
+columns are, with a predicate over that row type:
+
+<Program src="projection/projection.fossil" region="chain" title="projection.fossil" />
+
+`Active` is a relation of the same row type as `Employee`. `Minimal` is a relation of a *different*
+row type, computed from the projection — narrower, still checked, and still the thing the mapping
+below reads from. Neither `where` nor `select` knows anything about employees. They are one entry in
+the catalogue each, and the type they operate over comes from their receiver.
+
+The predicate is an ordinary expression of the row type, passed as an argument. That is what
+"higher-order" buys in this specific domain: the argument is a *value* of the language, so it is
+type-checked by the same rules as anything else, and a filter that compares a string to a number is
+a compile error in the place where it is written rather than a run-time surprise inside an operator.
+
+## The alternative, and why it grows without bound
+
+The alternative is a built-in per shape of data, and it is not hypothetical — it is the shape the
+established mapping languages have. There, "filter" is not a function over a row type; it is a
+configuration construct with its own vocabulary, and every new thing you might want to do to a
+source arrives as new vocabulary in the mapping format.
+
+The arithmetic of that is unforgiving. A language with *n* operations over *m* kinds of data needs
+somewhere between *n* and *n·m* named constructs, depending on how much of the *m* it manages to
+generalise over — and a configuration format with no type system has no mechanism for generalising,
+so it tends towards the product. That is why mapping-language surfaces grow monotonically and why
+their reference documentation is a list rather than a set of rules. Every entry is load-bearing for
+somebody, so nothing is ever removed.
+
+With polymorphism the same table is *n* entries, and the *m* dimension disappears into the type of
+the receiver.
+
+## Why you declare none of your own
+
+This is the half that surprises people, so it is worth being explicit about what it buys.
+
+A fossil program is a set of declarations that
+[elaborate into an operator tree](/docs/design/algebra), and that tree is lowered to SQL and run by
+an engine. A user-defined function has to survive that lowering. The moment the language admits one,
+it has to answer — permanently, and in the type system — what happens to recursion, to a function
+that closes over a relation, to a function used in a position where the engine below has no
+corresponding construct. Every one of those answers is either a restriction the user has to learn or
+a capability the engine has to grow.
+
+Not having them keeps the language's promise checkable. Everything callable has a signature in the
+catalogue, every signature has a known lowering, and "if it compiles, it runs" stays a property of
+the whole language rather than of the fragment of it that happens to lower cleanly.
+
+What replaces user-defined functions is composition of catalogue entries — which works because the
+entries are generic. The two lines below do the same thing, and both are ordinary expressions:
+
+<Program src="contacts/contacts.fossil" region="two-paths" title="contacts.fossil" />
+
+## What a generic signature is for
+
+A catalogue entry's signature is polymorphic where the operation genuinely does not care, and
+concrete where it does. `where` takes a relation of any row type and a predicate over that same row
+type; `str.lower` takes a string and returns a string, and there is nothing generic about it.
+
+The reader-facing consequence is small and worth naming: a signature with a type variable in it
+tells you the operation is *defined by its shape rather than by its data*, which is exactly the
+information you want when deciding whether it applies to your case. A catalogue where every entry is
+concrete cannot convey that, because there is nothing in the notation to convey it with.
+
+## The tie to the dot, because they are one fact
+
+"Generic over the row type" and "the dot offers exactly what applies" look like a library decision
+and an editor decision. They are the same decision.
+
+Because the receiver's type decides the members, `where` on a relation and `lower` on a string are
+found the same way — by asking a type what it has. The catalogue is therefore indexed by receiver
+type rather than by namespace, generic entries are indexed under the shape of receiver they accept,
+and the editor's completion list after a dot is *derived from the same index the checker uses*. One
+mechanism, and [its consequences for the editor](/docs/design/tooling-for-humans) are not a separate
+feature that has to be kept in sync.
+
+## The rule that keeps the catalogue from becoming the thing it replaced
+
+A generic catalogue solves the growth problem only if entries are added when a program needs them.
+The failure mode is well documented — in this project's own history, at nine different scales, under
+one heading: **the abstraction was written before the second implementation existed.** An entry
+added on the argument that somebody will want it is an entry with no caller, and an entry with no
+caller is indistinguishable from an entry that does not work.
+
+So the admission rule for a catalogue entry is the same as for an operator: it lands when the second
+thing that needs it arrives, and until then the composition of what exists is the answer. That rule
+is [in the discard list](/docs/design/discarded) with the evidence that produced it, because it was
+learned the expensive way.

@@ -60,8 +60,8 @@ export interface FossilTheme {
     md: string;
   };
   /**
-   * IDE-grade radii — extended from `radius` (v0.1 legacy, kept untouched
-   * per ADR-0034 rule 6). Aligned with Tailwind defaults. CSS variable names:
+   * IDE-grade radii — extended from `radius` (v0.1 legacy, kept untouched).
+   * Aligned with Tailwind defaults. CSS variable names:
    * `--fossil-radii-{sm,md,lg,xl,full}`. Phase 10 VIS-03.
    */
   radii: {
@@ -78,8 +78,9 @@ export interface FossilTheme {
   };
   /**
    * IDE-grade spacing scale — extended from `space` (v0.1 legacy, kept
-   * untouched). 7-step scale Tailwind-aligned. Numeric-string keys per
-   * ADR-0034 rule 3. CSS variable names: `--fossil-spacing-{0,1,2,3,4,6,8}`.
+   * untouched). 7-step scale Tailwind-aligned. Numeric-string keys — the `s`
+   * prefix (`s0`, `s1`) would break the 1:1 Tailwind mapping and is forbidden.
+   * CSS variable names: `--fossil-spacing-{0,1,2,3,4,6,8}`.
    * Phase 10 VIS-03.
    */
   spacing: {
@@ -99,8 +100,10 @@ export interface FossilTheme {
     '8': string;
   };
   /**
-   * Motion tokens — durations + easings. Per ADR-0034 rule 1 (sub-object
-   * nesting for multi-word CSS var names). CSS variable names:
+   * Motion tokens — durations + easings. Multi-word CSS var names come from
+   * sub-object nesting, never from a camelCase leaf: the flattener emits the
+   * object path verbatim, so `durationFast` would emit
+   * `--fossil-motion-durationFast`. CSS variable names:
    * `--fossil-motion-duration-fast`, `--fossil-motion-duration-base`,
    * `--fossil-motion-easing`. Phase 10 VIS-03.
    */
@@ -115,7 +118,7 @@ export interface FossilTheme {
     easing: string;
   };
   /**
-   * Focus tokens. Per ADR-0034 rule 4: focus.ring is a PRE-RESOLVED rgba
+   * Focus tokens. `focus.ring` is a PRE-RESOLVED rgba
    * shadow expression (NOT color-mix — Safari < 16.2 compat). Hosts override
    * `--fossil-focus-ring` directly to swap the full expression. The colour
    * anchor is `colors.ring`; this slot holds the composed box-shadow value.
@@ -127,7 +130,7 @@ export interface FossilTheme {
   };
   /**
    * Control sizes — heights for tabs / buttons / inputs / control surfaces.
-   * Per ADR-0034 rule 7: the canonical default height is named `base` (not
+   * The canonical default height is named `base` (not
    * an unsuffixed leaf — the flattener cannot emit both a leaf AND children
    * at the same path). CSS variable names:
    * `--fossil-size-control-base` (DEFAULT — primitives reference this),
@@ -145,9 +148,10 @@ export interface FossilTheme {
   };
 }
 
-/** Built-in @fossil-lang/* theme names. Hosts wanting brand-specific looks
- *  (e.g. the kanzo IDE look) wrap their tree in a brand-owned ThemeProvider —
- *  see ADR-0035 for the visual ownership separation story.
+/** Built-in @fossil-lang/* theme names. Brand visuals are owned downstream,
+ *  never by the OSS surface: a host wanting a brand-specific look (e.g. the
+ *  kanzo IDE look) supplies the `--fossil-*` variables itself, and
+ *  @fossil-lang/* only consumes that contract.
  *
  *  The OSS @fossil-lang/* surface is brand-agnostic: when no `theme` prop is
  *  passed AND no ancestor provider supplies the `--fossil-*` CSS-var cascade,

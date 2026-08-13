@@ -3,9 +3,9 @@ title: The relational half
 description: A source rarely arrives shaped the way a mapping needs it. That work lives in the language and gets typed by us — and planned by DataFusion, which is why ten rewrite rules leave.
 direction:
   summary: Sources compose with a pipeline operator that our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan — so the fourteen MIR operators are the pipeline's vocabulary and stay, while the ten rewrite rules go because they duplicate an optimizer that is already underneath.
-  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+  arguedIn: /docs/design/algebra
 today:
-  summary: The source pipeline runs. Since 2026-08-07 `users |> where(.edad >= 18)` compiles, types and writes the corpus the program describes — measured through the binary, five rows in and three out — and a `join` brings a column its source does not have. The three verbs are `where`, `select` and `join`; the join is inner and its key is named once (ADR-0054). What is NOT there is every other verb, and the ten rewrite rules, which are gone.
+  summary: The source pipeline runs. Since 2026-08-07 `users |> where(.edad >= 18)` compiles, types and writes the corpus the program describes — measured through the binary, five rows in and three out — and a `join` brings a column its source does not have. The three verbs are `where`, `select` and `join`; the join is inner and its key is named once. What is NOT there is every other verb, and the ten rewrite rules, which are gone.
   backedBy: crates/fossil-cli/tests/run_source_pipeline.rs
 ---
 
@@ -52,7 +52,7 @@ before and after. The lowering still emits four of fourteen operators: `Source`,
 where(.edad >= 18)` is a **relation**, not a value, and it needed three things that did not exist: a
 source binding that is not an `io.*` call, `Op::Filter` reachable from source, and types for
 `where`/`select`/`join`. All three are there. The opening question — whether `join` is in the first
-version — is answered: **it is**, as an inner equi-join whose key is named once (ADR-0054).
+version — is answered: **it is**, as an inner equi-join whose key is named once.
 
 The lowering now emits seven of fourteen: `Source`, `Filter`, `Project`, `Join`, `EmitVertex`,
 `EmitEdge`, `Sink`. The checker gained its first two-input rule with them — `fila(izq) ⊎ fila(der)`

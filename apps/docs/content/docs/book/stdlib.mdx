@@ -1,0 +1,190 @@
+---
+title: 'Reference: the standard library'
+description: Every function fossil ships, grouped by what it attaches to — the operations of a relation, of a string, of a number, and the readers under io.
+---
+
+The catalogue, organised by **what is on the left of the dot**. That is how you look one up when you
+are mid-line: you have a value, you want to know what you can do to it.
+
+## How to read this page
+
+A **member of a type** is reachable two ways — through the value or through the type — and they are
+the same function:
+
+| through the value | through the type |
+| --- | --- |
+| `Contact.email.trim()` | `str.trim(Contact.email)` |
+| `Adults.count()` | `seq.count(Adults)` |
+
+A **member of a namespace** has only the one spelling, because a namespace is not a value:
+
+| | |
+| --- | --- |
+| `parse.integer(Row.qty)` | and there is no `Row.qty.integer()` |
+| `io.csv("data/users.csv")` | and there is nothing for `io` to be on the right of |
+
+In a signature, the first argument is the receiver. `str.slice :: (String, start: Integer) -> String`
+is what you call as `s.slice(start = 3)`. A name before a colon is a named argument. `T?` is a value
+that may be absent, `Seq<T>` is a sequence, and `forall T.` means the function works over any `T` and
+gives you back the same one — see [functions](/docs/book/functions).
+
+## A relation
+
+Everything here takes a relation and gives back a relation, so they chain.
+
+| | signature |
+| --- | --- |
+| `where` | `forall R. (Relation<R>, (R) -> Bool) -> Relation<R>` |
+| `select` | `forall R, S. (Relation<R>, Field…) -> Relation<S>` |
+| `join` | `forall L, R. (Relation<L>, Relation<R>, on: Equality) -> Relation<L, R>` |
+| `union` | `forall R. (Relation<R>, Relation<R>) -> Relation<R>` |
+| `distinct` | `forall R. (Relation<R>, by: Field…) -> Relation<R>` |
+| `sort` | `forall R. (Relation<R>, by: Field…, desc: Bool) -> Relation<R>` |
+| `take` | `forall R. (Relation<R>, Integer) -> Relation<R>` |
+| `drop` | `forall R. (Relation<R>, Integer) -> Relation<R>` |
+| `flatten` | `forall T. (Relation<Seq<T>>) -> Relation<T>` |
+| `group_by` | `forall R, K. (Relation<R>, key: Field…) -> Grouped<R, K>` |
+| `aggregate` | `forall R, K, A. (Grouped<R, K>, (Field, Agg)…) -> Relation<A>` |
+| `count` | `forall R. Relation<R> -> Integer` |
+
+`where` filters. `select` narrows to the named fields. `join` takes an equality between qualified
+references, or several joined by `and`, and does not flatten the rows — both are in scope after it.
+`group_by` is consumed by `aggregate` and by nothing else.
+
+<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
+
+<Program src="projection/projection.fossil" region="chain" title="projection.fossil" />
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+## A string
+
+The operations of `str`. Reachable through the value or through the type.
+
+| | signature |
+| --- | --- |
+| `trim` | `String -> String` |
+| `lower` | `String -> String` |
+| `upper` | `String -> String` |
+| `slug` | `String -> String` |
+| `length` | `String -> Integer` |
+| `slice` | `(String, start: Integer, end: Integer) -> String` |
+| `contains` | `(String, needle: String) -> Bool` |
+| `starts_with` | `(String, prefix: String) -> Bool` |
+| `ends_with` | `(String, suffix: String) -> Bool` |
+| `replace` | `(String, from: String, to: String) -> String` |
+| `split` | `(String, sep: String) -> Seq<String>` |
+| `concat` | `(String, String…) -> String` |
+| `normalize_unicode` | `(String, form: String) -> String` |
+| `strip_html` | `String -> String` |
+
+`slug` lowercases, replaces anything that is not a letter or a digit with `-`, and collapses runs of
+them — the shape you want in an IRI. `slice` counts from zero, `start` is inclusive and `end` is
+exclusive, and a negative index counts from the end. `normalize_unicode` takes one of `"NFC"`,
+`"NFD"`, `"NFKC"`, `"NFKD"`.
+
+## A sequence
+
+The operations of `seq`. You get one from `split`, or from a source whose values are lists.
+
+| | signature |
+| --- | --- |
+| `map` | `forall T, U. (Seq<T>, (T) -> U) -> Seq<U>` |
+| `filter` | `forall T. (Seq<T>, (T) -> Bool) -> Seq<T>` |
+| `count` | `forall T. Seq<T> -> Integer` |
+
+## A number
+
+| | signature |
+| --- | --- |
+| `math.abs` | `forall T: Numeric. T -> T` |
+| `math.round` | `(Float, digits: Integer) -> Float` |
+
+And the four that go inside `aggregate`:
+
+| | signature |
+| --- | --- |
+| `math.sum` | `forall T: Numeric. (R -> T) -> Agg<R, T>` |
+| `math.avg` | `forall T: Numeric. (R -> T) -> Agg<R, Float>` |
+| `math.min` | `forall T: Comparable. (R -> T) -> Agg<R, T>` |
+| `math.max` | `forall T: Comparable. (R -> T) -> Agg<R, T>` |
+
+## An optional value
+
+| | signature |
+| --- | --- |
+| `core.require` | `forall T. T? -> T` |
+
+A column the source declares as nullable is a `T?`, and a shape that requires a value will not take
+one. `require` is how you say the value is there.
+
+## `parse` — text into something else
+
+| | signature |
+| --- | --- |
+| `parse.integer` | `String -> Integer` |
+| `parse.float` | `String -> Float` |
+| `parse.decimal` | `String -> Float` |
+| `parse.date` | `(String, format: String) -> Date` |
+| `parse.datetime` | `(String, format: String) -> DateTime` |
+| `parse.json` | `forall T. (String, schema: String) -> T` |
+| `parse.csv_row` | `(String, delimiter: String) -> Record` |
+
+`format` is a strftime pattern:
+
+<Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
+
+## `validate` — text that has to look like something
+
+Each one returns its input unchanged when the input is well formed.
+
+| | signature |
+| --- | --- |
+| `validate.email` | `String -> String` |
+| `validate.url` | `String -> String` |
+| `validate.uuid` | `String -> String` |
+| `validate.iso_date` | `String -> String` |
+| `validate.regex` | `(String, pattern: String) -> String` |
+
+## `anon` — text you do not want to publish
+
+| | signature |
+| --- | --- |
+| `anon.hash` | `(String, salt: String, algo: String) -> String` |
+| `anon.hmac` | `(String, key: String, algo: String) -> String` |
+| `anon.redact` | `(String, mask: String) -> String` |
+
+`algo` is `"sha256"`, `"sha512"` or `"blake3"`, and `"sha256"` is the default. `anon.hash` with a
+salt is the usual way to build an identity out of something you must not put in an IRI.
+
+## `core` — the two that belong nowhere else
+
+| | signature |
+| --- | --- |
+| `core.lang` | `(String, tag: String, dir: String) -> LangLiteral` |
+| `core.require` | `forall T. T? -> T` |
+
+`core.lang("Bonjour", tag = "fr")` is a language-tagged literal; `dir` is `"ltr"` or `"rtl"` where the
+direction matters.
+
+## `io` — the readers
+
+These take nothing on the left, because they are what makes the thing.
+
+| | signature |
+| --- | --- |
+| `io.csv` | `(String, delimiter: String, header: Bool) -> Relation<R>` |
+| `io.json` | `String -> Relation<R>` |
+| `io.parquet` | `String -> Relation<R>` |
+| `io.rdf` | `String -> Relation<R>` |
+| `io.sql` | `(String, table: String) -> Relation<R>` |
+| `io.http` | `(String, headers: Record) -> Relation<R>` |
+| `io.shex` | `String -> ShapeDocument` |
+| `io.shacl` | `String -> ShapeDocument` |
+
+The first six bind a source: one name, giving both a row type and a relation — see
+[naming what you read](/docs/book/what-you-read). The last two bind the output contract — see
+[naming what you produce](/docs/book/what-you-produce).
+
+The list is a list, not a grammar. A format that arrives later is a row on this table and nothing else
+changes.

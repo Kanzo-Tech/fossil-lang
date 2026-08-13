@@ -1,0 +1,99 @@
+---
+title: Your first program
+description: Seven lines, and an account of every token in them — the shape binding, the source binding, the mapping header, the identity and one property.
+---
+
+Here is the whole program again, and this page spends itself on it. Seven lines, three ideas, and
+by the end you should be able to say what every token is doing.
+
+<Program src="hello/hello.fossil" title="hello.fossil" />
+
+Three rows of CSV go in. Three `Person` nodes come out. Nothing else happens.
+
+## Line 1 — what you are producing
+
+<Program src="hello/hello.fossil" region="shape" title="hello.fossil" />
+
+`io.shex("hello.shex")` reads the shape document next to the program. A shape document says what a
+node of a given class looks like: which properties it has, what kind of value each one holds, and how
+many of them there may be. This one says a `shop:Person` has exactly one `shop:name`, and that it is
+a string.
+
+<Program src="hello/hello.shex" title="hello.shex" />
+
+The braces on the left pull one shape out of that document and give it the local name `Person`.
+From here on `Person` is a **type** the compiler knows, with a known set of properties. You did not
+write those properties down anywhere, and you will not have to.
+
+`:=` is the binder. It introduces a name.
+
+Naming a shape document is not optional. Every property you write takes its name from a predicate
+the document declares, so a program with no document has no way to spell a property at all.
+
+## Line 3 — what you are reading
+
+<Program src="hello/hello.fossil" region="source" title="hello.fossil" />
+
+Same binder, pointed the other way. `io.csv` reads the CSV — the real one, on disk, next to the
+program — and gives you `User`.
+
+`User` is two things at once, and they never get in each other's way:
+
+- a **type**, whose fields are the columns. `User.id` and `User.name` exist because those columns
+  exist. `User.nmae` is a mistake, and it is a mistake the compiler catches.
+- a **relation**, whose rows are the rows. That is what `from User` means below.
+
+Which one you get is decided by what you ask for.
+
+## Line 5 — the mapping header
+
+<Program src="hello/hello.fossil" region="header" title="hello.fossil" />
+
+Read it out loud: *the mapping called `People` produces `Person`s, one per row of `User`.*
+
+There are two names here and both earn their place. `Person` is the type — the contract the body
+below is checked against. `People` is the mapping's own name. Two mappings can produce the same type
+from different sources, and a diagnostic has to be able to say which one it means; "two mappings of
+`Person` disagree" is not a sentence anybody can act on.
+
+The block below is opened by the indentation. There is no colon at the end of the header.
+
+## Line 6 — the identity
+
+<Program src="hello/hello.fossil" region="identity" title="hello.fossil" />
+
+Every node in the graph is an IRI, and an IRI is not in your CSV. You have to mint one, and this is
+where you say how.
+
+`@subject` is the first line of a mapping body, always. It is an assignment like any other — the
+`@` marks it as the language's own, so it cannot collide with a property your shape happens to call
+`subject`.
+
+The right-hand side is an ordinary string, and `{...}` holds an expression. Here the expression is
+`User.id`, so row 1 becomes `https://shop.example/person/1`. The braces are safe as a delimiter
+because `{` and `}` cannot appear in an IRI at all. If you want a literal brace, write `{{`.
+
+## Line 7 — a property
+
+<Program src="hello/hello.fossil" region="property" title="hello.fossil" />
+
+The key on the left is a bare name. It is the last segment of the predicate IRI your shape declares:
+the document said `shop:name`, which is `https://shop.example/voc#name`, and the last segment of that
+is `name`.
+
+You do not write the IRI. You do not write a prefix. The shape has the IRI, and the shape is what the
+program is checked against, so repeating it in the program would only create somewhere for the two to
+disagree.
+
+The right-hand side is where the value comes from. `User.name` is the column, and it is a `String`,
+which is what `shop:name` asked for. Those two facts meeting is the entire job of the type checker,
+and it is the subject of the rest of this book.
+
+## What is not here
+
+No types written by hand — there is nowhere to put one. No prefix declaration. No mention of the
+predicate IRI outside the shape document. No function definitions, because you do not write
+functions in fossil; the standard library does that, and you call it.
+
+Next: [the anatomy of a fossil program](/docs/book/anatomy) takes a bigger program — two sources, a
+filter, a join and an edge — and grows it a section at a time.

@@ -1,0 +1,129 @@
+---
+title: Inference from shapes
+description: A shape document is a constraint table, a constraint table is a target type, and so a mapping is checked against the shape before the graph exists rather than validated after it does.
+---
+
+The type of a fossil program's *output* is not written in the program. It is read out of an RDF
+shape document — ShEx or SHACL — that describes the graph you intend to produce.
+
+<Program src="shop/shop.shex" region="person" title="shop.shex" />
+
+Read that as a table rather than as a schema language and the design falls out immediately. Per
+class it gives, for each predicate: **a name, a kind of value, and a count.** Three columns. That is
+a constraint table, and a constraint table is a type — the target type of every mapping that claims
+to produce that class.
+
+<Program src="shop/shop.fossil" region="shapes" title="shop.fossil" />
+
+The binding pulls shapes out of the document and gives them local names. From that line on, `Person`
+is a type the checker knows as thoroughly as it knows the type a
+[provider](/docs/design/type-providers) generated for a CSV — same status, opposite end of the
+program.
+
+## Checked against, not validated after
+
+This is the point of the whole thing, and it is easier to see by describing the alternative.
+
+The established way to use a shape document in this domain is **validation**: run the mapping,
+produce the graph, then run a validator over the graph and see whether it conforms. That works. What
+it costs is when you find out. The mapping ran over the source — which in this domain routinely
+means millions of rows — before anything told you the value you put in `shop:total` was a string.
+The error is discovered downstream of all the work, and the repair is a full regeneration.
+
+fossil reads the same document and uses it as a *type*, so the same error is a compile error, and
+the compile is over the program rather than over the data. **Everything fossil offers over
+validate-afterwards is the part that happens before the run.**
+
+That reframing also explains a fact about the surrounding ecosystem that is otherwise strange. The
+tools that connect mappings and shapes almost all run the arrow the other way: they *derive* a shape
+document from a mapping. A generated shape is a description, after the fact, of whatever the mapping
+happened to do — typos included. It cannot disagree with the mapping, because it was computed from
+it, and a contract that cannot disagree with you is not checking anything.
+
+The same survey found the related fact, and it is the reason a checked mapping is unusual rather
+than merely better. Of seventeen mapping languages examined, **fifteen treat a class IRI as a
+sequence of characters** to be concatenated and emitted; nothing in the tool has an opinion about
+whether that IRI denotes anything. The two that check something arrived there by accident: one
+needed class arities in order to rewrite queries into SQL, and even then it only complains when a
+term was already declared with a *different* role, so an IRI it has never seen passes in silence; the
+other checks because a graphical dropdown cannot offer a name that does not exist. Neither set out
+to check the mapping against the vocabulary.
+
+## ShEx and SHACL are equal citizens, and the reason is architectural
+
+Both formats describe the same thing in different vocabularies, and both are first class here. That
+is a claim that decays into a lie unless something structural enforces it, because in practice one
+format is always the one the compiler was built around and the other is a converter bolted on.
+
+The structural move is this: **the middle of the compiler never learns which schema language a
+document came from.**
+
+- A ShEx decoder reads a ShEx document and lowers it into a format-neutral shape vocabulary.
+- A SHACL decoder reads a SHACL document and lowers it into the *same* vocabulary.
+- The checker reads that vocabulary and nothing else.
+
+There is no `if shex` anywhere below the decoders, and there is no privileged format whose concepts
+the neutral vocabulary happens to be shaped like. Adding a third way to describe a graph's shape is
+a decoder, in the same way that adding a source format is
+[a row in the provider registry](/docs/design/type-providers).
+
+The symmetry is visible from the language side too: whichever document you point at, the type you
+get carries the same three things on every property, and the property keys in your mapping body
+come out of the predicate IRIs the same way.
+
+## What the constraint table has to carry
+
+Choosing what goes in the neutral vocabulary is the actual design work, and two things earn their
+place for reasons worth recording.
+
+**Cardinality, at full resolution.** Not "required or not" — the real count. The difference between
+*exactly one* and *one or more* is the difference between a property you may repeat and one you may
+not, and a table that collapses them cannot support the check on the
+[typing page](/docs/design/types) that distinguishes a missing required property from a legitimately
+absent optional one. **A contract that does not distinguish "one" from "one or more" is not the
+contract being asked for.**
+
+**Closure, and the fact that it has three states rather than two.** Whether a node may carry
+predicates the shape does not mention is a property of the *shape*, and it is tempting to model it
+as a boolean. ShEx's `EXTRA` is the counterexample: it says a predicate **may repeat with values
+that do not match** — which is neither "closed" nor "open", and a boolean cannot represent it. A
+neutral vocabulary that models closure as a bit silently loses a distinction the source document
+made, and loses it in the direction that admits graphs the author excluded.
+
+There is a general lesson underneath both, and it has a name in the prior art: DCTAP — a deliberately
+minimal tabular profile for shapes — needed extension sheets before it could write SHACL at all,
+because a usable shape type has to carry things that are not "shape": node kinds, targets, severity.
+Model the intersection of two schema languages too tightly and the vocabulary stops being able to
+express either one.
+
+A closure flag on the *emitter* is the specific version of that mistake, and it has been made
+twice in public: two of the three systems where round-tripping a schema is impossible by
+construction are exactly the two that put closure on a command-line switch, so the same type emits
+two different documents depending on how it was invoked. Closure is a property of the type.
+
+## Where the semantics come from
+
+The shape semantics rest on **rudof**, the Rust ShEx implementation from the **WESO research group
+at the Universidad de Oviedo**, led by **José Emilio Labra Gayo**.
+
+That is a dependency on a specification's authors rather than on a convenient library, and it is the
+right kind of dependency for this: what a shape *means* is a question with a normative answer, and
+re-deriving it from the specification text is how implementations drift from each other. The
+attribution is not a courtesy — it is the reason the answers are trustworthy.
+
+## The cost of binding by position
+
+One consequence is worth stating as a cost rather than as a feature. Shapes bind to local names **in
+the order the document declares them**, not by matching names, which is what lets one program read
+two documents with unrelated vocabularies without either one having to negotiate. It also means
+reordering the shapes inside a document rebinds the program. Shape documents are files you version
+and review, which is what makes that acceptable — but it is a real edge, and it is the sort that is
+discovered on the day somebody tidies a document up.
+
+## What this does not settle
+
+Naming a document is what gives a program its property names, so the output type is not optional in
+the way an annotation is optional; a program with no document has no way to spell a property at all.
+What a program *targeting* a shape does with a predicate the shape does not mention is decided by the
+shape's own closure — which is the design question the three-state model above exists to keep
+answerable.

@@ -8,7 +8,7 @@
 /*
  * TODO(ADR): no design system here yet. `@kanzo-tech/ui` is the intended one and is NOT on npm
  * (`npm view @kanzo-tech/ui` → 404 as of 2026-08-05), so consuming it means vendoring tarballs
- * across two repositories — a cross-repo dependency that needs its own decision record before any
+ * across two repositories — a cross-repo dependency that needs its own argued page before any
  * of it is wired. Until that ADR exists this app dresses in fumadocs' own preset and the handful of
  * rules below. Everything here is meant to be deleted, not extended.
  */

@@ -1,0 +1,106 @@
+---
+title: Streaming
+description: No stage boundary in the write path holds a whole value, so peak memory follows the working set rather than the corpus — which is what turns a memory budget into larger-than-RAM instead of a lower ceiling.
+---
+
+The promise is one sentence:
+
+> **No stage boundary in the write path holds a whole value.** A batch arrives, is transformed, is
+> handed on and is dropped. Peak memory follows the working set — a batch, a window, the O(n) state
+> an algorithm genuinely needs — and not the size of the corpus.
+
+It is worth being clear about why that is the *interesting* property, because "streams its input" is
+a thing every data tool claims.
+
+## Why streaming is the boundary type
+
+Streaming and [a memory budget](/docs/design/larger-than-ram) are usually presented as two features.
+They are one mechanism with two halves, and each half is useless without the other.
+
+A budget bounds the operators **inside** the pool: it tells them how much they may hold and requires
+them to spill when the answer is no. It says nothing about anything outside the pool. If a stage
+boundary in the pipeline holds a whole value — every batch collected into a list, an entire edge
+table read into an array, the whole output built before the first byte is written — then that memory
+is not the pool's to bound. The budget is honoured, and the process dies anyway.
+
+**Everything outside the pool is bounded by being a stream.** That is the only way the two promises
+compose. Where they compose, exceeding the machine is a slower run; where they do not, the budget is
+a number that makes the failure harder to diagnose.
+
+So streaming is not an optimisation applied to a pipeline. It is the property that makes the budget
+mean what it says, and a stage that holds a whole value is not slow — it is a hole in a guarantee.
+
+## The type at a boundary is the argument
+
+The place this becomes a design decision rather than an aspiration is the **type of the interface
+between two stages**, because a type is what makes a stage's obligation checkable.
+
+A lazy interface whose item is a *batch of columns* delivers exactly the boundary a columnar
+pipeline wants: offsets and values, in the representation both sides already use, one batch at a
+time. A lazy interface whose item is a *row converted to the host language's tuples* does not — it
+streams, technically, and it re-materialises the data in a second representation on the way through.
+The two look equally lazy in a signature and cost differently by an order of magnitude.
+
+The same argument works in reverse and is sharper. A function that takes an adjacency structure —
+offsets and targets — **cannot need a counting pass**, because its parameter type already asserts the
+ordering that a counting pass would establish. A function that takes a bag of pairs must reconstruct
+that ordering, because its parameter type asserts nothing. That is *parse, don't validate* applied to
+memory rather than to correctness, and it is why the interfaces in a streaming pipeline are worth
+arguing about: **the type at the boundary is what decides whether the next stage is allowed to be
+lazy.**
+
+The prior art here is a literature, not an intuition. Edge-centric streaming systems — X-Stream, and
+GraphChi's parallel sliding windows — are built entirely on the observation that walking edges in
+sequence while holding only per-vertex state beats random access over a resident adjacency, because
+sequential bandwidth is orders of magnitude larger than random. A corpus written by fossil is already
+in the order those systems work to construct, so the streaming shape is available rather than
+expensive.
+
+## The method, which is the transferable part
+
+Measuring this is where the interesting failures happen, and three lessons from doing it are worth
+more than any individual number.
+
+**A correctness test cannot see a cost regression.** One rewrite of a streaming boundary compiled,
+passed all three parity tests untouched, produced the right answer — and raised the peak by
+**seven gigabytes**, because the "lazy" interface it moved to materialised its result set in full,
+so two open statements meant two complete result sets resident where one array had been. Three green
+tests did not notice, and the reason is structural rather than an oversight: *they checked that the
+result was correct, and the cost was the entire objective.* The redone version carried a memory
+probe in its definition of done, not just parity.
+
+**Plausible causes are cheap and wrong.** A write path that asked for more than twenty times the
+memory of the corpus it produced had four obvious explanations, and measurement killed all four:
+
+| The candidate | Why it looked right | What killed it |
+| --- | --- | --- |
+| per-community hash maps in the graph pass | one allocation per community, millions of them | the whole core measures ~53 bytes per edge |
+| the layout core | an earlier record predicted it explicitly | measured in isolation at a small fraction of the total |
+| the embedded database during layout | no limit by default | capped, and the total did not move — zero bytes spilled |
+| the generator that produced the input | it had a very large heap | the same peak without it |
+
+None of the four was the cause. The cause was found by a probe reporting where memory already was
+before the suspected stage ran its first statement — which is the same lesson in a different shape:
+**a hypothesis about where memory goes is worth less than one reading of where it is.**
+
+**A refuted hypothesis is worth more than a confirmed one.** One of the boundaries examined here
+turned out not to be costing anything measurable, and the change was made anyway, for a reason that
+has to be stated *separately from the number*: holding N files in order to write them one at a time
+has no reader on that path — it is indefensible per file, and it is simply not worth any bytes at
+this size. Mixing the two would be how a refuted hypothesis quietly survives as a justification.
+
+And the negative result is a genuine finding: it means the term was not where the structure suggested
+it would be, and a design that had "obviously" fixed it would have been wrong about its own cost
+model.
+
+## Where the numbers live
+
+Peak figures, per-stage breakdowns and the state of each individual boundary belong to the artifact
+rather than to the language, and they are documented with their instruments on the corpus site —
+`apps/corpus`, which covers the format, the scale work and the executable guards that check a corpus
+on disk. This page is the argument; that one is the evidence.
+
+What belongs here is the design obligation the argument creates: **a new stage in the write path
+declares what it holds.** If the answer is "a batch", it composes with the budget. If the answer is
+"all of it", the budget stops being a promise for every consumer downstream, and the stage needs a
+different interface rather than a bigger machine.

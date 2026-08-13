@@ -1,7 +1,7 @@
 # Contributing to Fossil
 
-Fossil is in **pre-v0.1 active development**. This document covers what
-exists today (Phase 0 complete; Phase 1 walking-skeleton next) and the
+Fossil is in **pre-v0.1 active development** — nothing is published and the
+surface is still changing. This document covers what exists today and the
 contributor rituals that make a solo project survivable.
 
 ## Development setup
@@ -33,21 +33,31 @@ cargo test --workspace                                       # native tests
 cargo fmt --all -- --check                                   # format check
 cargo clippy --workspace --all-targets -- -D warnings        # lint check
 cargo deny check                                             # advisories + licenses + bans
-
-# WASM gate (the highest-leverage check; 6 compiler-core crates)
-cargo check --target wasm32-unknown-unknown \
-    -p fossil-base -p fossil-syntax -p fossil-hir \
-    -p fossil-mir -p fossil-codegen -p fossil-wasm
+cargo xtask wasm-check                                       # WASM gate (highest-leverage)
 ```
 
-CI runs all six on every PR. See `.github/workflows/ci.yml`.
+CI runs all of these on every PR. See `.github/workflows/ci.yml`.
+
+The WASM gate takes no crate list. `crates/xtask` derives it from the resolved
+dependency graph — the closure of the workspace's cdylib crates — and prints
+what it checked. It exists because the two hand-written `-p …` lists that
+preceded it, one in `ci.yml` and one in the `.cargo` alias, had already drifted
+apart; the comment at the top of `crates/xtask/src/main.rs` records that. Do not
+reintroduce a list, here or anywhere else.
+
+The gate needs a wasm-capable `clang` for `fossil-df-wasm`'s `zstd-sys` (Apple
+clang is not one; CI installs LLVM and sets `CC_wasm32_unknown_unknown`).
+Without it, check the rest of the closure directly:
+`cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
 
 ## Development cycle
 
-1. Read `.planning/STATE.md` for current focus.
+1. Read `CLAUDE.md` for the standing rules, and `git log --oneline` for where the
+   work actually is.
 2. Make your change.
 3. Run `cargo fmt`, `cargo clippy`, the WASM gate, and any relevant `cargo test`.
-4. Write an ADR if your change is a non-obvious choice (see ADR ritual below).
+4. Write the decision into the reference if your change is a non-obvious choice (see
+   «Where a decision goes» below).
 5. Commit atomically with a conventional-commit subject (see Commit policy below).
 6. If you're stepping away for >1 week, update `RETURNING.md` (gitignored, local-only)
    describing where you are, what's broken, and the next 3 steps.
@@ -58,33 +68,48 @@ CI runs all six on every PR. See `.github/workflows/ci.yml`.
   `refactor`, `test`, `chore`, `ci`, `build`, `style`, `perf`.
 - **Imperative mood**: "add X", "fix Y" — never "added"/"adds"/"adding".
 - **Subject ≤72 chars.** Body wraps at ~72 and explains WHY when non-obvious.
-  Reference ADRs (`Per ADR-001`), research findings, or pitfalls (`Mitigates P-CRIT-2`).
+  Reference the page that states the rule, a measurement, or a pitfall
+  (`Mitigates P-CRIT-2`) — never a record number.
 - **Atomic**: one commit = one logical change. CI must pass on every commit, not just
   the tip of a branch.
-- `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>` trailer on
-  Claude-authored commits.
+- `Co-Authored-By: Claude <model> <noreply@anthropic.com>` trailer on Claude-authored
+  commits, naming the model that actually wrote it — the log carries three so far, and
+  `git log --format='%(trailers:key=Co-Authored-By)' | sort -u` is the list. Do not copy
+  a model name out of this file; read the one you are.
 - **Never** `--no-verify`, `--amend` to published commits, or use WIP / "fix stuff" subjects.
 
-## ADR ritual
+## Where a decision goes
 
 Any decision between alternatives that took **more than 15 minutes to decide** gets
-an ADR within 24 hours of the decision.
+written down within 24 hours — and it gets written down **in the reference**, not in a
+record beside it.
 
-ADRs are how a solo project survives the bus-factor-1 problem. They are also how
-Future-Angel reads Past-Angel's reasoning without ambient context.
+This used to be a directory of numbered records, and the directory is the reason the
+rule now reads the way it does. Sixty-three of them accumulated, twelve saying
+`proposed` while the thing was built, and the prose that cited them rotted around
+them: **159 dead references** measured in versioned prose, and **eighteen of twenty**
+citations of one record resolving to a *different* record. Two files three modules
+apart asserted opposite things about the same rule, each citing an amendment, one of
+them repealed. A second reference does not stay true; it stays *cited*.
 
-To write one:
+So:
 
-```bash
-cp decisions/template.md decisions/NNNN-verb-noun-phrase.md
-# fill in Title / Date / Status / Decider / Cite / Context / Decision / Consequences
-# update decisions/README.md index table
-git add decisions/ && git commit -m "docs(adr): record decision NNNN: <one-line>"
-```
+- **The decision itself** is the page that states the rule. `apps/docs/content/docs/design/`
+  for the language, `apps/corpus/content/docs/` for the artifact, `grammar.bnf` for the
+  syntax, `apps/docs/content/docs/book/typing.mdx` for the static semantics.
+- **The alternative you rejected** goes to `design/discarded.mdx`, in its four fields —
+  the idea, why it is attractive, the evidence against it, and **what would bring it
+  back**. An entry that cannot state the last field does not go on the page. That field
+  is what makes a decision reopenable rather than dogma, and it is the whole reason the
+  page exists.
+- **Anything you read to decide it** goes to `design/prior-art.mdx`, named. "Seven
+  languages, no exception" is not a checkable claim until the seven are on the page.
+- **A number you measured** goes on the page that makes the claim, beside the claim.
 
-Examples to follow: `decisions/0001-use-lsp-server-not-tower-lsp.md`,
-`decisions/0002-fifteen-crate-workspace-layout.md`,
-`decisions/0003-thin-db-trait-with-system-abstraction.md`.
+There is no `Status` field, because a page has no status: it says what is true, or it
+carries a `today:` register that says what is true *yet*, with the file that would go
+red. `apps/docs/content.test.ts` fails the build if a page claims either without
+naming something checkable.
 
 ## RETURNING.md ritual
 
@@ -118,21 +143,18 @@ Read it on return BEFORE any code change. Mitigates P-SOLO-2.
 
 ## Pre-commit hooks
 
-Optional and per-developer, not enforced via tooling. CI is the gate. If you
-want local enforcement, see the `.git/hooks/pre-commit` snippet in
-[`.planning/phases/00-workspace-genesis-rudof-spike/00-RESEARCH.md`](.planning/phases/00-workspace-genesis-rudof-spike/00-RESEARCH.md)
-— copy it into your local `.git/hooks/pre-commit` and `chmod +x`. Note: this
-slows commits by ~30s (clippy) + ~15s (WASM check); skip for fast iteration loops.
+Optional and per-developer, not enforced via tooling. CI is the gate. If you want
+local enforcement, put `cargo fmt --all -- --check`, `cargo clippy --workspace
+--all-targets -- -D warnings` and `cargo xtask wasm-check` in your own
+`.git/hooks/pre-commit` and `chmod +x` it. Note: that slows commits by ~30s
+(clippy) + ~15s (WASM check); skip it for fast iteration loops.
 
 ## Issues, PRs, communication
 
-Fossil is pre-public. Until Phase 9 (public release), open communication via
-`angel.iglesias@kanzo.tech` or the `decisions/` directory (ADR-shaped issues).
-
-After Phase 9, the project goes public on GitHub with standard issue tracker /
-PR workflow + W3C kg-construct mailing list announcement.
+Fossil is pre-public: no GitHub issue tracker, no PR workflow. Until it goes
+public, communication is `angel.iglesias@kanzo.tech`.
 
 ## Code of conduct
 
 Be kind. Be specific. Cite sources. The community we want to build is one where
-"I read your ADR-0042 and disagree because X, Y" is the default discussion shape.
+"I read the page and disagree because X, Y" is the default discussion shape.

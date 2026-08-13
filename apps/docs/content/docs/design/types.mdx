@@ -1,0 +1,121 @@
+---
+title: Statically typed
+description: What a successful compile rules out — a field that is not in the source, a value the shape will not accept, a required property never written — and, just as precisely, what it does not.
+---
+
+"If it compiles, it is correct in its types" is only worth saying if both halves are precise: what
+compiling rules out, and what it leaves open. This page is both.
+
+## Checking runs in two directions
+
+Information about a mapping arrives from two places, and neither one is the program.
+
+**Forward, from the source.** The binding `User := io.csv("data/users.csv")` gives `User` a row type
+whose fields are the columns of the file, with the types the file has. Every expression in the
+mapping body is *synthesised* from that: `User.email` has the type the column has, a comparison has
+`Bool`, a standard-library call has the type its signature returns.
+
+**Backward, from the shape.** The mapping header `Users : Person from Adults` names the type the
+body must produce. `Person` is a constraint table — a predicate, a kind of value and a count, per
+property — and that table is the *expectation* against which each line of the body is checked.
+
+Neither direction is a fallback for the other, and the split is not an implementation detail. It is
+what makes the error message good: at every property assignment the checker holds both a
+synthesised type and an expected one, and knows the origin of each. So a mismatch names two places
+— the expression that produced the value and the constraint that expected otherwise:
+
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+A single-direction checker cannot write that message. Working forward only, it does not know what was
+expected; working backward only, it does not know what arrived.
+
+## The three failures a compile rules out
+
+These are the failures that would otherwise be discovered by reading the graph afterwards, on a run
+over a source with millions of rows.
+
+### A field that is not in the source
+
+The provider generated `User` from the file, so the compiler knows its columns exactly. A name that
+is not among them is not a possible run-time surprise; it is a typo with a location.
+
+<Program src="errors/unknown-field/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+The suggestion is worth noticing because of *where* it searched. It looked among the members of
+`User`, not among every name in the program — which is a property of
+[the dot meaning member-of](/docs/design/the-dot), not of the diagnostic.
+
+### A value whose type the shape will not accept
+
+The shape declares what kind of value a predicate carries. The source declares what kind of value a
+column holds. A property assignment is the place those two meet, and it is checked there — before
+the graph exists, rather than validated after it does.
+
+That is the whole of the `wrong-type` diagnostic above: the shape asked for a float, the column is a
+string, and the fix — a parsing function from the standard library — is in the message because the
+checker knows both types and can say which conversion closes the gap.
+
+### A cardinality the shape requires that the mapping does not supply
+
+A constraint table carries counts, not just kinds. A property the shape requires and the body never
+writes is a node that will not satisfy the shape it claims to satisfy, and that is knowable from the
+program alone:
+
+<Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+Notice what the help line distinguishes. `shop:phone` is also declared and is also absent, and it is
+*not* an error, because the shape says it is optional. The difference between "one" and "zero or
+one" is a difference the constraint table carries, and a contract that did not carry it would not be
+a contract.
+
+There is a fourth failure that belongs to the same family but is not about a single property, and it
+has [its own page](/docs/design/identity): two mappings that mint different identities for one type.
+
+## What a compile does not promise
+
+Stating this badly is how a type system loses the trust it earned. Three things, plainly.
+
+**It does not promise the source's *contents* are what its schema says.** The provider reads the
+file to learn its shape. A column typed `Integer` is a column the file presents as integral; a row
+that turns out to hold something else is a data error, and it surfaces when the data is read, not
+when the program is checked. Static typing here bounds the *program*, not the world.
+
+**It does not promise the graph is semantically right.** Nothing checks that you assigned the
+customer's name to `shop:name` rather than to `shop:email`. Both are strings; both satisfy the
+shape; only one is true. Type correctness is correctness against a contract you named, and choosing
+the wrong contract, or filling the right one with the wrong values, remains yours.
+
+**It does not promise anything about a document you did not name.** The checking is against the
+shape the mapping targets. A graph can be type-correct against one shape and violate another, and
+fossil is not the arbiter of which shape a downstream consumer expects.
+
+What is left after those three subtractions is still the whole of the class of errors that a
+mapping language traditionally discovers by producing a bad graph: names that do not resolve, values
+of the wrong kind, and obligations of the contract left unmet.
+
+## Why this is *bidirectional* and not inference in the usual sense
+
+One clarification, because the word "inferred" appears on the tin and could mislead.
+
+fossil does not solve for unknown types. There are no type variables in a program to solve for,
+because there is nowhere in a program to write a type: the input types are generated by reading the
+data and the output types are read out of a shape document. Both ends are known before checking
+starts. What checking does is push those two known ends towards each other and require that they
+agree in the middle.
+
+That is why the vocabulary of an inference algorithm would be wrong here even though "inference"
+correctly describes where the output types come from. The types are inferred from
+[the shape document](/docs/design/shapes) and from
+[the source](/docs/design/type-providers) — from documents, not from usage.
+
+## The boundary that makes this cheap
+
+One structural fact is doing more work than any rule: **a fossil program is checked as a whole, all
+at once.** There is no separate compilation, no linking, no unit that gets checked against a
+declaration of another unit written by somebody else.
+
+That is what makes whole-program obligations affordable — the identity check on the
+[identity page](/docs/design/identity) is the clearest case, and it is a check no system whose parts
+deploy separately can perform at all. It is also what makes the failure mode of a type error
+tolerable: the compiler has everything in front of it, so it can attribute the error to a place
+rather than to a stage.

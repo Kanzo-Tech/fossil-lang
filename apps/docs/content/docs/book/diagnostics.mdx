@@ -1,0 +1,111 @@
+---
+title: When it does not compile
+description: Five programs that fail, the diagnostic each one produces, and the fix — the promise of the language shown in the errors rather than asserted.
+---
+
+"If it compiles, it is correct in its types" is a claim about the errors you get. This is the page
+that shows them.
+
+Five programs. Each one is a real file in this documentation's corpus, each one fails, and each
+diagnostic below is the one that program produces. Read them in order if you like; they are ordered
+by how early in a program's life you tend to meet them.
+
+## 1. A field that is not in the source
+
+The shop program, one letter changed:
+
+<Program src="errors/unknown-field/program.fossil" title="program.fossil" />
+
+<Program src="errors/unknown-field/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+**Why it can say that.** `User` is a type, and its fields are the columns of the CSV it names — so
+`nmae` is not an open question, it is a name that is not there. The suggestion comes from `User`'s
+own fields rather than from everything the language knows, which is why it is a good suggestion.
+
+**The fix.** `User.name`.
+
+## 2. A value the shape will not accept
+
+<Program src="errors/wrong-type/shape.shex" title="shape.shex" />
+
+<Program src="errors/wrong-type/program.fossil" title="program.fossil" />
+
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+**Why two spans.** The error is a disagreement between the program and the document, and blaming one
+of them would be half the story. The expectation came from `shop.shex`, so `shop.shex` is on screen.
+
+**The fix.** `total = Purchase.amount`, which is a `Float` column. If the number really does live in
+`reference`, `parse.float(Purchase.reference)` converts it — and then the error is gone because the
+expression's type changed, not because the check was relaxed.
+
+Note what does **not** error: `shop:total` is `xsd:float` and an `Integer` column satisfies it. A
+whole number is a float, and you do not write a conversion to say so.
+
+## 3. A required property the mapping never writes
+
+<Program src="errors/missing-property/shape.shex" title="shape.shex" />
+
+<Program src="errors/missing-property/program.fossil" title="program.fossil" />
+
+<Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+**Why it points at the header.** There is no line to blame — the error is a line that is not there —
+so it is reported against the mapping, and against the place in the document that required it.
+
+**The fix.** Add `email = User.email`. And note the other half of the message: `shop:phone` carries a
+`?`, so it is optional, and leaving it out is not an error at all.
+
+## 4. Two mappings that mint different identities
+
+<Program src="errors/two-identities/program.fossil" title="program.fossil" />
+
+<Program src="errors/two-identities/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+**Why this is an error and not a warning.** What a warning here buys you is two nodes where you meant
+one, discovered later, in a graph that will not join up. There is no version of that which is worth a
+softer message.
+
+**The fix.** Decide which identity a `Person` has, and write it in both mappings. If the legacy file
+genuinely has no email, then the identity scheme for `Person` is the account id, and the first mapping
+changes too.
+
+## 5. Two predicates with the same short name
+
+<Program src="errors/colliding-name/shape.shex" title="shape.shex" />
+
+<Program src="errors/colliding-name/program.fossil" title="program.fossil" />
+
+<Program src="errors/colliding-name/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+**Why fossil does not pick.** A short name is the last segment of a predicate IRI, and when two of
+them end in the same word there is no principled winner. Numbering them would make the name of a
+property depend on the order of a document you did not write.
+
+**The fix.** Rename one, above the binding, in your program:
+
+<Program src="rename/rename.fossil" region="repair" title="rename.fossil" />
+
+Full program in [naming what you produce](/docs/book/what-you-produce#when-two-of-them-collide).
+
+## Reading any diagnostic
+
+The five above are different errors and they have the same anatomy.
+
+- **The first line says what is wrong**, in the terms of your program: a name, a type, a mapping.
+- **The spans are where the two sides met.** A type error has two, because a type error is always a
+  disagreement — one span in the program, one in the document that set the expectation.
+- **`help:` is the repair**, and where a repair is a specific edit it is written out.
+
+If a message ever leaves you without one of the three, that is worth reporting. A diagnostic that
+names one span and calls it a mismatch is not finished.
+
+## What a clean compile does not promise
+
+Worth being straight about. `fossil check` exiting zero says your program is type-correct against the
+shape document you named. It does not say the data in your CSV is what its header implies, and it does
+not say the graph means what you hoped — that `buyer` really is the buyer, that the vocabulary you
+chose is the right one, that the shape document describes the graph anybody wanted.
+
+It says the two ends meet. Which is a smaller claim than "correct", and it is the one that catches the
+errors that otherwise show up as an empty graph three weeks later.

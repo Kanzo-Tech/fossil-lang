@@ -1,0 +1,156 @@
+---
+title: Type providers
+description: Compile-time metaprogramming that generates a source's type by reading the source. The lineage is F#, the registry is `io`, and the one rule fossil takes from F#'s own published criterion is the one F# did not apply to itself.
+---
+
+A fossil program never declares the type of its input. It names the input, and the compiler goes and
+reads it.
+
+```
+User := io.csv("data/users.csv")
+```
+
+That line does two things at compile time. It reads the actual file on disk and **generates a type**
+whose members are the file's columns with the file's types; and it binds the name `User` to both
+that type and the relation of the file's rows. From then on `User.age` is a checked member access,
+and the compiler can tell you that `User.nmae` does not exist because it has the real list.
+
+## Why "provider" and not "loader"
+
+The distinction is the whole idea, and it is easy to slide past.
+
+A **loader** runs when the program runs. It hands back rows, and whatever the program says about
+their shape is the programmer's assertion, checked — if at all — against the data at run time. The
+type in the program and the type of the data are two things that agree by discipline.
+
+A **type provider** runs when the program is *compiled*. It is metaprogramming: a component that the
+compiler invokes during checking, whose output is types. There is no run-time step where the shape
+gets confirmed, because there is no moment at which the compiler did not know it. The type in the
+program and the type of the data are one thing, and that is what makes a misspelled column a
+squiggle in your editor rather than a null in a graph.
+
+The lineage is explicit. F# introduced type providers with `ITypeProvider`, described in Syme et
+al.'s *Themes in information-rich functional programming* and in the PLDI 2016 paper *Types from
+data*, and every subsequent design in this space — including this one — is a variation on their
+question: what if the schema of the world could be a type, generated on demand, without a code
+generation step the programmer maintains?
+
+## `io` is the registry
+
+`io` is the namespace where providers live. `io.csv` for delimited files, `io.shex` for a shape
+document, and so on for each family of source the language can read.
+
+The point of a registry, rather than a keyword per format, is that **adding a format is a row**. A
+new provider is an entry with a name and a way to turn a source into a type; it is not a grammar
+production, not a new binder, not a change to the checker. `io.graphql` would be a row. That is the
+same property the [verb catalogue](/docs/design/the-dot) has, arrived at from the other side.
+
+## One binding, both the type and the relation
+
+Here is where fossil departs from F# deliberately, and the reason is worth stating because the
+departure looks like a simplification and is actually a claim about the domain.
+
+In F# you write the provider and the load separately — a `CsvProvider<…>` gives you a type, and
+`.Load(path)` gives you data of that type. That is right *there*, because the type is meant to be
+reused: one shape of CSV, many files with that shape, and the type is the thing they share.
+
+In fossil a binding **is** a concrete source. There is no population of other files that share
+`data/users.csv`'s type and are handled by the same program; the program names this file. Splitting
+the type from the load would produce two names where one suffices and would give the reader a
+distinction with nothing on the other side of it. So one name yields both:
+
+- `User` as a **type**, whose members are the columns — `User.age`.
+- `User` as a **relation**, whose rows are the rows — `from User`.
+
+Which one you get is decided by what you ask for, which is the general rule that
+[the dot](/docs/design/the-dot) states.
+
+## The discard, and it comes with somebody else's measurement
+
+Providers generate names, and generated names are an interface. The rule fossil follows is narrow
+and deliberately dull:
+
+> **A derived name depends on the label and nothing else** — never on cardinality, never on the kind
+> of value, never on position. There is no plural-to-singular heuristic. A collision is an **error**
+> that names both origins; it is never disambiguated automatically.
+
+The evidence for that rule is FSharp.Data's own, and it is the most useful thing in the prior art
+because it is a criterion the authors published and then did not apply to themselves.
+
+*Types from data* states the principle plainly: the algorithm must avoid anything that would make **a
+small change in the sample cause a large change in the provided types**. That is exactly right, and
+it is the property that makes a generated type safe to write code against.
+
+Applied to names, their implementation did the opposite in three places. The collision scheme was a
+numeric suffix — `PascalCase2` — so a member's name depended on what *other* members happened to
+exist. The singulariser was a heuristic over English morphology, and produced `Purchasis` and
+`Sourcis`. And the consequence was not theoretical: **a minor version bump renamed members and broke
+a production application.**
+
+So the argument against a numeric suffix does not have to be made from first principles. Their own
+criterion makes it: a name that depends on the rest of the sample violates the rule they wrote down.
+
+**The repair is a rename, and it lives in the program.** When two labels genuinely collide, the
+program says which is which — an attribute above the binding, all constants, in the shape of Prisma's
+`@map`:
+
+<Program src="rename/rename.fossil" region="repair" title="rename.fossil" />
+
+It goes in the program rather than in the document being read for one plain reason: **the vocabulary
+may not be yours.** A local naming problem must not turn into an edit to a document other people
+share.
+
+## Why the provider is named inside the program
+
+An adversarial reading of this design went looking for the retrospective that says "type providers:
+good idea, wrong place", and did not find one. What it found instead is worth carrying, because it
+is the argument that decides where a provider is declared.
+
+**F#'s documented damage is about liveness, not location.** Schema drift is invisible until
+something forces a re-read; the invalidation signal is respected by the IDE and ignored by the batch
+compiler, so continuous integration never revalidates; a network outage becomes a compile failure.
+Every one of those is a question about *when the world is read*, not about *where the reading is
+declared*. And F#'s own answer moved the anchor **into** the program — a local schema file, named by
+the code that depends on it.
+
+**"Outside the program" does not come out better.** `sqlx` requires a live database at build time,
+and its fix is not to relocate the declaration but to *anchor* it: a prepared artifact, committed,
+that the build reads instead of the database. Diesel keeps a generated schema file in the
+repository and pays the price of two sources of truth. C# studied providers and shipped source
+generators, deliberately the opposite: additive only, and their input is the compilation rather than
+the world.
+
+**Nobody is pure at either extreme.** The systems that get this right all split it the same way —
+the name inside, the location outside, the identity anchored. Cap'n Proto imports by name and
+resolves by include path; Go imports a module path and pins a hash in a lock file; Nix names inputs
+and records their content hashes.
+
+Two more rules fall out of that reading, and both are load-bearing here.
+
+**No network at compile time.** Reading a file is a provider's job; resolving a name over the
+network during a compile is not. The evidence is unusually clean: the public prefix-abbreviation
+registry that RDF tooling reaches for served an **expired certificate for seven months** while every
+IRI it abbreviates continued to answer. IRIs are durable; the abbreviation layer on top of them
+rots. A compile that depends on the second inherits its uptime. (As an editor affordance — a
+suggestion, offered and ignorable — a network lookup is a different thing entirely.)
+
+**A provider needs a channel for warnings.** F# type providers cannot emit a warning; every
+diagnostic a provider raises is an exception, so a provider's only two moods are "fine" and "the
+build stops". Any design in this family that wants to say *this file has a column I cannot type, and
+here is what I did about it* has to have somewhere to say it, and it has to be decided at design time
+rather than discovered when the first partial success occurs.
+
+## What this costs, said plainly
+
+Reading real sources at compile time buys a checked member access and pays for it in two places.
+
+**The editor.** F#'s live pain is not the batch compiler, it is the IDE: providers re-running under
+an editing loop, with sustained high CPU, and the maintainers describing the mitigation as a
+band-aid over a more fundamental architectural issue. A provider whose input is a file rather than a
+network call escapes most of that — but "most" is not "all", and the cost falls on
+[the editor](/docs/design/tooling-for-humans), which is where the benefit falls too.
+
+**The staleness question.** A generated type is only as current as the last read. Every system in
+this family answers that question somehow, and every one of them answers it as a *design* decision
+about anchoring rather than as an optimisation. The answer belongs next to the compiler rather than
+on this page; the obligation to have one belongs here.

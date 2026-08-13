@@ -5,7 +5,7 @@
  * offsets into the source string.
  *
  * The `kind` → CodeMirror highlight category mapping lives in
- * `@fossil-lang/codemirror-fossil/src/tags.ts`. Per ADR-0030, appending new
+ * `@fossil-lang/codemirror-fossil/src/tags.ts`. Appending new
  * Token variants is backwards-compatible; reordering existing variants is
  * a breaking change for downstream consumers and must bump the major version
  * in a coordinated release.

@@ -1,0 +1,96 @@
+---
+title: Relations
+description: Filter, narrow and join — the operations a relation has, why a derived relation gets a name, and what you write inside a mapping that reads from one.
+---
+
+A source binding gives you a relation. So does every operation on one. That is the whole idea: you
+start with the rows in a file and you build the set of rows you actually want, one named step at a
+time.
+
+<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
+
+`Adults` is a relation derived from `User`. It has the same operations `User` has, so you can keep
+going.
+
+## `where`
+
+<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
+
+`where` takes a predicate — an expression that is true or false for a row — and gives back the rows
+where it holds.
+
+Look at what the predicate names: `User.age`, not `.age`. **Every reference says which row it came
+from.** With one row in scope that looks like more typing than the situation needs; it stops looking
+that way at the first join, and the point is that nothing about how you write a column reference
+changes in between.
+
+A predicate is an ordinary expression, so anything you can write on a property line you can write
+here — a call, a comparison, several of them joined by `and`:
+
+<Program src="expressions/expressions.fossil" region="comparison" title="expressions.fossil" />
+
+## `select`
+
+`select` narrows a relation to the fields you are going to use.
+
+<Program src="projection/projection.fossil" region="chain" title="projection.fossil" />
+
+Two named steps: `Active` is the rows that survive the filter, `Minimal` is those rows carrying two
+of their four fields.
+
+## Naming things, and what happens in the body
+
+Notice what `Adults` and `Minimal` are **not**: they are not new types. `Adults` is a relation of
+`User`s. `Minimal` is a relation of `Employee`s. The fields belong to the type, and the type is the
+one the binding named — so inside a mapping that reads from `Minimal`, you write `Employee.name`:
+
+<Program src="projection/projection.fossil" title="projection.fossil" />
+
+This is the one thing about relations that catches people out, and it is worth saying twice: **the
+name after `from` says which rows; the name before a dot says which type.** They are different
+questions and they take different answers.
+
+Give each step a name, or do not — `User.where(...).select(...)` in a header is a relation like any
+other. A name is worth it when the step means something you would otherwise re-explain, which is why
+`Adults` is called `Adults` and not `Filtered`.
+
+## `join`
+
+Two files, and the key that connects them lives in one of them:
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+`join` is a member of a relation, like `where`. It takes the other relation and an `on`.
+
+The `on` is an equality between qualified references, or several of them joined with `and`:
+
+<Program src="compound-key/compound-key.fossil" region="on" title="compound-key.fossil" />
+
+Compound keys are ordinary, so `and` is ordinary. What it is not is a general condition —
+`on = A.date > B.since` is not a join, and the language says so rather than quietly turning into
+something with different performance.
+
+### A join does not flatten
+
+There is no merged row afterwards. **Two rows are in scope**, `Purchase` and `User`, and every
+reference in the body says which one it means:
+
+<Program src="shop/shop.fossil" region="second-mapping" title="shop.fossil" />
+
+Nothing acquires a suffix. No column is renamed because two files happened to use the word `id`. And
+a self-join needs no special apparatus, because there is no union of rows for it to collide in. Name
+the second copy with `as` and you have two rows again, both of them `Node`s:
+
+<Program src="self-join/self-join.fossil" title="self-join.fossil" />
+
+The price is that names travel with the relation. Once a join has a name, every mapping that reads it
+has both rows in scope — which is how `Other` reaches the body of `Categories` there. Rename a source
+and its readers see the change.
+
+## The rest of them
+
+`where`, `select` and `join` are the three you will reach for constantly. The relation type has more
+— `union`, `distinct`, `sort`, `take`, `drop`, `count`, and grouping — and they are in
+[the standard library](/docs/book/stdlib), listed by what they attach to. They are not special forms:
+they are functions with a relation on the left, which is why they compose without anybody having
+written a rule that says they may.

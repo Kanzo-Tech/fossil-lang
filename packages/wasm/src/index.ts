@@ -1,11 +1,12 @@
 /**
  * @fossil-lang/wasm — JS/TS wrapper around the fossil-wasm wasm-bindgen artifacts.
  *
- * Public API (one of the six @fossil-lang/* packages per ADR-0028):
+ * Public API (one of the @fossil-lang/* packages; `git ls-files packages` is
+ * the list):
  * - {@link initFossilWasm} — consumer-controlled .wasm URL loader (memoised).
- * - {@link tokenize} — calls the Rust lexer, returns TokenRow[] (ADR-0030).
- * - {@link semanticLegend} — returns the LSP SemanticTokensLegend (Phase-6 06-07).
- * - {@link FossilPlayground} — Workspace API class (ADR-0024) for the LSP.
+ * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
+ * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
+ * - {@link FossilPlayground} — Workspace API class for the LSP.
  *
  * Consumer pattern (wasm-bindgen --target web — RESEARCH.md Pattern 3):
  *
@@ -13,7 +14,7 @@
  *   import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';  // Vite
  *
  *   await initFossilWasm({ wasmUrl });
- *   const tokens = tokenize('prefix ex: <https://example.org/>');
+ *   const tokens = tokenize('User := io.csv("data/people.csv")');
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_wasm.js`) is imported ONLY from leaf
@@ -110,18 +111,18 @@ export interface InferredColumnJson {
 
 /**
  * Host-introspected input schema. Produced by the playground's browser-side
- * `DuckDB-WASM` `DESCRIBE read_csv_auto('<url>')` call (see plan 13-04b);
- * consumed by the Rust compiler via
- * {@link FossilPlayground.registerInferredDescriptor}. See ADR-0037 for the
- * full architectural rationale (drop user-facing CSVW; host-side
- * introspection feeds the compiler ahead of `compile()`).
+ * `DuckDB-WASM` `DESCRIBE read_csv_auto('<url>')` call — `@fossil-lang/introspect`
+ * is the one home for it; consumed by the Rust compiler via
+ * {@link FossilPlayground.registerInferredDescriptor}. There is no metadata
+ * sidecar for the user to write and keep in sync: the host introspects the
+ * real file and feeds the compiler ahead of `compile()`.
  */
 export interface InferredDescriptorJson {
   /**
    * The source URI exactly as the program writes it — the string inside
    * `io.csv("examples/users.csv")`. NOT the binding name, and NOT the URL the
    * host resolved in order to read the file: the checker only ever sees what
-   * the program says. ADR-0050.
+   * the program says.
    */
   uri: string;
   /** Ordered columns — order is significant for column-position fallback. */

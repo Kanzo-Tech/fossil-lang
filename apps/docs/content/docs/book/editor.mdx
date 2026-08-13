@@ -1,0 +1,92 @@
+---
+title: In your editor
+description: Completion, hover, go-to-definition and the action that fills a mapping body from the shape — what to expect from each, and how to switch it on.
+---
+
+fossil ships a language server, and it is the same code that checks your program on the command
+line. Nothing it tells you is an approximation of what `fossil check` would say.
+
+## Switching it on
+
+The server is one binary, `fossil-lsp`, installed alongside the compiler:
+
+```bash
+cargo install --git https://github.com/Kanzo-Tech/fossil-lang fossil-lsp
+```
+
+Then tell your editor to start it for files ending in `.fossil`. In Neovim that is an `lspconfig`
+entry naming the binary and the filetype; in Helix a `[[language]]` block with
+`language-servers = ["fossil-lsp"]`; in any editor that speaks the protocol, the equivalent. It reads
+the program on stdin and stdout and needs no configuration of its own.
+
+## Completion after a dot
+
+The receiver's type decides what is on the list. After a source binding, the columns of that file:
+
+```
+User.        →  id   email   name   age
+```
+
+After a string, the string operations:
+
+```
+User.email.  →  trim   lower   upper   slug   length   split   …
+```
+
+After a relation, the relational ones:
+
+```
+Adults.      →  where   select   join   union   distinct   sort   …
+```
+
+The list is what applies and nothing else. There is no entry on it that would fail to compile if you
+picked it, because the thing that produces the list is the same thing that would reject it.
+
+## Hover
+
+Hover a field and you get its type and the file it came from. Hover a property key and you get the
+predicate IRI the shape declares, its value type and its cardinality — which is the fastest way to
+answer "why will it not take this?" without opening the shape document.
+
+## Go to definition
+
+- On a source name, it opens the binding.
+- On a property key, it opens the shape document, at the line that declares the predicate.
+- On a relation name, it opens the line that derived it.
+
+That third one is worth using more than it looks. A mapping that reads from `Recent` and writes
+`User.name` makes more sense once you have jumped to the join that put `User` in scope.
+
+## Fill the body
+
+The one that changes how it feels to write a mapping.
+
+Type a header and stop:
+
+<Program src="shop/shop.fossil" region="header" title="shop.fossil" />
+
+The server knows what `Person` declares and with what cardinality — it is the same table the checker
+reads — so it offers to write the body for you, one hole per property:
+
+<Program src="shop/editor/filled-body.txt" title="what the action inserts" />
+
+The names came from the shape. Now fill the holes, and inside each one completion offers the fields of
+`Adults` — which is a relation of `User`s, and `User` is a type because its binding named one:
+
+<Program src="shop/shop.fossil" region="first-mapping" title="shop.fossil" />
+
+Both halves of a mapping complete from opposite ends, and neither of them needed a heuristic. It is
+the type answering.
+
+## Diagnostics as you type
+
+The squiggles are the diagnostics from
+[when it does not compile](/docs/book/diagnostics), at the same spans, with the same `help:` text. A
+missing required property appears against the header the moment the body stops satisfying the shape;
+an unknown column appears as you finish typing it.
+
+## In a browser
+
+The language server compiles to WebAssembly and runs in a browser tab, with nothing on the other end
+of it. Checking a program needs a parser, a shape document and the columns of a file — none of which
+needs a machine somewhere else — so everything on this page is available in a page.

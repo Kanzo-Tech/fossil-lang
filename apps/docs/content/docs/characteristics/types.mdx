@@ -3,7 +3,7 @@ title: The type system
 description: Three jobs — the source, the shape, and sensitivity. The third is what makes the type system worth its cost, and no mapping language has it.
 direction:
   summary: Types come from the source descriptor and the output shape with no user annotation, the shape is the target type so a mapping that could violate it does not compile, and a shape may declare a property sensitive — in which case a raw value is not assignable to it and only a pseudonym is.
-  decidedBy: decisions/0046-un-nucleo-y-carcasas-finas.md
+  arguedIn: /docs/design/types
 today:
   summary: The lattice is nine xsd primitives in one enum in the leaf crate every side shares, and since 2026-08-07 it crosses the provider boundary typed rather than as a string — the seven duplicate tables are one per direction. What is still unbuilt is the other two jobs — the descriptor cache is declared and never wired, and the only output descriptor reaching the tracked typecheck path is the one that accepts everything.
   backedBy: crates/fossil-graph-schema/src/lib.rs
@@ -35,7 +35,7 @@ correct: it is a function of the world, not of the program text.
 It was the least-built thing in the tree: the field that drove invalidation was `String::new()` at
 every production site, its fallback hashed the *resulting columns* rather than the source, the key
 was the binding name rather than the URI, and registering a descriptor panicked by default. All four
-are closed (ADR-0053).
+are closed.
 
 The freshness token is **mtime + size from one `stat`** — not a content hash, because a hash reads
 the whole source to decide whether to read the source, which is the one way a cache over large
@@ -100,7 +100,7 @@ pub struct InferredColumn {
 
 **Until 2026-08-07 that field was a `SmolStr`,** and the lattice of the type system travelled across
 its most important boundary as text with the invariant written in a comment. The cause was on the
-record and it was not carelessness: ADR-0007 made it a string **on purpose**, to avoid a dependency
+record and it was not carelessness: it was made a string **on purpose**, to avoid a dependency
 cycle against `fossil_hir::Primitive`. A dependency direction had untyped the core of the type
 system, and it cost seven implementations of one table — two of them inside the same crate, one of
 which existed only to assert that it agreed with another.
@@ -119,8 +119,9 @@ and reported three crates later as a complaint about a column.
 
 <Callout title="Deliberately absent">
 No user type annotations — types come from descriptors. No global inference: the check is
-bidirectional and local to a mapping. There IS subtyping, and it is five rules wide (`type-system.md`
-§9): reflexivity, lifting to `Optional`, covariance of `Optional` and `Seq`, and `Integer <: Float`.
+bidirectional and local to a mapping. There IS subtyping, and it is five rules wide — reflexivity,
+lifting to `Optional`, covariance of `Optional` and of `Seq`, and `Integer <: Float`, all of them in
+[the typing rules](/docs/book/typing).
 `compatible` runs them on every property. This callout said "no subtyping" until 2026-08-08, which
 described an intention rather than the checker. And the introspection of job one is **never** a query in the
 incremental system; its cache is ours and its invalidation policy is explicit.

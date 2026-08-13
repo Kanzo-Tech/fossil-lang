@@ -5,15 +5,24 @@ Keep it under 200 lines, rules-not-context.
 
 ## Read These First
 
-- `decisions/` — ADRs (Nygard format). Every non-obvious choice is recorded here.
-  Most relevant: ADR-0001 (LSP framework), ADR-0002 (15-crate layout), ADR-0003 (Db trait shape).
-  Also `decisions/rudof-wasm.md` (Phase 0 spike outcome).
-- `.planning/PROJECT.md` — current scope, constraints, key decisions, out-of-scope list.
-- `.planning/ROADMAP.md` — 10 phases of Milestone 1 (compiler + LSP + playground + extension).
-- `.planning/STATE.md` — current focus, in-flight work.
-- The 5 design docs in repo root (`architecture.md`, `grammar.bnf`, `type-system.md`,
-  `operator-algebra.md`, `stdlib.md`) — original design corpus. Some points superseded
-  by research synthesis (see `.planning/research/SUMMARY.md`); when in doubt, ADRs win.
+- `grammar.bnf` — the syntax, normative, and ahead of the parser on purpose. A production
+  written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
+  the file.
+- `apps/docs/` — the language. `/docs/design` is where an argument lives (with
+  `design/discarded` for every rejected alternative and what would bring it back, and
+  `design/prior-art` for every source named); `/docs/book/typing` is the static semantics,
+  the grammar's sibling; `/docs/characteristics` is per-feature and carries both registers.
+- `apps/corpus/` — the artifact, with executable guards instead of prose about it.
+- `apps/docs/programs/` — the eighteen conformance programs. Documentation transcludes
+  them; nothing retypes a program into prose.
+- `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
+  the wasm32 subset it derived from the dependency graph.
+- `apps/docs/CLAUDE.md` — the editorial rules for the docs app, including the two-register
+  discipline (where fossil is going / what is true today, never mixed in one sentence).
+
+**There is no second reference.** When a document disagrees with the tree, the tree wins,
+and the document is wrong and gets fixed — not annotated, not superseded by a record kept
+somewhere else.
 
 ## Build & Test Commands
 
@@ -34,25 +43,32 @@ LLVM and sets `CC_wasm32_unknown_unknown`). Without it, check the compiler closu
 
 ## Hard Rules
 
-- **WASM gate is non-negotiable.** A PR that breaks `cargo check --target wasm32-unknown-unknown`
-  on any of the 9 gated compiler crates does not merge. No exceptions, no `continue-on-error`.
+- **WASM gate is non-negotiable.** A PR that breaks `cargo xtask wasm-check` does not merge.
+  No exceptions, no `continue-on-error`. Do not write the gated crate set down anywhere: xtask
+  derives it from the cdylib dependency closure and prints it, precisely because the two
+  hand-maintained `-p …` lists that preceded it had already drifted apart (9 crates vs 6).
 - **Forbidden crates** (banned in `deny.toml`): `serde_yml` (RUSTSEC-2025-0068; use `serde_yaml_ng`),
-  `tower-lsp` (unmaintained; use `lsp-server` per ADR-0001), `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
+  `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
+  `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
-- **No compiler logic in Phase 0.** Phase 0 is workspace genesis only — every crate is a stub.
-  Real implementation begins Phase 1.
 - **No `tokio` outside `fossil-lsp`.** And `fossil-lsp` is native-only with a `compile_error!` cfg-tripwire.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
-- **`unsafe_code = "deny"`** at workspace level (per ADR-0004). Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
-- **ADR ritual:** any decision between alternatives that took >15 minutes gets an ADR within 24h.
-  Use `decisions/template.md`, file naming `NNNN-verb-noun-phrase.md`. See ADR-0001/0002/0003 as examples.
-- **pnpm + cargo coexist at repo root** (per ADR-0031). Rust contributors don't need pnpm; JS/TS contributors need pnpm 9.x + Node 20+. The Rust workspace (`crates/`) and the pnpm workspace (`packages/` + `apps/`) are independent; CI runs them in parallel matrices.
+- **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
+- **Where a decision goes:** any decision between alternatives that took >15 minutes gets written
+  down within 24h, **in the reference** — the page that states the rule, with the rejected
+  alternative and what would bring it back in `design/discarded`, the sources named in
+  `design/prior-art`, and any number beside the claim it supports. `CONTRIBUTING.md` has the
+  reasoning, which is 159 dead citations and 18 of 20 pointing at the wrong record. **Do not
+  reintroduce a directory of records.**
+- **pnpm + cargo coexist at repo root.** Rust contributors don't need pnpm; JS/TS contributors need pnpm 9.x + Node 20+. The Rust workspace (`crates/`) and the pnpm workspace (`packages/` + `apps/`) are independent; CI runs them in parallel matrices.
 - **`RETURNING.md` ritual:** before stepping away from the project for >1 week, write/update
   `RETURNING.md` (gitignored, local-only) describing current state, what's broken, next 3 steps,
   what NOT to do because tried-it. Read on return before any code change. Mitigates P-SOLO-2.
-- **Walking-skeleton invariant** (post-Phase 1): at no point should `fossil run examples/hello.fossil --dest <tmp>`
-  regress (it must produce a valid GraphAr dataset — 5 `Person` vertices). A refactor that breaks the e2e demo for >3 days is reverted and broken into smaller steps.
+- **Walking-skeleton invariant:** `fossil run examples/hello.fossil --dest <tmp>` must keep
+  producing a valid GraphAr dataset — 5 `Person` vertices, asserted by content, not existence.
+  `crates/fossil-cli/tests/walking_skeleton.rs` is the test that goes red. A refactor that
+  breaks it for >3 days is reverted and broken into smaller steps.
 
 ## Stack Pins
 
@@ -66,79 +82,101 @@ LLVM and sets `CC_wasm32_unknown_unknown`). Without it, check the compiler closu
 | sqlparser | 0.59 | SQL AST construction |
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
-| wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating the graph wasm on Node 20, binaryen #4711; 116 fixes it). executor's `build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
+| wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating the graph wasm on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | serde_yaml_ng | 0.10 | NOT serde_yml (RUSTSEC) |
-| lsp-server | 0.7 | per ADR-0001 (NOT tower-lsp) |
-| arrow + parquet | latest | for GraphAr writer (no Apache GraphAr Rust SDK exists) |
+| lsp-server | 0.7 | NOT tower-lsp (unmaintained) |
+| arrow + parquet | 58 | for GraphAr writer (no Apache GraphAr Rust SDK exists) |
+| shex_ast + rudof_iri | 0.3 | ShEx target shapes; explicit features only — `default-features` drags in what wasm32 cannot build |
+| datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
-verify WASM gate, file ADR if it's a major version with API changes.
+verify WASM gate, and write the reason down on the page it affects if it is a major version with
+API changes.
 
 ## Project Layout
 
+`ls crates/` and `git ls-files packages` are the lists. This is what each one is for; a
+`[NATIVE-ONLY]` crate carries a `wasm32` `compile_error!` tripwire.
+
 ```
 crates/
-  fossil-base/             Salsa Db trait + System abstraction (per ADR-0003)
+  fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
   fossil-syntax/           lossless CST + parser
-  fossil-hir/              types + name resolution + bidirectional checker (ADR-0002) + the
-                           stdlib catalog (`stdlib.rs`, ADR-0048 — the checker resolves calls against it)
-  fossil-mir/              typed operator algebra (11 ops)
-  fossil-codegen/          MIR → DuckDB SQL + GraphAr manifest
+  fossil-hir/              types + name resolution + bidirectional checker + the stdlib
+                           catalog (`stdlib.rs` — the checker resolves calls against it)
+  fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
+  fossil-shex/             ShExDescriptor over `shex_ast` — backward target-shape checking
   fossil-descriptors-{input,output}/   trait + impls (CSVW, ShEx)
-  fossil-sinks/            Sink trait + GraphAr writer (atop arrow + parquet)
+  fossil-resolver/         host-injected cloud path resolution (s3://, az://)  [NATIVE-ONLY]
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
-  fossil-runtime/          DuckDB native execution    [NATIVE-ONLY]
+  fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
+  fossil-df/               DataFusion backend for the property-graph MIR
+  fossil-engine/           native orchestration behind the binaries — the compile→run
+                           pipeline plus check/refs/providers/catalog, returning STRUCTURED
+                           data the binary only renders  [NATIVE-ONLY]
+  fossil-runtime/          DuckDB native execution  [NATIVE-ONLY]
+  fossil-run-status/       the `fossil run --output-json` wire contract
+  fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
+  fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)
+  fossil-mcp/              that same verb surface as a native server-side service
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
-  fossil-cli/              `fossil run/check/catalog/providers` [NATIVE-ONLY]
+  fossil-cli/              `fossil check/run/catalog/providers/refs`  [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
-  fossil-wasm/             WASM host shim (FossilPlayground API + tokenize export per ADR-0030)
+  fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
+  fossil-df-wasm/          the fossil-df executor exposed to JS
+  fossil-graph-wasm/       wasm-bindgen binding for the fossil-graph verb surface
+  xtask/                   repo automation; `cargo xtask wasm-check` is its one command
 
-packages/                  npm-published @fossil-lang/* family (pnpm workspace, per ADR-0031)
+packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
   graph/                   in-process TS binding for the fossil-graph verb surface
   executor/                datafusion-wasm query executor
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
-  codemirror-fossil/       CodeMirror 6 language extension (StreamParser → fossil-wasm tokenize)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
-  introspect/              schema introspection helpers
+  introspect/              source-binding schema introspection (the one home; `fossil-engine`
+                           is the Rust sibling and the two must stay in parity)
   examples/                bundled .fossil/.csv/.csvw.json/.shex fixtures
-  ui/ viewer/ editor/      React family that ADR-0040 retires to @kanzo-tech/*. Still on disk;
-                           that ADR is `proposed`, not done, so do not treat them as gone.
 
 apps/                      NOT published, and no recursive CI step reaches them (all are
                            filtered to `./packages/*` by path — see release.yml)
   docs/                    Next.js + fumadocs. Where fossil is GOING, with what is already
                            true marked as such; `apps/docs/CLAUDE.md` has the editorial rules
 
-decisions/                 ADRs + non-numbered decision logs (rudof-wasm spike, etc.)
-.planning/                 GSD orchestration artifacts (gitignored — commit_docs=false)
+grammar.bnf                the syntax, normative, and ahead of the parser on purpose
+tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
+
+The `ui/ viewer/ editor/ codemirror-fossil/` React family moved to `@kanzo-tech/*`; commit
+`873cbc0` deleted all four. They are gone — fossil ships no UI.
 
 ## Style
 
 - Prefer enum dispatch over `Box<dyn Trait>`. Salsa interning needs concrete types.
 - `Result<T, E>` with thiserror-style enums in lib crates; `miette::Result` in CLI / LSP / runtime.
 - `tracing` for structured logs (not `log`). `RUST_LOG=fossil=debug` is the canonical filter.
-- Snapshot tests via `insta` for type-check output and SQL codegen output (not for parser CST yet — too brittle).
-- Doc comments on `pub` items in compiler-core crates. Doc comments are not required on Phase 0 stubs.
+- Snapshot tests via `insta` — `git ls-files '*.snap'` shows which crates carry them (not the
+  parser CST: too brittle).
+- Doc comments on `pub` items in compiler-core crates.
 
 ## Common Tasks
 
 - **Add a new dependency:** add to `[workspace.dependencies]` (workspace-level), then per-crate
   `dep = { workspace = true }`. Run `cargo deny check` to confirm no advisory or license issue.
-  Run WASM gate to confirm no transitive WASM-incompat leak. Update ADR if the dep is foundational.
-- **Add a new crate:** add to `members = ["crates/*"]` (auto-included), create `Cargo.toml`
-  using one of the three stub templates (compiler-core, native-only with cfg-tripwire, or wasm-shim).
-  Update ADR-0002 if the crate count changes from 15.
-- **Add a new ADR:** copy `decisions/template.md`, increment NNNN. Update `decisions/README.md` index.
-- **Run the WASM smoke test:** historical `playground-poc/` removed in Phase 8 plan 08-01 (ADR-0031). Phase 8 built the pnpm-workspace React library family under `packages/`.
+  Run WASM gate to confirm no transitive WASM-incompat leak. If the dep is foundational, say why
+  on the page whose claim depends on it.
+- **Add a new crate:** `members = ["crates/*"]` picks it up; copy the shape of an existing
+  peer (compiler-core, native-only with the `wasm32` cfg-tripwire, or wasm-shim). Do not
+  record the new crate count anywhere — nothing should have one to update.
+- **Run the WASM smoke test:** build the nodejs bindgen target, then
+  `node crates/fossil-wasm/test-wasm-workspace.js` — the build precondition is in that file's
+  header. `crates/fossil-wasm/tests/workspace.rs` is its native mirror and runs on every PR.
 - **Add an app:** it goes under `apps/`, carries `private: true`, and needs nothing else — every recursive CI step and every root script is already filtered to `./packages/*`, so an app cannot be version-stamped or published by accident. Give it its own path-filtered workflow rather than a step in `pnpm-ci.yml`, whose 60-minute ceiling exists for a cold cargo build.
 
 ## Anti-patterns
 
 - Importing `tokio` anywhere outside `fossil-lsp` (and even there, only `tokio = { version, features = ["sync"] }`).
-- Using `default-features = true` on rudof crates — be explicit about what you opt into per the
-  rudof spike outcome (`decisions/rudof-wasm.md`).
+- Using `default-features = true` on rudof crates — be explicit about what you opt into; the
+  defaults drag in crates that do not build for wasm32.
 - Putting compiler logic in `fossil-base` — it is the trait + db substrate, no business logic.
 - Skipping the WASM gate locally. CI catches it eventually but the feedback loop is slower.
 - Editing a generated file (`packages/wasm/pkg/*`, `crates/fossil-wasm/pkg/*`, or `target/*`). They are regenerated.

@@ -13,65 +13,61 @@ This site documents where that is going. Every page keeps two registers apart an
 it is in:
 
 <Cards>
-  <Card title="Where this is going" description="The destination, with the decision record that chose it. Written before the code gets there — that is the point of writing it." />
+  <Card title="Where this is going" description="The destination, and the page here that argues for it — the prior art it was read against, the measurement, and the observation that would reverse it. Written before the code gets there; that is the point of writing it." />
   <Card title="True today" description="What holds right now, with the file that would go red if it stopped holding. Or the word `unmeasured`, which is the honest alternative." />
 </Cards>
 
 Never both in one sentence. A target restated as a fact is the failure this site exists to avoid,
 and `apps/docs/content.test.ts` fails the build rather than trust anyone to remember.
 
-## Three rings, and the axis is where the code runs
+## Three layers, and the axis is what a piece of code may know
 
-The organising axis is not subject matter. It is **deployment target**, because that is the only
-axis on which the hard constraints actually conflict.
+The organising axis is not subject matter. It is **what a piece of code is allowed to know**, and
+the sharpest version of that constraint is where the code runs, because that is the only axis on
+which the hard requirements actually conflict.
 
-Three destinations have to work — a native CLI, wasm in a browser, an MCP server — and the corpus
-has to be writable with no ceiling on size. Those two demands contradict each other the moment both
-are read as *"run the engine here"*: wasm32 has roughly 4 GB of address space and **nowhere to
-spill**. A browser cannot be larger-than-RAM. That is the substrate, not the code.
+Three destinations have to work — a native command, wasm in a browser, and a product embedding the
+language — and the corpus has to be writable with no ceiling on size. Those demands contradict each
+other the moment they are read as *"run the engine here"*: wasm32 has roughly 4 GB of address space
+and **nowhere to spill**. A browser cannot be larger-than-RAM. That is the substrate, not the code.
 
-So the code is cut by where it runs, and each ring gets a different promise.
+So each layer gets a different promise. [Three hosts](/docs/design/three-hosts) is the argument;
+this is the shape.
 
 <Steps>
 
 <Step>
 
-### Ring 1 — the language. It knows no engine
+### The language layer knows no engine
 
-Parsing, types, name resolution, diagnostics, lowering to MIR, and the LSP that surfaces all of it.
-`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-resolver`, `fossil-lineage`, `fossil-base`,
-`fossil-shex`, the input and output descriptors, `fossil-lsp`, `fossil-ide`, `fossil-ide-db`.
+Parsing, types, name resolution, diagnostics, elaboration into the operator algebra, and the
+language server that surfaces all of it.
 
-**No dependency on `datafusion` or on `duckdb`.** That is what lets the LSP start in milliseconds
-and compile to wasm without dragging a database behind it. `fossil-mcp` belongs here too: it is
-tooling, and tooling that carries an engine is tooling you cannot deploy.
-
-</Step>
-
-<Step>
-
-### Ring 2 — the compiler. Native, batch, and it declares a budget
-
-`fossil-df`, `fossil-engine`, `fossil-sinks`, `fossil-cli`, and the pure layout core that
-ADR-0042 §5 lifts out of `fossil-runtime`.
-
-Takes MIR and sources, produces the corpus. **"No ceiling" lives here and only here**, and it is
-reachable precisely because this ring has a disk: a declared memory budget, and spill when the
-budget bites. A ring without a disk cannot promise that, which is why the promise cannot live in
-the other two.
+**No dependency on an execution engine.** That single negative fact is what lets the language server
+start in milliseconds and compile to wasm without dragging a database behind it — and it is what
+makes the checker in a browser tab the same checker rather than a reduced imitation of it.
 
 </Step>
 
 <Step>
 
-### Ring 3 — the reader. wasm, and it does not run programs
+### The compiler layer has a disk, and it declares a budget
 
-Addresses bytes against the corpus: reads the manifest, works out which ranges the camera is
-asking for, hands Arrow to the canvas. **No dependency on `datafusion` or on `duckdb`.**
+Takes the elaborated program and the sources and produces the corpus. **"No ceiling" lives here and
+only here**, and it is reachable precisely because this layer has a disk: a declared memory budget,
+and spill when the budget bites. A layer without a disk cannot promise that, which is why the
+promise must not live in a layer the browser shares.
 
-This is ADR-0042 §1 — *the camera is addressed, not queried* — applied to the engine and not only
-to the camera. Compiling the engine into the browser is a claim that the browser runs programs,
-which is exactly what that record decided against.
+</Step>
+
+<Step>
+
+### The reader addresses bytes, and does not run programs
+
+Reads the manifest, works out which byte ranges the camera is asking for, hands Arrow to the canvas.
+**No dependency on an execution engine** here either. Compiling the engine into the browser is a
+claim that the browser runs programs, and [the camera is addressed, not
+queried](/docs/characteristics/verbs).
 
 </Step>
 
@@ -79,27 +75,27 @@ which is exactly what that record decided against.
 
 ### The rule, and its guard
 
-> A crate may depend on its own ring and on lower-numbered ones. Never upward, and never on an
-> engine its ring does not declare.
+> A crate may depend on its own layer and on the ones beneath it. Never upward, and never on an
+> engine its layer does not declare.
 
-Checked, not agreed — a `cargo-deny` `wrappers` entry banning `duckdb` outside ring 2, and
-`datafusion` in rings 1 and 3.
+Checked, not agreed — a `cargo-deny` `wrappers` entry banning `duckdb` outside the compiler layer,
+and `datafusion` outside it too.
 
 <Callout type="warn" title="True today: the guard is written, was run, and is switched off">
 It was written and executed on 2026-08-05 and it came out **red**. What it caught on the first
-attempt is that `fossil-wasm` — the reader's ring — reaches the engine transitively, through
+attempt is that `fossil-wasm` — the reader — reaches the engine transitively, through
 `fossil-ide → fossil-engine`, while its own `Cargo.toml` says *"NOT pull `fossil-runtime` or any
 native UDF crate (Pitfall 3)"*. The rule had been written as a comment the whole time and the graph
 broke it anyway.
 
 It is not left enabled because `deny` is a hard CI gate and today it would break the branch for
 everyone. `deny.toml` on disk carries the advisory, licence and four-crate ban list, and **not** the
-ring rule. Turning it on is the first task of the migration, not a side effect of it: the day it
-passes, the migration is finished.
+layering rule. Turning it on is the first task, not a side effect of it: the day it passes, the
+work is finished.
 </Callout>
 
 That gap is the shape of the whole project right now. Twenty-four crates whose boundaries were drawn
-by **topic**, when what separates them is **where the code runs** — `fossil-mcp` is tooling and
+by **topic**, when what separates them is what each one may know — `fossil-mcp` is tooling and
 carries an engine; so does `fossil-cli`. The design did not bend because of a bad decision. It bent
 because of a decision nobody took.
 
@@ -110,5 +106,5 @@ because of a decision nobody took.
   <Card href="/docs/characteristics/bounded-write" title="The bounded write path" description="One flag, two engines, a spill test — and ten million vertices at 8.39 GiB against ~21. Why that is still not larger-than-RAM." />
   <Card href="/docs/characteristics/streaming" title="Streaming" description="Three seams named on structure: one landed, one was refuted by measurement, one still collects." />
   <Card href="/docs/characteristics/corpus-contract" title="The corpus contract" description="Four obligations chosen on the evidence of nine formats, and the one quarter of them that exists." />
-  <Card href="/docs/decisions" title="Decisions" description="Every record under decisions/, read from the directory at build time so the list cannot go stale." />
+  <Card href="/docs/design/discarded" title="What was discarded" description="Every alternative that was rejected, with the evidence against it and the observation that would bring it back. An entry that cannot state its last field does not go on the page." />
 </Cards>

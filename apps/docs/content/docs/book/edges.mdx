@@ -1,0 +1,72 @@
+---
+title: Edges
+description: Connect two entities by naming the target type and giving it the identity — why that is all the information required, and why an edge may point at a node nothing emits.
+---
+
+Most properties hold a value. Some hold another entity, and the shape document says which:
+
+<Program src="shop/shop.shex" region="order" title="shop.shex" />
+
+`shop:buyer @shop:Person` — this one does not take a string. It takes a `Person`. So you write one:
+
+<Program src="shop/shop.fossil" region="edge" title="shop.fossil" />
+
+Read it as *the `Person` whose identity is built from this email*. You name the type you are pointing
+at and hand it the value its identity needs. That is the whole form.
+
+## Why that is enough
+
+A `Person` in this program has exactly one identity, because
+[every mapping that produces one writes the same `@subject`](/docs/book/mappings#subject):
+
+<Program src="shop/shop.fossil" region="identity" title="shop.fossil" />
+
+So `Person(User.email)` is not a guess about what the other mapping might have minted. There is one
+answer and the compiler has it. You never write the IRI twice, which means the two copies can never
+drift apart — the failure that produces a graph full of nodes that almost join up.
+
+It also means the argument is checked. `Person` takes the thing its identity is built from, and if you
+hand it something of the wrong kind you hear about it at that line.
+
+## An edge is a reference
+
+This is the part worth being clear about, because the natural assumption is the other one.
+
+**An edge may point at a subject that no mapping in your program emits.** RDF is open-world: an IRI
+denotes whether or not anything in this corpus says something about it, and fossil keeps it that way.
+The check it does make is that the IRI is the right one — well formed, and built by the scheme that
+type uses. Whether the node at the other end is in this graph is a different question, and fossil does
+not ask it.
+
+Here is a program where that happens for real:
+
+<Program src="reviews/reviews.shex" title="reviews.shex" />
+
+<Program src="reviews/reviews.fossil" title="reviews.fossil" />
+
+The reviews name three people by email:
+
+<Program src="reviews/data/reviews.csv" title="data/reviews.csv" />
+
+The people file has two of them:
+
+<Program src="reviews/data/users.csv" title="data/users.csv" />
+
+`r3` mints `author = Person("dora@shop.example")`, and `People` never emits that node. The corpus gets
+an edge to `https://shop.example/user/dora@shop.example` and nothing that describes it. That is a
+correct RDF graph, and it is often the graph you meant — the second half of the data arrives from
+somewhere else, or it does not arrive at all and something downstream knows what to do about that.
+
+It also happens by accident, and the shape it usually takes is a filter upstream. In
+[the anatomy program](/docs/book/anatomy), `Orders` joins against `User` while `Users` maps from
+`Adults`, so an order placed by a seventeen-year-old points at a `Person` nobody wrote. If you want
+those edges to land inside your own graph, join against the same relation the mapping reads —
+`Purchase.join(Adults, ...)` rather than `Purchase.join(User, ...)`. That is a decision about your
+data, and the language leaves it to you.
+
+## Edges in both directions
+
+An edge lives on whichever entity the shape puts it on. There is nothing to declare on the other end,
+and no inverse to keep in step — `Order` has a `buyer`, and `Person` knows nothing about it. If you
+also want `Person` to have `orders`, the shape document declares that property and a mapping writes
+it, the same as any other.

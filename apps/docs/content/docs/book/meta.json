@@ -1,0 +1,23 @@
+{
+  "title": "The fossil book",
+  "description": "How to write a fossil program, from the first six lines to the reference.",
+  "pages": [
+    "getting-started",
+    "first-program",
+    "anatomy",
+    "what-you-produce",
+    "what-you-read",
+    "expressions",
+    "relations",
+    "mappings",
+    "edges",
+    "functions",
+    "diagnostics",
+    "editor",
+    "---Reference---",
+    "stdlib",
+    "grammar",
+    "typing",
+    "cli"
+  ]
+}

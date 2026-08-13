@@ -1,0 +1,130 @@
+---
+title: Three hosts
+description: A language designed to be embedded, cut by where the code runs rather than by what it is about — because three destinations and one unbounded promise contradict each other the moment all of them are read as "run the engine here".
+---
+
+fossil is designed to be embedded. Three destinations have to work, and they are not variations of
+one another:
+
+- a **native command**, run from a terminal or from a job scheduler;
+- **wasm in a browser**, where the editor and the checker live next to the person typing;
+- a **product embedding it**, which supplies credentials, storage and a job lifecycle and wants the
+  language to be a component rather than a subprocess it has to understand.
+
+Add the promise that a corpus has [no ceiling on its size](/docs/design/larger-than-ram) and the four
+requirements contradict each other — but only under one reading. If "this destination works" means
+*run the whole engine here*, then the browser must be larger-than-RAM, and it cannot be: wasm32 has
+roughly four gigabytes of address space and nowhere to spill.
+
+The resolution is to stop treating the destinations as configurations of one program, and to cut the
+code by **where it runs**, giving each layer a different promise.
+
+## Three layers, three promises
+
+**The language layer knows no engine.** Parsing, name resolution, types, diagnostics, elaboration
+into [the operator algebra](/docs/design/algebra), and the language server that surfaces all of it.
+It has no dependency on any execution engine, and that single negative fact is what buys two positive
+ones: it starts in milliseconds, and it compiles to wasm. The checker in a browser tab is the same
+checker, not a reduced imitation of it.
+
+**The compiler layer has a disk.** It takes the elaborated program and the sources and produces the
+corpus. *No ceiling* lives here and only here, because the promise is a budget plus spill and spill
+requires somewhere to spill to. A layer without a disk cannot make that promise, which is precisely
+why the promise must not live in a layer the browser shares.
+
+**The host layer decides the inputs of a run.** A memory budget, a credential, a destination. These
+are not properties of a language — nobody thinks a program means something different because it was
+given more memory — they are **inputs of a command**, and they belong to whoever issues the command.
+
+Gluon is the model here, and for a reason more specific than admiration: it is a small language whose
+entire problem statement is being embedded in a host application, and its documentation is organised
+around that fact. This is the same problem.
+
+## Why not cut by subject matter
+
+The obvious alternative is to organise the code by topic — parsing here, types there, the graph over
+there. Three reference compilers were examined for how they actually do it, and the finding is more
+interesting than the answer.
+
+| | cuts by |
+| --- | --- |
+| Gleam | **IO and purity** — a core that is entirely pure, with IO supplied by the crates that wrap it |
+| Gluon | **compiler phase** |
+| rust-analyzer | **semantic richness**, with explicitly declared API boundaries |
+
+**None of the three cuts by deployment target.** But all three cut by *what a piece of code is
+allowed to know*, and what they forbid is always the same thing: **knowledge of the outside world.**
+Deployment target is a proxy for that — a browser is exactly a place where the outside world is not
+available — so the cut fossil makes is the same cut those three make, expressed in the terms that
+make its constraint checkable.
+
+The other finding is what happens when the cut is right: **the shells collapse.** Gleam's entire wasm
+surface is around 352 lines, its binary six, its language-server transport sixty-nine. rust-analyzer's
+command-line entry point is not even a crate of its own. A thick shell is a symptom that the layer
+underneath is missing something, and a thin one is the evidence that the boundary is in the right
+place.
+
+And a caution taken from the same reading: **none of the three enforces its architecture with a
+test.** rust-analyzer's most-cited layering rule is held up by a comment in a manifest, repeated
+verbatim in two files. What actually does the work is a document that states the invariant **and its
+reason** — the reason being the part that survives contact with somebody who wants to break it. The
+one boundary that project defends hardest costs it roughly 3,180 lines of translation code, under one
+percent of its source, and that ratio is the honest price of a boundary worth having.
+
+## A boundary that is a threat model, not a taste
+
+One layer boundary here is not a matter of design preference at all, and it is worth naming because
+it looks mergeable.
+
+Resolving a source path can require credentials: fetching from an object store, signing a URL,
+holding secret material. That work needs facilities a browser does not have, and — more importantly —
+**the threat model deliberately keeps credential material off the wasm boundary.** So the layer that
+does it refuses to compile to wasm, by construction, and merging it into the layer that must compile
+to wasm would do two things at once: break the browser target, and place credential handling inside
+the browser.
+
+The proposal to merge them, when it was made, came from comparing two header comments that both
+described their file as a host-injection seam. Both comments were accurate. The constraint was
+elsewhere, in a conditional compilation directive, and it took seconds to check.
+
+> **The rule that came out of it: do not read prose where there was a checkable constraint.**
+> A dependency query, a search for a compile-time refusal, or a build against the target answers in
+> seconds a question that prose answers confidently and wrongly.
+
+## The test for the host boundary
+
+Embedding raises a question this design answers with a single criterion. The host owns credentials,
+storage, job lifecycle, multi-tenancy and its own interface. fossil owns *what this program computes
+and what it produces*. Where does a specific piece of work belong?
+
+> **Anything in the host that re-parses, re-derives or re-models the language's own knowledge is a
+> boundary violation.** And a program whose meaning — which graph it produces — changes with an
+> external flag is not self-contained; the definition of the output belongs **in** the program, next
+> to its sources and its transformations.
+
+That criterion is unusually productive, because it turns architecture arguments into deletions. A
+host that walks the compiler's intermediate representation to summarise a pipeline is re-deriving
+what the compiler already knows; the repair is not a better walker, it is the compiler emitting a
+description and the walker going away.
+
+The clearest instance was one capability — *given a program and access to its sources, produce a
+description of each source's type* — existing in **four** places, in two languages, in two
+repositories. The cost is not the duplication itself:
+
+> **Each copy has to agree about how a source's types map to the language's types, or the checker
+> silently disagrees with the editor.** Four copies are four chances to drift, and the drift is
+> invisible because each copy is individually correct.
+
+The shape that resolved it is the general answer for an embedded language: **the logic has one home,
+and the host injects the data plane.** The binding knows how to ask for a description and how to
+build a type from the answer; the host supplies *how to reach the source* and *what executes the
+query*. The entire argument about whether the schema read should happen in the browser or on the
+server then dissolves into "what does the host pass in" — and the binding does not care, which was
+the point.
+
+## What this document deliberately does not contain
+
+The layers are a design, not an inventory. Which units of code sit in which layer is a fact about the
+tree, it changes as the tree changes, and a list of them printed here would be wrong before it was
+useful — the same failure this document exists to stop repeating. The embedding surface itself is
+generated from the code that defines it, for the same reason.

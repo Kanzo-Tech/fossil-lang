@@ -32,8 +32,10 @@ import type {
 /**
  * Install the LSP-over-postMessage dispatcher on the current Worker scope.
  *
- * Per ADR-0024 (`fossil-wasm` IS the LSP server-side) + Phase 7 plan 07-03
- * (the 16-route dispatch loop). The Rust function (re-exported from
+ * `fossil-wasm` IS the LSP server-side in the browser: `fossil-lsp` is
+ * native-only (it speaks stdio over crossbeam and does not compile to
+ * `wasm32`), so the Worker gets an equivalent 16-route dispatch loop over the
+ * same `fossil-ide` free functions. The Rust function (re-exported from
  * `crates/fossil-wasm/src/lsp_worker.rs`) installs `self.onmessage` on the
  * Worker scope and owns LSP JSON-RPC dispatch from that point forward.
  *
@@ -56,8 +58,8 @@ export type FileHandle = RawFileHandle;
 
 /**
  * Tokenize a Fossil source string. Returns the byte-range tokens from the
- * canonical Rust lexer (`fossil_syntax::lexer::raw_lex`) — single grammar
- * source of truth per ADR-0030.
+ * canonical Rust lexer (`fossil_syntax::lexer::raw_lex`) — the single grammar
+ * source of truth, so no editor ever reimplements the lexer in TS and drifts.
  *
  * MUST be called after {@link initFossilWasm} has resolved; otherwise the
  * underlying wasm-bindgen function throws (the wasm module is not yet
@@ -109,7 +111,7 @@ export function providers(): ProviderInfo[] {
 }
 
 /**
- * Workspace API class (ADR-0024). Thin TS wrapper around the wasm-bindgen
+ * Workspace API class. Thin TS wrapper around the wasm-bindgen
  * `FossilPlayground` that exposes camelCase method names for JS idiom + better
  * TS inference (the raw bindings use snake_case from the Rust impl block).
  *
@@ -152,8 +154,9 @@ export class FossilPlayground {
 
   /**
    * Apply an edit to an open file. Mutates the SAME `SourceFile` via the Salsa
-   * `Setter` (`set_text`) — bumps the revision (ADR-0022) for incremental
-   * invalidation rather than a full recompute.
+   * `Setter` (`set_text`) — bumps the revision for incremental
+   * invalidation rather than a full recompute, and that revision bump is also
+   * what cancels any analysis still running on an older snapshot.
    */
   updateFile(handle: FileHandle, contents: string): void {
     this._inner.update_file(handle, contents);
@@ -184,12 +187,16 @@ export class FossilPlayground {
   }
 
   /**
-   * Register an {@link InferredDescriptorJson} for a source binding name BEFORE
-   * invoking {@link check}. The Rust compiler reads from this during forward
-   * type propagation.
+   * Register an {@link InferredDescriptorJson} under the source URI the program
+   * wrote, BEFORE invoking {@link check}. The Rust compiler reads from this
+   * during forward type propagation.
+   *
+   * The compiler never introspects a source itself: it performs no network or
+   * file IO — that would break the WASM gate and Salsa's determinism alike —
+   * so a host that wants column types must run the `DESCRIBE` and push the
+   * result in here.
    *
    * @throws Error if the descriptor JSON fails to deserialise on the Rust side.
-   * @see ADR-0037
    */
   registerInferredDescriptor(descriptor: InferredDescriptorJson): void {
     // The wasm-bindgen wrapper accepts a JSON string; serialise here so callers

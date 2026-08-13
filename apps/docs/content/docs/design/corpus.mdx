@@ -1,0 +1,113 @@
+---
+title: The corpus
+description: What a fossil program produces — a graph in columnar files, addressable by byte range with no service in the path — and why write-once/read-many is the topology that makes whole-program checking available in the first place.
+---
+
+A fossil program produces a **corpus**: a graph written to disk as columnar files with a manifest
+that names them. Not a database to connect to, not a stream to consume, not an endpoint. Files.
+
+The consequence that matters is what a reader has to do to use one. A reader that wants a slice of
+the graph works out which byte ranges hold it and fetches those ranges — from a local path, from an
+object store, from a plain web server. **There is no service in the path**, and therefore no query
+language between the reader and the data, no process to keep alive, and no version of the writer the
+reader has to match.
+
+## Addressable, and what that buys
+
+"Addressable" is the load-bearing word, and it means something narrower than "readable".
+
+An address is computed, not discovered. Given the manifest, a reader derives the location of every
+piece it wants **before it issues a single request** — arithmetic on identifiers and sizes, not a
+lookup that has to be answered first. That property is what makes the corpus work over a plain
+origin, and the evidence for it is a constraint that catches people out: **you cannot list a
+directory over HTTP.**
+
+That is why the shape of a naïve reader is wrong in an interesting way. Expanding a wildcard over
+files *is* listing a directory. It works against a local filesystem, and it works against an object
+store whose API offers listing, and it fails in a browser against a plain origin — which is the
+worst possible distribution of a failure, because every environment a developer tests in succeeds and
+the deployment target does not. A corpus is therefore designed so that nothing is discovered by
+listing: what exists is derivable from what the manifest declares.
+
+The lineage here is explicit and worth naming, because this pattern was solved elsewhere first:
+**Cloud-Optimized GeoTIFF → GeoParquet → PMTiles.** One file or a small set, an embedded directory,
+data laid out in an order that makes spatial locality into byte locality, and a client that issues
+HTTP range requests with no server-side component at all. Copying that schema is cheaper and more
+correct than inventing one.
+
+## The artifact is the API
+
+The design stance follows the table formats — Iceberg, Delta Lake, Lance — where a manifest plus a
+set of files is the interface, *many* engines read the same table, and **none of them is the
+contract**. The specification is the contract; an implementation is one reader.
+
+That stance imposes obligations most projects discover late.
+
+**Arithmetic that a reader must reproduce has to be published as arithmetic.** Iceberg is the good
+example: it publishes the hash function, the seed, and a table of test vectors per type — searching
+for one of those constants finds it in the tests of independent implementations that copied it.
+PMTiles is the counterexample: it dispatches its space-filling curve with a link to an encyclopedia
+article, and every port re-derives it. A reader that computes a different address from the same
+manifest is not a bug report; it is a divergence nobody notices until the data is wrong.
+
+**Two implementations before a format change, not after.** Arrow requires a second implementation
+and integration tests *before* a format change lands, which is why its gaps show up as skipped lines
+rather than as incorrect answers. A format whose test corpus does not round-trip through two
+independent readers is a format whose reference implementation is normative by accident.
+
+**And "by accident" is the specific fate to avoid.** Parquet's enduring problem is thirteen years of
+files that cannot be withdrawn, with a reference implementation that became normative without anyone
+deciding it and writer-version strings parsed against tables of known-bad releases. Every one of
+those is the cost of the same missing decision, taken too late.
+
+Which is why **capability negotiation is not built into a corpus that nobody else reads**, and why
+the trigger for building it is written down rather than left to judgement: *the day a corpus leaves
+this machine towards somebody who cannot regenerate it.* Before that day the mechanism answers a
+question nobody has asked. After it, it is late.
+
+## Why write-once/read-many is not an implementation detail
+
+A corpus is written once and read many times. That is a topology, and it is the reason two things
+elsewhere in this document are possible at all.
+
+**The whole-program checks.** [Identity is unique per type](/docs/design/identity) because a fossil
+program is compiled in one piece, by one compiler, with every mapping in front of it. That check is
+unavailable to any system whose parts are deployed independently — which is exactly why the one
+federation system that shipped an equivalent check removed it. The check exists here because the
+topology is the opposite one, and the topology is a consequence of write-once.
+
+**The absence of concurrency in the write path.** A dataset with no concurrent readers while it is
+being written does not need atomic renames, lock files, visibility protocols or a transaction log.
+Those mechanisms exist to protect a reader from seeing a half-written state; when there is no such
+reader, they are cost without benefit. Removing them is not a shortcut — it is declining to pay for a
+guarantee the topology already provides.
+
+## What a corpus can carry
+
+RDF terms, quads, and named graphs. A graph is not restricted to triples, and the container is not
+restricted to one graph — which is the difference between a corpus and a file of statements.
+
+It is worth being precise about the boundary, though, because a columnar layout imposes a real one.
+**A cell in a columnar file carries a value, not a term with its trimmings.** Everything that makes
+an RDF literal more than a lexical form — its language tag, and in RDF 1.2 its base direction — is
+information that has to be carried explicitly by the layout or it is gone at the pivot into columns.
+
+And it is not a comfortable loss, which is why it is stated here rather than filed as a detail. Base
+direction exists precisely because the first strong character of a string does **not** determine how
+it should be laid out. A value returned without it is not an impoverished value; it is a value the
+host will render backwards, and there is nothing in the cell that lets a downstream consumer detect
+that it happened. Any part of the design that widens what a term can carry has to answer this
+question first, because the answer is what decides whether a round trip is lossless.
+
+## Where the format lives
+
+The corpus is documented as a format in its own right — the conventions, the measurement behind each
+one, and executable guards that check a corpus on disk against them — on its own site, in
+`apps/corpus`. That site is written for somebody implementing a reader, and it deliberately requires
+no knowledge of the language.
+
+The division is the same one this whole document rests on. **The language is one product and the
+corpus is another, and the seam between them is the artifact.** A reader with a Parquet
+implementation and the specification can read a fossil corpus without any part of fossil — which is
+the strongest available statement that the artifact really is the interface, rather than a
+serialisation of somebody's object graph that happens to be documented.

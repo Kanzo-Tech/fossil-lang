@@ -3,9 +3,12 @@
 JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Provides:
 
 - `initFossilWasm({ wasmUrl })` — consumer-controlled `.wasm` URL loader (memoised).
-- `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]` (ADR-0030).
-- `semanticLegend()` — returns the LSP semantic-tokens legend (Phase 6 plan 06-07).
-- `FossilPlayground` — the Workspace API class (ADR-0024) for LSP + compile.
+- `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
+  is the only lexer: no host reimplements one and drifts from the grammar.
+- `semanticLegend()` — returns the LSP semantic-tokens legend.
+- `FossilPlayground` — the Workspace API class for LSP + compile. `fossil-lsp`
+  itself is native-only (stdio over crossbeam), so the browser gets this
+  equivalent dispatch surface over the same `fossil-ide` functions.
 
 ## Why explicit `init({ wasmUrl })` and not auto-load?
 
@@ -23,7 +26,7 @@ import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
 import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 
 await initFossilWasm({ wasmUrl });
-const tokens = tokenize('prefix ex: <https://example.org/>');
+const tokens = tokenize('User := io.csv("data/people.csv")');
 ```
 
 ### Next.js host (in a Client Component)
@@ -63,8 +66,6 @@ Optionally `wasm-opt` (binaryen) for size reduction.
 
 ## Source of truth
 
-- Rust crate: `crates/fossil-wasm/`
-- tokenize ADR: `decisions/0030-wasm-exported-tokenizer.md`
-- Workspace API ADR: `decisions/0024-fossil-wasm-workspace-api.md`
-- Distribution pattern: `decisions/0028-playground-as-react-library.md`
-  (this package is one of the six in the `@fossil-lang/*` family)
+- Rust crate: `crates/fossil-wasm/` — everything here is a wrapper over its
+  wasm-bindgen exports, and nothing in this package reimplements it.
+- The grammar the tokenizer follows: `grammar.bnf` at the repo root.

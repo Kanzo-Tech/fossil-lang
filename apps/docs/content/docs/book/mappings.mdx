@@ -1,0 +1,108 @@
+---
+title: Mappings
+description: Write a mapping body that satisfies a shape — the header and its two names, the two rules `@subject` obeys, property assignments, and what a missing property costs.
+---
+
+A mapping is where a row becomes a node. It has a header that says what it produces and where the
+rows come from, and a body that says what the node holds.
+
+<Program src="shop/shop.fossil" region="first-mapping" title="shop.fossil" />
+
+## The header, and its two names
+
+<Program src="shop/shop.fossil" region="header" title="shop.fossil" />
+
+*The mapping called `Users` produces `Person`s, one per row of `Adults`.*
+
+- **`Person`** is the type. It came from the shape document, and it is the contract this body is
+  checked against: which properties may appear, what each holds, how many there may be.
+- **`Users`** is the mapping's own name.
+- **`Adults`** is the relation. One node per row of it.
+
+The mapping's name is there because two mappings can produce the same type. When something is wrong
+across both of them, a diagnostic has to be able to say which is which, and "`Users` and `Imported`"
+is a sentence you can act on in a way that "two mappings of `Person`" is not.
+
+The source can be any relation, including one built on the spot:
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+There is no colon at the end of a header. The body is opened by the indentation, and the header
+already has one colon doing a job.
+
+## `@subject`
+
+The first line of every body is the identity:
+
+<Program src="shop/shop.fossil" region="identity" title="shop.fossil" />
+
+An IRI is not in your data — you mint one — and in RDF the subject **is** the node rather than one of
+its properties, so a shape document has nowhere to declare it. The language owns the slot instead,
+and marks it with `@` so that it can never be confused with a property your vocabulary happens to
+call `subject`.
+
+It is an assignment. The right-hand side is an ordinary expression, and the string is interpolated
+like any other — see [values and expressions](/docs/book/expressions).
+
+Two rules apply here and nowhere else in the body.
+
+**It depends only on the row.** An identity that reaches for anything but the data of the row it is
+identifying is not reproducible, and the checker refuses it. This is not a style guide.
+
+**One per type.** Every mapping that produces `Person` writes the same `@subject`. Two that disagree
+is an error, and it names both mappings and both templates:
+
+<Program src="errors/two-identities/program.fossil" title="program.fossil" />
+
+<Program src="errors/two-identities/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+That is an error rather than a warning on purpose. A warning about identity gets scrolled past, and
+what you get for scrolling past it is two nodes where you meant one — which is exactly the kind of
+damage that surfaces months later as a graph that will not join up.
+
+The rule is also what makes [edges](/docs/book/edges) as short as they are: because a type has one
+identity, naming the type is enough to know the IRI.
+
+## Property lines
+
+<Program src="shop/shop.fossil" region="properties" title="shop.fossil" />
+
+The key is a bare name — the last segment of the predicate IRI the shape declares. The value is any
+expression.
+
+The shape decides what is allowed on the right. `shop:email` is `xsd:string`, so the expression has
+to produce a string. `shop:total` is `xsd:float`, so an `Integer` column is fine — a whole number is
+a float — and a `String` column is not:
+
+<Program src="errors/wrong-type/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+Two spans, because the error is a disagreement between two places and blaming one of them would be
+half the story.
+
+## What the shape requires, you write
+
+A property the shape requires and the body never mentions is an error. It cannot be caught at any one
+line — it is about a line that is not there — so it is reported against the mapping as a whole:
+
+<Program src="errors/missing-property/shape.shex" title="shape.shex" />
+
+<Program src="errors/missing-property/program.fossil" title="program.fossil" />
+
+<Program src="errors/missing-property/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+The mirror of that: `shop:phone xsd:string ?` is optional, and leaving it out is fine. If you do write
+it, an ordinary non-optional expression satisfies it without being wrapped in anything.
+
+Cardinality is checked from both ends. A property the shape allows at most one of does not accept a
+sequence, and nothing is silently lifted into a sequence to make it fit — that would hide precisely
+the mistake worth catching.
+
+## Two mappings of one type
+
+Perfectly ordinary. Two populations of `Person`, taking their name from different columns, agreeing
+on identity:
+
+<Program src="two-mappings/two-mappings.fossil" region="both" title="two-mappings.fossil" />
+
+Same type, same identity scheme, two sets of rows. What you cannot do is give one type two identity
+schemes, and that rigidity is the price of everything on this page.

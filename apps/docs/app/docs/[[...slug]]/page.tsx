@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page";
+import { MarkdownCopyButton, ViewOptionsPopover } from "fumadocs-ui/layouts/docs/page";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 import { Registers } from "@/components/registers";
@@ -11,11 +12,18 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
   if (!page) notFound();
 
   const MDX = page.data.body;
+  const markdownUrl = `${page.url}.mdx`;
 
   return (
     <DocsPage toc={page.data.toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
+      {/* One row, so each control sizes to its content: as bare children of DocsPage's flex column
+          they stretch to the full page width. No `githubUrl` — this repo has no remote. */}
+      <div className="flex flex-row flex-wrap items-center gap-2 border-b pt-2 pb-6">
+        <MarkdownCopyButton markdownUrl={markdownUrl} />
+        <ViewOptionsPopover markdownUrl={markdownUrl} />
+      </div>
       {/* Above the body, always. The two registers are the page's contract with the reader, and a
           contract at the bottom is a footnote. */}
       <Registers direction={page.data.direction} today={page.data.today} />

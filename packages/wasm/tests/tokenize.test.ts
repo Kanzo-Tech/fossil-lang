@@ -73,8 +73,7 @@ describe('@fossil-lang/wasm — semanticLegend', () => {
     // Phase-6 06-07 ships 10 tokenTypes (keyword, namespace, type, function,
     // property, string, number, operator, comment, variable). We assert
     // non-emptiness rather than the exact count so additive legend changes
-    // don't break this test (mirrors 08-02's ADR-0030-friendly stance on the
-    // TokenRow.kind contract).
+    // don't break this test — appending is compatible, reordering is not.
     expect(legend.tokenTypes.length).toBeGreaterThan(0);
   });
 });
@@ -116,7 +115,7 @@ describe('@fossil-lang/wasm — FossilPlayground class', () => {
       // A bare prefix decl on its own is incomplete (no mapping rules) — the
       // type checker emits at least one diagnostic. We assert structural
       // shape rather than exact count to stay robust against future
-      // diagnostic-message tweaks (ADR-0030-friendly stance).
+      // diagnostic-message tweaks.
       if (diags.length > 0) {
         expect(diags[0]).toHaveProperty('uri');
         expect(diags[0]).toHaveProperty('range');

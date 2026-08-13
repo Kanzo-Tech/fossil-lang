@@ -1,0 +1,123 @@
+---
+title: The dot, and what it costs
+description: One access operator, one binder, and verbs as catalogue rows rather than grammar — with the one thing this design pays for stated as a cost and the three observations that would reverse it.
+---
+
+fossil has one access operator, and it means one thing.
+
+> **`.` means *member of*, and the type on the left decides what is on the right.**
+
+| On the left | Its members are |
+| --- | --- |
+| a **namespace** — `io`, `str`, `parse`, `clean` | its functions |
+| a **type** — `User`, `Person` | its fields |
+| a **relation** — `Users`, `Adults` | its operations — `where`, `select`, `join` |
+
+That is the entire access story. `User.email` is a field of a type; `str.lower` is a function of a
+namespace; `Adults.where(…)` is an operation of a relation. Reading any fossil expression requires
+knowing what is on the left, and nothing else.
+
+## Why there is no second operator
+
+The obvious alternative is Rust's, where `::` walks a path known at compile time and `.` accesses a
+value at run time. It is a good distinction in Rust. It has **no referent here**.
+
+A fossil program does not execute. It is elaborated into
+[an operator tree](/docs/design/algebra) and lowered; `User.age` is not a field read at run time,
+it is a column reference that becomes SQL. There is no moment at which one side of that distinction
+is happening and the other is not, so importing the two operators would import a difference the
+language does not have — and a reader would have to learn a rule whose justification they can never
+observe.
+
+One operator, and the type answers.
+
+## Verbs are rows, not grammar
+
+`where`, `select` and `join` are not keywords. They are catalogue entries whose receiver type is a
+relation, in exactly the way `lower` is a catalogue entry whose receiver type is a string. Nothing
+about them is special except what they operate on.
+
+The consequence is the point: **a new capability is a row, never a production.** Adding an operation
+over relations does not touch the grammar, the parser, the checker's dispatch or the editor's
+completion, because none of those know the names of verbs — they know how to ask a type what it has.
+That is the same property [the provider registry](/docs/design/type-providers) has, and the same one
+that lets [the standard library be generic](/docs/design/generic-functions), and it is not three
+properties. It is one, seen from three sides.
+
+It also removes an ambiguity the language would otherwise have to carry. When a namespace is
+something that is not a value, `clean.slug` without parentheses has to mean "a named function, not
+applied", and that is a special case in the parser justified entirely by the namespace's oddity. With
+typed members, there is no such case to write.
+
+## `:=` binds, `=` assigns
+
+Two glyphs, and the distinction is real rather than decorative.
+
+`:=` introduces a name — a shape binding, a source binding, a derived relation. What kind of thing is
+being bound is said by the left-hand side, not by the operator, so one binder suffices for all of
+them.
+
+`=` is what it looks like everywhere else: an assignment inside a mapping body, including the
+identity slot. The line `name = User.name` puts a value into a slot the shape declared; it does not
+introduce a name.
+
+The rule to hold on to is that a binder appears where something enters scope and an assignment
+appears where a slot gets filled. Those are different acts, and a language that spells them the same
+way makes the reader work out which is happening from context.
+
+## The cost, stated as a cost
+
+This design has one price, and it is paid in the corpus rather than in the compiler.
+
+**One catalogue entry is reachable by two paths.**
+
+<Program src="contacts/contacts.fossil" region="two-paths" title="contacts.fossil" />
+
+Those two lines call the same entries. `Contact.email.trim()` reaches `trim` through the value;
+`str.trim(Contact.name)` reaches the same `trim` through the type. Both are correct, both will
+appear in real programs, and anybody reading a corpus of fossil programs will see both spellings of
+the same idea.
+
+The house rule against two ways of saying one thing is a real rule, and this is a genuine exception
+to the letter of it. What makes it acceptable is that it is a **resolution rule** rather than two
+constructs: there is one entry, one signature, one implementation, and two ways to name the same
+member — which is precisely `s.len()` ≡ `str::len(&s)` in Rust and `s.upper()` ≡ `str.upper(s)` in
+Python, the two languages the largest number of programmers read. The cost is that it has to be
+explained once, and it is explained once, in
+[the book's page on expressions](/docs/book/expressions).
+
+## What would reverse this
+
+Three observations, in the order they would arrive.
+
+**1. A type whose set of members cannot be decided statically.** The entire design rests on the
+receiver being known at compile time. A receiver whose members depend on data — a source format
+whose columns vary per row, a dynamically assembled record — would break not the syntax but the
+premise underneath it, and the answer would have to be a different one.
+
+**2. The two paths of the resolution rule being used for different things.** The moment an idiom
+appears where `str.lower(x)` means something `x.lower()` does not, they stop being one entry reached
+two ways and become two spellings — which is the thing the house rule actually prohibits. This is
+observable in the corpus rather than arguable: it is a question about what people wrote, and the
+corpus is where to look.
+
+**3. A real vocabulary whose short names collide so often that renaming becomes the norm.** Property
+keys are the last segment of a predicate IRI, and
+[the rename](/docs/design/type-providers) exists for the occasional collision between vocabularies.
+If a working program needs a rename on most of its properties, the short name has stopped being the
+name, and the argument for bare keys goes with it.
+
+## What is still open
+
+Two questions this design raises and does not close, stated as questions rather than as gaps.
+
+**Where `select` lives when the relation came from a join.** A join produces a relation whose row
+type is the union of two schemas; projecting from it is well defined, and *how it is written* — which
+side qualifies, and whether the qualification survives into the mapping body — is a surface question
+with more than one defensible answer.
+
+**Whether `io` should also name the destination.** Sources are named by a provider in the program;
+the destination is an input of the command that runs it. There is a real argument on each side — a
+destination is an operational decision belonging to whoever launches the job, and it is also the one
+part of a program's meaning that lives outside the program. What would settle it is a program whose
+output location is part of what makes it that program rather than another one.

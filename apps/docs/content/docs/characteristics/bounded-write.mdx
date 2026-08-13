@@ -3,7 +3,7 @@ title: The bounded write path
 description: A write path that honours a declared memory budget at any N — the flag, the spill test, and the measured distance to larger-than-RAM.
 direction:
   summary: The write path honours a declared memory budget at any N, so a corpus larger than the machine is a slower run rather than an OOM.
-  decidedBy: decisions/0043-el-tipo-de-la-frontera.md
+  arguedIn: /docs/design/larger-than-ram
 today:
   summary: "`fossil run --memory-gib` declares one budget that governs both engines, a spill test asserts the mechanism in CI, and ten million vertices peak at 8.39 GiB against roughly 21 unbounded — but the peak still grows with N."
   backedBy: crates/fossil-df/tests/spill.rs
@@ -12,9 +12,9 @@ today:
 ## The destination
 
 `fossil run` accepts a memory budget and stays inside it, at any corpus size. Exceeding the machine
-means spilling to disk and taking longer, never dying. That is the ring-2 promise and it can only
-live in ring 2, because ring 2 is the only one with a disk to spill to — a browser has roughly 4 GB
-of address space and nowhere to put the overflow.
+means spilling to disk and taking longer, never dying. That is the compiler layer's promise and it
+can only live there, because it is the only layer with a disk to spill to — a browser has roughly
+4 GB of address space and nowhere to put the overflow.
 
 What is not reached is the *any N*. Everything below is inside that gap.
 
@@ -51,14 +51,14 @@ size wrapped in a `TrackConsumersPool`. Without one it falls back to `SessionCon
 unlimited pool with no disk manager, and therefore a configuration in which larger-than-RAM is not
 untested but impossible by construction.
 
-**The same number also configures DuckDB.** ADR-0043's stage-4 table had said to delete DuckDB's
+**The same number also configures DuckDB.** The plan had said to delete DuckDB's
 `apply_resource_limits` as a duplication; read against the code that turned out to be wrong, because
 the layout pass still runs on DuckDB and deleting its `memory_limit` removes the only bound that
 engine has. What was duplicated was the *way of declaring it* — three environment variables against
 one flag. So the function became `apply_memory_budget(conn, bytes)`, takes the run's number and sets
 `memory_limit` plus a `temp_directory`; the three variables are gone. One declared budget, two
-engines, one place to declare it. The ADR was amended with the reasoning rather than followed against
-the evidence.
+engines, one place to declare it. The plan was corrected against the code rather than followed
+against the evidence.
 
 ### The join that would not honour it
 
@@ -97,7 +97,7 @@ is part of the contract rather than a detail of the implementation.
 
 <Callout title="This page cites a test now, and this is what the test does not test">
 `backedBy` used to point at `crates/fossil-df/src/lib.rs` — the implementation — because the spill
-test ADR-0043 stage 4 specifies had not been written. It has been, so the citation is an assertion
+test the budget owes had not been written. It has been, so the citation is an assertion
 now rather than the presence of a feature.
 
 Read what it asserts narrowly, because the file says so itself: it proves that a declared budget
@@ -138,7 +138,7 @@ data does not vary by 3.7 GiB. It was operator memory nobody had bounded.
 | `community_hierarchy` | +2.09 GiB · 135.0 s | **+0.08 GiB** · 168.0 s |
 | process peak | 10.10 GiB | **8.39 GiB** |
 
-**−1.71 GiB, against the ≈ −1.7 GB the ADR predicted**, and the corpus is byte-identical again: 87
+**−1.71 GiB, against the ≈ −1.7 GB predicted before it was attempted**, and the corpus is byte-identical again: 87
 files, all 87 md5s equal to the previous binary's, and the three parity tests in
 `crates/fossil-runtime/tests/layout_renumber.rs` passed without being touched.
 

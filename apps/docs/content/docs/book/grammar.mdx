@@ -1,0 +1,33 @@
+---
+title: 'Reference: the grammar'
+description: The normative grammar of fossil, included whole from the one file that states it, with a short guide to reading it.
+---
+
+Everything else in this book explains the language. This page settles it. Below is `grammar.bnf`,
+included whole from the single file that states the syntax — the same file the parser is written
+against. No page anywhere restates a production, so if a question about syntax survives the rest of
+the book, the answer is here and it is the only answer.
+
+## Reading it
+
+**The notation.** `:=` defines a production. `|` is alternation. `X*` is zero or more, `X+` is one or
+more, `X?` is optional. Quoted text is a literal. `(* ... *)` is a comment.
+
+**Two layers.** The lexical layer names the tokens — identifiers, strings, numbers, operators — and
+the grammar layer names what they can be arranged into. `INDENT` and `DEDENT` are virtual tokens the
+lexer produces from the column of each line, which is how a mapping body gets opened without a
+delimiter.
+
+**Where to start.** `Program` is the top. It is a list of top-level items, and there are only a few
+kinds: a binding, a type binding and a mapping. From `Mapping` you reach the header, `@subject` and
+the property lines; from `Expression` you reach the whole expression grammar, written lowest
+precedence first, so the further down the list a production is, the tighter it binds.
+
+**One thing that is easy to miss.** String interpolation is in this grammar and not in the lexer. A
+string with a hole in it is carved into a run of tokens, and what is inside the hole is read by the
+ordinary expression parser — which is why a `{...}` is checked exactly like an expression anywhere
+else, and why there is no second little language for identity templates.
+
+## The grammar
+
+<Program src="grammar.bnf" repo title="grammar.bnf" />

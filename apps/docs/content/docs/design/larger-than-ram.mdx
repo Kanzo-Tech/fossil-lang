@@ -1,0 +1,120 @@
+---
+title: Larger than RAM
+description: A declared memory budget plus spill is a different promise from "efficient" — it makes exceeding the machine a slower run rather than a failed one — and it is a promise only a host with a disk can make.
+---
+
+"Efficient" is a comparison. **Larger than RAM is a guarantee**, and the difference between them is
+the whole of this page.
+
+An efficient pipeline uses less memory than a wasteful one, which tells you nothing about what
+happens at the size where it stops fitting. A pipeline with a declared budget answers that question
+in advance: **exceeding the machine is a slower run, not a failed one.** The corpus that comes out is
+the same corpus.
+
+Two mechanisms together produce that, and neither one suffices:
+
+- **A budget bounds the operators inside the pool.** They reserve before they allocate, and they
+  spill when told no.
+- **[A stream bounds everything outside it](/docs/design/streaming).** A stage boundary that holds a
+  whole value is memory the pool never sees, and it dies with the budget honoured.
+
+## A budget is a protocol, not a flag
+
+This is the design claim, and it is the one that decides whether the guarantee is real.
+
+*Try, and die if it does not fit* is not a mode any serious execution engine offers. The three
+references implement the same shape as each other: a memory pool with a reservation API, a disk
+manager, and operators that ask before they allocate. The form is always **the operator reserves
+before it allocates and knows what to do when it is told no.** A pool is not a limit checked after
+the fact; it is a conversation the operator has to be able to hold up its end of.
+
+Two consequences follow, and both are the sort found by measuring rather than by reading.
+
+**A budget with nowhere to spill turns slowness into an error.** The limit and the temporary
+directory are one decision, set together. Separately, the first one converts a job that would have
+been slow into a job that fails — which is worse than having no budget at all, because it fails at
+the size where the budget was supposed to help.
+
+**A budget only means something if the operators can honour it.** The build side of a hash join
+declares that it cannot spill. Told that it may not allocate, it has nothing to give back, and it
+dies. A sort-merge join spills. So a bounded plan has to be a plan built out of operators that can
+honour a refusal — which means the planner's preference for hash joins is something the bounded
+configuration overrides, not a tuning knob. This was not deduced: the pool names its consumers when
+it refuses, and the refusal identified the non-spilling side of a join, once per partition, by name.
+
+## The floor is a property of the machine, not a number you pick
+
+The least obvious part of the contract, and the part that surprises people who expect a budget to be
+freely chosen.
+
+Each partition of a sort reserves a fixed amount up front for its own merge, and declares that
+reservation non-spillable. That reservation is per partition, and the number of partitions follows
+the number of cores. **So the minimum viable pool grows with the width of the machine.**
+
+Measured on a ten-core machine, the shape of it: a pool of 384 MiB dies — five merge reservations
+holding their fixed amount each, with nothing left to run in — and 480 MiB runs and spills, and keeps
+spilling well above that. Which is why the floor is expressed as **memory per core** rather than as a
+round total, and why **a budget of a hundred megabytes is not viable at any corpus size**. It is not
+a small budget; it is a budget below the floor of the machine it is running on.
+
+Stating a floor is part of stating a guarantee. "Any budget works, it just gets slower" would be the
+comfortable claim and it is false.
+
+## Where the budget is declared
+
+One number, declared by the command that launched the job, reaching every engine in the path.
+
+It is not an environment variable, and that is a decision rather than an omission: **a number that
+decides whether a job survives is declared by the command that launched it, not by whichever shell
+happened to be open.** A budget in the environment is a budget that differs between the run you
+tested and the run that mattered, and the difference is invisible in the artifact.
+
+## Why this promise cannot live everywhere
+
+Here is the constraint that shapes the whole codebase, and it is the substrate rather than the code.
+
+**wasm32 has roughly four gigabytes of address space and nowhere to spill.** A browser tab cannot
+make this promise. Not a limitation waiting to be lifted — **cannot**, in the way that a machine
+with no disk cannot promise durability.
+
+Meanwhile fossil has to run in a browser, because the checker and the editor experience go where the
+user is. Those two facts contradict each other the moment both are read as *run the engine here* —
+and the resolution is that they are not read that way. The promise lives in the layer that has a
+disk, and the layer the browser shares does not contain it.
+
+That is the argument [the three hosts page](/docs/design/three-hosts) is entirely about, and it is
+the reason the code is cut by where it runs rather than by what it is about.
+
+## The honest exception: state an algorithm genuinely needs
+
+Streaming everything is not achievable, and pretending otherwise is how a guarantee becomes a
+slogan. Some algorithms need state proportional to the graph, and the honest answer is a **bounded
+working set** rather than zero.
+
+The layout pass is the worked example, and it is a good one because each of its three parts has a
+different memory story.
+
+- **Connected components by union-find** needs one entry per vertex. That is O(V) and there is no
+  streaming formulation that removes it; what it does not need is the edge list resident, because it
+  consumes edges in sequence.
+- **Placement by the golden angle** — phyllotaxis, the arrangement a sunflower head uses — is a
+  closed-form function of an index. It needs no neighbourhood, no iteration and no state beyond the
+  counter, which is why it is the placement in the pipeline rather than a force simulation.
+- **Ordering by Morton code** is arithmetic on the coordinates of a single point, so the sort is the
+  only thing with a footprint, and a sort is precisely the operator class that spills.
+
+The pattern to take from it: the parts that need O(V) state are the parts where that is intrinsic,
+and everything around them is either streaming or spilling. A design that claims zero state would
+have to be hiding it somewhere — usually in a data structure whose size follows the input and whose
+allocation nobody wrote down.
+
+## What is hard to prove, and should be said
+
+Spill evidence is fragile. The temporary files are deleted when the job ends, the disk-usage counter
+returns to zero, and per-plan metrics do not survive the execution that produced them. **The log is
+the only evidence that outlives the run.** Anything asserting that a job spilled rather than merely
+survived has to capture it while it is happening, and a test that checks only the output cannot
+distinguish "spilled successfully" from "happened to fit".
+
+That is not a limitation of the design; it is a property of the thing being measured, and it decides
+what a test in this area is allowed to claim.

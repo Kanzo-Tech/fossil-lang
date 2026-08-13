@@ -1,0 +1,82 @@
+---
+title: Naming what you read
+description: Bind a CSV, a JSON file, Parquet or an RDF graph, and use the type its fields give you — where the names come from and what one binding buys.
+---
+
+A source binding is one line:
+
+<Program src="shop/shop.fossil" region="sources" title="shop.fossil" />
+
+One file, one name — and fossil opens the file at that path while it is checking your program, to see
+what is in it. The columns become fields, and the values decide what kind each field holds. `age`
+holds whole numbers, so `User.age` is an `Integer`, and it is an `Integer` without anybody writing
+that down.
+
+## One name, two jobs
+
+`User` is a type **and** a relation, and which one you get depends on what you ask for.
+
+As a type, its members are the columns:
+
+| | |
+| --- | --- |
+| `User.email` | `String` |
+| `User.age` | `Integer` |
+
+As a relation, its rows are the rows — `where` narrows them, and `from` reads them:
+
+<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
+
+<Program src="shop/shop.fossil" region="header" title="shop.fossil" />
+
+They do not collide because they are never in the same position. After `from`, a name is a relation.
+After a dot, in an expression, a name is a type. One binding is one concrete file, so there is
+nothing to be gained by making you write the two separately.
+
+## The formats
+
+Each one is a member of `io`, and they are all the same shape of line.
+
+| what you have | how you bind it | where the field names come from |
+| --- | --- | --- |
+| a CSV | `io.csv("data/users.csv")` | the header row |
+| a JSON file | `io.json("data/sightings.json")` | the keys of the objects |
+| Parquet | `io.parquet("events.parquet")` | the file's own schema |
+| an RDF graph | `io.rdf("people.ttl")` | the predicates of its subjects |
+
+Here are two of them in one program. The stations are a CSV, the sightings are JSON, and neither one
+needs anything said about it beyond its path:
+
+<Program src="sightings/sightings.fossil" region="bindings" title="sightings.fossil" />
+
+<Program src="sightings/data/stations.csv" title="data/stations.csv" />
+
+<Program src="sightings/data/sightings.json" title="data/sightings.json" />
+
+`Site.elevation` is an `Integer` because the column holds integers; `Reading.count` is an `Integer`
+because the JSON numbers are whole. The shape document asks for `xsd:integer` on both, and that is
+the whole of what has to line up:
+
+<Program src="sightings/sightings.shex" title="sightings.shex" />
+
+<Program src="sightings/sightings.fossil" title="sightings.fossil" />
+
+## What this gets you
+
+Two things, and they are the reason a binding does its work up front rather than when the data goes
+past.
+
+**A misspelled column is a mistake you find now.** `User.nmae` is not a field of `User`, and the
+message says so, at the line, with a suggestion drawn from `User`'s own fields. Nothing is left to be
+discovered later in a graph with nothing in it.
+
+**And your editor knows the answer.** Type `User.` and the completion list is the columns of that
+file. Not a guess, not a cached schema somebody wrote down in a config — the columns of the file the
+line names. See [in your editor](/docs/book/editor).
+
+## Fields, not rows
+
+One thing to keep straight. A binding gives you the shape of a row, not the rows themselves. There is
+no way to ask a program what is in cell three, and no way for a value in the data to change what the
+program means. The file decides what fields exist; the mapping decides what happens to each row; the
+two never trade places.

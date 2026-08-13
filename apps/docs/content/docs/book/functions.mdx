@@ -1,0 +1,83 @@
+---
+title: Functions
+description: Apply a standard-library function, pass one as an argument, and read a generic signature — without ever defining a function of your own.
+---
+
+You do not write functions in fossil. There is no syntax for it and no place to put one. What there
+is instead is a library of them, and everything the language does to a value it does by calling one.
+
+That sounds like a limitation and it is really a division of labour: the library is where the generic
+machinery lives, and your program is where the decisions live.
+
+## Calling one
+
+Two spellings, one function:
+
+<Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
+
+`x.trim()` is `str.trim(x)`. Which you write is a matter of how it reads — chains usually read better
+left to right, and a single call sometimes reads better with the name first.
+
+Arguments after the first go in the parentheses, and some of them are named:
+
+<Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
+
+`salt` and `format` are named because the call would be a puzzle otherwise.
+
+## Passing one
+
+Some functions take a function. `where` is the one you meet first:
+
+<Program src="contacts/contacts.fossil" region="derived" title="contacts.fossil" />
+
+The thing inside the parentheses is an expression over a row, and `where` applies it to each one.
+Nothing about that is a special form — `where` is an entry in the catalogue like `trim` is, and it
+happens to take an expression where `trim` takes a string.
+
+`select` takes several:
+
+<Program src="projection/projection.fossil" region="chain" title="projection.fossil" />
+
+And `join` takes a relation and an equality:
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+## Reading a signature
+
+The catalogue writes signatures like this:
+
+```
+str.trim   :: String -> String
+str.split  :: (String, sep: String) -> Seq<String>
+```
+
+Left of the arrow is what goes in, right of it is what comes out. A name before a colon is a named
+argument. `Seq<String>` is a sequence of strings.
+
+Some signatures start with `forall`:
+
+```
+where    :: forall R. (Relation<R>, (R) -> Bool) -> Relation<R>
+require  :: forall T. T? -> T
+```
+
+`forall T.` means the function does not care what `T` is, and whatever you give it is what you get
+back. `where` over a relation of `User`s gives a relation of `User`s; `where` over a relation of
+`Purchase`s gives a relation of `Purchase`s. One entry in the catalogue, every source.
+
+That is why the library is as small as it is. There is no `filter_users` and no per-format verb: the
+same `where` reads a CSV, a Parquet file and an RDF graph, because it was never written against any
+of them.
+
+`T?` is an optional value — one that may be absent. `require` turns one into a plain `T`, and it is
+how you tell the compiler that a nullable column really does have a value where the shape needs one.
+
+## Where they live
+
+[The standard library](/docs/book/stdlib) lists every function, grouped by what it attaches to: the
+operations of a relation, the operations of a string, the readers under `io`, and the namespaces for
+parsing, validating, anonymising and arithmetic.
+
+Because the receiver decides the members, your editor's completion list after a dot is exactly the
+functions that apply — after a `String`, the string operations; after a relation, the relational ones.
+Offering you something that would not compile is not a thing it can do.

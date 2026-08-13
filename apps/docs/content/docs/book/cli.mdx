@@ -1,0 +1,105 @@
+---
+title: 'Reference: the command line'
+description: Check a program, write a corpus, declare a memory budget, pass a credential, and ask a program what it reads.
+---
+
+`fossil` is one binary and it has five things to say to it. Every command takes `--verbose` to raise
+the log level.
+
+## `fossil check`
+
+```bash
+fossil check shop.fossil
+```
+
+Reads the program, the shape document it names and the sources it binds, and reports every
+disagreement. Exits zero when there are none. It touches no data beyond what it needs to know the
+columns, and writes nothing.
+
+This is the one to put in a pre-commit hook and in CI. It is also what your editor runs — see
+[in your editor](/docs/book/editor).
+
+## `fossil run`
+
+```bash
+fossil run shop.fossil --dest file:///tmp/shop
+```
+
+```
+wrote 2 vertex type(s), 1 edge type(s) to file:///tmp/shop
+```
+
+Checks the program, then writes the corpus. There is no step in between and no artifact of fossil's
+own to keep — the destination is the output.
+
+| flag | |
+| --- | --- |
+| `--dest <url>` | where the corpus goes. Required. `file:///path`, `s3://bucket/prefix`, and the rest. |
+| `--memory-gib <gib>` | the memory budget for the run. Fractions allowed. |
+| `--creds-stdin` | read a JSON credentials payload from standard input. |
+| `--output-json` | print the run's result as JSON instead of the summary line. |
+
+### `--memory-gib`
+
+```bash
+fossil run shop.fossil --dest s3://corpus/shop --memory-gib 4
+```
+
+One number, and it bounds the whole run. Past it, work spills to disk rather than growing, so a
+corpus larger than the machine takes longer instead of failing.
+
+Leave it off and the run is unbounded, which is the right choice when you know the data fits and the
+wrong one when you are guessing.
+
+### `--creds-stdin`
+
+```bash
+cat creds.json | fossil run shop.fossil --dest s3://corpus/shop --creds-stdin
+```
+
+A secret on a command line is visible to every process on the host, and a secret in the environment
+is inherited by every child. So credentials ride standard input, and there is no flag that takes one
+as a value.
+
+The payload is JSON, keyed by the destination or source it belongs to. Omit the flag for local paths
+and public URLs.
+
+## `fossil refs`
+
+```bash
+fossil refs shop.fossil
+```
+
+Lists every external thing the program names — each source path or URL, and the shape document. It
+parses and stops: no data is opened, no credential is needed.
+
+This is what to run when you want to know what a program will touch before you let it touch anything.
+`--output-json` gives the same list as JSON.
+
+## `fossil providers`
+
+```bash
+fossil providers
+```
+
+Lists the readers under `io` — the source formats this binary can bind — with what each one accepts.
+`--output-json` for the machine-readable form.
+
+## `fossil catalog`
+
+```bash
+fossil catalog --dest file:///tmp/catalog
+```
+
+Writes a DCAT-AP catalogue describing a run, from a description of that run supplied on standard
+input. It is for a host that runs fossil on someone's behalf and needs the governance record to be a
+graph like everything else.
+
+## Exit codes
+
+| | |
+| --- | --- |
+| `0` | nothing was wrong |
+| non-zero | at least one error diagnostic. The diagnostics are on standard error, the summary on standard output |
+
+Which is what makes `fossil check` composable: put it in a pipeline and the pipeline stops.

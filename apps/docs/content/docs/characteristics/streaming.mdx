@@ -3,7 +3,7 @@ title: Streaming
 description: The engine streams and our seams collected. Three were named on structure — one landed, one was refuted by measurement, one still stands.
 direction:
   summary: Every stage boundary in the write path is a stream, so no stage ever holds a whole value and memory follows the working set rather than the corpus.
-  decidedBy: decisions/0043-el-tipo-de-la-frontera.md
+  arguedIn: /docs/design/streaming
 today:
   summary: Of the three seams named here, the layout's edge list landed as a CSR read on 2026-08-05 and the encoder's file list was measured and refuted — the materialised graph is the one that still collects, at 1.64 GiB of Arrow at ten million.
   backedBy: crates/fossil-df/src/lib.rs
@@ -111,7 +111,7 @@ The result, at ten million under a 4 GiB budget:
 | `community_hierarchy` | +2.09 GiB · 135.0 s | **+0.08 GiB** · 168.0 s |
 | process peak | 10.10 GiB | **8.39 GiB** |
 
-−1.71 GiB against the ≈ −1.7 GB the ADR predicted, corpus byte-identical, and the three parity tests
+−1.71 GiB against the ≈ −1.7 GB predicted before it was attempted, corpus byte-identical, and the three parity tests
 in `crates/fossil-runtime/tests/layout_renumber.rs` green **without being touched**.
 
 `from_edges` was not deleted. A bag costs what a bag costs, and the tests and

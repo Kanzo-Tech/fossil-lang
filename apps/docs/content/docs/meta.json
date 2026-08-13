@@ -1,5 +1,11 @@
 {
   "title": "fossil",
   "root": true,
-  "pages": ["index", "architecture", "characteristics", "decisions"]
+  "pages": [
+    "(root)/index",
+    "(root)/architecture",
+    "book",
+    "design",
+    "characteristics"
+  ]
 }

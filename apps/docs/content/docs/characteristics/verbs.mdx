@@ -3,7 +3,7 @@ title: The verb surface
 description: Six verbs, landed. What the seventeen collapsed into, and the one thing that left before its replacement existed.
 direction:
   summary: The corpus file, not the verb list, is what every consumer agrees on — the camera is addressed against tiles and no verb draws.
-  decidedBy: decisions/0042-la-camara-se-direcciona.md
+  arguedIn: /docs/design/tooling-for-machines
 today:
   summary: The surface is six — read, expand{into|all}, path, aggregate, schema, execute_sql — landed on 2026-08-05, with the dispatch match exhaustive and no verb that draws.
   backedBy: crates/fossil-graph/tests/snapshots/schemas__operation_envelope.snap
@@ -108,7 +108,8 @@ consumes. It enumerates exactly these six, so a seventh cannot land without it c
 why the count above is a fact rather than a recollection.
 
 What it does **not** know is that six is the right number. Nothing on disk asserts a target count;
-the closed set is a discipline, and ADR-0042 is where the discipline is written down.
+the closed set is a discipline, and [tooling for machines](/docs/design/tooling-for-machines) is
+where the discipline is argued.
 </Callout>
 
 ## The gap the closure opened, and it is real
@@ -118,15 +119,14 @@ the closed set is a discipline, and ADR-0042 is where the discipline is written 
 oversight — `c6c87fa` records the breakage as *expected and accepted*. There is still no tile store,
 no tile index and no tile emission anywhere in `crates/`, and none of the six verbs answers a camera.
 
-So the two registers genuinely diverge here. **Decided:** the camera is addressed, not queried
-(`decisions/0042-la-camara-se-direcciona.md`), and `kanzo-ui` consumes the verb package while the
-camera does not (`decisions/0045-dos-nucleos-un-monorepo.md`, third of the decisions recorded in its
-2026-08-05 review). **Undone:** the tiles both of those address. What broke in the meantime is the
-reader in `kanzo-ui`, and its migration is the next piece of work rather than a regression to be
+So the two registers genuinely diverge here. **Decided:** the camera is addressed, not queried, and a
+downstream reader consumes the verb package while the camera does not — both argued in
+[the corpus](/docs/design/corpus). **Undone:** the tiles both of those address. There is a reader
+waiting on them, and bringing it across is the next piece of work rather than a regression to be
 fixed here.
 </Callout>
 
-## The trap ADR-0042 records about `expand{into}`
+## The trap carried on `expand{into}`
 
 `expand{into}` shipped, and the reasoning that first put it on the list does not hold on our engine.
 It should be read with that attached — which is why the trap is now carried on `ExpandMode::Into`

@@ -8,13 +8,13 @@ import { z } from "zod";
  *
  * Every page under `characteristics/` and `protocols/` says two things and keeps them apart:
  *
- *   direction — where this is going, and the ADR that decided it
+ *   direction — where this is going, and the page on this site that argues for it
  *   today     — what is true right now, and the file that would go red if it stopped being
  *
  * fumadocs' own page schema strips unknown keys, so without this extension neither block ever
  * reaches `page.data` and the renderer has nothing to show. That is all this file does — it checks
  * *shape*, and it cannot check *presence*, because a zod schema does not know which directory the
- * file came from and the index and the decision list carry neither block by design.
+ * file came from and the index carries neither block by design.
  *
  * Presence is `content.test.ts`, which does know the path, and which also checks that every path a
  * page cites is still on disk. It runs ahead of `next build` in the `build` script, so both halves
@@ -22,7 +22,10 @@ import { z } from "zod";
  */
 const direction = z.object({
   summary: z.string().min(1),
-  decidedBy: z.string().min(1),
+  // A route on this site, not a path in the repository. The argument for a direction is prose —
+  // prior art, a measurement, and the observation that would reverse it — and prose that is not on
+  // this site is a second reference. `content.test.ts` resolves it to a page.
+  arguedIn: z.string().min(1),
 });
 
 const today = z.object({
