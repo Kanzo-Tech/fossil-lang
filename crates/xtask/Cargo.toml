@@ -3,6 +3,10 @@ name = "xtask"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+# The only crate that had no `license` field, so cargo-deny reported it unlicensed while
+# every sibling inherited `Apache-2.0 OR MIT`. It is part of the same repo under the same terms.
+license.workspace = true
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 description = "Repository automation — run via `cargo xtask <command>`."
 

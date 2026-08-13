@@ -20,6 +20,11 @@ CLAUDE.local.md
 # The RETURNING.md ritual (CLAUDE.md) says local-only, and nothing enforced it.
 RETURNING.md
 
+# insta pending snapshots. `crates/xtask/tests/snapshot_hygiene.rs` assumes these
+# never reach the history — a `.snap.new` is a proposal awaiting `cargo insta
+# review`, and it is the one file that legitimately carries `assertion_line:`.
+*.snap.new
+
 # GSD planning artifacts (commit_docs=false per .planning/config.json)
 .planning/
 
