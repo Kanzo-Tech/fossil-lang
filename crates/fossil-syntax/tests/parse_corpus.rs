@@ -334,7 +334,8 @@ fn no_fixture_spells_a_retired_form() {
             if path.extension().is_none_or(|e| e != "fossil") {
                 continue;
             }
-            let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+            let src =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
             let system: Arc<dyn System> = Arc::new(NativeSystem::default());
             let db = FossilDb::new(system);
             let file = SourceFile::new(&db, src, path.display().to_string());

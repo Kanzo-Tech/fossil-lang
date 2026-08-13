@@ -55,9 +55,18 @@ fn users_row<'db>(db: &'db dyn fossil_base::Db) -> Ty<'db> {
         &InferredDescriptor {
             uri: "users.csv".into(),
             columns: vec![
-                InferredColumn { name: "id".into(), primitive: Primitive::Integer },
-                InferredColumn { name: "name".into(), primitive: Primitive::String },
-                InferredColumn { name: "age".into(), primitive: Primitive::Integer },
+                InferredColumn {
+                    name: "id".into(),
+                    primitive: Primitive::Integer,
+                },
+                InferredColumn {
+                    name: "name".into(),
+                    primitive: Primitive::String,
+                },
+                InferredColumn {
+                    name: "age".into(),
+                    primitive: Primitive::Integer,
+                },
             ],
             freshness_token: String::new().into(),
         },
@@ -268,7 +277,11 @@ fn a_column_ref_naming_a_foreign_row_is_rejected() {
     assert!(shim(&db, file), "a foreign row must record an error");
     let diags = shim::accumulated::<Diagnostic>(&db, file);
     let refusals = foreign_row_refusals(&diags);
-    assert_eq!(refusals.len(), 1, "exactly one foreign-row diagnostic, got {refusals:?}");
+    assert_eq!(
+        refusals.len(),
+        1,
+        "exactly one foreign-row diagnostic, got {refusals:?}"
+    );
     let msg = &refusals[0];
     assert!(
         msg.contains("Orders.user_id") && msg.contains("Adults"),
@@ -376,14 +389,7 @@ fn compatible_string_to_integer_fails() {
         let s = Ty::new(db, TyKind::Primitive(Primitive::String));
         let i = Ty::new(db, TyKind::Primitive(Primitive::Integer));
         let mut cx = build_checker(db, m, None, None);
-        compatible(
-            &mut cx,
-            s,
-            Some(i),
-            ExprId(0),
-            &BlamePos::Expr(ExprId(0)),
-        )
-        .is_err()
+        compatible(&mut cx, s, Some(i), ExprId(0), &BlamePos::Expr(ExprId(0))).is_err()
     }
 
     let (db, file) = db_with(HELLO);
@@ -465,7 +471,10 @@ Contact : ex:Person from users
         accepts::accumulated::<Diagnostic>(&db, file)
     );
     let noise = about_the_body(&accepts::accumulated::<Diagnostic>(&db, file));
-    assert!(noise.is_empty(), "and it must do so silently, got {noise:?}");
+    assert!(
+        noise.is_empty(),
+        "and it must do so silently, got {noise:?}"
+    );
 }
 
 // ── The four ways a named document fails to produce a shape ────────────────

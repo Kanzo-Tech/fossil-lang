@@ -284,7 +284,9 @@ fn document_targets(
     };
 
     let document = entry.document.as_ref().map(|d| registry_key(db, file, d));
-    let doc_file = document.as_deref().and_then(|key| fossil_base::file_at(db, key));
+    let doc_file = document
+        .as_deref()
+        .and_then(|key| fossil_base::file_at(db, key));
 
     let Some(doc_file) = doc_file else {
         // The document is named and not registered — an unsaved buffer the host
@@ -314,11 +316,7 @@ fn document_targets(
 }
 
 /// The IRI to look for in the document.
-fn wanted_iri(
-    db: &dyn fossil_base::Db,
-    entry: &TypeEntry,
-    wanted: &Wanted<'_>,
-) -> Option<String> {
+fn wanted_iri(db: &dyn fossil_base::Db, entry: &TypeEntry, wanted: &Wanted<'_>) -> Option<String> {
     match wanted {
         Wanted::Shape => entry.shape_iri.as_ref().map(|s| s.to_string()),
         Wanted::Predicate { mapping, key } => {
@@ -428,10 +426,7 @@ fn find_standalone(text: &str, needle: &str) -> Option<Range<u32>> {
     while let Some(hit) = text[from..].find(needle) {
         let start = from + hit;
         let end = start + needle.len();
-        let after_ok = text[end..]
-            .chars()
-            .next()
-            .is_none_or(|c| !is_name_char(c));
+        let after_ok = text[end..].chars().next().is_none_or(|c| !is_name_char(c));
         if after_ok {
             return Some(u32::try_from(start).ok()?..u32::try_from(end).ok()?);
         }
@@ -531,7 +526,10 @@ shop:Person {
     fn a_prefixed_shape_is_located_through_the_documents_own_prefix_table() {
         let range =
             locate_iri(SHEXC, "https://shop.example/voc#Person").expect("shop:Person is written");
-        assert_eq!(&SHEXC[range.start as usize..range.end as usize], "shop:Person");
+        assert_eq!(
+            &SHEXC[range.start as usize..range.end as usize],
+            "shop:Person"
+        );
         // And it is the DECLARATION line, not one of the two `shop:` predicates.
         assert!(SHEXC[..range.start as usize].ends_with("\n\n"));
     }
@@ -539,7 +537,10 @@ shop:Person {
     #[test]
     fn a_prefixed_predicate_is_located() {
         let range = locate_iri(SHEXC, "https://shop.example/voc#name").expect("shop:name");
-        assert_eq!(&SHEXC[range.start as usize..range.end as usize], "shop:name");
+        assert_eq!(
+            &SHEXC[range.start as usize..range.end as usize],
+            "shop:name"
+        );
     }
 
     /// The bug a naive `find` has: `shop:name` is a substring of nothing here,
@@ -575,7 +576,10 @@ shop:Person {
         let shape = locate_iri(doc, "http://example.org/Person").expect("the shape line");
         assert_eq!(shape.start, 6, "just past `shape `");
         let pred = locate_iri(doc, "http://example.org/name").expect("the prop line");
-        assert!(pred.start > shape.end, "the predicate comes after the shape");
+        assert!(
+            pred.start > shape.end,
+            "the predicate comes after the shape"
+        );
     }
 
     #[test]

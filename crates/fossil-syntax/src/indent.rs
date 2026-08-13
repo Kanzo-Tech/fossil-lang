@@ -444,7 +444,9 @@ mod tests {
         let input = "User\n    @subject = User.id\n#\n";
         assert_eq!(
             kinds(input),
-            vec![IDENT, INDENT, AT_ATTR, ASSIGN, IDENT, DOT, IDENT, DEDENT, ERROR]
+            vec![
+                IDENT, INDENT, AT_ATTR, ASSIGN, IDENT, DOT, IDENT, DEDENT, ERROR
+            ]
         );
     }
 

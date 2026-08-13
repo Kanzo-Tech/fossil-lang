@@ -546,11 +546,9 @@ pub fn resolve_target_shape<'db>(
                 // read.
                 DocumentError::Undecodable
                 | DocumentError::Unnamed
-                | DocumentError::Mismatch(_) => {
-                    TargetShapeError::Undecodable {
-                        document: document.clone(),
-                    }
-                }
+                | DocumentError::Mismatch(_) => TargetShapeError::Undecodable {
+                    document: document.clone(),
+                },
                 DocumentError::Unparseable(cause) => TargetShapeError::Unparseable {
                     document: document.clone(),
                     cause,

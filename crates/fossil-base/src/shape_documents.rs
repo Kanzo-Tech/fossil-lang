@@ -311,10 +311,11 @@ mod tests {
         );
 
         // The document itself changes. This is what `read_file` could not see.
-        doc.set_text(&mut db).to("shape https://example.org/Person\n\
+        doc.set_text(&mut db)
+            .to("shape https://example.org/Person\n\
              prop https://example.org/name - 1 1\n\
              prop https://example.org/age - 1 1\n"
-            .to_string());
+                .to_string());
         let shapes = shape_document(&db, doc, "shex").expect("decoded");
         assert_eq!(
             executions.load(Ordering::SeqCst),

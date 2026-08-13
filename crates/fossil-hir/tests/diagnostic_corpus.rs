@@ -73,7 +73,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use fossil_base::test_support::{new_db, register_document};
-use fossil_base::{Diagnostic, Db, SourceFile};
+use fossil_base::{Db, Diagnostic, SourceFile};
 use fossil_graph_schema::{Occurs, Primitive, PropertyConstraint, Rejection, Shape};
 use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
@@ -592,8 +592,7 @@ fn the_generated_split_suggestion_compiles() {
 /// schema language, which is the cut `0e6898d` made.
 #[test]
 fn the_harness_installs_a_decoder_and_registers_the_document() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/diagnostics/harness");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/diagnostics/harness");
     let key = dir.join("person.shex").to_string_lossy().to_string();
 
     let mut db = new_db();
@@ -690,11 +689,7 @@ fn rename_clause(messages: &[String]) -> String {
         .find(|m| m.contains("@rename("))
         .unwrap_or_else(|| panic!("no message recommended a `@rename`; got {messages:#?}"));
     let start = m.find("@rename(").expect("just matched");
-    let end = start
-        + m[start..]
-            .find(')')
-            .expect("the clause is parenthesised")
-        + 1;
+    let end = start + m[start..].find(')').expect("the clause is parenthesised") + 1;
     m[start..end].to_string()
 }
 

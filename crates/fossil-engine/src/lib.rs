@@ -246,10 +246,8 @@ fn extract_source_refs(text: &str) -> Vec<(SmolStr, SmolStr, String)> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(
-            r#"(\w[\w\d_]*)\s*:=\s*io\.(csv|json|parquet)\(\s*['"]([^'"]+)['"]"#,
-        )
-        .expect("static regex")
+        regex::Regex::new(r#"(\w[\w\d_]*)\s*:=\s*io\.(csv|json|parquet)\(\s*['"]([^'"]+)['"]"#)
+            .expect("static regex")
     });
     re.captures_iter(text)
         .map(|c| {
@@ -558,7 +556,9 @@ fn read_output_shape(
 /// also what lets the anchor be a borrow — the pair (directory, connections)
 /// has to outlive every resolution done against it, which is exactly the
 /// lifetime of the command.
-fn connection_urls(connections: &HashMap<String, creds::ConnectionCreds>) -> HashMap<String, String> {
+fn connection_urls(
+    connections: &HashMap<String, creds::ConnectionCreds>,
+) -> HashMap<String, String> {
     connections
         .iter()
         .map(|(name, c)| (name.clone(), c.url.clone()))
@@ -852,7 +852,12 @@ mod tests {
         let system = system::EngineSystem::for_program_dir(dir.path());
         let cache = system.descriptors().expect("the engine keeps a table");
 
-        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &no_creds);
+        pre_introspect_and_register(
+            &system,
+            program,
+            SourceAnchor::beside(dir.path()),
+            &no_creds,
+        );
         assert_eq!(
             cache.registrations(),
             1,
@@ -860,7 +865,12 @@ mod tests {
         );
         assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
 
-        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &no_creds);
+        pre_introspect_and_register(
+            &system,
+            program,
+            SourceAnchor::beside(dir.path()),
+            &no_creds,
+        );
         assert_eq!(
             cache.registrations(),
             1,
@@ -868,7 +878,12 @@ mod tests {
         );
 
         std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
-        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &no_creds);
+        pre_introspect_and_register(
+            &system,
+            program,
+            SourceAnchor::beside(dir.path()),
+            &no_creds,
+        );
         assert_eq!(
             cache.registrations(),
             2,
@@ -891,7 +906,12 @@ mod tests {
 
         let system = system::EngineSystem::for_program_dir(dir.path());
         let cache = system.descriptors().expect("the engine keeps a table");
-        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &HashMap::new());
+        pre_introspect_and_register(
+            &system,
+            program,
+            SourceAnchor::beside(dir.path()),
+            &HashMap::new(),
+        );
 
         assert_eq!(cache.registrations(), 1);
         assert_eq!(cache.len(), 1);

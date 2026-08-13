@@ -133,7 +133,9 @@ fn a_validator_returns_its_input_raises_on_bad_input_and_passes_null_through() {
     ];
 
     for (name, good) in valid {
-        let entry = reg.lookup(name).unwrap_or_else(|| panic!("`{name}` is catalogued"));
+        let entry = reg
+            .lookup(name)
+            .unwrap_or_else(|| panic!("`{name}` is catalogued"));
         let LoweringKind::Expr(template) = &entry.lowering else {
             panic!("`{name}` must be an Expr row");
         };
@@ -156,7 +158,10 @@ fn a_validator_returns_its_input_raises_on_bad_input_and_passes_null_through() {
         // Invalid input RAISES, and the message names the function.
         let sql = format!(
             "SELECT {}",
-            render_template(template.as_str(), &["'!! definitely not valid !!'".to_string()])
+            render_template(
+                template.as_str(),
+                &["'!! definitely not valid !!'".to_string()]
+            )
         );
         let err = conn
             .prepare(&sql)

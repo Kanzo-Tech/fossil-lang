@@ -600,7 +600,8 @@ mod tests {
 
     #[test]
     fn parses_mapping_with_two_properties() {
-        let input = "Users : Person from User\n    @subject = \"u/{User.id}\"\n    name = User.name\n";
+        let input =
+            "Users : Person from User\n    @subject = \"u/{User.id}\"\n    name = User.name\n";
         let root = parse_text(input);
         let mapping = root
             .children()

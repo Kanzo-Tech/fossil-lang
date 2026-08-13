@@ -368,11 +368,15 @@ fn render_diagnostics(
         )
     };
     for d in diagnostics {
-        let help = d.help.clone().or_else(|| d.suggestion_source.clone()).or_else(|| {
-            d.message
-                .find("did you mean")
-                .map(|i| d.message[i..].to_string())
-        });
+        let help = d
+            .help
+            .clone()
+            .or_else(|| d.suggestion_source.clone())
+            .or_else(|| {
+                d.message
+                    .find("did you mean")
+                    .map(|i| d.message[i..].to_string())
+            });
         let labels = if d.labels.is_empty() {
             vec![at(d.span, "here")]
         } else {

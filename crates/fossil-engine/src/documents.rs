@@ -323,7 +323,10 @@ User : ex:Person from users
         let file = SourceFile::new(
             &db,
             "users := io.csv(\"users.csv\")\n".to_string(),
-            dir.path().join("prog.fossil").to_string_lossy().into_owned(),
+            dir.path()
+                .join("prog.fossil")
+                .to_string_lossy()
+                .into_owned(),
         );
         assert!(documents_named(&db, file).is_empty());
     }

@@ -32,8 +32,11 @@ const RDF_PERSON_SHEX: &str = include_str!("fixtures/rdf-person.shex");
 
 #[tokio::test]
 async fn io_rdf_runs_end_to_end_via_the_host_seam() {
-    let (db, file) =
-        support::db_with_shapes(PROGRAM, "rdf.fossil", &[("rdf-person.shex", RDF_PERSON_SHEX)]);
+    let (db, file) = support::db_with_shapes(
+        PROGRAM,
+        "rdf.fossil",
+        &[("rdf-person.shex", RDF_PERSON_SHEX)],
+    );
 
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.

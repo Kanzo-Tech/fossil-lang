@@ -199,12 +199,14 @@ mod tests {
         let anchor = SourceAnchor::new(Path::new("/srv/programs/shop"), &c);
         let first = anchor.locator("data/items.csv");
         assert_eq!(first, "/srv/programs/shop/data/items.csv");
-        assert!(!first.contains(
-            &std::env::current_dir()
-                .expect("cwd")
-                .to_string_lossy()
-                .into_owned()
-        ));
+        assert!(
+            !first.contains(
+                &std::env::current_dir()
+                    .expect("cwd")
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
     }
 
     #[test]

@@ -87,9 +87,7 @@ pub use ast_id::{AstIdEntry, AstIdMap, FileAstId, MappingNode, SourceDefNode};
 pub use body::{ExprId, HirBody};
 pub use def_map::{DefMap, MappingLoc, SourceLoc};
 pub use item_tree::{ItemHeader, ItemTree, MappingHeader};
-pub use lower::{
-    CmpOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey, UnOp,
-};
+pub use lower::{CmpOp, FloatBits, HirExpr, HirFile, HirMapping, HirProperty, PropertyKey, UnOp};
 pub use provenance::{
     ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind, expr_types, mapping_at, ty_origin,
 };

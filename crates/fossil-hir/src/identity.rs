@@ -197,7 +197,11 @@ impl<'db> SubjectTemplates<'db> {
     /// exists for when they do not: an edge built from the first while the
     /// second mints something else reaches a node the second never wrote.
     #[must_use]
-    pub fn for_shape(self, db: &'db dyn fossil_base::Db, shape_iri: &str) -> Option<SubjectTemplate> {
+    pub fn for_shape(
+        self,
+        db: &'db dyn fossil_base::Db,
+        shape_iri: &str,
+    ) -> Option<SubjectTemplate> {
         self.templates(db)
             .iter()
             .find(|t| t.shape_iri == shape_iri)
@@ -238,7 +242,10 @@ pub fn subject_templates<'db>(
             continue;
         };
         let span = crate::spans::spans(db, *loc)
-            .get(db, crate::body::ExprId(u32::try_from(idx).unwrap_or(u32::MAX)))
+            .get(
+                db,
+                crate::body::ExprId(u32::try_from(idx).unwrap_or(u32::MAX)),
+            )
             .unwrap_or(Span { start: 0, end: 0 });
         templates.push(SubjectTemplate {
             shape_iri: m.shape_iri.clone(),
@@ -312,9 +319,10 @@ pub fn check_identities<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> 
         // per-mapping barrier — and once rebased the diagnostic and its label
         // both declare `FileAbsolute`, so no host rebases them a second time.
         let absolute = |t: &SubjectTemplate| -> Span {
-            let base = dm.mappings(db).get(t.mapping_index).map_or(0, |loc| {
-                crate::spans::mapping_start_offset(db, *loc)
-            });
+            let base = dm
+                .mappings(db)
+                .get(t.mapping_index)
+                .map_or(0, |loc| crate::spans::mapping_start_offset(db, *loc));
             Span::new(
                 t.span.start.saturating_add(base),
                 t.span.end.saturating_add(base),
@@ -418,7 +426,7 @@ fn identity_form(e: &HirExpr) -> String {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use fossil_base::test_support::{db_with_document, PERSON_DOCUMENT};
+    use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
 
     /// The disagreement diagnostics alone.
     ///
@@ -504,7 +512,11 @@ Imported : Person from Legacy
     #[test]
     fn two_mappings_that_mint_different_identities_for_one_type_are_an_error() {
         let (db, file) = db_with_document(TWO_IDENTITIES, "person.shex", PERSON_DOCUMENT);
-        assert_eq!(check_identities(&db, file), 1, "one disagreement, one report");
+        assert_eq!(
+            check_identities(&db, file),
+            1,
+            "one disagreement, one report"
+        );
 
         let diags = conflicts(&db, file);
         let d = diags.first().expect("the disagreement is reported");

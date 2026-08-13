@@ -52,7 +52,6 @@ pub use fossil_mir::SourceFormat;
 pub use plan::plan_relation;
 /// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
 /// arm of the output model; ShEx's lives in `fossil-shex`).
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -1336,7 +1335,10 @@ impl TemplateReader<'_> {
                 .parse()
                 .map_err(|_| format!("has a template with a malformed hole at offset {start}"))?;
             return self.args.get(n).cloned().ok_or_else(|| {
-                format!("has a template naming `%{n}`, and it was given {} argument(s)", self.args.len())
+                format!(
+                    "has a template naming `%{n}`, and it was given {} argument(s)",
+                    self.args.len()
+                )
             });
         }
 
@@ -1408,8 +1410,12 @@ impl TemplateReader<'_> {
             if !self.eat_char(')') {
                 return Err("has a `CAST` with no closing `)`".to_string());
             }
-            let dt = cast_target(sql_type.trim())
-                .ok_or_else(|| format!("casts to `{}`, which this engine does not map", sql_type.trim()))?;
+            let dt = cast_target(sql_type.trim()).ok_or_else(|| {
+                format!(
+                    "casts to `{}`, which this engine does not map",
+                    sql_type.trim()
+                )
+            })?;
             return Ok(DfExpr::Cast(datafusion::logical_expr::Cast::new(
                 Box::new(inner),
                 dt,
@@ -1453,7 +1459,9 @@ impl TemplateReader<'_> {
                     if self.eat_char(')') {
                         break;
                     }
-                    return Err(format!("has a call to `{name}` with a malformed argument list"));
+                    return Err(format!(
+                        "has a call to `{name}` with a malformed argument list"
+                    ));
                 }
             }
             let df_name = crate::stdlib::datafusion_name(&name)

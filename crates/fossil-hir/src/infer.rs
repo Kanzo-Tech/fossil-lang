@@ -203,7 +203,11 @@ impl<'db> RowScope<'db> {
     }
 
     /// The columns of ONE row, for a per-binding message.
-    fn fields_of(&self, db: &'db dyn fossil_base::Db, binding: &str) -> Option<Vec<RecordField<'db>>> {
+    fn fields_of(
+        &self,
+        db: &'db dyn fossil_base::Db,
+        binding: &str,
+    ) -> Option<Vec<RecordField<'db>>> {
         record_fields(db, self.row_of(binding)?)
     }
 
@@ -500,10 +504,8 @@ fn apply_source_op<'db>(
         // told apart from a bare one, and `select` over a join is left open for
         // that reason.
         HirSourceOp::Select(cols) => {
-            let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> = scope
-                .bindings()
-                .map(|b| (b.clone(), Vec::new()))
-                .collect();
+            let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> =
+                scope.bindings().map(|b| (b.clone(), Vec::new())).collect();
             for col in cols {
                 let mut found = false;
                 for (binding, out) in &mut kept {
@@ -533,7 +535,10 @@ fn apply_source_op<'db>(
                 rows: kept
                     .into_iter()
                     .map(|(binding, fs)| {
-                        (binding, Some(Ty::new(db, TyKind::Record(Record::new(db, fs)))))
+                        (
+                            binding,
+                            Some(Ty::new(db, TyKind::Record(Record::new(db, fs)))),
+                        )
                     })
                     .collect(),
             })

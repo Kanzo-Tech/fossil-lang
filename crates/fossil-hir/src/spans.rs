@@ -318,11 +318,7 @@ Orders : Order from Row
         // must select.
         let expected: [&[&str]; 2] = [
             &["\"https://e.org/u/{User.id}\"", "User.name"],
-            &[
-                "\"https://e.org/o/{Row.id}\"",
-                "Row.amount",
-                "Row.note",
-            ],
+            &["\"https://e.org/o/{Row.id}\"", "Row.amount", "Row.note"],
         ];
 
         let (db, file) = db_with_text(SRC, "align.fossil");

@@ -253,7 +253,9 @@ User : ex:Person from users
             0
         );
         assert_eq!(
-            file_at(&db, "shapes/person.shex").expect("still there").text(&db),
+            file_at(&db, "shapes/person.shex")
+                .expect("still there")
+                .text(&db),
             "the buffer the user is editing"
         );
     }

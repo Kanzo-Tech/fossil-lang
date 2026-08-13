@@ -521,7 +521,10 @@ impl FunctionRegistry {
         add(
             e,
             "core.lang",
-            vec![p("value", S::String), p("tag", S::String)], S::String, expr("%0"));
+            vec![p("value", S::String), p("tag", S::String)],
+            S::String,
+            expr("%0"),
+        );
         // require: forall T. T? -> T. v0.1 scalar approximation String -> String.
         // The one row whose template reads its argument TWICE.
         add(
@@ -543,55 +546,94 @@ impl FunctionRegistry {
         add(
             e,
             "seq.where",
-            vec![p("rows", S::String)], S::String, L(P::Where));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::Where),
+        );
         add(
             e,
             "seq.map",
-            vec![p("rows", S::String)], S::String, L(P::Map));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::Map),
+        );
         add(
             e,
             "seq.flatten",
-            vec![p("rows", S::SeqString)], S::String, L(P::Flatten));
+            vec![p("rows", S::SeqString)],
+            S::String,
+            L(P::Flatten),
+        );
         add(
             e,
             "seq.take",
-            vec![p("rows", S::String), p("n", S::Integer)], S::String, L(P::Take));
+            vec![p("rows", S::String), p("n", S::Integer)],
+            S::String,
+            L(P::Take),
+        );
         add(
             e,
             "seq.drop",
-            vec![p("rows", S::String), p("n", S::Integer)], S::String, L(P::Drop));
+            vec![p("rows", S::String), p("n", S::Integer)],
+            S::String,
+            L(P::Drop),
+        );
         add(
             e,
             "seq.distinct",
-            vec![p("rows", S::String)], S::String, L(P::Distinct));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::Distinct),
+        );
         add(
             e,
             "seq.sort",
-            vec![p("rows", S::String)], S::String, L(P::Sort));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::Sort),
+        );
         add(
             e,
             "seq.select",
-            vec![p("rows", S::String)], S::String, L(P::Select));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::Select),
+        );
         add(
             e,
             "seq.join",
-            vec![p("rows", S::String), p("other", S::String)], S::String, L(P::Join));
+            vec![p("rows", S::String), p("other", S::String)],
+            S::String,
+            L(P::Join),
+        );
         add(
             e,
             "seq.union",
-            vec![p("rows", S::String), p("other", S::String)], S::String, L(P::Union));
+            vec![p("rows", S::String), p("other", S::String)],
+            S::String,
+            L(P::Union),
+        );
         add(
             e,
             "seq.group_by",
-            vec![p("rows", S::String)], S::String, L(P::GroupBy));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::GroupBy),
+        );
         add(
             e,
             "seq.aggregate",
-            vec![p("rows", S::String)], S::String, L(P::Aggregate));
+            vec![p("rows", S::String)],
+            S::String,
+            L(P::Aggregate),
+        );
         add(
             e,
             "seq.count",
-            vec![p("rows", S::String)], S::Integer, L(P::Count));
+            vec![p("rows", S::String)],
+            S::Integer,
+            L(P::Count),
+        );
 
         // ── str/ (13) — every operation on a string. Receiver::Scalar(String)
         //
@@ -604,7 +646,10 @@ impl FunctionRegistry {
         add(
             e,
             "str.length",
-            vec![p("text", S::String)], S::Integer, expr("length(%0)"));
+            vec![p("text", S::String)],
+            S::Integer,
+            expr("length(%0)"),
+        );
         add(
             e,
             "str.slice",
@@ -636,7 +681,11 @@ impl FunctionRegistry {
         add(
             e,
             "str.replace",
-            vec![p("text", S::String), p("needle", S::String), p("replacement", S::String)],
+            vec![
+                p("text", S::String),
+                p("needle", S::String),
+                p("replacement", S::String),
+            ],
             S::String,
             expr("replace(%0, %1, %2)"),
         );
@@ -657,19 +706,31 @@ impl FunctionRegistry {
         add(
             e,
             "str.trim",
-            vec![p("text", S::String)], S::String, expr("trim(%0)"));
+            vec![p("text", S::String)],
+            S::String,
+            expr("trim(%0)"),
+        );
         add(
             e,
             "str.lower",
-            vec![p("text", S::String)], S::String, expr("lower(%0)"));
+            vec![p("text", S::String)],
+            S::String,
+            expr("lower(%0)"),
+        );
         add(
             e,
             "str.upper",
-            vec![p("text", S::String)], S::String, expr("upper(%0)"));
+            vec![p("text", S::String)],
+            S::String,
+            expr("upper(%0)"),
+        );
         add(
             e,
             "str.slug",
-            vec![p("text", S::String)], S::String, expr(SLUG_TEMPLATE));
+            vec![p("text", S::String)],
+            S::String,
+            expr(SLUG_TEMPLATE),
+        );
         add(
             e,
             "str.strip_html",
@@ -733,7 +794,11 @@ impl FunctionRegistry {
         add(
             e,
             "parse.csv_row",
-            vec![p("text", S::String), p("separator", S::String), p("field", S::Integer)],
+            vec![
+                p("text", S::String),
+                p("separator", S::String),
+                p("field", S::Integer),
+            ],
             S::String,
             expr("split_part(%0, %1, %2)"),
         );
@@ -742,27 +807,45 @@ impl FunctionRegistry {
         add(
             e,
             "math.sum",
-            vec![p("value", S::Float)], S::Float, expr("sum(%0)"));
+            vec![p("value", S::Float)],
+            S::Float,
+            expr("sum(%0)"),
+        );
         add(
             e,
             "math.avg",
-            vec![p("value", S::Float)], S::Float, expr("avg(%0)"));
+            vec![p("value", S::Float)],
+            S::Float,
+            expr("avg(%0)"),
+        );
         add(
             e,
             "math.min",
-            vec![p("value", S::Float)], S::Float, expr("min(%0)"));
+            vec![p("value", S::Float)],
+            S::Float,
+            expr("min(%0)"),
+        );
         add(
             e,
             "math.max",
-            vec![p("value", S::Float)], S::Float, expr("max(%0)"));
+            vec![p("value", S::Float)],
+            S::Float,
+            expr("max(%0)"),
+        );
         add(
             e,
             "math.abs",
-            vec![p("value", S::Float)], S::Float, expr("abs(%0)"));
+            vec![p("value", S::Float)],
+            S::Float,
+            expr("abs(%0)"),
+        );
         add(
             e,
             "math.round",
-            vec![p("value", S::Float)], S::Integer, expr("round(%0)"));
+            vec![p("value", S::Float)],
+            S::Integer,
+            expr("round(%0)"),
+        );
 
         // ── validate/ (5) ──────────────────────────────────────────────────
         //
@@ -815,7 +898,10 @@ impl FunctionRegistry {
         add(
             e,
             "anon.hash",
-            vec![p("value", S::String)], S::String, expr("sha256(%0)"));
+            vec![p("value", S::String)],
+            S::String,
+            expr("sha256(%0)"),
+        );
         add(
             e,
             "anon.redact",
@@ -949,7 +1035,8 @@ impl FunctionRegistry {
 /// approximation, over `strip_accents`, differs on 55.6% of Latin-accented
 /// input, so this keeps the implementation whose behaviour is expressible and
 /// says so.
-const SLUG_TEMPLATE: &str = r"trim(regexp_replace(lower(trim(%0)), '[^\p{L}\p{N}.-]', '-', 'g'), '-')";
+const SLUG_TEMPLATE: &str =
+    r"trim(regexp_replace(lower(trim(%0)), '[^\p{L}\p{N}.-]', '-', 'g'), '-')";
 
 /// `str.strip_html` — replaces `voca_rs::strip::strip_tags`.
 ///

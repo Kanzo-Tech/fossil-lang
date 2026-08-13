@@ -1039,7 +1039,12 @@ fn lower_property_value<'db>(
         // re-derived so the two cannot drift.
         HirExpr::UnaryOp { op, operand } => Expr::UnaryOp {
             op: *op,
-            operand: Box::new(lower_property_value(db, operand, source_binding, assert_line)),
+            operand: Box::new(lower_property_value(
+                db,
+                operand,
+                source_binding,
+                assert_line,
+            )),
             ty: Ty::new(
                 db,
                 TyKind::Primitive(match op {

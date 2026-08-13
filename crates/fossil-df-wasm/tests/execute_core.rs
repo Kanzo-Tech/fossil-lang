@@ -56,9 +56,15 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         bytes,
     }];
 
-    let out = execute_core(PROGRAM, Some(EXECUTOR_SHEX), sources, "s3://jobs/run-1", &empty_refs())
-        .await
-        .expect("executor runs the CSV program");
+    let out = execute_core(
+        PROGRAM,
+        Some(EXECUTOR_SHEX),
+        sources,
+        "s3://jobs/run-1",
+        &empty_refs(),
+    )
+    .await
+    .expect("executor runs the CSV program");
 
     // The W0b vertex Parquet + the three manifest YAMLs are produced as bytes.
     let paths: Vec<&str> = out.files.iter().map(|f| f.rel_path.as_str()).collect();
@@ -103,8 +109,8 @@ Order : ex:Order from orders
 
 #[test]
 fn program_sources_lists_each_distinct_source_with_its_format() {
-    let srcs =
-        program_sources_core(TWO_SOURCE_PROGRAM, Some(EXECUTOR_SHEX), &empty_refs()).expect("sources enumerated");
+    let srcs = program_sources_core(TWO_SOURCE_PROGRAM, Some(EXECUTOR_SHEX), &empty_refs())
+        .expect("sources enumerated");
     let uris: Vec<&str> = srcs.iter().map(|(u, _)| u.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
     assert!(uris.contains(&"https://data.example.com/orders.csv"));
@@ -144,9 +150,15 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
         bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
     }];
 
-    let out = execute_core(CONN_PROGRAM, Some(EXECUTOR_SHEX), sources, "s3://jobs/run-1", &refs)
-        .await
-        .expect("executor runs the @conn-aliased program");
+    let out = execute_core(
+        CONN_PROGRAM,
+        Some(EXECUTOR_SHEX),
+        sources,
+        "s3://jobs/run-1",
+        &refs,
+    )
+    .await
+    .expect("executor runs the @conn-aliased program");
     let person = out
         .run_status
         .vertices

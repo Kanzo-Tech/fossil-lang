@@ -364,9 +364,18 @@ fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
     InferredDescriptor {
         uri: "users.csv".into(),
         columns: vec![
-            InferredColumn { name: "id".into(), primitive: Primitive::Integer },
-            InferredColumn { name: "name".into(), primitive: Primitive::String },
-            InferredColumn { name: "age".into(), primitive: Primitive::Integer },
+            InferredColumn {
+                name: "id".into(),
+                primitive: Primitive::Integer,
+            },
+            InferredColumn {
+                name: "name".into(),
+                primitive: Primitive::String,
+            },
+            InferredColumn {
+                name: "age".into(),
+                primitive: Primitive::Integer,
+            },
         ],
         freshness_token: String::new(),
     }

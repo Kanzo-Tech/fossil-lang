@@ -36,7 +36,6 @@
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
 //! `detail` string (Risk Register).
 
-
 use fossil_base::SourceFile;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;

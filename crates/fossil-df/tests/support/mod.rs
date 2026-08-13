@@ -23,9 +23,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_base::{
-    FossilDb, FsError, NativeSystem, Provider, SourceFile, System, register_file,
-};
+use fossil_base::{FossilDb, FsError, NativeSystem, Provider, SourceFile, System, register_file};
 
 /// The real filesystem (the CSV/JSON/Turtle sources still read through it) plus
 /// the `ShEx` decoder row.

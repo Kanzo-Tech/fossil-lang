@@ -41,7 +41,12 @@ async fn reads_an_ndjson_source() {
         &std::collections::HashMap::new(),
     )
     .await
-    .unwrap_or_else(|e| panic!("io.json reads via read_json: {e}; {:#?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| {
+        panic!(
+            "io.json reads via read_json: {e}; {:#?}",
+            support::diagnostics(&db, file)
+        )
+    });
 
     assert_eq!(node.label, "Person");
     let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();

@@ -198,10 +198,12 @@ pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) 
         uri: uri.into(),
         columns: columns
             .iter()
-            .map(|(name, primitive)| fossil_descriptors_input::InferredColumn {
-                name: (*name).into(),
-                primitive: *primitive,
-            })
+            .map(
+                |(name, primitive)| fossil_descriptors_input::InferredColumn {
+                    name: (*name).into(),
+                    primitive: *primitive,
+                },
+            )
             .collect(),
         // Empty means "never fresh", which is right for a table nobody re-reads.
         freshness_token: String::new().into(),
@@ -230,11 +232,7 @@ pub fn register_document(db: &mut dyn Db, path: &str, text: &str) {
 /// registered at `document_path`, which is the path a `test.fossil` program
 /// resolves to (both are at the root, so the name is the key).
 #[must_use]
-pub fn db_with_document(
-    src: &str,
-    document_path: &str,
-    document: &str,
-) -> (FossilDb, SourceFile) {
+pub fn db_with_document(src: &str, document_path: &str, document: &str) -> (FossilDb, SourceFile) {
     let mut db = new_db();
     let file = SourceFile::new(&db, src.to_string(), "test.fossil".to_string());
     register_document(&mut db, document_path, document);

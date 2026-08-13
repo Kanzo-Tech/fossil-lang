@@ -332,7 +332,13 @@ ex:PersonShape a sh:NodeShape ;
                 .unwrap_or_else(|| panic!("{p}"))
         };
         assert_eq!(by("name").datatype, Some(Primitive::String));
-        assert_eq!(by("name").occurs, Occurs { min: 0, max: Some(1) });
+        assert_eq!(
+            by("name").occurs,
+            Occurs {
+                min: 0,
+                max: Some(1)
+            }
+        );
         assert_eq!(
             by("homepage").datatype,
             Some(Primitive::AnyUri),

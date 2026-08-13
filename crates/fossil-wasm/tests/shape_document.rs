@@ -167,8 +167,7 @@ fn a_document_opened_after_the_program_is_still_found_by_it() {
     let mut pg = FossilPlayground::new();
     let _program = pg.open_file_native("a/prog.fossil".to_string(), PROGRAM.to_string());
     // Opened under the path the program's relative reference resolves to.
-    let _document =
-        pg.open_file_native("a/person.shex".to_string(), DEMANDS_INTEGER.to_string());
+    let _document = pg.open_file_native("a/person.shex".to_string(), DEMANDS_INTEGER.to_string());
     pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
         .expect("descriptor");
 

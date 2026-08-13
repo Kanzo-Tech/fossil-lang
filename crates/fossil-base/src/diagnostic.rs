@@ -306,9 +306,17 @@ mod tests {
     #[test]
     fn a_label_keeps_its_own_frame() {
         let d = Diagnostic::new(Severity::Error, "two identities", Span::new(10, 20))
-            .with_label(Span::new(400, 420), "`Users` mints this one", SpanFrame::FileAbsolute)
+            .with_label(
+                Span::new(400, 420),
+                "`Users` mints this one",
+                SpanFrame::FileAbsolute,
+            )
             .with_help("a type has one identity");
-        assert_eq!(d.frame, SpanFrame::MappingRelative, "the default is unmoved");
+        assert_eq!(
+            d.frame,
+            SpanFrame::MappingRelative,
+            "the default is unmoved"
+        );
         assert_eq!(d.labels.len(), 1);
         assert_eq!(d.labels[0].frame, SpanFrame::FileAbsolute);
         assert_eq!(d.help.as_deref(), Some("a type has one identity"));

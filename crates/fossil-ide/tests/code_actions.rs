@@ -28,8 +28,8 @@
 use std::sync::Arc;
 
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, Severity, SourceFile, Span, System};
-use fossil_shex::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
 use fossil_ide::code_actions;
+use fossil_shex::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
 use lsp_types::{CodeAction, Position, Range, TextEdit};
 
 fn db() -> FossilDb {

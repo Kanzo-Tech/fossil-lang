@@ -754,9 +754,8 @@ impl<'db> Checker<'db> {
         // against every predicate whose range is a shape.
         let expectation = match &prop.key {
             PropertyKey::Subject => None,
-            PropertyKey::Name(name) if self.resolved_shape.is_some() => self
-                .resolve_predicate(expr_id, name)
-                .and_then(|pred| {
+            PropertyKey::Name(name) if self.resolved_shape.is_some() => {
+                self.resolve_predicate(expr_id, name).and_then(|pred| {
                     let shape = self.resolved_shape.as_ref()?;
                     let constraint = shape.constraint_for(pred.as_str())?;
                     // `value_ty` is passed through as an `Option`, and that IS
@@ -772,7 +771,8 @@ impl<'db> Checker<'db> {
                             property: pred.clone(),
                         },
                     ))
-                }),
+                })
+            }
             PropertyKey::Name(_) => None,
         };
 
@@ -1131,7 +1131,11 @@ impl<'db> Checker<'db> {
                     let siblings = reg.members_of(recv).map(|e| e.member.as_str());
                     crate::didyoumean::did_you_mean(member, siblings).map_or_else(
                         || format!("`{head}` has no member `{member}`"),
-                        |s| format!("`{head}` has no member `{member}` — did you mean `{head}.{s}`?"),
+                        |s| {
+                            format!(
+                                "`{head}` has no member `{member}` — did you mean `{head}.{s}`?"
+                            )
+                        },
                     )
                 }
                 None => format!("unknown function `{func}`"),
@@ -1179,8 +1183,8 @@ impl<'db> Checker<'db> {
                 // it and `x.trim()` moving it. So a type error on it is a
                 // statement about what the value IS, and saying "argument 1"
                 // for `x.trim()` would name a position the author never wrote.
-                let is_receiver = i == 0
-                    && matches!(entry.recv, crate::stdlib::Receiver::Scalar(_));
+                let is_receiver =
+                    i == 0 && matches!(entry.recv, crate::stdlib::Receiver::Scalar(_));
                 let msg = if is_receiver {
                     format!(
                         "`{}` is a member of {}, and this is {}",

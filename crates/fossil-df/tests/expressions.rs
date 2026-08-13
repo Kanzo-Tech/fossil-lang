@@ -41,8 +41,7 @@ User : ex:Person from users
 
 #[tokio::test]
 async fn a_call_produces_its_column() {
-    let (db, file) =
-        support::db_with_shapes(CALLS, "calls.fossil", &[("expr.shex", EXPR_SHEX)]);
+    let (db, file) = support::db_with_shapes(CALLS, "calls.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -57,7 +56,12 @@ async fn a_call_produces_its_column() {
         &std::collections::HashMap::new(),
     )
     .await
-    .unwrap_or_else(|e| panic!("execute_vertex runs the DataFusion plan: {e}; {:?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| {
+        panic!(
+            "execute_vertex runs the DataFusion plan: {e}; {:?}",
+            support::diagnostics(&db, file)
+        )
+    });
 
     let props: Vec<&str> = node.properties.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(
@@ -109,8 +113,7 @@ User : ex:Person from users
     @subject = `${ex:}user/${.id}`
     tag = str.slug(str.upper(.name))
 ";
-    let (db, file) =
-        support::db_with_shapes(NESTED, "nested.fossil", &[("expr.shex", EXPR_SHEX)]);
+    let (db, file) = support::db_with_shapes(NESTED, "nested.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -125,7 +128,12 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .unwrap_or_else(|e| panic!("execute_vertex runs the nested plan: {e}; {:?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| {
+        panic!(
+            "execute_vertex runs the nested plan: {e}; {:?}",
+            support::diagnostics(&db, file)
+        )
+    });
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
     let tag = column::<StringArray>(batch, 2);
@@ -161,8 +169,7 @@ User : ex:Person from users
     @subject = `${ex:}user/${.id}`
     senior = .id >= 2
 ";
-    let (db, file) =
-        support::db_with_shapes(COMPARES, "cmp.fossil", &[("expr.shex", EXPR_SHEX)]);
+    let (db, file) = support::db_with_shapes(COMPARES, "cmp.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -177,7 +184,12 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .unwrap_or_else(|e| panic!("execute_vertex runs the comparison plan: {e}; {:?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| {
+        panic!(
+            "execute_vertex runs the comparison plan: {e}; {:?}",
+            support::diagnostics(&db, file)
+        )
+    });
 
     assert_eq!(node.properties[0].name, "senior");
     assert_eq!(
@@ -213,8 +225,7 @@ User : ex:Person from users
     @subject = `${ex:}user/${.id}`
     band = .id >= 2 ? \"senior\" : \"junior\"
 ";
-    let (db, file) =
-        support::db_with_shapes(TERNARY, "tern.fossil", &[("expr.shex", EXPR_SHEX)]);
+    let (db, file) = support::db_with_shapes(TERNARY, "tern.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -229,7 +240,12 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .unwrap_or_else(|e| panic!("execute_vertex runs the conditional plan: {e}; {:?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| {
+        panic!(
+            "execute_vertex runs the conditional plan: {e}; {:?}",
+            support::diagnostics(&db, file)
+        )
+    });
 
     assert_eq!(node.properties[0].name, "band");
     let batch = vertex.batches.first().expect("at least one RecordBatch");
@@ -268,8 +284,7 @@ User : ex:Person from users
     piped = users.name.upper()
     called = str.upper(users.name)
 ";
-    let (db, file) =
-        support::db_with_shapes(PIPED, "piped.fossil", &[("expr.shex", EXPR_SHEX)]);
+    let (db, file) = support::db_with_shapes(PIPED, "piped.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -284,7 +299,12 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .unwrap_or_else(|e| panic!("execute_vertex runs both paths: {e}; {:?}", support::diagnostics(&db, file)));
+    .unwrap_or_else(|e| {
+        panic!(
+            "execute_vertex runs both paths: {e}; {:?}",
+            support::diagnostics(&db, file)
+        )
+    });
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
     let piped = column::<StringArray>(batch, 2);
@@ -292,5 +312,8 @@ User : ex:Person from users
     let a: Vec<&str> = (0..piped.len()).map(|i| piped.value(i)).collect();
     let b: Vec<&str> = (0..called.len()).map(|i| called.value(i)).collect();
     assert_eq!(a, ["ALICE", "BOB", "CAROL"]);
-    assert_eq!(a, b, "the value path and the type path are the same program");
+    assert_eq!(
+        a, b,
+        "the value path and the type path are the same program"
+    );
 }

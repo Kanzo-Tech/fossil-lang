@@ -274,7 +274,6 @@ fn a_derived_binding_is_not_diagnosed_as_a_provider() {
     );
 }
 
-
 // ------------------------------------------------- `schema =` names a provider
 
 /// **The `schema =` argument carries its own row.** It was the last position
@@ -294,7 +293,11 @@ fn a_schema_argument_naming_a_provider_resolves_its_shapes() {
         ("person.shex", PERSON_SHEXC),
         ("g.ttl", ""),
     ]);
-    for evidence in ["named by no provider", "is not a provider", "reads rows, not types"] {
+    for evidence in [
+        "named by no provider",
+        "is not a provider",
+        "reads rows, not types",
+    ] {
         assert!(
             !diagnostics.iter().any(|m| m.contains(evidence)),
             "the argument names `io.shex` and it reads types; got {diagnostics:?}"

@@ -221,11 +221,7 @@ impl<'db> DefMap<'db> {
         self.sources(db)
             .iter()
             .find(|e| e.name.as_str() == name)
-            .and_then(|e| {
-                e.schema_arg
-                    .clone()
-                    .map(|d| (e.schema_provider.clone(), d))
-            })
+            .and_then(|e| e.schema_arg.clone().map(|d| (e.schema_provider.clone(), d)))
     }
 
     /// Look up the resolved shape IRI bound to a destructuring RDF source member
@@ -811,7 +807,10 @@ pub(crate) fn parse_renames(type_def: &fossil_syntax::SyntaxNode) -> Vec<RenameA
                 out.push(RenameAttr {
                     type_name: type_name.clone(),
                     predicate: SmolStr::from(
-                        predicate.text().trim_start_matches('"').trim_end_matches('"'),
+                        predicate
+                            .text()
+                            .trim_start_matches('"')
+                            .trim_end_matches('"'),
                     ),
                     rename_to: SmolStr::from(rename_to.text()),
                 });
@@ -1044,10 +1043,7 @@ b := io.parquet(\"b.parquet\")
         let (ctor, uri) = dm.lookup_source_call(&db, "u").unwrap();
         assert_eq!(ctor.as_deref(), Some("io.csv"));
         assert_eq!(uri.as_deref(), Some("u.csv"));
-        assert_eq!(
-            dm.lookup_source_schema(&db, "u").as_deref(),
-            Some("u.shex")
-        );
+        assert_eq!(dm.lookup_source_schema(&db, "u").as_deref(), Some("u.shex"));
     }
 
     /// **`schema =` names a provider.** The argument carries the row that reads
@@ -1109,7 +1105,8 @@ b := io.parquet(\"b.parquet\")
     /// exactly what this asserts.
     #[test]
     fn a_destructuring_member_binds_by_position_and_its_name_is_free() {
-        let src = "{ primero, segundo } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
+        let src =
+            "{ primero, segundo } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
         let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
         let dm = def_map(&db, file);
 

@@ -507,12 +507,15 @@ mod tests {
             "where", "select", "join", "on", "io", "str", "seq", "parse", "clean", "validate",
             "math", "anon",
         ] {
-            assert_eq!(just_kinds(word), vec![Token::Ident], "`{word}` must lex as an IDENT");
+            assert_eq!(
+                just_kinds(word),
+                vec![Token::Ident],
+                "`{word}` must lex as an IDENT"
+            );
         }
     }
 
     // ─── Disambiguation / longest-match guards ────────────────────────
-
 
     #[test]
     fn lexes_double_le_correctly() {

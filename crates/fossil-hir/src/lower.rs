@@ -464,11 +464,7 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
 /// A binding whose document could not be read is NOT reported here. It has
 /// already been reported, as a `ShapeBindError`, against the binding itself; a
 /// second message per rename would be N messages about one missing file.
-fn check_renames(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    type_def: &fossil_syntax::SyntaxNode,
-) {
+fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_syntax::SyntaxNode) {
     use fossil_syntax::SyntaxKind;
 
     let renames = crate::def_map::parse_renames(type_def);
@@ -692,7 +688,10 @@ fn check_provider(
 /// and the host not having installed a row for it is the host's answer, not the
 /// program's mistake. On a host that installs one — the engine, the LSP, the
 /// editor — the same name really is unknown and the message stands.
-fn answers_about(table: &[&'static fossil_base::Provider], wanted: fossil_base::Capability) -> bool {
+fn answers_about(
+    table: &[&'static fossil_base::Provider],
+    wanted: fossil_base::Capability,
+) -> bool {
     table.iter().any(|p| p.provides(wanted))
 }
 
@@ -821,7 +820,13 @@ fn lower_source_pipe(
         .next()?;
 
     let range = source_def.text_range();
-    lower_pipe_expr(db, &rhs, name, (range.start().into(), range.end().into()), types)
+    lower_pipe_expr(
+        db,
+        &rhs,
+        name,
+        (range.start().into(), range.end().into()),
+        types,
+    )
 }
 
 /// The `from` clause of a mapping header, when it derives a relation rather than
@@ -1022,7 +1027,11 @@ fn lower_source_stage(
                 );
                 return None;
             }
-            Some(HirSourceOp::Where(lower_expr_inner(db, &positional[0], types)?))
+            Some(HirSourceOp::Where(lower_expr_inner(
+                db,
+                &positional[0],
+                types,
+            )?))
         }
         "select" => {
             if positional.is_empty() {
@@ -1687,9 +1696,7 @@ fn lower_expr_inner(
                         // The hole's expression is the one node inside it; the
                         // braces are tokens. A hole that failed to parse leaves
                         // no node, and its diagnostic is already recorded.
-                        let hole = n
-                            .children()
-                            .find_map(|e| lower_expr_inner(db, &e, types))?;
+                        let hole = n.children().find_map(|e| lower_expr_inner(db, &e, types))?;
                         parts.push(InterpolationPart::Hole(hole));
                     }
                     _ => {}
@@ -2168,7 +2175,9 @@ fn lower_postfix(
     let sig = if is_edge {
         None
     } else {
-        crate::stdlib::stdlib().lookup(func.as_str()).map(|e| &e.sig)
+        crate::stdlib::stdlib()
+            .lookup(func.as_str())
+            .map(|e| &e.sig)
     };
     let args = place_args(db, node, types, sig, &func, 0)?;
 
@@ -2266,9 +2275,9 @@ fn place_args(
                     return None;
                 };
                 let Some(at) = sig.position_of(&name) else {
-                    let available: Vec<&str> =
-                        sig.params.iter().map(|p| p.name.as_str()).collect();
-                    let suggestion = crate::didyoumean::did_you_mean(&name, available.iter().copied());
+                    let available: Vec<&str> = sig.params.iter().map(|p| p.name.as_str()).collect();
+                    let suggestion =
+                        crate::didyoumean::did_you_mean(&name, available.iter().copied());
                     let list = available
                         .iter()
                         .map(|n| format!("`{n}`"))
@@ -2277,7 +2286,11 @@ fn place_args(
                     emit(
                         &arg,
                         suggestion.map_or_else(
-                            || format!("`{func}` has no parameter called `{name}`. It takes {list}."),
+                            || {
+                                format!(
+                                    "`{func}` has no parameter called `{name}`. It takes {list}."
+                                )
+                            },
                             |s| {
                                 format!(
                                     "`{func}` has no parameter called `{name}` — did you mean \
@@ -2338,7 +2351,11 @@ fn place_args(
                 // An argument that does not lower has already said why; dropping
                 // the whole call keeps the property from being written with a
                 // hole in it.
-                put(&mut slots, next_positional, lower_expr_inner(db, &inner, types)?);
+                put(
+                    &mut slots,
+                    next_positional,
+                    lower_expr_inner(db, &inner, types)?,
+                );
                 next_positional += 1;
             }
         }
@@ -2588,9 +2605,11 @@ Users : Person from User
             "there is exactly one"
         );
         assert!(
-            msgs(&format!("{HEAD}    name = User.name\n    @subject = \"a\"\n"))
-                .iter()
-                .any(|m| m.contains("is the first line of a mapping body")),
+            msgs(&format!(
+                "{HEAD}    name = User.name\n    @subject = \"a\"\n"
+            ))
+            .iter()
+            .any(|m| m.contains("is the first line of a mapping body")),
             "and it comes first"
         );
     }
@@ -2938,8 +2957,9 @@ Users : Person from User
         let diags =
             crate::check::typecheck_mapping::accumulated::<fossil_base::Diagnostic>(&db, mloc);
         assert!(
-            diags.iter().any(|d| d.message.contains("str.sluggify")
-                && d.message.contains("did you mean")),
+            diags
+                .iter()
+                .any(|d| d.message.contains("str.sluggify") && d.message.contains("did you mean")),
             "the checker must name the function and suggest one, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
         );
@@ -3213,8 +3233,10 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
         );
 
         assert_eq!(pipes[2].base.as_str(), "Adults");
-        let [HirSourceOp::Join { right, alias, on }, HirSourceOp::Where(pred)] =
-            pipes[2].ops.as_slice()
+        let [
+            HirSourceOp::Join { right, alias, on },
+            HirSourceOp::Where(pred),
+        ] = pipes[2].ops.as_slice()
         else {
             panic!("expected Join then Where, got {:?}", pipes[2].ops);
         };
@@ -3232,10 +3254,7 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
         };
         assert!(matches!(
             (&**lhs, &**rhs),
-            (
-                HirExpr::ColumnRef { .. },
-                HirExpr::ColumnRef { .. }
-            )
+            (HirExpr::ColumnRef { .. }, HirExpr::ColumnRef { .. })
         ));
         assert!(matches!(pred, HirExpr::BinOp { op: CmpOp::Ge, .. }));
     }

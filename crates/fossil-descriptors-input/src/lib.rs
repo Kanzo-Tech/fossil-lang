@@ -118,7 +118,6 @@ pub enum DescriptorError {
     // `JsonLdContextNotSupported` and `UnknownDatatype` lived here. Both were
     // about a CSVW sidecar; there is no sidecar.
 
-
     /// The descriptor parsed successfully but did not declare a
     /// `tableSchema`, and the consumer (plan 03-05) requires one for forward
     /// type propagation.

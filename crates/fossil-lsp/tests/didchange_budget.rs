@@ -126,9 +126,7 @@ fn didchange_round_trip_under_margined_budget() {
     // The host's other half: the document the program names is a Salsa INPUT, so
     // it has to be registered before any query looks for it. `fossil-lsp` does
     // this on `didOpen`; skipping it here is what made the old number cheap.
-    fossil_ide::register_missing_documents(&mut db, file, &|key| {
-        std::fs::read_to_string(key).ok()
-    });
+    fossil_ide::register_missing_documents(&mut db, file, &|key| std::fs::read_to_string(key).ok());
 
     // The contract actually resolved — assert it BEFORE timing, so a budget that
     // stops measuring the checking path fails loudly instead of getting faster.

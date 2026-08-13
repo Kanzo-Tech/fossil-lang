@@ -178,7 +178,10 @@ fn a_property_key_resolves_to_its_predicate_in_the_document() {
     let hits = goto_definition(&db, &[f], f, 7, 5);
     assert_eq!(hits.len(), 1, "one predicate; got {hits:?}");
     let target = &hits[0];
-    assert_ne!(target.file, f, "a property key names nothing in the program");
+    assert_ne!(
+        target.file, f,
+        "a property key names nothing in the program"
+    );
     let (_, slice) = hit(&db, target);
     assert_eq!(
         slice, "shop:name",

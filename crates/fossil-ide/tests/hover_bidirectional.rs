@@ -124,8 +124,14 @@ fn register_users(db: &dyn fossil_base::Db) {
     cache.insert(InferredDescriptor {
         uri: "users.csv".into(),
         columns: vec![
-            InferredColumn { name: "id".into(), primitive: Primitive::Integer },
-            InferredColumn { name: "name".into(), primitive: Primitive::String },
+            InferredColumn {
+                name: "id".into(),
+                primitive: Primitive::Integer,
+            },
+            InferredColumn {
+                name: "name".into(),
+                primitive: Primitive::String,
+            },
         ],
         freshness_token: String::new(),
     });

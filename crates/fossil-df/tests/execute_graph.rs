@@ -70,9 +70,15 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor(), &std::collections::HashMap::new())
-        .await
-        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &descriptor(),
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Two vertex types (source order: Person, Order); one edge (placedBy).
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -120,9 +126,15 @@ async fn execute_graph_emits_manifests_and_run_status() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor(), &std::collections::HashMap::new())
-        .await
-        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(
+        &ctx,
+        &db,
+        file,
+        &descriptor(),
+        &std::collections::HashMap::new(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // ── Manifests: graph index + per-type YAML, W0b paths (Type casing) ──
     let manifests = graph.manifests().expect("manifests serialize");

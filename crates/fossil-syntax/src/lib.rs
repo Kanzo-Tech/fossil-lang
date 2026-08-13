@@ -192,10 +192,10 @@ Users : ex:Person from User
             .map(|d| d.message.clone())
             .collect();
         for needle in [
-            "no vocabulary",       // `prefix ex: <…>`
-            "bare",                // `ex:Person`
-            "absolute IRI",        // `<http://xmlns.com/foaf/0.1/name>`
-            "qualified",           // `.email`
+            "no vocabulary",          // `prefix ex: <…>`
+            "bare",                   // `ex:Person`
+            "absolute IRI",           // `<http://xmlns.com/foaf/0.1/name>`
+            "qualified",              // `.email`
             "backtick opens nothing", // the backtick
         ] {
             assert!(

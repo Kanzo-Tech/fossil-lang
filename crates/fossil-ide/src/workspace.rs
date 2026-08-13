@@ -67,10 +67,7 @@ impl WorkspaceIndex {
     /// The per-file [`SymbolIndex`] for one open file, if present.
     #[must_use]
     pub fn symbols_of(&self, file: SourceFile) -> Option<&SymbolIndex> {
-        self.files
-            .iter()
-            .find(|(f, _)| *f == file)
-            .map(|(_, s)| s)
+        self.files.iter().find(|(f, _)| *f == file).map(|(_, s)| s)
     }
 
     /// The set of files this index spans.

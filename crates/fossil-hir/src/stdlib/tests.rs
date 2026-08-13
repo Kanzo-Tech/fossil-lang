@@ -45,8 +45,16 @@ fn every_rows_receiver_agrees_with_its_own_name() {
     let r = FunctionRegistry::stdlib_default();
     for e in r.iter() {
         let (recv, member) = split_receiver(e.name.as_str());
-        assert_eq!(e.recv, recv, "`{}` carries a receiver its name denies", e.name);
-        assert_eq!(e.member, member, "`{}` carries a member its name denies", e.name);
+        assert_eq!(
+            e.recv, recv,
+            "`{}` carries a receiver its name denies",
+            e.name
+        );
+        assert_eq!(
+            e.member, member,
+            "`{}` carries a member its name denies",
+            e.name
+        );
         assert!(
             e.name.contains('.'),
             "`{}` is not a dotted catalogue name",
