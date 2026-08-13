@@ -1,0 +1,131 @@
+---
+title: Adjacency
+description: Both orientations on disk, and an edge lives in its source's tile. CSR is flat in N where the alternative grows to 15.86× the over-read.
+---
+
+Every edge type is stored **twice, in one relation**:
+
+- `by_source.parquet` — ordered by `src_dense`. This is CSR on disk.
+- `by_target.parquet` — ordered by `dst_dense`. This is CSC on disk.
+
+Verified on a ten-million-vertex corpus: `by_source.parquet` has **zero out-of-order rows** by
+`src_dense` across 71,024,690 rows, and `by_target.parquet` likewise by `dst_dense`.
+
+## Why the order is worth a convention
+
+Because a reader that trusts it gets **wrong answers rather than slow ones** if it is not there.
+
+A sorted adjacency file is not merely convenient to scan — it *is* the CSR structure a graph
+algorithm wants, offsets and values, already laid out. Reading it as the CSR it claims to be needs
+no degree-counting pre-pass, no scatter, and no intermediate bag of pairs. A file that claims the
+order and does not have it does not fail: it builds a different graph, silently, and lays the corpus
+out by it.
+
+That is not hypothetical arithmetic. In the write path, taking the file as the CSR it already is
+removed a `Vec<(u32, u32)>` of every edge (568 MB at ten million), a degree-counting pre-pass and an
+80 MB cloned cursor scattering random writes over the 568 — **−1.71 GiB of process peak**, with the
+corpus byte-identical. None of the three was ever asked for by the algorithm; they existed because a
+function signature took an unordered bag and so could not carry the order the file already had. **An
+invariant lives in a type or it lives in a comment**, and here the file is the type.
+
+Guard: `csr-and-csc`. What it does not fix is the secondary order — rows sharing a `src_dense` may
+appear in any order, and no reader may depend on which.
+
+## One relation, stored twice
+
+The two orientations carry the same edge set. Nothing else in a corpus says so — the names do not,
+the counts do not, and a reader answering a neighbourhood query from one and a count from the other
+would silently disagree with itself.
+
+Guard: `one-relation-twice`, checked as a symmetric difference in both directions, so neither a
+missing edge nor an extra one survives. What it cannot prove is that either orientation is the
+*whole* relation: both being wrong identically passes.
+
+And every endpoint addresses a vertex that exists, in its own type's dense space. That is the
+corruption a renumbering can introduce and that no row count would reveal — the edge counts still
+match, both orientations still agree, and the graph is wrong. Guard: `no-dangling-endpoint`.
+
+## An edge lives in its source's tile
+
+Tiles of the source-ordered adjacency are keyed by **the same range as the vertices**: tile `k`
+under `by_source/` holds every edge whose `src_dense` is in vertex tile `k`. Its row count is
+therefore the total degree of those 4,096 vertices, not 4,096 — **`chunk_size` on an edge is an
+addressing unit and never a row count.**
+
+The target-ordered orientation is not tiled. It answers "an edge with one endpoint off screen",
+which is a different question and doubles the addressing to ask it.
+
+Guards: `tile-of`, which checks the source-ordered tiles against `src_dense >> shift`; and
+`declared-tiling`, which checks that an edge type's `src_chunk_size` equals its source type's
+`chunk_size` — a different number there would address nothing.
+
+### CSR, not LCA
+
+The alternative placement is to hoist an edge to the deepest tile containing both endpoints — the
+lowest common ancestor of the two ids, which with a fixed tile size is their common prefix. It is
+the natural thing to reach for, and it is **dominated on both curves at once**.
+
+Where the edges fall, by level. Level 0 is "both endpoints in the same leaf"; the root is the tile
+every id shares:
+
+| N | leaves | depth | in level 0 | in the root |
+| --- | --- | --- | --- | --- |
+| 200,000 | 49 | 6 | 88.51% | 24,942 |
+| 1,000,000 | 245 | 8 | 80.72% | 98,429 |
+| 5,000,000 | 1,221 | 11 | 74.42% | 292,410 |
+| 10,000,000 | 2,442 | 12 | 73.33% | 621,102 |
+
+**The root grows with N and the fraction that fits in a leaf shrinks.** And the root is paid by
+every window, whether or not anything inside it is drawn, because a reader cannot know what it holds
+without reading it — which is the definition of addressing.
+
+What a window costs, mean of six:
+
+| N | drawable | CSR reads | LCA reads | tiles CSR | tiles LCA | over-read CSR | LCA |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 200,000 | 184,282 | 347,975 | 403,848 | 11.8 | 29.7 | 1.95× | 2.29× |
+| 1,000,000 | 133,301 | 373,789 | 556,267 | 14.0 | 39.2 | 2.87× | 4.26× |
+| 5,000,000 | 122,556 | 345,988 | 1,659,809 | 13.0 | 44.3 | 2.89× | 13.84× |
+| 10,000,000 | 174,583 | 452,979 | 2,699,960 | 17.2 | 60.7 | 2.59× | 15.86× |
+
+**CSR is flat and LCA is not.** CSR reads 346k to 453k edges while the corpus multiplies by fifty;
+LCA goes from 404k to 2.70M. LCA also loses on requests, at 2.5×–3.5× the tiles.
+
+Why, in one table — the first window at five million, level by level:
+
+| level | tiles fetched | edges inside | of them drawable |
+| --- | --- | --- | --- |
+| 0 | 14 | 318,043 | 108,036 |
+| 1–2 | 15 | 31,048 | 5,793 |
+| 3–8 | 19 | 511,345 | 2,422 |
+| 9–11 | 4 | 977,000 | 3,852 |
+
+The four high tiles move **53% of everything an LCA reader downloads and draw 0.39% of what they
+contain**. That is not bad luck in one corpus: **near the root, the tree has no branching left to
+prune with.** At five million there exist only three tiles at level 9, two at level 10 and one at
+level 11, so any window touches almost all of them. The root at ten million is 621,102 edges of
+which a window draws **1,170**.
+
+Grouping levels in pairs — the quadrant, which is the natural move on a Morton order — merges
+adjacent rows of that table without moving a single edge downward. The ceiling does not drop.
+
+**And CSR needs no second request.** Every drawable edge has its source on screen, therefore in a
+leaf the window already fetched: reading the window's leaves is an **exact superset** of what can be
+drawn, with 1.1×–1.3× over-read at run granularity and 1.9×–2.9× at tile granularity.
+
+<Callout title="What that comparison does not cover">
+**"Drawable" means both endpoints on screen.** An edge with one endpoint outside has a visible
+segment and neither placement brings it. Measuring that needs the CSC half, which the corpus already
+carries, and it doubles the addressing rather than the argument.
+
+**Six windows per size, not a distribution**, all at one zoom, square and centred on the median
+vertex. **And the comparison is in rows, not bytes on the wire** — a high tile compresses *worse*
+than a leaf, since its ids span a wider range and delta and RLE yield less, so the LCA figure is
+optimistic if anything.
+</Callout>
+
+## The tiles are the relation
+
+Splitting a file is where rows are silently dropped or written twice, and both survive every count
+that is not a symmetric difference. `exactly-once` asserts that the tiles hold exactly the relation
+they cut — the same count, and nothing on either side of the difference.

@@ -1,0 +1,68 @@
+{
+  "//": "The published test vectors of a fossil corpus. This file is the deliverable, not the prose beside it: a second implementation is checked against this table and not against a sentence. It is read by `check.mjs` (guard tile-of) and rendered by the addressing page, so the documented table and the executed one cannot drift apart. Every value is a border.",
+  "tile_of": {
+    "formula": "tile = dense_id >> 12",
+    "input": "unsigned 64-bit dense_id",
+    "shift": "logical, 12 bits",
+    "output": "unsigned 64-bit tile number",
+    "vectors": [
+      { "dense_id": "0", "tile": "0", "why": "the first id of the first tile" },
+      { "dense_id": "4095", "tile": "0", "why": "the last id of tile 0" },
+      { "dense_id": "4096", "tile": "1", "why": "the first id of tile 1" },
+      { "dense_id": "8191", "tile": "1", "why": "the last id of tile 1" },
+      {
+        "dense_id": "2147483647",
+        "tile": "524287",
+        "why": "2^31 − 1, the last id a signed 32-bit reading agrees on"
+      },
+      {
+        "dense_id": "2147483648",
+        "tile": "524288",
+        "why": "2^31, where a port that took the shift as signed gives a negative tile"
+      },
+      {
+        "dense_id": "9007199254740992",
+        "tile": "2199023255552",
+        "why": "2^53, where a port that ran the id through a JavaScript Number stops being exact"
+      }
+    ]
+  },
+  "morton2": {
+    "formula": "morton = spread(x) | (spread(y) << 1)",
+    "input": "two unsigned 16-bit quantised coordinates",
+    "output": "unsigned 32-bit code; the shift result must be coerced back to unsigned",
+    "vectors": [
+      { "x": 0, "y": 0, "morton": 0, "why": "the origin" },
+      { "x": 1, "y": 0, "morton": 1, "why": "x occupies the even bits" },
+      { "x": 0, "y": 1, "morton": 2, "why": "y occupies the odd bits" },
+      { "x": 1, "y": 1, "morton": 3, "why": "the first cell of the second row" },
+      { "x": 34, "y": 17, "morton": 1542, "why": "an interior value with no symmetry to hide behind" },
+      { "x": 4096, "y": 4096, "morton": 50331648, "why": "a power of two on both axes" },
+      {
+        "x": 32768,
+        "y": 0,
+        "morton": 1073741824,
+        "why": "bit 30 — the last one a signed 32-bit accumulator survives"
+      },
+      {
+        "x": 0,
+        "y": 32768,
+        "morton": 2147483648,
+        "why": "bit 31, which is negative in a signed 32-bit reading and is where a port that omits the unsigned coercion sorts the top half of the plane first"
+      },
+      { "x": 65535, "y": 0, "morton": 1431655765, "why": "every even bit set" },
+      { "x": 0, "y": 65535, "morton": 2863311530, "why": "every odd bit set" },
+      { "x": 65535, "y": 65535, "morton": 4294967295, "why": "the last code" }
+    ]
+  },
+  "quantize": {
+    "formula": "q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)",
+    "extent": "the bounding box of one vertex type's own positions",
+    "vectors": [
+      { "v": 0, "lo": 0, "hi": 100, "q": 0, "why": "the low edge" },
+      { "v": 50, "lo": 0, "hi": 100, "q": 32768, "why": "the midpoint rounds up, not down" },
+      { "v": 100, "lo": 0, "hi": 100, "q": 65535, "why": "the high edge" },
+      { "v": 5, "lo": 5, "hi": 5, "q": 0, "why": "a degenerate axis maps to 0 rather than dividing by zero" }
+    ]
+  }
+}

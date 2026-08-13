@@ -1,0 +1,126 @@
+---
+title: Reading one without fossil
+description: A Parquet reader and the column names. What a third party needs, in the order they need it, and the SQL that answers each step.
+---
+
+Reading a corpus needs a Parquet reader and this page. No fossil crate, no `@fossil-lang/*` package,
+no wasm module, no service.
+
+This is not an aspiration about the format — it is how it is already read. `kanzo-ui` reads
+fossil-written corpora with no `@fossil-lang/*` dependency at all, reimplementing the read shape
+against DuckDB and Mosaic, and three languages that do not know fossil exists read the same tree.
+The examples below use DuckDB because it is the shortest way to write them down; nothing in them is
+DuckDB-specific except the syntax.
+
+## 1. Start at the index
+
+A reader over HTTP cannot list a directory, so nothing is discovered by listing. One file is named
+in advance:
+
+```
+graph.graph.yml
+```
+
+It names every per-type manifest. Each vertex manifest carries a `type`, a `prefix` and a
+`chunk_size`; each edge manifest carries `src_type`, `edge_type`, `dst_type`, a `prefix`, and the
+`src_chunk_size` that ties its tiles to the source type's.
+
+The manifests are small and flat. Reading them with a line scan rather than a YAML library is a
+legitimate choice and the checker makes it — `apps/corpus/guards/manifest.mjs` is sixty lines and
+refuses what it cannot parse rather than guessing at it.
+
+## 2. Everything else is arithmetic
+
+From `chunk_size` alone:
+
+```
+shift       = log2(chunk_size)          # 12
+tile(id)    = id >> shift
+tile_count  = ceil(V / chunk_size)
+tile i       spans dense ids [i·chunk_size, (i+1)·chunk_size)
+```
+
+No index file, no manifest of tiles, nothing to fetch. A reader knows the whole tile set from one
+number, which is what lets it compute every URL before it emits the first request.
+
+## 3. Ask the footer which tiles intersect the window
+
+Arithmetic gives the tiles that *exist*. The footer gives the ones that *intersect* — the row-group
+statistics on `x` and `y` are bounding boxes, they come with the first request, and selecting on
+them is the whole of viewport culling.
+
+```sql
+SELECT row_group_id,
+       min(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS x0,
+       max(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS x1,
+       min(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS y0,
+       max(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS y1
+  FROM parquet_metadata('vertex/Person/tiles.parquet')
+ WHERE path_in_schema IN ('x', 'y')
+ GROUP BY row_group_id;
+```
+
+Keep the row groups whose box intersects the window; those ordinals are tile numbers, and contiguous
+ones coalesce into a single byte range. Note `min_value`/`max_value` before `min`/`max` — the
+deprecated pair is signed-comparison only and is empty for an unsigned column, which is every
+addressing column there is.
+
+<Callout type="warn" title="Select the tiles; do not write the window as a predicate">
+Handing the ranges to the query planner as a `WHERE` is the intuitive move and it is measured to be
+slower than not pruning at all: a range join against 179 runs costs 237 ms and 179
+`BETWEEN … OR …` predicates cost 189 ms wall and 2.3 s of CPU, against 5 ms for a plain join,
+because the engine evaluates ranges per row instead of skipping row groups.
+
+**Pruning is not a predicate. It is a choice of what to read.**
+</Callout>
+
+## 4. Read the vertices
+
+```sql
+SELECT dense_id, x, y, cluster_id
+  FROM read_parquet('vertex/Person/tiles.parquet')
+ WHERE dense_id >= 40960 AND dense_id < 45056;   -- tiles 10..10
+```
+
+Or, over HTTP, fetch the byte ranges the footer named and decode them directly. The columns are laid
+out to upload to a GPU without transformation — `x` and `y` as separate arrays, never interleaved.
+
+## 5. Read the edges of those tiles
+
+An edge lives in its **source's** tile, so the tiles a window already fetched are an exact superset
+of the edges it can draw. No second round of addressing:
+
+```sql
+SELECT src_dense, dst_dense
+  FROM read_parquet('edge/Person_knows_Person/by_source/tile10.parquet');
+```
+
+`by_source` is ordered by `src_dense` and `by_target` by `dst_dense` — CSR and CSC. A reader that
+wants a neighbourhood scans a run; a reader that wants an incoming neighbourhood scans the other
+file.
+
+## 6. Name things by the subject IRI
+
+```sql
+SELECT v.subject
+  FROM read_parquet('vertex/Person/tiles.parquet') v
+ WHERE v.dense_id = 41000;
+```
+
+`dense_id` is an address and changes when the layout is redone. Anything stored outside the corpus —
+a selection, a bookmark, a foreign key — keys on `subject`.
+
+## Prove your own writer
+
+If you produce corpora rather than only consume them, the guards are the contract in executable
+form:
+
+```bash
+node apps/corpus/guards/check.mjs /path/to/your/corpus
+```
+
+It needs `node` and the `duckdb` binary, and nothing else — no pnpm install, no Rust toolchain, no
+part of this repository beyond the `guards/` directory, which is written to be copied. `--explain`
+prints what each guard proves and, more usefully, what it cannot.
+
+[The guards](/docs/guards) has the full list and the honest limits.

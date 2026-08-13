@@ -1,0 +1,85 @@
+---
+title: What a corpus is
+description: A graph on disk that outlives the process that wrote it, read by code that was never compiled against it. The artifact is the API.
+---
+
+A **fossil corpus** is a graph written to disk: vertices, adjacency in both orientations, and a
+manifest that names them. It is plain Parquet in a directory tree, and it is read by code that was
+not compiled against the code that wrote it.
+
+That last clause is the whole design. A corpus is not a serialisation of somebody's object graph —
+it is the interface. Between the two halves of fossil, **the seam is the corpus on disk, not an
+API**, and that is measured rather than asserted: `kanzo-ui` reads fossil-written corpora with no
+`@fossil-lang/*` dependency of any kind, and three languages that do not know fossil exists read the
+same tree. The read surface in this repository, `crates/fossil-graph`, reaches the rest of the tree
+exactly once — a fact `apps/docs/content.test.ts` asserts as a build failure rather than a sentence.
+
+<Callout title="Two products, one repository">
+The other half of fossil is a statically-typed language that produces a graph, and it is documented
+at its own site. Nothing on this site requires it. A corpus is readable by anyone with a Parquet
+reader, and the conventions here are what makes that true rather than merely possible.
+</Callout>
+
+## The tree
+
+```
+<dest>/
+  graph.graph.yml                          the one entry point
+  vertex/
+    Person.vertex.yml                      one per vertex type
+    Person/                                the type's payload, tiled by dense_id
+  edge/
+    Person_knows_Person/
+      Person_knows_Person.edge.yml
+      by_source.parquet                    CSR — ordered by src_dense
+      by_target.parquet                    CSC — ordered by dst_dense
+      by_source/                           the CSR, tiled by the source's tile
+```
+
+A reader over HTTP cannot list a directory, so nothing is discovered by listing. `graph.graph.yml`
+names every per-type manifest; each of those names a `prefix` and a `chunk_size`; and from a
+`chunk_size` the address of every tile is arithmetic. A reader computes every URL it wants before
+it emits the first request.
+
+## The five conventions
+
+Five things define a corpus. Each one exists for a reason that was measured, each one is a page on
+this site, and each one is a guard in `apps/corpus/guards/guards.mjs`.
+
+| | the convention | what it buys |
+| --- | --- | --- |
+| [Identity](/docs/conventions/identity) | `dense_id` is a gapless `0..V−1`; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
+| [Addressing](/docs/conventions/addressing) | a tile is 4,096 rows of `dense_id`; `tile = dense_id >> 12` | no index to fetch, no directory to list |
+| [Order](/docs/conventions/order) | `dense_id` ascends with the Morton code of the position | a rectangle in space is a few contiguous runs of ids |
+| [Adjacency](/docs/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, an edge lives in its source's tile | every drawable edge is in a tile the window already fetched |
+| [Payload](/docs/conventions/payload) | plain Parquet, row-group statistics on the addressing columns | the footer is the index, bought in one request |
+
+## Why a format rather than a library
+
+A library is a fine contract when there is one consumer and one language. This one has neither, and
+the alternative is not hypothetical — the corpus is already read from Rust, from TypeScript over
+DuckDB-WASM, and from a notebook that knows nothing about any of it.
+
+The reference for that choice is **Iceberg, Delta Lake and Lance**: a manifest plus files, with many
+engines reading the same table and none of them being the contract. For the read-by-ranges half the
+lineage is **Cloud-Optimized GeoTIFF → GeoParquet → PMTiles**: one file, an embedded directory, a
+spatial order, and a client that asks for byte ranges over HTTP with no server.
+
+And the counter-example that shaped the guards is **GraphAr**, whose vocabulary this format borrows
+— CSR and CSC, dense ids, edges aligned to the source's chunk. GraphAr ships a shared corpus that
+every language's CI clones, and no job writes with one implementation and reads with another.
+Through that gap a fourth implementation landed having re-derived the path arithmetic differently
+from the other three *and* from the corpus on disk, with green CI on both sides, because its tests
+asserted hand-written strings instead of resolving against the artifact.
+
+<Callout type="warn" title="A format is documented, not typed — and that costs something">
+The conventions do not live in a shared crate. A crate would put the compiler between the writer and
+the reader, and it would also put a version between them, re-introducing the very edge the two-core
+split removes. It would additionally assume a single output format by construction, which is a
+[live design question](/docs/conventions/payload#the-payload-format-is-open).
+
+What replaces it is this document plus [executable guards](/docs/guards). The price, stated where it
+is paid: **there is no type. A guard checks what it was asked to check and nothing more.** Every
+guard on this site therefore publishes what it cannot prove alongside what it can, and that second
+column is the one worth reading.
+</Callout>

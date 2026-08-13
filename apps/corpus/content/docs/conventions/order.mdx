@@ -1,0 +1,105 @@
+---
+title: Order
+description: dense_id ascends with the Morton code of the position. That single sentence is what turns a rectangle in space into a few hundred contiguous runs of ids.
+---
+
+**`dense_id` ascends with the Morton code of the vertex's position.** The id space *is* the spatial
+order.
+
+Everything in [Addressing](/docs/conventions/addressing) is arithmetic over an interval. This is the
+convention that makes an interval mean something: without it, `dense_id >> 12` still names a tile,
+and that tile holds 4,096 vertices scattered across the whole canvas.
+
+## The mechanism, and it is one line
+
+A rectangle over a Morton order breaks into **O(√n) contiguous segments**. That is the entire
+mechanism, and it is a property of the curve, not of the data.
+
+Measured on five million vertices: a window of 20,000 vertices is **179 contiguous runs of
+`dense_id` covering exactly 20,007 ids** — 0.4% of the corpus, zero over-read at run granularity.
+At tile granularity, nine windows on a five-million corpus select **11–25 tiles where 10–21 are
+needed, an over-read of 1.10×–1.20×, mean 1.14×**.
+
+<Callout title="A measurement that survived losing its explanation">
+The runs were originally explained by the layout being lumpy: a community is a compact disc, a
+window contains whole communities, so a community is a contiguous run. **That explanation is
+false and is measured as false.** At five million, `community` is eight groups of 625,000 vertices
+and each group is broken into **5,461 runs** of `dense_id`; `cluster_id` is **15,310 groups with a
+median of 1 vertex** and a p90 of 3; a 20,000-vertex window is **~170 runs of ~118 ids**, which is
+neither.
+
+The runs are produced by the curve, not by the communities. The finding is **stronger** than when it
+was written, because it turns out not to depend on the layout grouping well.
+
+Two orthogonal structures, not one: the community hierarchy gives the levels of *aggregation*; the
+Morton order gives the ranges of *bytes*.
+</Callout>
+
+## The arithmetic
+
+Two steps, and both are specified rather than left to be inferred.
+
+**Quantise** each coordinate to 16 bits over the bounding box of **that vertex type's own
+positions** — each type is laid out and renumbered independently, so each has its own extent. A
+degenerate axis maps to 0 rather than dividing by zero.
+
+```
+q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)
+```
+
+<VectorTable of="quantize" />
+
+**Interleave** the two quantised coordinates into a 32-bit code, `x` in the even bits and `y` in the
+odd ones.
+
+```
+morton = spread(x) | (spread(y) << 1)
+```
+
+<VectorTable of="morton2" />
+
+The `x = 0, y = 32768` row is the one that matters most. `spread(y) << 1` reaches bit 31, so in a
+signed 32-bit accumulator the result is negative, and a port that does not coerce it back to
+unsigned sorts the top half of the plane before the bottom half. That corpus satisfies every
+count-based check ever written and addresses nothing.
+
+<Callout type="warn" title="The quantisation is binary32, and the width is part of the contract">
+`(v − lo) / (hi − lo)`, the multiply by 65535 and the rounding are all single-precision. This is not
+an implementation detail that leaked into a specification — it is the specification, because two
+implementations that agree on the formula and disagree on the width produce quantised values that
+differ by one at the boundaries, and a difference of one is a different Morton code and a different
+order.
+
+The guard reproduces the arithmetic in the same width for the same reason. A writer that quantised
+in binary64 can show inversions here that are ties in its own view of the numbers, and naming the
+width is what turns that from an argument into a bug report.
+</Callout>
+
+## Redoing the layout renumbers everything
+
+A flattened id space only works if the id space *is* the spatial order, which is what the
+renumbering does. The consequence follows immediately: **a new placement produces a new numbering**,
+so `dense_id` cannot also be the identity. That is why the identity is
+[the subject IRI](/docs/conventions/identity#the-identity-is-the-subject-iri).
+
+It also means positions moved by hand are a layer on top and never a rewrite. Tiles are precomputed;
+mutating one means rebuilding them.
+
+## What the guards check
+
+Two guards, and they ask different questions.
+
+`morton-order` recomputes the code from the corpus's own `x` and `y` and asserts it **never
+decreases** as `dense_id` increases. Non-decreasing rather than strictly increasing, because equal
+codes are legal — two vertices can quantise to the same cell, and their relative order is not
+specified by anything.
+
+`spatial-tiles` asks what the order was *for*, using only the footer a reader actually has: the
+average tile's bounding box covers at most half the corpus extent. On the fixture — 70,000 vertices
+in 18 tiles — a Morton-ordered corpus measures **12.4%**; the same vertices renumbered at random
+measure **99%**, which is what theory says, because with no spatial order every tile's box is the
+whole corpus.
+
+It separates *having* a spatial order from *not having one*. It does not separate a good one from a
+slightly worse one, and no single number could. The measured over-read on a real corpus is
+1.10×–1.20×; this bound is nowhere near that tight and is not a quality target.

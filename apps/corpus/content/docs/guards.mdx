@@ -1,0 +1,130 @@
+---
+title: The guards
+description: Fifteen executable checks a corpus on disk either satisfies or does not — what each one proves, what each one cannot, and how each was proved to fire.
+---
+
+The conventions on this site are documented rather than typed. **The guards are what make them a
+contract.**
+
+```bash
+node apps/corpus/guards/check.mjs /path/to/corpus
+```
+
+`node` and the `duckdb` binary. No fossil crate, no npm package, no install, no build step — copy
+the `guards/` directory somewhere else and it runs. That is the position the third party this format
+exists for is in, and a checker that needed more than they have would be checking a different
+question.
+
+## Why a document and guards, rather than a shared crate
+
+The two halves of fossil are joined by the corpus on disk, and the alternative to writing the
+conventions down was a small crate that both sides import. It was rejected for three reasons, in
+increasing order of weight:
+
+1. **It re-introduces the edge that was just removed.** A shared crate puts the compiler between
+   writer and reader, and also a version. Two implementations that must agree on a Cargo version are
+   not two implementations.
+2. **It excludes everyone else.** A third party gets nothing from a Rust crate. The corpus is already
+   read from three languages that do not know fossil exists, and the point of a format is that the
+   fourth needs no permission.
+3. **It assumes one output format by construction.** Whether a tile's payload stays Parquet is a
+   [live design question](/docs/conventions/payload#the-payload-format-is-open). A crate that models
+   *the* manifest cannot hold that question; a document and a set of guards can, and here they do —
+   the addressing guards survive a format change untouched and the Parquet ones are named as such.
+
+<Callout type="warn" title="And the price, stated where it is paid">
+**There is no type. A guard checks what it was asked to check and nothing more.**
+
+That is not a caveat added for form. It is the entire difference between this and a compiler, and it
+is why every guard below publishes what it *cannot* prove beside what it can. A reader who has seen
+only the first half has been told half the contract.
+</Callout>
+
+## The fifteen
+
+Rendered from `apps/corpus/guards/guards.mjs` at build time, so this page cannot describe a guard
+that does not exist, omit one that does, or paraphrase what one proves.
+
+<GuardIndex />
+
+## How each one is known to fire
+
+Every check is phrased as a **count of violations**, so the expected answer is always zero and a
+failure names what was violated rather than what was expected. That form has exactly one failure
+mode, and it is the classic one: **an empty corpus satisfies all of them at once.** A conformance
+suite that passes vacuously has stopped being evidence and nobody notices, because the output looks
+identical.
+
+So `apps/corpus/guards/self-test.mjs` does two things:
+
+**Non-vacuity.** It writes a conforming corpus — 70,000 vertices, 139,993 edges, 18 tiles — in both
+containers, one file per tile and one file with row groups, and requires all fifteen guards to pass
+on both.
+
+**Mutation.** For each guard, it copies that corpus, breaks exactly one convention, and requires
+that guard to fire. One break each:
+
+| guard | the break |
+| --- | --- |
+| `not-empty` | a corpus of one tile, which has no boundary to get wrong |
+| `entry-point` | the index names a per-type manifest that is not on disk |
+| `plain-parquet` | the vertex payload has no `y` column |
+| `declared-tiling` | the manifest declares a tile of 5,000 rows, which no shift addresses |
+| `dense-ids` | one vertex deleted, so the ids have a gap |
+| `tile-of` | one vertex placed in the file of the tile next door |
+| `published-vectors` | the vector table claims `tile_of(4096) = 0` |
+| `morton-order` | two distant vertices swap positions |
+| `spatial-tiles` | the ids renumbered at random — the control the bound was chosen against |
+| `csr-and-csc` | `by_source` written in target order |
+| `one-relation-twice` | one edge missing from `by_target` |
+| `no-dangling-endpoint` | one edge pointing at a `dense_id` no vertex has |
+| `exactly-once` | the staged single-file vertex Parquet left beside the tiles |
+| `footer-is-the-index` | `x` nested in a struct, so the footer holds a box for `x, v` and none for `x` |
+| `identity-is-the-subject` | two vertices sharing a subject IRI |
+
+Collateral — other guards firing on the same break — is **reported rather than forbidden**. Some
+conventions genuinely cannot be violated in isolation: deleting a vertex breaks the id sequence and
+strands an edge at the same time, and a randomly renumbered corpus loses its Morton order and its
+tile compactness together. Requiring isolation would mean weakening the guards until they could be
+isolated, which is the wrong direction.
+
+## The fixture is a second implementation
+
+`apps/corpus/guards/fixture.mjs` writes its corpus in JavaScript against the published conventions
+and nothing else — no Rust, no fossil package, and no import from this repository beyond
+`apps/corpus/guards/arithmetic.mjs`, which exists to be copied.
+
+That makes it a second implementation of the arithmetic at fixture scale, which is what the
+conventions ask of anyone. It is not a benchmark and not a realistic graph: the positions come from
+a grid of phyllotactic discs because that is a shape with real clustering and no dependencies.
+Nothing in it is normative. The conventions are.
+
+## What no guard here reaches
+
+Named, because the honest list of what a document-plus-guards contract does not cover is the price
+of not having a type.
+
+**A corpus written by a different writer.** The fixture is one implementation checked against
+itself. A genuinely independent writer is what the conventions exist for, and no self-test can stand
+in for one.
+
+**Statistics that are present and wrong.** Every mutation removes a box; none writes a false one,
+because writing one requires a Parquet library and that is the dependency this checker does not
+take. A box wider than its rows costs a request; a box narrower than its rows loses vertices; only
+re-reading every page tells them apart, and no reader does that.
+
+**A corpus that does not fit in memory.** Every mutation rewrites a file through a `SELECT`, so the
+largest thing exercised is 70,000 vertices. Nothing here says a guard's own query stays bounded at
+ten million.
+
+**Semantics.** A corpus can satisfy all fifteen and be the wrong graph. `dense-ids` proves the
+numbering is gapless, not that it means anything; `no-dangling-endpoint` proves an endpoint is in
+range, not that it points at the right vertex; `spatial-tiles` separates having a spatial order from
+not having one, and no single number separates a good one from a slightly worse one.
+
+**The prose on this site.** There is deliberately no guard asserting that the pages cite files that
+exist. One of those was written next door, and an audit found what it actually bought: it checks
+that a cited line *exists*, never that it *says* what the page claims, and 159 dead references
+accumulated under it with CI green throughout — one page pointing at a blank line. A guard that
+measures the artifact is worth writing. A guard that measures a page's punctuation buys the
+appearance of one, which is worse than none, because it is the appearance people trust.

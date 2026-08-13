@@ -1,0 +1,133 @@
+---
+title: Addressing
+description: A tile is 4,096 rows of dense_id and its address is a shift. There is no tile tree and no index to discover — the reader computes every URL before it emits the first request.
+---
+
+**A tile is a fixed range of 4,096 rows of `dense_id`**, and tile `i` *is* the range
+`[i·4096, (i+1)·4096)`. Its address is arithmetic:
+
+```
+tile = dense_id >> 12
+```
+
+That is the entire index. There is no directory to fetch, no tile tree to walk, no listing to
+perform. The tile of a vertex is a shift; the tile of its ancestor at level `L` is
+`dense_id >> (12+L)`; the lowest common ancestor of two vertices is the common prefix of their ids,
+which is an `XOR` and a count of leading zeros. **A reader computes every URL it wants before it
+emits the first request.**
+
+## Why the camera does not ask
+
+Pruning cannot be expressed as a predicate. That is measured, and it is the finding the whole
+addressing scheme comes from.
+
+A window of 20,000 vertices on a five-million corpus is **179 contiguous runs of `dense_id`
+covering exactly 20,007 ids** — 0.4% of the corpus, with zero over-read. Those runs contain
+**130,516 of 34,974,279 edges — 268× fewer** — and they return the same 120,103 visible edges. It is
+an exact superset, not an approximation.
+
+And no way of asking for it in SQL gets it:
+
+| how the runs are asked for | cost |
+| --- | --- |
+| a plain join | 5 ms |
+| a range join against the runs | 237 ms |
+| 179 `BETWEEN … OR …` predicates | 189 ms wall, 2.3 s CPU |
+
+Both attempts are **slower than not pruning at all**, because DuckDB evaluates the ranges per row
+instead of skipping row groups. A `WHERE` clause selects rows from a table; it does not select which
+bytes get read.
+
+So the camera is addressed and the algebra is queried, and they are two different surfaces. The
+camera computes a level and a set of tiles and asks for bytes — no bbox in flight, no SQL, no
+database on that path. The [verbs](/docs/reading/verbs) answer questions and return Arrow, and they
+do not draw. When a filter has to change the picture it returns **ids**, and the canvas applies them
+as a mask over the tiles it already holds.
+
+## Why 4,096
+
+Measured on the five-million corpus served over a plain HTTP origin, counting every request that
+answers, against an ideal payload of 0.6–0.9 MB per window that is flat in N:
+
+| `chunk_size` | requests | bytes | vs ideal |
+| --- | --- | --- | --- |
+| 1,024 | 178 | 1.11 MB | 1.73× |
+| **4,096** | **78** | **1.48 MB** | **2.31×** |
+| 8,192 | 47 | 1.89 MB | 2.95× |
+| 32,768 | 25 | 4.61 MB | 7.20× |
+| 122,880 | 35 | 11.73 MB | 18.3× |
+
+The two curves have no common optimum — bytes bottom out at 1,024–2,048 and requests fall
+monotonically — so what chooses is `λ·β`, the bytes a link moves in the latency of one request:
+32,768 in series, 8,192 with six requests in flight, **4,096 fully multiplexed**. An addressed
+reader is fully multiplexed by construction, because it computes every URL before it emits the
+first.
+
+**And the byte curve is flat from 1,024 to 8,192, so the emitter is not tuned inside that band.** A
+change there is not an improvement; it is noise with a `git blame` on it.
+
+<Callout title="A power of two, and refused otherwise">
+122,880 is Pareto-dominated on both curves at once — more requests *and* four times the bytes,
+because a 122,880-row edge tile crosses several row groups and costs 9.4 requests. It is also not a
+power of two, which forces a division where a shift does. `chunk_size` is a power of two or the
+corpus does not have an address. Guard: `declared-tiling`.
+</Callout>
+
+## There is no tile tree
+
+A tree of tiles would only earn its keep by **containing** something that does not fit in a leaf.
+The one candidate was the edge that crosses tiles — hoisting it to the deepest tile holding both
+endpoints — and that costs more than it saves by a wide margin
+([Adjacency](/docs/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior nodes are
+empty, and there is nothing to materialise.
+
+**The level-of-detail pyramid is not that tree either.** Zoom does not filter; it reads a different
+relation. A tile at aggregation level 3 holds super-nodes that do not exist at level 0. So each
+level is its own relation, with its own `dense_id` space, its own Morton renumbering and its own
+flat tiling of 4,096 rows. It is not a tree of `k` levels; it is **`k` flat tilings**, and inside
+each one the address is a shift.
+
+## Two containers, one address
+
+A tile is a range of rows. Which container carries it is a second question, and both answers are
+addressed by the same arithmetic:
+
+- **one file per tile** — `chunk{k}.parquet`, the address in the name;
+- **one file, one row group per tile** — the address is the row-group ordinal.
+
+They are not equally cheap, and the difference is measured on five million vertices in 1,221 tiles:
+
+| container | requests/window | bytes/window | total footer | index a reader must hold |
+| --- | --- | --- | --- | --- |
+| one file per tile | **22.3** | 1.40 MB | 1,150,490 B | 1.33 MB (1,221 footers) |
+| one file, row groups of 4,096 | **5.6** | 1.38 MB | **496,373 B** | 675.8 kB (1 footer) |
+
+A request is one file when a tile is a file, and a **maximal run of consecutive row groups** when it
+is not: inside one file, contiguous tiles are asked for in a single byte range. The 22.3 selected
+tiles coalesce into **5.6 runs**, so the file boundary is the only thing preventing the merge.
+**One file per tile costs 4× the requests and does not save a byte.**
+
+The checker classifies rather than judges, and reports which container it found. What it refuses is
+*both at once*: two ways to address the same rows is one way too many, and a reader that globs finds
+both. Guard: `tile-of`, checked in whichever form the corpus uses.
+
+## The published vectors
+
+The arithmetic ships as a formula **and a table of vectors**, because the vectors are what gets
+copied.
+
+Iceberg specifies its bucket transform as Murmur3 x86 32-bit with seed 0 — the formula, the widths,
+the sign — and a table of vectors by type, of which `34 → 2017239379` is one. Searching for that
+constant finds it in the tests of independent implementations that copied it. PMTiles dispatches its
+Hilbert curve with a link to Wikipedia, and every port re-derives it differently.
+
+Every value below is a border. They live in `apps/corpus/guards/vectors.json`, the guard
+`published-vectors` executes that file, and this table is rendered from it — so the documented
+vectors and the executed ones are the same bytes.
+
+<VectorTable of="tile_of" />
+
+The last two rows are not decoration. `2^31` is where a port that took the shift as signed gives a
+negative tile; `2^53` is where a port that ran the id through a JavaScript `Number` stops being
+exact. Both exceed the width a `dense_id` column carries in a corpus of today's size, and they are
+published for exactly that reason — they are where a wrong implementation is still right.

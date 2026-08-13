@@ -1,0 +1,83 @@
+---
+title: Identity
+description: dense_id is an address and the subject IRI is a name. A gapless 0..V−1 is what makes a tile a range, and 64 bits is what makes a boundary safe.
+---
+
+A corpus carries two numbers that are easy to confuse and must not be. **`dense_id` is where a
+vertex is. The subject IRI is which vertex it is.**
+
+## `dense_id` is a gapless `0..V−1`
+
+Per vertex type, the dense ids are exactly the integers from zero to one less than the vertex count,
+with no gaps and no repeats. This is not tidiness; four other conventions are built on it.
+
+- **A tile is a range of ids.** A gap is therefore either an addressable tile that holds nothing —
+  a request that costs a round trip to learn it was empty — or a vertex that no address reaches.
+- **The tile count is derivable.** `ceil(V / chunk_size)` tiles exist, and a reader knows the whole
+  set without asking.
+- **The `dense_id` column need not be stored.** If tile `i` is the range `[i·4096, (i+1)·4096)` then
+  row `j` of tile `i` *is* `i·4096 + j`. That column is 4.000 of the 9.23 compressed bytes per row a
+  drawing tile costs — **43% of the payload** — and it is derivable arithmetic only because the ids
+  are gapless.
+- **Each vertex type has its own space.** Two types both number from zero. An id is meaningless
+  without the type it belongs to, which is why an edge manifest names `src_type` and `dst_type`.
+
+Guard: `dense-ids`, and its mutation is deleting a single vertex.
+
+## The identity is the subject IRI
+
+Redoing the layout renumbers every vertex. The spatial order *is* the id space
+([Order](/docs/conventions/order)), so a new placement produces a new numbering, and a `dense_id`
+stored anywhere outside the corpus names a different vertex after the next write.
+
+So the identity is the subject IRI, and the corpus carries it as a `subject` column: non-null,
+unique within its type. A selection, a bookmark, a link from another system, a row in somebody
+else's database — all of them key on the IRI. Anything that keys on a dense id is keying on an
+address.
+
+The consequence that catches people is in the client rather than the corpus: a viewer that tracks
+selection or highlighting by *index into the currently resident buffers* has stored an address twice
+over, and a tiled reader moves those buffers constantly. Selection is by identity or it is a bug
+waiting for a pan.
+
+<Callout title="Where the IRI lives is a measured trade, and half of it is open">
+Carrying `subject` in the drawing tile costs **1.87× the tile**. Compressed bytes per row, measured
+on the five-million corpus: `subject` **8.016**, `dense_id` 4.000, `x` 2.717, `y` 2.501,
+`cluster_id` 0.028, `community` 0.014. The four drawing columns are 9.23 B/row; with `subject` they
+are 17.25.
+
+Measured on real tiles, a tile of `dense_id, x, y, community` costs **3 requests and 36.0 kB**
+against **4 requests and 37.0 kB** — from 68.8 kB stored — for all six columns. The same bytes on
+the wire, one round trip fewer and half the storage. So the drawing path carries addresses, and the
+IRI is fetched when something has to be *named* — a selection, a hover, a link out — rather than
+when it has to be painted.
+
+**Which path it is fetched from is an open convention.** It is not pinned by any record, and the
+guard reflects that: `identity-is-the-subject` asserts uniqueness and non-nullness wherever a
+`subject` column appears, and *reports* rather than fails when a payload has none.
+</Callout>
+
+## Sixty-four bits, and `number` is not one of them
+
+A `dense_id` is an unsigned integer that may carry more than 53 bits. At a language boundary it is a
+`BigInt`, and a `Number` is wrong.
+
+This is not precaution. `node-s2` was a **binding** — not a port, not a reimplementation — and it
+returned wrong cell ids anyway, because JavaScript's `number` carries 53 bits and a cell id carries
+64. **A binding does not protect a language boundary that cannot hold the value.** H3 settled the
+same question by decree, typing `H3Index` as a string before anyone could get it wrong.
+
+And the operator is worse than the width. `>>` means three different things across the layers that
+have to agree:
+
+| | what `>>` does |
+| --- | --- |
+| Rust, on a signed type | arithmetic shift — sign-extends |
+| Rust, on `u64` | logical shift, which is what the addressing specifies |
+| JavaScript, on a `Number` | **truncates to 32 bits, then shifts** |
+
+`apps/corpus/guards/arithmetic.mjs` therefore refuses a `Number` outright, and the
+[published vectors](/docs/conventions/addressing#the-published-vectors) include 2³¹ and 2⁵³ for no
+other reason than that those are the two places a port that got this wrong gives a different answer.
+
+What goes to the GPU stays a typed array. What *identifies* does not.

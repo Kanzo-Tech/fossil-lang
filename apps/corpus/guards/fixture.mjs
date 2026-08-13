@@ -1,0 +1,215 @@
+/**
+ * A conforming corpus, written by something that is not fossil.
+ *
+ * This is the checker's own evidence. A guard suite with no corpus to run on is a set of sentences;
+ * one that only ever runs on the corpus its authors wrote is a set of sentences about themselves.
+ * So the fixture is written here, in JavaScript, against the published conventions and nothing else
+ * — no Rust, no `@fossil-lang/*`, and no import from anything in this repository except the
+ * arithmetic module, which exists to be copied.
+ *
+ * That makes it the second implementation the conventions ask for, at fixture scale. It is also
+ * what `self-test.mjs` mutates: every guard is proved to fire by breaking exactly one convention in
+ * a corpus that otherwise satisfies all of them.
+ *
+ * **What it is not.** It is not a benchmark and not a realistic graph — the positions come from a
+ * grid of phyllotactic discs because that is a shape with real clustering and no dependencies, not
+ * because a corpus has to look like that. Nothing here is normative. The conventions are.
+ *
+ *   node guards/fixture.mjs <dir> [--vertices 70000] [--layout rowgroups|files]
+ */
+
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { execute, lit } from "./duck.mjs";
+import { TILE_ROWS, mortonOf } from "./arithmetic.mjs";
+
+const GOLDEN_ANGLE = 2.3999632;
+const CLUSTER_SPACING = 100;
+const INTRA_CLUSTER_RADIUS = 12;
+
+/** Positions: `clusters` discs on a square grid, phyllotaxis-packed inside each. */
+function positions(count, clusters) {
+  const side = Math.ceil(Math.sqrt(clusters));
+  const per = Math.ceil(count / clusters);
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    const cluster = Math.floor(i / per);
+    const k = i % per;
+    const radius = INTRA_CLUSTER_RADIUS * Math.sqrt(k);
+    const angle = GOLDEN_ANGLE * k;
+    out.push({
+      cluster,
+      x: (cluster % side) * CLUSTER_SPACING + radius * Math.cos(angle),
+      y: Math.floor(cluster / side) * CLUSTER_SPACING + radius * Math.sin(angle),
+    });
+  }
+  return out;
+}
+
+/**
+ * The renumbering, which is the whole of the spatial order: rank every vertex by the Morton code of
+ * its quantised position and let that rank *be* its `dense_id`. Ties break on the pre-layout index,
+ * so the ranking is total and the same input always produces the same corpus.
+ */
+function renumber(points) {
+  const extent = {
+    minX: Math.min(...points.map((p) => p.x)),
+    maxX: Math.max(...points.map((p) => p.x)),
+    minY: Math.min(...points.map((p) => p.y)),
+    maxY: Math.max(...points.map((p) => p.y)),
+  };
+  const coded = points.map((p, index) => ({ ...p, index, morton: mortonOf(p.x, p.y, extent) }));
+  coded.sort((a, b) => a.morton - b.morton || a.index - b.index);
+  const denseOf = new Array(points.length);
+  coded.forEach((p, dense) => {
+    denseOf[p.index] = dense;
+  });
+  return { ordered: coded, denseOf };
+}
+
+/**
+ * Write a corpus of `count` vertices of one type with one self-edge type.
+ *
+ * The edges are a **ring** — vertex `i` knows `(i+1) mod n` in the pre-layout numbering — plus one
+ * chord per vertex inside its own cluster. The ring makes the whole graph statable in one line of
+ * arithmetic; the chords make the adjacency non-trivial across tiles.
+ */
+export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups" } = {}) {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(join(dir, "vertex", "Person"), { recursive: true });
+  mkdirSync(join(dir, "edge", "Person_knows_Person", "by_source"), { recursive: true });
+
+  const points = positions(count, clusters);
+  const { ordered, denseOf } = renumber(points);
+
+  const rows = ordered.map(
+    (p, dense) => `${dense},https://example.org/person/${p.index},${p.x},${p.y},${p.cluster}`,
+  );
+  const vertexCsv = join(dir, "vertices.csv");
+  writeFileSync(vertexCsv, `dense_id,subject,x,y,cluster_id\n${rows.join("\n")}\n`);
+
+  const per = Math.ceil(count / clusters);
+  const pairs = [];
+  for (let i = 0; i < count; i += 1) {
+    pairs.push([denseOf[i], denseOf[(i + 1) % count]]);
+    const chord = Math.floor(i / per) * per + ((i + 7) % per);
+    if (chord < count && chord !== i) pairs.push([denseOf[i], denseOf[chord]]);
+  }
+  const edgeCsv = join(dir, "edges.csv");
+  writeFileSync(edgeCsv, `src_dense,dst_dense\n${pairs.map((p) => p.join(",")).join("\n")}\n`);
+
+  const tileRows = Number(TILE_ROWS);
+  const tiles = Math.ceil(count / tileRows);
+  const vertexPrefix = join(dir, "vertex", "Person");
+  const edgeDir = join(dir, "edge", "Person_knows_Person");
+
+  const vertexCopy =
+    layout === "files"
+      ? Array.from(
+          { length: tiles },
+          (_, k) =>
+            `COPY (SELECT * FROM v WHERE dense_id >= ${k * tileRows} AND dense_id < ${(k + 1) * tileRows}
+                    ORDER BY dense_id) TO '${lit(join(vertexPrefix, `chunk${k}.parquet`))}' (FORMAT PARQUET);`,
+        ).join("\n")
+      : `COPY (SELECT * FROM v ORDER BY dense_id) TO '${lit(join(vertexPrefix, "tiles.parquet"))}'
+           (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+
+  const edgeTileCopy = Array.from({ length: tiles }, (_, k) => {
+    const target = join(edgeDir, "by_source", `tile${k}.parquet`);
+    return `COPY (SELECT * FROM e WHERE src_dense >= ${k * tileRows} AND src_dense < ${(k + 1) * tileRows}
+                   ORDER BY src_dense, dst_dense) TO '${lit(target)}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+  }).join("\n");
+
+  execute(`
+    CREATE TEMP TABLE v AS
+      SELECT dense_id::UINTEGER AS dense_id, subject::VARCHAR AS subject,
+             x::FLOAT AS x, y::FLOAT AS y, cluster_id::UINTEGER AS cluster_id
+        FROM read_csv('${lit(vertexCsv)}', header = true);
+    CREATE TEMP TABLE e AS
+      SELECT src_dense::UINTEGER AS src_dense, dst_dense::UINTEGER AS dst_dense
+        FROM read_csv('${lit(edgeCsv)}', header = true);
+    ${vertexCopy}
+    COPY (SELECT * FROM e ORDER BY src_dense, dst_dense)
+      TO '${lit(join(edgeDir, "by_source.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});
+    COPY (SELECT * FROM e ORDER BY dst_dense, src_dense)
+      TO '${lit(join(edgeDir, "by_target.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});
+    ${edgeTileCopy}
+  `);
+
+  rmSync(vertexCsv);
+  rmSync(edgeCsv);
+
+  writeFileSync(
+    join(dir, "graph.graph.yml"),
+    [
+      "name: graph",
+      "prefix: ''",
+      "vertices:",
+      "- vertex/Person.vertex.yml",
+      "edges:",
+      "- edge/Person_knows_Person/Person_knows_Person.edge.yml",
+      "version: gar/v1",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(dir, "vertex", "Person.vertex.yml"),
+    [
+      "type: Person",
+      `chunk_size: ${tileRows}`,
+      "prefix: vertex/Person/",
+      "property_groups:",
+      "- file_type: parquet",
+      "  properties:",
+      "  - name: subject",
+      "    data_type: string",
+      "    is_primary: true",
+      "version: gar/v1",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(edgeDir, "Person_knows_Person.edge.yml"),
+    [
+      "src_type: Person",
+      "edge_type: knows",
+      "dst_type: Person",
+      `chunk_size: ${tileRows}`,
+      `src_chunk_size: ${tileRows}`,
+      `dst_chunk_size: ${tileRows}`,
+      "directed: true",
+      "prefix: edge/Person_knows_Person/",
+      "adj_lists:",
+      "- ordered: true",
+      "  aligned_by: src",
+      "  file_type: parquet",
+      "- ordered: true",
+      "  aligned_by: dst",
+      "  file_type: parquet",
+      "property_groups: []",
+      "version: gar/v1",
+      "",
+    ].join("\n"),
+  );
+
+  return { dir, count, edges: pairs.length, tiles, layout };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [dir] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  if (!dir) {
+    console.error("usage: node guards/fixture.mjs <dir> [--vertices N] [--layout rowgroups|files]");
+    process.exit(2);
+  }
+  const flag = (name, fallback) => {
+    const at = process.argv.indexOf(`--${name}`);
+    return at === -1 ? fallback : process.argv[at + 1];
+  };
+  const written = write(dir, {
+    count: Number(flag("vertices", 70_000)),
+    layout: String(flag("layout", "rowgroups")),
+  });
+  console.log(
+    `${written.count} vertices · ${written.edges} edges · ${written.tiles} tiles · ${written.layout} → ${written.dir}`,
+  );
+}

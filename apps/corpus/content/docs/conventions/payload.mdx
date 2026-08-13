@@ -1,0 +1,117 @@
+---
+title: Payload
+description: Plain Parquet, row groups of 4,096, and statistics on the addressing columns. The footer is the index — and whether the payload stays Parquet is an open design question.
+---
+
+The payload is **plain Parquet**. Files named for what they hold, columns named for what they are, no
+specification in incubation between a reader and the bytes.
+
+That is a choice with a discarded alternative behind it. The corpus borrows GraphAr's vocabulary —
+CSR and CSC, dense ids, edges aligned to the source's chunk — and none of its wire format. As an
+interchange format it does not pay: a recipient would have to learn a specification in incubation to
+read `vertices.parquet`. Names that explain themselves are **more** interoperable, not less.
+
+## Row groups of 4,096, and a tile is one
+
+The addressing unit and the storage unit are the same number. A tile is 4,096 rows of `dense_id`;
+a row group is 4,096 rows; a tile is a row group. Measured at five million vertices: 1,221 tiles,
+1,221 row groups, no surprises in the remainder.
+
+The default matters here more than it looks. A Parquet writer's default row-group size is often a
+million rows or more, which puts five million vertices into **five** row groups and leaves the
+footer with five boxes. **An addressed reader cannot prune with that.** Guard: `tile-of`, which
+checks that a row group's ordinal is its address and that it never holds more rows than a tile.
+
+## The footer is the index
+
+Arithmetic tells a reader **which tiles exist**. It does not tell it **which tiles intersect the
+window**, because the `dense_id` range of a rectangle is not computable without knowing the Morton
+range, and the Morton range is what the boxes say.
+
+The row-group statistics are those boxes, they are in the footer, and one request buys all of them.
+At five million vertices in one file the footer is **496,373 bytes — 406 B per tile**; a reader
+holds it once and computes byte ranges from then on without a second request. Contiguous tiles
+coalesce for free: 22.3 selected tiles are 5.6 ranges.
+
+<Callout type="warn" title="Read `min_value`/`max_value`, not `min`/`max`">
+Parquet's original statistics fields were defined by **signed** byte comparison, which is meaningless
+for an unsigned column. A writer that gets this right leaves them empty and fills `min_value` and
+`max_value` instead — and `dense_id` is unsigned.
+
+A reader that only knows the deprecated pair concludes that the footer carries no box for exactly
+the column the whole address is built on. This cost the checker a false failure before it cost
+anybody a corpus, which is the cheap way to find it.
+</Callout>
+
+Guard: `footer-is-the-index`, which asserts a box for `x`, `y` and `dense_id` on every vertex row
+group and for `src_dense` on every edge tile. What it cannot prove is that the statistics are
+**true**. They are written by the writer and believed by the reader; a box wider than its rows costs
+a request, a box narrower than its rows loses vertices, and only re-reading every page tells them
+apart.
+
+### What is deliberately not in the footer
+
+The Parquet **page index** — `ColumnIndex` and `OffsetIndex` — is written by some writers and not
+others, and here it is 179 kB that no reader opens. It exists to prune *inside* a row group, and a
+row group is 4,096 rows, which is the indivisible unit. There is nothing inside a tile to prune.
+
+This is worth stating because the page index is the obvious reason to prefer one Parquet writer over
+another, and it is the wrong one. What prunes is the row-group box, which every writer emits.
+
+## Encoding: choose per column or lose a quarter of the bytes
+
+Dictionary encoding is right for one of the four drawing columns and wrong for the others, and the
+gap is large in both directions. Five million vertices, uncompressed pages:
+
+| | `cluster_id` | `dense_id` | `x` | `y` |
+| --- | --- | --- | --- | --- |
+| dictionary everywhere | 71.6 kB | 27.56 MB | 27.50 MB | 20.00 MB |
+| dictionary nowhere | 20.03 MB | 20.03 MB | 20.03 MB | 20.03 MB |
+| **dictionary per column** | **71.6 kB** | **20.03 MB** | **20.03 MB** | 20.03 MB |
+
+On `dense_id` and `x` — nearly unique within a tile — the dictionary plus its indices cost **37%
+more than PLAIN**. On `cluster_id`, a handful of repeated values, it wins by **280×**. Turning it
+off everywhere is worse than leaving it on everywhere (80.73 MB against 75.81 MB) because it
+destroys `cluster_id`. Choosing per column lands at **60.78 MB**.
+
+The corpus does not mandate an encoding — Parquet's whole point is that a reader does not care. It
+mandates the consequence: a writer that applies one encoding decision to every column pays about a
+quarter of its bytes, on disk and on the wire, for nothing.
+
+## Geometry in the tile, everything else beside it
+
+The drawing tile carries geometry. Measured on real tiles at five million: a tile of
+`dense_id, x, y, community` costs **3 requests and 36.0 kB**; the same tile with all six columns
+costs **4 requests and 37.0 kB**, from 68.8 kB stored. The same bytes on the wire, one round trip
+fewer and half the storage.
+
+Columns are laid out so they upload to a GPU without transformation — `x` and `y` as separate
+arrays, never interleaved — which removes the interleave step by construction rather than optimising
+it.
+
+## The payload format is open
+
+**This is a design question, not a settled convention.**
+
+A tile's payload is Parquet because the corpus is Parquet and one format is simpler than two. But a
+tile is read to be drawn, and drawing wants contiguous typed arrays that upload to a GPU without
+decoding. **Arrow IPC gives exactly that and Parquet does not** — Parquet's encodings are the reason
+its bytes are small, and decoding them is work a drawing path pays on every tile.
+
+What makes it a real question rather than a preference:
+
+- The two formats disagree about *where* the cost goes. Parquet moves fewer bytes and decodes them;
+  Arrow IPC moves more bytes and does not. Which wins depends on the link, and the link is the thing
+  a corpus does not control.
+- The addressing does not care. `tile = dense_id >> 12` is arithmetic over a range of rows, and it
+  is true of a row group, of a file, and of an IPC record batch alike. **Nothing in
+  [Addressing](/docs/conventions/addressing) or [Order](/docs/conventions/order) would change.**
+- What would change is the footer. Parquet's row-group statistics are the index; an IPC file's
+  metadata is not laid out to answer "which batches intersect this box", and replacing that is a
+  design cost, not a swap.
+
+This is also the strongest single argument against putting these conventions in a shared crate. **A
+crate that models *the* manifest assumes one output format by construction**, and would have to be
+rewritten to hold a question that the document and the guards hold without effort: the guards split
+into the ones that are about addressing — which survive a format change untouched — and the ones
+that are about Parquet, which are named as such.

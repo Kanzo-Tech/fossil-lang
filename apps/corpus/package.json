@@ -1,0 +1,41 @@
+{
+  "name": "@fossil-lang/corpus",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The fossil corpus: what the artifact is, the conventions that define it, and the guards that make those conventions a contract. Never published; the pnpm-workspace entry is for resolution, not for npm.",
+  "type": "module",
+  "//guards": "`guards/` has no npm dependencies and no build step. It needs `node` and the `duckdb` binary, so `pnpm check`, `pnpm self-test` and `pnpm fixture` run in a checkout where nothing has been installed — which is the position the third party this format is for is in.",
+  "//test": "`pnpm test` is the guards' own self-test: a conforming corpus is written in both containers, every guard passes on it, and then every guard is required to FIRE against a corpus broken in exactly one way. There is deliberately no guard over the prose on this site — one existed in `apps/docs`, it checked that a cited line existed rather than that it said what the page claimed, and 159 dead references accumulated under it with CI green throughout. A guard that measures the artifact is worth writing; a guard that measures a page's punctuation buys the appearance of one.",
+  "scripts": {
+    "dev": "next dev --port 3300",
+    "build": "pnpm run test && next build",
+    "start": "next start --port 3300",
+    "test": "node guards/self-test.mjs",
+    "check": "node guards/check.mjs",
+    "self-test": "node guards/self-test.mjs",
+    "fixture": "node guards/fixture.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "postinstall": "fumadocs-mdx"
+  },
+  "dependencies": {
+    "fumadocs-core": "16.9.3",
+    "fumadocs-mdx": "15.0.11",
+    "fumadocs-ui": "16.9.3",
+    "mermaid": "^11.16.1",
+    "next": "16.2.7",
+    "next-themes": "^0.4.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^20",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "4",
+    "typescript": "^5.6.0"
+  }
+}
