@@ -31,18 +31,25 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// **It used to shell out to `cargo build` and then hard-code
+/// `<repo>/target/debug/fossil`**, which is a test that can pass against a
+/// binary it did not build: with `CARGO_TARGET_DIR` set — which is how this
+/// repository's own instructions say to drive the suite — the build lands
+/// elsewhere and that path holds whatever was left there last. Measured on
+/// 2026-08-13: the file at the hard-coded path was **29 hours old**, older than
+/// the parser rewrite, the provider registry, `@rename` and the edge
+/// constructor. Everything this file reported that day was about a compiler
+/// nobody had edited.
+///
+/// `CARGO_BIN_EXE_<name>` is cargo's answer: it is set for an integration test
+/// and points at the binary of THIS build, which cargo has already built before
+/// the test runs. No path to guess, and no `cargo build` spawned from inside a
+/// test — the same fix `crates/fossil-lsp/tests/` took.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(bin.exists(), "fossil binary missing at {}", bin.display());
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
 /// Per-test workdir with the canonical hello.fossil + users.csv.
@@ -50,9 +57,11 @@ fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
     let tmp = common::unique_workdir("fossil-cli-w0b", test_name);
     std::fs::create_dir_all(tmp.join("examples")).expect("create examples subdir");
-    // The CLI reads `examples/users.csv` (the io.csv binding in
-    // hello.fossil resolves to this path).
-    for f in ["hello.fossil", "users.csv"] {
+    // Everything the program NAMES: the `users.csv` its `io.csv` binding reads
+    // and the `hello.shex` its `type { Person }` binding names. Without the
+    // document the mapping has no output contract and the run writes a `Person`
+    // with no `name` column — no error, just a column that is not there.
+    for f in ["hello.fossil", "users.csv", "hello.shex"] {
         std::fs::copy(root.join("examples").join(f), tmp.join("examples").join(f))
             .unwrap_or_else(|e| panic!("copy {f}: {e}"));
     }

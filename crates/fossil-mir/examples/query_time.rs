@@ -2,8 +2,9 @@
 //!
 //! `query_executions.rs` counts executions and says plainly that it cannot
 //! answer this: it knows there is nothing to *reuse* per mapping, not what the
-//! bookkeeping *costs*. ADR-0046 §6 fills that hole with Apollo's −52.3%, and
-//! marks it as borrowed. This example takes the number back.
+//! bookkeeping *costs*. That hole was once filled with a borrowed figure —
+//! Apollo's −52.3%, which is what *they* measured taking salsa out of
+//! `apollo-compiler`. This example takes the number back and measures ours.
 //!
 //! # The three quantities
 //!
@@ -46,7 +47,7 @@ fn program(n: usize) -> String {
     for i in 0..n {
         let _ = write!(
             s,
-            "M{i} : ex:Person from users\n    iri = `${{ex:}}m{i}/${{.id}}`\n    ex:name = .name\n\n"
+            "M{i} : ex:Person from users\n    @subject = `${{ex:}}m{i}/${{.id}}`\n    name = .name\n\n"
         );
     }
     s

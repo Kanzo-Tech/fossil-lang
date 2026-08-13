@@ -11,6 +11,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "DataFusion backend for the property-graph MIR (lower_to_mir_pg)"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
 [lib]
@@ -29,7 +30,8 @@ fossil-run-status = { path = "../fossil-run-status" }
 # manifest/RunStatus materialize from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The program-resident output descriptor (ShEx) that drives edge/cardinality
-# classification, threaded into execute_graph as an argument (ADR-0018). This
+# classification, threaded into execute_graph as an argument, never read off
+# the db. This
 # crate is where it stops: `to_graph_schema()` is called here and only the
 # format-neutral schema crosses into `fossil_mir::apply_output_shape`.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
@@ -83,9 +85,14 @@ tokio = { workspace = true }
 tokio = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
+# `tests/rdf_source.rs` builds a `ShExDescriptor` to exercise the ShEx→edge path
+# end to end. It names the decode directly because `fossil-descriptors-output`
+# stopped re-exporting ShEx types: a host may know what ShEx is, the compiler
+# may not.
+fossil-shex = { path = "../fossil-shex" }
 tempfile = { workspace = true }
-# tests/pipeline.rs builds the op list by hand — the operators ADR-0009 defined
-# and no `.fossil` reaches yet — so it spells `SmolStr` directly.
+# tests/pipeline.rs builds the op list by hand — the MIR operators, which no
+# `.fossil` reaches yet — so it spells `SmolStr` directly.
 smol_str = { workspace = true }
 # tests/spill.rs asserts that a declared budget is honoured by spilling, and the
 # spill only announces itself through a `log` record from DataFusion.

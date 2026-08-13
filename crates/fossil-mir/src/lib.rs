@@ -6,7 +6,7 @@
 //! ADT. The HIR → MIR lowering [`lower::lower_to_mir_pg`] lowers the
 //! property-graph shape (`Source`, `EmitVertex`, `EmitEdge`, `Sink`) from
 //! `.fossil` source; the remaining operators are reachable through the R1-R10
-//! rewriting and are exercised via direct `MirGraph` construction (ADR-0009).
+//! rewriting and are exercised via direct `MirGraph` construction.
 //! `fossil-df` consumes the [`graph::MirGraph`] and executes it on `DataFusion`.
 //!
 //! # Failure discipline
@@ -21,7 +21,6 @@ pub mod graph;
 pub mod lower;
 pub mod op;
 pub mod schema;
-pub mod skeleton;
 
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
 // types at the crate root, query functions stay under their module path
@@ -30,4 +29,3 @@ pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
 pub use op::{AggFn, AggSpec, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
 pub use schema::{free_cols, schema_of};
-pub use skeleton::{subject_template_skeleton, template_skeleton};

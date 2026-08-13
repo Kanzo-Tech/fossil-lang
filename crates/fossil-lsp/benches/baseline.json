@@ -1,16 +1,37 @@
 {
-  "_comment": "ADVISORY committed baseline for the SC#2 didChange round-trip benchmark (ADR-0021). This is a REFERENCE point captured on the plan-06-09 author's dev hardware (Apple M-series, macOS, --release). Criterion's live target/criterion/ baseline is gitignored and runner-local; the 20%-regression comparison is reliable only on a pinned/self-hosted runner. On shared CI the benchmark is informational. The HARD gate is tests/didchange_budget.rs (margined wall-clock).",
+  "_comment": "ADVISORY committed baseline for the SC#2 didChange round-trip benchmark. A REFERENCE point captured on an Apple M-series / macOS dev machine, --release. Criterion's live target/criterion/ baseline is gitignored and runner-local; the 20%-regression comparison is reliable only on a pinned/self-hosted runner. On shared CI the benchmark is informational. The HARD gate is tests/didchange_budget.rs (margined wall-clock).",
+  "_rebaselined": "2026-08-13, and the reason is not drift. The fixture was rewritten into the surface of grammar.bnf (no `prefix`, bare property keys, `@subject`, `str.*` after ruling 16) and it now NAMES a shape document, which the old one could not. More importantly the HOST changed: both this benchmark and the hard gate built their db on `fossil_base::NativeSystem`, whose provider table reads no types — so the shape document never decoded, `resolve_target_shape` failed for all 15 mappings, and what was being measured was the error path. Both now install `fossil_descriptors_output::PROVIDERS` and register the document, as `fossil-lsp`'s own `LspSystem` does. The old 120042 ns is not comparable to the new figure in either direction and is kept below only so nobody re-derives a regression from it.",
   "benchmark": "lsp_didchange/canonical_200_round_trip",
   "fixture": "tests/fixtures/canonical_200.fossil",
-  "fixture_lines": 190,
-  "measures": "set_text (Salsa Setter, revision bump) -> def_map -> typecheck_mapping over every mapping -> drain Diagnostic accumulator",
+  "fixture_lines": 181,
+  "fixture_mappings": 15,
+  "fixture_sources": 8,
+  "shape_document": "tests/fixtures/canonical_200.shex",
+  "resolved_predicates": 60,
+  "measures": "set_text (Salsa Setter, revision bump) -> def_map -> typecheck_mapping over every mapping (each resolving its target shape against the registered document) -> drain Diagnostic accumulator",
   "warm_round_trip": {
-    "point_estimate_ns": 120042,
-    "point_estimate_ms": 0.12,
+    "point_estimate_ns": 155010,
+    "point_estimate_ms": 0.155,
+    "confidence_interval_ns": [153920, 156270],
     "unit": "nanoseconds (slope point estimate)"
+  },
+  "measuring_the_real_path_is_not_slower": {
+    "_comment": "Same machine, same fixture, same loop, only the host differs — 10 measured iterations after 2 warm-ups, --release. Resolving the contract COSTS NOTHING NET: the decode is memoised and keyed by the document's SourceFile, so editing the program re-runs it zero times, while the failing path was pushing 32 diagnostics through the accumulator on every keystroke.",
+    "native_system_no_type_reader_ns": 169000,
+    "native_system_diagnostics_per_keystroke": 32,
+    "native_system_resolved_predicates": 0,
+    "editor_system_ns": 155000,
+    "editor_system_diagnostics_per_keystroke": 0,
+    "editor_system_resolved_predicates": 60
+  },
+  "superseded": {
+    "captured": "2026-05-22",
+    "fixture_lines": 190,
+    "point_estimate_ns": 120042,
+    "why_not_comparable": "different program, and a host that resolved no output contract"
   },
   "design_goal_ms": 100,
   "hard_gate_budget_ms": 400,
   "advisory_regression_threshold_pct": 20,
-  "captured": "2026-05-22"
+  "captured": "2026-08-13"
 }

@@ -37,10 +37,13 @@ use std::time::SystemTime;
 use datafusion::execution::context::SessionContext;
 use datafusion::prelude::SessionConfig;
 use fossil_base::{FossilDb, FsError, SourceFile, System};
-use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
+use fossil_descriptors_output::OutputDescriptorKind;
+// The `ShEx` AST, named from its own crate: `fossil-descriptors-output` stopped
+// re-exporting it, so a consumer that wants it says so in its `Cargo.toml`.
 use fossil_df::SourceFormat;
 use fossil_df::files::GraphArFile;
 use fossil_run_status::RunStatus;
+use fossil_shex::ShExDescriptor;
 use object_store::memory::InMemory;
 use object_store::path::Path as ObjPath;
 use object_store::{ObjectStore, ObjectStoreExt};
@@ -90,9 +93,23 @@ pub struct ExecOutput {
 /// the object-store / provider seams, never through `System::read_file`, and
 /// touches no clock on its path — so `read_file` is unreachable (returns
 /// `NotFound`) and `now` returns the wasm-safe `UNIX_EPOCH` placeholder
-/// (`SystemTime::now()` panics on `wasm32-unknown-unknown`). `descriptors`
-/// stays at the trait default (`None`): typing falls back to the passed output
-/// descriptor / string defaults — the descriptor is an argument, not read here.
+/// (`SystemTime::now()` panics on `wasm32-unknown-unknown`).
+///
+/// Two accessors stay at their trait defaults, and both are real answers rather
+/// than stubs:
+///
+/// - `descriptors` is `None`: typing falls back to the passed output descriptor
+///   / string defaults — the descriptor is an argument, not read here.
+/// - `providers` is the default, `fossil_base::providers::DATA`: the four rows
+///   that read DATA, and **no row that reads types**. Its schema arrives already
+///   decided, as the `shex` argument to [`execute_core`] —
+///   the browser fetched it and the host lowered it in [`build_descriptor`]
+///   before any query ran. Installing a type-reading row would put a second,
+///   differently sourced answer to "what shape does this program write?" inside
+///   the database, and the executor would then have two. It runs a plan; it does
+///   not resolve one. Nothing registers a shape document here either, for the
+///   same reason — see [`build_program`]. The DATA rows are not optional in the
+///   same way: without them nothing recognises `io.csv`.
 #[derive(Debug, Default)]
 struct ExecutorSystem;
 
@@ -174,6 +191,13 @@ pub fn program_sources_core(
 
 /// Build the executor's db + interned program + output descriptor — shared by
 /// [`execute_core`] and [`program_sources_core`].
+///
+/// **No shape document is registered here, deliberately.** The other hosts
+/// register what `type { … } = io.shex("…")` names, because their checker has
+/// to decode it; this one installs no decoder row (see [`ExecutorSystem`]), so
+/// a registered document could only sit in the database unread. The shape this
+/// host acts on is the `shex` argument, and it is already an
+/// [`OutputDescriptorKind`] by the time the executor sees it.
 fn build_program(
     program: &str,
     shex: Option<&str>,
@@ -201,8 +225,14 @@ fn build_descriptor(text: &str) -> Result<OutputDescriptorKind, String> {
             || text.contains("sh:NodeShape")
             || text.contains("sh:property"));
     if looks_shacl {
-        return Ok(OutputDescriptorKind::Shacl(
-            fossil_df::shacl_to_graph_schema(text)?,
+        // Through the SHACL ROW, which is the one SHACL lowering there is now —
+        // it used to be a second implementation in `fossil-df` producing a
+        // `GraphSchema` directly, one step past the vocabulary the checker
+        // reads, which is why SHACL reached the executor and never the checker.
+        return Ok(OutputDescriptorKind::Lowered(
+            fossil_descriptors_output::decode_shacl("", text)
+                .map_err(|e| format!("SHACL parse error: {e:?}"))?
+                .to_graph_schema(),
         ));
     }
     Ok(OutputDescriptorKind::ShEx(

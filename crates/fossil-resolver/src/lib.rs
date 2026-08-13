@@ -11,8 +11,9 @@
 //!    `read_parquet(url)` / `COPY … TO url` call.
 //!
 //! Fossil itself does NOT know about clouds — the [`PathResolver`] trait is
-//! the host-injection seam (same pattern as `fossil-base::System` for the
-//! filesystem; per ADR-0003). A standalone CLI mounts
+//! the host-injection seam — the same pattern as `fossil-base::System` for the
+//! filesystem: the capability is behind a host-supplied object, never on the
+//! Salsa `Db` trait. A standalone CLI mounts
 //! [`DefaultPathResolver`] which passes paths through unchanged; a
 //! multi-tenant host like Keasy mounts an implementation that resolves
 //! `@conn-name/path` against the calling org's per-connection credentials.

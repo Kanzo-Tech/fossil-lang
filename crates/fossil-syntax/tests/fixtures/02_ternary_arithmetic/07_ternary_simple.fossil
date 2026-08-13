@@ -1,2 +1,2 @@
-User : ex:Person from users
-    iri = cond ? a : b
+Users : Person from User
+    @subject = cond ? a : b

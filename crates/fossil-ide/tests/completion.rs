@@ -9,22 +9,48 @@
 //!   (d) when the cursor's mapping resolves a target `ShEx` shape, the shape's
 //!       predicate names appear as completions.
 //!
-//! Case (d) needs a program that NAMES its output shape document (ADR-0055) and
-//! a db over a real filesystem, so the test builds a `HostDb` stand-in reading
-//! `tests/fixtures/person.shex`. Cases (a)-(c) only need the stdlib catalog +
-//! the cross-file prefix index, which any db provides.
+//! Case (d) needs a program that NAMES its output shape document and
+//! a HOST that has done its two jobs for it: installed a decoder row that
+//! claims `.shex`, and REGISTERED the document as a Salsa input before the
+//! query asks for it. That is what `HostDb::new` + [`file`] do here, and it is
+//! what `fossil-lsp` and `fossil-wasm` do in production. A host that skips
+//! either one resolves no shape — which is the correct answer, not a bug, and
+//! is why case (d) would otherwise fail silently.
+//! Cases (a)-(c) only need the stdlib catalog + the cross-file prefix index,
+//! which any db provides.
 
 #![cfg(not(target_arch = "wasm32"))]
 // The `.fossil` fixtures contain `${ex:}` / `${.id}` template placeholders —
 // LITERAL Fossil source, not Rust format-string args.
 #![allow(clippy::literal_string_with_formatting_args)]
 
+use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use fossil_base::{Files, NativeSystem, SourceFile, System};
+use fossil_base::{Files, FsError, Provider, SourceFile, System};
 use lsp_types::{CompletionItemKind, CompletionItemTag};
 
-/// A host db stand-in: a real Salsa db over a `NativeSystem`, so the shape
+/// The test's host `System`: a filesystem plus the `ShEx` decoder row, exactly
+/// as `fossil-lsp`'s `LspSystem` installs it. `fossil_base::NativeSystem` is
+/// not enough any more — its decoder table is the trait default `&[]`, so a
+/// `.shex` it can read is still a document nothing decodes.
+#[derive(Debug, Default)]
+struct HostSystem;
+
+impl System for HostSystem {
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
+    }
+    fn now(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH
+    }
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
+    }
+}
+
+/// A host db stand-in: a real Salsa db over a `HostSystem`, so the shape
 /// document the program names is readable from disk.
 #[salsa::db]
 #[derive(Clone)]
@@ -57,7 +83,7 @@ impl HostDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::default()),
+            system: Arc::new(HostSystem),
             files: Files::default(),
         }
     }
@@ -65,7 +91,7 @@ impl HostDb {
 
 /// The program NAMES its output shape document — `tests/fixtures/person.shex`,
 /// which declares `ex:Person` with an `ex:name` triple constraint narrowed to
-/// `xsd:integer`. `resolve_target_shape` reads it (ADR-0055, F4), so the
+/// `xsd:integer`. `resolve_target_shape` reads it, so the
 /// completion path resolves a shape here for the same reason the compiler does,
 /// and stops resolving one when the program stops asking.
 ///
@@ -78,16 +104,20 @@ User : ex:Person from users
     ex:name = .name
 ";
 
-fn file(db: &HostDb, src: &str) -> SourceFile {
-    SourceFile::new(db, src.to_string(), "complete.fossil".to_string())
+/// Intern the program AND register the documents it names — the host's half,
+/// spelled here with the same function `fossil-lsp` and `fossil-wasm` call.
+fn file(db: &mut HostDb, src: &str) -> SourceFile {
+    let f = SourceFile::new(db, src.to_string(), "complete.fossil".to_string());
+    fossil_ide::register_missing_documents(db, f, &|key| std::fs::read_to_string(key).ok());
+    f
 }
 
 /// (a) A stdlib completion for an un-imported namespace carries a non-empty
 ///     auto-import `additional_text_edits` (the gleam-lsp pattern).
 #[test]
 fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
-    let db = HostDb::new();
-    let f = file(&db, SRC);
+    let mut db = HostDb::new();
+    let f = file(&mut db, SRC);
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     let trim = items
@@ -111,8 +141,8 @@ fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
 ///     it out.
 #[test]
 fn native_only_stdlib_entry_is_tagged() {
-    let db = HostDb::new();
-    let f = file(&db, SRC);
+    let mut db = HostDb::new();
+    let f = file(&mut db, SRC);
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     // `clean.slug` lowers to a Rust UDF → NativeUdfOnly.
@@ -130,8 +160,8 @@ fn native_only_stdlib_entry_is_tagged() {
 /// (c) A declared prefix appears as a completion.
 #[test]
 fn declared_prefix_is_offered() {
-    let db = HostDb::new();
-    let f = file(&db, SRC);
+    let mut db = HostDb::new();
+    let f = file(&mut db, SRC);
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     assert!(
@@ -145,8 +175,8 @@ fn declared_prefix_is_offered() {
 ///     predicate names appear as Field completions.
 #[test]
 fn shape_property_names_are_offered_when_shape_resolves() {
-    let db = HostDb::new();
-    let f = file(&db, SRC);
+    let mut db = HostDb::new();
+    let f = file(&mut db, SRC);
     // Line 3 (`    ex:name = .name`) is inside the `User : ex:Person` mapping
     // whose target shape resolves to `ex:Person`; column 14 is inside the body.
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
@@ -172,8 +202,7 @@ fn shape_property_names_are_offered_when_shape_resolves() {
 /// stdlib and prefixes still do — the "if reachable" hedge.
 ///
 /// What turns backward checking off is the program declaring no output
-/// contract — ADR-0055's F4. There is nowhere else for that condition to come
-/// from any more.
+/// contract; there is nowhere else for that condition to come from any more.
 #[test]
 fn a_program_naming_no_document_yields_no_shape_properties_but_keeps_stdlib() {
     const NO_DOCUMENT: &str = "\
@@ -181,8 +210,8 @@ prefix ex: <http://example.org/>
 User : ex:Person from users
     ex:name = .name
 ";
-    let db = HostDb::new();
-    let f = file(&db, NO_DOCUMENT);
+    let mut db = HostDb::new();
+    let f = file(&mut db, NO_DOCUMENT);
     // One line shorter than `SRC` — the body is line 2 here.
     let items = fossil_ide::completions(&db, &[f], f, 2, 14);
 

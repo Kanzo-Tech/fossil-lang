@@ -1,5 +1,5 @@
 prefix ex: <https://example.org/>
-users := io.csv("users.csv", schema = "descriptor.csvw.json")
+users := io.csv("users.csv")
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .naem
+    @subject = `${ex:}user/${.id}`
+    name = .naem

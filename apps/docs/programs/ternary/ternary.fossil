@@ -1,0 +1,12 @@
+type { Listing } := io.shex("ternary.shex")
+
+Item := io.csv("data/items.csv")
+
+Listings : Listing from Item
+    @subject     = "https://shop.example/listing/{Item.sku}"
+    // #region simple
+    availability = Item.stock > 0 ? "in stock" : "sold out"
+    // #endregion simple
+    // #region chained
+    band         = Item.stock > 100 ? "plenty" : Item.stock > 0 ? "low" : "none"
+    // #endregion chained

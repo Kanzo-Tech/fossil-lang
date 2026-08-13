@@ -11,7 +11,7 @@
     clippy::similar_names
 )]
 
-//! CORE-02 SC#2 mechanical gate. Per RESEARCH.md Q8 + ADR-0005.
+//! CORE-02 SC#2 mechanical gate. Per RESEARCH.md Q8.
 //!
 //! The test installs an event callback on FossilDb that counts every
 //! `EventKind::WillExecute` event. After warming the cache, we reset the
@@ -24,8 +24,10 @@
 //! 2. **Per-mapping fan-out is exactly 1** (the LOAD-BEARING invariant
 //!    per CORE-02 SC#2) — only ONE per-mapping body() / expr_types() /
 //!    typecheck_mapping() pair re-executes (the one for mapping #3),
-//!    NOT all 10. This is the structural promise of ADR-0005's invalidation
-//!    barrier. Enforced by `keyset_of_reexecuted_queries_matches_expected_four`.
+//!    NOT all 10. This is the structural promise of the per-mapping
+//!    invalidation barrier: signatures live in a file-keyed query and bodies
+//!    behind a per-mapping one, so a body edit cannot reach a sibling.
+//!    Enforced by `keyset_of_reexecuted_queries_matches_expected_four`.
 //!
 //! ─────────────────────────────────────────────────────────────────────────
 //! EXPECTED QUERY RE-EXECUTION COSTS (per Phase 2 architecture)
@@ -51,7 +53,7 @@
 //!     17. spans(M_3)                       — Phase 3 plan 03-04 side table; depends on mapping_cst_node(M_3); re-runs for the edited mapping ONLY (siblings stay cached via the same Arc-shared subtree barrier)
 //!     (expr_types(M_3) is NOW a thin accessor over typecheck_mapping(M_3);
 //!      after the edit its input output is structurally-equal — the
-//!      ten-mappings fixture's FieldRef bodies have no CSVW schema so the type
+//!      ten-mappings fixture's FieldRef bodies have no descriptor so the type
 //!      table is unchanged — so it VALIDATES instead of re-executing. Hence
 //!      expr_types_count == 0 in Phase 3 plan 03-05, and typecheck_count == 1
 //!      takes its place in the fan-out. Net total is unchanged at 18.)
@@ -118,17 +120,29 @@
 //! when the SC#3 regression was grown (plan 06-04). Findings:
 //!
 //!   * `resolve_target_shape` returns `Some` in production because it READS the
-//!     shape document the program names, through `System::read_file`
-//!     (ADR-0055). A `System` read registers no Salsa input dependency: it is
-//!     NOT a `#[salsa::tracked]` query, NOT a per-mapping Salsa key, and adds
-//!     NO new tracked query to the per-mapping fan-out set. The ten-mapping
-//!     fixture names no document, so `resolve_target_shape` returns `None`
-//!     here, exactly as in Phase 3/4. Fan-out is provably unchanged.
+//!     shape document the program names. It used to read it through
+//!     `System::read_file`, which registers no Salsa dependency — so editing
+//!     the document re-ran nothing, and in the LSP that is a diagnostic that
+//!     never clears. It now reads the document as an INPUT: `file_at` (the file
+//!     registry) and `fossil_base::shape_document` (tracked).
+//!
+//!     That adds two Salsa dependencies to `typecheck_mapping` and NEITHER is
+//!     per-mapping: `shape_document` is keyed by the DOCUMENT's `SourceFile`,
+//!     so ten mappings checking against one document share one decode, and
+//!     `file_at` reads the registry input. The per-mapping fan-out set is
+//!     therefore unchanged; what a document edit costs is one `shape_document`
+//!     re-execution plus the mappings that read it, which is the cost of being
+//!     correct about it at all.
+//!
+//!     The ten-mapping fixture names no document, so `resolve_target_shape`
+//!     returns `Ok(None)` before touching either, and `MAX_REEXECUTIONS` is
+//!     unmoved at 18. A future fixture that DOES name one must budget the
+//!     `shape_document` re-execution here, once, and not per mapping.
 //!   * Plans 06-02 (CLI) and 06-03 (`fossil_ide::WorkspaceIndex`) touch
 //!     only native CLI / WASM-clean IDE-index code; neither introduces a
 //!     `#[salsa::tracked]` query keyed by `MappingLoc`. The IDE indexes are
 //!     plain structs built from `def_map` (file-keyed) — not per-mapping
-//!     tracked queries (ADR-0023).
+//!     tracked queries.
 //!
 //! The complete per-mapping (`MappingLoc`-keyed) `#[salsa::tracked]` query
 //! set is therefore UNCHANGED from Phase 4: `body`, `typecheck_mapping`,
@@ -143,8 +157,9 @@
 //!
 //! If the test fails with count > 18, something else is leaking. If the
 //! per-mapping fan-out test (body / typecheck / expr_types / spans > 1)
-//! fails, ADR-0005's invalidation barrier is broken — DO NOT relax that
-//! assertion; fix the data layout per ADR-0005.
+//! fails, the per-mapping invalidation barrier is broken — DO NOT relax that
+//! assertion; fix the data layout so that signatures stay file-keyed and every
+//! body stays behind its own per-mapping query.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -177,7 +192,7 @@ use salsa::Setter;
 /// work" guard.
 const MAX_REEXECUTIONS: usize = 18;
 
-/// The LOAD-BEARING per-mapping fan-out bound (ADR-0005 invariant). Editing
+/// The LOAD-BEARING per-mapping fan-out bound. Editing
 /// one mapping's body MUST NOT re-execute body / typecheck / expr_types
 /// for sibling mappings — those queries must validate via Salsa's
 /// `DidValidateMemoizedValue` after their per-mapping CST subtree input
@@ -266,7 +281,7 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 /// each `WillExecute` event and assert the per-mapping fan-out is exactly
 /// `MAX_PER_MAPPING_FAN_OUT` (= 1) for body / expr_types — i.e. only one
 /// mapping's body and provenance re-execute after a single-mapping edit,
-/// NOT all 10. THIS is the ADR-0005 invalidation-barrier invariant: the
+/// NOT all 10. THIS is the invalidation-barrier invariant: the
 /// per-mapping CST subtree extraction (`mapping_cst_node`) makes downstream
 /// body() queries for sibling mappings see a structurally-equal input and
 /// validate via `DidValidateMemoizedValue` instead of re-executing.
@@ -290,8 +305,8 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
 ///       edit, else re-runs — count 1)
 ///   (e) exactly one `spans` key (Phase 3 plan 03-04 per-mapping real-span
 ///       side table — same per-mapping fan-out shape as expr_types; load-
-///       bearing for ADR-0008's "spans depends on mapping_cst_node not
-///       parse(file)" claim)
+///       bearing for the claim that spans depends on mapping_cst_node, not
+///       parse(file))
 ///   (f) `mapping_cst_node` may re-run for any subset of mappings (this is
 ///       the structural-pass cost; output is structurally-equal for siblings
 ///       so it doesn't propagate further)
@@ -410,7 +425,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         "expected at least one parse re-exec; keys: {keys:#?}"
     );
 
-    // ── LOAD-BEARING ADR-0005 invariant: per-mapping body fan-out is
+    // ── LOAD-BEARING invariant: per-mapping body fan-out is
     //    exactly 1, NOT 10. If body_count == 10, the invalidation barrier
     //    (mapping_cst_node) is broken. NEVER silence this assertion.
     assert!(
@@ -466,10 +481,10 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
     // Phase 3 plan 03-04 — `spans()` LOAD-BEARING fan-out:
     // The spans tracked query reads `mapping_cst_node(M_k)`, NOT
     // `parse(file)`. The same Arc-shared-subtree invalidation barrier
-    // ADR-0005 established for `body()` therefore applies to `spans()`
+    // established for `body()` therefore applies to `spans()`
     // too — only the edited mapping's spans re-execute; siblings stay
-    // cached. If spans_count == 10, ADR-0008's "spans depends on
-    // mapping_cst_node" claim is broken; fix the data layout, do NOT
+    // cached. If spans_count == 10, the claim that spans depends on
+    // `mapping_cst_node` is broken; fix the data layout, do NOT
     // silence.
     assert!(
         spans_count <= MAX_PER_MAPPING_FAN_OUT,

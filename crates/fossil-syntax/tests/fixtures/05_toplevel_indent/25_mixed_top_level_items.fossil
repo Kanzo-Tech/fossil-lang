@@ -1,4 +1,4 @@
-prefix ex: <https://example.org/>
-users := io.csv("users.csv")
-User : ex:Person from users
-    iri = .id
+type { Person } := io.shex("personas.shex")
+User := io.csv("users.csv")
+Users : Person from User
+    @subject = "https://example.org/user/{User.id}"

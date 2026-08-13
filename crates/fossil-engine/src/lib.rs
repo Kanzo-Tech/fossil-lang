@@ -16,14 +16,16 @@ compile_error!(
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use fossil_base::{Db, Diagnostic, System};
+use fossil_base::{Db, Diagnostic, Severity, SourceAnchor, Span, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::Primitive;
 use fossil_run_status::{ProviderInfo, RunStatus, SourceRefInfo};
 use smol_str::SmolStr;
 
+pub mod census;
 pub mod creds;
+mod documents;
 mod system;
 
 pub use creds::{CatalogRequest, RunCreds};
@@ -33,10 +35,14 @@ use system::open_db;
 
 /// List the data-source providers fossil supports. Thin native wrapper over
 /// [`fossil_lineage::providers`] (the shared, WASM-clean implementation — one
-/// source of truth for both the CLI and the browser, ADR-0024).
+/// source of truth for both the CLI and the browser).
 #[must_use]
 pub fn providers() -> Vec<ProviderInfo> {
-    fossil_lineage::providers()
+    // The engine's own table, which is the whole registry — so `fossil
+    // providers` now lists `shex` and `shacl` as `Schema` rows beside the four
+    // `Data` ones. The wire contract has carried that distinction since it was
+    // written and nothing ever produced anything but `Data`.
+    fossil_lineage::providers(fossil_descriptors_output::PROVIDERS)
 }
 
 // ========================================================================= refs
@@ -54,7 +60,7 @@ pub fn refs(path: &Path) -> miette::Result<Vec<SourceRefInfo>> {
     let (db, file) = open_db(text, path);
     // The native host reads the file; the lineage logic (parse → typed refs,
     // dedup) is the shared WASM-clean `fossil_lineage::source_refs` — same code
-    // the browser runs over its in-memory db (ADR-0024).
+    // the browser runs over its in-memory db.
     Ok(fossil_lineage::source_refs(&db, file))
 }
 
@@ -67,6 +73,10 @@ pub fn refs(path: &Path) -> miette::Result<Vec<SourceRefInfo>> {
 pub struct CheckOutcome {
     pub source: String,
     pub diagnostics: Vec<Diagnostic>,
+    /// How many mappings the file defines. Zero with no diagnostics is a
+    /// program that parses and builds nothing — the caller renders that
+    /// differently from a clean program, because it is not the same answer.
+    pub mappings: usize,
 }
 
 /// Parse + type-check + lower `path`, draining the Salsa `Diagnostic`
@@ -81,6 +91,15 @@ pub struct CheckOutcome {
 /// program `run` then refused — e.g. a mapping reading `from` a derived binding,
 /// whose source cannot be resolved. `check` must not pass what `run` rejects.
 ///
+/// A file with NO mappings is drained at the file level instead — see the body.
+/// Zero mappings and zero diagnostics is reported as success, not as an error:
+/// `check` answers "is this text a well-formed program", and a program that
+/// declares nothing is vacuously well-formed. `run` refuses it (`no mapping
+/// found in …`) because `run` was asked to produce a graph and there is nothing
+/// to produce it from — a different question, asked of a different command. So
+/// the count rides out on [`CheckOutcome::mappings`] and the caller says so
+/// plainly rather than claiming a clean bill of health it did not earn.
+///
 /// # Errors
 /// Returns a read error if `path` is unreadable.
 pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
@@ -89,13 +108,74 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
     let (db, file) = open_db(text.clone(), path);
-    let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    pre_introspect_and_register(db.system(), &text, source_dir, &HashMap::new());
+    // `check` has no `--creds-stdin`, so it resolves with no connection map —
+    // and against the SAME directory `run` will. The two used to differ here:
+    // `check` pre-introspected against `path.parent()` while the executor read
+    // against the process's cwd, so the two commands disagreed about where one
+    // file was.
+    let program_dir = fossil_base::program_dir(&path.to_string_lossy());
+    let anchor = SourceAnchor::beside(&program_dir);
+    pre_introspect_and_register(db.system(), &text, anchor, &HashMap::new());
 
     let def_map = fossil_hir::def_map::def_map(&db, file);
     let mappings = def_map.mappings(&db);
 
-    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    // ── The FILE-level queries, drained once and unconditionally ──────────
+    //
+    // A file that yields no mapping — empty, or broken badly enough that the
+    // parser recovered nothing — used to report `ok`, because the per-mapping
+    // loop was the ONLY thing that read an accumulator and it never ran. The
+    // parse errors were not missing; they were unreachable, because salsa
+    // collects an accumulator over a query's whole dependency subtree and
+    // `parse` is only in the subtree of a mapping.
+    //
+    // These two drains were guarded on `mappings.is_empty()`, which is where
+    // the second half of the bug lived: `lower_to_hir` is where a top-level
+    // BINDING is checked (`check_provider`, `check_schema_arg`), and it is not
+    // in `def_map`'s subtree — so a file with no mapping lost every provider
+    // diagnostic it produced, silently, which is the failure this whole change
+    // is against. Both are file-keyed, so draining them always is correct and
+    // the duplicates it creates are removed below.
+    //
+    // Their spans are file-absolute — the parser and `lower_to_hir` both
+    // measure against the file — which is why nothing is rebased here.
+    let mut diagnostics: Vec<Diagnostic> =
+        fossil_hir::def_map::def_map::accumulated::<Diagnostic>(&db, file)
+            .into_iter()
+            .cloned()
+            .collect();
+    diagnostics.extend(
+        fossil_hir::lower::lower_to_hir::accumulated::<Diagnostic>(&db, file)
+            .into_iter()
+            .cloned(),
+    );
+    // One identity per type: every mapping that produces `T` declares the same
+    // `@subject`, and two that disagree are an ERROR — never a warning —
+    // naming both mappings and both templates, because a warning about
+    // identity gets ignored and the result is two entities where there was one.
+    //
+    // It is a third file-level drain and not a fourth per-mapping one because
+    // uniqueness is a fact about the FILE:
+    // `body::check_identity` is keyed by `MappingLoc` and by construction cannot
+    // see a second mapping. Its own spans are file-absolute — it rebased both of
+    // them itself, being the only party that holds two mappings at once.
+    //
+    // FILTERED to the file-absolute ones, and that is not a nicety. Unlike the
+    // two drains above, this query sits BELOW `body`: salsa accumulates over the
+    // whole dependency subtree, so draining it unfiltered also yields every
+    // mapping-relative diagnostic every body produced — raw, while the loop
+    // below yields the same ones REBASED. Two spans, so `dedup_file_level`
+    // cannot see them as one, and the raw copy points at whatever sits at that
+    // offset from the start of the file. A mapping-relative diagnostic has an
+    // owner and this drain is not it.
+    let _ = fossil_hir::identity::check_identities(&db, file);
+    diagnostics.extend(
+        fossil_hir::identity::check_identities::accumulated::<Diagnostic>(&db, file)
+            .into_iter()
+            .filter(|d| d.frame == fossil_base::SpanFrame::FileAbsolute)
+            .cloned(),
+    );
+
     for mapping in mappings {
         let _ = fossil_mir::lower_to_mir_pg(&db, *mapping);
         let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(&db, *mapping);
@@ -106,10 +186,37 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
             diags.into_iter().cloned(),
         ));
     }
+    dedup_file_level(&mut diagnostics);
     Ok(CheckOutcome {
         source: text,
         diagnostics,
+        mappings: mappings.len(),
     })
+}
+
+/// Drop repeats, keeping the first of each.
+///
+/// **Salsa accumulates over a query's whole dependency subtree**, and every
+/// mapping's subtree contains the two FILE-keyed queries above. So a diagnostic
+/// about a top-level binding — `type { P } := io.csv("users.csv")` — comes out
+/// once per mapping, and a program with ten mappings reported one mistake ten
+/// times. It is not a per-mapping fact and there is no mapping to attribute it
+/// to.
+///
+/// The key is `(severity, message, span)`, and each part is load-bearing. Two
+/// diagnostics with one message at two spans are two mistakes and both survive
+/// — which is why this is not a `message`-only dedup. Two with one message at
+/// ONE span are one statement about one range of bytes, and printing it twice
+/// is noise by construction, whichever query emitted it.
+///
+/// It runs over the whole list rather than only the file-level drains because
+/// the per-mapping path is where the duplicates actually arrive: they are the
+/// file-level ones, carried along by `lower_to_mir_pg::accumulated`, and there
+/// is nothing at that point marking which is which.
+fn dedup_file_level(diagnostics: &mut Vec<Diagnostic>) {
+    let mut seen: std::collections::HashSet<(Severity, String, Span)> =
+        std::collections::HashSet::new();
+    diagnostics.retain(|d| seen.insert((d.severity, d.message.clone(), d.span)));
 }
 
 // =============================================================== pre-introspection
@@ -135,18 +242,21 @@ fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
 /// Scrape source-binding RHS source URLs from a `.fossil` file's text (regex,
 /// v0.2 placeholder — Phase 14+ replaces with an AST walk). Mirrors the TS
 /// `extractSourceRefs` so playground + CLI behave identically.
-fn extract_source_refs(text: &str) -> Vec<(SmolStr, String)> {
+fn extract_source_refs(text: &str) -> Vec<(SmolStr, SmolStr, String)> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r#"(\w[\w\d_]*)\s*:=\s*io\.(?:csv|json)\(\s*['"]([^'"]+)['"]"#)
-            .expect("static regex")
+        regex::Regex::new(
+            r#"(\w[\w\d_]*)\s*:=\s*io\.(csv|json|parquet)\(\s*['"]([^'"]+)['"]"#,
+        )
+        .expect("static regex")
     });
     re.captures_iter(text)
         .map(|c| {
             (
                 SmolStr::from(c.get(1).unwrap().as_str()),
-                c.get(2).unwrap().as_str().to_string(),
+                SmolStr::from(c.get(2).unwrap().as_str()),
+                c.get(3).unwrap().as_str().to_string(),
             )
         })
         .collect()
@@ -154,8 +264,14 @@ fn extract_source_refs(text: &str) -> Vec<(SmolStr, String)> {
 
 /// The token that decides whether a cached descriptor still describes its
 /// source: the file's modification time in nanoseconds since the epoch, paired
-/// with its byte length. Two `stat` fields, no read of the source itself — see
-/// ADR-0050 for why the native host does not hash the bytes.
+/// with its byte length. Two `stat` fields, no read of the source itself: the
+/// native host does NOT hash the bytes because hashing means reading the whole
+/// source to decide whether the source needs reading — hundreds of megabytes
+/// to save a `DESCRIBE` that reads the first rows, which would make the cache
+/// cost more than the thing it caches. `mtime` can say "changed" when nothing
+/// did (a `touch`), which costs one extra `DESCRIBE` and no wrong answer;
+/// pairing it with the size is what narrows the one case that *is* wrong, a
+/// file restored with both its old `mtime` and its exact old length.
 ///
 /// Returns `""` for anything this host cannot `stat` — an `http(s)://` or
 /// `s3://` locator, or a path that does not exist. An empty token is never
@@ -180,34 +296,10 @@ fn freshness_token(resolved: &str) -> String {
     )
 }
 
-/// Turn a source URI as the program writes it into a locator `DuckDB` can read:
-/// `@conn` aliases expand, a URL or absolute path passes through, and a
-/// relative path anchors to the program's directory when that resolves to a
-/// file that exists.
-fn resolve_for_read(
-    raw_uri: &str,
-    source_dir: &Path,
-    connections: &HashMap<String, creds::ConnectionCreds>,
-) -> String {
-    let url = resolve_source_uri(raw_uri, connections);
-    let is_pass_through = url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("s3://")
-        || Path::new(&url).is_absolute();
-    if is_pass_through {
-        return url;
-    }
-    let joined = source_dir.join(&url);
-    if joined.exists() {
-        joined.to_string_lossy().into_owned()
-    } else {
-        url
-    }
-}
-
 /// Pre-introspect every source the program names and register an
-/// [`InferredDescriptor`] on the host's descriptor cache BEFORE typecheck
-/// (ADR-0037, keyed by URI since ADR-0050).
+/// [`InferredDescriptor`] on the host's descriptor cache BEFORE typecheck,
+/// keyed by the URI the program writes rather than by the resolved locator —
+/// the written URI is the only string the host and the checker both see.
 ///
 /// A source whose cached descriptor still carries the current
 /// [`freshness_token`] is skipped — no `DESCRIBE`, no read. That is where the
@@ -220,7 +312,7 @@ fn resolve_for_read(
 fn pre_introspect_and_register(
     system: &dyn System,
     source_text: &str,
-    source_dir: &Path,
+    anchor: SourceAnchor<'_>,
     connections: &HashMap<String, creds::ConnectionCreds>,
 ) {
     let Some(cache) = system.descriptors() else {
@@ -232,8 +324,8 @@ fn pre_introspect_and_register(
     // fresh must do no DuckDB work at all, and opening a connection is work.
     let mut conn: Option<duckdb::Connection> = None;
 
-    for (source_name, raw_uri) in extract_source_refs(source_text) {
-        let token = freshness_token(&resolve_for_read(&raw_uri, source_dir, connections));
+    for (source_name, constructor, raw_uri) in extract_source_refs(source_text) {
+        let token = freshness_token(&anchor.locator(&raw_uri));
         if cache.is_fresh(&raw_uri, &token) {
             tracing::debug!("`{raw_uri}` is unchanged since it was introspected; reusing");
             continue;
@@ -258,9 +350,21 @@ fn pre_introspect_and_register(
         // Resolved a second time deliberately: the token above is about the
         // bytes on disk, this is the string DuckDB reads, and conflating them
         // would make a `@conn` alias silently change meaning between the two.
-        let resolved_path = resolve_for_read(&raw_uri, source_dir, connections);
+        let resolved_path = anchor.locator(&raw_uri);
         let escaped_path = resolved_path.replace('\'', "''");
-        let sql = format!("DESCRIBE SELECT * FROM read_csv_auto('{escaped_path}')");
+        // The CONSTRUCTOR chooses the reader, and it used to not: every source
+        // was `read_csv_auto` whatever `io.` said. A JSON array read as CSV
+        // introspects to one column named after the first line, so
+        // `data/sightings.json` — which opens with a bare `[` — produced a
+        // schema whose only column was literally `[`, and every real column
+        // came back as `unknown column \`id\` — did you mean \`[\`?`. The
+        // did-you-mean is what made it legible: it printed the wrong schema.
+        let reader = match constructor.as_str() {
+            "json" => "read_json_auto",
+            "parquet" => "read_parquet",
+            _ => "read_csv_auto",
+        };
+        let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}')");
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
@@ -295,23 +399,59 @@ fn pre_introspect_and_register(
 
 // ================================================================== run pipeline
 
-/// Resolve the program-resident OUTPUT descriptor: an `io.rdf(schema = …)` `ShEx`
-/// IS the output graph's shape; no io.rdf schema ⇒ `AcceptAll`. The shape is
-/// sourced from the PROGRAM, never a host flag (invariant #1). v1: one shape per
-/// program (a second, different schema is rejected, not merged).
+/// Resolve the program-resident OUTPUT descriptor. The shape is sourced from the
+/// PROGRAM, never a host flag (invariant #1).
+///
+/// # Two places a program can name its output shape, and the order between them
+///
+/// 1. **`type { … } := io.shex("shop.shex")`** — the binding ruling 3 of
+///    2026-08-11 makes MANDATORY. It is what the CHECKER reads
+///    ([`fossil_hir::def_map::DefMap::output_shape_document`]), and it is
+///    consulted FIRST.
+/// 2. `io.rdf(schema = …)` — an RDF *input* whose ShEx doubles as the output
+///    contract. It stays as the fallback for a program that reads a graph and
+///    writes one back.
+///
+/// **Only (2) existed here, and that was a hole between step 4 and step 7 of
+/// `SURFACE-PLAN.md`.** A pure-`io.csv` program — every program in
+/// `apps/docs/programs/` bar one — got `ACCEPT_ALL_DEFAULT`, and
+/// `fossil_mir::apply_output_shape` against an empty schema returns the ops
+/// unchanged: **zero `Op::EmitEdge`, for every CSV program there is**. The
+/// tombstone `fossil-mir/src/lower.rs` left when `subject_skeletons` was deleted
+/// says the shape classifies edges «and since ruling 3 that path is always
+/// available»; it was available to the checker and not to the executor, so
+/// deleting the skeletons did not migrate the edge capability, it dropped it.
+/// This function is the other half of that ruling: the document a program is
+/// REQUIRED to name is the document the run classifies edges with.
+///
+/// v1: one shape per program (a second, different `io.rdf` schema is rejected,
+/// not merged).
 fn resolve_output_descriptor(
     db: &fossil_base::FossilDb,
     def_map: fossil_hir::def_map::DefMap<'_>,
-    connections: &HashMap<String, creds::ConnectionCreds>,
-    source_dir: &Path,
+    anchor: SourceAnchor<'_>,
 ) -> miette::Result<OutputDescriptorKind> {
-    let mut schema: Option<SmolStr> = None;
+    // The `type { … } := io.shex(…)` binding, and it wins: it is the one the
+    // checker resolved the mapping's target shape against, so preferring it is
+    // what keeps «what compiled» and «what ran» the same document. The
+    // CONSTRUCTOR travels with it — ruling 13 — because it is what selects the
+    // row that reads it, and reading a document with a row the program did not
+    // name is how the run came to use a different parser from the check.
+    if let Some((constructor, document)) = def_map.output_shape_binding(db) {
+        return read_output_shape(constructor.as_deref(), document.as_str(), anchor);
+    }
+
+    // The `schema =` argument carries its OWN provider now
+    // (`schema = io.shex("x.shex")`), so the pair travels together here exactly
+    // as the `type { … }` pair does above — there is no position left where a
+    // document arrives without the row that reads it.
+    let mut schema: Option<(Option<SmolStr>, SmolStr)> = None;
     for s in def_map.sources(db) {
         let is_provider = s
             .constructor
             .as_deref()
-            .and_then(fossil_hir::stdlib::source_kind)
-            .is_some_and(|k| k.lowering == fossil_hir::stdlib::SourceLowering::Provider);
+            .and_then(|c| fossil_base::provider(fossil_descriptors_output::PROVIDERS, c))
+            .is_some_and(|p| p.reads_rows == Some(fossil_base::RowReader::Materialised));
         if !is_provider {
             continue;
         }
@@ -319,60 +459,110 @@ fn resolve_output_descriptor(
             continue;
         };
         match &schema {
-            Some(existing) if existing != arg => {
+            Some((_, existing)) if existing != arg => {
                 return Err(miette::miette!(
                     "a program may declare only one io.rdf output shape (v1); found `{existing}` and `{arg}`"
                 ));
             }
-            _ => schema = Some(arg.clone()),
+            _ => schema = Some((s.schema_provider.clone(), arg.clone())),
         }
     }
 
-    let Some(schema) = schema else {
+    let Some((provider, schema)) = schema else {
         return Ok(OutputDescriptorKind::ACCEPT_ALL_DEFAULT);
     };
 
-    let locator = resolve_ref(schema.as_str(), connections, source_dir);
-    let text = std::fs::read_to_string(&locator)
-        .map_err(|e| miette::miette!("read io.rdf output shape `{locator}`: {e}"))?;
-    let desc = fossil_descriptors_output::ShExDescriptor::from_reader(text.as_bytes())
-        .map_err(|e| miette::miette!("parse io.rdf output shape `{locator}`: {e:?}"))?;
-    Ok(OutputDescriptorKind::ShEx(desc))
+    read_output_shape(provider.as_deref(), schema.as_str(), anchor)
 }
 
-/// Resolve a source-reference argument to a physical locator the cloud-capable
-/// reader accepts — UNIFORMLY for every reference, so a `@conn` alias works in
-/// ANY URI position. `@conn/path` → connection URL + path; a direct URL or
-/// absolute path → itself; a relative path → anchored to the program's directory.
-fn resolve_ref(
-    raw: &str,
-    connections: &HashMap<String, creds::ConnectionCreds>,
-    source_dir: &Path,
-) -> String {
-    let resolved = resolve_source_uri(raw, connections);
-    if resolved.contains("://") || Path::new(&resolved).is_absolute() {
-        return resolved;
+/// Read and decode one shape document into the run's output descriptor,
+/// **through the registry row the program named** — the same seam the checker
+/// goes through.
+///
+/// # What this was, and why it was a bug nobody could see from one side
+///
+/// ```ignore
+/// let desc = fossil_shex::ShExDescriptor::from_reader(text.as_bytes())?;   // was
+/// ```
+///
+/// `from_reader` is **`ShExJ` (JSON) and only `ShExJ`**. Every `.shex` in
+/// `apps/docs/programs/` is `ShExC`. The checker's path goes
+/// `decoded_document` → `shape_document` → the `shex` row → `from_shex_source`,
+/// which auto-detects both. So a document that **type-checked** made the `run`
+/// fail on the same bytes, and neither side was wrong on its own — which is
+/// exactly how it survived (`SURFACE-PLAN.md` §B′).
+///
+/// It also meant the run had a hard-coded language: a program naming
+/// `io.shacl("catalogue.ttl")` was handed to a `ShEx` parser.
+///
+/// Both are one fix. The row is selected by the constructor the program wrote,
+/// its `reads_types` is the same `fn` the checker calls, and what comes back is
+/// [`fossil_graph_schema::OutputShapes`] — so «what compiled» and «what ran»
+/// are now the same decode of the same bytes by construction, not by two
+/// implementations agreeing.
+///
+/// The descriptor is [`OutputDescriptorKind::Lowered`] whatever the language —
+/// the variant was called `Shacl`, and the rename is part of this: it never
+/// meant SHACL, it meant "the decode already happened". The rich `ShEx`
+/// resolved table it replaces was only ever read by the checker, which does not
+/// come through here; the executor reads `to_graph_schema` and nothing else.
+fn read_output_shape(
+    constructor: Option<&str>,
+    document: &str,
+    anchor: SourceAnchor<'_>,
+) -> miette::Result<OutputDescriptorKind> {
+    use fossil_base::providers::{Capability, provider};
+
+    let table = fossil_descriptors_output::PROVIDERS;
+    let ctor = constructor.ok_or_else(|| {
+        miette::miette!(
+            "the shape document `{document}` is named by no provider — write \
+             `io.shex(\"…\")` or `io.shacl(\"…\")`"
+        )
+    })?;
+    let row = provider(table, ctor)
+        .ok_or_else(|| miette::miette!("`{ctor}` is not a provider this host installs"))?;
+    if !row.provides(Capability::ReadTypes) {
+        return Err(miette::miette!(
+            "{}",
+            row.decline_capability(Capability::ReadTypes, table)
+        ));
     }
-    let joined = source_dir.join(&resolved);
-    let anchored = if joined.exists() {
-        joined
-    } else {
-        std::env::current_dir().unwrap_or_default().join(&resolved)
-    };
-    anchored.to_string_lossy().into_owned()
+    if !row.accepts(document) {
+        return Err(miette::miette!("{}", row.decline_extension(document)));
+    }
+    let decode = row
+        .reads_types
+        .ok_or_else(|| miette::miette!("`{}` reads no types", row.constructor()))?;
+
+    // The one resolution rule, and the same one the CHECKER went through to
+    // read this document (`fossil_hir::def_map::resolve_relative`). A run that
+    // anchored differently would decode a different file from the one that
+    // type-checked, which is the same class of bug as decoding it with a
+    // different parser.
+    let locator = anchor.locator(document);
+    let text = std::fs::read_to_string(&locator)
+        .map_err(|e| miette::miette!("read output shape document `{locator}`: {e}"))?;
+    let shapes = decode(&locator, &text)
+        .map_err(|e| miette::miette!("parse output shape document `{locator}`: {e:?}"))?;
+    Ok(OutputDescriptorKind::Lowered(shapes.to_graph_schema()))
 }
 
-/// Resolve a `.fossil` source URI through the `--creds-stdin` connection map.
-/// `@conn/path` → `<connection url>/path`; any other URI is returned verbatim.
-/// Delegates to the shared rule [`fossil_df::resolve_source_uri`] (one
-/// resolution authority across the native host + the browser executor),
-/// projecting the creds map onto its name→base-URL view.
-fn resolve_source_uri(raw: &str, connections: &HashMap<String, creds::ConnectionCreds>) -> String {
-    let urls: HashMap<String, String> = connections
+/// The name→base-URL view of the run's connections — what
+/// [`fossil_base::SourceAnchor`] expands a `@conn` alias through, and what the
+/// executor is handed for the same purpose.
+///
+/// Projected ONCE per command and then borrowed, rather than rebuilt inside a
+/// per-URI resolver: the map was cloned for every source of every program, and
+/// a second copy of it was built again at the executor seam. One projection is
+/// also what lets the anchor be a borrow — the pair (directory, connections)
+/// has to outlive every resolution done against it, which is exactly the
+/// lifetime of the command.
+fn connection_urls(connections: &HashMap<String, creds::ConnectionCreds>) -> HashMap<String, String> {
+    connections
         .iter()
         .map(|(name, c)| (name.clone(), c.url.clone()))
-        .collect();
-    fossil_df::resolve_source_uri(raw, &urls)
+        .collect()
 }
 
 /// Install each source connection's scoped read secret on `conn`, so a
@@ -429,10 +619,17 @@ pub fn run(
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
     let (db, file) = open_db(text.clone(), path);
-    let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    // The run's one anchor: the directory of the program being run, and the
+    // `@conn` map it expands aliases through. Everything below resolves through
+    // this and nothing below consults the process's working directory — which
+    // is what makes `fossil run apps/docs/programs/hello/hello.fossil` mean the
+    // same thing from the repository root as from beside the program.
+    let connections = connection_urls(&creds.connections);
+    let program_dir = fossil_base::program_dir(&path.to_string_lossy());
+    let anchor = SourceAnchor::new(&program_dir, &connections);
     // CSV type pre-introspection (DuckDB DESCRIBE) feeds the type-checker's
     // `source_row`, which the property-graph lowering reads for prop datatypes.
-    pre_introspect_and_register(db.system(), &text, source_dir, &creds.connections);
+    pre_introspect_and_register(db.system(), &text, anchor, &creds.connections);
 
     let def_map = fossil_hir::def_map::def_map(&db, file);
     if def_map.mappings(&db).is_empty() {
@@ -441,7 +638,7 @@ pub fn run(
 
     // The program-resident output descriptor (ShEx) drives the PG edge/cardinality
     // classification inside `execute_graph` (via `apply_output_shape`).
-    let descriptor = resolve_output_descriptor(&db, def_map, &creds.connections, source_dir)?;
+    let descriptor = resolve_output_descriptor(&db, def_map, anchor)?;
 
     // The single execution path: lower to the property-graph MIR + execute on
     // DataFusion + write the GraphAr tree. The host's only job is the byte seam
@@ -450,18 +647,14 @@ pub fn run(
     let dest_dir = local_dest_dir(dest_url).ok_or_else(|| {
         miette::miette!("the DataFusion run path writes a local directory; cloud dest `{dest_url}` is not yet wired")
     })?;
+    // The host's byte seam for provider (RDF) sources. `provider_bindings` has
+    // already put every URI through the anchor, so this call is idempotent on
+    // what it is handed — it is here because a host that read a raw URI would
+    // be the fourth resolution rule.
     let read_uri = |uri: &str| -> Result<String, String> {
-        let locator = resolve_ref(uri, &creds.connections, source_dir);
+        let locator = anchor.locator(uri);
         std::fs::read_to_string(&locator).map_err(|e| format!("read source `{locator}`: {e}"))
     };
-    // The name→base-URL ref-map the executor resolves `@conn` source aliases
-    // through (object-store + provider sources alike) — projected from the
-    // `--creds-stdin` connections, the single resolution authority.
-    let connections: std::collections::HashMap<String, String> = creds
-        .connections
-        .iter()
-        .map(|(name, c)| (name.clone(), c.url.clone()))
-        .collect();
     let graph = fossil_df::run_to_dir(
         &db,
         file,
@@ -621,44 +814,26 @@ mod tests {
             .collect()
     }
 
+    /// The four `@conn` cases this file used to assert against its own resolver
+    /// now live beside the rule itself, in `fossil_base::locator` — there is one
+    /// implementation, so there is one place to test it. What is left here is
+    /// the engine's own half: the projection the anchor is built from.
     #[test]
-    fn resolves_at_conn_to_connection_url() {
+    fn the_creds_map_projects_onto_the_anchor_the_rule_takes() {
         let c = conns(&[("sales", "s3://bucket/prefix")]);
+        let urls = connection_urls(&c);
+        let dir = std::path::PathBuf::from("/programs/shop");
         assert_eq!(
-            resolve_source_uri("@sales/2024/orders.csv", &c),
+            SourceAnchor::new(&dir, &urls).locator("@sales/2024/orders.csv"),
             "s3://bucket/prefix/2024/orders.csv"
         );
-    }
-
-    #[test]
-    fn collapses_slashes_at_the_join() {
-        let c = conns(&[("sales", "s3://bucket/prefix/")]);
         assert_eq!(
-            resolve_source_uri("@sales/x.csv", &c),
-            "s3://bucket/prefix/x.csv"
+            SourceAnchor::new(&dir, &urls).locator("data/items.csv"),
+            "/programs/shop/data/items.csv"
         );
     }
 
-    #[test]
-    fn passes_through_direct_urls_and_paths() {
-        let c = conns(&[("sales", "s3://bucket")]);
-        assert_eq!(
-            resolve_source_uri("s3://other/x.csv", &c),
-            "s3://other/x.csv"
-        );
-        assert_eq!(
-            resolve_source_uri("examples/users.csv", &c),
-            "examples/users.csv"
-        );
-    }
-
-    #[test]
-    fn unknown_connection_passes_through_verbatim() {
-        let c = conns(&[("sales", "s3://bucket")]);
-        assert_eq!(resolve_source_uri("@missing/x.csv", &c), "@missing/x.csv");
-    }
-
-    /// ADR-0050's done-when, counted rather than timed: changing the CSV and
+    /// The cache's done-when, counted rather than timed: changing the CSV and
     /// re-running re-introspects; not changing it does not.
     ///
     /// `registrations()` moves only when a `DESCRIBE` actually ran, so the
@@ -677,7 +852,7 @@ mod tests {
         let system = system::EngineSystem::for_program_dir(dir.path());
         let cache = system.descriptors().expect("the engine keeps a table");
 
-        pre_introspect_and_register(&system, program, dir.path(), &no_creds);
+        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &no_creds);
         assert_eq!(
             cache.registrations(),
             1,
@@ -685,7 +860,7 @@ mod tests {
         );
         assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
 
-        pre_introspect_and_register(&system, program, dir.path(), &no_creds);
+        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &no_creds);
         assert_eq!(
             cache.registrations(),
             1,
@@ -693,7 +868,7 @@ mod tests {
         );
 
         std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
-        pre_introspect_and_register(&system, program, dir.path(), &no_creds);
+        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &no_creds);
         assert_eq!(
             cache.registrations(),
             2,
@@ -716,7 +891,7 @@ mod tests {
 
         let system = system::EngineSystem::for_program_dir(dir.path());
         let cache = system.descriptors().expect("the engine keeps a table");
-        pre_introspect_and_register(&system, program, dir.path(), &HashMap::new());
+        pre_introspect_and_register(&system, program, SourceAnchor::beside(dir.path()), &HashMap::new());
 
         assert_eq!(cache.registrations(), 1);
         assert_eq!(cache.len(), 1);

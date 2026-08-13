@@ -1,7 +1,6 @@
 //! `AstIdMap` — stable typed identity for AST nodes across body-only edits.
 //!
-//! Pattern: rust-analyzer's `hir-def::AstIdMap` (see ADR-0005 for the full
-//! decision and references).
+//! Pattern: rust-analyzer's `hir-def::AstIdMap`.
 //!
 //! Why: [`crate::item_tree::ItemHeader`] stores `FileAstId<MappingNode>` (a
 //! typed index into this map) instead of a `SyntaxNodePtr` or a raw byte
@@ -53,7 +52,9 @@ impl<N> std::hash::Hash for FileAstId<N> {
     }
 }
 
-// SAFETY: third-party-trait integration boundary (per ADR-0004). `FileAstId`
+// SAFETY: third-party-trait integration boundary — the workspace denies
+// `unsafe_code` rather than forbidding it, so a boundary like this one opts in
+// with an explicit `allow` and this justification. `FileAstId`
 // is `Copy + Eq`, so the trivial-replace pattern is sound: the new value
 // either equals the old (no change) or replaces it bit-for-bit (self-
 // contained, no nested invariants). The `PhantomData` carries no runtime
@@ -97,11 +98,10 @@ pub struct MappingNode;
 /// Marker type — `FileAstId<SourceDefNode>`.
 #[derive(Debug)]
 pub struct SourceDefNode;
-/// Marker type — `FileAstId<PrefixDeclNode>`.
-#[derive(Debug)]
-pub struct PrefixDeclNode;
-// There was an `ImportNode` marker here. `use` left the grammar, so there is
-// no `IMPORT` node to point a `FileAstId` at.
+// There was a `PrefixDeclNode` marker here, and an `ImportNode` before it.
+// `use` left the grammar with the module system there never was, and `prefix`
+// with the CURIE — `use` and `prefix` are ordinary identifiers now — so neither
+// has a node to point a `FileAstId` at.
 
 /// Per-file stable map: records the DFS top-level insertion order of every
 /// signature-carrying CST node.
@@ -137,7 +137,7 @@ pub struct AstIdEntry {
 
 /// Build the per-file `AstIdMap` by walking top-level CST children once. Body
 /// content is NOT inspected — that's the invalidation-barrier guarantee
-/// (RESEARCH.md §Q3 / ADR-0005).
+/// (RESEARCH.md §Q3).
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdMap<'db> {
@@ -147,7 +147,7 @@ pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdM
         // We DO NOT inspect child.children() or child.text() here. Body
         // content does not contribute to AstIdMap's input.
         match child.kind() {
-            SyntaxKind::MAPPING | SyntaxKind::SOURCE_DEF | SyntaxKind::PREFIX_DECL => {
+            SyntaxKind::MAPPING | SyntaxKind::SOURCE_DEF => {
                 entries.push(AstIdEntry {
                     kind: child.kind(),
                     local_index: u32::try_from(idx).expect("file with > u32::MAX top-level items"),
@@ -168,27 +168,29 @@ mod tests {
     #[allow(clippy::literal_string_with_formatting_args)] // Fossil-source fixture, not a format string
     fn ast_id_map_assigns_stable_indices_in_dfs_order() {
         let src = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"personas.shex\")
 
-users := io.csv(\"x.csv\")
+User := io.csv(\"x.csv\")
 
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
+Users : Person from User
+    @subject = \"https://example.org/u/{User.id}\"
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "test.fossil".to_string());
         let m = ast_id_map(&db, file);
         let entries = m.entries(&db);
-        assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].kind, SyntaxKind::PREFIX_DECL);
-        assert_eq!(entries[1].kind, SyntaxKind::SOURCE_DEF);
-        assert_eq!(entries[2].kind, SyntaxKind::MAPPING);
+        // TWO, not three. The `type { … } := …` binding above them carries no
+        // `FileAstId` — `TYPE_DEF` is not one of the signature-carrying kinds —
+        // where the `prefix` line this fixture used to open with was.
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].kind, SyntaxKind::SOURCE_DEF);
+        assert_eq!(entries[1].kind, SyntaxKind::MAPPING);
     }
 
     #[test]
     fn ast_id_map_memoises_per_file() {
-        let src = "prefix ex: <https://example.org/>\n";
+        let src = "User := io.csv(\"u.csv\")\n";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "m.fossil".to_string());

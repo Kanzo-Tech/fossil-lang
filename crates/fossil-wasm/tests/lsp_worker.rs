@@ -172,7 +172,7 @@ fn did_open_emits_per_file_publish_diagnostics() {
 fn did_change_invokes_set_text_revision_bump() {
     // Behavioral assertion: after didOpen + didChange, documentSymbol on
     // the new content path must succeed (proves set_text path took effect
-    // and the file revision bumped — ADR-0022).
+    // and the file revision bumped).
     let mut pg = FossilPlayground::new();
     let _ = fossil_wasm::__dispatch_for_test(
         &mut pg,

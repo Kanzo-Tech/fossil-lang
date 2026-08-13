@@ -2,7 +2,7 @@
 source: crates/fossil-cli/tests/check_diagnostics.rs
 expression: normalised
 ---
-Error:   × type-checking failed: 2 error(s)
+Error:   × type-checking failed: 3 error(s)
 
 Error: 
   × D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is
@@ -16,11 +16,23 @@ Error:
    ╰────
 
 Error: 
+  × this program names no shape document, so it cannot write a property: a
+  │ property key is the last segment of a predicate IRI that a shape declares.
+  │ Bring one in with `type { … } = io.shex("shop.shex")`.
+   ╭─[<FIXTURE>/mapping.fossil:3:1]
+ 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
+ 3 │ User : ex:Person from users
+   · ▲
+   · ╰── here
+ 4 │     @subject = `${ex:}user/${.id}`
+   ╰────
+
+Error: 
   × unknown column `naem` — did you mean `name`?
-   ╭─[<FIXTURE>/mapping.fossil:5:15]
- 4 │     iri = `${ex:}user/${.id}`
- 5 │     ex:name = .naem
-   ·               ──┬──
-   ·                 ╰── here
+   ╭─[<FIXTURE>/mapping.fossil:5:12]
+ 4 │     @subject = `${ex:}user/${.id}`
+ 5 │     name = .naem
+   ·            ──┬──
+   ·              ╰── here
    ╰────
   help: did you mean `name`?

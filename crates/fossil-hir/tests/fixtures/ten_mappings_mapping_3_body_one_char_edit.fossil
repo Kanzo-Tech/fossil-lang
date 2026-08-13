@@ -3,61 +3,61 @@ prefix ex: <https://example.org/>
 users := io.csv("data.csv")
 
 Mapping_1 : ex:Shape from users
-    iri = `${ex:}u/${.id}/1`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/1`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_2 : ex:Shape from users
-    iri = `${ex:}u/${.id}/2`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/2`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_3 : ex:Shape from users
-    iri = `${ex:}u/${.id}/3`
-    ex:a = .x
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/3`
+    a = .x
+    b = .b
+    c = .c
 
 Mapping_4 : ex:Shape from users
-    iri = `${ex:}u/${.id}/4`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/4`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_5 : ex:Shape from users
-    iri = `${ex:}u/${.id}/5`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/5`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_6 : ex:Shape from users
-    iri = `${ex:}u/${.id}/6`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/6`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_7 : ex:Shape from users
-    iri = `${ex:}u/${.id}/7`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/7`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_8 : ex:Shape from users
-    iri = `${ex:}u/${.id}/8`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/8`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_9 : ex:Shape from users
-    iri = `${ex:}u/${.id}/9`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/9`
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_10 : ex:Shape from users
-    iri = `${ex:}u/${.id}/10`
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    @subject = `${ex:}u/${.id}/10`
+    a = .a
+    b = .b
+    c = .c

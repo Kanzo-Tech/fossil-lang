@@ -31,7 +31,7 @@
 //! removing salsa would win — only whether there is anything to win. That half
 //! is `query_time.rs`, and it has since been measured: the ceiling is 3.8% of
 //! the batch compile, and the batch compile is 0.20% of `fossil check`. Apollo's
-//! −52.3% was never ours and is no longer cited as if it were (ADR-0050).
+//! −52.3% was never ours and is no longer cited as if it were.
 //!
 //! **Not the editor path.** The LSP keeps one database alive across edits, and
 //! `crates/fossil-hir/tests/invalidation_regression.rs` already pins what that
@@ -58,7 +58,7 @@ fn program(n: usize) -> String {
     for i in 0..n {
         let _ = write!(
             s,
-            "M{i} : ex:Person from users\n    iri = `${{ex:}}m{i}/${{.id}}`\n    ex:name = .name\n\n"
+            "M{i} : ex:Person from users\n    @subject = `${{ex:}}m{i}/${{.id}}`\n    name = .name\n\n"
         );
     }
     s

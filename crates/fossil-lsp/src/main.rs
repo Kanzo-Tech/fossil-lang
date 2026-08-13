@@ -15,7 +15,7 @@
 //!   real `parse → def_map → typecheck` diagnostics.
 //! - `textDocument/didChange` → mutates the SAME `SourceFile` via the Salsa
 //!   `Setter` (`set_text`), which BUMPS THE REVISION — the real cancellation
-//!   trigger (ADR-0022; NOT a fictional `db.cancel_pending()`) — then republishes
+//!   trigger (NOT a fictional `db.cancel_pending()`) — then republishes
 //!   diagnostics.
 //! - `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (the
 //!   target-side `ShEx` type is reachable whenever the program names its output
@@ -27,7 +27,7 @@
 //! - `textDocument/codeAction` → [`fossil_ide::code_actions`].
 //! - `shutdown` (request) / `exit` (notification) → `Connection::handle_shutdown`.
 //!
-//! Per ADR-0001 (`lsp-server`, NOT `tower-lsp`) and CLAUDE.md "Hard Rules"
+//! The transport is `lsp-server`, NOT `tower-lsp`, and CLAUDE.md "Hard Rules"
 //! (`fossil-lsp` is native-only). The dispatch loop pattern is derived from
 //! `rust-analyzer/lsp-server/examples/goto_def.rs` (verified via `WebFetch`
 //! per `01-RESEARCH.md` Example 16).
@@ -40,9 +40,13 @@ compile_error!(
 
 use std::collections::HashMap;
 use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use fossil_base::{Diagnostic, Files, NativeSystem, Severity, SourceFile, Span, System};
+use fossil_base::{
+    Diagnostic, Files, FsError, Provider, Severity, SourceFile, Span, System, register_file,
+};
 use fossil_ide::{LineIndex, Utf16Position};
 use lsp_server::{Connection, ErrorCode, ExtractError, Message, Notification, Request, Response};
 use lsp_types::notification::{
@@ -62,13 +66,67 @@ use lsp_types::{
     WorkDoneProgressOptions,
 };
 
+/// The editor's [`System`].
+///
+/// A filesystem, a clock, and the decoder rows for the shape documents a
+/// program can name. The LSP COMPILES programs, so it installs the same rows
+/// the native engine does: without them every program checks against no output
+/// contract, and the target-side halves of
+/// [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] go quietly
+/// empty for exactly the programs that declare a shape.
+///
+/// It replaced `fossil_base::NativeSystem`, whose decoder table is the trait
+/// default — `&[]`, correct for a host that decodes nothing and wrong for this
+/// one. No descriptor table: the LSP introspects no sources yet, and `None` is
+/// a real answer rather than an empty table pretending to be one.
+#[derive(Debug, Default)]
+struct LspSystem;
+
+impl System for LspSystem {
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => FsError::NotFound(path.display().to_string()),
+            _ => FsError::Io(e.to_string()),
+        })
+    }
+
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
+    }
+}
+
+/// The local file a registry key names, or `None` for a key no filesystem can
+/// answer.
+///
+/// The keys are the program's own path with the document joined onto it, so in
+/// this host they are `file://` URIs. Anything with another scheme belongs to a
+/// client we cannot read for (a `untitled:` buffer, a remote workspace); the
+/// answer there is `None`, and the document arrives — if it arrives — when the
+/// client opens it.
+///
+/// Percent-escapes are NOT decoded. A workspace path containing one is read
+/// wrong today; the fix is a URI type at this seam, not a hand-rolled decoder.
+fn local_path(key: &str) -> Option<PathBuf> {
+    if let Some(rest) = key.strip_prefix("file://") {
+        return Some(PathBuf::from(rest));
+    }
+    if key.contains("://") {
+        return None;
+    }
+    Some(PathBuf::from(key))
+}
+
 /// The LSP database.
 ///
-/// A `#[salsa::db]` struct carrying the Salsa runtime + the host [`System`].
-/// The system is the whole of what the editor owes the compiler: the target
-/// shape reaches [`fossil_ide::hover_bidirectional`] /
-/// [`fossil_ide::completions`] because the PROGRAM names its output document
-/// and `resolve_target_shape` reads it through `System::read_file` (ADR-0055).
+/// A `#[salsa::db]` struct carrying the Salsa runtime, the host [`System`] and
+/// the file registry. The target shape reaches
+/// [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] because
+/// the PROGRAM names its output document and this host REGISTERS it — as a
+/// Salsa input, so an edit to the document re-checks the programs that read it.
 #[salsa::db]
 #[derive(Clone)]
 struct LspDb {
@@ -100,7 +158,7 @@ impl LspDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::default()),
+            system: Arc::new(LspSystem),
             files: Files::default(),
         }
     }
@@ -127,15 +185,48 @@ impl LspState {
     /// Record a newly-opened file: intern a fresh `SourceFile`. The path is
     /// kept because the shape and CSVW documents the program names are read
     /// relative to it.
+    ///
+    /// Two registrations, and they are different things. The buffer goes into
+    /// the file registry under its own URI, so opening a `.shex` makes the OPEN
+    /// COPY the document every program naming it reads — that is how an unsaved
+    /// edit reaches the checker, and the disk cannot express it. Then the
+    /// documents THIS file names are read from disk if nobody has them yet.
     fn open(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
-        let file = SourceFile::new(&self.db, text, path);
+        let file = SourceFile::new(&self.db, text, path.clone());
+        register_file(&mut self.db, path, file);
         self.files.insert(uri.as_str().to_string(), file);
+        self.register_named_documents(file);
         file
+    }
+
+    /// Register every shape document `file` names that the database does not
+    /// hold yet, reading it from the local filesystem.
+    ///
+    /// Unopened documents are read ONCE, here. There is no
+    /// `workspace/didChangeWatchedFiles` handling in this server, so a document
+    /// nobody opened that changes on disk afterwards is stale until the program
+    /// naming it is reopened. Opening the document fixes it for good: from then
+    /// on it is a buffer, and every keystroke in it is a `set_text` the checker
+    /// sees.
+    fn register_named_documents(&mut self, file: SourceFile) {
+        let registered = fossil_ide::register_missing_documents(&mut self.db, file, &|key| {
+            let path = local_path(key)?;
+            match std::fs::read_to_string(&path) {
+                Ok(text) => Some(text),
+                Err(e) => {
+                    tracing::debug!("shape document {} was not read: {e}", path.display());
+                    None
+                }
+            }
+        });
+        if registered > 0 {
+            tracing::debug!("registered {registered} shape document(s) from disk");
+        }
     }
 
     /// Apply a `didChange` to an already-open file. Mutates the SAME
     /// `SourceFile` via the Salsa [`salsa::Setter`] (`set_text`) — this BUMPS
-    /// THE REVISION, the real cancellation trigger (ADR-0022): any in-flight
+    /// THE REVISION, the real cancellation trigger: any in-flight
     /// analysis from the previous keystroke observes the new revision at its
     /// next cooperative checkpoint. Falls back to a fresh intern if the URI was
     /// never opened (a `didChange` before `didOpen` — tolerated, not an error).
@@ -143,6 +234,10 @@ impl LspState {
         use salsa::Setter as _;
         if let Some(&file) = self.files.get(uri.as_str()) {
             file.set_text(&mut self.db).to(text);
+            // The keystroke may have just written the `type { … } =
+            // io.shex("…")` line that names a document. A no-op once the
+            // document is in — the loop skips what the registry already holds.
+            self.register_named_documents(file);
             file
         } else {
             self.open(uri, text, path)
@@ -156,7 +251,7 @@ impl LspState {
     }
 
     /// The open-file set as a slice — the cross-file workspace for goto-def /
-    /// completion (ADR-0023: workspace == open files).
+    /// completion — the workspace IS the open files.
     fn open_files(&self) -> Vec<SourceFile> {
         self.files.values().copied().collect()
     }
@@ -551,7 +646,7 @@ fn handle_notification(
                 let path = uri.as_str().to_string();
                 // `change` mutates via `set_text` (Setter) → revision bump →
                 // cancels in-flight analysis from the previous keystroke
-                // (ADR-0022, the real cancellation trigger).
+                // (the real cancellation trigger).
                 let file = state.change(&uri, last.text, path);
                 tracing::debug!("didChange: {}", uri.as_str());
                 publish_diagnostics(connection, &state.db, &uri, file)?;

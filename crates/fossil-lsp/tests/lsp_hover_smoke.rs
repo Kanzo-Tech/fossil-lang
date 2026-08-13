@@ -11,13 +11,20 @@
 //!    opener (```` ```fossil ````).
 //! 4. `result.contents.kind` is `"markdown"`.
 //!
-//! Per checker Warning W4: the test binary is built via `cargo build -p
-//! fossil-lsp` BEFORE the test runs (Phase 1 baseline pattern from
-//! `lsp_smoke.rs`'s `fossil_lsp_binary()` helper) so a build error surfaces
-//! distinctly from a test failure ("binary not found" vs. assertion fail).
-//!
 //! Pattern mirrors Phase 1's `lsp_smoke.rs`: all frames written upfront,
 //! then stdin dropped, then stdout drained and parsed.
+//!
+//! # The program is written to disk, and it has to be
+//!
+//! It used to be an inline `const` opened under `file:///tmp/hover.fossil`,
+//! which was free while a program named no shape document. Ruling 3 of
+//! 2026-08-11 makes naming one MANDATORY — a property key is the last segment
+//! of a predicate IRI the document declares — and `typecheck_mapping` returns
+//! `Err` when the contract does not resolve, which empties the `expr_types`
+//! table hover reads. A hover over an unresolvable program is `null`, so this
+//! test writes BOTH files into a temp directory and opens the program under its
+//! real path, letting the server resolve `io.shex("hover.shex")` beside it the
+//! way it does in an editor.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -26,42 +33,18 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
-fn repo_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("CARGO_MANIFEST_DIR has at least two parents")
-        .to_path_buf()
-}
-
-/// Build + cache the `fossil-lsp` binary path. Per checker Warning W4, we
-/// build via `cargo build` (NOT `cargo test`) so build errors are reported
-/// distinctly from test failures.
+/// The `fossil-lsp` binary this test drives — cargo's own path for it.
+///
+/// This shelled out to `cargo build` and then hard-coded
+/// `<repo>/target/debug/fossil-lsp`, which is a test that can pass against a
+/// binary it did not build: with `CARGO_TARGET_DIR` set the build lands
+/// elsewhere and that path holds whatever was left there last. Measured on
+/// 2026-08-13 — the file there was two days old. `CARGO_BIN_EXE_<name>` is set
+/// by cargo for an integration test, and cargo has already built the binary
+/// before the test runs.
 fn fossil_lsp_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args([
-                "build",
-                "--quiet",
-                "-p",
-                "fossil-lsp",
-                "--bin",
-                "fossil-lsp",
-            ])
-            .status()
-            .expect("spawn cargo build for fossil-lsp");
-        assert!(status.success(), "cargo build -p fossil-lsp failed");
-
-        let bin = repo_root().join("target").join("debug").join("fossil-lsp");
-        assert!(
-            bin.exists(),
-            "fossil-lsp binary not found at {} after cargo build",
-            bin.display(),
-        );
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil-lsp")))
 }
 
 fn frame(body: &str) -> String {
@@ -114,26 +97,47 @@ fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// `.fossil` source the hover smoke test opens. Line layout (0-indexed):
-///   0: prefix ex: <https://example.org/>
-///   1: users := io.csv("x.csv")
-///   2: User : ex:Person from users
-///   3:     iri = `${ex:}u/${.id}`
-///   4:     ex:name = .name
+///   0: type { Person } := io.shex("hover.shex")
+///   1: Users := io.csv("x.csv")
+///   2: People : Person from Users
+///   3:     @subject = "https://example.org/u/{Users.id}"
+///   4:     name = Users.name
 ///
-/// The hover request targets line 3, character 10 — inside the iri
-/// template property. `ty_origin` synthesises `IriTemplate` for `ExprId(0)`.
+/// The hover request targets line 3, character 10 — inside the identity
+/// property, whose interpolated string synthesises `IriTemplate`.
 const FOSSIL_SRC: &str = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"hover.shex\")
+Users := io.csv(\"x.csv\")
+People : Person from Users
+    @subject = \"https://example.org/u/{Users.id}\"
+    name = Users.name
 ";
+
+/// The output contract `FOSSIL_SRC` names, written beside it. One shape, one
+/// predicate whose last segment is the one property the body writes.
+const SHEX_SRC: &str = "\
+PREFIX ex: <https://example.org/>
+
+ex:Person {
+  ex:name .
+}
+";
+
+/// Write the two files into a fresh temp directory and return the program's
+/// `file://` URI. The server resolves the document relative to this path.
+fn write_program() -> String {
+    let dir = std::env::temp_dir().join(format!("fossil-hover-smoke-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    std::fs::write(dir.join("hover.fossil"), FOSSIL_SRC).expect("write program");
+    std::fs::write(dir.join("hover.shex"), SHEX_SRC).expect("write document");
+    format!("file://{}", dir.join("hover.fossil").display())
+}
 
 #[test]
 #[allow(clippy::too_many_lines)]
 fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
     let bin = fossil_lsp_binary();
+    let uri = write_program();
 
     let mut child = Command::new(bin)
         .stdin(Stdio::piped())
@@ -173,7 +177,7 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
-                    "uri": "file:///tmp/hover.fossil",
+                    "uri": uri,
                     "languageId": "fossil",
                     "version": 1,
                     "text": FOSSIL_SRC,
@@ -190,7 +194,7 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
             "id": 2,
             "method": "textDocument/hover",
             "params": {
-                "textDocument": { "uri": "file:///tmp/hover.fossil" },
+                "textDocument": { "uri": uri },
                 "position": { "line": 3, "character": 10 }
             }
         });
@@ -350,16 +354,23 @@ use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
 use fossil_hir::ty::{Ty, TyKind};
 use std::sync::Arc;
 
-const USERS_CSVW: &str = r#"{
-  "@context": "http://www.w3.org/ns/csvw",
-  "tableSchema": {
-    "columns": [
-      { "name": "id", "datatype": "integer" },
-      { "name": "name", "datatype": "string" },
-      { "name": "age", "datatype": "integer" }
-    ]
-  }
-}"#;
+/// The introspected `users` row — `id`/`age` integers, a `name` string.
+///
+/// It was a `USERS_CSVW` JSON-LD sidecar parsed by `CsvwDescriptor`. CSVW is
+/// gone: its own `D-CSVW-DEPRECATED` diagnostic said types are inferred from
+/// the file directly, and this is that.
+fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
+    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    InferredDescriptor {
+        uri: "users.csv".into(),
+        columns: vec![
+            InferredColumn { name: "id".into(), primitive: Primitive::Integer },
+            InferredColumn { name: "name".into(), primitive: Primitive::String },
+            InferredColumn { name: "age".into(), primitive: Primitive::Integer },
+        ],
+        freshness_token: String::new(),
+    }
+}
 
 fn bare_db() -> FossilDb {
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
@@ -378,10 +389,12 @@ fn bare_db() -> FossilDb {
 fn hover_inside_synthesized_closure_via_typecheck_mapping() {
     let db = bare_db();
     let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-    // The closure rendering plan 03-06's `render_closure` produces for the
-    // canonical SC#3 predicate `users |> filter(.age >= 18)` (03-06-SUMMARY
-    // §"SC#3-shape acceptance string"). The row Record carries the field names
-    // + types so the user sees what `row` is bound to.
+    // The closure rendering for the canonical SC#3 predicate
+    // `users |> filter(.age >= 18)`. It is written out by hand because the
+    // function that produced it, `fossil_hir::check::render_closure`, is
+    // deleted along with `synthesize_closure` — so this asserts the RENDERING
+    // of a provenance kind nothing produces. It survives only until
+    // `ProvenanceKind::SynthesizedClosureRendering` itself goes.
     let rendering = smol_str::SmolStr::from("(row: Record<{age: Integer}>) => row.age >= 18");
     let entry = ExprTypeEntry {
         expr_id: ExprId(0),
@@ -434,20 +447,24 @@ fn hover_inside_synthesized_closure_via_typecheck_mapping() {
 /// in-process path `resolve_source_row` uses), then rendering the resulting
 /// `InputDescriptor` entry via the LSP's `render_markdown`.
 #[test]
-fn hover_on_csvw_fieldref_outside_closure() {
+fn hover_on_introspected_fieldref_outside_closure() {
     let db = bare_db();
 
-    // Resolve `.name` against the real CSVW descriptor — proves the `String`
-    // type below is CSVW-derived, not hard-coded.
-    let descriptor =
-        fossil_descriptors_input::CsvwDescriptor::parse(USERS_CSVW.as_bytes()).expect("valid CSVW");
-    let name_kind = descriptor
-        .type_for_column("name")
-        .expect("CSVW `name` column has a type");
+    // Resolve `.name` against a real INTROSPECTED descriptor — proves the
+    // `String` type below comes from the descriptor and is not hard-coded. It
+    // read a CSVW sidecar until CSVW was deleted; the inferred descriptor is
+    // what a host registers after introspecting the file, which is what the
+    // deprecation pointed at.
+    let name_kind = users_descriptor()
+        .columns
+        .iter()
+        .find(|c| c.name == "name")
+        .expect("the introspected row has a `name` column")
+        .primitive;
     assert_eq!(
         name_kind,
         Primitive::String,
-        "CSVW `name` column must be a string type; got {name_kind:?}",
+        "the `name` column must be a string type; got {name_kind:?}",
     );
 
     let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));

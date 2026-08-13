@@ -1,0 +1,6 @@
+[
+  { "id": 1, "station": "NW-A", "species": "Northwind Kite", "count": 2 },
+  { "id": 2, "station": "NW-A", "species": "Marsh Warbler", "count": 11 },
+  { "id": 3, "station": "NW-B", "species": "Marsh Warbler", "count": 4 },
+  { "id": 4, "station": "NW-C", "species": "Common Tern", "count": 37 }
+]

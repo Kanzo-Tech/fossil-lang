@@ -1,6 +1,6 @@
 //! Salsa `Db` trait + `FossilDb` implementation.
 //!
-//! Per ADR-0003 the trait is intentionally **thin**: just `system()` + `files()`.
+//! The trait is intentionally **thin**: just `system()` + `files()`.
 //! Descriptors, registry, and host capabilities flow through `&dyn System`
 //! rather than as separate composing traits. This is the verified pattern from
 //! `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it).
@@ -35,11 +35,7 @@ impl std::fmt::Debug for FossilDb {
 impl FossilDb {
     #[must_use]
     pub fn new(system: Arc<dyn System>) -> Self {
-        Self {
-            storage: salsa::Storage::default(),
-            system,
-            files: Files::default(),
-        }
+        Self::with_storage(salsa::Storage::default(), system)
     }
 
     /// Construct a `FossilDb` whose Salsa runtime invokes `callback` for
@@ -58,11 +54,24 @@ impl FossilDb {
         system: Arc<dyn System>,
         callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static>,
     ) -> Self {
-        Self {
-            storage: salsa::Storage::new(Some(callback)),
+        Self::with_storage(salsa::Storage::new(Some(callback)), system)
+    }
+
+    /// The one constructor. It exists because the file registry
+    /// ([`crate::files::FileRegistry`]) is a Salsa input, and a Salsa input can
+    /// only be created with a database in hand — so the database is built first
+    /// and the registry forced immediately after, **outside any query**. Salsa
+    /// does not stop a query body from creating an input, but an input a query
+    /// creates is not in that query's dependency list; allocating here means no
+    /// query ever has to.
+    fn with_storage(storage: salsa::Storage<Self>, system: Arc<dyn System>) -> Self {
+        let db = Self {
+            storage,
             system,
             files: Files::default(),
-        }
+        };
+        let _ = db.files.registry(&db);
+        db
     }
 }
 

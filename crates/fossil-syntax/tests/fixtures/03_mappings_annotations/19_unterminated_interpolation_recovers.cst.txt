@@ -1,0 +1,29 @@
+PROGRAM
+  MAPPING
+    MAPPING_HEADER
+      IDENT "Users"
+      SHAPE_SEP ":"
+      SHAPE_EXPR
+        IDENT "Person"
+      KW_FROM "from"
+      EXPR
+        LITERAL_EXPR
+          IDENT "User"
+    MAPPING_BODY
+      PROPERTY
+        PROPERTY_LHS
+          AT_ATTR "@subject"
+        ASSIGN "="
+        EXPR
+          INTERP_STRING_EXPR
+            STRING_OPEN "\""
+            STRING_TEXT "user/"
+            INTERPOLATION
+              INTERP_OPEN "{"
+              POSTFIX_EXPR
+                LITERAL_EXPR
+                  IDENT "User"
+                DOT "."
+                IDENT "id"
+              ERROR
+            STRING_CLOSE "\""

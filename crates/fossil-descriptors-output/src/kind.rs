@@ -1,12 +1,12 @@
 //! `OutputDescriptorKind` — enum dispatch for inside-Salsa-query descriptor
 //! access.
 //!
-//! Phase 3 introduces this enum because [`crate::OutputDescriptor`] is a
-//! trait (per ADR-0003) and Salsa 0.26 cannot intern or memoize trait objects
+//! Phase 3 introduces this enum because [`crate::OutputDescriptor`] is a trait
+//! and Salsa 0.26 cannot intern or memoize trait objects
 //! (`Box<dyn OutputDescriptor>`) — they lack structural equality. Inside a
 //! `#[salsa::tracked]` query body (plan 03-05's `typecheck_mapping`), dispatch
 //! goes through this enum's variants (concrete types), not through
-//! `&dyn OutputDescriptor`. See ADR-0006.
+//! `&dyn OutputDescriptor`.
 //!
 //! The trait stays as the OUTSIDE-Salsa surface API (e.g. for the playground
 //! UI listing loaded descriptors).
@@ -36,11 +36,17 @@ pub enum OutputDescriptorKind {
     /// compile-time backward checker (`fossil-hir`) needs the rich resolved
     /// table; the executor reads only [`Self::to_graph_schema`].
     ShEx(ShExDescriptor),
-    /// A canonical output model, already lowered (the SHACL path produces this
-    /// directly — SHACL is RDF, walked into [`GraphSchema`] — and any future
-    /// pre-resolved source can reuse it). The executor consumes it as-is;
-    /// `fossil-hir`'s `ShEx` backward checker treats it like `AcceptAll`.
-    Shacl(GraphSchema),
+    /// A canonical output model, **already lowered** — whatever language it came
+    /// from. The executor consumes it as-is.
+    ///
+    /// It was called `Shacl`, and the name was a claim about the document's
+    /// language that the value does not carry: since the run reads its shape
+    /// document through the provider registry (`fossil_engine`'s
+    /// `read_output_shape`), a `ShEx` document arrives here too. What the
+    /// variant means is "the decode already happened", which is what it now
+    /// says. [`Self::ShEx`] survives beside it because the browser executor is
+    /// handed a raw `ShEx` blob with no registry in front of it.
+    Lowered(GraphSchema),
     /// Phase 1 stub — accepts any graph. Used when no shape target is loaded
     /// (the walking-skeleton case) or as the degraded fallback if a host
     /// can't resolve a `ShEx` schema.
@@ -67,7 +73,7 @@ impl OutputDescriptorKind {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::ShEx(_) => "shex",
-            Self::Shacl(_) => "shacl",
+            Self::Lowered(_) => "lowered",
             Self::AcceptAll(_) => "accept-all",
         }
     }
@@ -83,14 +89,14 @@ impl OutputDescriptorKind {
     /// Lower this descriptor to the canonical, format-neutral [`GraphSchema`] —
     /// the single output model the executor (`apply_output_shape`) consumes,
     /// independent of the source schema language. `ShEx` lowers through its
-    /// resolved table; SHACL is already a `GraphSchema`; `AcceptAll` is empty
+    /// resolved table; `Lowered` already is one; `AcceptAll` is empty
     /// (no node/edge typing → every predicate stays a vertex property, the
     /// walking-skeleton behaviour).
     #[must_use]
     pub fn to_graph_schema(&self) -> GraphSchema {
         match self {
             Self::ShEx(d) => d.to_graph_schema(),
-            Self::Shacl(gs) => gs.clone(),
+            Self::Lowered(gs) => gs.clone(),
             Self::AcceptAll(_) => GraphSchema {
                 nodes: Vec::new(),
                 edges: Vec::new(),
@@ -168,7 +174,7 @@ mod tests {
             // require a new match arm in fossil-hir, intentionally.
             let _name: &'static str = match k {
                 OutputDescriptorKind::ShEx(_) => "shex",
-                OutputDescriptorKind::Shacl(_) => "shacl",
+                OutputDescriptorKind::Lowered(_) => "lowered",
                 OutputDescriptorKind::AcceptAll(_) => "accept-all",
             };
         }

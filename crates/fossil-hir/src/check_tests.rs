@@ -1,30 +1,29 @@
 //! Integration tests for the Phase 3 bidirectional checker (plan 03-05).
 //!
 //! Covers: literal-subset regression (Phase 2 widening), forward CSVW
-//! propagation (SC#1) + did-you-mean, backward `ShEx` cardinality blame
-//! (SC#2), the 5 subtyping rules, `ShEx` `OneOf` rejection diagnostic emission
+//! propagation (SC#1) + did-you-mean, backward cardinality blame against a
+//! target shape (SC#2), the 5 subtyping rules, value-disjunction rejection
 //! (SC#4), the `expr_types` thin-accessor inversion, and the
 //! `ErrorGuaranteed`-implies-diagnostic contract.
 
 use super::*;
 use crate::body::ExprId;
 use crate::def_map::{MappingLoc, def_map};
-use crate::infer::record_from_descriptor;
 use crate::lower::{HirExpr, HirProperty, PropertyKey};
 use crate::provenance::{expr_types, ty_origin};
 use crate::shapes::ResolvedShape;
 use crate::ty::{ShapeId, TyKind};
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
-use fossil_descriptors_input::CsvwDescriptor;
-use fossil_graph_schema::Primitive;
+use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+use fossil_graph_schema::{Occurs, Primitive};
 use std::sync::Arc;
 
 const HELLO: &str = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Users : Person from User
+    @subject = \"https://example.org/u/{User.id}\"
+    name = User.name
 ";
 
 fn db_with(src: &str) -> (FossilDb, SourceFile) {
@@ -41,16 +40,29 @@ fn first_mapping(db: &FossilDb, file: SourceFile) -> MappingLoc<'_> {
         .expect("at least one mapping")
 }
 
-const USERS_CSVW: &str = r#"{
-  "@context": "http://www.w3.org/ns/csvw",
-  "tableSchema": {
-    "columns": [
-      { "name": "id", "datatype": "integer" },
-      { "name": "name", "datatype": "string" },
-      { "name": "age", "datatype": "integer" }
-    ]
-  }
-}"#;
+/// The `users` row every checker test below builds on: `id`/`age` integers, a
+/// `name` string.
+///
+/// It was a CSVW descriptor parsed by `CsvwDescriptor::parse`, and CSVW is
+/// gone — it was deprecated by `D-CSVW-DEPRECATED`, which told the author to
+/// remove the argument because types are inferred from the file directly. What
+/// replaces it is the INFERRED descriptor: the shape a host registers after
+/// introspecting the file, which is the direction the deprecation already
+/// pointed at. Same three columns, same types, one less way to say it.
+fn users_row<'db>(db: &'db dyn fossil_base::Db) -> Ty<'db> {
+    crate::infer::record_from_inferred(
+        db,
+        &InferredDescriptor {
+            uri: "users.csv".into(),
+            columns: vec![
+                InferredColumn { name: "id".into(), primitive: Primitive::Integer },
+                InferredColumn { name: "name".into(), primitive: Primitive::String },
+                InferredColumn { name: "age".into(), primitive: Primitive::Integer },
+            ],
+            freshness_token: String::new().into(),
+        },
+    )
+}
 
 /// Build a `Checker` over a fixture, with an explicit source row + optional
 /// resolved shape, inside a tracked shim so `delay_span_bug` is valid.
@@ -60,17 +72,64 @@ fn build_checker<'db>(
     source_row: Option<Ty<'db>>,
     resolved_shape: Option<ResolvedShape<'db>>,
 ) -> Checker<'db> {
+    // The short-name table `typecheck_mapping` builds for the real path. A
+    // bare key resolves against it, so a `Checker` built without one would
+    // reject every property in these tests as a name the shape does not
+    // declare.
+    // No `@rename` in any fixture here: every short name is the last segment of
+    // its predicate IRI.
+    let predicates = resolved_shape
+        .as_ref()
+        .map_or_else(Vec::new, |s| s.short_names(&[]).0);
+    // The scope the `from` clause really puts in the body — resolved by the
+    // production path, so `from Adults` presents `User` and not `Adults`. It is
+    // NOT derived from `source_row`: the row-name check has to fire with no
+    // schema at all, which is what `a_column_ref_naming_a_foreign_row_is_rejected`
+    // pins.
+    //
+    // When a test supplies an explicit row it stands in for the ONE binding
+    // these fixtures draw on; a fixture with a join would need its rows named,
+    // and there is none here.
+    let resolved = crate::infer::resolve_source_scope(db, mapping)
+        .ok()
+        .flatten();
+    let source_scope = match (resolved, source_row) {
+        (Some(scope), Some(_)) => scope
+            .bindings()
+            .next()
+            .map(|b| crate::infer::RowScope::one(b, source_row)),
+        (scope, _) => scope,
+    };
     Checker {
         db,
         mapping,
         source_row,
+        source_scope,
         resolved_shape,
+        predicates,
         spans: spans(db, mapping),
         entries: Vec::new(),
         next_inference: 0,
         first_error: None,
-        subject_position: false,
+        iri_position: false,
     }
+}
+
+/// The diagnostics a shim raised about the CODE under test.
+///
+/// `build_checker` resolves the real source scope now — `from Adults` has to
+/// present `User` — and that reads `lower_to_hir`, so every shim's accumulator
+/// subtree carries the FIXTURE's own complaints as well: these fixtures name
+/// `io.shex("personas.shex")` and the bare `NativeSystem` they run on installs
+/// no row that reads types, so the shape name binds nothing and `lower_to_hir`
+/// says so, once per shim. Counting those is a hostage to what the fixture
+/// declares; this filters them out by the one thing they all say.
+fn about_the_body(diags: &[&Diagnostic]) -> Vec<String> {
+    diags
+        .iter()
+        .map(|d| d.message.clone())
+        .filter(|m| !m.contains("is declared and bound nothing"))
+        .collect()
 }
 
 // ── Literal-subset regression (Phase 2 behaviour preserved) ────────────────
@@ -108,8 +167,7 @@ fn fieldref_csvw_propagates_string() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let ty = cx.lookup_field(ExprId(0), "name")?;
         Some(render_ty_kind(db, ty.kind(db)))
@@ -125,8 +183,7 @@ fn fieldref_csvw_typo_emits_did_you_mean() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let _ = cx.lookup_field(ExprId(0), "naem"); // typo for `name`
         Some(())
@@ -134,9 +191,13 @@ fn fieldref_csvw_typo_emits_did_you_mean() {
 
     let (db, file) = db_with(HELLO);
     let _ = shim(&db, file);
-    let diags = shim::accumulated::<Diagnostic>(&db, file);
-    assert_eq!(diags.len(), 1, "exactly one field-not-found diagnostic");
-    let msg = &diags[0].message;
+    let diags = about_the_body(&shim::accumulated::<Diagnostic>(&db, file));
+    assert_eq!(
+        diags.len(),
+        1,
+        "exactly one field-not-found diagnostic, got {diags:?}"
+    );
+    let msg = &diags[0];
     assert!(
         msg.contains("unknown column `naem`"),
         "diagnostic must name the unknown column, got {msg:?}"
@@ -147,13 +208,45 @@ fn fieldref_csvw_typo_emits_did_you_mean() {
     );
 }
 
-// ── Qualified column references (ADR-0057, ninth amendment) ────────────────
+// ── Qualified column references ────────────────────────────────────────────
+
+/// A relation derived from `User`, so that the two tests below can ask the
+/// question the equality could not: `User.name` is legal from `from Adults`,
+/// and `Orders.name` is not.
+const DERIVED: &str = "\
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Orders := io.csv(\"o.csv\")
+Adults := User.where(User.age >= 18)
+Users : Person from Adults
+    @subject = \"https://example.org/u/{User.id}\"
+    name = User.name
+";
+
+/// The foreign-row refusals in `diags`, by their text.
+///
+/// It was `diags.len() == 1`, and that counted every diagnostic the FIXTURE
+/// raises as well — `personas.shex` is not readable by the bare `NativeSystem`
+/// these tests use, so the shape name does not resolve and `lower_to_hir` says
+/// so. Counting the refusal under test is the assertion; counting the fixture's
+/// own noise is a hostage to whatever the fixture declares next.
+fn foreign_row_refusals(diags: &[&Diagnostic]) -> Vec<String> {
+    diags
+        .iter()
+        .map(|d| d.message.clone())
+        .filter(|m| m.contains("reads a row this mapping does not have"))
+        .collect()
+}
 
 #[test]
 fn a_column_ref_naming_a_foreign_row_is_rejected() {
-    // The check the anonymous `.name` could never make: `orders.user_id` in a
-    // mapping that reads `users` names a row this mapping does not have. It
+    // The check the anonymous `.name` could never make: `Orders.user_id` in a
+    // mapping that reads `User` names a row this mapping does not have. It
     // fires before the column is resolved, so it does not need a schema.
+    //
+    // **`Orders` is a binding this file declares**, and that is the point: the
+    // refusal is not about a name nobody bound, it is about a row this RELATION
+    // does not carry. That is the case the scope must keep rejecting.
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
@@ -161,11 +254,9 @@ fn a_column_ref_naming_a_foreign_row_is_rejected() {
         };
         let mut cx = build_checker(db, m, None, None);
         let prop = HirProperty {
-            key: PropertyKey::PrefixedName {
-                iri: smol_str::SmolStr::from("https://example.org/x"),
-            },
+            key: PropertyKey::Name(smol_str::SmolStr::from("x")),
             value: HirExpr::ColumnRef {
-                binding: smol_str::SmolStr::from("orders"),
+                binding: smol_str::SmolStr::from("Orders"),
                 column: smol_str::SmolStr::from("user_id"),
             },
         };
@@ -173,23 +264,30 @@ fn a_column_ref_naming_a_foreign_row_is_rejected() {
         cx.first_error.is_some()
     }
 
-    let (db, file) = db_with(HELLO);
+    let (db, file) = db_with(DERIVED);
     assert!(shim(&db, file), "a foreign row must record an error");
     let diags = shim::accumulated::<Diagnostic>(&db, file);
-    assert_eq!(diags.len(), 1, "exactly one foreign-row diagnostic");
-    let msg = &diags[0].message;
+    let refusals = foreign_row_refusals(&diags);
+    assert_eq!(refusals.len(), 1, "exactly one foreign-row diagnostic, got {refusals:?}");
+    let msg = &refusals[0];
     assert!(
-        msg.contains("orders.user_id") && msg.contains("users"),
-        "the diagnostic must name the row asked for AND the row mapped, got {msg:?}"
+        msg.contains("Orders.user_id") && msg.contains("Adults"),
+        "the diagnostic must name the row asked for AND the relation mapped, got {msg:?}"
     );
 }
 
 #[test]
-fn a_column_ref_naming_the_source_row_is_accepted() {
-    // `users.name` in a mapping that reads `users`. HELLO declares no CSVW
-    // schema, so it synthesises no type — exactly what `.name` does (see
-    // `fieldref_without_schema_synthesises_no_type_phase_2_compat`). What is
-    // asserted here is that qualifying it raises no error of its own.
+fn a_column_ref_naming_a_row_the_relation_derives_from_is_accepted() {
+    // **The rule `grammar.bnf` states under `SourceDef`**: *«a mapping body
+    // writes `User.name` and never `Adults.name`, even when it draws
+    // `from Adults`»*. `Users` draws `from Adults` and writes `User.name`, and
+    // this used to be refused by an equality against the `from` name — the
+    // defect that failed nine of the twenty-three conformance programs.
+    //
+    // `DERIVED` registers no descriptor, so the column synthesises no type,
+    // exactly as `fieldref_without_schema_synthesises_no_type_phase_2_compat`
+    // describes. What is asserted is that qualifying it raises no error of its
+    // own.
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
@@ -197,11 +295,9 @@ fn a_column_ref_naming_the_source_row_is_accepted() {
         };
         let mut cx = build_checker(db, m, None, None);
         let prop = HirProperty {
-            key: PropertyKey::PrefixedName {
-                iri: smol_str::SmolStr::from("https://example.org/x"),
-            },
+            key: PropertyKey::Name(smol_str::SmolStr::from("x")),
             value: HirExpr::ColumnRef {
-                binding: smol_str::SmolStr::from("users"),
+                binding: smol_str::SmolStr::from("User"),
                 column: smol_str::SmolStr::from("name"),
             },
         };
@@ -209,8 +305,39 @@ fn a_column_ref_naming_the_source_row_is_accepted() {
         cx.first_error.is_some()
     }
 
-    let (db, file) = db_with(HELLO);
-    assert!(!shim(&db, file), "the mapping's own row must not error");
+    let (db, file) = db_with(DERIVED);
+    assert!(
+        !shim(&db, file),
+        "the binding the relation derives from must not error"
+    );
+}
+
+#[test]
+fn a_column_ref_naming_the_relations_own_name_is_rejected() {
+    // The other half of the same rule, and the half that stops the fix from
+    // being «accept anything»: `Adults` is the RELATION, not a row, so
+    // `Adults.name` is refused with the same words a stranger's name gets.
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return false;
+        };
+        let mut cx = build_checker(db, m, None, None);
+        let prop = HirProperty {
+            key: PropertyKey::Name(smol_str::SmolStr::from("x")),
+            value: HirExpr::ColumnRef {
+                binding: smol_str::SmolStr::from("Adults"),
+                column: smol_str::SmolStr::from("name"),
+            },
+        };
+        cx.check_property(ExprId(0), &prop);
+        cx.first_error.is_some()
+    }
+
+    let (db, file) = db_with(DERIVED);
+    assert!(shim(&db, file), "the relation's own name is not a row");
+    let refusals = foreign_row_refusals(&shim::accumulated::<Diagnostic>(&db, file));
+    assert_eq!(refusals.len(), 1, "exactly one refusal, got {refusals:?}");
 }
 
 // ── Subtyping rules (type-system.md §9) ────────────────────────────────────
@@ -228,8 +355,7 @@ fn compatible_integer_widens_to_float() {
         compatible(
             &mut cx,
             int,
-            flt,
-            Cardinality::Exact(1),
+            Some(flt),
             ExprId(0),
             &BlamePos::Expr(ExprId(0)),
         )
@@ -253,8 +379,7 @@ fn compatible_string_to_integer_fails() {
         compatible(
             &mut cx,
             s,
-            i,
-            Cardinality::Exact(1),
+            Some(i),
             ExprId(0),
             &BlamePos::Expr(ExprId(0)),
         )
@@ -263,189 +388,175 @@ fn compatible_string_to_integer_fails() {
 
     let (db, file) = db_with(HELLO);
     assert!(shim(&db, file), "String is not a subtype of Integer");
-    let diags = shim::accumulated::<Diagnostic>(&db, file);
-    assert_eq!(diags.len(), 1);
-    let msg = &diags[0].message;
+    let diags = about_the_body(&shim::accumulated::<Diagnostic>(&db, file));
+    assert_eq!(diags.len(), 1, "got {diags:?}");
+    let msg = &diags[0];
     assert!(
         msg.contains("String") && msg.contains("Integer"),
         "got {msg:?}"
     );
 }
 
+// Three tests lived here and all three built a `TyKind::Optional`:
+// `compatible_string_lifts_into_optional` (S-Opt),
+// `compatible_optional_fails_against_cardinality_one_required` and
+// `check_property_against_a_target_shape_optional_fails` (the cardinality
+// blame). The variant is gone because nothing but a test ever constructed one —
+// so what they proved was that the checker handles a value the compiler cannot
+// produce. The count a shape declares is still enforced, in the one direction
+// that is observable: `check_required_properties`, covered by
+// `a_named_document_that_cannot_answer_says_which_way_it_failed`'s siblings and
+// by the corpus.
+
+/// The defect, at the place it bit. A document that mentions `ex:name` and does
+/// not narrow its value used to reach here as `TyKind::Iri` — the narrowest
+/// type in the lattice — via `unwrap_or_else`, so the most ordinary property in
+/// the corpus, `name = .name` against `ex:name .`, was a type error.
+///
+/// This had a second shim, `still_counts`: the same un-narrowed constraint
+/// demanding one-or-more, against an `Optional<String>`, proving the `None` did
+/// not turn the constraint off wholesale. It built the only kind of value that
+/// could fail that check, and `TyKind::Optional` is gone because a test was the
+/// only thing that ever built one.
 #[test]
-fn compatible_string_lifts_into_optional() {
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
-        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
-            return false;
-        };
-        let s = Ty::new(db, TyKind::Primitive(Primitive::String));
-        let opt_s = Ty::new(db, TyKind::Optional(s));
-        let mut cx = build_checker(db, m, None, None);
-        // S-Opt: String <: Optional<String>, cardinality ZeroOrOne.
-        compatible(
-            &mut cx,
-            s,
-            opt_s,
-            Cardinality::ZeroOrOne,
-            ExprId(0),
-            &BlamePos::Expr(ExprId(0)),
-        )
-        .is_ok()
-    }
-
-    let (db, file) = db_with(HELLO);
-    assert!(
-        shim(&db, file),
-        "String <: Optional<String> (S-Opt) must hold"
-    );
-}
-
-// ── Backward ShEx cardinality blame (SC#2) ─────────────────────────────────
-
-#[test]
-fn compatible_optional_fails_against_cardinality_one_required() {
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<(u32, u32)> {
-        let m = *def_map(db, file).mappings(db).first()?;
-        let s = Ty::new(db, TyKind::Primitive(Primitive::String));
-        let opt_s = Ty::new(db, TyKind::Optional(s));
-        let mut cx = build_checker(db, m, None, None);
-        // Optional<String> provided where the shape demands OneOrMore → Err.
-        let r = compatible(
-            &mut cx,
-            opt_s,
-            s,
-            Cardinality::OneOrMore,
-            ExprId(0),
-            &BlamePos::Expr(ExprId(0)),
-        );
-        assert!(r.is_err(), "Optional<X> vs cardinality 1+ must error");
-        // Return the source span so the test asserts it is real (non-zero).
-        let sp = cx.span_of(ExprId(0));
-        Some((sp.start, sp.end))
-    }
-
-    let (db, file) = db_with(HELLO);
-    let (start, end) = shim(&db, file).expect("Err path taken");
-    // ExprId(0) is the iri-template property whose span is real.
-    assert!(
-        end > start,
-        "source span must be real (non-zero), got {start}..{end}"
-    );
-    let diags = shim::accumulated::<Diagnostic>(&db, file);
-    assert_eq!(diags.len(), 1);
-    assert!(
-        diags[0].message.contains("cardinality 1+"),
-        "diagnostic must mention the cardinality demand, got {:?}",
-        diags[0].message
-    );
-    // Dest span embedded in the message must be non-zero too (both sides real).
-    assert!(
-        !diags[0].message.contains("start: 0, end: 0"),
-        "dest span in the blame must be real, got {:?}",
-        diags[0].message
-    );
-}
-
-#[test]
-fn check_property_against_shex_shape_optional_fails() {
-    // End-to-end: a mapping with `ex:email = .email` where the source row types
-    // `email` as Optional<String> but the ShEx shape demands cardinality 1+.
+fn an_un_narrowed_constraint_accepts_a_string() {
     const SRC: &str = "\
 prefix ex: <https://example.org/>
 users := io.csv(\"x.csv\")
 Contact : ex:Person from users
-    ex:email = .email
+    name = User.name
 ";
+    /// `value_ty: None`, `occurs` = exactly one. A `String` satisfies it.
     #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+    fn accepts(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
         };
-        // Source row: email : Optional<String>.
-        let s = Ty::new(db, TyKind::Primitive(Primitive::String));
-        let opt = Ty::new(db, TyKind::Optional(s));
-        let rec = crate::ty::Record::new(
+        let mut cx = build_checker(
             db,
-            vec![crate::ty::RecordField {
-                name: smol_str::SmolStr::from("email"),
-                ty: opt,
-            }],
+            m,
+            Some(row_record(db, &[("name", Primitive::String)])),
+            Some(ResolvedShape {
+                shape_id: ShapeId::placeholder(0),
+                constraints: vec![crate::shapes::ShapeConstraint {
+                    predicate: smol_str::SmolStr::from("https://example.org/name"),
+                    value_ty: None,
+                    occurs: Occurs::ONE,
+                }],
+                rejections: Vec::new(),
+            }),
         );
-        let row = Ty::new(db, TyKind::Record(rec));
-        // Resolved shape: predicate ex:email with String, OneOrMore.
-        let shape = ResolvedShape {
-            shape_id: ShapeId::placeholder(0),
-            constraints: vec![crate::shapes::ShapeConstraint {
-                predicate: smol_str::SmolStr::from("https://example.org/email"),
-                value_ty: Some(s),
-                cardinality: Cardinality::OneOrMore,
-            }],
-            errors: Vec::new(),
-        };
-        let mut cx = build_checker(db, m, Some(row), Some(shape));
-        let prop = HirProperty {
-            key: PropertyKey::PrefixedName {
-                iri: smol_str::SmolStr::from("https://example.org/email"),
+        cx.check_property(
+            ExprId(0),
+            &HirProperty {
+                key: PropertyKey::Name(smol_str::SmolStr::from("name")),
+                value: HirExpr::FieldRef(smol_str::SmolStr::from("name")),
             },
-            value: HirExpr::FieldRef(smol_str::SmolStr::from("email")),
-        };
-        cx.check_property(ExprId(0), &prop);
-        cx.first_error.is_some()
+        );
+        cx.first_error.is_none()
     }
 
     let (db, file) = db_with(SRC);
     assert!(
-        shim(&db, file),
-        "Optional<String> vs cardinality 1+ must error"
+        accepts(&db, file),
+        "a constraint that narrows nothing must accept a String; it demanded \
+         `Iri` until now, so every un-narrowed predicate in the corpus was a \
+         type error: {:#?}",
+        accepts::accumulated::<Diagnostic>(&db, file)
     );
-    let diags = shim::accumulated::<Diagnostic>(&db, file);
-    assert!(!diags.is_empty(), "must emit a backward-check diagnostic");
+    let noise = about_the_body(&accepts::accumulated::<Diagnostic>(&db, file));
+    assert!(noise.is_empty(), "and it must do so silently, got {noise:?}");
 }
 
-// ── ShEx OneOf rejection diagnostic (SC#4) ─────────────────────────────────
+// ── The four ways a named document fails to produce a shape ────────────────
 
-const ONE_OF_SCHEMA: &str = r#"{
-  "@context": "http://www.w3.org/ns/shex.jsonld",
-  "type": "Schema",
-  "shapes": [
-    {
-      "type": "ShapeDecl",
-      "id": "http://example.org/Person",
-      "shapeExpr": {
-        "type": "Shape",
-        "expression": {
-          "type": "OneOf",
-          "expressions": [
-            { "type": "TripleConstraint", "predicate": "http://example.org/email" },
-            { "type": "TripleConstraint", "predicate": "http://example.org/phone" }
-          ]
-        }
-      }
+/// Every one of these was a silent `None` — the same answer as "this program
+/// names no document" — so the commonest mistake, a misspelt shape name,
+/// produced no message at all. This drives the production query, so it also
+/// proves the diagnostics reach the accumulator.
+#[test]
+fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
+    use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
+
+    fn program(document: &str, shape: &str) -> String {
+        format!(
+            "prefix ex: <http://example.org/>\n\
+             type {{ T }} = io.shex(\"{document}\")\n\
+             users := io.csv(\"x.csv\")\n\
+             User : ex:{shape} from users\n    \
+             name = User.name\n"
+        )
     }
-  ]
-}"#;
+
+    // Each row: (the program, what is registered, its text, the substring the
+    // message must carry).
+    let cases: &[(String, &str, &str, &str)] = &[
+        (
+            program("person.shex", "Persn"),
+            "person.shex",
+            PERSON_DOCUMENT,
+            "declares no shape `http://example.org/Persn` — did you mean",
+        ),
+        (
+            program("missing.shex", "Person"),
+            "person.shex",
+            PERSON_DOCUMENT,
+            "`missing.shex` is not there",
+        ),
+        (
+            program("person.unknown", "Person"),
+            "person.unknown",
+            PERSON_DOCUMENT,
+            "nothing here reads `person.unknown` as a shape document",
+        ),
+        (
+            program("broken.shex", "Person"),
+            "broken.shex",
+            "!malformed expected a shape line\n",
+            "did not parse: expected a shape line",
+        ),
+    ];
+
+    for (src, path, text, expected) in cases {
+        let (db, file) = db_with_document(src, path, text);
+        let m = *def_map(&db, file)
+            .mappings(&db)
+            .first()
+            .expect("one mapping");
+        let _ = typecheck_mapping(&db, m);
+        let diags = typecheck_mapping::accumulated::<Diagnostic>(&db, m);
+        assert!(
+            diags.iter().any(|d| d.message.contains(expected)),
+            "expected a diagnostic containing {expected:?}, got {diags:#?}"
+        );
+    }
+}
+
+// ── Value-disjunction rejection diagnostic (SC#4) ──────────────────────────
+
+/// The shape whose body is a disjunction the compiler does not support. The
+/// decoder rejected it and named the branches; nothing here knows which schema
+/// language it was written in, which is the point.
+fn disjunction_rejection() -> Rejection {
+    Rejection::Disjunction {
+        shape_iri: "http://example.org/Person".to_string(),
+        disjuncts: vec![
+            vec!["http://example.org/email".to_string()],
+            vec!["http://example.org/phone".to_string()],
+        ],
+    }
+}
 
 #[test]
-fn shex_one_of_rejection_attaches_to_consuming_mapping() {
+fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor =
-            fossil_descriptors_output::ShExDescriptor::from_reader(ONE_OF_SCHEMA.as_bytes())
-                .ok()?;
-        let errors = descriptor.lowering_errors().to_vec();
-        assert!(
-            !errors.is_empty(),
-            "OneOf schema must produce a lowering error"
-        );
-        let binding = descriptor
-            .shapes()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| panic!("at least one shape"));
-        let shape = ResolvedShape::from_binding(db, &binding, ShapeId::placeholder(0), errors);
+        let shape = ResolvedShape {
+            shape_id: ShapeId::placeholder(0),
+            constraints: Vec::new(),
+            rejections: vec![disjunction_rejection()],
+        };
         let mut cx = build_checker(db, m, None, Some(shape));
         cx.surface_shape_lowering_errors();
         Some(())
@@ -461,7 +572,7 @@ fn shex_one_of_rejection_attaches_to_consuming_mapping() {
     assert_eq!(
         with_suggestion.len(),
         1,
-        "exactly one OneOf rejection diagnostic carrying a structured \
+        "exactly one disjunction diagnostic carrying a structured \
          suggestion_source, got {} diagnostics: {diags:#?}",
         with_suggestion.len()
     );
@@ -470,16 +581,72 @@ fn shex_one_of_rejection_attaches_to_consuming_mapping() {
         .suggestion_source
         .as_deref()
         .expect("suggestion_source set");
+    // HELLO is `User : ex:Person from users` — the mapping is `User`, the
+    // source binding is `users`, and telling them apart is the whole assertion.
+    // Production passed the MAPPING name as the `from` clause, so it emitted
+    // `User1 : … from User`: a `from` pointing at the mapping being split. This
+    // test could not see it — it asserted `contains("from User")`, which the
+    // wrong string satisfies and the right one (`from users`) does not, because
+    // the capital is the only difference. The corpus could not see it either:
+    // it calls `render_split_suggestion` directly and passed `"users"` by hand.
     assert!(
-        suggestion.contains("from users") || suggestion.contains(':'),
-        "split suggestion must be Fossil source, got {suggestion:?}"
+        suggestion.contains("User1 : ") && suggestion.contains("email = "),
+        "split suggestion must be Fossil source naming the branch predicates, \
+         got {suggestion:?}"
     );
-    // The message names the OneOf situation.
     assert!(
-        with_suggestion[0].message.contains("OneOf"),
-        "message must mention OneOf, got {:?}",
+        suggestion.contains("from users"),
+        "the `from` clause is the SOURCE BINDING the mapping reads, \
+         got {suggestion:?}"
+    );
+    assert!(
+        !suggestion.contains("from User\n"),
+        "a `from` naming the mapping itself is the bug this pins; \
+         got {suggestion:?}"
+    );
+    assert!(
+        with_suggestion[0].message.contains("disjunction"),
+        "message must name the situation, got {:?}",
         with_suggestion[0].message
     );
+}
+
+/// The rendering the decoder used to own. It walked a cloned `OneOf` AST node
+/// carried through the whole compiler for this one purpose; it now reads the
+/// branch predicates, which is all it ever took out of that node.
+// The `${ex:}u/${.id}` here is LITERAL Fossil source — the subject template the
+// suggestion carries through — not a Rust format string.
+#[allow(clippy::literal_string_with_formatting_args)]
+#[test]
+fn the_split_suggestion_is_one_mapping_per_branch() {
+    let rendered = crate::check::render_split_suggestion(
+        "Contact",
+        "ex:Contact",
+        "users",
+        "`${ex:}u/${.id}`",
+        &[
+            vec!["http://example.org/email".to_string()],
+            vec!["http://example.org/phone".to_string()],
+        ],
+    );
+    assert_eq!(
+        rendered,
+        "Contact1 : ex:Contact from users\n    \
+         @subject = \"https://example.org/u/{User.id}\"\n    \
+         email = .email\n\n\
+         Contact2 : ex:Contact from users\n    \
+         @subject = \"https://example.org/u/{User.id}\"\n    \
+         phone = .phone\n\n"
+    );
+}
+
+/// A branch the decoder could not name is a comment, not an empty mapping body
+/// the user has to notice is empty.
+#[test]
+fn a_branch_with_no_named_predicate_says_so() {
+    let rendered =
+        crate::check::render_split_suggestion("C", "ex:C", "users", "`t`", &[Vec::new()]);
+    assert!(rendered.contains("# TODO"), "got {rendered:?}");
 }
 
 // ── Query-level inversions + contract ──────────────────────────────────────
@@ -494,13 +661,10 @@ fn typecheck_mapping_returns_error_guaranteed_on_any_diagnostic() {
         let Some(m) = def_map(db, file).mappings(db).first().copied() else {
             return false;
         };
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).expect("csvw");
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let prop = HirProperty {
-            key: PropertyKey::PrefixedName {
-                iri: smol_str::SmolStr::from("https://example.org/x"),
-            },
+            key: PropertyKey::Name(smol_str::SmolStr::from("x")),
             value: HirExpr::FieldRef(smol_str::SmolStr::from("nonexistent")),
         };
         cx.check_property(ExprId(0), &prop);
@@ -540,7 +704,7 @@ fn typecheck_mapping_is_memoised() {
     assert_eq!(a, b);
 }
 
-// ── CORE-07: implicit closure synthesis (plan 03-06) ───────────────────────
+// ── Row fixtures ──────────────────────────────────────────────────────────
 
 /// Build a `Record` row `Ty` with the given `(name, primitive)` fields.
 fn row_record<'db>(db: &'db dyn fossil_base::Db, fields: &[(&str, Primitive)]) -> Ty<'db> {
@@ -557,315 +721,15 @@ fn row_record<'db>(db: &'db dyn fossil_base::Db, fields: &[(&str, Primitive)]) -
     Ty::new(db, TyKind::Record(rec))
 }
 
-/// `Fn(Record<R> -> τ)` expected type.
-fn fn_over_row<'db>(db: &'db dyn fossil_base::Db, row: Ty<'db>, ret: Ty<'db>) -> Ty<'db> {
-    let sig = crate::ty::FnSig::new(db, vec![row], ret);
-    Ty::new(db, TyKind::Fn(sig))
-}
-
-/// The `SynthesizedClosureRendering` rendering recorded on `expr_id`, if any.
-fn closure_rendering(cx: &Checker<'_>, expr_id: ExprId) -> Option<String> {
-    cx.entries.iter().rev().find_map(|e| {
-        if e.expr_id == expr_id
-            && let ProvenanceKind::SynthesizedClosureRendering { rendering } = &e.provenance.kind
-        {
-            return Some(rendering.to_string());
-        }
-        None
-    })
-}
-
-#[test]
-fn rewrite_field_refs_to_row_dot_edge_cases() {
-    // Bare single field ref.
-    assert_eq!(rewrite_field_refs_to_row_dot(".age"), "row.age");
-    // Binop predicate: only the `.age` gets rewritten, the literal `18` doesn't.
-    assert_eq!(rewrite_field_refs_to_row_dot(".age >= 18"), "row.age >= 18");
-    // A decimal point inside a number must NOT be rewritten (prev char is a
-    // digit → blocked).
-    assert_eq!(rewrite_field_refs_to_row_dot("3.14"), "3.14");
-    // Leading whitespace + two field refs in a comparison.
-    assert_eq!(rewrite_field_refs_to_row_dot(".x > .y"), "row.x > row.y");
-    // Field ref at expression start preceded by `(`.
-    assert_eq!(rewrite_field_refs_to_row_dot("(.id)"), "(row.id)");
-}
-
-#[test]
-fn expr_contains_free_field_refs_visits_all_arms() {
-    // FieldRef → true.
-    assert!(expr_contains_free_field_refs(&HirExpr::FieldRef(
-        smol_str::SmolStr::from("age")
-    )));
-    // Non-FieldRef leaf forms → false (no row dependency).
-    assert!(!expr_contains_free_field_refs(&HirExpr::StringLit(
-        smol_str::SmolStr::from("hi")
-    )));
-    // An interpolation of pure text has no row dependency...
-    assert!(!expr_contains_free_field_refs(&HirExpr::Interpolation(
-        vec![crate::lower::InterpolationPart::Text(
-            smol_str::SmolStr::from("x")
-        )]
-    )));
-    // ...and one whose hole reads a column does. This is the case the old
-    // `Template(SmolStr)` could not express: the `${.id}` was text, so this
-    // walker answered `false` for every subject IRI in the corpus.
-    assert!(expr_contains_free_field_refs(&HirExpr::Interpolation(
-        vec![crate::lower::InterpolationPart::Hole(HirExpr::FieldRef(
-            smol_str::SmolStr::from("id")
-        ))]
-    )));
-    assert!(!expr_contains_free_field_refs(&HirExpr::PrefixedName {
-        iri: smol_str::SmolStr::from("https://example.org/Foo"),
-    }));
-}
-
-#[test]
-fn closure_synth_on_simple_field_ref() {
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
-        let m = *def_map(db, file).mappings(db).first()?;
-        let row = row_record(db, &[("id", Primitive::String)]);
-        let str_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
-        let expected = fn_over_row(db, row, str_ty);
-        let mut cx = build_checker(db, m, Some(row), None);
-        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("id"));
-        let result = cx.check(
-            ExprId(0),
-            &arg,
-            expected,
-            Cardinality::Exact(1),
-            &BlamePos::Expr(ExprId(0)),
-        );
-        assert!(result.is_ok(), "closure synth over `.id` must check OK");
-        closure_rendering(&cx, ExprId(0))
-    }
-
-    let (db, file) = db_with(HELLO);
-    let rendering = shim(&db, file).expect("closure rendering must be recorded");
-    assert_eq!(rendering, "(row: Record<{id: String}>) => row.id");
-}
-
-#[test]
-fn closure_synth_on_binop_predicate() {
-    // SC#3-shape: the canonical `users |> filter(.age >= 18)` predicate body.
-    // Phase 3 v0.1 has no surface binop HIR node, so we drive synthesis with a
-    // FieldRef arg and assert the rendering for the FieldRef form; the binop
-    // text form is exercised via render_closure directly below.
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
-        let m = *def_map(db, file).mappings(db).first()?;
-        let row = row_record(db, &[("age", Primitive::Integer)]);
-        let int_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
-        // The closure body `.age` resolves to Integer; expected predicate
-        // result Integer. (Bool comparison ops are a later phase; the row
-        // context resolution + rendering is what CORE-07 validates here.)
-        let expected = fn_over_row(db, row, int_ty);
-        let mut cx = build_checker(db, m, Some(row), None);
-        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("age"));
-        let _ = cx.check(
-            ExprId(0),
-            &arg,
-            expected,
-            Cardinality::Exact(1),
-            &BlamePos::Expr(ExprId(0)),
-        );
-        closure_rendering(&cx, ExprId(0))
-    }
-
-    let (db, file) = db_with(HELLO);
-    let rendering = shim(&db, file).expect("closure rendering recorded");
-    assert_eq!(rendering, "(row: Record<{age: Integer}>) => row.age");
-
-    // The SC#3 acceptance shape — `(row: Record<{age: Integer}>) => row.age >= 18`
-    // — via render_closure directly (the binop text form), proving the renderer
-    // produces the documented SC#3 string once a binop HIR node exists.
-    let (db2, _f2) = db_with(HELLO);
-    let row = row_record(&db2, &[("age", Primitive::Integer)]);
-    let sc3 = render_closure(&db2, row, ".age >= 18");
-    assert_eq!(
-        sc3.as_str(),
-        "(row: Record<{age: Integer}>) => row.age >= 18"
-    );
-}
-
-#[test]
-fn closure_synth_multi_field_record_rendering() {
-    // A multi-field row renders every field name + type in declaration order.
-    let (db, _file) = db_with(HELLO);
-    let row = row_record(
-        &db,
-        &[
-            ("id", Primitive::String),
-            ("name", Primitive::String),
-            ("age", Primitive::Integer),
-        ],
-    );
-    let rendering = render_closure(&db, row, ".age");
-    assert_eq!(
-        rendering.as_str(),
-        "(row: Record<{id: String, name: String, age: Integer}>) => row.age"
-    );
-}
-
-#[test]
-fn no_closure_synth_when_no_free_field_refs() {
-    // A function-arg position expecting Fn(Record<{}> -> Iri) whose arg is a
-    // PrefixedName (no FieldRef) must NOT synthesise a closure — it falls
-    // through to the standard synth + compatible path, so no
-    // SynthesizedClosureRendering entry is recorded.
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<bool> {
-        let m = *def_map(db, file).mappings(db).first()?;
-        let row = row_record(db, &[]);
-        let iri_ty = Ty::new(db, TyKind::Iri);
-        let expected = fn_over_row(db, row, iri_ty);
-        let mut cx = build_checker(db, m, Some(row), None);
-        let arg = HirExpr::PrefixedName {
-            iri: smol_str::SmolStr::from("https://example.org/Foo"),
-        };
-        let _ = cx.check(
-            ExprId(0),
-            &arg,
-            expected,
-            Cardinality::Exact(1),
-            &BlamePos::Expr(ExprId(0)),
-        );
-        Some(closure_rendering(&cx, ExprId(0)).is_some())
-    }
-
-    let (db, file) = db_with(HELLO);
-    let synthesised = shim(&db, file).expect("shim ran");
-    assert!(
-        !synthesised,
-        "no FieldRef → no implicit closure synthesis (standard check path)"
-    );
-}
-
-#[test]
-fn closure_synth_with_missing_field_emits_did_you_mean() {
-    // A `.naem` typo inside the closure body emits the did-you-mean diagnostic
-    // (against the row's ACTUAL fields), AND the closure rendering is still
-    // produced (synthesis does not abort on a body error).
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
-        let m = *def_map(db, file).mappings(db).first()?;
-        let row = row_record(db, &[("name", Primitive::String)]);
-        let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
-        let expected = fn_over_row(db, row, bool_ty);
-        let mut cx = build_checker(db, m, Some(row), None);
-        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("naem")); // typo
-        let _ = cx.check(
-            ExprId(0),
-            &arg,
-            expected,
-            Cardinality::Exact(1),
-            &BlamePos::Expr(ExprId(0)),
-        );
-        closure_rendering(&cx, ExprId(0))
-    }
-
-    let (db, file) = db_with(HELLO);
-    let rendering = shim(&db, file).expect("rendering still produced on body error");
-    // Rendering uses the row's real field (`name`), not the typo'd `.naem`.
-    assert_eq!(rendering, "(row: Record<{name: String}>) => row.naem");
-    let diags = shim::accumulated::<Diagnostic>(&db, file);
-    let msg = diags
-        .iter()
-        .map(|d| d.message.as_str())
-        .find(|m| m.contains("naem"))
-        .expect("did-you-mean diagnostic for the typo");
-    assert!(
-        msg.contains("unknown column `naem`") && msg.contains("did you mean `name`"),
-        "missing-field inside closure must still fire did-you-mean, got {msg:?}"
-    );
-}
-
-#[test]
-fn closure_synth_rendering_never_contains_unknown_or_inferenceid() {
-    // Risk Register: the closure renderer must never leak the internal
-    // TyKind::Unknown(InferenceId) placeholder. Build a row whose field is
-    // explicitly Unknown(InferenceId) and assert it renders as `?`, not the
-    // Debug form.
-    let (db, _file) = db_with(HELLO);
-    let unknown = Ty::new(&db, TyKind::Unknown(crate::ty::InferenceId(7)));
-    let rec = crate::ty::Record::new(
-        &db,
-        vec![crate::ty::RecordField {
-            name: smol_str::SmolStr::from("mystery"),
-            ty: unknown,
-        }],
-    );
-    let row = Ty::new(&db, TyKind::Record(rec));
-    let rendering = render_closure(&db, row, ".mystery");
-    assert!(
-        !rendering.contains("Unknown"),
-        "rendering must NOT leak `Unknown`, got {rendering:?}"
-    );
-    assert!(
-        !rendering.contains("InferenceId"),
-        "rendering must NOT leak `InferenceId`, got {rendering:?}"
-    );
-    assert_eq!(
-        rendering.as_str(),
-        "(row: Record<{mystery: ?}>) => row.mystery",
-        "internal inference state normalises to `?` at the display boundary"
-    );
-}
-
-#[test]
-fn closure_synth_type_mismatch_emits_diagnostic() {
-    // A closure body whose type does not satisfy the predicate result type
-    // emits a standard mismatch diagnostic (synthesis does not swallow errors).
-    // `.id : String` checked against expected predicate result `Integer` →
-    // String ≮: Integer.
-    #[salsa::tracked]
-    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<bool> {
-        let m = *def_map(db, file).mappings(db).first()?;
-        let row = row_record(db, &[("id", Primitive::String)]);
-        let int_ty = Ty::new(db, TyKind::Primitive(Primitive::Integer));
-        let expected = fn_over_row(db, row, int_ty);
-        let mut cx = build_checker(db, m, Some(row), None);
-        let arg = HirExpr::FieldRef(smol_str::SmolStr::from("id")); // String
-        let _ = cx.check(
-            ExprId(0),
-            &arg,
-            expected,
-            Cardinality::Exact(1),
-            &BlamePos::Expr(ExprId(0)),
-        );
-        Some(cx.first_error.is_some())
-    }
-
-    let (db, file) = db_with(HELLO);
-    let errored = shim(&db, file).expect("shim ran");
-    assert!(errored, "String body vs Integer predicate must error");
-    let diags = shim::accumulated::<Diagnostic>(&db, file);
-    let msg = diags
-        .iter()
-        .map(|d| d.message.as_str())
-        .find(|m| m.contains("String") && m.contains("Integer"))
-        .expect("type mismatch diagnostic inside closure body");
-    assert!(
-        msg.contains("expected `Integer`") && msg.contains("got `String`"),
-        "closure body type mismatch must surface, got {msg:?}"
-    );
-}
-
-#[test]
-fn pipeline_typechecks_in_phase_3_v0_1() {
-    // Phase 3 v0.1's HirExpr is the Phase 2 leaf surface (Template / FieldRef /
-    // StringLit / PrefixedName) — there is NO Pipeline/Call form to lower yet,
-    // so `users |> seq.filter(...)` cannot be expressed. This test documents
-    // that a plain mapping with no closure-triggering form type-checks; the
-    // seq.filter stub decision (NOT added — see 03-05-SUMMARY.md) is recorded
-    // for plan 03-07's SC#3 LSP smoke test strategy.
-    let (db, file) = db_with(HELLO);
-    let m = first_mapping(&db, file);
-    assert!(
-        typecheck_mapping(&db, m).is_ok(),
-        "hello (no closure form) type-checks ok"
-    );
-}
+// The implicit-closure block lived here: `fn_over_row`, `closure_rendering`,
+// `rewrite_field_refs_to_row_dot_edge_cases`,
+// `expr_contains_free_field_refs_visits_all_arms`, and the six
+// `closure_synth_*` tests. They were the ONLY callers of `Checker::check` and
+// of `synthesize_closure`, which is what made both unreachable from
+// `typecheck_mapping` — a whole algorithm proved by nothing but its own tests.
+// `pipeline_typechecks_in_phase_3_v0_1` went with them: it asserted that
+// `HELLO` type-checks, which `fieldref_without_schema_synthesises_no_type_phase_2_compat`
+// already asserts, and its entire docblock was about the closure form.
 
 // ── F2 §1/§2: calls and comparisons against the catalog and the row ────────
 
@@ -876,8 +740,7 @@ fn comparing_a_string_column_with_an_integer_is_an_error() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::BinOp {
             op: crate::lower::CmpOp::Ge,
@@ -908,8 +771,7 @@ fn comparing_an_integer_column_with_an_integer_is_bool() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::BinOp {
             op: crate::lower::CmpOp::Ge,
@@ -931,18 +793,17 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<(String, String)> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
-        // `clean.trim(String) -> String` applied to the String column: ok.
+        // `str.trim(String) -> String` applied to the String column: ok.
         let ok = crate::lower::HirExpr::Call {
-            func: "clean.trim".into(),
+            func: "str.trim".into(),
             args: vec![crate::lower::HirExpr::FieldRef("name".into())],
         };
         let ok_ty = cx.synth(ExprId(0), &ok)?;
         // The same function applied to the Integer column: refused.
         let bad = crate::lower::HirExpr::Call {
-            func: "clean.trim".into(),
+            func: "str.trim".into(),
             args: vec![crate::lower::HirExpr::FieldRef("age".into())],
         };
         let bad_ty = cx.synth(ExprId(0), &bad)?;
@@ -963,7 +824,7 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("argument 1 of `clean.trim`")),
+            .any(|d| d.message.contains("argument 1 of `str.trim`")),
         "the diagnostic must name the argument and the function, got: {:?}",
         diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
     );
@@ -976,8 +837,7 @@ fn a_conditional_with_mismatched_branches_is_an_error() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::Ternary {
             cond: Box::new(crate::lower::HirExpr::BinOp {
@@ -1013,8 +873,7 @@ fn a_conditional_whose_condition_is_not_bool_is_an_error() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
-        let descriptor = CsvwDescriptor::parse(USERS_CSVW.as_bytes()).ok()?;
-        let row = record_from_descriptor(db, &descriptor, "users");
+        let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::Ternary {
             cond: Box::new(crate::lower::HirExpr::FieldRef("name".into())),

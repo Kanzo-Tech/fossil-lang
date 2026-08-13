@@ -7,21 +7,36 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Output descriptors (ShEx via rudof, future SHACL) for backward shape checking"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# The ShEx decode (parse + resolved constraint table) was extracted to the
-# neutral `fossil-shex` crate so the INPUT descriptor can derive source column
-# types from the same table (compile-time, always). This crate re-exports those
-# types for its existing public API; the rudof crates are now transitive via
-# fossil-shex. shex_validation stays out — AST-only here (per rudof-wasm.md).
+# The ShEx decode (parse + resolved constraint table) lives in the neutral
+# `fossil-shex` crate so the INPUT descriptor can derive source column types
+# from the same table (compile-time, always). The rudof crates are transitive
+# via fossil-shex; shex_validation stays out — AST-only here (per
+# rudof-wasm.md). This crate no longer re-exports any of it: a consumer that
+# wants `ShExDescriptor` names `fossil_shex::` itself.
 #
 # Note: do NOT add a `fossil-hir` path dep here. `ShapeId` mapping lives in
 # fossil-hir's `shapes.rs` (plan 03-05); the kind enum here carries only the
 # `fossil-shex` resolved-table types.
 fossil-shex = { path = "../fossil-shex" }
-# The canonical, format-neutral output model the executor consumes. ShEx lowers
-# into it (`ShExDescriptor::to_graph_schema`); SHACL produces it pre-lowered.
+# `Provider` — the registry row this crate exists to supply. No cycle:
+# fossil-base depends on fossil-descriptors-INPUT and fossil-graph-schema, and
+# on nothing output-side. `cargo tree -p fossil-base -i` shows no path back.
+fossil-base = { path = "../fossil-base" }
+# The canonical, format-neutral output model the executor consumes, and the
+# neutral shape vocabulary the decoder produces.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# The SHACL row's machinery. A shapes graph IS RDF, so it is walked with the
+# same pure-Rust (WASM-clean) Turtle reader the `io.rdf` provider uses, rather
+# than the `shacl_ast`/`srdf` stack — which is generic over an RDF backend,
+# heavy, and WASM-awkward. This is the walk that used to live in `fossil-df`
+# and produce a `GraphSchema`; it lives beside the other decoder row now, and
+# produces the neutral vocabulary the checker reads.
+oxttl = { workspace = true }
+oxrdf = { workspace = true }

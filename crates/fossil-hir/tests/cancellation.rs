@@ -9,7 +9,7 @@
 //! arriving mid-analysis must interrupt the in-flight work so the LSP never
 //! ships a stale result. The success-criterion text named a `db.cancel_pending()`
 //! method — that method does NOT exist in Salsa 0.26.2. The real cancellation
-//! surface (verified against the vendored `salsa-0.26.2` source, see ADR-0022)
+//! surface (verified against the vendored `salsa-0.26.2` source)
 //! is revision-based and cooperative:
 //!
 //!   * `Database::cancellation_token() -> CancellationToken` + `token.cancel()`
@@ -22,9 +22,9 @@
 //!     — the PRODUCTION trigger: each LSP `didChange` bumps the revision, which
 //!     sets the same cancellation flag for other handles. Mechanism is identical
 //!     to `token.cancel()` from the in-flight query's point of view: the next
-//!     cooperative checkpoint observes the flag and unwinds. See ADR-0022 for
-//!     why the unit-level proof uses `token.cancel()` (non-blocking) while the
-//!     LSP loop uses `set_text` (the revision bump that carries the new text).
+//!     cooperative checkpoint observes the flag and unwinds. The unit-level
+//!     proof uses `token.cancel()` because it cannot block; the LSP loop uses
+//!     `set_text`, the revision bump that also carries the new text.
 //!   * `Database::unwind_if_revision_cancelled(&self)` — the cooperative
 //!     checkpoint a long query calls to bail early; it throws `Cancelled` (a
 //!     panic-based unwind). Salsa ALSO inserts these checkpoints automatically
@@ -185,7 +185,7 @@ fn cancellation_mid_flight_unwinds_in_flight_query_via_cancelled() {
     // (before moving it into the thread) and share the `Arc<AtomicU8>` token
     // with the main thread. (The production `set_text`/`synthetic_write` path
     // instead sets the SHARED runtime cancellation flag, which
-    // `unwind_if_revision_cancelled` also checks — ADR-0022.)
+    // `unwind_if_revision_cancelled` also checks.)
     let main_db = db; // the main handle; kept live for the worker's lifetime
     let worker_db = main_db.clone();
     let token = worker_db.cancellation_token();
@@ -204,7 +204,7 @@ fn cancellation_mid_flight_unwinds_in_flight_query_via_cancelled() {
 
     // THE REAL CANCELLATION TRIGGER (non-blocking). In production the LSP loop
     // instead calls `file.set_text(&mut db).to(new)` on `didChange`, which
-    // bumps the revision and sets this SAME flag (ADR-0022); the mechanism the
+    // bumps the revision and sets this SAME flag; the mechanism the
     // in-flight query observes is identical.
     token.cancel();
 

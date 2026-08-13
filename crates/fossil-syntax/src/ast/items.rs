@@ -42,14 +42,27 @@ macro_rules! ast_node {
 // it would take to bring it back.
 
 ast_node!(ShapeExpr, SHAPE_EXPR);
-ast_node!(IriExpr, IRI_EXPR);
+
+// `IriExpr` was a view here, over the `IRI_EXPR` node that wrapped the CURIE,
+// the `<…>` absolute IRI and the backtick template. All three spellings went —
+// a constant IRI is a STRING now — and so did the node.
 
 impl ShapeExpr {
-    /// The shape's IRI expression. There is exactly one: the `&` intersection
-    /// went when the lowering was found to keep the first element and drop the
-    /// rest without a diagnostic.
+    /// The shape's NAME — `Person` in `Users : Person from Adults`.
+    ///
+    /// `ShapeExpr := IDENT` (grammar.bnf, ShapeExpr): one of the names a
+    /// `type { … } := io.shex(…)` binding introduced. There is exactly one, and
+    /// there was exactly one before: the `&` intersection went when the
+    /// lowering was found to keep the first element and drop the rest without a
+    /// diagnostic. What changed is that the one is a bare name rather than an
+    /// `IRI_EXPR` that could be a CURIE, an absolute IRI or a template — so
+    /// this accessor returns the name, and there is no second node to unwrap.
     #[must_use]
-    pub fn primary_iri(&self) -> Option<IriExpr> {
-        self.0.children().find_map(IriExpr::cast)
+    pub fn name(&self) -> Option<smol_str::SmolStr> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .find(|t| t.kind() == SyntaxKind::IDENT)
+            .map(|t| smol_str::SmolStr::from(t.text()))
     }
 }

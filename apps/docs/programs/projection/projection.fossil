@@ -1,0 +1,12 @@
+type { Person } := io.shex("projection.shex")
+
+Employee := io.csv("data/employees.csv")
+
+// #region chain
+Active  := Employee.where(Employee.left_on == "")
+Minimal := Active.select(Employee.id, Employee.name)
+// #endregion chain
+
+Staff : Person from Minimal
+    @subject = "https://shop.example/staff/{Employee.id}"
+    name     = Employee.name

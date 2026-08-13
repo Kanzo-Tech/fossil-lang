@@ -1,10 +1,42 @@
-//! The row algebra of a source pipeline (ADR-0054 §4): what `where`, `select`
+//! The row algebra of a source pipeline: what `where`, `select`
 //! and `join` do to the type of a row.
 //!
 //! Only this crate can test it, because it needs a real descriptor behind the
 //! base binding — a pipeline over a source that declares no columns has no row
 //! to transform, and the interesting refusals (a name that would appear twice, a
 //! key typed two ways) are exactly the ones an untyped source cannot raise.
+//!
+//! # EVERY FIXTURE BELOW IS WRITTEN IN A SPELLING THE LANGUAGE NO LONGER HAS
+//!
+//! The SUBJECT is alive — `where`, `select` and `join` are still the verbs, and
+//! what they do to a row is still the thing worth pinning. Four spellings under
+//! it are dead, and each one appears in every fixture:
+//!
+//!   - `a |> f()` — the pipeline. The member call is the spelling: `a.f()`.
+//!   - `.id`, `.total`, `.persona_id` — the leading-dot reference to a column of
+//!     an anonymous current row. The row has a name; every reference is
+//!     qualified, `pedidos.id`.
+//!   - `prefix ex: <https://example.org/>` and the CURIE `ex:Person` — a shape
+//!     is one of the names a `type { … } := io.shex(…)` binding introduced.
+//!   - a mapping body with no `@subject`. The identity is a required assignment
+//!     on the body's first line, and naming a shape document is mandatory, so
+//!     these programs cannot reach the checker at all now.
+//!
+//! **The rewrite is not mechanical, and this is what blocks it.** Three of the
+//! four tests carry over by substitution. The fourth —
+//! `the_three_verbs_compose_and_the_join_key_appears_once` — asserts that the
+//! joined row holds `persona_id` ONCE, and that assertion came from a join
+//! condition, `on = .persona_id`, that named the key once because it was
+//! `USING (k)`. The spelling the grammar carries now is an equality naming both
+//! sides — `Purchase.join(User, on = Purchase.user_id == User.id)` — and with
+//! both sides named, whether the result keeps one `persona_id` or two is not
+//! decided anywhere. It is open question 4 of `grammar.bnf, § OPEN`: what a
+//! projection over a joined relation may name, and whether `select` may follow
+//! a join at all.
+//!
+//! So this file needs a ruling before it needs an edit. Rewriting it to the
+//! final spelling would mean choosing that answer here, in a test fixture, which
+//! is the way a test stops recording a decision and starts making one.
 
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
@@ -69,7 +101,7 @@ fn program(pipe: &str) -> String {
          personas := io.csv(\"p.csv\")\n\
          {pipe}\n\
          Venta : ex:Person from ventas\n    \
-         ex:name = .id\n"
+         name = .id\n"
     )
 }
 
@@ -119,7 +151,7 @@ fn the_three_verbs_compose_and_the_join_key_appears_once() {
 
 /// A name that would appear twice is refused, and the message says which.
 ///
-/// This is the half of ADR-0054 §4 that is easy to get wrong in the other
+/// This is the half of the row algebra that is easy to get wrong in the other
 /// direction: shadowing one side silently would give the mapping a column whose
 /// meaning depends on which file the reader happens to know.
 #[test]
@@ -152,7 +184,7 @@ fn a_join_that_would_duplicate_a_column_is_an_error() {
 }
 
 /// The key must be the same type on both sides — no implicit coercion, the same
-/// rule the ternary's branches follow (ADR-0050 §1, ADR-0054 §5).
+/// rule the ternary's branches follow.
 #[test]
 fn a_join_key_typed_two_ways_is_an_error() {
     let (db, file) = db_with(

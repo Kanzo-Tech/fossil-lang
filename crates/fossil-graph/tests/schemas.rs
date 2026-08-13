@@ -1,7 +1,8 @@
 //! Snapshot the JSON Schemas for every verb's params + result.
 //!
-//! Per ADR-0039: these snapshots ARE the wire contract every transport
-//! binding consumes. A hand-edit to a `Params`/`Result` struct that the
+//! These snapshots ARE the wire contract every transport binding consumes —
+//! the surface is published once here and no binding carries a second copy of
+//! it. A hand-edit to a `Params`/`Result` struct that the
 //! author didn't intend to publish surfaces as a snapshot diff and fails CI
 //! until reviewed (`cargo insta review` to accept).
 //!

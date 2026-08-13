@@ -1,0 +1,17 @@
+× two predicates of Person are both called `name`
+   ╭─[program.fossil:1:18]
+ 1 │ type { Person } := io.shex("shape.shex")
+   ·                   ──────────┬──────────
+   ·                             ╰── Person is bound here
+   ╰────
+   ╭─[shape.shex:6:3]
+ 6 │   shop:name xsd:string ;
+   ·   ────┬────
+   ·       ╰── https://shop.example/voc#name
+ 7 │   foaf:name xsd:string
+   ·   ────┬────
+   ·       ╰── http://xmlns.com/foaf/0.1/name
+   ╰────
+  help: a short name is the last segment of the predicate IRI, and fossil never
+        picks between two. Give one of them another name above the binding:
+        @rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)

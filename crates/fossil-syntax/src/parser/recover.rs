@@ -35,15 +35,25 @@ use super::diag::ParseDiagnostic;
 /// `IDENT` is deliberately included even though it is ambiguous at
 /// lookahead-0 — `parse_program` re-disambiguates IDENT into `SourceDef` /
 /// `Mapping` / fallthrough-error on the next iteration.
-pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[SyntaxKind::KW_PREFIX, SyntaxKind::IDENT];
+///
+/// It is now a one-element set. `KW_PREFIX` was the other, and with the
+/// vocabulary declaration gone every top-level item
+/// starts with an `IDENT` or a `{` — and the `{` is `MULTI_SOURCE_DEF`, which
+/// the outer loop dispatches without needing an anchor.
+pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[SyntaxKind::IDENT];
 
 /// Token kinds that end a property inside a `MAPPING_BODY`: either the
 /// `NEWLINE` separator or the `DEDENT` closing the body block. Note
 /// `peek_kind` skips `NEWLINE` as trivia, so for property-level recovery the
 /// practical anchor is `DEDENT` plus whatever starts the next property
-/// (`IDENT` / `KW_IRI`).
+/// (an `IDENT`, or the `AT_ATTR` of the identity).
+///
+/// `ABS_IRI` was a fourth: the absolute-IRI property key was dispatched to
+/// `parse_property_lhs` so the key could be CONSUMED and named. `<…>` is not a
+/// token any more; the refusal moved to a `LT` arm, which
+/// needs no anchor because it consumes the whole form.
 pub(crate) const MAPPING_BODY_ANCHORS: &[SyntaxKind] =
-    &[SyntaxKind::DEDENT, SyntaxKind::IDENT, SyntaxKind::KW_IRI];
+    &[SyntaxKind::DEDENT, SyntaxKind::IDENT, SyntaxKind::AT_ATTR];
 
 // There was a `CLOSE_BRACKET_ANCHORS` here — `RBRACE` / `RPAREN` / `DEDENT`,
 // for recovering inside a `{ … }` annotation block. The annotation block was
@@ -157,22 +167,22 @@ mod tests {
 
     #[test]
     fn recover_to_stops_at_anchor() {
-        // `garbage prefix ex: <x>` — anchor on KW_PREFIX. After recovery the
-        // current token MUST be `prefix`.
-        let mut p = parser("garbage prefix ex: <x>");
+        // `* * users := …` — anchor on IDENT. After recovery the current token
+        // MUST be `users`.
+        let mut p = parser("* * users := io.csv(\"u.csv\")");
         // Open a synthetic PROGRAM node so the green-tree builder is in a
         // valid `start_node` context for the ERROR node `recover_to` emits.
         p.start(SyntaxKind::PROGRAM);
-        recover_to(&mut p, &[SyntaxKind::KW_PREFIX]);
-        assert_eq!(p.current(), Some(SyntaxKind::KW_PREFIX));
+        recover_to(&mut p, TOP_LEVEL_ANCHORS);
+        assert_eq!(p.current(), Some(SyntaxKind::IDENT));
         p.finish();
     }
 
     #[test]
     fn recover_to_emits_one_diagnostic_per_call() {
-        let mut p = parser("garbage prefix ex: <x>");
+        let mut p = parser("* * users := io.csv(\"u.csv\")");
         p.start(SyntaxKind::PROGRAM);
-        recover_to(&mut p, &[SyntaxKind::KW_PREFIX]);
+        recover_to(&mut p, TOP_LEVEL_ANCHORS);
         assert_eq!(
             p.diagnostics.len(),
             1,
@@ -187,15 +197,15 @@ mod tests {
 
     #[test]
     fn recover_to_noop_when_already_at_anchor() {
-        let mut p = parser("prefix ex: <x>");
+        let mut p = parser("users := io.csv(\"u.csv\")");
         p.start(SyntaxKind::PROGRAM);
-        recover_to(&mut p, &[SyntaxKind::KW_PREFIX]);
+        recover_to(&mut p, TOP_LEVEL_ANCHORS);
         assert_eq!(
             p.diagnostics.len(),
             0,
             "no diagnostic when already at anchor"
         );
-        assert_eq!(p.current(), Some(SyntaxKind::KW_PREFIX));
+        assert_eq!(p.current(), Some(SyntaxKind::IDENT));
         p.finish();
     }
 

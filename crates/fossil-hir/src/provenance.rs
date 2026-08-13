@@ -39,12 +39,12 @@
 //! and avoids threading `'db` through [`crate::body::HirBody`] →
 //! [`ExprTypes`] → [`Provenance`].
 //!
-//! # Phase 3 plan 03-04: real spans land (ADR-0008)
+//! # Phase 3 plan 03-04: real spans land
 //!
 //! Phase 2 shipped zero-width `Span { start: 0, end: 0 }` placeholders for
 //! every literal-subset entry — the blame STRUCTURE was in place but the
 //! byte ranges weren't useful for diagnostics. Phase 3 plan 03-04 lands
-//! the [`crate::spans::Spans`] side table (ADR-0008) and this module now
+//! the [`crate::spans::Spans`] side table and this module now
 //! populates [`Provenance::span`] from real `rowan::TextRange`s read via
 //! [`crate::spans::spans`]. The Phase 2 limitation comment that previously
 //! lived here is discharged.
@@ -88,7 +88,7 @@ pub enum ProvenanceKind {
         source_name: SmolStr,
         column: SmolStr,
     },
-    /// Type came from an output shape descriptor (e.g. a `ShEx` property
+    /// Type came from the output shape document (e.g. a property
     /// shape).
     OutputDescriptor {
         shape_iri: SmolStr,
@@ -215,14 +215,36 @@ fn infer_literal_type_kind<'db>(
             Ty::new(db, TyKind::Primitive(Primitive::Integer)),
             ProvenanceKind::Literal,
         )),
+        HirExpr::FloatLit(_) => Some((
+            Ty::new(db, TyKind::Primitive(Primitive::Float)),
+            ProvenanceKind::Literal,
+        )),
+        HirExpr::BoolLit(_) => Some((
+            Ty::new(db, TyKind::Primitive(Primitive::Bool)),
+            ProvenanceKind::Literal,
+        )),
         // A field reference needs the source row; a call needs the catalog; an
         // operator needs both sides typed; an interpolation needs the position
-        // it sits in. None is a literal, and this helper only knows literals.
+        // it sits in; an edge needs the target type's identity template. None
+        // is a literal, and this helper only knows literals.
+        //
+        // `Edge` is the one that reads closest to belonging here — it always
+        // synthesises `Iri`, exactly as `PrefixedName` above does — and it does
+        // not: a `PrefixedName` IS its IRI, while `Person(User.email)` is a
+        // template applied to a column, so its type is `Iri` only if the
+        // constructor is well-formed. Answering `Iri` here without the check
+        // would be this helper claiming a literal it cannot verify.
+        //
+        // `UnaryOp` joins them for the same reason `BinOp` is here: `-x` is its
+        // operand's type and `not x` needs that operand to BE Bool, so neither
+        // is answerable without typing what is underneath.
         HirExpr::Interpolation(_)
         | HirExpr::FieldRef(_)
         | HirExpr::ColumnRef { .. }
         | HirExpr::Call { .. }
+        | HirExpr::Edge { .. }
         | HirExpr::BinOp { .. }
+        | HirExpr::UnaryOp { .. }
         | HirExpr::Ternary { .. } => None,
     }
 }
@@ -271,11 +293,11 @@ mod tests {
     use std::sync::Arc;
 
     const HELLO: &str = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Users : Person from User
+    @subject = \"https://example.org/u/{User.id}\"
+    name = User.name
 ";
 
     fn db_with_text(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
@@ -299,7 +321,7 @@ User : ex:Person from users
         assert_eq!(entry.expr_id, ExprId(0));
     }
 
-    /// Property 1 of `hello.fossil` is `ex:name = .name` — the RHS is a
+    /// Property 1 of `hello.fossil` is `name = .name` — the RHS is a
     /// `FieldRef`. Phase 2 returns `None` (deferred to Phase 3 — needs
     /// source-row type).
     #[test]

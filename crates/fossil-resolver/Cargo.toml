@@ -7,6 +7,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Host-injected cloud path resolution — PathResolver trait + ResolvedPath. NATIVE-only: cloud auth carries credentials (secrecy::SecretString) and DuckDB SET configuration; not WASM-buildable."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true

@@ -1,0 +1,16 @@
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# The output contract of `examples/hello.fossil`, and therefore of the
+# walking-skeleton invariant. `ex:Person` declares exactly one predicate, so the
+# body writes exactly one property and its bare key is `name` — the last segment
+# of `https://example.org/name`. Cardinality is 1..1: the mapping must write it,
+# and `check_required_properties` says so if it stops.
+#
+# Verified against the built binary: `fossil check examples/hello.fossil` exits 0
+# and `fossil run` writes 5 `Person` vertices with a `name` column of `string`,
+# `rdf_uri = https://example.org/name`, `xsd_datatype = xsd:string`.
+
+ex:Person {
+  ex:name xsd:string
+}

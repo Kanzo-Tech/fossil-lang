@@ -2,7 +2,7 @@
 //!
 //! Writing a ten-million-vertex corpus peaks at **17.0 GiB** for 713 MB of output
 //! (`kanzo-ui/BENCHMARKS.md`, 2026-08-04), and four hypotheses about where that memory went were
-//! false — each eliminated by measurement rather than argument (ADR-0043). This is the instrument
+//! false — each eliminated by measurement rather than argument. This is the instrument
 //! that eliminated them, and it lives here because both halves of the write path need it: the
 //! `DataFusion` executor and Parquet sink in `fossil-df`, and the `DuckDB` layout pass in
 //! `fossil-runtime`. Neither may depend on the other, and this crate is the substrate under both.

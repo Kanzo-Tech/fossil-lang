@@ -3,36 +3,38 @@
 //! other (design §B4). Regression guard for the multi-mapping same-type path.
 
 #![cfg(not(target_arch = "wasm32"))]
-
-use std::sync::Arc;
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray};
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+
+mod support;
+
+const PERSON_SHEX: &str = include_str!("fixtures/person-name.shex");
 
 // `users` = person/1,2,3 (Alice,Bob,Carol); `extra` = person/3,4,5 (Carol,Dave,
 // Eve). person/3 overlaps → single-valued dedup collapses it. Expect ONE Person
 // table with 5 distinct subjects.
 const PROGRAM: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"person.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 extra := io.csv(\"tests/fixtures/people_extra.csv\")
 
 Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+    @subject = `${ex:}person/${.id}`
+    name = .name
 
 Person : ex:Person from extra
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+    @subject = `${ex:}person/${.id}`
+    name = .name
 ";
 
 #[tokio::test]
 async fn same_type_from_two_sources_merges_into_one_table() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, PROGRAM.to_string(), "merge.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(PROGRAM, "merge.fossil", &[("person.shex", PERSON_SHEX)]);
 
     let ctx = SessionContext::new();
     let graph = fossil_df::execute_graph(
@@ -43,7 +45,7 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_graph");
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Exactly ONE Person vertex table (not one per mapping).
     assert_eq!(

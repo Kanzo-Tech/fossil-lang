@@ -1,37 +1,28 @@
-//! Wave-0 regression — parser TERMINATES on unlexable bytes.
+//! Unlexable bytes — the parser TERMINATES, and it REPORTS.
 //!
-//! Background: the logos lexer silently drops bytes it cannot tokenise
-//! (`crates/fossil-syntax/src/lexer.rs:237` — `raw_lex` does
-//! `filter_map(|(tok, range)| tok.ok().map(...))`). Before the plan
-//! 07-01 fix, `parse_program`'s fall-through called
-//! `recover_to(p, TOP_LEVEL_ANCHORS)` — and `IDENT ∈ TOP_LEVEL_ANCHORS` —
-//! so the call no-op'd while the outer `loop` re-entered the same arm
-//! with the same `p.pos` forever. The parser spun at 100% CPU and never
-//! returned. See `.planning/phases/06-cli-complete-lsp/deferred-items.md`
-//! (HIGH-priority parser-hang).
+//! Two bugs met on the same input, and both are fixed:
 //!
-//! The fix in `parser/items.rs::parse_program` replaces the no-progress
-//! `recover_to` calls with `p.bump_as_error()` (always advances `p.pos`).
+//! 1. **The hang.** `parse_program`'s fall-through called
+//!    `recover_to(p, TOP_LEVEL_ANCHORS)` — and `IDENT ∈ TOP_LEVEL_ANCHORS` —
+//!    so the call no-op'd while the outer `loop` re-entered the same arm
+//!    with the same `p.pos` forever. The parser spun at 100% CPU and never
+//!    returned. `parser/items.rs::parse_program` uses `p.bump_as_error()`
+//!    instead, which always advances `p.pos`.
 //!
-//! These tests would NEVER TERMINATE before the fix. They run in
-//! sub-millisecond range post-fix; we assert a generous <100ms wall-clock
-//! bound so a future regression that re-introduces the loop will surface
-//! as a timeout-style failure (rather than the user noticing the test
-//! suite never ends).
+//! 2. **The silence.** `raw_lex` dropped logos's `Err` variants, so an input
+//!    of ONLY unlexable bytes — `"#"`, `"$$"` — lexed to an EMPTY token
+//!    stream: `parse_program` broke on `None` immediately, the CST came back
+//!    empty, and the LSP's Problems panel showed nothing for a file the user
+//!    could see was wrong. `lexer::raw_lex_lossless` keeps the range and
+//!    `indent::lex_with_indents` emits it as a `SyntaxKind::ERROR` token
+//!    carrying the byte, which `bump_as_error` reports as
+//!    `unexpected character `#` — no token starts with it`.
 //!
-//! # Known limitation — diagnostic surface for the truly-bare-byte case
-//!
-//! Because `raw_lex` silently drops `Err` tokens from logos, an input
-//! consisting ONLY of unlexable bytes (e.g. `"#"`, `"$"`) produces an
-//! EMPTY token stream — `parse_program` immediately breaks on `None` and
-//! no diagnostic is emitted. This is a separate lexer-layer issue and is
-//! intentionally OUT OF SCOPE for plan 07-01 (which is scoped to the
-//! parser-side no-progress fix, as the Wave 0 precondition for Phase 7's
-//! Monaco mount). Tracking: see Plan 07-01 SUMMARY, "Deferred — lexer
-//! silent-drop". For now we assert TERMINATION (the only invariant the
-//! parser-side fix actually owns) on minimal-byte inputs, and add a
-//! diagnostic-count assertion only on inputs where a valid downstream
-//! token reaches the parser.
+//! These tests would NEVER TERMINATE before the first fix, and asserted
+//! nothing about diagnostics before the second. They run in sub-millisecond
+//! range; we assert a generous <100ms wall-clock bound so a future regression
+//! that re-introduces the loop will surface as a timeout-style failure
+//! (rather than the user noticing the test suite never ends).
 //!
 //! ## Wall-clock bound rationale
 //!
@@ -54,12 +45,12 @@ use fossil_syntax::parse;
 
 /// Parse `input` on a worker thread; panic with "parser hung — regression"
 /// if it doesn't finish within `timeout`. On success returns the wall-clock
-/// duration + the count of accumulated diagnostics.
+/// duration + the accumulated diagnostic messages.
 ///
-/// We cannot return the `Cst<'db>` itself because the db lives on the
-/// worker thread; for this regression test the (duration, diag-count)
-/// summary is all the assertions need.
-fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, usize) {
+/// We cannot return the `Cst<'db>` itself, nor the `&Diagnostic`s, because the
+/// db lives on the worker thread and drops when it exits — so the messages are
+/// copied out as owned `String`s.
+fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<String>) {
     let (tx, rx) = mpsc::channel();
     let input_owned = input.to_string();
     thread::spawn(move || {
@@ -69,10 +60,9 @@ fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, usiz
         let file = SourceFile::new(&db, input_owned, "regression.fossil".to_string());
         let _cst = parse(&db, file);
         let diags: Vec<&Diagnostic> = parse::accumulated::<Diagnostic>(&db, file);
+        let messages: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
         let elapsed = start.elapsed();
-        // Send the diagnostic COUNT, not the borrowed Vec — the db owns
-        // the storage and goes out of scope when the worker exits.
-        let _ = tx.send((elapsed, diags.len()));
+        let _ = tx.send((elapsed, messages));
     });
     rx.recv_timeout(timeout).unwrap_or_else(|_| {
         panic!("parser hung — regression: parse did not return within {timeout:?}")
@@ -90,16 +80,17 @@ const HAPPY_PATH_BUDGET: Duration = Duration::from_millis(100);
 const HANG_DETECTION_BUDGET: Duration = Duration::from_secs(2);
 
 #[test]
-fn parse_terminates_on_bare_unlexable_byte() {
-    // The minimal repro: a single `#`. Pre-fix: 100% CPU forever.
-    // Post-fix: returns in a handful of microseconds.
-    //
-    // Diagnostic-count is NOT asserted here — see the module-level
-    // "Known limitation" note: raw_lex silently drops the `#`, so the
-    // resulting token stream is empty and the parser sees nothing to
-    // report. The plan-07-01 fix is fundamentally about TERMINATION;
-    // the diagnostic-surface gap is a separate lexer-layer concern.
-    let (elapsed, _diag_count) = parse_with_timeout("#", HANG_DETECTION_BUDGET);
+fn parse_reports_the_bare_unlexable_byte() {
+    // The minimal repro: a single `#`. Once 100% CPU forever, then a clean
+    // return with nothing to show for it. Now exactly one diagnostic, and it
+    // says which character — the byte is the only content the file has, so a
+    // generic "unexpected token" would name nothing at all.
+    let (elapsed, diags) = parse_with_timeout("#", HANG_DETECTION_BUDGET);
+    assert_eq!(
+        diags,
+        vec!["unexpected character `#` — no token starts with it"],
+        "parse(\"#\") must produce exactly one diagnostic, naming the byte",
+    );
     assert!(
         elapsed < HAPPY_PATH_BUDGET,
         "parse(\"#\") took {elapsed:?}; expected < {HAPPY_PATH_BUDGET:?} \
@@ -113,44 +104,55 @@ fn parse_terminates_on_unlexable_then_valid_item() {
     // The realistic shape — a stray `#` followed by an otherwise
     // well-formed top-level item (the mid-edit Monaco scenario:
     // user just typed `#` and the LSP receives didChange). The
-    // valid `prefix` decl after the `#` MUST still parse cleanly —
-    // sanity that the recovery advances past the bad token AND
-    // resumes normal parsing. We do not assert the exact green-tree
-    // shape here; the parse_corpus snapshot tests already pin
-    // CST shape elsewhere.
-    let input = "# stray comment\nprefix ex: <https://example.org/>\n";
-    let (elapsed, diag_count) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
+    // valid binding after the `#` MUST still parse cleanly — sanity
+    // that the recovery advances past the bad token AND resumes normal
+    // parsing. We do not assert the exact green-tree shape here; the
+    // parse_corpus snapshot tests already pin CST shape elsewhere.
+    // `stray` and `comment` are two bare IDENTs that start no production, so
+    // they report too — one diagnostic each, and that is the fall-through arm
+    // doing its job rather than a regression. What this test is about is the
+    // `#`: that it is NAMED, and that the parse returns.
+    let input = "# stray comment\nusers := io.csv(\"users.csv\")\n";
+    let (elapsed, diags) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
     assert!(
-        diag_count >= 1,
-        "expected ≥1 diagnostic for the stray `#`; got {diag_count}",
+        diags.iter().any(|m| m.contains('#')),
+        "expected a diagnostic naming the stray `#`; got {diags:?}",
     );
     assert!(
         elapsed < HAPPY_PATH_BUDGET,
-        "parse(\"# … \\nprefix …\") took {elapsed:?}; expected < {HAPPY_PATH_BUDGET:?}",
+        "parse(\"# … \\nusers := …\") took {elapsed:?}; expected < {HAPPY_PATH_BUDGET:?}",
     );
 }
 
 #[test]
-fn parse_terminates_on_other_unlexable_bytes() {
-    // The fix is byte-agnostic — anything logos drops (e.g. `$` outside
-    // a `${...}` interpolation, control chars, exotic punctuation) must
-    // reach the same `parse_program` fall-through and bump_as_error.
-    // We sample a few representative bytes; an exhaustive sweep is the
-    // job of a fuzz target (deferred).
+fn parse_reports_every_unlexable_byte() {
+    // Byte-agnostic — anything logos rejects (`$` outside a hole, control
+    // chars, exotic punctuation) reaches the same `parse_program`
+    // fall-through and the same `bump_as_error`. We sample a few
+    // representative bytes; an exhaustive sweep is the job of a fuzz target
+    // (deferred).
     //
-    // Per the "Known limitation" module-level note, diagnostic count is
-    // NOT asserted for inputs consisting ONLY of unlexable bytes —
-    // raw_lex silently drops them and the parser sees an empty stream.
-    // TERMINATION is the only invariant this plan owns; we assert that.
-    let cases: &[&'static str] = &[
-        "$",   // not a token (interpolation is INSIDE TEMPLATE)
-        "#",   // the originally-reported bug
-        "##",  // two unlexable bytes in a row
-        "#$#", // mixed unlexable bytes
-        "\\",  // backslash
+    // One diagnostic PER BYTE, not one per run: logos rejects a byte at a
+    // time, each becomes its own ERROR token, and each is named. `#$#` is
+    // three characters and three messages.
+    let cases: &[(&'static str, usize)] = &[
+        ("$", 1),   // not a token (a hole's `{` is only a hole inside a string)
+        ("#", 1),   // the originally-reported bug
+        ("##", 2),  // two unlexable bytes in a row
+        ("#$#", 3), // mixed unlexable bytes
+        ("\\", 1),  // backslash
     ];
-    for input in cases {
-        let (elapsed, _diag_count) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
+    for (input, want) in cases {
+        let (elapsed, diags) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
+        assert_eq!(
+            diags.len(),
+            *want,
+            "input {input:?}: expected {want} diagnostic(s), got {diags:?}",
+        );
+        assert!(
+            diags.iter().all(|m| m.starts_with("unexpected character")),
+            "input {input:?}: every diagnostic must name its character; got {diags:?}",
+        );
         assert!(
             elapsed < HAPPY_PATH_BUDGET,
             "input {input:?}: took {elapsed:?}; expected < {HAPPY_PATH_BUDGET:?}",
@@ -159,21 +161,27 @@ fn parse_terminates_on_other_unlexable_bytes() {
 }
 
 #[test]
-fn parse_terminates_on_unlexable_inside_mapping_header_position() {
-    // A `#` between two top-level items must also terminate. This
-    // exercises the outer `_ => bump_as_error()` arm rather than the
-    // IDENT-lookahead arm. Pre-fix would also hang here because the
-    // next non-trivia token after the dropped `#` is `prefix`
-    // (KW_PREFIX, which IS in TOP_LEVEL_ANCHORS) — same no-progress
-    // shape.
-    let input = "prefix ex: <https://example.org/>\n#\nprefix ey: <https://example.com/>\n";
-    let (elapsed, diag_count) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
-    // Note: a single `#` between two well-formed items might not
-    // trigger any diagnostic because the lexer silently drops it and
-    // the resulting token stream is two clean prefix decls. That's
-    // acceptable — the test is fundamentally about TERMINATION, not
-    // diagnostic count. We do not assert diag_count here.
-    let _ = diag_count;
+fn parse_reports_an_unlexable_byte_between_two_good_items() {
+    // A `#` on its own line between two well-formed items. This exercises the
+    // outer `_ => bump_as_error()` arm rather than the IDENT-lookahead arm.
+    //
+    // It is the case the old test explicitly gave up on: the byte was dropped,
+    // the stream was two clean items, and the file looked perfect to every tool
+    // while the user was staring at the `#`. Exactly one diagnostic, and the two
+    // items around it still parse.
+    //
+    // The two items used to be `prefix` declarations, which is what this file
+    // reached for whenever it wanted something short and certainly valid. They
+    // are source bindings now — a `prefix` line is itself a diagnostic, and
+    // asserting «only the `#` is reported» around two of them would have been
+    // asserting the opposite of what the test says.
+    let input = "a := io.csv(\"a.csv\")\n#\nb := io.csv(\"b.csv\")\n";
+    let (elapsed, diags) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
+    assert_eq!(
+        diags,
+        vec!["unexpected character `#` — no token starts with it"],
+        "the byte between two good items must be reported, and only it",
+    );
     assert!(
         elapsed < HAPPY_PATH_BUDGET,
         "took {elapsed:?}; expected < {HAPPY_PATH_BUDGET:?}",

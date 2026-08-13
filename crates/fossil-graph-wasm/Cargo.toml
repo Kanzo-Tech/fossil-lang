@@ -7,6 +7,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "wasm-bindgen binding for the fossil-graph verb surface — the WASM core of @fossil-lang/graph. Runs verb→SQL in WASM and delegates SQL execution to a host-provided DuckDB-WASM async callback."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

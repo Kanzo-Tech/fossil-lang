@@ -1,6 +1,6 @@
 //! [`HirBody`] — per-mapping body content + the [`body`] Salsa query.
 //!
-//! Lower half of the CORE-02 invalidation-barrier pattern (see ADR-0005).
+//! Lower half of the CORE-02 invalidation-barrier pattern.
 //! [`crate::item_tree::ItemTree`] is the SIGNATURE table; this module is the
 //! BODY table. They are deliberately separate `#[salsa::tracked]` queries
 //! with separate input-dependency surfaces.
@@ -45,8 +45,8 @@
 //! `DidValidateMemoizedValue` instead of re-executing.
 //!
 //! This is the rust-analyzer per-item Salsa fan-out pattern; the
-//! intermediate query is the data-layout fix per ADR-0005's structural
-//! invariant.
+//! intermediate query is the data-layout fix, and it is what makes the
+//! barrier structural rather than something every caller has to remember.
 
 use crate::def_map::{MappingLoc, def_map};
 use crate::lower::{HirProperty, lower_property_public};
@@ -62,14 +62,53 @@ pub struct ExprId(pub u32);
 /// Per-mapping body content.
 ///
 /// Owns the flat `Vec<HirProperty>` that Phase 1's `HirMapping.properties`
-/// previously carried (the field is REMOVED from `HirMapping` per
-/// ADR-0005). The [`Self::expr_count`] is a Phase 2 placeholder for plan
-/// 02-06's `ExprId` arena bookkeeping.
+/// previously carried (the field is REMOVED from `HirMapping`: the signature
+/// table carries names and structural counts and never body content, so a body
+/// edit cannot invalidate it). The [`Self::expr_count`] is a Phase 2
+/// placeholder for plan 02-06's `ExprId` arena bookkeeping.
+///
+/// # `ExprId` is assigned HERE, and nowhere else
+///
+/// [`Self::expr_spans`] is the reason. There were THREE notions of `ExprId` in
+/// the tree and they disagreed the moment one property failed to lower:
+///
+/// 1. this query — a DENSE index over the properties that lowered;
+/// 2. `crate::spans::spans` — the property's POSITION among the CST's
+///    `PROPERTY` children, from an `.enumerate()`, with a comment claiming it
+///    matched this one;
+/// 3. `fossil_ide::hover` — the CST position again, used both as the `ExprId`
+///    and to index this `properties` vector.
+///
+/// A property that parses and does not lower — a CURIE key, `iri =`, an
+/// absolute-IRI key: every retired spelling in the corpus is exactly one of
+/// these — makes the CST longer than the HIR, and everything after it shifts.
+/// The consequences were silent in all three directions: the checker numbers
+/// with (1) and looks the span up in (2), so a type error UNDERLINES THE WRONG
+/// PROPERTY; hover reads the short name and the predicate IRI of a different
+/// property than the one under the cursor.
+///
+/// So the arena publishes its own spans, in lockstep with `properties`, from
+/// the `prop_node` it already has in hand. `spans()` is an accessor over this
+/// vector rather than a second walk of the CST, and hover resolves a position
+/// by SPAN CONTAINMENT instead of by counting. One walk, one numbering.
+///
+/// A side table and not a field on `HirProperty`: a `span` on the
+/// property would enter its `PartialEq`/`Hash` and two source-identical
+/// properties at different offsets would stop deduping.
 #[salsa::tracked(debug)]
 pub struct HirBody<'db> {
     /// Per-mapping flat property list, in source order.
     #[returns(ref)]
     pub properties: Vec<HirProperty>,
+    /// One mapping-relative span per lowered property, at the SAME index —
+    /// `expr_spans[i]` is the source range of `properties[i]`'s right-hand
+    /// side. See the type docs: this is what makes `ExprId` one thing.
+    ///
+    /// Mapping-relative, because it is read off [`mapping_cst_node`]'s detached
+    /// subtree (rowan resets offsets to zero at a new root). The
+    /// [`crate::spans::rebase_to_file`] direction is unchanged.
+    #[returns(ref)]
+    pub expr_spans: Vec<fossil_base::Span>,
     /// Count of distinct expression nodes lowered for this mapping. Phase 2
     /// plan 02-06 keys the provenance side table by `(MappingLoc, ExprId)`
     /// for IDs in `0..expr_count`.
@@ -104,7 +143,7 @@ pub struct MappingCstNode {
     green: Option<GreenNode>,
 }
 
-// SAFETY: third-party-trait integration boundary (per ADR-0004). Salsa's
+// SAFETY: third-party-trait integration boundary. Salsa's
 // `Update` trait is `unsafe` by design — implementations must guarantee
 // `maybe_update` correctly determines whether the new value differs. We
 // delegate to `PartialEq` on `Option<GreenNode>`, which rowan implements
@@ -142,9 +181,11 @@ impl MappingCstNode {
 /// re-executes on any byte edit) and [`body`] (which depends only on the
 /// per-mapping CST subtree, stable across sibling-mapping edits).
 ///
-/// Resolution uses filter-then-nth over MAPPING-kind top-level children
-/// (per ADR-0005 + plan 02-04 contract; matches `def_map`'s per-MAPPING-
-/// kind dense indexing).
+/// Resolution uses filter-then-nth over MAPPING-kind top-level children, and
+/// `def_map`'s `MappingLoc.index` MUST allocate with the same convention — a
+/// dense position among MAPPING-kind children, never an all-children index.
+/// If the two sides ever disagree this query silently hands back another
+/// mapping's subtree, with no panic anywhere downstream.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn mapping_cst_node<'db>(
@@ -182,29 +223,137 @@ pub fn mapping_cst_node<'db>(
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirBody<'db> {
-    let file = mapping.file(db);
-    let dm = def_map(db, file);
-    let prefixes = dm.prefixes(db);
     let mapping_cst = mapping_cst_node(db, mapping);
+    // The names a `type { … } := …` binding introduced, for the one decision the
+    // lowering cannot make from the CST alone: `Person(User.email)` and
+    // `str.slug(x)` are the same node, and only a bound type name makes the
+    // first an edge. `def_map` is FILE-keyed and structurally
+    // stable across body-only edits, so this read adds no per-mapping fan-out —
+    // the same argument that lets `lower_to_mir_pg` read it.
+    let type_names: Vec<smol_str::SmolStr> = def_map(db, mapping.file(db))
+        .types(db)
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
 
     let mut properties: Vec<HirProperty> = Vec::new();
+    let mut expr_spans: Vec<fossil_base::Span> = Vec::new();
     let mut expr_count: u32 = 0;
-    if let Some(node) = mapping_cst.syntax()
-        && let Some(body_node) = node
+    // Where the identity was written, among the properties that lowered. Its
+    // three obligations — required, exactly one, first — are checked here and
+    // not in the parser: each is a fact about a mapping
+    // rather than about a token, and the message wants the mapping's name.
+    let mut subjects: Vec<(usize, fossil_base::Span)> = Vec::new();
+    if let Some(node) = mapping_cst.syntax() {
+        let name = mapping_name(&node);
+        if let Some(body_node) = node
             .children()
             .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)
-    {
-        for prop_node in body_node
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::PROPERTY)
         {
-            if let Some(prop) = lower_property_public(db, &prop_node, prefixes) {
-                properties.push(prop);
-                expr_count = expr_count.saturating_add(1);
+            for prop_node in body_node
+                .children()
+                .filter(|c| c.kind() == SyntaxKind::PROPERTY)
+            {
+                if let Some(prop) = lower_property_public(db, &prop_node, &type_names) {
+                    if matches!(prop.key, crate::lower::PropertyKey::Subject) {
+                        let r = prop_node.text_range();
+                        subjects.push((
+                            properties.len(),
+                            fossil_base::Span::new(r.start().into(), r.end().into()),
+                        ));
+                    }
+                    expr_spans.push(rhs_span(&prop_node));
+                    properties.push(prop);
+                    expr_count = expr_count.saturating_add(1);
+                }
             }
+            check_identity(db, &name, &subjects, &body_node);
         }
     }
-    HirBody::new(db, properties, expr_count)
+    HirBody::new(db, properties, expr_spans, expr_count)
+}
+
+/// The span a diagnostic about this property's VALUE should underline.
+///
+/// `EXPR`'s own `text_range()` swallows the leading whitespace and the trailing
+/// newline, so it descends to the first child — the tight range over the
+/// right-hand side's tokens. A property that lowered without one falls back to
+/// the whole `PROPERTY` node, which is imprecise and inside the right line;
+/// what it must NOT do is skip, because the index is the `ExprId`.
+fn rhs_span(prop_node: &SyntaxNode) -> fossil_base::Span {
+    let range = prop_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::EXPR)
+        .and_then(|expr| expr.children().next())
+        .map_or_else(|| prop_node.text_range(), |inner| inner.text_range());
+    fossil_base::Span::new(range.start().into(), range.end().into())
+}
+
+/// The mapping's own name, read off its header. Used only in the identity
+/// diagnostics below, which is why it is read from the CST rather than from
+/// `lower_to_hir`: a file-keyed read here would re-lower every body in the file
+/// whenever any header changed, to put one word in one message.
+fn mapping_name(mapping_node: &SyntaxNode) -> String {
+    mapping_node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)
+        .and_then(|h| {
+            h.children_with_tokens()
+                .filter_map(fossil_syntax::SyntaxElement::into_token)
+                .find(|t| t.kind() == SyntaxKind::IDENT)
+                .map(|t| t.text().to_string())
+        })
+        .unwrap_or_else(|| "this mapping".to_string())
+}
+
+/// `MappingBody := SubjectAssign Property+` — required, exactly one, first.
+///
+/// All three used to be unchecked, and the first one was the expensive silence:
+/// a mapping with no identity lowered to vertices whose subject was the empty
+/// string, which dedups every row of the mapping into one blank node. That was
+/// caught downstream in `fossil-mir` as a `delay_span_bug` — an internal-error
+/// spelling for something the author wrote and can fix.
+fn check_identity(
+    db: &dyn fossil_base::Db,
+    name: &str,
+    subjects: &[(usize, fossil_base::Span)],
+    body_node: &SyntaxNode,
+) {
+    use salsa::Accumulator as _;
+    let emit = |span: fossil_base::Span, message: String| {
+        fossil_base::Diagnostic::new(fossil_base::Severity::Error, message, span).accumulate(db);
+    };
+    let Some(&(index, first_span)) = subjects.first() else {
+        let r = body_node.text_range();
+        emit(
+            fossil_base::Span::new(r.start().into(), r.end().into()),
+            format!(
+                "`{name}` declares no `@subject`, so the rows it writes have no identity. The \
+                 first line of a mapping body is `@subject = <expr>`."
+            ),
+        );
+        return;
+    };
+    if let Some(&(_, second_span)) = subjects.get(1) {
+        emit(
+            second_span,
+            format!(
+                "`{name}` declares `@subject` twice, and a type has one identity. Every mapping \
+                 that produces this type writes the same one, so that an edge naming the type \
+                 reaches the same node whichever mapping emitted it."
+            ),
+        );
+    }
+    if index != 0 {
+        emit(
+            first_span,
+            format!(
+                "`@subject` is the first line of a mapping body, and in `{name}` it is line \
+                 {}. The identity comes before what it identifies.",
+                index + 1
+            ),
+        );
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -213,11 +362,11 @@ mod tests {
     use std::sync::Arc;
 
     const HELLO: &str = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Users : Person from User
+    @subject = \"https://example.org/u/{User.id}\"
+    name = User.name
 ";
 
     #[test]
@@ -256,16 +405,16 @@ prefix ex: <https://example.org/>
 users := io.csv(\"x.csv\")
 
 Mapping_A : ex:Shape from users
-    ex:a = .a
-    ex:b = .b
-    ex:c = .c
+    a = .a
+    b = .b
+    c = .c
 
 Mapping_B : ex:Shape from users
-    ex:a = .a
-    ex:b = .b
+    a = .a
+    b = .b
 
 Mapping_C : ex:Shape from users
-    ex:c = .c
+    c = .c
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);

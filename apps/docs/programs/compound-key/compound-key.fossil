@@ -1,0 +1,13 @@
+type { Line } := io.shex("compound-key.shex")
+
+OrderRow := io.csv("data/orders.csv")
+LineRow  := io.csv("data/lines.csv")
+
+// #region on
+Joined := LineRow.join(OrderRow, on = LineRow.order_id == OrderRow.id and LineRow.tenant == OrderRow.tenant)
+// #endregion on
+
+Lines : Line from Joined
+    @subject  = "https://shop.example/{LineRow.tenant}/line/{LineRow.id}"
+    quantity  = LineRow.quantity
+    placed_on = OrderRow.placed_on

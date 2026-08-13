@@ -1,0 +1,11 @@
+× `nmae` is not a field of `User`
+    ╭─[program.fossil:11:21]
+  3 │ User     := io.csv("data/users.csv")
+    ·             ────────────┬───────────
+    ·                         ╰── `User` has the fields id, email, name, age
+    ·
+ 11 │     name     = User.nmae
+    ·                     ──┬─
+    ·                       ╰── here
+    ╰────
+  help: did you mean `name`?

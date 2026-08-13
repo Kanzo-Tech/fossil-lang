@@ -23,10 +23,13 @@ use smol_str::SmolStr;
 
 use crate::op::{Expr, Op};
 
-/// The one column name an `Op::Join`'s condition equates, when the condition has
-/// the only shape the language can build: `left.k = right.k` (ADR-0054 §3).
-/// `None` for a hand-constructed graph whose condition is anything else — those
-/// keep the old concatenating behaviour rather than guessing which name to drop.
+/// The one column name an `Op::Join`'s condition equates, when both sides name
+/// the SAME column — the shape the retired `on = .k` sugar produced, and the
+/// only one where the key can be identified rather than duplicated.
+/// `None` for anything else: a condition equating two DIFFERENTLY named keys
+/// (the ordinary case now that both sides are written qualified), a conjunction
+/// of equalities, or a hand-constructed graph's arbitrary predicate. Those keep
+/// the concatenating behaviour rather than guessing which name to drop.
 fn join_key(on: &Expr<'_>) -> Option<SmolStr> {
     match on {
         Expr::BinOp {
@@ -55,9 +58,13 @@ fn join_key(on: &Expr<'_>) -> Option<SmolStr> {
 /// - `Extend` → input schema ∪ `{field}` (field appended if not already present)
 /// - `Rename` → input schema with `old` → `new`
 /// - `Filter` / `Distinct` → input schema unchanged
-/// - `Join` → left schema ++ right schema minus the key, which `on = .k`
-///   identifies rather than duplicates (ADR-0054 §4). Any OTHER shared name is a
-///   compile error the checker raises, so this never has to break a tie.
+/// - `Join` → left schema ++ right schema minus the key, when the condition
+///   equates one name with itself and so identifies it rather than duplicating
+///   it. Any OTHER shared name used to be a compile error, and is not any more:
+///   the join no longer flattens two rows into one, every reference is written
+///   qualified, so two sources with a column of the same name are legal. This
+///   concatenation can therefore produce a duplicate name, and nothing here
+///   breaks the tie.
 /// - `Union` → left schema (asserted equal to right in debug builds)
 /// - `GroupBy` → `keys`
 /// - `Aggregate` → input schema ∪ agg `out_field`s
@@ -99,8 +106,8 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => schema_of(db, ops, *input),
-        // `on = .k` is `USING (k)`: the key is IDENTIFIED, so it appears once
-        // (ADR-0054 §4). This concatenated both sides until 2026-08-07 and
+        // A condition equating one name with itself IDENTIFIES that key, so it
+        // appears once. This concatenated both sides until 2026-08-07 and
         // disagreed with the row the backend actually executes — the executor
         // drops the right side's key, so a schema that kept it described a
         // column nobody would find.
@@ -153,7 +160,7 @@ pub fn free_cols(expr: &Expr<'_>) -> BTreeSet<SmolStr> {
 
 fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
     match expr {
-        Expr::LitString(_) | Expr::LitBool(_) | Expr::LitInt(_) => {}
+        Expr::LitString(_) | Expr::LitBool(_) | Expr::LitInt(_) | Expr::LitFloat(_) => {}
         Expr::ColRef { column, .. } => {
             acc.insert(column.clone());
         }
@@ -176,7 +183,9 @@ fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
             collect_free_cols(then, acc);
             collect_free_cols(otherwise, acc);
         }
-        Expr::Assert { inner, .. } => collect_free_cols(inner, acc),
+        Expr::Assert { inner, .. } | Expr::UnaryOp { operand: inner, .. } => {
+            collect_free_cols(inner, acc);
+        }
     }
 }
 

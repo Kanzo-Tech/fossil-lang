@@ -14,6 +14,8 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -27,19 +29,25 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build the `fossil` binary once per test process.
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// **It used to shell out to `cargo build` and then hard-code
+/// `<repo>/target/debug/fossil`**, which is a test that can pass against a
+/// binary it did not build: with `CARGO_TARGET_DIR` set — which is how this
+/// repository's own instructions say to drive the suite — the build lands
+/// elsewhere and that path holds whatever was left there last. Measured on
+/// 2026-08-13: the file at the hard-coded path was **29 hours old**, older than
+/// the parser rewrite, the provider registry, `@rename` and the edge
+/// constructor. Everything this file reported that day was about a compiler
+/// nobody had edited.
+///
+/// `CARGO_BIN_EXE_<name>` is cargo's answer: it is set for an integration test
+/// and points at the binary of THIS build, which cargo has already built before
+/// the test runs. No path to guess, and no `cargo build` spawned from inside a
+/// test — the same fix `crates/fossil-lsp/tests/` took.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(bin.exists(), "fossil binary missing at {}", bin.display());
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
 /// Strip ANSI SGR escape sequences (`ESC [ ... m`) so the snapshot is stable
@@ -147,5 +155,108 @@ fn check_hello_exits_zero_and_prints_ok() {
         String::from_utf8_lossy(&output.stdout).contains("ok"),
         "fossil check should print 'ok'; got: {}",
         String::from_utf8_lossy(&output.stdout),
+    );
+    // …and it must not have GAINED one. The file-level drain added for the
+    // no-mapping case runs on a different branch than this program takes; if it
+    // ever ran here it would republish whatever `parse` accumulated, and a
+    // clean file would start reporting.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("declares no mapping"),
+        "hello.fossil declares a mapping; got: {stdout}"
+    );
+    assert!(
+        !strip_ansi(&String::from_utf8_lossy(&output.stderr)).contains("Error"),
+        "a clean program must produce no diagnostic; got:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+/// Write `text` to a `.fossil` in this test's own workdir and run `fossil check`
+/// on it. Each case names its own directory: the CLI reads relative source paths
+/// against the program's parent, and two tests sharing one is two tests sharing
+/// a state.
+fn check_text(test_name: &str, text: &str) -> std::process::Output {
+    let dir = common::unique_workdir("fossil-check", test_name);
+    let file = dir.join("subject.fossil");
+    std::fs::write(&file, text).expect("write subject");
+    Command::new(fossil_binary())
+        .args(["check", file.to_str().expect("utf8 path")])
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "off")
+        .output()
+        .expect("spawn fossil check")
+}
+
+/// An EMPTY file: zero mappings, zero parse errors. Deliberately a success —
+/// nothing in it is wrong — but it must not be rendered as a clean program,
+/// because `fossil run` refuses it (`no mapping found`). The distinct line is
+/// the whole point: `ok — no errors` on a file that builds nothing is the wrong
+/// answer even when the exit code is right.
+#[test]
+fn check_empty_file_exits_zero_and_says_it_declares_no_mapping() {
+    let output = check_text("empty", "");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "an empty file has no error in it; stdout={stdout} stderr={}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        stdout.contains("declares no mapping"),
+        "an empty file must not read as a checked program; got: {stdout}"
+    );
+}
+
+/// A WHOLLY-UNPARSEABLE file: zero mappings, and parse errors the old drain
+/// could not reach. Before the file-level drain this printed `ok — no errors`
+/// and exited 0 — a wrong answer on the surface a downstream product invokes.
+#[test]
+fn check_unparseable_file_exits_nonzero_and_reports_the_parse_error() {
+    let output = check_text("unparseable", "!@#$%^&*() )))\n{{{ ]]]\n");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    assert!(
+        !output.status.success(),
+        "garbage is not a program; stdout={stdout} stderr={stderr}"
+    );
+    assert!(
+        !stdout.contains("ok —"),
+        "a file that does not parse must not be reported as ok; got: {stdout}"
+    );
+    assert!(
+        stderr.to_lowercase().contains("unexpected"),
+        "the parse error must reach stderr; got:\n{stderr}"
+    );
+}
+
+/// The double-report guard. `def_map` sits in EVERY mapping's dependency
+/// subtree, so draining it alongside the per-mapping loop would publish each
+/// parse error twice. One mapping, one parse error, one line about it.
+#[test]
+fn a_parse_error_in_a_file_with_a_mapping_is_reported_once() {
+    // The missing `:` after `prefix ex` — the same break the variations
+    // harness curates as `02-syntax-error.fossil`.
+    let output = check_text(
+        "parse-error-once",
+        concat!(
+            "prefix ex <https://example.org/>\n",
+            "\n",
+            "users := io.csv(\"users.csv\")\n",
+            "\n",
+            "User : ex:Person from users\n",
+            "    @subject = `${ex:}user/${.id}`\n",
+            "    name = .name\n",
+        ),
+    );
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+
+    assert!(!output.status.success(), "the file does not parse");
+    let occurrences = stderr.matches("expected SHAPE_SEP").count();
+    assert_eq!(
+        occurrences, 1,
+        "the parse error must be reported exactly once; got {occurrences} in:\n{stderr}"
     );
 }

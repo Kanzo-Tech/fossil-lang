@@ -1,9 +1,55 @@
-(* ═══════════════════════════════════════════════════════════════ *)
-(*  FOSSIL — Grammar (EBNF) — v0.1                                   *)
-(*                                                                    *)
-(*  This is the formal grammar of the Fossil language.               *)
-(*  See: type-system.md (semantic rules), architecture.md (compiler) *)
-(* ═══════════════════════════════════════════════════════════════ *)
+(* ═══════════════════════════════════════════════════════════════════ *)
+(*  FOSSIL — Grammar (EBNF) — v0.2                                     *)
+(*                                                                     *)
+(*  THIS FILE SPECIFIES THE LANGUAGE. The parser implements it; it     *)
+(*  does not define it. A production written here and absent from      *)
+(*  `crates/fossil-syntax` is WORK OUTSTANDING, not an error in this   *)
+(*  file. That inversion is deliberate and it is the whole reason the  *)
+(*  file exists apart from the parser: v0.1 of this document described *)
+(*  what the parser happened to accept, which made every disagreement  *)
+(*  a bug in the document by construction, and so the document could   *)
+(*  never ask the parser for anything.                                 *)
+(*                                                                     *)
+(*  The surface below is the one decided by three rulings. They are    *)
+(*  STATED here and not cited, because a citation outlives the file it *)
+(*  points at and then says nothing:                                   *)
+(*                                                                     *)
+(*    THE IDENTITY IS A SLOT OF THE LANGUAGE. It is written as an      *)
+(*    assignment, `@subject = <expr>`, on the first line of a mapping  *)
+(*    body, and it is UNIQUE PER TYPE: every mapping that produces T   *)
+(*    declares the same one, and two that disagree are an error naming *)
+(*    both. It is not an attribute argument, and the reason it is not  *)
+(*    is that no reviewed language admits a per-row expression in one. *)
+(*                                                                     *)
+(*    `.` MEANS «MEMBER OF», AND WHAT IS ON THE LEFT DECIDES WHAT THE  *)
+(*    MEMBERS ARE. It is the only access operator: a namespace gives   *)
+(*    its functions, a type its fields, a value its type's operations, *)
+(*    a relation its verbs. The verbs are CATALOGUE ROWS reached       *)
+(*    through it and not productions, so a new one is a row and never  *)
+(*    a rule.                                                          *)
+(*                                                                     *)
+(*    `|>` DIES, and the member call is the spelling. It is the        *)
+(*    ruling of 2026-08-11 that reaches this file hardest. The two     *)
+(*    others that reach a production — naming a shape document is      *)
+(*    mandatory, and the user declares no functions — are stated at    *)
+(*    the production they bind. All of them are recorded, with their   *)
+(*    arguments, in SURFACE-PLAN.md.                                   *)
+(*                                                                     *)
+(*  THE CONFORMANCE SET is `apps/docs/programs/` — 23 programs with    *)
+(*  their shape documents and data, 5 of which are expected to fail    *)
+(*  the checker and carry the diagnostic they must produce. Every one  *)
+(*  of the 23 is derivable from the productions below, and no          *)
+(*  production below exists for a form none of them spells, except     *)
+(*  where a comment says so and says why. Nothing mechanically checks  *)
+(*  this file against the parser today, so those 23 programs are the   *)
+(*  only check it has.                                                 *)
+(*                                                                     *)
+(*  What a well-formed program MEANS, as against how it is spelled —   *)
+(*  the judgments, the subtyping relation, and the exact statement of  *)
+(*  what a successful compile promises — is `/docs/book/typing`. It    *)
+(*  stands to the checker as this file stands to the parser, and the   *)
+(*  two are the only normative documents about the language.           *)
+(* ═══════════════════════════════════════════════════════════════════ *)
 
 
 (* ═══ LEXICAL LAYER ═══ *)
@@ -17,53 +63,88 @@ TAB            := '\t'
 WHITESPACE     := SPACE | TAB
 NEWLINE        := '\n'
 
-(* INDENT and DEDENT are virtual tokens emitted by the lexer        *)
+(* INDENT and DEDENT are virtual tokens emitted by the lexer          *)
 (* based on column tracking. Spaces or tabs but consistent per block. *)
+(*                                                                    *)
+(* A line that carries only a comment, and a blank line, DO NOT touch *)
+(* the indentation stack, whatever column they start at. This is not  *)
+(* a nicety: the conformance programs mark their transcluded regions  *)
+(* with `// #endregion name` at column 0 in the middle of an indented *)
+(* mapping body, and a comment that closed the block would make the   *)
+(* documentation unable to quote the program it documents.            *)
 INDENT, DEDENT := computed
 
 (* Identifiers and keywords *)
 IDENT          := (LETTER | '_') (LETTER | DIGIT | '_')*
-KEYWORD        := 'prefix' | 'from'
-                | 'and' | 'or' | 'not' | 'iri'
+KEYWORD        := 'from' | 'and' | 'or' | 'not'
+
+(* `prefix` was a keyword and is gone with the CURIE: a program writes full
+   IRIs inside interpolated strings and short names everywhere else, so there
+   is no vocabulary declaration left to introduce.
+
+   `iri` was a keyword and is gone with `@subject(iri = …)`: the identity is an
+   assignment now, so the word named an argument that no production takes. It
+   was also a plausible column name held hostage.
+
+   `where`, `select`, `join` and `on` are NOT keywords and must never become
+   any. They are catalogue entries and named arguments — ordinary identifiers
+   that the checker resolves against a receiver type. See the tombstone under
+   POSTFIX for the productions they used to have. *)
+
+(* Boolean literals. `true` and `false` are tokens, not identifiers: a program
+   writes `verified = true` and there is no binding for the name to resolve
+   against, so leaving them as IDENT makes a literal look like an unresolved
+   reference. *)
+BOOL           := 'true' | 'false'
 
 (* Numeric literals — decimal only, optional underscores as separators *)
 INTEGER        := DIGIT (DIGIT | '_')*
 FLOAT          := INTEGER '.' INTEGER
 
 (* String literals. Interpolation is ALWAYS ACTIVE and `{{` is the escape for a
-   literal '{' (ADR-0057, seventh amendment §3). A closing '}' needs no escape:
-   outside a hole it has only one reading.
+   literal '{'. A closing '}' needs no escape: outside a hole it has only one
+   reading.
 
    A string with no hole is one STRING token. One WITH a hole is carved by the
    post-lexer pass into the run below, so the hole's expression is read by the
    ordinary expression parser — the interpolation is IN THIS GRAMMAR, not in the
-   lexer, which is the lesson PEP 701 paid seven years for. *)
+   lexer, which is the lesson PEP 701 paid seven years for.
+
+   This is also where a full IRI is written, now that there is no other place
+   to write one: `"http://xmlns.com/foaf/0.1/name"`, `"https://shop.example/
+   user/{User.email}"`. *)
 STRING         := '"' STRING_CONTENT* '"'
 STRING_CONTENT := REGULAR_CHAR | ESCAPE | '{{'
+REGULAR_CHAR   := any char except '"', '\', '{' and NEWLINE
 ESCAPE         := '\n' | '\t' | '\r' | '\\' | '\"'
 
-STRING_OPEN    := '"' | '`'
+STRING_OPEN    := '"'
 STRING_TEXT    := (REGULAR_CHAR | ESCAPE | '{{')*
-INTERP_OPEN    := '{' | '${'                (* '${' dies with TEMPLATE *)
-STRING_CLOSE   := '"' | '`'
+INTERP_OPEN    := '{'
+STRING_CLOSE   := '"'
 
-(* Template literals — RETIRED by ADR-0057's seventh amendment; the spelling
-   survives only until the fixtures are rewritten. *)
-TEMPLATE       := '`' TPL_CONTENT* '`'
-TPL_CONTENT    := REGULAR_CHAR | TPL_ESCAPE | Interpolation
-TPL_ESCAPE     := ESCAPE | '\`' | '\$' | '\${'
+(* There is no TEMPLATE. The backtick literal and its TPL_CONTENT / TPL_ESCAPE
+   run were a second spelling of the string above, differing only in the
+   delimiter and in `${` for the hole — two ways to say one thing, which is the
+   one rule this repo does not bend. `"…{expr}…"` is the spelling; `${`, '`'
+   and `\$` are not tokens. *)
 
-(* IRI literals *)
-ABS_IRI        := '<' IRI_CHARS '>'           (* RFC 3986 chars *)
+(* There is no ABS_IRI. `<http://…>` had exactly two consumers — the vocabulary
+   declaration and the property key — and both are bare names now. A constant
+   IRI is a STRING, and the shape decides that it denotes rather than reads:
+   the type decides what there is. The lexical win is that `<` and
+   `>` have one reading each and the lexer no longer has to guess between a
+   comparison and the start of an IRI. *)
 
-(* Comments — discarded by lexer *)
+(* Comments — discarded by lexer. `// #region name` / `// #endregion name` are
+   ordinary comments; the docs transclude program fragments by those markers,
+   which is why 17 of the 23 conformance programs carry them. *)
 COMMENT        := '//' (any char except NEWLINE)*
 
 (* Operators *)
-DEFINE         := ':='
-ASSIGN         := '='
+DEFINE         := ':='                (* binds a name *)
+ASSIGN         := '='                 (* assigns a value *)
 SHAPE_SEP      := ':'
-PIPE           := '|>'
 T_QUESTION     := '?'
 
 EQ             := '=='
@@ -84,12 +165,20 @@ COMMA          := ','
 LPAREN, RPAREN := '(' ')'
 LBRACE, RBRACE := '{' '}'
 
-(* Attributes — lexed but consumed by no production yet. The spelling is NOT
-   open: it is `@`, decided in ADR-0057's fourth amendment for the reasons
-   restated under RESERVED KEYWORDS below. What a production will accept is
-   bounded by the seventh amendment: an attribute takes constants only, so a
-   form that dereferences the row is syntax wearing the sigil, not an
-   attribute. *)
+(* There is no PIPE. `a |> f()` was a second spelling of `a.f()` and the ruling
+   of 2026-08-11 kills it: the member call is the spelling, and with member
+   resolution by receiver type the pipeline had nothing left that the dot could
+   not do. `|>` is not a token. *)
+
+(* Attributes. `@` is the language's own namespace, against the bare names that
+   the shape document declares — the criterion is Django's («model metadata is
+   anything that's not a field») with JSON-LD's solution, which reserves
+   `@`+ALPHA for the same reason: a user's keys are arbitrary and you cannot
+   appropriate `id`.
+
+   Two names are accepted, by two productions, and the position tells them
+   apart: `@rename` above a type binding, `@subject` as the first line of a
+   mapping body. Any other name is an error. *)
 AT_ATTR        := '@' IDENT
 
 
@@ -99,163 +188,292 @@ AT_ATTR        := '@' IDENT
 
 Program             := TopLevel* EOF
 
-TopLevel            := PrefixDecl
-                     | SourceDef
+TopLevel            := SourceDef
                      | MultiSourceDef
                      | TypeDef
                      | Mapping
 
-(* There is no import production. `use foo/bar { a, b } as c` parsed into
-   IMPORT / IMPORT_PATH / SELECTIVE_IMPORT / ALIAS and nothing below the parser
-   read any of them: a file is compiled alone, and there is no module system for
-   a name to come from. ADR-0057's second amendment says `use` stays dead until
-   modules exist, and when they exist the form comes back with something that
-   resolves it. `use` and `as` are ordinary identifiers again. *)
+(* `@rename` is NOT a fifth alternative, and looking for one here is the
+   mistake this note exists to stop. `TypeDef := RenameAttr* 'type' …` below,
+   so `@rename(…) type { … } := …` already derives from `TopLevel` through
+   `TypeDef`. What the `RenameAttr*` prefix changed is the FIRST set —
+   `TypeDef` now starts with `AT_ATTR` as well as with the contextual `type` —
+   which is a fact about the parser's dispatch and not about this production.
+
+   LL(1) survives it. `AT_ATTR` has exactly one derivation at top level:
+   `SubjectAssign`, the other thing that lexes as one, sits inside a
+   `MappingBody`, which is reachable only through an `INDENT`. That is
+   disambiguation rule 6 — one token, two names, POSITION decides — and it is
+   why neither name needs a token of its own. *)
+
+(* There is no PrefixDecl. `prefix ex: <http://example.org/>` introduced the
+   CURIE, and the CURIE is gone from every position it held: a shape name, a
+   property key, an expression and an interpolation hole are all bare names or
+   full IRIs in strings now. A vocabulary declaration that nothing spells is a
+   statement about nothing.
+
+   There is no import production either. `use foo/bar { a, b } as c` parsed
+   into IMPORT / IMPORT_PATH / SELECTIVE_IMPORT / ALIAS and nothing below the
+   parser read any of them: a file is compiled alone, and there is no module
+   system for a name to come from. `use` is an ordinary identifier. *)
 
 
-(* ─── Vocabulary and bindings ─── *)
+(* ─── Bindings ─── *)
 
-PrefixDecl          := 'prefix' IDENT SHAPE_SEP ABS_IRI
+(* `:=` binds a name; `=` assigns a value. One binder, and what is being bound
+   is read off the left-hand side. Every `=` in this grammar is an assignment:
+   a body property, `@subject`, and a named argument. *)
 
+(* A source binding binds BOTH the type and the relation under one name:
+   `User := io.csv("data/users.csv")` makes `User.age` a field and `from User`
+   a stream of rows. F# separates `CsvProvider<…>` from `.Load(…)` because
+   there a type is reused across files; here a binding IS one concrete source,
+   so separating them would be ceremony with no work in it. The consequence
+   for names is that a mapping body writes `User.name` and
+   never `Adults.name`, even when it draws `from Adults`. *)
 SourceDef           := IDENT DEFINE Expression
 
-(* Destructuring source: one binding per shape declared by the source schema. *)
+(* Destructuring source: one binding per shape declared by the source schema.
+   Binding is POSITIONAL — the Nth name binds the Nth shape the document
+   declares, and the name is a free local label.
+
+   No conformance program spells one: every source in the 23 is single-shape
+   (`io.csv`, `io.json`). It stays because the type side below is the same
+   production in type position and the two must not drift apart. *)
 MultiSourceDef      := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
 
-(* Type binding: the same destructuring, in type position. One catalogue
-   (`io.*`), two binders — `:=` for values, `type … =` for types (ADR-0057,
-   seventh amendment). Binding is POSITIONAL: the Nth name binds the Nth shape
-   the document declares, and the name is a free local label (tenth amendment).
-   `type` is NOT a reserved word: at top level `IDENT LBRACE` is free, and the
-   next token separates this from `SourceDef` (`:=`) and from a mapping header
-   (`:`). That matters — `type` is a plausible column name in a language whose
-   commonest predicate is `rdf:type`. *)
-TypeDef             := 'type' LBRACE IDENT (COMMA IDENT)* RBRACE ASSIGN Expression
+(* Type binding: the same destructuring, in type position. `type` is NOT a
+   reserved word — at top level `IDENT LBRACE` is free, and the next token
+   separates this from `SourceDef` (`:=` directly after the name) and from a
+   mapping header (`:`). That matters: `type` is a plausible column name in a
+   language whose commonest predicate is `rdf:type`.
+
+   Naming a shape document is MANDATORY (the ruling of 2026-08-11). A bare
+   property key takes its name from a predicate that a shape declares, so
+   without a shape you cannot write a single property, and a program with no
+   `type` binding has no mapping. *)
+TypeDef             := RenameAttr* 'type'
+                       LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
+
+(* The short name of a property is the last segment of the predicate IRI that
+   the shape declares. Two predicates whose last segments coincide are an
+   ERROR naming both IRIs — never disambiguated by the compiler, because the
+   alternative is measured: FSharp.Data's numeric-suffix scheme and its
+   singulariser produced `Purchasis` and renamed members across a minor
+   version, breaking a program in production (PLDI 2016 §6.5). The repair is
+   the author's, it is all constants, and it sits above the declaration in the
+   shape of Prisma's `@map`:
+
+       @rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)
+       type { Person } := io.shex("mixed.shex")
+
+   It goes in the program and not in the `.shex` because the vocabulary may
+   not be yours. AT_ATTR here must be `@rename`; the IDENT is one of the names
+   this binding introduces. *)
+RenameAttr          := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
+Rename              := STRING 'as' IDENT
+
+(* `as` is one of two survivors of the word (the other is AliasArg, for the
+   self-join). It is CONTEXTUAL, not reserved: it is recognised only between
+   two operands where no expression could continue, and everywhere else it is
+   an ordinary identifier. See RESERVED KEYWORDS. *)
 
 
 (* ─── Mappings ─── *)
 
 Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
 
+(* `Users : Person from Adults`. Two names, because two sources can produce
+   `Person` and a diagnostic has to be able to say which. Since
+   the mapping keeps its name, the trailing `:` that would have opened the
+   block is redundant — indentation opens it, and two `:` in one header are
+   noise. *)
 MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
 
-(* One shape, not an intersection. `A & B` parsed and then lowered to `A`
+(* The shape is a NAME — one of the names a `type { … }` binding introduced.
+   It was `IRIExpr` (a CURIE, an absolute IRI or a template), and it is a name
+   now because there is nothing left for the other two to be written against:
+   the vocabulary declaration a CURIE expanded through is gone, and the shape
+   document already names every shape it declares. A header that spelled the
+   IRI would name, a second time and in a second syntax, the very thing the
+   `type { … }` binding above it bound.
+
+   One shape, not an intersection. `A & B` parsed and then lowered to `A`
    alone, silently, because the lowering took the first IRI and dropped the
    rest — a mapping that type-checked against half of what it declared. The
-   node stays because the header needs somewhere to put its one shape; the
-   `& IRIExpr` tail is gone, and `&` is not a token.
+   node stays because the header needs somewhere to put its one shape; `&` is
+   not a token.
 
    There is no `in g` either. The named graph clause parsed into an IN_CLAUSE
    nothing read, and the corpus has nowhere to put a graph name: GraphAr is
-   vertex and edge tables, not quads. `in` is an ordinary identifier again. *)
-ShapeExpr           := IRIExpr
+   vertex and edge tables, not quads. `in` is an ordinary identifier. *)
+ShapeExpr           := IDENT
 
-MappingBody         := SubjectAttr? Property+
+(* `from` takes a full expression, and that is where the verbs live: `from
+   Adults`, `from User.where(User.age >= 18)`, `from Purchase.join(User, on =
+   Purchase.user_id == User.id)`. All three are the same production. *)
 
-(* The subject, as the FIRST line of the body — not above the header, because
-   the row binder is introduced BY the header and above it does not exist yet
-   (ADR-0057, seventh amendment §4). It is syntax with a sigil, not an
-   attribute: it is required in every mapping, and it dereferences the row,
-   which an attribute may never do.
+MappingBody         := SubjectAssign Property+
 
-   This is the first production to accept `@`. *)
-SubjectAttr         := AT_ATTR LPAREN 'iri' ASSIGN Expression RPAREN
-                       (* AT_ATTR is `@subject`; any other name is an error *)
+(* The identity: an ASSIGNMENT, required, exactly one, and the first line of
+   the body. Its right-hand side is an ordinary expression, read by the
+   ordinary expression parser, which is the point — `@subject(iri = …)`
+   had to be argued each time to be «syntax wearing a sigil» in order to
+   survive its own attribute law, and no reviewed language admits a per-row
+   expression in an attribute argument.
+
+   It is the first line of the BODY and not a line above the header because
+   the row binder is introduced BY the header: above it, `User` does not exist
+   yet.
+
+   AT_ATTR here must be `@subject`. Two obligations that no other property
+   carries, both checker-enforced and neither expressible here: the expression
+   is deterministic and bounded to the row, and every mapping producing the
+   same type declares the SAME `@subject` — otherwise error, naming both
+   mappings and both templates (the `errors/two-identities` conformance
+   program is the one that must produce that diagnostic). *)
+SubjectAssign       := AT_ATTR ASSIGN Expression
 
 Property            := PropertyLhs ASSIGN Expression
 
-PropertyLhs         := 'iri'                     (* retired by SubjectAttr *)
-                     | IRIExpr
+(* A bare name. `name = User.name`, never `ex:name = …` and never
+   `<http://…/name> = …`. The name is the last segment of the predicate IRI
+   that the shape declares — which is what `fossil-mir` already computed
+   internally, promoted to being what the author writes. *)
+PropertyLhs         := IDENT
 
 (* There is no annotation block. `p = e { a = v }` was a statement about a
    statement, and saying one needs a term that names the base triple —
    RDF-star's, which left this grammar with the triple term. Nothing below the
-   parser ever read an ANNOTATION_BLOCK, and `type-system.md` §6's T-Annot
-   spells its conclusion with a `<<s p o>>` this language no longer writes. It
-   comes back when there is something to reify with. *)
+   parser ever read an ANNOTATION_BLOCK. It comes back when there is something
+   to reify with. *)
 
 
 (* ─── Expressions (precedence-ordered, low binding → high) ─── *)
 
-Expression          := PipelineExpr
+Expression          := TernaryExpr
 
-(* L1 — Pipeline, lowest precedence, left-assoc *)
-PipelineExpr        := TernaryExpr (PIPE PipelineTarget)*
-PipelineTarget      := PostfixExpr
+(* There is no PipelineExpr. See the PIPE tombstone in the lexical layer:
+   `a |> f()` and `a.f()` were one idea with two spellings, and the dot won. *)
 
-(* L2 — Ternary, right-assoc. The `:` is SHAPE_SEP — the same token the mapping
+(* L1 — Ternary, right-assoc. The `:` is SHAPE_SEP — the same token the mapping
    header takes. There is no T_COLON: it was declared as a terminal of its own
    and nothing ever produced one, so the grammar named a token the lexer does
    not emit. What separates the two readings is the node, not the lexeme. *)
 TernaryExpr         := OrExpr (T_QUESTION OrExpr SHAPE_SEP TernaryExpr)?
 
-(* L3 — Or *)
+(* L2 — Or *)
 OrExpr              := AndExpr ('or' AndExpr)*
 
-(* L4 — And *)
+(* L3 — And *)
 AndExpr             := CompExpr ('and' CompExpr)*
 
-(* L5 — Comparison, non-associative *)
+(* L4 — Comparison, non-associative *)
 CompExpr            := AdditiveExpr (CompOp AdditiveExpr)?
 CompOp              := EQ | NEQ | LT | LE | GT | GE
 
-(* L6 — Additive *)
+(* L5 — Additive *)
 AdditiveExpr        := MulExpr ((PLUS | MINUS) MulExpr)*
 
-(* L7 — Multiplicative *)
+(* L6 — Multiplicative *)
 MulExpr             := UnaryExpr ((STAR | SLASH | PERCENT) UnaryExpr)*
 
-(* L8 — Unary *)
+(* L7 — Unary *)
 UnaryExpr           := MINUS UnaryExpr
                      | 'not' UnaryExpr
                      | PostfixExpr
 
-(* L9 — Postfix (member access, function call), tightest *)
+(* L8 — Postfix (member access, call), tightest.
+
+   `.` is the ONLY access operator and it means «member of». What is on the
+   left decides what the members are:
+
+     a namespace   `io`, `parse`, `validate`, `math`, `anon`
+                   → its functions.        `parse.float(Row.celsius)`
+     a type        `User`, `Person`, `str`, `seq`
+                   → its fields, or its operations reached through the type.
+                                           `User.email`, `str.trim(x)`
+     a value       any expression
+                   → its type's operations. `User.email.trim().lower()`
+     a relation    `Users`, `Adults`, `User`
+                   → its operations.       `User.where(User.age >= 18)`
+
+   There is no `::`. Rust's split between a compile-time path and a run-time
+   access has no referent here: a fossil program executes nothing, and
+   `User.age` is a column reference that ends up as SQL. Importing two
+   operators would import a distinction that does not exist.
+
+   THE VERBS ARE NOT IN THIS GRAMMAR, and their absence is the change.
+   `where`, `select` and `join` had productions of their own; they are
+   catalogue entries now, resolved by receiver type, and a new verb is a ROW
+   rather than a RULE. There is deliberately no generic `Verb` production to
+   put them back — that would smuggle in exactly what was removed. What
+   remains is `PostfixOp`: a member, and a call.
+
+   `str.lower(str.trim(x))` and `x.trim().lower()` are ONE catalogue entry
+   reached two ways, not two ideas — `s.len()` ≡ `str::len(&s)` in Rust,
+   `s.upper()` ≡ `str.upper(s)` in Python. The cost, accepted knowingly when
+   the rule was taken, is that the corpus contains both and it has to be
+   explained once; the `expressions` and `contacts` programs each spell both
+   on purpose.
+
+   AN EDGE IS A CALL. `buyer = Person(User.email)` is the destination type
+   applied to an expression — «the Person whose identity is built from this
+   email». It needs no production of its own: a type name is a PrimaryExpr and
+   the application is the ordinary call below. The lowering knows the type and
+   uses THE template for it — there is exactly one, because the identity is
+   unique per type, and that uniqueness is what retires `subject_skeletons`
+   and its `\u{1}` marker: an edge used to be inferred by comparing template
+   skeletons between mappings, which needed the marker and could match where
+   it must not. *)
 PostfixExpr         := PrimaryExpr (PostfixOp)*
 PostfixOp           := DOT IDENT
                      | LPAREN ArgList? RPAREN
 
 ArgList             := Arg (COMMA Arg)*
-Arg                 := NamedArg | Expression
+Arg                 := NamedArg | AliasArg | Expression
 NamedArg            := IDENT ASSIGN Expression
+
+(* The self-join, and the only other place `as` survives: `Node.join(Node as
+   Other, on = Node.parent == Other.id)`. The alias binds a second name for
+   the same source so the two sides of the join can be told apart, and the
+   mapping body then writes `Other.label` next to `Node.label`. *)
+AliasArg            := IDENT 'as' IDENT
 
 (* Primary expressions *)
 PrimaryExpr         := Literal
-                     | FieldRef
                      | IDENT
-                     | IRIExpr
                      | LPAREN Expression RPAREN
 
-FieldRef            := DOT IDENT (DOT IDENT)*
+(* There is no FieldRef. `.name` was a reference to a column of an anonymous
+   current row, and the row has a name now: every reference is qualified,
+   `User.name`. It took three pieces of machinery with it —
+   `expr_contains_free_field_refs`, `rewrite_field_refs_to_row_dot` and
+   `synthesize_closure` existed ONLY because a predicate did not name its row.
+   A leading `.` is an error. *)
+
+(* There is no IRIExpr, no PrefixedName and no LocalName. `ex:name` was the
+   third thing that looked like member access and was not (`str.slug`,
+   `users.name`, `ex:name` — three spellings, one of them not a member). The
+   two that WERE member access survive as one rule, and `ex:name` dies with
+   the CURIE: what is on the left decides the members, and a prefix is not
+   something a member can be taken of. A `:` that is not a mapping header or
+   a ternary is an error. *)
 
 
 (* ─── Literals ─── *)
 
-Literal             := INTEGER | FLOAT | STRING | TEMPLATE
+Literal             := INTEGER | FLOAT | STRING | BOOL
                      | InterpolatedString
 
-(* A string with at least one hole. Both delimiters produce the same node, so
-   nothing above the parser learns there were two spellings. *)
+(* A string with at least one hole. One spelling, one node. *)
 InterpolatedString  := STRING_OPEN (STRING_TEXT | Interpolation)* STRING_CLOSE
-Interpolation       := INTERP_OPEN (Expression | PrefixRef) RBRACE
+Interpolation       := INTERP_OPEN Expression RBRACE
 
-(* `${ex:}` — a prefix with no local part. It is NOT an expression, and it is
-   admitted HERE and nowhere else: it is the CURIE-with-holes that the seventh
-   amendment retires along with the backtick, and it dies with the last fixture
-   that spells one. *)
-PrefixRef           := IDENT SHAPE_SEP
-
-
-(* ─── IRI expressions ─── *)
-
-IRIExpr             := ABS_IRI
-                     | PrefixedName
-                     | TEMPLATE                  (* yielding IRI per context type *)
-                     | InterpolatedString        (* likewise — the position types it *)
-
-PrefixedName        := IDENT SHAPE_SEP LocalName
-                       (* lexer-level: no whitespace between IDENT and ':' *)
-LocalName           := IDENT
+(* The hole takes an EXPRESSION and nothing else. There is no PrefixRef:
+   `${ex:}` — a prefix with no local part — was the CURIE-with-holes, admitted
+   in this one position and nowhere else, and it died with the CURIE. A full
+   IRI is written out: `"https://shop.example/user/{User.email}"`. *)
 
 
 (* ─── Record literals (blank node value position) ─── *)
@@ -275,66 +493,164 @@ LocalName           := IDENT
 (*   forms are gone, and a rule that told two absent things apart is not   *)
 (*   a rule. A `{` in a mapping body is now an error, and only one.)       *)
 (*                                                                         *)
-(*  2. DOT IDENT vs FieldRef                                              *)
-(*     - `namespace.ident`    → PostfixOp on `namespace`                   *)
-(*     - `.ident` (no preceding expression) → FieldRef (current row)      *)
+(*  (There used to be a rule 2 here: DOT IDENT vs FieldRef, on whether an  *)
+(*   expression preceded the dot. FieldRef is gone; a leading `.` starts   *)
+(*   nothing.)                                                             *)
 (*                                                                         *)
-(*  3. `:` in a header vs `:` in a ternary                                *)
-(*     - Both are SHAPE_SEP; the lexer emits one token and only one.      *)
-(*     - `Name : Shape`       → consumed by MappingHeader                  *)
-(*     - `cond ? a : b`       → consumed by TernaryExpr, paired with `?`   *)
+(*  3. `:` in a header vs `:` in a ternary                                 *)
+(*     - Both are SHAPE_SEP; the lexer emits one token and only one.       *)
+(*     - `Name : Shape from …`  → consumed by MappingHeader                *)
+(*     - `cond ? a : b`         → consumed by TernaryExpr, paired with `?` *)
+(*     The old third reading — `ex:name`, a PrefixedName, which needed a   *)
+(*     no-whitespace-before-the-colon rule to keep `a : b` out of a        *)
+(*     ternary — is gone with the CURIE. The contiguity check goes with    *)
+(*     it.                                                                 *)
 (*                                                                         *)
 (*  (There used to be a rule 4 here: `<<` vs `<`. The triple term went     *)
 (*   with the RDF-specific surface, so `<<` claims nothing and `<` has     *)
-(*   only ever one reading.)                                              *)
+(*   only ever one reading. With ABS_IRI gone, `<` no longer even opens.)  *)
+(*                                                                         *)
+(*  5. `type` at top level                                                 *)
+(*     - `type {` → TypeDef.  `type :=` → SourceDef binding the name       *)
+(*       `type`.  `type :` → a mapping called `type`.  One token of        *)
+(*       lookahead, and the word stays available as a column name.         *)
+(*                                                                         *)
+(*  6. `@rename` vs `@subject`                                             *)
+(*     - Both lex as AT_ATTR; position decides. At top level, immediately  *)
+(*       above a `type` binding → RenameAttr. As the first line inside a   *)
+(*       mapping body → SubjectAssign. Neither name is valid in the        *)
+(*       other's position, and no third name is valid anywhere.            *)
+(*                                                                         *)
+(*  7. `as`                                                                *)
+(*     - Contextual, in exactly two places: `STRING as IDENT` inside       *)
+(*       `@rename`, and `IDENT as IDENT` as an argument. In both, an       *)
+(*       operand is followed by a bare IDENT, which no expression can      *)
+(*       continue, so one token of lookahead settles it and `as` stays an  *)
+(*       ordinary identifier everywhere else.                              *)
 
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
 
-(*  prefix   from     and      or       not      iri                      *)
+(*  from     and      or       not      true     false                    *)
 (*                                                                         *)
-(*  `in`, `use` and `as` were reserved for the named-graph clause and the  *)
-(*  import, and both went. A word reserved for a form the language does    *)
-(*  not have costs every program that wanted it as a column name.          *)
+(*  CONTEXTUAL, and therefore still usable as names: `type` (rule 5) and   *)
+(*  `as` (rule 7).                                                         *)
 (*                                                                         *)
-(*  There is no attribute keyword. `@name` lexes as AT_ATTR and the only  *)
-(*  production that accepts one is SubjectAttr, whose name must be        *)
-(*  `subject`. The sigil IS decided and it is `@`                         *)
-(*  (ADR-0057, fourth amendment): `#` is unlexable here, is Turtle's      *)
-(*  comment character, and is RDF's fragment separator. `@` is shared     *)
-(*  with keasy's connection aliases, which live inside string literals,   *)
-(*  so the two never cross lexically.                                     *)
+(*  NOT KEYWORDS, and this is load-bearing: `where`, `select`, `join`,     *)
+(*  `on`, `io`, `str`, `seq`, `parse`, `validate`, `math`, `anon`. Every   *)
+(*  one is an ordinary identifier that the checker resolves against a      *)
+(*  catalogue by receiver type. Reserving any of them would undo in the    *)
+(*  lexer the rule the grammar was rewritten around — the verbs stopped    *)
+(*  being grammar, and a keyword is grammar.                               *)
+(*                                                                         *)
+(*  `prefix` and `iri` were reserved and are not. `in`, `use` and `as`     *)
+(*  were reserved for the named-graph clause and the import, and both      *)
+(*  went; `as` came back contextual for the self-join and `@rename`. A     *)
+(*  word reserved for a form the language does not have costs every        *)
+(*  program that wanted it as a column name.                               *)
+(*                                                                         *)
+(*  The `@` sigil IS decided, and against `#`: `#` is unlexable here, is   *)
+(*  Turtle's comment character, and is RDF's fragment separator. `@` is    *)
+(*  shared with keasy's connection aliases, which live inside string       *)
+(*  literals, so the two never cross lexically.                            *)
 
 
 (* ═══ OPERATOR PRECEDENCE TABLE ═══ *)
 
-(*  Level   Operators                    Associativity                   *)
-(*  ─────   ─────────────────────────    ─────────────                   *)
-(*   L1     |>                            left-assoc                      *)
-(*   L2     ? :                           right-assoc                     *)
-(*   L3     or                            left-assoc                      *)
-(*   L4     and                           left-assoc                      *)
-(*   L5     == != < <= > >=               non-assoc                       *)
-(*   L6     + -                           left-assoc                      *)
-(*   L7     * / %                         left-assoc                      *)
-(*   L8     - (unary), not                right-assoc                     *)
-(*   L9     . (member), ( ) (call)        left-assoc                      *)
+(*  Level   Operators                    Associativity                    *)
+(*  ─────   ─────────────────────────    ─────────────                    *)
+(*   L1     ? :                           right-assoc                      *)
+(*   L2     or                            left-assoc                       *)
+(*   L3     and                           left-assoc                       *)
+(*   L4     == != < <= > >=               non-assoc                        *)
+(*   L5     + -                           left-assoc                       *)
+(*   L6     * / %                         left-assoc                       *)
+(*   L7     - (unary), not                right-assoc                      *)
+(*   L8     . (member), ( ) (call)        left-assoc                       *)
+(*                                                                         *)
+(*  Levels renumbered: `|>` held L1 and is gone, so everything moved up    *)
+(*  one. A citation of «L8 unary» or «L9 postfix» predates this table.     *)
 
 
 (* ═══ NOT IN MVP (productions intentionally absent) ═══ *)
 
-(*  LambdaExpr        — no user-defined multi-arg lambdas                 *)
-(*  MatchExpr         — no pattern matching (use multiple mappings)       *)
+(*  LambdaExpr        — no user-defined multi-arg lambdas                  *)
+(*  MatchExpr         — no pattern matching (use multiple mappings)        *)
 (*  IfThenElseExpr    — only via ternary `?:`                              *)
 (*  ExternDecl        — no `extern` declarations in MVP                    *)
 (*  WhileLoop/ForLoop — no imperative control flow                         *)
 (*  MutableBinding    — no mutation                                        *)
+(*  FunctionDecl      — the user declares no functions. Polymorphism lives *)
+(*                      in the library only (ruling 2 of 2026-08-11)       *)
 (*  TypeAnnotation    — no `f :: T -> U` over a value; nothing reads one   *)
 (*  ExportedDefinition— no `@export`; there is no module system to export  *)
 (*                      to, so the marker named nobody                     *)
 (*  PartialPlaceholder— no `f(_, x)`; `_` is an ordinary identifier        *)
 (*  Type parameters   — no generics                                        *)
-(*                                                                         *)
-(*  This file describes the language, not the parser's tolerance. A form   *)
-(*  no downstream stage reads does not belong here — it is a promise the   *)
-(*  language does not keep.                                                *)
+(*  `@graph`          — the quad's named graph enters by the same door as  *)
+(*                      `@subject` when the corpus schema has a place to   *)
+(*                      put one. It does not today, so there is no slot.   *)
+(*  Destination syntax— `io` names only the INPUT. Where a program writes  *)
+(*                      to has no syntax at all, and inventing one here    *)
+(*                      before it is decided is how v0.1 got its ghosts.   *)
+
+
+(* ═══ OPEN — decided nowhere, and a grammar is where that shows ═══ *)
+
+(*  These are not «not in MVP»: they are forms the language needs and no  *)
+(*  record fixes. Each was hit while writing a production above.          *)
+(*                                                                        *)
+(*  (1 was `@rename`'s repetition — whether it may appear twice over one  *)
+(*   binding and whether one may carry several `STRING as IDENT`. DECIDED *)
+(*   2026-08-12, and permissively: `RenameAttr*` with `(COMMA Rename)+`   *)
+(*   is what the parser implements. The argument is that the alternative  *)
+(*   is a LIMIT, and a limit needs a reason — one repair per binding is   *)
+(*   not a property of anything, and a vocabulary that collides twice is  *)
+(*   the same vocabulary that collided once. `+` and not `*` on `Rename`  *)
+(*   is the one restriction kept: `@rename(Person)` renames nothing and   *)
+(*   would be a line that looks like a repair and is not one.)            *)
+(*                                                                        *)
+(*  2. Short destructuring — naming fewer members than the document       *)
+(*     declares. `MultiSourceDef` and `TypeDef` are written as if the     *)
+(*     count must match, because binding is positional; nothing says so.  *)
+(*                                                                        *)
+(*  (3 was the edge constructor with more than one hole — the binding     *)
+(*   order, and whether an argument is the hole's INPUT or its finished   *)
+(*   value. DECIDED 2026-08-12 by the repo owner, and both halves the     *)
+(*   same way: POSITIONAL in order of appearance, and each argument is    *)
+(*   the hole's FINISHED VALUE. `Line(a, b)` against                      *)
+(*   `"…/{LineRow.tenant}/line/{LineRow.id}"` puts `a` where the tenant   *)
+(*   was and `b` where the id was, and the defining mapping's own         *)
+(*   expressions are replaced rather than re-applied.                     *)
+(*                                                                        *)
+(*   Three reasons, and the last two are the ones that decide it:         *)
+(*                                                                        *)
+(*   - The language then has ONE binding rule. `type { A, B } := …` binds *)
+(*     the Nth name to the Nth declared shape already; by-name binding    *)
+(*     here would be a second idea.                                       *)
+(*   - By-name would make the hole's SPELLING public API. The identifier  *)
+(*     inside `{…}` is a column of the DEFINING mapping's row; renaming   *)
+(*     it would break every call site that references the type.           *)
+(*   - «Input» is not even well-defined across mappings. The hole's       *)
+(*     expression is written in the defining mapping's scope, and that    *)
+(*     row need not exist where the constructor is called — `Orders`      *)
+(*     joins `User`, but a third mapping referencing `Person` need not.   *)
+(*     Re-applying it would resolve a name the author never wrote.        *)
+(*                                                                        *)
+(*   Arity is checked and a mismatch names both counts and the mapping    *)
+(*   that declared the identity. Zero holes is legal: a constant IRI is   *)
+(*   an identity, and its constructor takes no arguments.)                *)
+(*                                                                        *)
+(*  4. Where `select` lives when the relation came from a join. Nothing   *)
+(*     decides it: the join leaves both sides addressable under their own *)
+(*     binding names, and nothing says what a projection over that        *)
+(*     relation may name, or whether `select` may follow a join at all.   *)
+(*                                                                        *)
+(*  5. Whether a mapping may have a `@subject` and no properties.         *)
+(*     `Property+` above says no, inherited from v0.1 rather than         *)
+(*     decided; a shape that requires nothing is unwritable under it.     *)
+(*                                                                        *)
+(*  This file describes the language, not the parser's tolerance. A form  *)
+(*  no downstream stage reads does not belong here — it is a promise the  *)
+(*  language does not keep. The converse now also holds: a form the       *)
+(*  language keeps belongs here whether or not the parser has caught up.  *)

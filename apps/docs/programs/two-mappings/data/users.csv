@@ -1,0 +1,4 @@
+id,email,name,age,guardian_name
+1,alice@shop.example,Alice Northwind,34,
+2,bob@shop.example,Bob Northwind,17,Alice Northwind
+3,carol@shop.example,Carol Northwind,29,

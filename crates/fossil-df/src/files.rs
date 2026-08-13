@@ -113,12 +113,13 @@ impl GraphArData {
 /// empty batch set (a 0-row type has no schema to declare).
 ///
 /// **One row group per tile.** The only property set is the row-group row count,
-/// and it is [`DEFAULT_CHUNK_SIZE`] — the same 4,096 that addresses a tile
-/// (ADR-0042 §3.1). `parquet`'s default is 1,048,576 rows, which puts a whole
+/// and it is [`DEFAULT_CHUNK_SIZE`] — the same 4,096 rows of `dense_id` that
+/// address a tile. `parquet`'s default is 1,048,576 rows, which puts a whole
 /// five-million-row type in five row groups and leaves the footer with five
 /// `x`/`y` boxes to prune with. With this set the footer carries one box per
-/// tile, which is the index the addressed reader wants and is the whole of
-/// ADR-0056 §2.
+/// tile, and that footer IS the reader's index: arithmetic gives which tiles
+/// exist, but only the boxes give which ones intersect a window. The row-group
+/// size is the only Parquet property this function fixes.
 ///
 /// Measured at five million (`examples/tile_layout.rs`): 1,221 row groups, a
 /// 496 kB footer, 5.6 range requests and 1.38 MB per window against 22.3
@@ -159,7 +160,7 @@ mod tests {
 
     /// A row group is a tile, and the last one is the remainder.
     ///
-    /// This is the whole of ADR-0056 §2 as a test: the footer of a written type
+    /// This is the rule as a test: the footer of a written type
     /// must carry one `x`/`y` box per addressable tile, and it does that only if
     /// the row groups are cut at the tile boundary. What it cannot prove is that
     /// the boxes prune well — that is a property of the Morton order upstream,

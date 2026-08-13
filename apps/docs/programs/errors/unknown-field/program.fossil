@@ -1,0 +1,16 @@
+type { Person, Order } := io.shex("shop.shex")
+
+User     := io.csv("data/users.csv")
+Purchase := io.csv("data/orders.csv")
+
+Adults := User.where(User.age >= 18)
+
+Users : Person from Adults
+    @subject = "https://shop.example/user/{User.email}"
+    email    = User.email
+    name     = User.nmae
+
+Orders : Order from Purchase.join(User, on = Purchase.user_id == User.id)
+    @subject = "https://shop.example/order/{Purchase.id}"
+    total    = Purchase.amount
+    buyer    = Person(User.email)

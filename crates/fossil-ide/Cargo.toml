@@ -7,6 +7,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Analysis API: hover, goto-def, completion, code actions"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
@@ -21,15 +23,15 @@ fossil-hir = { path = "../fossil-hir" }
 # Plan 06-06 (SC#4): goto-def + completion consume the stdlib classification
 # catalog (Phase 5). WASM-clean, so fossil-ide stays WASM-clean. The cross-file
 # symbol / prefix infrastructure (06-03) used to be `fossil-ide-db` and is now
-# the `symbol_index` / `prefix_index` / `workspace` modules here (ADR-0045 §6).
+# the `symbol_index` / `prefix_index` / `workspace` modules here.
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
 # Plan 06-01 Spike A (Research Open Question #3): does `lsp-types` compile to
 # wasm32-unknown-unknown? If yes, fossil-ide may return `lsp_types` structs
 # directly (recommended downstream API shape); if no, it must return
-# Fossil-domain byte-range structs translated in fossil-lsp. Spike outcome
-# recorded in 06-01-SUMMARY.md + ADR-0020.
+# Fossil-domain byte-range structs translated in fossil-lsp. It does compile
+# there, so this crate returns `lsp_types` structs directly.
 lsp-types = { workspace = true }
 
 [dev-dependencies]
@@ -37,7 +39,15 @@ lsp-types = { workspace = true }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The code-action test drives `generate_split_suggestion` over a
 # `ShExDescriptor` it builds directly, the same plain-Rust helper the checker
-# calls once it has resolved the document the program names.
+# calls once it has resolved the document the program names. Named from
+# `fossil-shex`, which owns those types — `fossil-descriptors-output` stopped
+# re-exporting them, and the row it does export (`SHEX`) is a host's business,
+# not this crate's.
+fossil-shex = { path = "../fossil-shex" }
+# The completion test's host installs the `SHEX` decoder row on its `System`,
+# the way `fossil-lsp` and `fossil-wasm` do — without it a `.shex` the test can
+# read is still a document nothing decodes, and the shape-property completions
+# quietly disappear.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # Source-field completion (4th source) test: builds an `InferredDescriptor` and
 # registers it on the test `System`, driving the `.<field>` completion path

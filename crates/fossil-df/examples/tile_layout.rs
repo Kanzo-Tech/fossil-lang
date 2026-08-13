@@ -1,13 +1,14 @@
 //! What a camera window costs, in footers, requests and bytes, under the two
 //! Parquet layouts — one file per tile, or one file with 4,096-row row groups.
 //!
-//! ADR-0046 §9 asserts three things about the second layout: a 4,096-row tile is
-//! one row group, its footer is 710 bytes, and over nine windows the `x`/`y`
-//! boxes select 14–23 tiles where 13–21 are needed (overread 1.05×–1.21×). Two
-//! of those are arithmetic over a corpus that no longer exists on disk. This
-//! example writes both layouts and observes all three, plus the number ADR-0046
-//! never took: **how many requests a window costs**, which is where the two
-//! layouts actually differ.
+//! Three things were asserted about the second layout, measured on 2026-08-06
+//! over a one-million-vertex corpus: a 4,096-row tile is one row group, its
+//! footer is 710 bytes, and over nine windows the `x`/`y` boxes select 14–23
+//! tiles where 13–21 are needed (overread 1.05×–1.21×). Two of those are
+//! arithmetic over a corpus that no longer exists on disk. This example writes
+//! both layouts and observes all three, plus the number that measurement never
+//! took: **how many requests a window costs**, which is where the two layouts
+//! actually differ.
 //!
 //! # What it measures
 //!
@@ -27,14 +28,18 @@
 //!
 //! # What it does NOT measure
 //!
-//! - **No edges.** Vertices only. §3.2 of ADR-0042 measured edge placement and
-//!   this changes nothing about it: an edge tile is keyed by its source's
-//!   `dense_id` range either way, so the layout question is the same question
-//!   and the vertex file is where it is cheapest to ask.
+//! - **No edges.** Vertices only. Edge placement was settled separately and this
+//!   changes nothing about it: an edge lives in the tile of its SOURCE (CSR, not
+//!   the lowest common ancestor of its two ends), so an edge tile is keyed by the
+//!   source's `dense_id` range under either layout, the layout question is the
+//!   same question, and the vertex file is where it is cheapest to ask.
 //! - **No network.** A "request" here is a range that a reader would have to
 //!   ask for; nothing is served over HTTP, so latency and connection reuse are
-//!   out of scope. The request *counts* are what ADR-0042 §3.1's table counted,
-//!   and they are comparable to it; the milliseconds are not measured at all.
+//!   out of scope. The request *counts* are the same quantity the tile-size
+//!   measurement counted — requests per window, served over HTTP at five million,
+//!   which is what fixed the tile at 4,096 rows (78 requests and 1.48 MB, against
+//!   178 at 1,024 rows and 25 at 32,768) — so they are comparable to it; the
+//!   milliseconds are not measured at all.
 //! - **The community structure is stipulated, not computed.** `community_hierarchy`
 //!   is not run — the corpus is `k` equal-sized clusters laid out by the same
 //!   `cluster_layout` phyllotaxis-on-a-Z-grid the writer uses, then renumbered by
@@ -108,9 +113,10 @@ enum Dict {
 /// example must not depend on the crate that owns the manifest.
 const TILE_ROWS: usize = 4_096;
 /// How many windows to pan across. Nine, so the overread band is comparable to
-/// the nine ADR-0046 §9 reports.
+/// the nine windows the 2026-08-06 measurement reported.
 const WINDOWS: usize = 9;
-/// Vertices a window is sized to contain, matching the ADR-0042 harness.
+/// Vertices a window is sized to contain, matching the harness the tile-size and
+/// edge-placement measurements used.
 const WINDOW_VERTICES: usize = 20_000;
 /// The `parquet` crate version this measurement is about. There is no runtime
 /// way to ask, so it is the workspace pin restated; if `Cargo.toml` moves and
@@ -122,16 +128,19 @@ const PARQUET_PIN: &str = "58 (workspace pin)";
 // ──────────────────────────────────────────────────────────────────────────
 
 /// The four drawing columns, in `dense_id` order — row `i` **is** `dense_id` `i`
-/// (ADR-0042 §3.5: the drawing tile carries geometry and nothing else).
+/// — the drawing tile carries geometry and nothing else, and the properties go
+/// in a sidecar fetched only when something has to be NAMED.
 struct Corpus {
     x: Vec<f32>,
     y: Vec<f32>,
     cluster: Vec<u32>,
-    /// The pre-Morton id, which is what the subject IRI is built from — a
-    /// stable identity that the renumbering scrambles (ADR-0042 §3.4).
+    /// The pre-Morton id, which is what the subject IRI is built from. `dense_id`
+    /// is an ADDRESS and the subject IRI is the identity: redoing the layout
+    /// renumbers every `dense_id`, so it cannot also be what a vertex is.
     orig: Vec<u32>,
-    /// Carry `subject` and `community` as well as the four drawing columns.
-    /// ADR-0042 §3.5 decided the drawing tile carries geometry only; the wide
+    /// Carry `subject` and `community` as well as the four drawing columns. The
+    /// drawing tile carries geometry only — measured, the four columns cost 3
+    /// requests and 36.0 kB against 4 and 37.0 kB for the six — and the wide
     /// shape is here because the footer figure this measurement is checked
     /// against was taken on a corpus that had them.
     full: bool,
@@ -254,9 +263,11 @@ fn build_corpus(n: usize, k: u32, full: bool) -> Corpus {
     }
 }
 
-/// The drawing schema — `dense_id`, `x`, `y`, `cluster_id` (ADR-0042 §3.5) —
-/// or that plus `subject` and `community`, the six columns ADR-0042 §3.4
-/// weighed.
+/// The drawing schema — `dense_id`, `x`, `y`, `cluster_id`, the geometry and
+/// nothing else — or that plus `subject` and `community`, the six columns that
+/// were weighed when the IRI's cost was measured: `subject` is 8.016 compressed
+/// bytes per row against 9.23 for all four drawing columns together, so carrying
+/// it makes the vertex tile 1.87×.
 fn schema(full: bool) -> Arc<Schema> {
     let mut fields = vec![
         Field::new("dense_id", DataType::UInt32, false),
@@ -288,7 +299,7 @@ fn batch(c: &Corpus, lo: usize, hi: usize) -> RecordBatch {
                 .map(|o| format!("https://example.org/v/{o}")),
         )));
         // `community` is the coarse level of the hierarchy — eight groups, the
-        // shape ADR-0042 §3 measured at five million.
+        // shape measured at five million.
         cols.push(Arc::new(UInt32Array::from_iter_values(
             c.cluster[lo..hi].iter().map(|c| c % 8),
         )));
@@ -321,7 +332,7 @@ fn write_per_tile(dir: &Path, c: &Corpus, n: usize) -> Vec<PathBuf> {
 
 /// Layout B — one file, row groups of [`TILE_ROWS`]. This encoder does not
 /// exist in the tree; it is `batches_to_parquet` with the row-group size set,
-/// which is the whole of ADR-0046 §9's proposal §2. `dictionary` is the
+/// which is the whole of the proposal this example exists to check. `dictionary` is the
 /// `parquet` default (on) unless a caller says otherwise — it is a parameter
 /// because on these four columns the default is not free, and §1 shows what it
 /// costs.
@@ -358,7 +369,7 @@ fn write_single(path: &Path, c: &Corpus, n: usize, dictionary: Dict) {
 struct FileFacts {
     file_bytes: u64,
     /// Thrift `FileMetaData` plus the 4-byte length and the `PAR1` trailer —
-    /// what ADR-0046 calls "the footer".
+    /// what "the footer" means in the 710-byte figure this example checks.
     footer_bytes: u64,
     /// `ColumnIndex` + `OffsetIndex`, which sit before the footer and are what
     /// "arrow-rs writes the page index by default" is a claim about.

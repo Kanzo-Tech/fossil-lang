@@ -36,47 +36,49 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Build the `fossil` binary once per test process via `cargo build`.
-/// Memoised through `OnceLock` so a future second test in this file does not
-/// pay the build cost. Cargo's `--quiet` no-op rebuild is cheap when the binary
-/// is already up-to-date from a sibling test run.
+/// The `fossil` binary this test drives — cargo's own path for it.
+///
+/// **It used to shell out to `cargo build` and then hard-code
+/// `<repo>/target/debug/fossil`**, which is a test that can pass against a
+/// binary it did not build: with `CARGO_TARGET_DIR` set — which is how this
+/// repository's own instructions say to drive the suite — the build lands
+/// elsewhere and that path holds whatever was left there last. Measured on
+/// 2026-08-13: the file at the hard-coded path was **29 hours old**, older than
+/// the parser rewrite, the provider registry, `@rename` and the edge
+/// constructor. Everything this file reported that day was about a compiler
+/// nobody had edited.
+///
+/// `CARGO_BIN_EXE_<name>` is cargo's answer: it is set for an integration test
+/// and points at the binary of THIS build, which cargo has already built before
+/// the test runs. No path to guess, and no `cargo build` spawned from inside a
+/// test — the same fix `crates/fossil-lsp/tests/` took.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args(["build", "--quiet", "-p", "fossil-cli", "--bin", "fossil"])
-            .status()
-            .expect("spawn cargo build");
-        assert!(status.success(), "cargo build -p fossil-cli failed");
-
-        let bin = repo_root().join("target").join("debug").join("fossil");
-        assert!(
-            bin.exists(),
-            "fossil binary not found at {} after cargo build",
-            bin.display(),
-        );
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
-/// Materialise a fresh per-test working directory containing
-/// `examples/hello.fossil` + `examples/users.csv`. The path is unique per
-/// process — see `common::unique_workdir`, which explains why the test name
-/// alone was not enough.
+/// Materialise a fresh per-test working directory holding everything the
+/// program NAMES: `hello.fossil`, the `users.csv` it reads, and the
+/// `hello.shex` that is its output contract. The path is unique per process —
+/// see `common::unique_workdir`, which explains why the test name alone was not
+/// enough.
+///
+/// **The shape document is not optional and its absence is silent.** Ruling 3
+/// of 2026-08-11 makes a property key the last segment of a predicate IRI the
+/// shape declares, so a workdir without `hello.shex` gives the mapping no
+/// output contract, `name` resolves to nothing, and the run writes a `Person`
+/// with no `name` column — five vertices, no error, and the content assertions
+/// below are the only thing that would catch it. The list is spelled out here
+/// rather than globbed because a file this test needs and does not copy is
+/// exactly that failure.
 fn fresh_workdir(test_name: &str) -> PathBuf {
     let root = repo_root();
     let tmp = common::unique_workdir("fossil-walking-skeleton", test_name);
     std::fs::create_dir_all(tmp.join("examples")).expect("create examples subdir");
-    std::fs::copy(
-        root.join("examples").join("hello.fossil"),
-        tmp.join("examples").join("hello.fossil"),
-    )
-    .expect("copy hello.fossil");
-    std::fs::copy(
-        root.join("examples").join("users.csv"),
-        tmp.join("examples").join("users.csv"),
-    )
-    .expect("copy users.csv");
+    for f in ["hello.fossil", "users.csv", "hello.shex"] {
+        std::fs::copy(root.join("examples").join(f), tmp.join("examples").join(f))
+            .unwrap_or_else(|e| panic!("copy {f}: {e}"));
+    }
     tmp
 }
 

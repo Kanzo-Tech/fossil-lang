@@ -7,47 +7,72 @@
 //! edge-join calca el SQL del writer (`e.src_iri=s.subject`, `e.dst_iri=t.subject`,
 //! CSR `ORDER BY src_dense,dst_dense` / CSC `ORDER BY dst_dense,src_dense`).
 
-#![cfg(not(target_arch = "wasm32"))]
+//! ⚠️ **RED, and the premise is what died** — see the report of 2026-08-12.
+//!
+//! `placedBy` can only be an edge if the shape declares its range to be a shape
+//! (`ex:placedBy @ex:Person`); the template-skeleton guess that used to infer
+//! one is deleted. But `expected_value_ty` turns a shape-ref constraint into an
+//! expectation of `Iri`, while `HirExpr::Interpolation` OUTSIDE `@subject`
+//! synthesises `String` — and `String` is not a subtype of `Iri`. So the same
+//! document that makes the executor emit the edge makes the checker refuse the
+//! body:
+//!
+//! ```text
+//! expected `Iri`, got `String` (expected because of the constraint at Span { start: 86, end: 112 })
+//! ```
+//!
+//! An edge is spelled by NAMING THE DESTINATION TYPE: `buyer = Person(User.email)`
+//! — "the Person whose identity is built from this email" — so the lowering knows
+//! the type and uses that type's one identity template. That syntax does not exist
+//! yet (step 7), and until it does there is no way to write an edge that both
+//! compiles and reaches the executor. Splitting the
+//! document in two (a lenient one registered for the checker, the typed one
+//! passed as the descriptor) makes both tests pass, which is how the executor
+//! half below was proved intact; it is not a fixture anyone should ship.
 
-use std::sync::Arc;
+#![cfg(not(target_arch = "wasm32"))]
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::UInt32Array;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+
+mod support;
 
 const PROGRAM: &str = "\
 prefix ex: <https://example.org/>
+type { Person, Order } = io.shex(\"graph.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 orders := io.csv(\"tests/fixtures/orders.csv\")
 
 Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+    @subject = `${ex:}person/${.id}`
+    name = .name
 
 Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
-    ex:total = .amount
+    @subject = `${ex:}order/${.order_id}`
+    placedBy = `${ex:}person/${.user_id}`
+    total = .amount
 ";
+
+const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
+
+fn descriptor() -> fossil_df::OutputDescriptorKind {
+    fossil_df::OutputDescriptorKind::ShEx(
+        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX).expect("parse graph.shex"),
+    )
+}
 
 #[tokio::test]
 async fn execute_graph_resolves_edges_to_dense_ids() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .expect("execute_graph runs both phases");
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor(), &std::collections::HashMap::new())
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Two vertex types (source order: Person, Order); one edge (placedBy).
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -91,20 +116,13 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
 
 #[tokio::test]
 async fn execute_graph_emits_manifests_and_run_status() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .expect("execute_graph");
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor(), &std::collections::HashMap::new())
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // ── Manifests: graph index + per-type YAML, W0b paths (Type casing) ──
     let manifests = graph.manifests().expect("manifests serialize");

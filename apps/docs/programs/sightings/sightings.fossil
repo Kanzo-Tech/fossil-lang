@@ -1,0 +1,16 @@
+type { Station, Sighting } := io.shex("sightings.shex")
+
+// #region bindings
+Site    := io.csv("data/stations.csv")
+Reading := io.json("data/sightings.json")
+// #endregion bindings
+
+Stations : Station from Site
+    @subject  = "https://birds.example/station/{Site.code}"
+    name      = Site.name
+    elevation = Site.elevation
+
+Sightings : Sighting from Reading
+    @subject = "https://birds.example/sighting/{Reading.id}"
+    species  = Reading.species
+    count    = Reading.count

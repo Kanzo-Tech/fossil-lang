@@ -5,15 +5,15 @@
 //! and posts the JSON-RPC response back. Notifications produce no
 //! response but trigger `textDocument/publishDiagnostics`.
 //!
-//! Architectural seam: ADR-0024 (`fossil-wasm` IS the LSP worker — NOT a
-//! recompiled `fossil-lsp`; the cfg-tripwire on `fossil-lsp` stays). The
+//! Architectural seam: `fossil-wasm` IS the LSP worker — NOT a recompiled
+//! `fossil-lsp`, and the cfg-tripwire on `fossil-lsp` stays. The
 //! Phase-6 LSP capabilities + handlers (`fossil-lsp/src/main.rs`) are the
 //! 1:1 model; the only difference is the wire channel (postMessage vs
 //! stdio).
 //!
 //! ## Cancellation
 //!
-//! Same revision-bump trigger as `fossil-lsp` (ADR-0022) — no new
+//! Same revision-bump trigger as `fossil-lsp` — no new
 //! mechanism. `update_file` calls `set_text` via the Salsa `Setter`; any
 //! in-flight analysis observes the new revision at its next cooperative
 //! checkpoint.

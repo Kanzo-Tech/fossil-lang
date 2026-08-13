@@ -1,11 +1,13 @@
 //! `InferredDescriptor` — input schema produced by host-side runtime introspection
 //! (`DuckDB` `DESCRIBE read_csv_auto` in the playground; `duckdb::Connection` in
-//! the native CLI). See ADR-0037.
+//! the native CLI). A host ships no CSVW sidecar: it introspects the source and
+//! hands over the column list.
 //!
 //! Salsa-friendly: concrete struct (NOT trait object), Send + Sync + Clone +
-//! Hash + Eq, serde-(de)serialisable. The host passes descriptors in via the
-//! `fossil-base::System` accessor (mirrors `read_file` pattern, ADR-0020) BEFORE
-//! invoking `compile()`. Rust never does network IO from the WASM-gated crates.
+//! Hash + Eq, serde-(de)serialisable. The host passes descriptors in through an
+//! accessor on the ambient `fossil-base::System`, reached the same way
+//! `read_file` is — never a query key, never interned — BEFORE invoking
+//! `compile()`. Rust never does network IO from the WASM-gated crates.
 //!
 //! Implements `InputDescriptor` so existing forward-propagation code paths in
 //! `fossil-hir` can dispatch by `&dyn InputDescriptor` without specialisation
@@ -33,7 +35,7 @@ pub struct InferredColumn {
 ///
 /// Identified by the source **URI**, which is what the descriptor is about: a
 /// binding name is a name for the *program*'s convenience, and two of them can
-/// point at one file. See ADR-0050.
+/// point at one file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InferredDescriptor {
     /// The source URI exactly as written in the program — the string inside
@@ -50,8 +52,13 @@ pub struct InferredDescriptor {
     /// `mtime` + size, a host that has a strong `ETag` or a content digest
     /// writes that instead, and a host that cannot cheaply tell writes `""` —
     /// which [`crate::DescriptorCache::is_fresh`] reads as "never fresh", so
-    /// that source is re-introspected every time. See ADR-0050 for why the
-    /// native token is not a hash of the bytes.
+    /// that source is re-introspected every time. It is NOT a hash of the bytes,
+    /// and deliberately: hashing means reading the whole source to decide
+    /// whether the source needs reading, which makes the cache cost more than
+    /// the `DESCRIBE` it saves. `mtime` + size is two fields of one `stat`. Its
+    /// one dangerous failure — saying "unchanged" when it changed — needs a file
+    /// restored with the same `mtime` AND the same size, which is what pairing
+    /// the two narrows.
     pub freshness_token: String,
 }
 

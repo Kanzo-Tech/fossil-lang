@@ -25,6 +25,22 @@
 //! once, attaching `Diagnostic.suggestion_source` populated from
 //! [`generate_split_suggestion`].
 //!
+//! ## The way out is the neutral vocabulary
+//!
+//! [`ShExDescriptor::to_output_shapes`] lowers the resolved table into
+//! [`fossil_graph_schema::OutputShapes`] — shapes, predicates, datatypes,
+//! targets, [`fossil_graph_schema::Occurs`], and every lowering error as a
+//! [`fossil_graph_schema::Rejection`]. No `shex_ast` or `rudof_iri` type
+//! crosses, which is what lets the middle of the compiler read a shape document
+//! without linking `ShEx` — the cut `0e6898d` made for `fossil-mir`.
+//!
+//! [`ShExDescriptor::to_graph_schema`] goes through it rather than beside it, so
+//! there is one lowering and not two. The `ShEx`-typed surface
+//! ([`ShapeBinding`], [`ResolvedConstraint`], [`ConstraintValue`]) stays for the
+//! callers that genuinely want the AST — the INPUT descriptor derives source
+//! column types from it, and [`generate_split_suggestion`] re-emits `ShEx`'s own
+//! syntax, which only a crate that knows the syntax can do.
+//!
 //! ## WASM safety (Pitfall 1)
 //!
 //! We use ONLY `Schema::from_reader` (byte-stream input) — never
@@ -44,7 +60,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use fossil_graph_schema::{
-    Cardinality as GsCardinality, EdgeType, GraphSchema, NodeType, Primitive, Property,
+    GraphSchema, Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection,
+    Shape as OutputShape, local_name,
 };
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
@@ -66,8 +83,6 @@ use shex_ast::TripleExprWrapper;
 pub struct ShapeBinding {
     /// The shape's declared IRI (after prefix resolution).
     pub iri: IriS,
-    /// Whether the shape is `closed`.
-    pub closed: bool,
     /// Flattened triple constraints — `TripleExpr::Ref`s have been resolved
     /// in-line; `TripleExpr::EachOf` branches have been collapsed; encountered
     /// `OneOf` nodes are NOT included here (their rejection is logged in
@@ -84,72 +99,45 @@ pub struct ResolvedConstraint {
     /// for now — plan 03-05 narrows this into a `Ty<'db>` against the
     /// `Primitive` lattice.
     pub value_expr: Option<ShapeExpr>,
-    /// Cardinality decoded from `ShEx`'s `(min, max)` integer encoding.
-    pub cardinality: Cardinality,
+    /// How many values the predicate may carry, decoded from `ShEx`'s
+    /// `(min, max)` integer encoding by [`occurs_from_shex`].
+    pub cardinality: Occurs,
 }
 
-/// Decoded cardinality of a [`ResolvedConstraint`].
+/// Decode `ShEx`'s `(min, max)` `Option<i32>` encoding into [`Occurs`].
 ///
-/// Matches the shape from `RESEARCH.md` §"Bidirectional Checker Shape"
-/// Example 2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cardinality {
-    Exact(u32),
-    ZeroOrOne,
-    OneOrMore,
-    ZeroOrMore,
-    Range { min: u32, max: Option<u32> },
-}
-
-impl Cardinality {
-    /// Convert from `ShEx`'s `(min, max)` `Option<i32>` encoding.
-    ///
-    /// Per [the ShEx 2.1 spec](https://shex.io/shex-semantics/), `max = -1`
-    /// means "unbounded" in the JSON form. `(None, None)` means "exactly 1"
-    /// (the default).
-    #[must_use]
-    pub fn from_shex(min: Option<i32>, max: Option<i32>) -> Self {
-        // Negative `lo`/`hi` values shouldn't occur in well-formed schemas
-        // (ShEx 2.1 only uses `-1` to encode "unbounded" in `max`), but if
-        // they do we clamp to zero rather than panicking.
-        let to_u32 = |v: i32| u32::try_from(v.max(0)).unwrap_or(0);
-        match (min, max) {
-            (None, None) => Self::Exact(1),
-            (Some(0), Some(1)) => Self::ZeroOrOne,
-            (Some(0), Some(-1)) => Self::ZeroOrMore,
-            (Some(1), Some(-1)) => Self::OneOrMore,
-            (Some(lo), Some(-1)) => Self::Range {
-                min: to_u32(lo),
-                max: None,
-            },
-            (Some(lo), Some(hi)) => Self::Range {
-                min: to_u32(lo),
-                max: Some(to_u32(hi)),
-            },
-            (None, Some(hi)) => Self::Range {
-                min: 1,
-                max: Some(to_u32(hi)),
-            },
-            (Some(lo), None) => Self::Range {
-                min: to_u32(lo),
-                max: Some(to_u32(lo)),
-            },
-        }
-    }
-
-    /// `true` iff at most one value is allowed — `Exact(_)` / `ZeroOrOne`
-    /// (or a `Range` with `max <= 1`). Single-valued constraints collapse
-    /// duplicate subjects; `OneOrMore` / `ZeroOrMore` keep every value (and, for
-    /// the RDF provider, become a `LIST` column). The single source of this
-    /// truth, shared by the input pivot (`fossil-provider-rdf`) and the output
-    /// decomposition (`fossil-sinks`).
-    #[must_use]
-    pub const fn is_single_valued(self) -> bool {
-        match self {
-            Self::Exact(_) | Self::ZeroOrOne => true,
-            Self::OneOrMore | Self::ZeroOrMore => false,
-            Self::Range { max, .. } => matches!(max, Some(m) if m <= 1),
-        }
+/// Per [the ShEx 2.1 spec](https://shex.io/shex-semantics/), `max = -1` means
+/// "unbounded" in the JSON form, and `(None, None)` means "exactly 1" (the
+/// default). Negative `min`/`max` values other than that one `-1` shouldn't
+/// occur in a well-formed schema; they clamp to zero rather than panicking.
+///
+/// This produces the pair directly. It used to route through a five-variant
+/// enum that could spell one cardinality two ways — `Exact(3)` and
+/// `Range { min: 3, max: Some(3) }` — and disagree with itself about whether
+/// that was single-valued. `fossil-graph-schema`'s
+/// `collapse_pins_every_shape_the_old_enum_could_take` pins every case the enum
+/// could take, including that unreachable divergence.
+#[must_use]
+pub fn occurs_from_shex(min: Option<i32>, max: Option<i32>) -> Occurs {
+    let to_u32 = |v: i32| u32::try_from(v.max(0)).unwrap_or(0);
+    match (min, max) {
+        (None, None) => Occurs::ONE,
+        (Some(lo), Some(-1)) => Occurs {
+            min: to_u32(lo),
+            max: None,
+        },
+        (Some(lo), Some(hi)) => Occurs {
+            min: to_u32(lo),
+            max: Some(to_u32(hi)),
+        },
+        (None, Some(hi)) => Occurs {
+            min: 1,
+            max: Some(to_u32(hi)),
+        },
+        (Some(lo), None) => Occurs {
+            min: to_u32(lo),
+            max: Some(to_u32(lo)),
+        },
     }
 }
 
@@ -240,11 +228,6 @@ fn shape_label_iri(label: &ShapeExprLabel) -> String {
     }
 }
 
-/// The local name of an IRI — the substring after the last `#` or `/`.
-fn local_name(iri: &str) -> &str {
-    iri.rsplit(['#', '/']).next().unwrap_or(iri)
-}
-
 /// The destination shape IRIs of an edge constraint — empty for a literal/opaque
 /// property. A single shape `Ref` yields one; a value disjunction `@<A> OR @<B>`
 /// (`ShapeOr` of refs) yields all of them, so the canonical model emits one edge
@@ -264,23 +247,86 @@ fn edge_targets(value_expr: Option<&ShapeExpr>) -> Vec<String> {
     }
 }
 
-/// The canonical datatype of a non-edge constraint: a typed literal maps through
-/// the XSD lattice (unknown datatypes fall back to `String`); a `nodeKind IRI`
-/// node is an opaque IRI-valued property (`AnyUri`); anything else defaults to
-/// `String` (the permissive walking-skeleton column).
-fn datatype_of(value_expr: Option<&ShapeExpr>) -> Primitive {
+/// The datatype a constraint's `valueExpr` narrows the value to, or `None` when
+/// **the document did not narrow it** — `PropertyConstraint::datatype`'s
+/// contract.
+///
+/// `Some(p)` for a typed literal whose datatype IRI is in the XSD lattice;
+/// `Some(Primitive::AnyUri)` for a `nodeKind IRI` node, which is an opaque
+/// IRI-valued column and not an edge; `None` for everything else, **including an
+/// XSD datatype outside the lattice**.
+///
+/// `None` becomes `Primitive::String` in `OutputShapes::to_graph_schema`, which
+/// is exactly what the `Primitive`-valued predecessor of this function returned
+/// for those cases — the permissive walking-skeleton column. The `Option` is
+/// what lets a consumer tell "the document said `String`" from "the document
+/// said nothing", which a bare `Primitive::String` cannot.
+fn datatype_of(value_expr: Option<&ShapeExpr>) -> Option<Primitive> {
     match value_expr {
         Some(ShapeExpr::NodeConstraint(nc)) => nc.datatype().map_or_else(
-            || {
-                if matches!(nc.node_kind(), Some(NodeKind::Iri)) {
-                    Primitive::AnyUri
-                } else {
-                    Primitive::String
-                }
-            },
-            |dt| Primitive::from_xsd_iri(&iri_ref_to_string(&dt)).unwrap_or(Primitive::String),
+            || matches!(nc.node_kind(), Some(NodeKind::Iri)).then_some(Primitive::AnyUri),
+            |dt| Primitive::from_xsd_iri(&iri_ref_to_string(&dt)),
         ),
-        _ => Primitive::String,
+        _ => None,
+    }
+}
+
+/// The predicate IRIs a single `OneOf` branch constrains, in order.
+///
+/// Recurses through `EachOf`. A nested `OneOf` and a `Ref` contribute nothing
+/// and are not an error here: the outer `OneOf` is already rejected, and this
+/// walk exists only to *name* what the split would be splitting.
+fn branch_predicates(expr: &TripleExpr, prefixmap: &PrefixMap, out: &mut Vec<String>) {
+    match expr {
+        TripleExpr::TripleConstraint { predicate, .. } => {
+            if let Some(iri) = resolve_iri_ref(predicate, prefixmap) {
+                out.push(iri.to_string());
+            }
+        }
+        TripleExpr::EachOf { expressions, .. } => {
+            for w in expressions {
+                branch_predicates(&w.te, prefixmap, out);
+            }
+        }
+        TripleExpr::OneOf { .. } | TripleExpr::Ref(_) => {}
+    }
+}
+
+/// Lower one lowering error to the format-neutral [`Rejection`].
+///
+/// The one thing that does not survive is the `OneOf` AST node itself, which
+/// [`SuggestionSeed`] clones so the emitter can regenerate a
+/// split-into-N-mappings suggestion. [`Rejection::Disjunction`] carries each
+/// branch's predicate IRIs instead — enough to name the split with no `ShEx`
+/// type in hand, not enough to re-emit the document's own syntax. Re-emitting
+/// syntax stays here, with [`generate_split_suggestion`], because it is the
+/// decoder that knows the syntax.
+fn rejection_of(err: &ShExLoweringError, prefixmap: &PrefixMap) -> Rejection {
+    match err {
+        ShExLoweringError::OneOfRejection(r) => {
+            let disjuncts = match &r.suggestion_seed.one_of_node {
+                TripleExpr::OneOf { expressions, .. } => expressions
+                    .iter()
+                    .map(|w| {
+                        let mut out = Vec::new();
+                        branch_predicates(&w.te, prefixmap, &mut out);
+                        out
+                    })
+                    .collect(),
+                // Unreachable: the seed is only ever built from a `OneOf`.
+                _ => Vec::new(),
+            };
+            Rejection::Disjunction {
+                shape_iri: r.shape_iri.to_string(),
+                disjuncts,
+            }
+        }
+        ShExLoweringError::CyclicShapeRef { path } => Rejection::CyclicRef { path: path.clone() },
+        ShExLoweringError::UnresolvedRef { label, in_shape } => Rejection::UnresolvedRef {
+            label: label.clone(),
+            in_shape: in_shape.clone(),
+        },
+        ShExLoweringError::MalformedSchema(m) => Rejection::Malformed(m.clone()),
     }
 }
 
@@ -352,9 +398,8 @@ pub struct ShExDescriptor {
     /// cost: `values()` handed back six different orders in six parses, because
     /// Rust seeds its hasher per process. Anything downstream that iterates —
     /// [`Self::to_graph_schema`] builds `nodes`/`edges` from this — was
-    /// non-deterministic across runs, and ADR-0057's tenth amendment binds
-    /// `type { A, B } = io.shex(...)` positionally, which needs this order to
-    /// be the file's. rudof preserves it for both `ShExC` and `ShExJ`; we were
+    /// non-deterministic across runs, and `type { A, B } = io.shex(...)` binds
+    /// positionally, which needs this order to be the file's. rudof preserves it for both `ShExC` and `ShExJ`; we were
     /// the ones throwing it away on insert.
     shapes: Vec<ShapeBinding>,
     /// Resolved IRI → index into `shapes`. Lookup only; never iterated.
@@ -391,56 +436,51 @@ impl ShExDescriptor {
         Self::from_schema(schema)
     }
 
+    /// Lower this `ShEx` schema into the format-neutral vocabulary — the
+    /// decoded document the middle of the compiler reads instead of a schema
+    /// language. No `shex_ast` or `rudof_iri` type survives the crossing.
+    ///
+    /// Shapes keep the document's declaration order (`type { A, B } = io.shex(…)`
+    /// binds by position). Every lowering error
+    /// becomes a [`Rejection`]; the shapes that DID lower are still there, which
+    /// is what the `ShEx`-typed original did too.
+    #[must_use]
+    pub fn to_output_shapes(&self) -> OutputShapes {
+        let prefixmap = self.schema.prefixmap().unwrap_or_default();
+        let shapes = self
+            .shapes()
+            .map(|binding| OutputShape {
+                iri: binding.iri.to_string(),
+                properties: binding
+                    .constraints
+                    .iter()
+                    .map(|c| PropertyConstraint {
+                        predicate: c.predicate.to_string(),
+                        datatype: datatype_of(c.value_expr.as_ref()),
+                        targets: edge_targets(c.value_expr.as_ref()),
+                        occurs: c.cardinality,
+                    })
+                    .collect(),
+            })
+            .collect();
+        let rejections = self
+            .errors
+            .iter()
+            .map(|e| rejection_of(e, &prefixmap))
+            .collect();
+        OutputShapes::new(shapes, rejections)
+    }
+
     /// Lower this `ShEx` schema into the canonical, format-neutral
     /// [`GraphSchema`] — the single output model the MIR/executor consume,
-    /// shared with the (future) SHACL path. Each shape becomes a [`NodeType`]
-    /// (keyed by its `rdf:type` IRI); each triple constraint becomes either an
-    /// [`EdgeType`] (value is a shape ref) or a literal/IRI [`Property`]. A value
-    /// disjunction (`@<A> OR @<B>`) emits **one edge per destination**, sharing
-    /// the predicate label — the reference RDF→property-graph model.
+    /// shared with the (future) SHACL path.
+    ///
+    /// One path, not two: this is [`Self::to_output_shapes`] followed by
+    /// [`OutputShapes::to_graph_schema`], so a `ShEx` document and a decoded
+    /// document that says the same thing cannot lower differently.
     #[must_use]
     pub fn to_graph_schema(&self) -> GraphSchema {
-        let mut nodes = Vec::new();
-        let mut edges = Vec::new();
-        for binding in self.shapes() {
-            let node_iri = binding.iri.to_string();
-            let label = local_name(&node_iri).to_string();
-            let mut properties = Vec::new();
-            for c in &binding.constraints {
-                let pred_iri = c.predicate.to_string();
-                let name = local_name(&pred_iri).to_string();
-                let cardinality = if c.cardinality.is_single_valued() {
-                    GsCardinality::Single
-                } else {
-                    GsCardinality::Multi
-                };
-                let targets = edge_targets(c.value_expr.as_ref());
-                if targets.is_empty() {
-                    properties.push(Property {
-                        name,
-                        datatype: datatype_of(c.value_expr.as_ref()),
-                        iri: Some(pred_iri),
-                        cardinality,
-                    });
-                } else {
-                    for t in targets {
-                        edges.push(EdgeType {
-                            label: name.clone(),
-                            iri: Some(pred_iri.clone()),
-                            source: label.clone(),
-                            destination: local_name(&t).to_string(),
-                            cardinality,
-                        });
-                    }
-                }
-            }
-            nodes.push(NodeType {
-                label,
-                iri: Some(node_iri),
-                properties,
-            });
-        }
-        GraphSchema { nodes, edges }
+        self.to_output_shapes().to_graph_schema()
     }
 
     /// Build the resolved constraint table from an already-parsed schema.
@@ -499,7 +539,7 @@ impl ShExDescriptor {
     }
 
     /// Iterator over every resolved shape binding, **in declaration order**.
-    /// Callers may rely on that: ADR-0057's tenth amendment binds by position.
+    /// Callers may rely on that: `type { A, B } = io.shex(…)` binds by position.
     pub fn shapes(&self) -> impl Iterator<Item = &ShapeBinding> {
         self.shapes.iter()
     }
@@ -557,9 +597,12 @@ fn lower_shape_decl(
         );
     }
 
+    // `shape.closed` is read here and thrown away, deliberately: the field it
+    // used to fill is gone from `fossil_graph_schema::Shape`. Nothing downstream
+    // ever read it, and a bare property key is resolved against the declared
+    // predicates either way — see the tombstone in `graph-schema/src/shapes.rs`.
     Some(ShapeBinding {
         iri: shape_iri,
-        closed: shape.closed.unwrap_or(false),
         constraints,
     })
 }
@@ -626,7 +669,7 @@ fn walk_triple_expr(
             out.push(ResolvedConstraint {
                 predicate: pred_iri,
                 value_expr: value_expr.as_ref().map(|b| (**b).clone()),
-                cardinality: Cardinality::from_shex(*min, *max),
+                cardinality: occurs_from_shex(*min, *max),
             });
         }
         TripleExpr::EachOf { expressions, .. } => {
@@ -1033,7 +1076,7 @@ mod tests {
             binding.constraints[0].predicate.to_string(),
             "http://example.org/name"
         );
-        assert_eq!(binding.constraints[0].cardinality, Cardinality::Exact(1));
+        assert_eq!(binding.constraints[0].cardinality, Occurs::ONE);
         assert!(desc.lowering_errors().is_empty());
     }
 
@@ -1047,44 +1090,77 @@ mod tests {
         );
     }
 
+    /// Every `(min, max)` pair `ShEx` can hand over, and the `Occurs` it decodes
+    /// to. The rows are the five cases the enum this replaces had names for,
+    /// plus the three encodings that fell through to its `Range` arm — the pair
+    /// is produced directly now, so there is no intermediate spelling to drift
+    /// from. `(None, Some(-1))` is degenerate in both: `-1` only means
+    /// "unbounded" beside an explicit `min`.
     #[test]
-    fn cardinality_from_shex_min_none_max_none() {
-        assert_eq!(Cardinality::from_shex(None, None), Cardinality::Exact(1));
-    }
-
-    #[test]
-    fn cardinality_from_shex_zero_one() {
-        assert_eq!(
-            Cardinality::from_shex(Some(0), Some(1)),
-            Cardinality::ZeroOrOne
-        );
-    }
-
-    #[test]
-    fn cardinality_from_shex_zero_unbounded() {
-        assert_eq!(
-            Cardinality::from_shex(Some(0), Some(-1)),
-            Cardinality::ZeroOrMore
-        );
-    }
-
-    #[test]
-    fn cardinality_from_shex_one_unbounded() {
-        assert_eq!(
-            Cardinality::from_shex(Some(1), Some(-1)),
-            Cardinality::OneOrMore
-        );
-    }
-
-    #[test]
-    fn cardinality_from_shex_range() {
-        assert_eq!(
-            Cardinality::from_shex(Some(2), Some(5)),
-            Cardinality::Range {
-                min: 2,
-                max: Some(5)
-            }
-        );
+    fn occurs_decodes_every_shex_min_max_encoding() {
+        let cases: &[(&str, Option<i32>, Option<i32>, Occurs)] = &[
+            ("the default: exactly 1", None, None, Occurs::ONE),
+            (
+                "0..1",
+                Some(0),
+                Some(1),
+                Occurs {
+                    min: 0,
+                    max: Some(1),
+                },
+            ),
+            ("0..*", Some(0), Some(-1), Occurs { min: 0, max: None }),
+            ("1..*", Some(1), Some(-1), Occurs { min: 1, max: None }),
+            ("3..*", Some(3), Some(-1), Occurs { min: 3, max: None }),
+            (
+                "2..5",
+                Some(2),
+                Some(5),
+                Occurs {
+                    min: 2,
+                    max: Some(5),
+                },
+            ),
+            (
+                "max only",
+                None,
+                Some(4),
+                Occurs {
+                    min: 1,
+                    max: Some(4),
+                },
+            ),
+            (
+                "min only ⇒ exactly min",
+                Some(2),
+                None,
+                Occurs {
+                    min: 2,
+                    max: Some(2),
+                },
+            ),
+            (
+                "a bare -1 max is not unbounded",
+                None,
+                Some(-1),
+                Occurs {
+                    min: 1,
+                    max: Some(0),
+                },
+            ),
+            (
+                "negatives clamp to zero rather than panicking",
+                Some(-7),
+                Some(-3),
+                Occurs {
+                    min: 0,
+                    max: Some(0),
+                },
+            ),
+        ];
+        for (name, min, max, want) in cases {
+            assert_eq!(occurs_from_shex(*min, *max), *want, "{name}");
+        }
     }
 
     #[test]
@@ -1212,6 +1288,430 @@ iri = `${ex:}user/${.id}`\n    \
             has_cycle,
             "expected CyclicShapeRef, got {:?}",
             desc.lowering_errors()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ShEx → the neutral vocabulary
+    // -----------------------------------------------------------------------
+
+    /// Every case the lowering distinguishes, in one document: a literal with a
+    /// datatype the lattice recognises, one with a datatype it does not, one
+    /// with no `valueExpr` at all, a `nodeKind IRI` node, a single-target edge,
+    /// a two-target `@<A> OR @<B>` edge — and every `(min, max)` encoding
+    /// `ShEx` can spell.
+    const ORDER_SCHEMA: &str = r#"{
+      "@context": "http://www.w3.org/ns/shex.jsonld",
+      "type": "Schema",
+      "shapes": [
+        {
+          "type": "ShapeDecl",
+          "id": "http://example.org/Order",
+          "shapeExpr": {
+            "type": "Shape",
+            "closed": true,
+            "expression": {
+              "type": "EachOf",
+              "expressions": [
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/total",
+                  "valueExpr": {
+                    "type": "NodeConstraint",
+                    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+                  }
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/code",
+                  "valueExpr": {
+                    "type": "NodeConstraint",
+                    "datatype": "http://www.w3.org/2001/XMLSchema#hexBinary"
+                  },
+                  "min": 0,
+                  "max": 1
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/note",
+                  "min": 0,
+                  "max": -1
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/homepage",
+                  "valueExpr": { "type": "NodeConstraint", "nodeKind": "iri" },
+                  "min": 1,
+                  "max": -1
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/placedBy",
+                  "valueExpr": "http://example.org/Person"
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/paidWith",
+                  "valueExpr": {
+                    "type": "ShapeOr",
+                    "shapeExprs": [
+                      "http://example.org/Card",
+                      "http://example.org/Cash"
+                    ]
+                  },
+                  "min": 2,
+                  "max": 5
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/audited",
+                  "min": 3
+                },
+                {
+                  "type": "TripleConstraint",
+                  "predicate": "http://example.org/reviewed",
+                  "max": 4
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "ShapeDecl",
+          "id": "http://example.org/Person",
+          "shapeExpr": { "type": "Shape" }
+        }
+      ]
+    }"#;
+
+    fn order_shapes() -> OutputShapes {
+        ShExDescriptor::from_reader(ORDER_SCHEMA.as_bytes())
+            .expect("schema parses")
+            .to_output_shapes()
+    }
+
+    /// The document's declaration order. This also asserted that `closed` was
+    /// carried over per shape, and it was the ONLY reader of that field in the
+    /// workspace — the checker never saw it. The field is gone; the ordering
+    /// half is the half the positional `type { A, B }` binding relies on.
+    #[test]
+    fn output_shapes_keep_declaration_order() {
+        let doc = order_shapes();
+        let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
+        assert_eq!(
+            order,
+            ["http://example.org/Order", "http://example.org/Person"],
+            "declaration order, not hash order"
+        );
+        assert!(doc.rejections().is_empty());
+    }
+
+    /// `datatype` says what the DOCUMENT narrowed the value to. `None` is not
+    /// "string" — it is "the document did not say", and an XSD datatype outside
+    /// the lattice is one of the ways a document does not say.
+    #[test]
+    fn a_datatype_is_some_only_when_the_document_narrowed_it() {
+        let doc = order_shapes();
+        let order = doc.lookup("http://example.org/Order").expect("Order");
+        let by_predicate = |local: &str| {
+            order
+                .properties
+                .iter()
+                .find(|p| local_name(&p.predicate) == local)
+                .unwrap_or_else(|| panic!("no `{local}` property"))
+        };
+
+        assert_eq!(
+            by_predicate("total").datatype,
+            Some(Primitive::Integer),
+            "a datatype the lattice recognises"
+        );
+        assert_eq!(
+            by_predicate("code").datatype,
+            None,
+            "xsd:hexBinary is a real XSD datatype OUTSIDE the lattice, and \
+             `None` is how that is said"
+        );
+        assert_eq!(by_predicate("note").datatype, None, "no valueExpr at all");
+        assert_eq!(
+            by_predicate("homepage").datatype,
+            Some(Primitive::AnyUri),
+            "`nodeKind IRI` is an opaque IRI column — narrowed, but not an edge"
+        );
+        assert!(
+            by_predicate("homepage").targets.is_empty(),
+            "an opaque IRI is a column, not an edge"
+        );
+    }
+
+    /// `targets` is the edge destination set: empty for a literal, one for a
+    /// shape `Ref`, and every ref of a `ShapeOr` in the order it is written.
+    #[test]
+    fn targets_carry_the_edge_destinations_in_order() {
+        let doc = order_shapes();
+        let order = doc.lookup("http://example.org/Order").expect("Order");
+        let by_predicate = |local: &str| {
+            order
+                .properties
+                .iter()
+                .find(|p| local_name(&p.predicate) == local)
+                .unwrap_or_else(|| panic!("no `{local}` property"))
+        };
+
+        assert!(by_predicate("total").targets.is_empty());
+        assert_eq!(
+            by_predicate("placedBy").targets,
+            ["http://example.org/Person"]
+        );
+        assert_eq!(
+            by_predicate("paidWith").targets,
+            ["http://example.org/Card", "http://example.org/Cash"],
+            "`@<A> OR @<B>` keeps both destinations, in the written order"
+        );
+    }
+
+    /// Every `(min, max)` arm, reached through a real parse rather than through
+    /// `occurs_from_shex` directly — the encodings the `ShExJ` form can carry.
+    #[test]
+    fn occurs_survives_the_parse_for_every_encoding() {
+        let doc = order_shapes();
+        let order = doc.lookup("http://example.org/Order").expect("Order");
+        let occurs = |local: &str| {
+            order
+                .properties
+                .iter()
+                .find(|p| local_name(&p.predicate) == local)
+                .unwrap_or_else(|| panic!("no `{local}` property"))
+                .occurs
+        };
+
+        assert_eq!(occurs("total"), Occurs::ONE, "omitted ⇒ exactly 1");
+        assert_eq!(
+            occurs("code"),
+            Occurs {
+                min: 0,
+                max: Some(1)
+            },
+            "0..1"
+        );
+        assert_eq!(occurs("note"), Occurs { min: 0, max: None }, "0..*");
+        assert_eq!(occurs("homepage"), Occurs { min: 1, max: None }, "1..*");
+        assert_eq!(
+            occurs("paidWith"),
+            Occurs {
+                min: 2,
+                max: Some(5)
+            },
+            "2..5"
+        );
+        assert_eq!(
+            occurs("audited"),
+            Occurs {
+                min: 3,
+                max: Some(3)
+            },
+            "min alone ⇒ exactly min"
+        );
+        assert_eq!(
+            occurs("reviewed"),
+            Occurs {
+                min: 1,
+                max: Some(4)
+            },
+            "max alone ⇒ 1..max"
+        );
+    }
+
+    /// A `OneOf` becomes a [`Rejection::Disjunction`] carrying each branch's
+    /// predicate IRIs **in order** — enough to name the split with no `ShEx`
+    /// type in hand. A branch that is an `EachOf` contributes all of its
+    /// predicates; a nested `OneOf` contributes none and is not a second
+    /// rejection (the outer walk already stopped).
+    #[test]
+    fn a_one_of_becomes_a_disjunction_carrying_each_branchs_predicates() {
+        const SCHEMA: &str = r#"{
+          "@context": "http://www.w3.org/ns/shex.jsonld",
+          "type": "Schema",
+          "shapes": [
+            {
+              "type": "ShapeDecl",
+              "id": "http://example.org/Contact",
+              "shapeExpr": {
+                "type": "Shape",
+                "expression": {
+                  "type": "OneOf",
+                  "expressions": [
+                    {
+                      "type": "EachOf",
+                      "expressions": [
+                        { "type": "TripleConstraint", "predicate": "http://example.org/email" },
+                        { "type": "TripleConstraint", "predicate": "http://example.org/emailVerified" }
+                      ]
+                    },
+                    { "type": "TripleConstraint", "predicate": "http://example.org/phone" },
+                    {
+                      "type": "OneOf",
+                      "expressions": [
+                        { "type": "TripleConstraint", "predicate": "http://example.org/fax" }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }"#;
+
+        let doc = ShExDescriptor::from_reader(SCHEMA.as_bytes())
+            .expect("schema parses")
+            .to_output_shapes();
+
+        assert_eq!(
+            doc.rejections(),
+            [Rejection::Disjunction {
+                shape_iri: "http://example.org/Contact".into(),
+                disjuncts: vec![
+                    vec![
+                        "http://example.org/email".to_string(),
+                        "http://example.org/emailVerified".to_string(),
+                    ],
+                    vec!["http://example.org/phone".to_string()],
+                    vec![],
+                ],
+            }],
+            "three branches in order; the nested OneOf contributes an empty one \
+             and is not a second rejection"
+        );
+
+        // The rejected `OneOf` is not silently half-lowered into properties.
+        assert_eq!(
+            doc.lookup("http://example.org/Contact")
+                .expect("the shape is still there")
+                .properties
+                .len(),
+            0
+        );
+    }
+
+    /// The document that did not parse produces the rejection and nothing else
+    /// — and it arrives as an `Err`, which is what the decoder row turns into
+    /// `OutputShapes::rejected`.
+    #[test]
+    fn a_document_that_does_not_parse_is_a_malformed_schema() {
+        let err = ShExDescriptor::from_shex_source("{ not json").expect_err("must not parse");
+        assert!(
+            matches!(err, ShExLoweringError::MalformedSchema(_)),
+            "got {err:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // to_graph_schema goes through the neutral vocabulary, unchanged
+    // -----------------------------------------------------------------------
+
+    /// The output model, constructed **by hand** rather than snapshotted
+    /// against ourselves. Every distinction the old direct lowering made is
+    /// here: an un-narrowed value is a `String` column, a `nodeKind IRI` is an
+    /// `AnyUri` column and not an edge, a disjunction emits one edge per
+    /// destination sharing the predicate, and the single/multi collapse follows
+    /// `Occurs::is_single_valued`.
+    #[test]
+    fn to_graph_schema_through_the_neutral_vocabulary_is_unchanged() {
+        use fossil_graph_schema::{Cardinality, EdgeType, NodeType, Property};
+
+        let g = ShExDescriptor::from_reader(ORDER_SCHEMA.as_bytes())
+            .expect("schema parses")
+            .to_graph_schema();
+
+        let prop = |name: &str, datatype: Primitive, iri: &str, cardinality| Property {
+            name: name.into(),
+            datatype,
+            iri: Some(iri.into()),
+            cardinality,
+        };
+        let edge = |label: &str, iri: &str, destination: &str, cardinality| EdgeType {
+            label: label.into(),
+            iri: Some(iri.into()),
+            source: "Order".into(),
+            destination: destination.into(),
+            cardinality,
+        };
+
+        assert_eq!(
+            g.nodes,
+            vec![
+                NodeType {
+                    label: "Order".into(),
+                    iri: Some("http://example.org/Order".into()),
+                    properties: vec![
+                        prop(
+                            "total",
+                            Primitive::Integer,
+                            "http://example.org/total",
+                            Cardinality::Single
+                        ),
+                        prop(
+                            "code",
+                            Primitive::String,
+                            "http://example.org/code",
+                            Cardinality::Single
+                        ),
+                        prop(
+                            "note",
+                            Primitive::String,
+                            "http://example.org/note",
+                            Cardinality::Multi
+                        ),
+                        prop(
+                            "homepage",
+                            Primitive::AnyUri,
+                            "http://example.org/homepage",
+                            Cardinality::Multi
+                        ),
+                        prop(
+                            "audited",
+                            Primitive::String,
+                            "http://example.org/audited",
+                            Cardinality::Multi
+                        ),
+                        prop(
+                            "reviewed",
+                            Primitive::String,
+                            "http://example.org/reviewed",
+                            Cardinality::Multi
+                        ),
+                    ],
+                },
+                NodeType {
+                    label: "Person".into(),
+                    iri: Some("http://example.org/Person".into()),
+                    properties: vec![],
+                },
+            ]
+        );
+
+        assert_eq!(
+            g.edges,
+            vec![
+                edge(
+                    "placedBy",
+                    "http://example.org/placedBy",
+                    "Person",
+                    Cardinality::Single
+                ),
+                edge(
+                    "paidWith",
+                    "http://example.org/paidWith",
+                    "Card",
+                    Cardinality::Multi
+                ),
+                edge(
+                    "paidWith",
+                    "http://example.org/paidWith",
+                    "Cash",
+                    Cardinality::Multi
+                ),
+            ]
         );
     }
 }

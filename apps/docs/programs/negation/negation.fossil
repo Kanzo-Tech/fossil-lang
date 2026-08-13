@@ -1,0 +1,16 @@
+type { Sensor } := io.shex("negation.shex")
+
+Row := io.csv("data/sensors.csv")
+
+// #region not-in-a-predicate
+Working := Row.where(not Row.faulty)
+// #endregion not-in-a-predicate
+
+Sensors : Sensor from Working
+    @subject = "https://lab.example/sensor/{Row.id}"
+    // #region minus
+    offset   = -Row.drift
+    // #endregion minus
+    // #region not
+    healthy  = not Row.degraded
+    // #endregion not

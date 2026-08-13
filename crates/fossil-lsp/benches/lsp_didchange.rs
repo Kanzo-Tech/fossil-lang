@@ -5,7 +5,7 @@
 //! revision bump) → `def_map` → `typecheck_mapping` over every mapping → drain
 //! the `Diagnostic` accumulator, on the canonical 200-line fixture.
 //!
-//! # Status: ADVISORY (per ADR-0021)
+//! # Status: ADVISORY
 //!
 //! Criterion's committed baseline + 20%-regression detection is reliable only
 //! on a pinned / self-hosted runner (stable CPU, no neighbour noise). On shared
@@ -18,19 +18,42 @@
 //! Run: `cargo bench -p fossil-lsp`. The first run writes the baseline under
 //! `target/criterion/`; subsequent runs compare against it.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::{Diagnostic, FossilDb, FsError, Provider, SourceFile, System};
 use salsa::Setter as _;
 
+/// The path the program is opened under — the REAL one, because the shape
+/// document is resolved relative to the program. See the hard gate's module
+/// docs: a synthetic path resolves no contract, and the benchmark then measures
+/// a program that checks nothing.
+fn fixture_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/canonical_200.fossil")
+}
+
 fn fixture() -> String {
-    std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/fixtures/canonical_200.fossil"
-    ))
-    .expect("read canonical_200.fossil")
+    std::fs::read_to_string(fixture_path()).expect("read canonical_200.fossil")
+}
+
+/// The editor's `System` — the rows that read shape documents, as
+/// `fossil-lsp`'s own `LspSystem` installs them. It was
+/// `fossil_base::NativeSystem`, which reads no types; see the hard gate.
+#[derive(Debug, Default)]
+struct EditorSystem;
+
+impl System for EditorSystem {
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
+    }
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
+    }
 }
 
 /// One `didChange` round-trip — identical to the budget test's, kept in sync so
@@ -59,9 +82,18 @@ fn bench_didchange(c: &mut Criterion) {
     group.bench_function("canonical_200_round_trip", |b| {
         // Build a warm db once; each iteration is a distinct edit so `set_text`
         // genuinely bumps the revision (the realistic editor case).
-        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+        let system: Arc<dyn System> = Arc::new(EditorSystem);
         let mut db = FossilDb::new(system);
-        let file = SourceFile::new(&db, base.clone(), "canonical_200.fossil".to_string());
+        let file = SourceFile::new(
+            &db,
+            base.clone(),
+            fixture_path().to_string_lossy().into_owned(),
+        );
+        // The document the program names is a Salsa INPUT: register it, or the
+        // contract never resolves and this measures the error path.
+        fossil_ide::register_missing_documents(&mut db, file, &|key| {
+            std::fs::read_to_string(key).ok()
+        });
         let _ = round_trip(&mut db, file, format!("{base}\n// warm\n"));
         let mut i = 0usize;
         b.iter(|| {

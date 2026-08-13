@@ -1,35 +1,32 @@
 PROGRAM
   MAPPING
     MAPPING_HEADER
-      IDENT "User"
+      IDENT "Users"
       SHAPE_SEP ":"
       SHAPE_EXPR
-        IRI_EXPR
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "Person"
+        IDENT "Person"
       KW_FROM "from"
       EXPR
         LITERAL_EXPR
-          IDENT "users"
+          IDENT "User"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          KW_IRI "iri"
+          AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          FIELD_REF_EXPR
+          POSTFIX_EXPR
+            LITERAL_EXPR
+              IDENT "User"
             DOT "."
             IDENT "id"
-  MAPPING
-    MAPPING_HEADER
-      IDENT "ex"
-      SHAPE_SEP ":"
-      SHAPE_EXPR
-        IRI_EXPR
-          IDENT "name"
-      ERROR
-      ERROR
-        ASSIGN "="
-        DOT "."
-        IDENT "name"
+  ERROR
+    IDENT "name"
+  ERROR
+    ASSIGN "="
+  ERROR
+    IDENT "User"
+  ERROR
+    DOT "."
+  ERROR
+    IDENT "name"

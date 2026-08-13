@@ -6,7 +6,7 @@
 //! wasm32-unknown-unknown -p fossil-lsp`, the lib-level tripwire would fail
 //! fast — `main.rs` alone wouldn't catch lib-target compilation.
 //!
-//! Per ADR-0001 (use `lsp-server`, not `tower-lsp`) and CLAUDE.md "Hard Rules"
+//! The transport is `lsp-server`, not `tower-lsp`, and CLAUDE.md "Hard Rules"
 //! (`fossil-lsp` is native-only). Mirrors the dual-tripwire layout of
 //! `fossil-cli` (per `01-07-SUMMARY.md` decisions).
 

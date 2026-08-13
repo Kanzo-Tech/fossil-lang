@@ -11,21 +11,25 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
-use fossil_base::{FsError, System};
+use fossil_base::{FsError, Provider, System};
 use fossil_descriptors_input::DescriptorCache;
 
 /// The descriptor cache for programs living in `program_dir`, created on first
 /// sight of that directory and shared by every compile of every program in it.
 ///
 /// **Why it is not on the db.** [`open_db`] builds a fresh
-/// [`fossil_base::FossilDb`] with empty `Storage` on every call — the finding
-/// in ADR-0046 §6 — so a table hanging off the db is thrown away between the
-/// `check` and the `run` that follows it, which is precisely the pair we want
-/// to introspect once. The cache is ambient instead, which is also where
-/// ADR-0046 §5 puts an extension table.
+/// [`fossil_base::FossilDb`] with empty `Storage` on every call, so a table
+/// hanging off the db is thrown away between the `check` and the `run` that
+/// follows it, which is precisely the pair we want to introspect once. The
+/// cache is ambient instead, which is where an extension table belongs:
+/// **ambient in the context and never part of a query's key**, so reading it
+/// from inside a tracked query registers no dependency and triggers no
+/// invalidation — the same rule `read_file` follows.
 ///
 /// **Why it is per-directory and not per-process.** The cache is keyed by the
-/// URI as the program writes it (ADR-0050), and that URI is usually relative:
+/// URI as the program writes it — never the resolved locator, which needs the
+/// `@conn` credentials and the program's directory that the checker does not
+/// have — and that URI is usually relative:
 /// `"users.csv"` names a different file in two different directories. The
 /// program's directory is the scope in which a written URI is unambiguous, so
 /// it is the scope of the table. Entries are never evicted; a long-lived host
@@ -47,9 +51,8 @@ fn descriptor_cache(program_dir: &Path) -> Arc<DescriptorCache> {
     )
 }
 
-/// Native [`System`] for the engine. Reading files IS the whole contract: the
-/// bidirectional checker reaches the output shape by reading the document the
-/// program names, through [`System::read_file`] (ADR-0055).
+/// Native [`System`] for the engine — a filesystem, an introspected-schema
+/// table, and the decoder rows for the shape documents a program can name.
 #[derive(Debug)]
 pub(crate) struct EngineSystem {
     descriptors: Arc<DescriptorCache>,
@@ -80,16 +83,33 @@ impl System for EngineSystem {
     fn descriptors(&self) -> Option<&DescriptorCache> {
         Some(&self.descriptors)
     }
+
+    /// The engine COMPILES programs, so it installs the WHOLE registry — the
+    /// four rows that read data and both rows that read types (`io.shex`,
+    /// `io.shacl`). A host on the default table reads no types at all, which is
+    /// the right answer for a host that runs a plan somebody else compiled and
+    /// the wrong one for the host the plan comes from.
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
+    }
 }
 
-/// Build a fresh `FossilDb` over the engine [`System`] for `path` + `text`.
+/// Build a fresh `FossilDb` over the engine [`System`] for `path` + `text`,
+/// with every shape document the program names already registered.
+///
+/// The registration is not the caller's to remember: `check`, `run` and `refs`
+/// all arrive here, and a compile that skipped it would type-check against no
+/// output contract while claiming to have read one. See
+/// [`crate::documents::register_shape_documents`] for why it has to happen
+/// before any query looks for the document.
 pub(crate) fn open_db(
     text: String,
     path: &Path,
 ) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
     let program_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let system: Arc<dyn System> = Arc::new(EngineSystem::for_program_dir(program_dir));
-    let db = fossil_base::FossilDb::new(system);
+    let mut db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
+    crate::documents::register_shape_documents(&mut db, file);
     (db, file)
 }

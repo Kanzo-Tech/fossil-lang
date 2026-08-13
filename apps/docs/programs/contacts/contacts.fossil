@@ -1,0 +1,14 @@
+type { Person } := io.shex("contacts.shex")
+
+Contact := io.csv("data/contacts.csv")
+
+// #region derived
+Reachable := Contact.where(Contact.email.trim() != "")
+// #endregion derived
+
+Contacts : Person from Reachable
+    @subject = "https://shop.example/person/{Contact.id}"
+    // #region two-paths
+    email    = Contact.email.trim().lower()
+    name     = str.trim(Contact.name)
+    // #endregion two-paths

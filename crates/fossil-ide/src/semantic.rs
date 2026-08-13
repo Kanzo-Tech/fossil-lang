@@ -142,30 +142,34 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         // A string with a hole is carved into a run of tokens, so every part
         // of it has to be named here or the literal loses its colour halfway
         // through — which is what happened when the carve landed.
-        K::STRING | K::TEMPLATE | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => {
-            Some(ty::STRING)
-        }
+        K::STRING | K::STRING_OPEN | K::STRING_TEXT | K::STRING_CLOSE => Some(ty::STRING),
         K::INTEGER | K::FLOAT => Some(ty::NUMBER),
-        K::ABS_IRI => Some(ty::NAMESPACE),
+        // `K::ABS_IRI => NAMESPACE` was here, and `K::TEMPLATE` shared the
+        // STRING arm above. Neither is a token: `<` and `>` have one reading
+        // each, and a constant IRI is a STRING like any other.
 
-        // ── keywords (prefix / from / and / or / not / iri) + the `@attr`
-        //    marker, read as a keyword ─────────────────────────────────────
+        // ── keywords (from / and / or / not) + the `@attr` marker,
+        //    read as a keyword ─────────────────────────────────────────────
         //
         // `in`, `use` and `as` were here. They stopped being keywords when the
         // named-graph clause and the import left the grammar, and an `in`
         // painted as a keyword would now be a lie about an ordinary column.
-        K::KW_PREFIX
-        | K::KW_FROM
+        // `iri` went the same way: the subject slot is `@subject`
+        // and `iri` is an ordinary identifier again, so painting it as a
+        // keyword would colour a user's column name. `prefix` is the fifth and
+        // the most recent (grammar.bnf, § RESERVED KEYWORDS).
+        K::KW_FROM
         | K::KW_AND
         | K::KW_OR
         | K::KW_NOT
-        | K::KW_IRI
         | K::AT_ATTR => Some(ty::KEYWORD),
 
-        // ── operators (pipeline, assignment, ternary, arithmetic,
-        //    comparison) ───────────────────────────────────────────────────
-        K::PIPE
-        | K::DEFINE
+        // ── operators (assignment, ternary, arithmetic, comparison) ───────
+        //
+        // `K::PIPE` was the first name in this list. `|>` is not a token any
+        // more (ruling 7 of 2026-08-11), so painting it
+        // was painting a lexeme the lexer cannot produce.
+        K::DEFINE
         | K::ASSIGN
         | K::EQ
         | K::NEQ
@@ -190,20 +194,24 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
     }
 }
 
-/// Classify a bare `IDENT`. Calls and member access are `POSTFIX_EXPR` nodes
-/// and a primary field ref is a `FIELD_REF_EXPR` — there is no call or
-/// field-ref *leaf* token. So we read the IDENT's local tree shape, in
+/// Classify a bare `IDENT`. Calls and member access are `POSTFIX_EXPR` nodes —
+/// there is no call *leaf* token. So we read the IDENT's local tree shape, in
 /// priority order:
 ///
-/// 1. **property** — the IDENT names a record field: it is the IDENT of a
-///    `FIELD_REF_EXPR` (`.name` in primary position) or it directly follows a
-///    `DOT` sibling (`x.name` member access under a `POSTFIX_EXPR`).
-/// 2. **function** — the IDENT is a *call callee*: its primary node
-///    (`LITERAL_EXPR` / `IRI_EXPR`) is the first child of a `POSTFIX_EXPR` that
-///    also has an `LPAREN` child (`upper(...)`, `io.csv(...)`).
-/// 3. **namespace** — the prefix segment of a prefixed name (`ex` in
-///    `ex:Person`): under an `IRI_EXPR`.
-/// 4. **variable** — otherwise (a mapping subject, a source name, a binding).
+/// 1. **property** — the IDENT names a record field: it directly follows a
+///    `DOT` sibling (`User.name` member access under a `POSTFIX_EXPR`). It used
+///    to have a second way in, the IDENT of a `FIELD_REF_EXPR` (`.name` in
+///    primary position), and that node is gone — a leading `.` is an error —
+///    which leaves this rule with ONE shape, and the one every reference now has.
+/// 2. **function** — the IDENT is a *call callee*: its `LITERAL_EXPR` is the
+///    first child of a `POSTFIX_EXPR` that also has an `LPAREN` child
+///    (`upper(...)`, `io.csv(...)`).
+/// 3. **variable** — otherwise (a mapping subject, a source name, a binding).
+///
+/// A **namespace** rule sat between 2 and 3: the prefix segment of `ex:Person`,
+/// found by climbing to an `IRI_EXPR`. Both are gone, and a shape name is now
+/// an ordinary IDENT that falls to rule 3 — correctly, because it IS a binding
+/// the program made.
 fn ident_type(tok: &SyntaxToken) -> u32 {
     if is_field_name(tok) {
         return ty::PROPERTY;
@@ -211,22 +219,12 @@ fn ident_type(tok: &SyntaxToken) -> u32 {
     if is_call_callee(tok) {
         return ty::FUNCTION;
     }
-    if has_ancestor(tok, SyntaxKind::IRI_EXPR) {
-        return ty::NAMESPACE;
-    }
     ty::VARIABLE
 }
 
-/// Whether `tok` names a record field — the IDENT of a `FIELD_REF_EXPR` or an
-/// IDENT immediately preceded by a `DOT` token (member access).
+/// Whether `tok` names a record field — an IDENT immediately preceded by a
+/// `DOT` token (member access).
 fn is_field_name(tok: &SyntaxToken) -> bool {
-    if tok
-        .parent()
-        .is_some_and(|p| p.kind() == SyntaxKind::FIELD_REF_EXPR)
-    {
-        return true;
-    }
-    // Preceding sibling token is a DOT (postfix `x.name`).
     prev_token_kind(tok) == Some(SyntaxKind::DOT)
 }
 
@@ -236,10 +234,7 @@ fn is_call_callee(tok: &SyntaxToken) -> bool {
     let Some(primary) = tok.parent() else {
         return false;
     };
-    if !matches!(
-        primary.kind(),
-        SyntaxKind::LITERAL_EXPR | SyntaxKind::IRI_EXPR
-    ) {
+    if primary.kind() != SyntaxKind::LITERAL_EXPR {
         return false;
     }
     let Some(postfix) = primary.parent() else {
@@ -271,17 +266,8 @@ fn prev_token_kind(tok: &SyntaxToken) -> Option<SyntaxKind> {
     None
 }
 
-/// Whether `tok` has an ancestor node of `kind`.
-fn has_ancestor(tok: &SyntaxToken, kind: SyntaxKind) -> bool {
-    let mut node = tok.parent();
-    while let Some(n) = node {
-        if n.kind() == kind {
-            return true;
-        }
-        node = n.parent();
-    }
-    false
-}
+// `has_ancestor` lived here. Its one caller climbed to an `IRI_EXPR` to paint
+// the prefix segment of `ex:Person` as a namespace, and there is no such node.
 
 /// Convert one token's byte range to UTF-16 `(line, start_char, length)` via the
 /// [`LineIndex`] and push an [`AbsToken`]. A token that spans multiple lines

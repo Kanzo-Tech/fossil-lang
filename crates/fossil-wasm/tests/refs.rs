@@ -16,7 +16,7 @@ use fossil_wasm::refs_native;
 // (data, schema) pair (must dedup to one each), plus an unaliased local csv.
 const PROGRAM: &str = r#"prefix ex: <https://ex.org/>
 
-{ KB, Project } := io.rdf("@data/graph.ttl", schema = "@vocab/graph.shex")
+{ KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 plain := io.csv("local.csv")
 
 KB : ex:KB from KB

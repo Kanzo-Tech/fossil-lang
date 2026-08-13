@@ -1,0 +1,12 @@
+type { Category } := io.shex("self-join.shex")
+
+Node := io.csv("data/categories.csv")
+
+// #region self
+Pairs := Node.join(Node as Other, on = Node.parent == Other.id)
+// #endregion self
+
+Categories : Category from Pairs
+    @subject     = "https://shop.example/category/{Node.id}"
+    label        = Node.label
+    parent_label = Other.label

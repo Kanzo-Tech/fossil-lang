@@ -40,7 +40,9 @@ impl ErrorGuaranteed {
     }
 }
 
-// SAFETY: third-party-trait integration boundary per ADR-0004. ErrorGuaranteed
+// SAFETY: a third-party-trait integration boundary, which is the ONLY thing the
+// workspace's `unsafe_code = "deny"` (not `"forbid"`) exists to let through, and
+// only with a justification naming what the unsafe is for. ErrorGuaranteed
 // is Copy + Eq + Hash with no nested invariants (PhantomData<()> is zero-sized),
 // so the trivial-replace pattern is sound. No safe alternative exists because
 // salsa::Update requires `unsafe impl` even for trivially-safe bodies.

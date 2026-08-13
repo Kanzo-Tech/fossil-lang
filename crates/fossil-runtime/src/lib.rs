@@ -1,7 +1,7 @@
 //! `fossil-runtime`: native `DuckDB` execution for the `fossil compile`/`fossil run` pipeline.
 //!
 //! This crate is **NATIVE-ONLY** by design — `DuckDB`-WASM lives in `fossil-wasm`
-//! (Phase 7 PLAY-02 wires the playground's lazy-load). See ADR-0002 and the
+//! (Phase 7 PLAY-02 wires the playground's lazy-load). See the
 //! "Project Layout" section of `CLAUDE.md`. The `compile_error!` cfg-tripwire
 //! below catches accidental inclusion of `fossil-runtime` in the WASM CI gate
 //! at compile time rather than runtime.
@@ -28,7 +28,13 @@ use duckdb::Connection;
 pub mod graph_exec;
 pub mod layout;
 pub mod materialize;
-pub mod udf;
+// `pub mod udf;` lived here — eight native Rust UDF trampolines
+// (`fossil_slug`, `fossil_validate_email`, `fossil_hmac`, …) registered on a
+// DuckDB connection. Ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering
+// kind: two of the eight functions left the language and the other six are SQL
+// expression templates in the catalogue, so there is nothing left to register.
+// The module went with them, and so did the `WasmClass` concept it was the
+// whole reason for.
 
 pub use graph_exec::DuckRuntime;
 pub use materialize::{MaterializeError, install_secret};
@@ -43,21 +49,18 @@ pub use materialize::{MaterializeError, install_secret};
 /// `COPY` statement write to the process's current working directory unless
 /// the SQL embeds an absolute path.
 ///
-/// Before the batch runs, every `native_udf_only` stdlib function is
-/// registered on the connection via [`udf::register_stdlib_udfs`] (STDL-05),
-/// so a generated `fossil_slug(x)` / `fossil_validate_email(x)` /
-/// `fossil_hmac(x, k)` call resolves natively. These UDFs are unavailable in
-/// `DuckDB`-WASM — the playground reads the classification manifest and
-/// disables them in-browser (STDL-07).
+/// Nothing is registered on the connection first. It used to be: eight native
+/// Rust UDFs, so a generated `fossil_slug(x)` resolved natively and did not
+/// resolve in `DuckDB`-WASM at all. Every catalogued function is a pure SQL
+/// expression now, so the batch needs no host support and the language runs
+/// identically in a browser.
 ///
 /// # Errors
 ///
 /// Returns the underlying [`duckdb::Error`] if the in-memory connection
-/// cannot be opened, a UDF fails to register, or any statement in the batch
-/// fails to execute.
+/// cannot be opened or any statement in the batch fails to execute.
 pub fn execute(sql: &str) -> Result<(), duckdb::Error> {
     let conn = Connection::open_in_memory()?;
-    udf::register_stdlib_udfs(&conn)?;
     conn.execute_batch(sql)?;
     Ok(())
 }

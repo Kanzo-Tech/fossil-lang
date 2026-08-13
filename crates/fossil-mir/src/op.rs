@@ -4,14 +4,14 @@
 //! operators of `operator-algebra.md` §2 (`Source`, `Project`, `Extend`,
 //! `Rename`, `Filter`, `Join`, `Union`, `GroupBy`, `Aggregate`, `Distinct`,
 //! `TripleEmit`, `Sink`) plus an [`Op::Empty`] node (the R9 empty-source
-//! representation — see ADR-0009), and replaces the thin untyped `ExprLowered`
+//! representation), and replaces the thin untyped `ExprLowered`
 //! with a typed [`Expr`] ADT carrying [`Ty`] on the synthesised nodes.
 //!
-//! See `operator-algebra.md` for the full algebra spec and ADR-0009 for the
-//! reachability decision (all 11 defined; only `Source` / `Extend` /
-//! `TripleEmit` / `Sink` are lowered from `.fossil` source this phase, the
-//! other 7 are exercised via direct `MirGraph` construction in plans
-//! 04-04/04-05).
+//! See `operator-algebra.md` for the full algebra spec. **Completeness of the
+//! IR is not surface coverage**: all 11 operators are DEFINED here, but only
+//! `Source` / `Extend` / `TripleEmit` / `Sink` are lowered from `.fossil`
+//! source; the other 7 have no surface syntax and are exercised by direct
+//! `MirGraph` construction instead.
 //!
 //! # Design notes
 //!
@@ -31,6 +31,7 @@
 
 use fossil_hir::CmpOp;
 use fossil_hir::Ty;
+use fossil_hir::UnOp;
 use smol_str::SmolStr;
 
 /// One node of the MIR DAG. The complete typed operator algebra:
@@ -149,8 +150,11 @@ pub enum Op<'db> {
 
     /// `Empty(schema)` — the R9 empty-source target. Carries the column schema
     /// it would have produced so codegen can emit a `SELECT ... WHERE false`
-    /// (or `LIMIT 0`) shell of the right shape. See ADR-0009 for why this is a
-    /// distinct variant rather than a `Source` with an empty marker.
+    /// (or `LIMIT 0`) shell of the right shape. It is a distinct variant rather
+    /// than a `Source` carrying an empty marker because a `Source` that yields
+    /// no rows is a special case every downstream operator would have to reason
+    /// about; a variant of its own is self-documenting and keeps `schema_of`
+    /// total.
     Empty { schema: Vec<SmolStr> },
 }
 
@@ -250,6 +254,8 @@ pub enum Expr<'db> {
     LitBool(bool),
     /// Literal integer (`18`).
     LitInt(i64),
+    /// Literal float (`0.5`), by its bits — see `fossil_hir::FloatBits`.
+    LitFloat(fossil_hir::FloatBits),
     /// Column reference (e.g. `users.id`).
     ColRef { source: SmolStr, column: SmolStr },
     /// String concatenation: `lhs || rhs`. Recursive via `Box` so the variant
@@ -269,6 +275,17 @@ pub enum Expr<'db> {
         op: CmpOp,
         lhs: Box<Expr<'db>>,
         rhs: Box<Expr<'db>>,
+        ty: Ty<'db>,
+    },
+    /// Unary operator: `-operand` or `not operand`, result typed `ty`.
+    ///
+    /// It survives lowering as itself rather than becoming `0 - operand` /
+    /// `operand == FALSE`, and the reason is in `fossil_hir::HirExpr::UnaryOp`:
+    /// `0.0 - 0.0` is `+0.0` where `-(0.0)` is `-0.0`, so the rewrite changes
+    /// the bits a `xsd:float` column carries.
+    UnaryOp {
+        op: UnOp,
+        operand: Box<Expr<'db>>,
         ty: Ty<'db>,
     },
     /// `cond ? then : otherwise`, result typed `ty`. Renders as a two-armed

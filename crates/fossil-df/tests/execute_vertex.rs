@@ -8,29 +8,35 @@
 //! como `tests/fixtures/users.csv` (relativa a `crates/fossil-df`).
 
 #![cfg(not(target_arch = "wasm32"))]
-
-use std::sync::Arc;
+// `${ex:}user/${.id}` is Fossil template syntax, not a Rust format arg.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray, UInt32Array};
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_hir::def_map::def_map;
+
+mod support;
 
 const HELLO: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"hello.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+    @subject = `${ex:}user/${.id}`
+    name = .name
 ";
+
+/// The document `hello.fossil` names. `name` — the bare key the body writes —
+/// is the last segment of `ex:name`: a property key is a BARE NAME whose
+/// meaning is the last segment of a predicate IRI that a shape declares, so
+/// without this document there is no such thing as the key `name`.
+const HELLO_SHEX: &str = include_str!("fixtures/person-name.shex");
 
 #[tokio::test]
 async fn execute_vertex_materialises_graphar_shape() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, HELLO.to_string(), "hello.fossil".to_string());
+    let (db, file) = support::db_with_shapes(HELLO, "hello.fossil", &[("hello.shex", HELLO_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -45,7 +51,7 @@ async fn execute_vertex_materialises_graphar_shape() {
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_vertex runs the DataFusion plan");
+    .unwrap_or_else(|e| panic!("execute_vertex: {e}; {:?}", support::diagnostics(&db, file)));
 
     // The node's metadata is the graph-schema contract; the table holds the data.
     assert_eq!(vertex.label, "Person");

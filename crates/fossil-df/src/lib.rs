@@ -27,7 +27,12 @@ pub mod literal;
 /// sources it reads (`Filter` / `Project` / `Join`).
 pub mod plan;
 pub mod rdf;
-pub mod shacl;
+// `pub mod shacl` lived here: a SHACL shapes graph walked into a `GraphSchema`.
+// It has moved to `fossil-descriptors-output` and produces `OutputShapes`, the
+// neutral vocabulary the CHECKER reads — a `GraphSchema` is the output model,
+// one step past it, so SHACL could reach the executor and never the checker.
+// That is exactly why `apps/docs/programs/catalogue` had no output contract.
+// Ruling 13 of `SURFACE-PLAN.md`: a decoder lives beside the other decoder.
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and the UDFs no engine ships.
 pub mod stdlib;
@@ -36,8 +41,8 @@ pub mod stdlib;
 pub mod sink;
 
 /// Re-exported so callers name the program-resident output descriptor that
-/// [`execute_graph`] / [`provider_bindings`] take (ADR-0018: passed as an
-/// argument, never read through `Db::system()`).
+/// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
+/// never read through `Db::system()`.
 pub use fossil_descriptors_output::OutputDescriptorKind;
 /// Re-exported so a host can classify a [`SourceRef`]'s format without depending
 /// on `fossil-mir` directly (the browser host maps it to a fetch strategy).
@@ -47,7 +52,6 @@ pub use fossil_mir::SourceFormat;
 pub use plan::plan_relation;
 /// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
 /// arm of the output model; ShEx's lives in `fossil-shex`).
-pub use shacl::shacl_to_graph_schema;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -66,8 +70,8 @@ use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
 use datafusion::prelude::{
     CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
 };
-use fossil_base::SourceFile;
 use fossil_base::probe::Probe;
+use fossil_base::{SourceAnchor, SourceFile};
 use fossil_graph_schema::{
     Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
@@ -141,6 +145,15 @@ pub async fn execute_graph<'db>(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<GraphArData> {
+    // The run's anchor, derived from the PROGRAM and not from the caller: a
+    // source URI is a path the program wrote, so the directory it resolves
+    // against is the program's own. The executor used to hand DataFusion the
+    // written path verbatim, which made the process's working directory the
+    // anchor — so `io.csv("data/items.csv")` meant a different file depending
+    // on where you invoked from, while `io.shex("shop.shex")` in the same
+    // program was already resolved beside it.
+    let program_dir = fossil_base::program_dir(&file.path(db));
+    let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
     let mut probe = Probe::new(&format!("execute_graph — {} mapping(s)", mappings.len()));
 
@@ -151,7 +164,7 @@ pub async fn execute_graph<'db>(
     // other's `MemTable`.
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
-        let prepared = prepare_vertex(ctx, db, mapping, descriptor, connections).await?;
+        let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
         match groups.iter_mut().find(|(t, _)| *t == prepared.node.label) {
             Some((_, group)) => group.push(prepared),
             None => groups.push((prepared.node.label.clone(), vec![prepared])),
@@ -174,7 +187,7 @@ pub async fn execute_graph<'db>(
         // Marked per `execute_edges` call and not per table: the whole call's
         // memory is already spent by the time it returns, so a mark inside the
         // loop over its results would bill all of it to the first table.
-        let produced = execute_edges(ctx, db, mapping, descriptor, connections).await?;
+        let produced = execute_edges(ctx, db, mapping, descriptor, anchor).await?;
         probe.mark(&format!("collect {} edge table(s)", produced.len()));
         for (table, edge_type) in produced {
             edges.push(table);
@@ -228,7 +241,9 @@ pub async fn execute_vertex<'db>(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let prepared = prepare_vertex(ctx, db, mapping, descriptor, connections).await?;
+    let program_dir = fossil_base::program_dir(&mapping.file(db).path(db));
+    let anchor = SourceAnchor::new(&program_dir, connections);
+    let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared]).await
 }
 
@@ -236,8 +251,9 @@ pub async fn execute_vertex<'db>(
 /// descriptor-refined — [`execute_vertex`] without the `MappingLoc`.
 ///
 /// This is the seam for an op list built by hand rather than by
-/// [`lower_to_mir_pg`]: the operators ADR-0009 defines and the lowering does
-/// not yet emit are reached this way, and that is how they are tested. `db` is
+/// [`lower_to_mir_pg`]. The operator algebra is defined whole and lowered in
+/// part — every operator exists, and only some of them are emitted from source
+/// — so the rest are reached this way, and that is how they are tested. `db` is
 /// still needed — a [`VProp`]'s type is an interned handle.
 ///
 /// # Errors
@@ -247,9 +263,9 @@ pub async fn execute_vertex_ops<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     ops: &[Op<'db>],
-    connections: &HashMap<String, String>,
+    anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let prepared = prepare_vertex_ops(ctx, db, ops, connections).await?;
+    let prepared = prepare_vertex_ops(ctx, db, ops, anchor).await?;
     finalize_vertex(ctx, vec![prepared]).await
 }
 
@@ -283,12 +299,12 @@ async fn prepare_vertex<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
+    anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
     let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
-    prepare_vertex_ops(ctx, db, &ops, connections).await
+    prepare_vertex_ops(ctx, db, &ops, anchor).await
 }
 
 /// [`prepare_vertex`] over an op list that is already lowered and refined.
@@ -301,7 +317,7 @@ async fn prepare_vertex_ops<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     ops: &[Op<'db>],
-    connections: &HashMap<String, String>,
+    anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let (input, type_name, rdf_type, id, dedup, props) = ops
         .iter()
@@ -329,7 +345,7 @@ async fn prepare_vertex_ops<'db>(
             )
         })?;
 
-    let df = plan_relation(ctx, ops, input, connections).await?;
+    let df = plan_relation(ctx, ops, input, anchor).await?;
     let projected = df.select(vertex_projection(render(&id), &props))?;
     let node = NodeType {
         label: type_name,
@@ -477,7 +493,7 @@ async fn execute_edges<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
+    anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
@@ -497,7 +513,7 @@ async fn execute_edges<'db>(
             single_valued,
         } = op
         {
-            let rows = plan_relation(ctx, ops, *input, connections).await?;
+            let rows = plan_relation(ctx, ops, *input, anchor).await?;
             let table = execute_edge(
                 ctx,
                 rows,
@@ -609,27 +625,17 @@ async fn execute_edge(
     })
 }
 
-/// Resolve a `.fossil` source reference through a connection ref-map:
-/// `@name/path` → `{connections[name]}/path`; any other reference (a concrete
-/// URL or path) is returned verbatim. This is THE source-resolution rule, shared
-/// by the native host ([`fossil-engine`]) and the browser executor so a `@conn`
-/// alias resolves identically everywhere — the MIR keeps the alias literal, the
-/// host owns the name→URL map (a connection's base URL). An unknown alias is
-/// left untouched (the reader then surfaces the real "not found").
-#[must_use]
-pub fn resolve_source_uri(raw: &str, connections: &HashMap<String, String>) -> String {
-    match raw.strip_prefix('@').and_then(|r| r.split_once('/')) {
-        Some((name, path)) => connections.get(name).map_or_else(
-            || raw.to_string(),
-            |base| format!("{}/{path}", base.trim_end_matches('/')),
-        ),
-        None => raw.to_string(),
-    }
-}
+// `resolve_source_uri` lived here and expanded `@conn` aliases and nothing else
+// — it was called THE source-resolution rule, and it was half of one. A
+// reference also has to be anchored somewhere, and every caller of this was
+// left to decide that for itself: the executor decided "nowhere", which is the
+// process's working directory. Both halves are one function now,
+// `fossil_base::SourceAnchor::locator`, and it cannot be called without an
+// anchor.
 
 /// Every resolved source URI + format + binding name of a lowered mapping, in
-/// op order. A mapping had exactly one `Source` until a `join` gave it two
-/// (ADR-0054), so this is a list and not a lookup — the second source of a
+/// op order. A mapping had exactly one `Source` until a `join` gave it two,
+/// so this is a list and not a lookup — the second source of a
 /// joined mapping is as much a source as the first, and a host that fetches
 /// only the first would run the program against half its inputs.
 ///
@@ -639,7 +645,7 @@ pub fn resolve_source_uri(raw: &str, connections: &HashMap<String, String>) -> S
 /// [`read_source`] scans it); object-store formats ignore it.
 fn sources_of<'db>(
     ops: &[Op<'db>],
-    connections: &HashMap<String, String>,
+    anchor: SourceAnchor<'_>,
 ) -> Vec<(String, SourceFormat, String)> {
     ops.iter()
         .filter_map(|o| match o {
@@ -648,11 +654,7 @@ fn sources_of<'db>(
                 format,
                 binding,
                 ..
-            } => Some((
-                resolve_source_uri(uri, connections),
-                format.clone(),
-                binding.to_string(),
-            )),
+            } => Some((anchor.locator(uri), format.clone(), binding.to_string())),
             _ => None,
         })
         .collect()
@@ -751,6 +753,8 @@ pub fn provider_bindings(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
+    let program_dir = fossil_base::program_dir(&file.path(db));
+    let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();
     let mut out = Vec::new();
@@ -764,7 +768,7 @@ pub fn provider_bindings(
                 format: SourceFormat::Provider { .. },
                 binding,
                 ..
-            } => Some((resolve_source_uri(uri, connections), binding.to_string())),
+            } => Some((anchor.locator(uri), binding.to_string())),
             _ => None,
         }) else {
             continue; // object-store source — no host bytes seam
@@ -814,13 +818,15 @@ pub fn program_sources(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<SourceRef> {
+    let program_dir = fossil_base::program_dir(&file.path(db));
+    let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();
     let mut out: Vec<SourceRef> = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
         let ops = apply_output_shape(mir.ops(db), &schema);
-        for (uri, format, _binding) in sources_of(&ops, connections) {
+        for (uri, format, _binding) in sources_of(&ops, anchor) {
             if !out.iter().any(|s| s.uri == uri) {
                 out.push(SourceRef { uri, format });
             }
@@ -1031,6 +1037,7 @@ pub fn run_to_dir(
 /// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
 /// reach, which is what makes a property that type-checks a property that runs.
 pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
+    use fossil_hir::{CmpOp, UnOp};
     match e {
         Expr::LitString(s) => lit(s.to_string()),
         // `new_unqualified` (NOT `col()`): a bare `col("hasProject")` folds the
@@ -1041,8 +1048,32 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
         Expr::Assert { inner, .. } => render(inner),
         Expr::Call { func, args, .. } => render_call(func.as_str(), args),
         Expr::LitInt(v) => lit(*v),
+        Expr::LitFloat(v) => lit(v.get()),
         Expr::LitBool(b) => lit(*b),
+        // `/` is the one operator whose SQL is not its spelling. fossil types
+        // `a / b` as Float (see `synth_binop`), and DataFusion's `Divide` on two
+        // `Int64`s is INTEGER division — `7 / 2` would be `3` while DuckDB, the
+        // other engine this language runs on, gives `3.5` for the same program.
+        // Casting the left operand makes the engine compute what the type says
+        // rather than making the type describe whatever the engine did.
+        Expr::BinOp {
+            op: CmpOp::Div,
+            lhs,
+            rhs,
+            ..
+        } => binary_expr(
+            datafusion::logical_expr::cast(render(lhs), DataType::Float64),
+            Operator::Divide,
+            render(rhs),
+        ),
         Expr::BinOp { op, lhs, rhs, .. } => binary_expr(render(lhs), df_operator(*op), render(rhs)),
+        // `-x` and `not x`, as themselves. Rendering `-x` as `0 - x` would make
+        // `-0.0` come out `+0.0` — measured, and the reason
+        // `fossil_hir::HirExpr::UnaryOp` is a node at all.
+        Expr::UnaryOp { op, operand, .. } => match op {
+            UnOp::Neg => DfExpr::Negative(Box::new(render(operand))),
+            UnOp::Not => DfExpr::Not(Box::new(render(operand))),
+        },
         // A two-armed CASE. `otherwise` is always present — fossil has no
         // one-armed conditional, so no row can fall through to NULL.
         Expr::Ternary {
@@ -1072,6 +1103,14 @@ const fn df_operator(op: fossil_hir::CmpOp) -> Operator {
         CmpOp::Ge => Operator::GtEq,
         CmpOp::And => Operator::And,
         CmpOp::Or => Operator::Or,
+        CmpOp::Add => Operator::Plus,
+        CmpOp::Sub => Operator::Minus,
+        CmpOp::Mul => Operator::Multiply,
+        // Reached only through the general `BinOp` arm above, which `Div` never
+        // takes — it has its own arm because it needs a cast. Kept total so a
+        // new operator stops compiling here rather than reaching a plan wrong.
+        CmpOp::Div => Operator::Divide,
+        CmpOp::Rem => Operator::Modulo,
     }
 }
 
@@ -1083,8 +1122,7 @@ const fn df_operator(op: fossil_hir::CmpOp) -> Operator {
 /// aggregate in a scalar position, a UDF not yet ported — and that is an error
 /// carried in the plan, not a panic and not a dropped column.
 fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
-    use datafusion::logical_expr::expr::ScalarFunction;
-    use fossil_hir::stdlib::{InlineForm, LoweringKind};
+    use fossil_hir::stdlib::LoweringKind;
 
     let rendered: Vec<DfExpr> = args.iter().map(render).collect();
     let Some(entry) = fossil_hir::stdlib::stdlib().lookup(func) else {
@@ -1092,53 +1130,349 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
     };
 
     match &entry.lowering {
-        LoweringKind::Builtin { duckdb_name } => {
-            let Some(df_name) = crate::stdlib::datafusion_name(duckdb_name.as_str()) else {
-                return unsupported_call(func, "has no DataFusion equivalent yet");
-            };
-            let Some(udf) = datafusion::functions::all_default_functions()
+        LoweringKind::Expr(template) => match render_expr_template(template.as_str(), &rendered) {
+            Ok(e) => e,
+            Err(why) => unsupported_call(func, &why),
+        },
+        LoweringKind::Op(_) => unsupported_call(func, "is a plan operator, not a value"),
+    }
+}
+
+/// Turn a catalogue SQL template into a `DataFusion` expression.
+///
+/// # Why the template is INTERPRETED rather than pattern-matched
+///
+/// Nine `InlineForm` variants used to be matched here, one arm each, and each
+/// arm rebuilt in `DfExpr` a SQL shape that was already written down in the
+/// variant's doc-comment. That is the duplication ruling 15 of
+/// `SURFACE-PLAN.md` deleted: the template is the datum, so the renderer reads
+/// the datum instead of knowing the same thing a second way. The gain is what
+/// the arms could never give — adding `str.slugify` over `regexp_replace` is a
+/// row, and neither this function nor any other Rust changes.
+///
+/// # Why a hand-written reader and not a SQL parser
+///
+/// Two SQL parsers were available and both were refused, for reasons that are
+/// this crate's and not preferences. `DataFusion`'s own
+/// `SessionContext::parse_sql_expr` is behind its `sql` feature, which
+/// `Cargo.toml` turns OFF on purpose — this crate compiles to `wasm32` and the
+/// SQL frontend is bundle weight for a backend that builds plans
+/// programmatically. `sqlparser` is declared in the workspace but is in nobody's
+/// dependency tree, so it would be a new dependency for one call site.
+///
+/// What is read here is not SQL. It is the closed expression language the
+/// CATALOGUE writes, which is nine shapes wide and enumerated in
+/// [`TEMPLATE_GRAMMAR`]. A template outside it is an `Err` that names itself, so
+/// the day the catalogue wants a tenth shape, the failure says so.
+///
+/// # The dialect seam, which is real and is NOT hidden
+///
+/// The templates are `DuckDB`'s, because `DuckDB` is what they were measured
+/// against. [`crate::stdlib::datafusion_name`] has always been the one place the
+/// two vocabularies are reconciled, and it is applied here per function name
+/// rather than to a single builtin.
+///
+/// What cannot be reconciled stays a NAMED gap, exactly as before: `error()` has
+/// no `DataFusion` equivalent, so the four validators do not render on this
+/// engine and say so. An `Err` becomes an `unsupported_call`, never a dropped
+/// column.
+///
+/// # Errors
+///
+/// Returns the reason the template could not be rendered, phrased to be read
+/// after "`<func>` ".
+pub(crate) fn render_expr_template(template: &str, args: &[DfExpr]) -> Result<DfExpr, String> {
+    let mut r = TemplateReader {
+        chars: template.chars().collect(),
+        pos: 0,
+        args,
+    };
+    let e = r.expr()?;
+    r.skip_ws();
+    if r.pos < r.chars.len() {
+        return Err(format!(
+            "has a template with trailing text at offset {} (`{}`)",
+            r.pos,
+            r.chars[r.pos..].iter().collect::<String>()
+        ));
+    }
+    Ok(e)
+}
+
+/// A reader over one catalogue template. See [`TEMPLATE_GRAMMAR`] for the grammar.
+struct TemplateReader<'a> {
+    chars: Vec<char>,
+    pos: usize,
+    args: &'a [DfExpr],
+}
+
+/// The grammar of a catalogue template — the whole of it, and the reason a SQL
+/// parser is not needed:
+///
+/// ```text
+/// Expr    := Or
+/// Or      := Concat ('OR' Concat)*
+/// Concat  := Primary ('||' Primary)*         -- also `IS NULL` / `IS NOT NULL`
+/// Primary := '%' DIGITS                      -- an argument hole
+///          | "'" ... "'"                     -- a string literal ('' escapes)
+///          | DIGITS                          -- an integer literal
+///          | 'CAST' '(' Expr 'AS' TYPE ')'
+///          | 'CASE' 'WHEN' Expr 'THEN' Expr 'ELSE' Expr 'END'
+///          | IDENT '(' Expr (',' Expr)* ')'  -- a function call
+///          | '(' Expr ')'
+/// ```
+///
+/// Nine shapes. Anything else is an error that names the offset.
+#[allow(dead_code)] // documentation anchor: the grammar above is the datum.
+const TEMPLATE_GRAMMAR: () = ();
+
+impl TemplateReader<'_> {
+    fn skip_ws(&mut self) {
+        while self.pos < self.chars.len() && self.chars[self.pos].is_whitespace() {
+            self.pos += 1;
+        }
+    }
+
+    /// Does the (case-insensitive) word `kw` stand here, as a whole word?
+    fn peek_kw(&mut self, kw: &str) -> bool {
+        self.skip_ws();
+        let end = self.pos + kw.len();
+        if end > self.chars.len() {
+            return false;
+        }
+        let got: String = self.chars[self.pos..end].iter().collect();
+        if !got.eq_ignore_ascii_case(kw) {
+            return false;
+        }
+        // A keyword must not be the prefix of a longer identifier.
+        !self
+            .chars
+            .get(end)
+            .is_some_and(|c| c.is_alphanumeric() || *c == '_')
+    }
+
+    fn eat_kw(&mut self, kw: &str) -> bool {
+        if self.peek_kw(kw) {
+            self.pos += kw.len();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect_kw(&mut self, kw: &str) -> Result<(), String> {
+        if self.eat_kw(kw) {
+            Ok(())
+        } else {
+            Err(format!(
+                "has a template missing `{kw}` at offset {}",
+                self.pos
+            ))
+        }
+    }
+
+    fn eat_char(&mut self, c: char) -> bool {
+        self.skip_ws();
+        if self.chars.get(self.pos) == Some(&c) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expr(&mut self) -> Result<DfExpr, String> {
+        let mut lhs = self.concat()?;
+        while self.eat_kw("OR") {
+            let rhs = self.concat()?;
+            lhs = binary_expr(lhs, Operator::Or, rhs);
+        }
+        Ok(lhs)
+    }
+
+    fn concat(&mut self) -> Result<DfExpr, String> {
+        let mut lhs = self.primary()?;
+        loop {
+            self.skip_ws();
+            if self.chars.get(self.pos) == Some(&'|') && self.chars.get(self.pos + 1) == Some(&'|')
+            {
+                self.pos += 2;
+                let rhs = self.primary()?;
+                lhs = binary_expr(lhs, Operator::StringConcat, rhs);
+                continue;
+            }
+            if self.eat_kw("IS") {
+                if self.eat_kw("NOT") {
+                    self.expect_kw("NULL")?;
+                    lhs = lhs.is_not_null();
+                } else {
+                    self.expect_kw("NULL")?;
+                    lhs = lhs.is_null();
+                }
+                continue;
+            }
+            break;
+        }
+        Ok(lhs)
+    }
+
+    fn primary(&mut self) -> Result<DfExpr, String> {
+        self.skip_ws();
+        let Some(&c) = self.chars.get(self.pos) else {
+            return Err("has a template that ends where a value was due".to_string());
+        };
+
+        // `%N` — an argument hole. Out of range is a catalogue bug and is named
+        // as one rather than silently dropping the term.
+        if c == '%' {
+            self.pos += 1;
+            let start = self.pos;
+            while self.chars.get(self.pos).is_some_and(char::is_ascii_digit) {
+                self.pos += 1;
+            }
+            let n: usize = self.chars[start..self.pos]
+                .iter()
+                .collect::<String>()
+                .parse()
+                .map_err(|_| format!("has a template with a malformed hole at offset {start}"))?;
+            return self.args.get(n).cloned().ok_or_else(|| {
+                format!("has a template naming `%{n}`, and it was given {} argument(s)", self.args.len())
+            });
+        }
+
+        // `'...'`, with `''` for an embedded quote.
+        if c == '\'' {
+            self.pos += 1;
+            let mut s = String::new();
+            loop {
+                match self.chars.get(self.pos) {
+                    None => return Err("has a template with an unterminated string".to_string()),
+                    Some('\'') if self.chars.get(self.pos + 1) == Some(&'\'') => {
+                        s.push('\'');
+                        self.pos += 2;
+                    }
+                    Some('\'') => {
+                        self.pos += 1;
+                        break;
+                    }
+                    Some(&ch) => {
+                        s.push(ch);
+                        self.pos += 1;
+                    }
+                }
+            }
+            return Ok(lit(s));
+        }
+
+        if c.is_ascii_digit() {
+            let start = self.pos;
+            while self.chars.get(self.pos).is_some_and(char::is_ascii_digit) {
+                self.pos += 1;
+            }
+            let n: i64 = self.chars[start..self.pos]
+                .iter()
+                .collect::<String>()
+                .parse()
+                .map_err(|_| format!("has a template with a malformed number at offset {start}"))?;
+            return Ok(lit(n));
+        }
+
+        if c == '(' {
+            self.pos += 1;
+            let e = self.expr()?;
+            if !self.eat_char(')') {
+                return Err(format!("has a template missing `)` at offset {}", self.pos));
+            }
+            return Ok(e);
+        }
+
+        if self.eat_kw("CAST") {
+            if !self.eat_char('(') {
+                return Err("has a `CAST` with no `(`".to_string());
+            }
+            let inner = self.expr()?;
+            self.expect_kw("AS")?;
+            self.skip_ws();
+            let start = self.pos;
+            let mut depth = 0usize;
+            while let Some(&ch) = self.chars.get(self.pos) {
+                match ch {
+                    '(' => depth += 1,
+                    ')' if depth == 0 => break,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                self.pos += 1;
+            }
+            let sql_type: String = self.chars[start..self.pos].iter().collect();
+            if !self.eat_char(')') {
+                return Err("has a `CAST` with no closing `)`".to_string());
+            }
+            let dt = cast_target(sql_type.trim())
+                .ok_or_else(|| format!("casts to `{}`, which this engine does not map", sql_type.trim()))?;
+            return Ok(DfExpr::Cast(datafusion::logical_expr::Cast::new(
+                Box::new(inner),
+                dt,
+            )));
+        }
+
+        if self.eat_kw("CASE") {
+            self.expect_kw("WHEN")?;
+            let when = self.expr()?;
+            self.expect_kw("THEN")?;
+            let then = self.expr()?;
+            self.expect_kw("ELSE")?;
+            let otherwise = self.expr()?;
+            self.expect_kw("END")?;
+            return datafusion::logical_expr::when(when, then)
+                .otherwise(otherwise)
+                .map_err(|e| format!("has a `CASE` this engine rejected ({e})"));
+        }
+
+        // A function call. The name is the only thing the dialect seam touches.
+        if c.is_alphabetic() || c == '_' {
+            let start = self.pos;
+            while self
+                .chars
+                .get(self.pos)
+                .is_some_and(|ch| ch.is_alphanumeric() || *ch == '_')
+            {
+                self.pos += 1;
+            }
+            let name: String = self.chars[start..self.pos].iter().collect();
+            if !self.eat_char('(') {
+                return Err(format!("has a bare name `{name}` where a value was due"));
+            }
+            let mut args = Vec::new();
+            if !self.eat_char(')') {
+                loop {
+                    args.push(self.expr()?);
+                    if self.eat_char(',') {
+                        continue;
+                    }
+                    if self.eat_char(')') {
+                        break;
+                    }
+                    return Err(format!("has a call to `{name}` with a malformed argument list"));
+                }
+            }
+            let df_name = crate::stdlib::datafusion_name(&name)
+                .ok_or_else(|| format!("calls `{name}`, which has no DataFusion equivalent"))?;
+            let udf = datafusion::functions::all_default_functions()
                 .into_iter()
                 .find(|u| u.name() == df_name || u.aliases().iter().any(|a| a == df_name))
-            else {
-                return unsupported_call(func, "names a DataFusion builtin that does not exist");
-            };
-            DfExpr::ScalarFunction(ScalarFunction::new_udf(udf, rendered))
+                .ok_or_else(|| {
+                    format!("calls `{name}` → `{df_name}`, which is not a DataFusion function")
+                })?;
+            return Ok(DfExpr::ScalarFunction(
+                datafusion::logical_expr::expr::ScalarFunction::new_udf(udf, args),
+            ));
         }
-        LoweringKind::Udf { udf_name } => crate::stdlib::UDFS.get(udf_name.as_str()).map_or_else(
-            || unsupported_call(func, "is a UDF this engine does not implement yet"),
-            |udf| DfExpr::ScalarFunction(ScalarFunction::new_udf(Arc::clone(udf), rendered)),
-        ),
-        LoweringKind::Inline(InlineForm::Concat) => rendered
-            .into_iter()
-            .reduce(|a, b| binary_expr(a, Operator::StringConcat, b))
-            .unwrap_or_else(|| lit("")),
-        LoweringKind::Inline(InlineForm::LiteralStr { value }) => lit(value.to_string()),
-        LoweringKind::Inline(InlineForm::Cast { sql_type }) => {
-            let Some(dt) = cast_target(sql_type.as_str()) else {
-                return unsupported_call(func, "casts to a type this engine does not map");
-            };
-            rendered.into_iter().next().map_or_else(
-                || unsupported_call(func, "was called with no argument"),
-                |a| DfExpr::Cast(datafusion::logical_expr::Cast::new(Box::new(a), dt)),
-            )
-        }
-        // Identity is the passthrough `core.iri` / `core.literal` family.
-        LoweringKind::Inline(InlineForm::Identity) => rendered
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| unsupported_call(func, "was called with no argument")),
-        // Forms whose SQL shape has no DataFusion rendering yet. Each is a
-        // named gap, not a silent one.
-        LoweringKind::Inline(
-            InlineForm::SplitPart
-            | InlineForm::JsonExtract
-            | InlineForm::BlankNode
-            | InlineForm::RequireNonNull,
-        ) => unsupported_call(
-            func,
-            "is an inline SQL form this engine does not render yet",
-        ),
-        LoweringKind::Plan(_) => unsupported_call(func, "is a plan operator, not a value"),
+
+        Err(format!(
+            "has a template with an unexpected `{c}` at offset {}",
+            self.pos
+        ))
     }
 }
 
@@ -1182,8 +1516,10 @@ fn count_rows(batches: &[RecordBatch]) -> i64 {
 impl GraphArData {
     /// What this value costs in Arrow buffers, in `GiB` — every vertex batch plus
     /// both orientations of every edge table. Cheap (a walk of the batch list, no
-    /// data touched) and the number ADR-0043 is about: the corpus resident in one
-    /// value because the boundary between executing and writing is a whole graph.
+    /// data touched) and the number the peak-memory work is about: the whole corpus
+    /// is resident in one value, and it is resident because the TYPE of the boundary
+    /// between executing and writing is a whole graph — a streaming boundary would
+    /// not hold it, and no amount of tuning inside either half can give it back.
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn arrow_gib(&self) -> f64 {

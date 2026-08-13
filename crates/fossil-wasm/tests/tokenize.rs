@@ -1,4 +1,4 @@
-//! Native-side smoke for the `tokenize` export (ADR-0030).
+//! Native-side smoke for the `tokenize` export.
 //!
 //! Drives `tokenize_native` (the pure-Rust mirror) to catch:
 //! - `Token` enum reorders that would silently invalidate the public Rust ↔ JS
@@ -14,7 +14,7 @@
 //!
 //! The tests intentionally avoid pinning exact numeric `kind` values. Pinning
 //! would couple this test to `Token` variant declaration order and convert
-//! ADR-0030's documented "negative consequence" (REORDER is breaking) into a
+//! the documented "negative consequence" (REORDER is breaking) into a
 //! CI failure on every additive change, defeating the additive-friendly
 //! contract.
 

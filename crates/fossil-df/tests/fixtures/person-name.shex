@@ -1,0 +1,17 @@
+# The output contract of the one-mapping, one-property programs:
+# `execute_vertex.rs`, `source_formats.rs`, `multi_mapping.rs`.
+#
+# One predicate, `https://example.org/name`, whose LAST SEGMENT is the bare key
+# `name` those bodies write. Cardinality {1,1} (the ShExC default)
+# and every body writes it, so `check_required_properties` is satisfied.
+#
+# `xsd:string` is the one narrowing that is safe here: absent a CSVW schema on
+# the source, `.name` synthesises no type at all, so the constraint is never
+# actually exercised — but the GraphAr column IS a string, and a document that
+# said otherwise would be lying about the corpus.
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:string
+}

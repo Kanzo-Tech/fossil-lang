@@ -1,0 +1,14 @@
+× `Users` and `Imported` mint two identities for Person
+   ╭─[program.fossil:7:16]
+ 7 │     @subject = "https://shop.example/user/{User.email}"
+   ·                ───────────────────┬───────────────────
+   ·                                   ╰── `Users` mints this one
+   ╰────
+   ╭─[program.fossil:11:16]
+11 │     @subject = "https://shop.example/user/{Legacy.account_id}"
+   ·                ──────────────────────┬──────────────────────
+   ·                                      ╰── `Imported` mints this one
+   ╰────
+  help: a type has one identity. Every mapping that produces Person writes the
+        same @subject, so that an edge naming Person reaches the same node
+        whichever mapping emitted it.

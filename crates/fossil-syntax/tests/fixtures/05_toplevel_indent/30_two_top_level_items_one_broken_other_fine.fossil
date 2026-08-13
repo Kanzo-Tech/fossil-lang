@@ -1,5 +1,5 @@
-prefix ex: <https://example.org/>
-User : ex:Person from users
-    ex:name = *
-Item : ex:Item from items
-    iri = .id
+type { Person, Item } := io.shex("catalogue.shex")
+Users : Person from User
+    name = *
+Items : Item from Product
+    @subject = Product.id

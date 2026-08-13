@@ -1,0 +1,11 @@
+// #region repair
+@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)
+type { Person } := io.shex("mixed.shex")
+// #endregion repair
+
+User := io.csv("data/users.csv")
+
+People : Person from User
+    @subject  = "https://shop.example/user/{User.email}"
+    name      = User.name
+    foaf_name = User.name

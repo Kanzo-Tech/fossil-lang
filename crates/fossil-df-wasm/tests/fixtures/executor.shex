@@ -1,0 +1,22 @@
+# The output contract of `fossil-df-wasm/tests/execute_core.rs`.
+#
+# `csv_program_runs_through_the_in_memory_source_seam` and
+# `at_conn_source_alias_resolves_through_the_ref_map` need only `ex:Person`;
+# `program_sources_lists_each_distinct_source_with_its_format` also needs
+# `ex:Order`, whose `placedBy` is a shape-ref (an edge).
+#
+# ⚠️ Handing this text to `execute_core`'s `shex` argument is NOT enough. That
+# argument becomes an `OutputDescriptorKind` for the EXECUTOR; the CHECKER
+# resolves its shape through `file_at` + `shape_document`, and
+# `fossil-df-wasm`'s `ExecutorSystem` installs no decoder row and registers no
+# document — both deliberately, and both now wrong. See the report.
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:string
+}
+
+ex:Order {
+  ex:placedBy @ex:Person
+}

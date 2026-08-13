@@ -3,28 +3,30 @@
 //! (RDF) is host-decoded + scanned via the input seam — see `rdf_source.rs`.
 
 #![cfg(not(target_arch = "wasm32"))]
-
-use std::sync::Arc;
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray};
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+
+mod support;
 
 const JSON_PROGRAM: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"person.shex\")
 
 users := io.json(\"tests/fixtures/users.json\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+    @subject = `${ex:}user/${.id}`
+    name = .name
 ";
+
+const PERSON_SHEX: &str = include_str!("fixtures/person-name.shex");
 
 #[tokio::test]
 async fn reads_an_ndjson_source() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, JSON_PROGRAM.to_string(), "json.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(JSON_PROGRAM, "json.fossil", &[("person.shex", PERSON_SHEX)]);
     let mapping = *fossil_hir::def_map::def_map(&db, file)
         .mappings(&db)
         .first()
@@ -39,7 +41,7 @@ async fn reads_an_ndjson_source() {
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("io.json reads via read_json");
+    .unwrap_or_else(|e| panic!("io.json reads via read_json: {e}; {:#?}", support::diagnostics(&db, file)));
 
     assert_eq!(node.label, "Person");
     let total: usize = vertex.batches.iter().map(|b| b.num_rows()).sum();

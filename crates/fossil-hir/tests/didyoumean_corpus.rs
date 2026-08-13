@@ -1,5 +1,5 @@
 //! Did-you-mean corpus — fixture-style coverage of the Damerau-Levenshtein
-//! suggestion heuristic over realistic CSVW column-name typos.
+//! suggestion heuristic over realistic column-name typos.
 //!
 //! These typo/candidate pairs mirror the column names the diagnostic corpus
 //! (plan 03-08) exercises end-to-end. The threshold is `max(2, typo.len()/3)`
@@ -7,7 +7,7 @@
 
 use fossil_hir::did_you_mean;
 
-/// Realistic CSVW column set used across the corpus.
+/// Realistic column set used across the corpus.
 const COLUMNS: &[&str] = &["id", "name", "age", "email", "username", "created_at"];
 
 #[test]

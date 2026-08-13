@@ -1,25 +1,22 @@
 PROGRAM
   MAPPING
     MAPPING_HEADER
-      IDENT "User"
+      IDENT "Users"
       SHAPE_SEP ":"
       SHAPE_EXPR
-        IRI_EXPR
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "Person"
+        IDENT "Person"
       KW_FROM "from"
       EXPR
         LITERAL_EXPR
-          IDENT "users"
+          IDENT "User"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          KW_IRI "iri"
+          AT_ATTR "@subject"
         ASSIGN "="
         EXPR
           PIPELINE_EXPR
             LITERAL_EXPR
-              IDENT "users"
+              IDENT "User"
             PIPE "|>"
             ERROR

@@ -6,7 +6,7 @@ PROGRAM
     COMMA ","
     IDENT "City"
     RBRACE "}"
-    ASSIGN "="
+    DEFINE ":="
     EXPR
       POSTFIX_EXPR
         POSTFIX_EXPR
@@ -38,13 +38,10 @@ PROGRAM
         RPAREN ")"
   MAPPING
     MAPPING_HEADER
-      IDENT "User"
+      IDENT "Users"
       SHAPE_SEP ":"
       SHAPE_EXPR
-        IRI_EXPR
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "Person"
+        IDENT "Person"
       KW_FROM "from"
       EXPR
         LITERAL_EXPR
@@ -52,9 +49,11 @@ PROGRAM
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          KW_IRI "iri"
+          AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          FIELD_REF_EXPR
+          POSTFIX_EXPR
+            LITERAL_EXPR
+              IDENT "type"
             DOT "."
             IDENT "id"

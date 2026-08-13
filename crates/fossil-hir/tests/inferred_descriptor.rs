@@ -1,5 +1,5 @@
 //! Forward propagation via a host-registered `InferredDescriptor`, keyed by the
-//! source **URI** (ADR-0037, rekeyed by ADR-0050).
+//! source **URI**, never the binding name.
 //!
 //! What only this crate can test is the indirection: the checker holds a
 //! binding name, the cache holds URIs, and the `DefMap` is what joins them. The
@@ -18,7 +18,7 @@ use std::sync::Arc;
 const PROGRAM: &str = "prefix ex: <https://example.org/>\n\
                        users := io.csv(\"data/users.csv\")\n\
                        User : ex:Person from users\n    \
-                       ex:name = .name\n";
+                       name = .name\n";
 
 fn descriptor(uri: &str, columns: &[(&str, Primitive)]) -> InferredDescriptor {
     InferredDescriptor {
@@ -71,8 +71,9 @@ fn a_descriptor_registered_under_the_uri_reaches_the_binding_that_names_it() {
     assert_eq!(field_names(&db, file), ["id", "name"]);
 }
 
-/// The binding name is not a key. A descriptor filed under `"users"` — what the
-/// pre-ADR-0050 host registered — is not found, and the checker falls through
+/// The binding name is not a key. A descriptor filed under `"users"` — what a
+/// host registered before the cache was keyed by URI — is not found, and the
+/// checker falls through
 /// to no forward propagation instead of typing against the wrong file.
 #[test]
 fn a_descriptor_registered_under_the_binding_name_is_not_found() {

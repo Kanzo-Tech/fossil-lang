@@ -7,23 +7,43 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Salsa Db trait, System abstraction, and shared input types for the Fossil compiler"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
+
+[features]
+# `test_support`: the line-format shape decoder, the host that installs it, and
+# the document registration a test owes the checker. Opt-in, and a
+# DEV-dependency everywhere it is used, so no shipped binary carries it —
+# `resolver = "3"` keeps a dev-only feature out of a non-test build.
+#
+# It is here rather than in `fossil-hir` (where the first copy lived,
+# `#[cfg(test)]` and so unreachable across the crate boundary) because the seam
+# it exercises is defined here: `ShapeDecoder`, `shape_document`, `SourceFile`,
+# `register_file`. A decoder for a format no program is written in is not the
+# compiler logic this crate refuses.
+test-support = []
 
 [dependencies]
 salsa = { workspace = true }
 thiserror = { workspace = true }
 smol_str = { workspace = true }
-# Phase 13 INPUT-01 / ADR-0037, reshaped by ADR-0050 — the `System` trait
-# hands out a `&fossil_descriptors_input::DescriptorCache`. Verified
+# Phase 13 INPUT-01 — the `System` trait hands out a
+# `&fossil_descriptors_input::DescriptorCache`, keyed by the source URI the
+# program writes. Verified
 # (plan 13-02 Task 0): fossil-descriptors-input has NO dependency on
 # fossil-base — no cycle. The fossil-base → fossil-descriptors-input
 # direction matches the existing fossil-hir → fossil-descriptors-input
 # direction; descriptors-input remains a leaf data crate.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-
-[dev-dependencies]
-# The `System` descriptor tests build an `InferredColumn`, whose datatype is the
-# lattice value itself (`fossil_graph_schema::Primitive`), not a name.
+# Promoted from a dev-dependency: `System::shape_documents` and the
+# `shape_document` query name `OutputShapes` and `Rejection` in their public
+# signatures, so the type is part of this crate's API and not just its tests.
+# This is the dependency that lets `fossil-hir` stop linking `shex_ast` — the
+# compiler names the neutral vocabulary and a host supplies the decoder. It
+# stays cheap and stays WASM-clean: `fossil-graph-schema` depends on `serde`
+# and nothing else, which is exactly why the vocabulary lives there rather
+# than beside a parser.
 fossil-graph-schema = { path = "../fossil-graph-schema" }

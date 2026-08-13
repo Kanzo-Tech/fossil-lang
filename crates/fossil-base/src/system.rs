@@ -1,12 +1,14 @@
 //! Host-injected capabilities (filesystem, time, future: registry, descriptors).
 //!
-//! Per ADR-0003, descriptors and registry live behind a single `dyn System`
-//! indirection on the `Db` trait. Phase 1 only needs `read_file` and `now`;
-//! Phase 3+ extends this trait with `input_descriptor`, `output_descriptor`,
-//! `registry`, `read_dir`, and `random_seed`.
+//! **The `Db` trait stays thin, and descriptors and registry live behind a
+//! single `dyn System` indirection on it** — so a new host capability widens one
+//! trait and never the query surface. Today that is `read_file` and `now`, plus
+//! the two tables below; `read_dir`, `random_seed` and the function registry are
+//! extension points, listed at the foot of the trait and not written yet.
 //!
-//! Phase 13 (v0.2, ADR-0037) added the inferred-descriptor table; ADR-0050
-//! moved it behind ONE accessor, [`System::descriptors`]. Hosts (browser-side
+//! The inferred-descriptor table arrived as a read/write method pair that three
+//! `System` impls each re-implemented, and it sits behind ONE accessor now,
+//! [`System::descriptors`]. Hosts (browser-side
 //! `DuckDB-WASM` via `FossilPlayground::registerInferredDescriptor`; the
 //! native engine via the `duckdb` crate) populate runtime-introspected column
 //! lists BEFORE invoking `compile()`. The Rust compiler never initiates
@@ -20,6 +22,8 @@ use std::time::SystemTime;
 
 use fossil_descriptors_input::DescriptorCache;
 
+use crate::providers::{DATA, Provider};
+
 pub trait System: Send + Sync + std::fmt::Debug {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError>;
     fn now(&self) -> SystemTime;
@@ -31,9 +35,15 @@ pub trait System: Send + Sync + std::fmt::Debug {
     /// reference to a plain table, in place of the read/write method pair that
     /// three `System` impls each re-implemented over a private
     /// `Mutex<HashMap>`. The registration side no longer has a default that
-    /// panics, because there is no longer a default to write — a host either
-    /// has a table or answers `None` (ADR-0050, applying ADR-0046 §5: ambient
-    /// in the context, never part of a query key).
+    /// panics, because there is no longer a default to write — a host either has
+    /// a table or answers `None`. **A host capability is ambient in the context
+    /// and never part of a query key**, which is what lets this be an accessor
+    /// at all.
+    ///
+    /// It is a concrete struct and not a `fn` table because the split is data
+    /// against behaviour: [`Self::providers`] is a table of BEHAVIOUR and this
+    /// is a table of DATA, and a function pointer that returned descriptors
+    /// would be the indirection without the reason for it.
     ///
     /// `None` is a real answer and not a stub: `fossil-df-wasm`'s executor
     /// takes its schemas from the plan it was handed and has nothing to cache.
@@ -45,6 +55,48 @@ pub trait System: Send + Sync + std::fmt::Debug {
     /// Salsa already tracks.
     fn descriptors(&self) -> Option<&DescriptorCache> {
         None
+    }
+
+    /// **The provider registry** — every row a program may name after `io.`,
+    /// each declaring the extensions it accepts and the capabilities it has.
+    ///
+    /// This used to be `shape_decoders`, half of the registry, holding only the
+    /// rows that read TYPES while the rows that read ROWS lived in a second
+    /// table in `fossil-hir` that dispatched by a different criterion. Ruling 13
+    /// of `SURFACE-PLAN.md` collapses the two; [`crate::providers`] carries the
+    /// argument.
+    ///
+    /// **Ambient in the context, never part of a query key.** A table of `fn`
+    /// and not a trait object: an extension point that has to be named inside a
+    /// query is a table of functions, because a trait object has no identity a
+    /// query key can hold. That is also what puts a provider on the opposite
+    /// side from [`Self::descriptors`] — a descriptor cache is a table of data,
+    /// a provider is a table of behaviour. [`Provider`] carries the `&'static` +
+    /// `ptr::eq`/`ptr::hash` identity that naming-inside-a-query requires.
+    ///
+    /// The default is [`DATA`] — the four rows that read data — and it is a real
+    /// answer, not a stub: a host that decodes no shape document still has to
+    /// recognise `io.csv`. Backward checking with no expected types is correct
+    /// rather than degraded, because an undeclared predicate is legal in an open
+    /// world. It is NOT the case that a program naming no shape document simply
+    /// has no output contract — that was the older rule; naming a document is
+    /// mandatory now, a bare property key takes its name from a predicate the
+    /// document declares, and a program with none is refused by the checker.
+    /// A host that COMPILES installs
+    /// `fossil_descriptors_output::PROVIDERS`, which adds the rows carrying a
+    /// `fn` into a schema language the compiler may not link.
+    ///
+    /// Unlike [`Self::descriptors`], the *document* a row decodes IS tracked:
+    /// [`crate::shape_documents::decode_shape_document`] takes a
+    /// [`crate::files::SourceFile`] input, so editing the document re-runs the
+    /// decode and everything downstream. Only the table itself is host-owned and
+    /// untracked, and being `&'static` it cannot change within a session.
+    ///
+    /// See `crates/fossil-base/src/shape_documents.rs` for the rest of the
+    /// argument, including the two records where the extension-trait alternative
+    /// was tried and did not reach.
+    fn providers(&self) -> &'static [&'static Provider] {
+        DATA
     }
 
     // Phase 3+ extension points (do not add now — keep the trait surface
@@ -69,7 +121,7 @@ pub enum FsError {
 pub struct NativeSystem {
     /// The introspected-schema table this host owns. One field, no methods —
     /// the storage, the locking and the freshness rule all live on
-    /// [`DescriptorCache`] (ADR-0050).
+    /// [`DescriptorCache`].
     descriptors: DescriptorCache,
 }
 

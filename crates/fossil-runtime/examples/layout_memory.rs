@@ -2,9 +2,9 @@
 //!
 //! Writing a ten-million-vertex corpus peaks at 16.4 GiB for 713 MB of output
 //! (`kanzo-ui/BENCHMARKS.md`). That number is the whole build — the generator, `DuckDB`, the Parquet
-//! writer and this — so it says where to look and nothing more. ADR-0042 names larger-than-RAM as
-//! the architecture's central untested claim and predicts the risk is here, in a Louvain that runs
-//! in memory over the whole graph. This isolates it: no I/O, no database, one synthetic graph, and
+//! writer and this — so it says where to look and nothing more. Larger-than-RAM is the
+//! architecture's central untested claim, and the risk is here, in a Louvain that runs in memory
+//! over the whole graph. This isolates it: no I/O, no database, one synthetic graph, and
 //! the peak resident set after each phase.
 //!
 //! It is an example rather than a benchmark because the question is not "how fast" — it is "how

@@ -1,33 +1,27 @@
 //! The stdlib catalog, rendered for `DataFusion` — the engine half of a call.
 //!
-//! `fossil_hir::stdlib` says what a function IS: its name, its signature, and
-//! its classification (a builtin of the engine, an inline SQL form, or a UDF).
+//! `fossil_hir::stdlib` says what a function IS: its receiver, its name, its
+//! signature, and its lowering (a scalar SQL expression template, or an
+//! operator of the algebra).
 //! This module says what each becomes HERE, which is a materializer's business
 //! and not the language's — the same split `primitive_to_graphar` keeps for the
 //! datatype lattice.
 //!
 //! # Two vocabularies, one catalog
 //!
-//! `LoweringKind::Builtin` carries the `DuckDB` spelling because the `DuckDB`
-//! path is what the catalog was written for. Most of those names are also
-//! `DataFusion`'s; the three that are not are listed in [`datafusion_name`],
-//! which is the only place the two engines' vocabularies are reconciled.
+//! A `LoweringKind::Expr` template is written in `DuckDB` SQL, because `DuckDB`
+//! is the engine every one of them was MEASURED against. Most of those names
+//! are also `DataFusion`'s; the ones that are not are listed in
+//! [`datafusion_name`], the only place the two vocabularies are reconciled.
 //!
-//! # The UDFs
+//! # There are no UDFs any more
 //!
-//! `LoweringKind::Udf` names a function no engine has (`fossil_slug`). The
-//! logic is pure Rust and lives here as a `ScalarUDF`, so the compiler ring can
-//! run it without a database at all. `WasmClass::NativeUdfOnly` is about
-//! `DuckDB`-WASM, which has no runtime registration API — it says nothing about
-//! this path.
-
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
-
-use datafusion::arrow::array::{Array, ArrayRef, StringArray};
-use datafusion::arrow::datatypes::DataType;
-use datafusion::error::DataFusionError;
-use datafusion::logical_expr::{ColumnarValue, ScalarUDF, Volatility, create_udf};
+//! A `UDFS` map lived here: `ScalarUDF`s for `fossil_slug` and
+//! `fossil_unicode_norm`, the two functions no engine ships, reimplemented in
+//! Rust so the compiler ring could run them without a database. Ruling 15 of
+//! `SURFACE-PLAN.md` deleted the `Udf` lowering kind, so no row names one.
+//! `str.slug` is a template both engines render; `clean.normalize_unicode`
+//! left the language.
 
 /// The `DataFusion` spelling of a catalogued builtin.
 ///
@@ -52,10 +46,23 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         "substring" => "substr",
         "trim" => "btrim",
         "upper" => "upper",
-        // The three that differ.
+        // Shared, and reached only through a template: these are the names the
+        // nine `InlineForm` variants used to hide in a doc-comment, so they
+        // could never appear here before ruling 15.
+        "regexp_replace" => "regexp_replace",
+        "split_part" => "split_part",
+        // The four that differ.
         "regexp_matches" => "regexp_like",
         "string_split" => "string_to_array",
         "strptime" => "to_timestamp",
+        // `error()` has NO DataFusion equivalent, and it is the single reason
+        // the four validators do not render on this engine. Naming it here as a
+        // `None` rather than leaving it to fall through the catch-all is the
+        // difference between a gap that is declared and a gap that is a typo.
+        "error" => return None,
+        // `json_extract` is DuckDB's; DataFusion ships no JSON extraction in
+        // its default function set.
+        "json_extract" => return None,
         // Aggregates are not scalar expressions: `math.sum` in a property
         // position is a different feature (a pipeline with a group-by), and F5
         // is where it lands. Saying so beats emitting a call that plans wrong.
@@ -64,132 +71,49 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
     })
 }
 
-/// Every `ScalarUDF` the stdlib needs and `DataFusion` does not ship, keyed by
-/// the `udf_name` its catalog entry declares.
-pub static UDFS: LazyLock<HashMap<&'static str, Arc<ScalarUDF>>> = LazyLock::new(|| {
-    let mut m: HashMap<&'static str, Arc<ScalarUDF>> = HashMap::new();
-    m.insert(
-        "fossil_slug",
-        Arc::new(unary_string_udf("fossil_slug", |s| Ok(slug::slugify(s)))),
-    );
-    m.insert(
-        "fossil_unicode_norm",
-        Arc::new(binary_string_udf("fossil_unicode_norm", |s, form| {
-            use unicode_normalization::UnicodeNormalization;
-            Ok(match form.to_ascii_uppercase().as_str() {
-                "NFC" => s.nfc().collect::<String>(),
-                "NFD" => s.nfd().collect::<String>(),
-                "NFKC" => s.nfkc().collect::<String>(),
-                "NFKD" => s.nfkd().collect::<String>(),
-                other => {
-                    return Err(DataFusionError::Execution(format!(
-                        "fossil_unicode_norm: unknown normalization form `{other}` \
-                         (expected NFC/NFD/NFKC/NFKD)"
-                    )));
-                }
-            })
-        })),
-    );
-    m
-});
+// `template_to_datafusion` lived here: a textual pass over a whole template,
+// replacing `regexp_matches(` with `regexp_like(` and so on before the text was
+// handed to a SQL parser. It went with the SQL parser. `render_expr_template`
+// reads the template itself and reconciles each function name through
+// `datafusion_name` as it meets it, which is one mechanism instead of two and
+// cannot rewrite a name that appears inside a string literal.
 
-/// Build a `(VARCHAR, VARCHAR) -> VARCHAR` UDF from a pure per-row function.
-fn binary_string_udf(
-    name: &'static str,
-    f: impl Fn(&str, &str) -> Result<String, DataFusionError> + Send + Sync + 'static,
-) -> ScalarUDF {
-    create_udf(
-        name,
-        vec![DataType::Utf8, DataType::Utf8],
-        DataType::Utf8,
-        Volatility::Immutable,
-        Arc::new(move |args: &[ColumnarValue]| {
-            let arrays = ColumnarValue::values_to_arrays(args)?;
-            let as_str = |i: usize| -> Result<&StringArray, DataFusionError> {
-                arrays[i]
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .ok_or_else(|| {
-                        DataFusionError::Execution(format!("{name} expects string arguments"))
-                    })
-            };
-            let (a, b) = (as_str(0)?, as_str(1)?);
-            let mut out: Vec<Option<String>> = Vec::with_capacity(a.len());
-            for i in 0..a.len() {
-                if a.is_null(i) || b.is_null(i) {
-                    out.push(None);
-                } else {
-                    out.push(Some(f(a.value(i), b.value(i))?));
-                }
-            }
-            let array: ArrayRef = Arc::new(StringArray::from(out));
-            Ok(ColumnarValue::Array(array))
-        }),
-    )
-}
-
-/// Build a `VARCHAR -> VARCHAR` UDF from a pure per-row function.
-///
-/// A row-level `Err` is a query error, not a null: `validate.*` exists to stop
-/// a run, and a silent null is the failure mode this whole phase is about.
-fn unary_string_udf(
-    name: &'static str,
-    f: impl Fn(&str) -> Result<String, DataFusionError> + Send + Sync + 'static,
-) -> ScalarUDF {
-    create_udf(
-        name,
-        vec![DataType::Utf8],
-        DataType::Utf8,
-        Volatility::Immutable,
-        Arc::new(move |args: &[ColumnarValue]| {
-            let arrays = ColumnarValue::values_to_arrays(args)?;
-            let input = arrays[0]
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| {
-                    DataFusionError::Execution(format!("{name} expects a string argument"))
-                })?;
-            let mut out: Vec<Option<String>> = Vec::with_capacity(input.len());
-            for i in 0..input.len() {
-                if input.is_null(i) {
-                    out.push(None);
-                } else {
-                    out.push(Some(f(input.value(i))?));
-                }
-            }
-            let array: ArrayRef = Arc::new(StringArray::from(out));
-            Ok(ColumnarValue::Array(array))
-        }),
-    )
-}
-
-/// The catalogued functions this engine cannot run yet, pinned so that making
+/// The catalogued functions this engine cannot render, pinned so that making
 /// one work — or breaking one — is a diff in this list and not a surprise in a
 /// user's program.
 #[cfg(test)]
 const UNREACHABLE_ON_DATAFUSION: &[&str] = &[
-    // Two reasons, and they are different.
+    // Four causes, and they are different. Every one of them was MEASURED by
+    // the test below planning the real template, not guessed from a name.
     //
-    // The aggregates are not scalar calls at all: `math.sum` in a property
-    // position is a pipeline with a group-by, which is F5.
-    "math.avg",
-    "math.max",
-    "math.min",
-    "math.sum",
-    // These six are UDFs whose pure logic exists ONCE, inside
-    // `fossil-runtime`'s DuckDB trampolines, and `fossil-runtime` may not
-    // depend on this crate (nor this on it — the two engine halves are
-    // deliberately unaware of each other). Copying the logic here would make
-    // two implementations of `validate.email`, which is the mistake F1 spent a
-    // day undoing. They move here when the DuckDB half goes, which is F5 — and
-    // that half is already dead: `fossil_runtime::execute` has no caller but
-    // its own test, and the codegen that emitted its SQL no longer exists.
-    "anon.hmac",
-    "clean.strip_html",
+    // 1 — `sha256` and `string_to_array` are real DataFusion functions that are
+    //     not in `all_default_functions()`: they live in optional function
+    //     packages this crate does not register. A `SessionContext` that
+    //     registered them would make these two render with no other change.
+    "anon.hash",
+    "str.split",
+    // 2 — `error()`. There is no way to raise from a DataFusion expression, so
+    //     "return this value or stop the run" has no spelling. It is the sole
+    //     cause for all five.
+    "core.require",
     "validate.email",
     "validate.iso_date",
     "validate.url",
     "validate.uuid",
+    // 3 — the aggregates are not scalar calls at all: `math.sum` in a property
+    //     position is a pipeline with a group-by, which is F5.
+    "math.avg",
+    "math.max",
+    "math.min",
+    "math.sum",
+    // 4 — `json_extract` is DuckDB's; DataFusion ships no JSON extraction.
+    "parse.json",
+    // WHAT IS NOT HERE ANY MORE, and it is the point of ruling 15 on this
+    // engine: `str.slug` and `str.strip_html`. They were native Rust UDFs whose
+    // logic lived inside `fossil-runtime`'s DuckDB trampolines, unreachable
+    // from this crate by construction. As templates they render here, because a
+    // template is portable in a way a UDF is not. `clean.strip_html` was the
+    // name in this list; the row is `str.strip_html` now and it is renderable.
 ];
 
 #[cfg(test)]
@@ -198,26 +122,31 @@ mod tests {
     use fossil_hir::stdlib::{LoweringKind, stdlib};
 
     /// Every catalogued function reaches an implementation on this engine, or
-    /// is named here as one that does not. The list is the honest half: an
-    /// aggregate is not a scalar call, and saying which functions those are
-    /// beats discovering it when a program uses one.
+    /// is named above as one that does not.
+    ///
+    /// **This test got teeth.** It used to check that a `Builtin`'s name had a
+    /// `DataFusion` spelling and that a `Udf`'s name was in a map — a question
+    /// about two lookup tables. It now PLANS each row's template through the
+    /// real renderer, so it fails on a template that is not valid SQL, not just
+    /// on a name that is not in a list. The nine `InlineForm` variants it could
+    /// not see at all are included for the first time.
     #[test]
     fn every_catalogued_function_is_reachable_or_declared_unreachable() {
+        use datafusion::logical_expr::lit;
+
         let mut unreachable: Vec<&str> = Vec::new();
         for entry in stdlib().iter() {
             match &entry.lowering {
-                LoweringKind::Builtin { duckdb_name } => {
-                    if datafusion_name(duckdb_name.as_str()).is_none() {
+                LoweringKind::Expr(template) => {
+                    let args: Vec<datafusion::logical_expr::Expr> =
+                        entry.sig.params.iter().map(|_| lit("x")).collect();
+                    if crate::render_expr_template(template.as_str(), &args).is_err() {
                         unreachable.push(entry.name.as_str());
                     }
                 }
-                LoweringKind::Udf { udf_name } => {
-                    if !UDFS.contains_key(udf_name.as_str()) {
-                        unreachable.push(entry.name.as_str());
-                    }
-                }
-                // Inline forms render structurally; plan ops are not scalars.
-                LoweringKind::Inline(_) | LoweringKind::Plan(_) => {}
+                // An operator is not a scalar expression; there is nothing to
+                // render and nothing to declare.
+                LoweringKind::Op(_) => {}
             }
         }
         unreachable.sort_unstable();
@@ -225,12 +154,25 @@ mod tests {
         declared.sort_unstable();
         assert_eq!(
             unreachable, declared,
-            "a function became reachable or unreachable without this list moving"
+            "a function became renderable or unrenderable without this list moving"
         );
     }
 
+    /// The two rows that were native-only Rust and are portable SQL now. This is
+    /// the concrete gain of ruling 15 on this engine, so it is pinned rather
+    /// than left as a claim in a comment.
     #[test]
-    fn slug_is_a_real_udf_on_this_engine() {
-        assert!(UDFS.contains_key("fossil_slug"));
+    fn slug_and_strip_html_render_on_this_engine() {
+        use datafusion::logical_expr::lit;
+        for name in ["str.slug", "str.strip_html"] {
+            let entry = stdlib().lookup(name).expect("catalogued");
+            let LoweringKind::Expr(t) = &entry.lowering else {
+                panic!("`{name}` must be an Expr row");
+            };
+            assert!(
+                crate::render_expr_template(t.as_str(), &[lit("x")]).is_ok(),
+                "`{name}` must render on DataFusion"
+            );
+        }
     }
 }

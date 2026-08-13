@@ -47,7 +47,7 @@ fn workspace_lifecycle_smoke() {
     let h = pg.open_file_native("hello.fossil".to_string(), source.clone());
 
     // update_file_native bumps the Salsa revision via `set_text` — the
-    // EXACT mechanism didChange uses (ADR-0022). No panic, no error.
+    // EXACT mechanism didChange uses. No panic, no error.
     pg.update_file_native(h, source + "\n// edit")
         .expect("update_file_native");
 

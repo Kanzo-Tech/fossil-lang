@@ -23,9 +23,11 @@
 //! The schema is spoken by every side at once — the producer (`fossil-df`), each
 //! materializer, the consumer (`fossil-graph`), and the wire/manifest. So this
 //! crate depends on nothing but `serde`: anyone can deserialize and interpret a
-//! graph without pulling the ShEx descriptor or Arrow. The *derivation* from a
-//! ShEx descriptor (which does need that machinery) lives next to the descriptor,
-//! not here — the contract stays pure.
+//! graph without pulling the ShEx descriptor or Arrow. *Decoding* a ShEx
+//! document (which does need that machinery) lives next to the descriptor, not
+//! here — the contract stays pure. What the decoder produces is [`shapes`],
+//! which is in this crate precisely because it too must be speakable without
+//! ShEx.
 //!
 //! # Identity & references
 //!
@@ -33,8 +35,20 @@
 //! `source → destination` references node types by `label`; the relational plan
 //! computes the actual IRI-valued columns, and a GraphAr materializer resolves
 //! those IRIs to dense ids. The schema only states the shape.
+//!
+//! # Two contracts, one crate
+//!
+//! [`GraphSchema`] is the **output** model — what gets written. [`shapes`] is
+//! the **input** side of the same border: what a shape document *says*, also
+//! format-neutral, so the middle of the compiler can read a document's
+//! constraints without linking a schema language. [`OutputShapes::to_graph_schema`]
+//! is the one function between them.
 
 use serde::{Deserialize, Serialize};
+
+pub mod shapes;
+
+pub use shapes::{Occurs, OutputShapes, PropertyConstraint, Rejection, Shape, local_name};
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.
@@ -115,10 +129,11 @@ pub enum Primitive {
     AnyUri,
 }
 
-/// Cardinality of a property or edge — the only distinction a materializer needs
-/// (the richer ShEx `Exact(n)`/`ZeroOrOne`/`OneOrMore`/`ZeroOrMore` collapses to
-/// this: the first two are [`Single`](Cardinality::Single), the rest
-/// [`Multi`](Cardinality::Multi)).
+/// Cardinality of a property or edge — the only distinction a materializer
+/// needs. The richer `(min, max)` form a shape document states is [`Occurs`],
+/// and [`Occurs::collapse`] is the only way from there to here: at most one
+/// value is [`Single`](Cardinality::Single), anything else
+/// [`Multi`](Cardinality::Multi).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Cardinality {

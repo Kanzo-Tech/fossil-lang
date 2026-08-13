@@ -7,6 +7,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "WASM shim for the Fossil compiler — exposes FossilPlayground to JS"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
 [lib]
@@ -27,11 +28,16 @@ fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-# Phase 13 INPUT-01 (ADR-0037): WasmSystem stores InferredDescriptors registered
+# Phase 13 INPUT-01: WasmSystem stores InferredDescriptors registered
 # by the browser-side playground orchestration BEFORE invoking compile() — the
 # Rust forward-propagation path (13-02) reads them through the System trait
 # accessor.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+# The `SHEX` decoder row this host installs on its `System`. A table of `fn`
+# so the dependency buys one const and no vtable — and the
+# playground never names a ShEx type: it hands the row over and the compiler
+# calls it.
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 smol_str = { workspace = true }
 # Phase 5 STDL-07: the stdlib classification table the playground reads to
 # disable native_udf_only functions in-browser. fossil-hir is WASM-clean
@@ -81,7 +87,7 @@ console_error_panic_hook = { workspace = true }
 # getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
 # `oxrdf` ← `oxrdfio` ← `rudof_rdf` ← `shex_ast`. Salsa's own hashbrown hashes
 # with foldhash and draws no randomness. The line here used to say
-# salsa→hashbrown→ahash; ADR-0050 read the tree. The `.cargo/config.toml`
+# salsa→hashbrown→ahash, until the tree above was read. The `.cargo/config.toml`
 # rustflag is the belt-and-suspenders fallback for unconditioned call sites.
 getrandom = { workspace = true }
 uuid      = { workspace = true }

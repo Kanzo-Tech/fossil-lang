@@ -4,18 +4,47 @@
 //! flow through the `#[wasm_bindgen]` wrapper to prove `execute_graph().collect()`
 //! works under wasm-bindgen-futures.
 
+//! ⚠️ **These three pass, and one of them passes for the wrong reason.**
+//!
+//! `fossil-df-wasm`'s `ExecutorSystem` installs no shape decoder and
+//! `build_program` registers no shape document — both deliberate, and both
+//! written before ruling 3 of 2026-08-11. So `resolve_target_shape` answers
+//! `Unregistered` for the `executor.shex` the program names; that is
+//! informational, NOT fatal, so the mapping still compiles — with an EMPTY
+//! predicate table. Measured here on 2026-08-12:
+//!
+//! ```text
+//! RunStatus vertex Person → columns = [("name", None)]
+//! ```
+//!
+//! The column keeps the bare name the author wrote and LOSES its predicate IRI.
+//! Nothing in this file asserts `rdf_uri`, which is why it goes green. Two
+//! things break silently downstream: keasy's DCAT (`rdf_uri` is the wire
+//! contract's whole point) and every edge, because `apply_output_shape`
+//! classifies on `p.rdf_uri` and `None` matches no predicate. The `shex`
+//! ARGUMENT cannot supply it: a bare property key means the last segment of a
+//! predicate IRI a shape declares, so the IRI comes from
+//! `TypeckOutput.predicates`, which comes from the REGISTERED document.
+
 #![cfg(not(target_arch = "wasm32"))]
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use fossil_df_wasm::{SourceInput, SourceKind, execute_core, program_sources_core};
 
+/// The schema the browser fetched and hands to the executor. It is the SAME
+/// text the program names, and that is the point: this host has one shape and
+/// two consumers of it.
+const EXECUTOR_SHEX: &str = include_str!("fixtures/executor.shex");
+
 const PROGRAM: &str = "\
 prefix ex: <https://example.org/>
+type { Person, Order } = io.shex(\"executor.shex\")
 
 users := io.csv(\"https://data.example.com/users.csv\")
 
 Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+    @subject = `${ex:}person/${.id}`
+    name = .name
 ";
 
 #[tokio::test]
@@ -27,7 +56,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         bytes,
     }];
 
-    let out = execute_core(PROGRAM, None, sources, "s3://jobs/run-1", &empty_refs())
+    let out = execute_core(PROGRAM, Some(EXECUTOR_SHEX), sources, "s3://jobs/run-1", &empty_refs())
         .await
         .expect("executor runs the CSV program");
 
@@ -58,23 +87,24 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
 
 const TWO_SOURCE_PROGRAM: &str = "\
 prefix ex: <https://example.org/>
+type { Person, Order } = io.shex(\"executor.shex\")
 
 users := io.csv(\"https://data.example.com/users.csv\")
 orders := io.csv(\"https://data.example.com/orders.csv\")
 
 Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+    @subject = `${ex:}person/${.id}`
+    name = .name
 
 Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
+    @subject = `${ex:}order/${.order_id}`
+    placedBy = `${ex:}person/${.user_id}`
 ";
 
 #[test]
 fn program_sources_lists_each_distinct_source_with_its_format() {
     let srcs =
-        program_sources_core(TWO_SOURCE_PROGRAM, None, &empty_refs()).expect("sources enumerated");
+        program_sources_core(TWO_SOURCE_PROGRAM, Some(EXECUTOR_SHEX), &empty_refs()).expect("sources enumerated");
     let uris: Vec<&str> = srcs.iter().map(|(u, _)| u.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
     assert!(uris.contains(&"https://data.example.com/orders.csv"));
@@ -84,12 +114,13 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
 
 const CONN_PROGRAM: &str = "\
 prefix ex: <https://example.org/>
+type { Person, Order } = io.shex(\"executor.shex\")
 
 users := io.csv(\"@mybucket/users.csv\")
 
 Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+    @subject = `${ex:}person/${.id}`
+    name = .name
 ";
 
 #[tokio::test]
@@ -102,7 +133,7 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
         "https://data.example.com".to_string(),
     );
 
-    let listed = program_sources_core(CONN_PROGRAM, None, &refs).expect("sources");
+    let listed = program_sources_core(CONN_PROGRAM, Some(EXECUTOR_SHEX), &refs).expect("sources");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, "https://data.example.com/users.csv");
 
@@ -113,7 +144,7 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
         bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
     }];
 
-    let out = execute_core(CONN_PROGRAM, None, sources, "s3://jobs/run-1", &refs)
+    let out = execute_core(CONN_PROGRAM, Some(EXECUTOR_SHEX), sources, "s3://jobs/run-1", &refs)
         .await
         .expect("executor runs the @conn-aliased program");
     let person = out

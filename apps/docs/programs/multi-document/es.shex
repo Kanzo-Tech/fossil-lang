@@ -1,0 +1,6 @@
+PREFIX ayto: <https://ayto.example/voc#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+
+ayto:Persona {
+  ayto:nombre xsd:string
+}

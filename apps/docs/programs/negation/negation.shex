@@ -1,0 +1,7 @@
+PREFIX lab: <https://lab.example/voc#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+lab:Sensor {
+  lab:offset  xsd:float ;
+  lab:healthy xsd:boolean
+}

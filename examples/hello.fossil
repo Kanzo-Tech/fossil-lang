@@ -1,16 +1,26 @@
-// Phase 1 walking skeleton — exercises every crate with the minimum
-// grammar surface (prefix decl, source binding, mapping header, one
-// property assignment, IRI template, field reference, string field).
+// The walking skeleton: the smallest program that drives every crate, and the
+// one `crates/fossil-cli/tests/walking_skeleton.rs` asserts by content — five
+// `Person` vertices, subjects `https://example.org/user/1`…`/5`, and the five
+// names from `users.csv` on the `name` column.
 //
-// Grammar productions used: PrefixDecl, SourceDef, Mapping, MappingHeader,
-//   Property, TEMPLATE, FieldRef, IRIExpr (PrefixedName + ABS_IRI).
-// Stdlib used: io/csv (source ctor), implicit core/iri (template→IRI),
-//   implicit core/literal (string→Literal).
+// Every path here is relative to THIS FILE and not to wherever you invoked
+// `fossil` from: `users.csv` and `hello.shex` sit beside it in `examples/`. The
+// source read `examples/users.csv`, which only resolved because the engine fell
+// back to the process's working directory when the program-relative path did
+// not exist — so this program meant a different file depending on where you ran
+// it, and meant nothing at all from anywhere but the repository root.
 
-prefix ex: <https://example.org/>
+// The output contract. Since ruling 3 of 2026-08-11 this binding is MANDATORY:
+// a property key is the last segment of a predicate IRI the shape declares, so
+// without the document `name` below resolves to nothing and the mapping writes
+// no properties at all. `hello.shex` declares `ex:name xsd:string` at 1..1.
+type { Person } := io.shex("hello.shex")
 
-users := io.csv("examples/users.csv")
+User := io.csv("users.csv")
 
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+Users : Person from User
+    // The identity slot (ADR-0058). The hole is an ordinary expression inside
+    // an ordinary quoted string — there is one string spelling, and `prefix` +
+    // the CURIE it fed are gone from every position they held.
+    @subject = "https://example.org/user/{User.id}"
+    name     = User.name

@@ -1,136 +1,216 @@
-//! SC#1 native-builtin smoke (STDL-07): every `pure_sql` Builtin name is real.
+//! Every `LoweringKind::Expr` template is real SQL that a real `DuckDB` binds.
 //!
 //! NATIVE-ONLY (`fossil-runtime` carries a `wasm32` `compile_error!` tripwire).
 //!
-//! The structural half of the SC#1 gate lives in
-//! `fossil-hir/tests/classification_gate.rs`: it proves every `pure_sql`
-//! `Builtin.duckdb_name` is a member of the curated `DUCKDB_BUILTIN_ALLOWLIST`.
-//! That allowlist is internally consistent, but a name could still be a typo or
-//! a builtin that a future `DuckDB` renamed/removed. THIS test closes that gap
-//! (RESEARCH Pitfall 4): for every `pure_sql` `Builtin` entry in
-//! `FunctionRegistry::stdlib_default()` it executes a minimal
-//! `SELECT <duckdb_name>(<dummy args>)` on a native bundled-DuckDB 1.10502
-//! connection and asserts the call resolves (no "function does not exist"
-//! error) — proving the name matches the real engine, on native, before it can
-//! silently fail in the WASM playground.
+//! # What this replaced, and why it is strictly stronger
 //!
-//! `native_udf_only` functions are deliberately excluded — their UDFs are
-//! registered separately by `udf::register_stdlib_udfs` (STDL-03/05) and are not
-//! `DuckDB` builtins.
+//! There were TWO guards here and neither checked what mattered.
+//! `DUCKDB_BUILTIN_ALLOWLIST` was a curated list of names a `Builtin` row was
+//! allowed to render to, and `fossil-hir/tests/stdlib_classification_gate.rs`
+//! asserted membership in it — a list checked against itself. This file then
+//! executed `SELECT <duckdb_name>(<dummy args>)` to prove the NAME was real.
+//! Between them they proved a function name existed, and they could not see the
+//! nine `InlineForm` variants at all, because those rendered no name: the SQL
+//! shape of `CAST(x AS BIGINT)` or `CASE WHEN x IS NULL THEN error(…) END` was
+//! written in a doc-comment, where nothing could execute it.
 //!
-//! The test is catalog-driven (it enumerates `stdlib_default().iter()`), so it
-//! cannot drift from the registry: a newly added `Builtin` entry whose
-//! `duckdb_name` lacks an arg template here fails the explicit completeness
-//! assertion below rather than being silently skipped.
+//! Ruling 15 of `SURFACE-PLAN.md` made the template the datum. So this test
+//! executes THE TEMPLATE — every row, whole, with its arguments substituted —
+//! and both old guards fall out of it: a misspelt function name and a
+//! malformed expression are the same failure now, and the allowlist that had to
+//! be kept in step by hand is gone.
+//!
+//! # The pass criterion, and why it is not "returns a value"
+//!
+//! A template is fed dummy arguments typed from its own [`SigSpec`], and dummy
+//! arguments cannot satisfy every row: `strptime('abc', 'abc')` is a real call
+//! to a real function that fails at RUNTIME, and `validate.uuid` is SUPPOSED to
+//! raise on input that is not a UUID — that is the whole of what it does.
+//!
+//! So the criterion is BINDING, not evaluation. A `Catalog`, `Parser` or
+//! `Binder` error means the template does not name real SQL and is a failure. A
+//! `Conversion` or `Invalid Input` error means `DuckDB` bound the expression and
+//! then disliked the data, which is the template working.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 use duckdb::Connection;
-use fossil_hir::stdlib::{FunctionRegistry, LoweringKind, WasmClass};
+use fossil_hir::stdlib::{FunctionRegistry, LoweringKind, ScalarTy, render_template};
 
-/// A representative `SELECT <duckdb_name>(<dummy args>)` for a given `DuckDB`
-/// builtin name. The arg shapes match each builtin's real arity (most are unary
-/// string/number; `strptime`/`substring`/`replace`/`string_split`/`contains`/
-/// `starts_with`/`ends_with`/`regexp_matches`/`concat` have known multi-arg
-/// shapes). Returns `None` for an unrecognised name so the caller fails loudly
-/// (no silent skip).
-fn smoke_sql(name: &str) -> Option<String> {
-    let call = match name {
-        // unary string
-        "trim" => "trim('  x  ')",
-        "lower" => "lower('XY')",
-        "upper" => "upper('xy')",
-        "length" => "length('abc')",
-        "sha256" => "sha256('abc')",
-        // (string, format) — date/datetime parsing
-        "strptime" => "strptime('2020-01-02', '%Y-%m-%d')",
-        // aggregates over a constant (valid in a bare SELECT in DuckDB)
-        "sum" => "sum(1)",
-        "avg" => "avg(1)",
-        "min" => "min(1)",
-        "max" => "max(1)",
-        // scalar math
-        "abs" => "abs(-3)",
-        "round" => "round(2.5)",
-        // (string, start[, length]) — 2-arg form
-        "substring" => "substring('abcdef', 2)",
-        // (string, string) predicates / split
-        "contains" => "contains('abc', 'b')",
-        "starts_with" => "starts_with('abc', 'a')",
-        "ends_with" => "ends_with('abc', 'c')",
-        "string_split" => "string_split('a,b,c', ',')",
-        "regexp_matches" => "regexp_matches('abc', 'a.c')",
-        // (string, string, string)
-        "replace" => "replace('abc', 'b', 'X')",
-        // variadic concat
-        "concat" => "concat('a', 'b', 'c')",
-        _ => return None,
-    };
-    Some(format!("SELECT {call}"))
+/// A literal of the right SQL type for a parameter, so the template binds.
+///
+/// Deliberately NOT tailored per row: a per-row valid argument would make this
+/// a test of the arguments. The types come from the row's own signature, which
+/// is the only thing the catalogue promises about them.
+fn dummy(ty: ScalarTy) -> String {
+    match ty {
+        ScalarTy::String | ScalarTy::Iri => "'abc'".to_string(),
+        ScalarTy::Integer => "2".to_string(),
+        ScalarTy::Float => "1.5".to_string(),
+        ScalarTy::Bool => "true".to_string(),
+        ScalarTy::Date => "DATE '2026-05-21'".to_string(),
+        ScalarTy::DateTime => "TIMESTAMP '2026-05-21 00:00:00'".to_string(),
+        ScalarTy::SeqString => "['a', 'b']".to_string(),
+    }
+}
+
+/// Did `DuckDB` fail to BIND this expression, as opposed to disliking the data?
+///
+/// The three binding failures are the ones that mean the template is not SQL:
+/// a function that does not exist, a statement that does not parse, and an
+/// expression whose types cannot be resolved.
+fn is_binding_failure(msg: &str) -> bool {
+    msg.contains("Catalog Error")
+        || msg.contains("Parser Error")
+        || msg.contains("Binder Error")
+        || msg.contains("does not exist")
 }
 
 #[test]
-fn every_pure_sql_builtin_resolves_on_native_duckdb() {
+fn every_expr_template_binds_on_a_real_duckdb() {
     let conn = Connection::open_in_memory().expect("open in-memory DuckDB");
     let reg = FunctionRegistry::stdlib_default();
 
-    let mut tested = 0usize;
+    let mut checked = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+
     for entry in reg.iter() {
-        let LoweringKind::Builtin { duckdb_name } = &entry.lowering else {
+        let LoweringKind::Expr(template) = &entry.lowering else {
+            // `Op` rows name an operator of the algebra, not a scalar
+            // expression. There is nothing to SELECT.
             continue;
         };
-        // Sanity: the structural gate guarantees this, but assert it here too so
-        // the smoke set is exactly the pure_sql Builtin set.
-        assert_eq!(
-            entry.wasm_class,
-            WasmClass::PureSql,
-            "{} is a Builtin but not PureSql",
-            entry.name,
-        );
+        let args: Vec<String> = entry.sig.params.iter().map(|p| dummy(p.ty)).collect();
+        let sql = format!("SELECT {}", render_template(template.as_str(), &args));
 
-        let sql = smoke_sql(duckdb_name).unwrap_or_else(|| {
-            panic!(
-                "no smoke arg template for Builtin `{}` (used by {}); add one so the \
-                 builtin is exercised — do NOT skip silently",
-                duckdb_name, entry.name,
-            )
-        });
-
-        // PREPARE + EXECUTE the call. A renamed/removed builtin surfaces as a
-        // "function ... does not exist" / catalog error here.
-        let mut stmt = conn.prepare(&sql).unwrap_or_else(|err| {
-            panic!(
-                "DuckDB builtin `{}` (used by {}) failed to PREPARE `{}`: {} — \
-                 the name is not a real DuckDB 1.10502 builtin (typo/renamed/removed)",
-                duckdb_name, entry.name, sql, err,
-            )
-        });
-        // Drain the single result row to force execution.
-        let mut rows = stmt.query([]).unwrap_or_else(|err| {
-            panic!(
-                "DuckDB builtin `{}` (used by {}) failed to EXECUTE `{}`: {}",
-                duckdb_name, entry.name, sql, err,
-            )
-        });
-        let got = rows
-            .next()
-            .unwrap_or_else(|err| panic!("`{sql}` row fetch failed: {err}"));
-        assert!(got.is_some(), "`{sql}` returned no row");
-
-        tested += 1;
+        checked += 1;
+        if let Err(e) = conn.prepare(&sql).and_then(|mut s| {
+            s.query_row([], |row| row.get::<_, duckdb::types::Value>(0))
+                .map(|_| ())
+        }) {
+            let msg = e.to_string();
+            if is_binding_failure(&msg) {
+                failures.push(format!("`{}`\n    sql: {sql}\n    err: {msg}", entry.name));
+            }
+        }
     }
 
-    // The catalog has 20 distinct pure_sql Builtin entries (clean 3, parse 2,
-    // math 6, str 8, validate 1, anon 1 = 21 entries; parse.date+parse.datetime
-    // both use strptime). Assert we exercised every Builtin entry — a non-zero,
-    // catalog-derived count so the loop can never be silently empty.
-    let builtin_count = reg
-        .iter()
-        .filter(|e| matches!(e.lowering, LoweringKind::Builtin { .. }))
-        .count();
-    assert_eq!(
-        tested, builtin_count,
-        "every pure_sql Builtin entry must be smoke-tested (no silent skip)",
+    assert!(
+        failures.is_empty(),
+        "{} template(s) are not SQL DuckDB can bind:\n  {}",
+        failures.len(),
+        failures.join("\n  "),
     );
-    assert!(builtin_count >= 20, "expected at least 20 Builtin entries");
+    // The catalogue is not allowed to become all-`Op` without anyone noticing:
+    // an empty loop would pass the assertion above silently.
+    // 48 surface rows, of which the 13 relation verbs and the 3 `io/`
+    // constructors are `Op`. The remainder is what a real DuckDB just bound.
+    assert_eq!(
+        checked, 35,
+        "the number of Expr templates moved; the catalogue or the lowering \
+         kinds changed and this smoke should say so rather than shrink quietly"
+    );
+}
+
+/// The four validators return their input when it is valid and RAISE when it is
+/// not, and both halves are the point: a validator that returns NULL on bad
+/// input is the silent-failure mode this project exists to make impossible.
+///
+/// This also pins the two `DuckDB` facts the templates rest on, measured rather
+/// than assumed: `error()` inside a `CASE` arm is lazy, and a NULL predicate
+/// takes the ELSE branch (which is why every validator opens `%0 IS NULL OR`).
+#[test]
+fn a_validator_returns_its_input_raises_on_bad_input_and_passes_null_through() {
+    let conn = Connection::open_in_memory().expect("open in-memory DuckDB");
+    let reg = FunctionRegistry::stdlib_default();
+
+    // One valid value per validator, so the THEN arm is exercised.
+    let valid: &[(&str, &str)] = &[
+        ("validate.email", "'a@b.com'"),
+        ("validate.url", "'https://example.org/x'"),
+        ("validate.uuid", "'550e8400-e29b-41d4-a716-446655440000'"),
+        ("validate.iso_date", "'2026-05-21'"),
+    ];
+
+    for (name, good) in valid {
+        let entry = reg.lookup(name).unwrap_or_else(|| panic!("`{name}` is catalogued"));
+        let LoweringKind::Expr(template) = &entry.lowering else {
+            panic!("`{name}` must be an Expr row");
+        };
+
+        // Valid input comes back unchanged.
+        let sql = format!(
+            "SELECT {}",
+            render_template(template.as_str(), &[(*good).to_string()])
+        );
+        let got: String = conn
+            .prepare(&sql)
+            .and_then(|mut s| s.query_row([], |r| r.get::<_, String>(0)))
+            .unwrap_or_else(|e| panic!("`{name}` on valid input failed: {e}\n{sql}"));
+        assert_eq!(
+            format!("'{got}'"),
+            *good,
+            "`{name}` must return its input unchanged"
+        );
+
+        // Invalid input RAISES, and the message names the function.
+        let sql = format!(
+            "SELECT {}",
+            render_template(template.as_str(), &["'!! definitely not valid !!'".to_string()])
+        );
+        let err = conn
+            .prepare(&sql)
+            .and_then(|mut s| s.query_row([], |r| r.get::<_, String>(0)))
+            .expect_err("invalid input must raise, not return NULL");
+        assert!(
+            err.to_string().contains(name),
+            "`{name}` must name itself in its error; got {err}"
+        );
+
+        // NULL passes through as NULL rather than raising. Without the
+        // `%0 IS NULL OR` guard this is an error, because `regexp_matches(NULL,
+        // …)` is NULL and a NULL predicate takes the ELSE branch.
+        let sql = format!(
+            "SELECT {}",
+            render_template(template.as_str(), &["CAST(NULL AS VARCHAR)".to_string()])
+        );
+        let got: Option<String> = conn
+            .prepare(&sql)
+            .and_then(|mut s| s.query_row([], |r| r.get::<_, Option<String>>(0)))
+            .unwrap_or_else(|e| panic!("`{name}` on NULL raised: {e}\n{sql}"));
+        assert!(got.is_none(), "`{name}` must pass NULL through");
+    }
+}
+
+/// `error()` in a `CASE` arm is lazy PER ROW, not merely per query.
+///
+/// This is the fact every validator rests on and the one that would be most
+/// expensive to discover late: were it eager, a column containing one bad value
+/// would not fail on that row — it would fail on every query that mentions the
+/// column, including one whose rows are all valid.
+#[test]
+fn error_in_a_case_arm_is_lazy_per_row() {
+    let conn = Connection::open_in_memory().expect("open in-memory DuckDB");
+
+    let n: i64 = conn
+        .prepare(
+            "SELECT count(*) FROM (
+               SELECT CASE WHEN i < 5000 THEN i ELSE error('boom') END AS v
+               FROM range(5000) t(i)
+             ) WHERE v IS NOT NULL",
+        )
+        .and_then(|mut s| s.query_row([], |r| r.get::<_, i64>(0)))
+        .expect("5000 valid rows must not raise");
+    assert_eq!(n, 5000);
+
+    let err = conn
+        .prepare(
+            "SELECT count(*) FROM (
+               SELECT CASE WHEN i < 4999 THEN i ELSE error('boom') END AS v
+               FROM range(5000) t(i)
+             ) WHERE v IS NOT NULL",
+        )
+        .and_then(|mut s| s.query_row([], |r| r.get::<_, i64>(0)))
+        .expect_err("the one bad row at 4999 must raise");
+    assert!(err.to_string().contains("boom"), "got {err}");
 }

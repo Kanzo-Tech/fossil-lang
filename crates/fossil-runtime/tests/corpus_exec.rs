@@ -1,7 +1,7 @@
 //! SC#1 native-execution tier + cross-engine baseline producer.
 //!
 //! NATIVE-ONLY (`fossil-runtime` carries a `wasm32` `compile_error!` tripwire).
-//! This is tier 2 of the two-tier parity strategy (ADR-0014):
+//! This is tier 2 of the two-tier parity strategy:
 //!
 //! 1. **Snapshot tier** — `fossil-codegen/tests/corpus.rs` locks the 30-mapping
 //!    corpus' generated SQL text.

@@ -1,23 +1,23 @@
-//! `GraphAr` v1.0.0 manifest structs + `serde_yaml_ng` emission (SINK-02, ADR-0016).
+//! `GraphAr` v1.0.0 manifest structs + `serde_yaml_ng` emission (SINK-02).
 //!
 //! These structs serialize to the **`GraphAr` v1.0.0** vertex-info / edge-info YAML field
 //! names — `version: gar/v1`, `type`, `chunk_size`, `prefix`, `property_groups`, and edge
 //! `src_type`/`dst_type`/`adj_lists`. This deliberately supersedes the Phase-1 hand-templated
 //! spelling (`graphar_version: 1.0.0`, `vertex_types:`, `data_type: string`), which conformed
-//! to no `GraphAr` reader (see ADR-0016 + `RESEARCH` Pitfall 2).
+//! to no `GraphAr` reader (see `RESEARCH` Pitfall 2).
 //!
 //! The structs are plain serializable data — no `Box<dyn Trait>`, safe to pass through Salsa
 //! queries (CLAUDE.md hard rule). `data_type` strings are derived from [`arrow_schema::DataType`]
 //! via [`data_type_name`], the single authority for the spec spellings (`int64`, `string`, ...).
 //!
-//! Fossil never byte-writes Parquet from Rust (ADR-0017) — the runtime materializes tiles via
+//! Fossil never byte-writes Parquet from Rust — the runtime materializes tiles via
 //! `DuckDB` `COPY ... (FORMAT PARQUET)` into the manifest-declared `prefix`. The vertex-tile naming
-//! convention is `<prefix>chunk{k}.parquet` (ADR-0016, `RESEARCH` Open Q1) and the edge-tile one is
+//! convention is `<prefix>chunk{k}.parquet` (`RESEARCH` Open Q1) and the edge-tile one is
 //! `<prefix>by_source/tile{k}.parquet`. This module declares the tiling; it does not emit bytes,
 //! and `fossil-runtime`'s `enrich_layout` is the only thing that does — **what the emitter writes
 //! is what the manifest says**, asserted on the artefact by
-//! `fossil-engine/tests/conformance.rs` rather than agreed by convention. ADR-0041 is the record of
-//! that gap being open for a long time; it does not get to reopen.
+//! `fossil-engine/tests/conformance.rs` rather than agreed by convention. That gap stood open for
+//! a long time; it does not get to reopen.
 
 use arrow_schema::DataType;
 use serde::{Deserialize, Serialize};
@@ -67,7 +67,7 @@ pub struct EdgeInfo {
     /// The addressing unit of an edge tile, equal to [`Self::src_chunk_size`].
     ///
     /// **Not a row count**, and it never was one for edges: an edge lives in its
-    /// source's tile (CSR — ADR-0042 §3.2), so tile `k` under
+    /// source's tile (CSR), so tile `k` under
     /// `<prefix>by_source/` holds every edge whose `src_dense` is in vertex tile
     /// `k` and its row count is the degree of those 4,096 vertices. The
     /// alternative — the deepest tile containing both endpoints — was measured
@@ -156,7 +156,7 @@ pub struct AdjList {
 ///
 /// Published as arithmetic and not as prose, because that is the difference
 /// between an implementation somebody can copy and one they have to re-derive
-/// (ADR-0045, «Decidido el 2026-08-05» §4 — Iceberg publishes Murmur3 with a
+/// (Iceberg publishes Murmur3 with a
 /// vector table and every port agrees; `PMTiles` links Wikipedia for its Hilbert
 /// curve and every port differs).
 ///
@@ -174,7 +174,7 @@ pub const TILE_SHIFT: u32 = 12;
 /// `[i·4096, (i+1)·4096)`, its parent is a further shift, and the lowest common
 /// ancestor of two vertices is the common prefix of their ids. A reader computes
 /// every URL it wants before it emits the first request, which is the whole
-/// content of *the camera is addressed, not queried* (ADR-0042 §3.3).
+/// content of *the camera is addressed, not queried*.
 #[must_use]
 pub const fn tile_of(dense_id: u64) -> u64 {
     dense_id >> TILE_SHIFT
@@ -183,7 +183,7 @@ pub const fn tile_of(dense_id: u64) -> u64 {
 /// Rows per tile when a mapping does not override it — `1 << TILE_SHIFT`.
 ///
 /// **A tile is a fixed 4,096-row `dense_id` range**, and both lines of reasoning
-/// that reach that number arrived independently (ADR-0042 §3.1, ADR-0045 §8).
+/// that reach that number arrived independently.
 /// Measured on the five-million corpus served over a plain HTTP origin, counting
 /// every request that answers, against an ideal payload of 0.6–0.9 MB per window
 /// that is flat in N:

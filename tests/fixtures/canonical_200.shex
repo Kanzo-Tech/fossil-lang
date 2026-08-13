@@ -1,0 +1,142 @@
+# canonical_200.shex — the output contract of canonical_200.fossil.
+#
+# Naming a shape document is MANDATORY (ruling 3 of 2026-08-11): a property key
+# is a bare name whose meaning is the last segment of a predicate IRI THIS FILE
+# declares, so without it the program cannot write a single property. That is
+# also what makes this file the second half of the two-file scenario — see the
+# header of canonical_200.fossil.
+#
+# ONE SHAPE PER MAPPING, fifteen of them, declared in the order the program's
+# `type { … }` binding names them: binding is POSITIONAL, so a shape moved here
+# rebinds a name there silently.
+#
+# Un-narrowed predicates are written `.` on purpose. The source bindings carry
+# no CSVW descriptor, so a column's type is not known; a shape that declines to
+# narrow the value does not narrow it (fossil-hir `expected_value_ty`, case 3),
+# and the properties that ARE narrowed below are exactly the ones whose value is
+# a catalogue call with a static return type.
+
+PREFIX ex:     <https://example.org/>
+PREFIX schema: <https://schema.org/>
+PREFIX foaf:   <http://xmlns.com/foaf/0.1/>
+PREFIX xsd:    <http://www.w3.org/2001/XMLSchema#>
+
+# 1 — people
+ex:Person {
+  foaf:name    xsd:string ;
+  foaf:nick    xsd:string ;
+  schema:email . ;
+  ex:age       . ;
+  ex:active    .
+}
+
+# 2 — organizations
+ex:Organization {
+  schema:name      xsd:string ;
+  schema:legalName . ;
+  ex:country       . ;
+  ex:founded       .
+}
+
+# 3 — products
+ex:Product {
+  schema:name  . ;
+  schema:price xsd:integer ;
+  ex:currency  . ;
+  ex:inStock   . ;
+  ex:slug      xsd:string
+}
+
+# 4 — orders
+ex:Order {
+  ex:placedBy   . ;
+  schema:total  xsd:integer ;
+  ex:quantity   . ;
+  ex:orderedAt  .
+}
+
+# 5 — reviews
+ex:Review {
+  schema:author       . ;
+  schema:itemReviewed . ;
+  schema:reviewBody   xsd:string ;
+  schema:ratingValue  .
+}
+
+# 6 — memberships
+ex:Membership {
+  ex:member       . ;
+  ex:organization . ;
+  ex:role         xsd:string ;
+  ex:since        .
+}
+
+# 7 — addresses
+ex:PostalAddress {
+  schema:streetAddress   xsd:string ;
+  schema:addressLocality . ;
+  schema:postalCode      . ;
+  schema:addressCountry  xsd:string
+}
+
+# 8 — categories
+ex:Category {
+  schema:name . ;
+  ex:slug     xsd:string ;
+  ex:parent   .
+}
+
+# 9 — product → category link
+ex:ProductCategory {
+  ex:belongsTo   . ;
+  ex:displayName xsd:string
+}
+
+# 10 — enriched person profile
+ex:Profile {
+  foaf:name       xsd:string ;
+  foaf:mbox       . ;
+  ex:displayLabel xsd:string ;
+  ex:ageGroup     . ;
+  ex:homepage     .
+}
+
+# 11 — order line items
+ex:OrderLine {
+  ex:lineOrder     . ;
+  ex:lineProduct   . ;
+  schema:quantity  . ;
+  schema:price     xsd:integer
+}
+
+# 12 — organization contacts
+ex:Contact {
+  ex:contactOf      . ;
+  schema:name       xsd:string ;
+  schema:email      xsd:string ;
+  schema:telephone  .
+}
+
+# 13 — product pricing snapshot
+ex:PriceSnapshot {
+  ex:snapshotOf        . ;
+  schema:price         xsd:integer ;
+  schema:priceCurrency xsd:string ;
+  ex:capturedAt        .
+}
+
+# 14 — review summary per product
+ex:ReviewSummary {
+  ex:summaryOf         . ;
+  ex:reviewer          . ;
+  schema:reviewRating  . ;
+  ex:headline          xsd:string
+}
+
+# 15 — address geocoding stub
+ex:GeoAddress {
+  ex:locationOf          . ;
+  schema:addressLocality xsd:string ;
+  ex:postalCode          . ;
+  ex:countryCode         xsd:string
+}

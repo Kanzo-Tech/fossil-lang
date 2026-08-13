@@ -37,7 +37,7 @@ use crate::{GraphError, Operation, Result};
 /// the return of [`DuckExecutor::query_columns`].
 pub type ColumnedRows = (Vec<(String, String)>, Vec<Value>);
 
-/// The thin `DuckDB` seam (ADR-0003 thin-DB-trait). A binding implements
+/// The thin `DuckDB` seam. A binding implements
 /// exactly this — run a query, hand back rows as JSON objects — and inherits
 /// every verb's SQL for free.
 pub trait DuckExecutor {
@@ -429,7 +429,8 @@ impl<E: DuckExecutor> Context<'_, E> {
     ///
     /// The projection is the identity plus the user-facing columns: `subject`
     /// rides along because a filter that must change the picture answers with
-    /// ids (ADR-0042), and the writer's `dense_id`/`x`/`y`/`cluster_id` do not,
+    /// ids — the canvas masks its resident tiles with them — and the writer's
+    /// `dense_id`/`x`/`y`/`cluster_id` do not,
     /// because those are what a tile carries and this is the algebra.
     async fn read(&self, p: &ReadParams) -> Result<ReadResult> {
         let props: Vec<&str> = self

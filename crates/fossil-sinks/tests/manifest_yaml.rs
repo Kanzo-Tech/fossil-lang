@@ -1,4 +1,4 @@
-//! Snapshot lock for the `GraphAr` v1.0.0 manifest YAML shape (SINK-02, ADR-0016).
+//! Snapshot lock for the `GraphAr` v1.0.0 manifest YAML shape (SINK-02).
 //!
 //! These `insta` snapshots freeze the serialized field names + layout so a future regression
 //! to the Phase-1 `graphar_version:`/`vertex_types:` spelling (Pitfall 2) is caught. The

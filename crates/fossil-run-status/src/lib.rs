@@ -243,7 +243,7 @@ pub struct ProviderInfo {
 pub enum RefRole {
     /// The positional data URI (`io.rdf("…")`).
     Data,
-    /// The `schema = "…"` argument (a `ShEx` shape).
+    /// The `schema = io.shex("…")` argument (a shape document).
     Schema,
 }
 

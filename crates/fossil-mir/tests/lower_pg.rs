@@ -8,26 +8,54 @@
 
 use std::sync::Arc;
 
+use fossil_base::test_support::db_with_document_at;
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use fossil_hir::def_map::def_map;
 use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
 
+// ── the two halves a program's shape contract needs, and neither is the disk ──
+//
+// A property key is a bare name whose meaning is the last segment of a predicate
+// IRI THE DOCUMENT DECLARES, which is why naming a shape document is MANDATORY:
+// a program that names no document carries no `rdf_uri` on any property and
+// `apply_output_shape` has nothing to match against. Two things are needed and
+// both are easy to half-do:
+//
+//  1. a HOST WITH A TYPE-READING ROW — `NativeSystem::providers` is the trait
+//     default, the four rows that read DATA, so nothing reads types and a
+//     `.shex` it reads decodes to nothing, silently;
+//  2. the document REGISTERED as a Salsa input — `decoded_document` resolves
+//     through `fossil_base::file_at`, which reads the registry and never the
+//     disk, so writing the file next to the program is invisible.
+//
+// `fossil_base::test_support` supplies both. It is a dev-dependency on a
+// dev-only feature of a crate this one already depends on: no schema language
+// enters `fossil-mir`, which is the cut `0e6898d` made and this test nearly
+// undid.
+
+/// The shape `hello.fossil` targets: one un-narrowed `name` predicate, whose
+/// IRI is the one the vertex prop must carry.
+const HELLO_SHAPE: &str = "\
+shape https://example.org/Person
+prop https://example.org/name - 1 1
+";
+
 const HELLO: &str = "\
 prefix ex: <https://example.org/>
+
+type { Person } = io.shex(\"hello.shex\")
 
 users := io.csv(\"examples/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+    @subject = `${ex:}user/${.id}`
+    name = .name
 ";
 
 #[test]
 fn lower_pg_emits_source_vertex_sink() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, HELLO.to_string(), "hello.fossil".to_string());
+    let (db, file) = db_with_document_at("hello.fossil", HELLO, "hello.shex", HELLO_SHAPE);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -62,7 +90,7 @@ fn lower_pg_emits_source_vertex_sink() {
     let name = props
         .iter()
         .find(|p| p.name == "name")
-        .expect("the `ex:name = .name` literal becomes a vertex prop");
+        .expect("the `name = .name` literal becomes a vertex prop");
     assert_eq!(
         name.rdf_uri.as_deref(),
         Some("https://example.org/name"),
@@ -73,7 +101,7 @@ fn lower_pg_emits_source_vertex_sink() {
 /// A mapping reading `from` a DERIVED binding must taint, not silently read
 /// some other file.
 ///
-/// `x := Source |> seq.filter(...)` parses as a source definition (the parser
+/// `x := Source.where(...)` parses as a source definition (the parser
 /// classifies every top-level `IDENT :=` that way) but carries no `io.*`
 /// constructor and no URI. Lowering used to substitute `examples/users.csv` —
 /// so a mapping over `@upv/aemet.csv` executed against the walking-skeleton
@@ -87,11 +115,11 @@ prefix ex: <https://example.org/>
 
 Rows := io.csv(\"@conn/real.csv\")
 
-filtered := Rows |> seq.filter(.kind == \"https://example.org/wanted\")
+filtered := Rows.where(Rows.kind == \"https://example.org/wanted\")
 
 Thing : ex:Thing from filtered
-    iri = `${ex:}thing/${.id}`
-    ex:name = .name
+    @subject = `${ex:}thing/${.id}`
+    name = .name
 ";
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
@@ -123,78 +151,39 @@ Thing : ex:Thing from filtered
     }
 }
 
-const EDGES: &str = "\
-prefix ex: <https://example.org/>
-
-users := io.csv(\"users.csv\")
-orders := io.csv(\"orders.csv\")
-
-Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
-
-Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
-    ex:total = .amount
-    ex:external = `${ex:}widget/${.wid}`
-";
-
-/// The `Order` mapping's `ex:placedBy` template resolves (skeleton-match) to the
-/// `Person` subject → `EmitEdge`; the literal `ex:total` → a vertex prop; the
-/// dangling `ex:external` (no matching subject) → neither. Same classification
-/// the codegen decomposition makes — now shared via `fossil_mir::skeleton`.
-#[test]
-fn lower_pg_classifies_edge_vs_prop() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, EDGES.to_string(), "edges.fossil".to_string());
-    let order = *def_map(&db, file)
-        .mappings(&db)
-        .get(1)
-        .expect("Order is the 2nd mapping");
-
-    let graph = lower_to_mir_pg(&db, order);
-    let ops = graph.ops(&db);
-
-    // EmitVertex(Order): `total` is the only literal prop.
-    let (vtype, prop_names) = ops
-        .iter()
-        .find_map(|o| match o {
-            Op::EmitVertex {
-                type_name, props, ..
-            } => Some((
-                type_name.to_string(),
-                props.iter().map(|p| p.name.to_string()).collect::<Vec<_>>(),
-            )),
-            _ => None,
-        })
-        .expect("an EmitVertex");
-    assert_eq!(vtype, "Order");
-    assert_eq!(
-        prop_names,
-        ["total"],
-        "only the literal property is a vertex prop"
-    );
-
-    // placedBy → Person edge; external is dangling → no edge.
-    let edges: Vec<(String, String)> = ops
-        .iter()
-        .filter_map(|o| match o {
-            Op::EmitEdge {
-                edge_type,
-                dst_type,
-                ..
-            } => Some((edge_type.to_string(), dst_type.to_string())),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        edges,
-        vec![("placedBy".to_string(), "Person".to_string())],
-        "placedBy → Person only (external is dangling)"
-    );
-}
+// `EDGES` + `lower_pg_classifies_edge_vs_prop` lived here, and what they proved
+// is worth writing down because it has to be re-proved against the constructor.
+//
+// Given two mappings over two sources — `Person` keyed
+// `@subject = `${ex:}person/${.id}`` and `Order` keyed
+// `@subject = `${ex:}order/${.order_id}`` — the `Order` body wrote three
+// non-identity properties and the lowering sorted them three ways:
+//
+//   * `placedBy = `${ex:}person/${.user_id}`` → `Op::EmitEdge { edge_type:
+//     "placedBy", dst_type: "Person" }`. The template's SKELETON
+//     (`https://example.org/person/{}`, every per-row hole replaced by a
+//     marker) equalled the skeleton of `Person`'s subject, so the value was
+//     taken to be a reference to a `Person`.
+//   * `total = .amount` → a vertex prop. `EmitVertex`'s props were exactly
+//     `["total"]`.
+//   * `external = `${ex:}widget/${.wid}`` → NEITHER. A template whose skeleton
+//     matched no mapping's subject was dropped: no edge, and not a prop either.
+//
+// That mechanism is deleted (see the tombstone at `fossil_mir::lower`'s
+// `subject_skeletons`): an edge was GUESSED by comparing strings, and the guess
+// existed only because the identity rule was written once per mapping. There is
+// now exactly ONE identity per type — every mapping producing `T` declares the
+// same `@subject`, and disagreeing is an error — so the comparison becomes a
+// lookup, and an edge is written by naming the target type:
+// `buyer = Person(User.email)` builds that type's one subject template. The
+// successor test drives the constructor, and the three outcomes it has to keep
+// are the three above.
+//
+// The dangling case is the one most likely to be lost: a reference the program
+// writes to a subject nothing constructs must still be well-formed and must not
+// become a property. Ruling 6 of 2026-08-11 says an edge is a reference and RDF
+// is open-world, so nothing checks that the target exists — which makes "it
+// silently became a column" the failure to guard against.
 
 // ── Schema-driven refinement (GraphSchema → edges + cardinality) ────────────
 
@@ -205,12 +194,24 @@ fn lower_pg_classifies_edge_vs_prop() {
 const KB_FOSSIL: &str = "\
 prefix ex: <https://ex.org/>
 
+type { KB } = io.shex(\"kb.shex\")
+
 kb := io.rdf(\"graph.ttl\")
 
 KB : ex:KB from kb
-    iri = .subject
-    ex:label = .label
-    ex:hasProject = .hasProject
+    @subject = .subject
+    label = .label
+    hasProject = .hasProject
+";
+
+/// `KB`'s output contract. It declares the two predicates the body writes, so
+/// the props reach MIR carrying `rdf_uri`; what it does NOT say is which of them
+/// is an edge in the property-graph sense — that is `kb_schema()`'s answer, and
+/// keeping the two apart is the point of the test.
+const KB_SHAPE: &str = "\
+shape https://ex.org/KB
+prop https://ex.org/label - 1 1
+prop https://ex.org/hasProject - 0 *
 ";
 
 // `KB`: a single-valued literal `label` + a multi-valued edge `hasProject` →
@@ -258,9 +259,7 @@ fn kb_schema() -> GraphSchema {
 
 #[test]
 fn apply_output_shape_reclassifies_shape_ref_to_edge() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, KB_FOSSIL.to_string(), "kb.fossil".to_string());
+    let (db, file) = db_with_document_at("kb.fossil", KB_FOSSIL, "kb.shex", KB_SHAPE);
     let kb = *def_map(&db, file)
         .mappings(&db)
         .first()

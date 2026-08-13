@@ -1,0 +1,5 @@
+id,drift,faulty,degraded
+S-1,0.25,false,false
+S-2,-1.5,false,true
+S-3,0.0,true,true
+S-4,3.75,false,false

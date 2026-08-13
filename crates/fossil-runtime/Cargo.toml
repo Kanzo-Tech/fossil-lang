@@ -7,27 +7,25 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Native execution runtime via DuckDB (bundled C++); WASM-host execution lives in fossil-wasm"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# NATIVE-ONLY (per ADR-0002 + CLAUDE.md Project Layout). The cfg-tripwire in
+# NATIVE-ONLY (per CLAUDE.md Project Layout). The cfg-tripwire in
 # src/lib.rs enforces the workspace contract that this crate is never built
 # for wasm32. The `bundled` feature is inherited from the workspace pin
 # `duckdb = { version = "1.10502", features = ["bundled"] }` (~80MB C++,
 # 3-5 min cold-cache compile per RESEARCH.md Risk 6).
 duckdb = { workspace = true }
 
-# Native_udf_only stdlib UDF impl crates (STDL-03/05). All native-only — this
-# crate carries the wasm32 cfg-tripwire so none of these can leak into the WASM
-# gate (Pitfall 3). sha2 (hex hashing for hmac) is workspace-pinned at 0.10.
-unicode-normalization = { workspace = true }
-slug = { workspace = true }
-voca_rs = { workspace = true }
-hmac = { workspace = true }
-sha2 = { workspace = true }
-uuid = { workspace = true }
+# The six `native_udf_only` UDF impl crates (unicode-normalization, slug,
+# voca_rs, hmac, sha2, uuid) were here for `src/udf.rs`. Ruling 15 of
+# `SURFACE-PLAN.md` deleted the `Udf` lowering kind and the module with it, so
+# the language needs no native crate to run a catalogued function. `sha2`
+# survives as a DEV-dependency below, for the parity digest — a different job.
 
 # W0b/4 — GraphAr materialiser. fossil-sinks emits the WriteSqlPlan +
 # ManifestSet (WASM-clean planning side); this crate (native) runs the
@@ -70,4 +68,4 @@ fossil-hir = { path = "../fossil-hir" }
 # `salsa` was here too, and no test in this crate has ever named it: the module
 # doc says this crate runs OUTSIDE the query graph, and it does. It went with
 # `fossil-mir` / `fossil-descriptors-output` / `smol_str` / `tempfile`, which
-# served a `tests/graphar_decomp.rs` that no longer exists. ADR-0052 §3.
+# served a `tests/graphar_decomp.rs` that no longer exists.

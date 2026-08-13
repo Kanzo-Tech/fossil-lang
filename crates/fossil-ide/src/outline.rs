@@ -74,7 +74,6 @@ fn to_document_symbol(entry: &SymbolEntry, li: &LineIndex) -> DocumentSymbol {
 /// module table).
 const fn map_kind(kind: FossilSymbolKind) -> LspSymbolKind {
     match kind {
-        FossilSymbolKind::Prefix => LspSymbolKind::NAMESPACE,
         FossilSymbolKind::Mapping => LspSymbolKind::CLASS,
         FossilSymbolKind::Shape => LspSymbolKind::INTERFACE,
     }

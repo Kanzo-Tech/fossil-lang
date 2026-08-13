@@ -18,7 +18,7 @@
 //! what we lean on is the abstract model, not the spelling: a triple term reaches
 //! [`term_value`] as `Term::Triple` and a base direction as
 //! `Literal::direction`. Neither survives the pivot, and the second one says so
-//! rather than answering wrongly — ADR-0051.
+//! rather than answering wrongly.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -153,10 +153,11 @@ fn term_value(term: &Term) -> String {
         Term::NamedNode(n) => n.as_str().to_string(),
         Term::Literal(l) => l.value().to_string(),
         Term::BlankNode(b) => b.to_string(),
-        // An RDF 1.2 triple term. It has no identity of its own (Concepts §3.1),
-        // so there is nothing to key a row by; the surface form is a placeholder
-        // and the real answer needs the reifier, which is a mapping we cannot
-        // lower yet. ADR-0046 §8.
+        // An RDF 1.2 triple term. It has no identity of its own (Concepts §3.1)
+        // — the identity belongs to the REIFIER — so there is nothing to key a
+        // row by; the surface form is a placeholder. A reifier needs no new
+        // syntax, because an IRI with properties is already a mapping; what it
+        // needs is a lowering, and that does not exist yet.
         Term::Triple(_) => term.to_string(),
     }
 }
@@ -170,8 +171,12 @@ fn term_value(term: &Term) -> String {
 /// `"x"@he--rtl` is not a lossy convenience, it is the wrong string: base
 /// direction exists because the first strong character does not determine how the
 /// text is laid out, so an RTL value rendered as LTR reorders in the host. So the
-/// read path names the loss instead of committing it. ADR-0051 has why this is
-/// the stopping point and what would lift it.
+/// read path names the loss instead of committing it. What would lift it is a
+/// column type that carries the direction, and that is a new `Primitive` — which
+/// waits for a producer that emits one, because there is no Turtle writer, no
+/// descriptor that declares a `dirLangString`, and adding a lattice variant that
+/// nobody constructs is the abstraction-before-the-second-implementation this
+/// tree refuses everywhere else.
 fn directional_literal_unsupported(
     subject: &str,
     predicate: &str,

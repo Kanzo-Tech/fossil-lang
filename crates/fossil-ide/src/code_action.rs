@@ -10,13 +10,8 @@
 //!    nearest, surfaced STRUCTURALLY by plan 06-08 Task 1) yields a `QuickFix`
 //!    whose `WorkspaceEdit` replaces the typo's `wrong_span` with the
 //!    `replacement`. Read from the typed field — NOT parsed from the message
-//!    string (Research §code actions, ADR-0006 Approach A).
-//! 2. **auto-import prefix** — an unknown-prefix diagnostic yields a `QuickFix`
-//!    inserting a `prefix xx: <iri>` declaration at the top of the file. The
-//!    IRI comes from [`crate::WELL_KNOWN_PREFIXES`] for rdf/rdfs/xsd/owl
-//!    (via the 06-03 [`crate::PrefixIndex`]); an unknown prefix gets a
-//!    `<>` placeholder the user fills in.
-//! 3. **split-mapping** — a target `ShEx` `OneOf` diagnostic ALREADY carries the
+//!    string (Research §code actions).
+//! 2. **split-mapping** — a target `ShEx` `OneOf` diagnostic ALREADY carries the
 //!    generated split-into-N-mappings snippet in
 //!    [`fossil_base::Diagnostic::suggestion_source`] (Phase 3
 //!    `generate_split_suggestion`, proven to re-compile by plan 03-08). The
@@ -35,7 +30,6 @@
 use std::collections::HashMap;
 use std::str::FromStr as _;
 
-use crate::WELL_KNOWN_PREFIXES;
 use fossil_base::{Diagnostic, SourceFile, Span};
 use lsp_types::{
     CodeAction, CodeActionKind, Diagnostic as LspDiagnostic, Position, Range, TextEdit, Uri,
@@ -75,9 +69,6 @@ pub fn code_actions(
         if let Some(a) = did_you_mean_action(&index, &uri, diag) {
             actions.push(a);
         }
-        if let Some(a) = auto_import_action(db, file, &index, &uri, diag) {
-            actions.push(a);
-        }
         if let Some(a) = split_mapping_action(&index, &uri, diag) {
             actions.push(a);
         }
@@ -103,40 +94,14 @@ fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Optio
     ))
 }
 
-/// Action 2: auto-import an unknown prefix. Triggered by the "undeclared
-/// prefix" diagnostic (the message `lower.rs` emits). Inserts a
-/// `prefix xx: <iri>` line at the top of the file — the canonical IRI for a
-/// well-known prefix, a `<>` placeholder otherwise.
-fn auto_import_action(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    index: &LineIndex,
-    uri: &Uri,
-    diag: &Diagnostic,
-) -> Option<CodeAction> {
-    let prefix = unknown_prefix_name(&diag.message)?;
-    // Don't offer the import if the file already declares the prefix (a stale
-    // diagnostic after the user fixed it manually).
-    let prefixes = crate::PrefixIndex::build(db, file);
-    if prefixes.is_declared(&prefix) {
-        return None;
-    }
-    let iri = WELL_KNOWN_PREFIXES
-        .iter()
-        .find(|(p, _)| *p == prefix)
-        .map_or(String::new(), |(_, iri)| (*iri).to_string());
-    let line = format!("prefix {prefix}: <{iri}>\n");
-    let edit = TextEdit::new(byte_span_to_range(index, Span::new(0, 0)), line);
-    Some(quick_fix(
-        format!("Import prefix `{prefix}:`"),
-        uri.clone(),
-        vec![edit],
-        diag,
-        true,
-    ))
-}
+// `auto_import_action` was action 2: an «undeclared prefix» diagnostic yielded a
+// top-of-file `prefix xx: <iri>` insertion, with the canonical IRI for
+// rdf/rdfs/xsd/owl and a `<>` placeholder otherwise. `lower.rs` emits no such
+// diagnostic any more and the line it inserted is not a production, so the
+// action, its `unknown_prefix_name` message parser and the `WELL_KNOWN_PREFIXES`
+// table it read all went together.
 
-/// Action 3: split-mapping. Reads the pre-generated split snippet from
+/// Action 2: split-mapping. Reads the pre-generated split snippet from
 /// [`fossil_base::Diagnostic::suggestion_source`] (never regenerated) and
 /// replaces the offending mapping's span with it.
 fn split_mapping_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Option<CodeAction> {
@@ -151,23 +116,8 @@ fn split_mapping_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Opti
     ))
 }
 
-/// Parse the prefix name out of the "undeclared prefix" diagnostic message
-/// `lower.rs` emits. The STRUCTURED trigger is "this is an unknown-prefix
-/// diagnostic"; the prefix name is the only datum the import line needs, and
-/// `lower.rs` spells it in backticks immediately after the marker text.
-fn unknown_prefix_name(message: &str) -> Option<String> {
-    const MARKER: &str = "undeclared prefix `";
-    let rest = message.strip_prefix(MARKER).or_else(|| {
-        let idx = message.find(MARKER)?;
-        Some(&message[idx + MARKER.len()..])
-    })?;
-    // The name runs up to the trailing `:` `` ` `` pair (`xx:` ).
-    let name: String = rest
-        .chars()
-        .take_while(|c| *c != ':' && *c != '`')
-        .collect();
-    if name.is_empty() { None } else { Some(name) }
-}
+// `unknown_prefix_name` lived here: it read the prefix out of the «undeclared
+// prefix `ex:`» message that `lower.rs` used to emit. Nothing emits it.
 
 /// Build a `quick fix` [`CodeAction`] resolving `diag` with one document's
 /// worth of [`TextEdit`]s.

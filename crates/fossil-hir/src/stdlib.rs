@@ -1,71 +1,68 @@
 //! The Fossil v0.1 standard-library catalog — every function the language
-//! declares, with its signature and how it compiles.
+//! declares, with its receiver, its signature and how it compiles.
 //!
-//! # Why it lives in `fossil-hir` (ADR-0048)
+//! # Why it lives in `fossil-hir`
 //!
 //! The checker resolves a `HirExpr::Call` against this catalog: arity, argument
 //! types and the result type all come from here. It used to be its own crate,
 //! `fossil-registry`, which depended on `fossil-hir` for `FnSig` — so the
 //! checker could not read it without a cycle, and for as long as that held, a
-//! call could not be typed at all. The catalog is language surface
-//! (`stdlib.md` is a spec, not a backend detail), so it moved down, not the
-//! checker up.
+//! call could not be typed at all. The catalog is language surface, so it moved
+//! down, not the checker up.
 //!
-//! # Phase 5 (STDL-01..07): the classification framework
+//! # A row is DATA: receiver + name + signature + lowering
 //!
-//! Every stdlib function from `stdlib.md` is recorded as a [`RegistryEntry`]
-//! carrying:
-//! - its fully-qualified dotted [`RegistryEntry::name`] (`"clean.trim"`),
-//! - a Salsa-free [`SigSpec`] from which an interned `fossil_hir::FnSig<'db>`
-//!   is materialized on demand,
-//! - a [`LoweringKind`] (how it compiles: `Builtin` / `Inline` / `Udf` / `Plan`),
-//! - a [`WasmClass`] (`PureSql` = runs in the browser playground;
-//!   `NativeUdfOnly` = requires a native Rust UDF, disabled in `DuckDB`-WASM).
+//! Ruling 14 of `SURFACE-PLAN.md`. The catalogue is on its way to being a file
+//! the compiler reads, so a row carries nothing a file could not: four fields,
+//! all of them values. `grammar.bnf` then says the SHAPE of a program and this
+//! says WHICH NAMES EXIST — two data files and a compiler. Adding
+//! `str.slugify` over `regexp_replace` stops touching Rust.
 //!
-//! ## The `PureSql` ⟺ non-Udf invariant (SC#1 / STDL-07)
+//! Nothing here loads a file yet, and that is deliberate: what this module owes
+//! the loader is a shape it can fill, not a parser it has to agree with.
 //!
-//! `wasm_class == NativeUdfOnly` **iff** `lowering` is [`LoweringKind::Udf`].
-//! Everything `Builtin` / `Inline` / `Plan` is [`WasmClass::PureSql`]. The
-//! invariant is mechanically enforced: every catalog insertion sets
-//! `wasm_class` via the private [`derive_wasm_class`] helper, so the two fields
-//! cannot drift. The unit test suite asserts it holds for every entry, and the
-//! SC#1 CI allowlist gate (plan 05-07) reuses the same derivation.
+//! ## The receiver is the field that ends dispatch-by-string
 //!
-//! ## Why a `&'static` registry (no `Box<dyn>` in Salsa)
+//! [`RegistryEntry::name`] used to be the whole of the key — the string
+//! `"clean.trim"` — and dispatch by RECEIVER TYPE exists to replace exactly
+//! that. A row now says what it hangs off
+//! ([`Receiver`]) and what it is called after the dot
+//! ([`RegistryEntry::member`]), and both are derived in ONE place,
+//! [`split_receiver`], from the dotted name. They are not constructor
+//! arguments: a field a call site fills by hand is a field that ends up
+//! disagreeing with the name beside it.
 //!
-//! The registry is read by `fossil-codegen`'s `render_expr` *inside* a
-//! `#[salsa::tracked]` query. Per ADR-0003/ADR-0006 and the CLAUDE.md hard
-//! rule, no `Box<dyn Trait>` may cross a Salsa boundary. The stdlib is
-//! program-invariant in v0.1 (no federation — REG-01 deferred), so the catalog
-//! is a plain owned `FunctionRegistry` built once via [`FunctionRegistry::stdlib_default`]
-//! and held behind a `LazyLock`/`OnceLock` static at the consumer. Enum
-//! dispatch over [`LoweringKind`] replaces trait objects entirely.
+//! Three ways in, and each is a different question:
 //!
-//! `FnSig<'db>` itself is `#[salsa::interned]` (it carries a `'db` lifetime and
-//! needs a database to construct), so it cannot live in a `'static` value.
-//! Instead the static registry stores a [`SigSpec`] (a `'db`-free description of
-//! arity + scalar param/return types) and [`RegistryEntry::signature`] interns
-//! the real `FnSig<'db>` on demand against the caller's `db`. This satisfies
-//! both "construct `FnSig` directly via the fossil-hir constructor" and
-//! "the registry is `&'static`".
+//! - [`FunctionRegistry::lookup`] — the TYPE path, `str.trim(x)`. By dotted
+//!   name, which is what a `HirExpr::Call` carries.
+//! - [`FunctionRegistry::lookup_member`] — the VALUE path, `x.trim()`. By
+//!   receiver and member, which is what a postfix call knows.
+//! - [`FunctionRegistry::members_of`] — every member of a receiver. This is
+//!   what makes completion stop being approximate: the IDE can ask what a
+//!   value HAS instead of offering the whole catalogue.
 //!
-//! ## Catalog authority
+//! ## Two lowerings, and no third
 //!
-//! The catalog is reconciled to `stdlib.md` as the authoritative spec
-//! (CLAUDE.md). The eight surface namespaces — `seq` / `core` / `clean` /
-//! `parse` / `math` / `str` / `validate` / `anon` — are populated exactly: the
-//! [`crate::tests`] completeness test asserts SET EQUALITY (catalog set ==
-//! stdlib.md set), failing on both omissions and extras. Notable per-namespace
-//! reconciliations: `math/` has exactly six functions (`sum`, `avg`, `min`,
-//! `max`, `abs`, `round` — NO `ceil`/`floor`); `anon/` includes `redact`
-//! (an inline literal mask, `PureSql`); `validate/` includes `regex`
-//! (`DuckDB` `regexp_matches`, `PureSql`).
+//! Ruling 15. [`LoweringKind`] had four variants and `InlineForm` another nine,
+//! and the nine were SQL templates whose text was already written in their own
+//! doc-comments — the datum existed, in a comment, where nothing could execute
+//! it. Two of them (`SplitPart`, `JsonExtract`) were literally what `Builtin`
+//! was: a call by name. The `Builtin`/`Inline` border was not semantic.
 //!
-//! The `io/` source constructors (`io.csv` / `io.json` / `io.parquet`) are also
-//! registered (Plan-kind sources) so the Phase-1 walking-skeleton and the
-//! 05-04 source-lowering work keep a single source of truth. They are NOT part
-//! of the eight-namespace surface-function completeness set (`io/sql` and
-//! `io/http` are out of scope this milestone). See ADR-0015.
+//! What is left is the one border that is: [`LoweringKind::Expr`] is a scalar
+//! SQL expression and [`LoweringKind::Op`] names an operator of the algebra, a
+//! closed set of 14. `Udf` is gone — see [`LoweringKind::Expr`] for what
+//! that cost and bought.
+//!
+//! ## `WasmClass` is gone as a CONCEPT
+//!
+//! There was a `WasmClass` field, a `derive_wasm_class` that computed it, a
+//! `NativeUdfOnly` variant and a test asserting `PureSql ⟺ non-Udf`. With no
+//! `Udf` variant the bad state is unrepresentable rather than derived and
+//! checked, so all four go, and `fossil-runtime/src/udf.rs` with them. **The
+//! language now runs entirely in the browser**, which is a change of product
+//! and not of housekeeping.
 
 use std::sync::LazyLock;
 
@@ -79,9 +76,9 @@ use crate::ty::{Ty, TyKind};
 ///
 /// The checker resolves every call against this, so it is built once rather
 /// than per call. It is program-invariant in v0.1 — there is no federation and
-/// no user-defined function, so nothing about a program can change it (REG-01
-/// deferred). When that stops being true this becomes a Salsa input, and the
-/// call sites do not move.
+/// no user-defined function, so nothing about a program can change it. When
+/// that stops being true this becomes a Salsa input, and the call sites do not
+/// move.
 static STDLIB: LazyLock<FunctionRegistry> = LazyLock::new(FunctionRegistry::stdlib_default);
 
 /// The stdlib catalog. See [`STDLIB`].
@@ -93,32 +90,106 @@ use std::collections::HashMap;
 
 /// Registry of stdlib functions available to a Fossil program.
 ///
-/// Construct via [`Self::stdlib_default`] (the full Phase-5 catalog). The
-/// Phase-1 [`Self::phase1_default`] entry point is retained as a thin alias.
-/// Read entries by name with [`Self::lookup`] or enumerate every entry with
-/// [`Self::iter`] (used by 05-03's UDF manifest and 05-07's SC#1 CI gate).
+/// Construct via [`Self::stdlib_default`]. Read a row by its dotted name with
+/// [`Self::lookup`], by receiver and member with [`Self::lookup_member`], and
+/// enumerate a receiver's members with [`Self::members_of`].
 #[derive(Debug, Clone)]
 pub struct FunctionRegistry {
     entries: HashMap<SmolStr, RegistryEntry>,
 }
 
-/// A single stdlib function entry.
+/// What sits to the LEFT of the dot, and therefore what decides which members
+/// exist (`grammar.bnf`, PostfixExpr).
 ///
-/// Carries the fully-qualified name, a `'db`-free [`SigSpec`], its
-/// [`LoweringKind`], and the derived [`WasmClass`]. The `wasm_class` field is
-/// always set via [`derive_wasm_class`] at construction so the `PureSql` ⟺
-/// non-Udf invariant cannot drift.
+/// This is the field that turns dispatch from a string match into a type
+/// question. Before it, `where` / `select` / `join` were productions in the
+/// grammar and everything else was looked up by its dotted spelling, so a new
+/// verb meant a new RULE. With a receiver on every row, **a new verb is a ROW.**
+///
+/// The three variants are the three things the grammar says can stand on the
+/// left, reduced to what the checker can actually dispatch on:
+///
+/// - [`Self::Namespace`] — `io`, `core`, `parse`, `math`, `validate`, `anon`.
+///   A name, not a value: there is nothing to dispatch on, so the entry is
+///   reached by its dotted spelling and only that. `io` is the clearest case —
+///   its entries **create** the thing, so they cannot have a receiver.
+/// - [`Self::Scalar`] — a value's type. Reached by EITHER path, and both reach
+///   ONE row: `str.lower(x)` and `x.lower()` resolve to the same entry,
+///   exactly as `str::len(&s)` ≡ `s.len()` in Rust. One entry, two ways in.
+/// - [`Self::Relation`] — a relation (`Users`, `Adults`). Its members are the
+///   verbs — `where`, `select`, `join` — which is why a new verb is a row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Receiver {
+    /// No receiver — a namespace function, reached only as `ns.member(args)`.
+    Namespace,
+    /// A value of this scalar type. Reached as `Ty.member(x, …)` or
+    /// `x.member(…)`; both are the same row.
+    Scalar(ScalarTy),
+    /// A relation. Reached as `Rel.member(…)`; the members are the verbs.
+    Relation,
+}
+
+/// The receiver a namespace-or-type head denotes, and the single place the
+/// classification lives.
+///
+/// Derived from the head of the dotted name so that a row cannot carry a
+/// receiver that disagrees with its own spelling. In the declarative catalogue
+/// this becomes a column and this function becomes its parser; until then it is
+/// the parser of a column that is written as the head of the name.
+///
+/// `str` and `seq` are TYPES, not namespaces: the left of a dot names a thing
+/// whose members these are.
+#[must_use]
+pub fn receiver_of(head: &str) -> Receiver {
+    match head {
+        "str" => Receiver::Scalar(ScalarTy::String),
+        "seq" => Receiver::Relation,
+        _ => Receiver::Namespace,
+    }
+}
+
+/// Split a dotted catalogue name into its receiver and its member.
+///
+/// The ONE place `recv` and `member` come from. Both are derived rather than
+/// passed, because a field a call site sets by hand is a field that drifts from
+/// the name written beside it — which is the defect this whole change is about,
+/// one level down.
+///
+/// A name with no dot is not a catalogue name; it gets [`Receiver::Namespace`]
+/// and itself as the member, so a malformed row is inert rather than a panic.
+#[must_use]
+pub fn split_receiver(dotted: &str) -> (Receiver, SmolStr) {
+    dotted.split_once('.').map_or_else(
+        || (Receiver::Namespace, SmolStr::new(dotted)),
+        |(head, member)| (receiver_of(head), SmolStr::new(member)),
+    )
+}
+
+/// A single stdlib function entry — one ROW of the catalogue.
+///
+/// Four fields, all data: the [`Receiver`] it hangs off, its name, a `'db`-free
+/// [`SigSpec`], and its [`LoweringKind`]. `recv` and `member` are derived from
+/// `name` by [`split_receiver`] at construction and are never passed in.
 #[derive(Debug, Clone)]
 pub struct RegistryEntry {
-    /// Fully-qualified dotted name (e.g. `"clean.trim"`, `"io.csv"`).
+    /// Fully-qualified dotted name (e.g. `"str.trim"`, `"io.csv"`).
+    ///
+    /// Still the catalogue's key, because a namespace entry has no other handle.
+    /// For a [`Receiver::Scalar`] or [`Receiver::Relation`] row it is the
+    /// TYPE-PATH spelling: the left half names a type, not a namespace.
     pub name: SmolStr,
+    /// What this entry hangs off. See [`Receiver`].
+    pub recv: Receiver,
+    /// The name after the dot — the member. `"lower"` for `str.lower`, `"where"`
+    /// for the relation verb. This is what a value-path call `x.lower()` matches
+    /// on, and it is why the type path `str.lower(x)` and the value path
+    /// `x.lower()` reach one row.
+    pub member: SmolStr,
     /// `'db`-free signature description. Materialize the real interned
     /// `FnSig<'db>` with [`Self::signature`].
     pub sig: SigSpec,
-    /// How this function compiles to SQL / MIR.
+    /// How this row compiles: a scalar SQL expression, or an operator.
     pub lowering: LoweringKind,
-    /// SC#1 / STDL-07 tag: pure `DuckDB` SQL vs native-only Rust UDF.
-    pub wasm_class: WasmClass,
 }
 
 impl RegistryEntry {
@@ -141,32 +212,64 @@ impl RegistryEntry {
 /// Stored in the static registry so a [`RegistryEntry`] needs no `'db` lifetime.
 /// [`Self::to_fn_sig`] interns it into a real `FnSig<'db>` on demand.
 ///
-/// v0.1 limitation (RESEARCH Open Q4): the surface syntax for pipelines and
-/// schema-directed parsing (`parse.json`, the `seq/` `Fn(...)` arguments,
-/// `forall`-polymorphism) does not exist yet, so signatures here are the best
-/// scalar approximation. Generic / higher-order positions collapse to their
-/// dominant scalar shape (e.g. predicate-taking `seq/` ops are typed
-/// `(String) -> String` placeholders; `parse.json` is `(String) -> String`).
-/// These are documented per-entry where they deviate from `stdlib.md`'s ideal.
+/// v0.1 limitation: the surface syntax for schema-directed parsing (`parse.json`
+/// and the `seq/` higher-order arguments) does not exist yet, so signatures here
+/// are the best scalar approximation. Generic / higher-order positions collapse
+/// to their dominant scalar shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SigSpec {
-    /// Scalar type of each parameter, in order.
-    pub params: Vec<ScalarTy>,
+    /// Each parameter's NAME and scalar type, in order.
+    pub params: Vec<ParamSpec>,
     /// Scalar return type.
     pub ret: ScalarTy,
+}
+
+/// One parameter of a catalogue row: what it is called, and what it takes.
+///
+/// The name is here and nowhere else, and that placement is the whole of the
+/// named-argument decision (`grammar.bnf`, NamedArg). `NamedArg := IDENT ASSIGN
+/// Expression` is a production, so the grammar is normative and `format =
+/// "%Y-%m-%d"` is a program fossil must accept; what it needed was somewhere for
+/// `format` to MEAN something. A signature is that somewhere:
+///
+/// - it is where arity and argument types are already checked, so a name that
+///   matches no parameter is refused beside a count that does not match;
+/// - it makes the resolution PURELY LOCAL — `crate::lower` reorders the
+///   arguments into positional slots against this vector and every layer below
+///   the HIR keeps seeing positional arguments. `HirExpr::Call` did not change,
+///   MIR did not change, and the backends did not change.
+///
+/// The rejected alternative was to carry names into `HirExpr::Call` and resolve
+/// them in the checker. It costs a wider HIR for nothing: no diagnostic the
+/// checker could give is better than one given where the source text is still in
+/// hand, and every consumer of `Call` would then have to know that arguments may
+/// be out of order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamSpec {
+    /// What a named argument writes to reach this position.
+    pub name: SmolStr,
+    /// Its scalar type.
+    pub ty: ScalarTy,
 }
 
 impl SigSpec {
     /// Convenience constructor.
     #[must_use]
-    pub const fn new(params: Vec<ScalarTy>, ret: ScalarTy) -> Self {
+    pub const fn new(params: Vec<ParamSpec>, ret: ScalarTy) -> Self {
         Self { params, ret }
+    }
+
+    /// The zero-based position `name` refers to, or `None` if this signature has
+    /// no such parameter.
+    #[must_use]
+    pub fn position_of(&self, name: &str) -> Option<usize> {
+        self.params.iter().position(|p| p.name == name)
     }
 
     /// Intern this spec into a real `fossil_hir::FnSig<'db>`.
     #[must_use]
     pub fn to_fn_sig<'db>(&self, db: &'db dyn salsa::Database) -> FnSig<'db> {
-        let params: Vec<Ty<'db>> = self.params.iter().map(|p| p.to_ty(db)).collect();
+        let params: Vec<Ty<'db>> = self.params.iter().map(|p| p.ty.to_ty(db)).collect();
         let ret = self.ret.to_ty(db);
         FnSig::new(db, params, ret)
     }
@@ -190,7 +293,6 @@ pub enum ScalarTy {
     DateTime,
     /// An IRI value.
     Iri,
-    /// An RDF 1.2 triple-as-term.
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -216,74 +318,79 @@ impl ScalarTy {
     }
 }
 
-/// How a stdlib function compiles. Enum dispatch — never a `Box<dyn>`.
+/// How a stdlib row compiles. TWO variants, and the border between them is the
+/// only one that was ever semantic.
+///
+/// # `Expr` — a scalar SQL expression, written as a template
+///
+/// The payload is SQL text with `%N` holes, `N` the ZERO-BASED index of an
+/// argument. `trim(%0)`, `CAST(%0 AS BIGINT)`, `%0 || %1`.
+///
+/// **Why indexed holes and not sequential ones.** A `?`-style placeholder that
+/// consumes the next argument cannot express the two shapes the catalogue
+/// actually contains, and both are load-bearing:
+///
+/// - a hole appearing **twice** — `core.require` is
+///   `CASE WHEN %0 IS NULL THEN error(…) ELSE %0 END`, one argument read in two
+///   positions. Sequential placeholders would demand two arguments for a
+///   one-argument function;
+/// - a hole appearing **zero** times — `anon.redact` is the literal
+///   `'[REDACTED]'` and ignores what it is given. Sequential placeholders
+///   cannot say "ignore".
+///
+/// So a template does NOT determine arity, and must not: [`SigSpec`] does, and
+/// the checker reads it. A hole index outside the signature is a catalogue bug
+/// that [`crate::stdlib::tests`] catches, not a runtime one.
+///
+/// **The one shape this notation does not have is the variadic**, and that is a
+/// deliberate hole rather than an oversight. `Concat` was the only variadic
+/// form and it belonged to `core.triple`, which was deleted with the other five
+/// RDF term constructors; `BlankNode` was the only template referring to
+/// something that is not an argument at all (`'_:bnode_' || row_id`) and
+/// belonged to `core.blank`, deleted in the same sweep. Two of the four arity
+/// puzzles this notation had to answer answered themselves by being
+/// unreachable, and the remaining two are the two above. A variadic row needs a
+/// notation and there is no row that needs one.
+///
+/// # `Op` — an operator of the algebra
+///
+/// [`PlanOp`] cuts at a real seam: it names one of a closed set of 14 operators
+/// that affect the PLAN, not a value. It used to be called `Plan`, after its
+/// effect, rather than after what it names.
+///
+/// # What `Udf` cost, and what deleting it bought
+///
+/// There was a third kind, `Udf`, naming a native Rust function registered on a
+/// `DuckDB` connection. Eight rows used it. Two are deleted from the language
+/// outright because they cannot be done honestly without Rust — `anon.hmac`
+/// (HMAC needs a key schedule and `DuckDB` has `sha256` and no HMAC) and
+/// `clean.normalize_unicode` (`DuckDB` ships `nfc_normalize`, which is NFC and
+/// nothing else). The other six are templates here, and each one's delta
+/// against its Rust predecessor was measured, not assumed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweringKind {
-    /// A `DuckDB` scalar/aggregate builtin called by name: `trim`, `lower`,
-    /// `strptime`, `sha256`, `regexp_matches`. ⇒ [`WasmClass::PureSql`].
-    Builtin {
-        /// The `DuckDB` builtin function name (must be non-empty; the SC#1 gate
-        /// in 05-07 additionally checks membership in a curated allowlist).
-        duckdb_name: SmolStr,
-    },
-    /// Compiled inline to a SQL expression — a `CAST`, `||`, `CASE`, or literal,
-    /// not a named function call. ⇒ [`WasmClass::PureSql`].
-    Inline(InlineForm),
-    /// A native Rust UDF registered on the `DuckDB` connection (`fossil_slug`,
-    /// `fossil_hmac`). NOT available in `DuckDB`-WASM. ⇒ [`WasmClass::NativeUdfOnly`].
-    Udf {
-        /// The registered UDF name (e.g. `"fossil_slug"`).
-        udf_name: SmolStr,
-    },
-    /// Affects MIR/plan structure, not a scalar expression: the `seq/` operator
-    /// family and the `io/` source constructors. Surface-unreachable in v0.1
-    /// per ADR-0009 (registry-only here). ⇒ [`WasmClass::PureSql`].
-    Plan(PlanOp),
+    /// A scalar SQL expression template with `%N` argument holes.
+    Expr(SmolStr),
+    /// An operator of the algebra — affects the plan, not a value.
+    Op(PlanOp),
 }
 
-/// The concrete inline SQL forms used by the v0.1 catalog. Each variant names
-/// the SQL shape it expands to. Enum dispatch keeps codegen `Box<dyn>`-free.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InlineForm {
-    /// `CAST(x AS <sql_type>)` — `parse.integer`→`BIGINT`, `parse.float`→`DOUBLE`,
-    /// `parse.decimal`→`DECIMAL(38,18)`.
-    Cast {
-        /// The target `DuckDB` SQL type (e.g. `"BIGINT"`).
-        sql_type: SmolStr,
-    },
-    /// `a || b || ...` — string concatenation operator (`core.triple` composite
-    /// id, etc.).
-    Concat,
-    /// `'<value>'` — a fixed string literal, ignoring arguments. Used by
-    /// `anon.redact` (default mask `[REDACTED]`).
-    LiteralStr {
-        /// The literal value to emit (without surrounding quotes).
-        value: SmolStr,
-    },
-    /// `split_part(s, sep, n)` chain — `parse.csv_row`.
-    SplitPart,
-    /// `json_extract(s, path)` — `parse.json` (schema-directed parsing is
-    /// post-surface-syntax; v0.1 lowers to a scalar extract).
-    JsonExtract,
-    /// `'_:bnode_' || row_id` — `core.blank`.
-    BlankNode,
-    /// `CASE WHEN x IS NULL THEN error(...) ELSE x END` — `core.require`.
-    RequireNonNull,
-    /// Identity passthrough — `core.iri` when its argument is already an IRI
-    /// template; `core.literal`/`core.typed`/`core.lang` literal construction
-    /// (the datatype/lang annotation is carried in a side column at codegen).
-    Identity,
-}
-
-/// Plan-affecting operations: the `seq/` operator algebra family + `io/` sources.
+/// Operators of the algebra: the relation verbs plus the `io/` sources.
 ///
-/// These mirror the multi-input MIR ops (built and codegen-verified in Phase 4
-/// via direct `MirGraph` construction, ADR-0009) but are surface-unreachable in
-/// v0.1. Registry-only here.
+/// These mirror the multi-input MIR ops. They were documented as
+/// "surface-unreachable in v0.1", and that stopped being true with the
+/// receiver: a [`Receiver::Relation`] row is reached by writing
+/// `User.where(User.age >= 18)`, which `grammar.bnf, PostfixExpr` spells and the
+/// conformance programs use.
+///
+/// The gap that is now VISIBLE rather than hidden: this enum has 13 relation
+/// operators and `crate::lower::lower_source_stage` implements three
+/// (`where`, `select`, `join`). Before the receiver, nothing could enumerate
+/// the members of a relation and so nothing could count the difference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanOp {
-    /// `seq.filter` → `FilterOp` (`WHERE`).
-    Filter,
+    /// `seq.where` → `FilterOp` (`WHERE`).
+    Where,
     /// `seq.map` → `ExtendOp`s + `ProjectOp`.
     Map,
     /// `seq.flatten` → `UNNEST`.
@@ -296,8 +403,8 @@ pub enum PlanOp {
     Distinct,
     /// `seq.sort` → `ORDER BY`.
     Sort,
-    /// `seq.project` → `ProjectOp` (`SELECT cols`).
-    Project,
+    /// `seq.select` → `ProjectOp` (`SELECT cols`).
+    Select,
     /// `seq.join` → `JoinOp` (`JOIN ... ON`).
     Join,
     /// `seq.union` → `UNION ALL`.
@@ -314,7 +421,7 @@ pub enum PlanOp {
 }
 
 /// Registry-local mirror of `fossil-mir::SourceFormat` (avoids a `fossil-mir`
-/// dependency / cycle). Phase 5 STDL-06 (plan 05-04) reconciles the two.
+/// dependency / cycle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceFormatTag {
     /// `io.csv` → `read_csv_auto`.
@@ -325,144 +432,43 @@ pub enum SourceFormatTag {
     Parquet,
 }
 
-// ── Source dispatch: the single source of truth (W1) ───────────────────────
+// ── Source dispatch lived here, and it was HALF of one table ──────────────
 //
-// Every `io.<name>` source constructor the language recognises is described by
-// exactly one [`SourceKind`] in [`SOURCE_KINDS`]. `fossil-mir`'s `resolve_source`
-// reads it to pick the [`fossil_mir::SourceFormat`]; `fossil_registry::providers`
-// iterates it for the CLI and the browser. Adding a source format is ONE edit
-// here — no string-matching scattered across crates.
+// `SourceKind` / `SOURCE_KINDS` / `source_kind` are gone to
+// `fossil_base::providers`. They described a name, the extensions it accepts,
+// and what it does with them — the same three fields as `ShapeDecoder` in
+// `fossil-base`, modelled twice: this one dispatched by NAME, that one by
+// EXTENSION, and `def_map` threw away the constructor of a `type { … } :=`
+// binding because nothing read it. `io.shex("x.ttl")` and `io.shacl("x.ttl")`
+// were therefore the same program. Ruling 13 of `SURFACE-PLAN.md` collapses
+// them into `fossil_base::providers::Provider`, one lookup and one criterion.
 //
-// The split is between bytes a reader scans directly and bytes something else
-// has to materialise first. It is NOT DataFusion's `FileFormat`/`TableProvider`
-// split, which this comment used to claim: there is no `TableProvider` here and
-// no trait of ours plays that part.
-
-/// A recognised `io.<name>` source constructor: how its URI is read and which
-/// file shapes it accepts. The single source of truth for source dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SourceKind {
-    /// Fully-qualified constructor name, e.g. `"io.csv"`, `"io.rdf"`.
-    pub constructor: &'static str,
-    /// Short name (the constructor without the `io.` prefix), e.g. `"csv"`,
-    /// `"rdf"` — the provider key and the `providers` listing name.
-    pub short_name: &'static str,
-    /// File extensions this source reads (no leading dot).
-    pub extensions: &'static [&'static str],
-    /// How the source's bytes become scannable rows.
-    pub lowering: SourceLowering,
-}
-
-/// How a [`SourceKind`]'s bytes become rows a `DuckDB` plan can scan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceLowering {
-    /// A native `DuckDB` table function (`read_csv_auto`, …) — portable
-    /// native↔WASM, no custom decode.
-    NativeReader(NativeReader),
-    /// Something outside the reader materialises the relation (RDF, …) and the
-    /// core only scans the result. Lowers to `fossil_mir::SourceFormat::Provider`
-    /// and is executed by `fossil-df` (`lib.rs:616`) — there is no
-    /// `SourceProvider` trait and no `fossil-provider-rdf` crate, which is what
-    /// this comment claimed until ADR-0045 §6.
-    Provider,
-}
-
-/// The native `DuckDB` readers a [`SourceLowering::NativeReader`] maps to.
-/// `fossil-mir` exhaustively maps each to a `SourceFormat`, so a new reader is a
-/// compile error until handled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NativeReader {
-    /// `read_csv_auto`.
-    CsvAuto,
-    /// `read_json_auto`.
-    JsonAuto,
-    /// `read_parquet`.
-    Parquet,
-}
-
-/// Every source constructor the language recognises (W1 single source of truth).
-pub const SOURCE_KINDS: &[SourceKind] = &[
-    SourceKind {
-        constructor: "io.csv",
-        short_name: "csv",
-        extensions: &["csv"],
-        lowering: SourceLowering::NativeReader(NativeReader::CsvAuto),
-    },
-    SourceKind {
-        constructor: "io.json",
-        short_name: "json",
-        extensions: &["json"],
-        lowering: SourceLowering::NativeReader(NativeReader::JsonAuto),
-    },
-    SourceKind {
-        constructor: "io.parquet",
-        short_name: "parquet",
-        extensions: &["parquet"],
-        lowering: SourceLowering::NativeReader(NativeReader::Parquet),
-    },
-    SourceKind {
-        constructor: "io.rdf",
-        short_name: "rdf",
-        // Kept in lockstep with `RdfProvider::extensions` (the source_kinds
-        // invariant test pins them equal).
-        extensions: &["ttl", "nt", "n3", "rdf"],
-        lowering: SourceLowering::Provider,
-    },
-];
-
-/// Look up a [`SourceKind`] by its constructor name (`"io.csv"`). `None` when the
-/// name is not a recognised source constructor.
-#[must_use]
-pub fn source_kind(constructor: &str) -> Option<&'static SourceKind> {
-    SOURCE_KINDS.iter().find(|k| k.constructor == constructor)
-}
-
-/// STDL-07 / SC#1 classification: does this function compile to pure `DuckDB` SQL
-/// (OK in the browser playground), or does it require a native Rust UDF
-/// (native-only, disabled in `DuckDB`-WASM)?
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WasmClass {
-    /// Compiles to pure `DuckDB` SQL — runs identically native and in WASM.
-    PureSql,
-    /// Requires a native Rust UDF — unavailable in the browser playground.
-    NativeUdfOnly,
-}
-
-/// Derive the [`WasmClass`] from a [`LoweringKind`], enforcing the
-/// `PureSql` ⟺ non-Udf invariant. Returns [`WasmClass::NativeUdfOnly`] iff the
-/// lowering is [`LoweringKind::Udf`]; everything else is [`WasmClass::PureSql`].
-///
-/// Every catalog insertion sets `wasm_class` through this single function so the
-/// two fields cannot drift (SC#1 / STDL-07).
-#[must_use]
-const fn derive_wasm_class(l: &LoweringKind) -> WasmClass {
-    if matches!(l, LoweringKind::Udf { .. }) {
-        WasmClass::NativeUdfOnly
-    } else {
-        WasmClass::PureSql
-    }
-}
+// The table cannot live here any more even if it wanted to: a row that reads
+// TYPES carries a `fn` into a schema language, and `fossil-hir` may not link
+// one (`0e6898d`). It comes from the host, through `System::providers`.
+//
+// `FunctionRegistry` below is NOT that table and does not merge into it: it
+// carries call SIGNATURES for the checker, and `io.csv` appears in both for the
+// same reason `str.trim` appears in one — a provider is a thing you can name,
+// a signature is what happens when you call it.
 
 impl FunctionRegistry {
-    /// Phase-1 compatibility alias. Delegates to [`Self::stdlib_default`] so the
-    /// historical four entries (`io.csv`, `core.iri`, `core.triple`,
-    /// `core.literal`) remain present with the new shape and the walking
-    /// skeleton / `fossil-mir` source recognition keep working unchanged.
+    /// Construct the stdlib catalog: every function across the seven surface
+    /// namespaces-and-types (`seq`/`core`/`parse`/`math`/`str`/`validate`/
+    /// `anon`) plus the `io/` source constructors.
+    ///
+    /// `clean/` is not among them any more, and that is ruling 16 of
+    /// `SURFACE-PLAN.md`: it held `trim`, `lower`, `upper`, `slug` and
+    /// `strip_html` while `str/` held eight operations on a string, with no
+    /// principle separating the two — `replace` could have been called cleaning
+    /// and `trim` could have been called a string operation. Five renames and
+    /// the namespace is gone. It also makes `str.lower(str.trim(x))` — the
+    /// canonical example of one entry reached two ways, and the one
+    /// `grammar.bnf, PostfixExpr` gives — name two rows that exist, which it did
+    /// not before.
     #[must_use]
-    pub fn phase1_default() -> Self {
-        Self::stdlib_default()
-    }
-
-    /// Construct the full Phase-5 stdlib catalog: every function across the
-    /// eight surface namespaces (`seq`/`core`/`clean`/`parse`/`math`/`str`/
-    /// `validate`/`anon`), reconciled to `stdlib.md` exactly, plus the `io/`
-    /// source constructors. Each entry is classified `PureSql` or
-    /// `NativeUdfOnly` via [`derive_wasm_class`].
-    #[must_use]
-    #[allow(clippy::too_many_lines)] // a flat catalog table; one line per stdlib fn.
+    #[allow(clippy::too_many_lines)] // a flat catalog table; one row per stdlib fn.
     pub fn stdlib_default() -> Self {
-        use InlineForm as IF;
-        use LoweringKind as L;
         use PlanOp as P;
         use ScalarTy as S;
 
@@ -470,21 +476,35 @@ impl FunctionRegistry {
             entries: HashMap::new(),
         };
 
-        // Local insertion helper: sets `wasm_class` via derive_wasm_class so the
-        // PureSql ⟺ non-Udf invariant is enforced at every call site.
+        // One parameter. The name is what a named argument writes to reach this
+        // position (`grammar.bnf`, NamedArg) — see [`ParamSpec`] — and the
+        // FIRST parameter of a `Receiver::Scalar` or `Receiver::Relation` row is
+        // the receiver itself, which `x.trim()` fills by being written to the
+        // left of the dot. It is named anyway: `str.trim(text = x)` is the type
+        // path, and refusing a name in the one position that has two spellings
+        // would be a rule with no reason.
+        let p = |name: &str, ty: ScalarTy| ParamSpec {
+            name: SmolStr::new(name),
+            ty,
+        };
+
+        // Local insertion helper. `recv` and `member` come from
+        // `split_receiver` and from nowhere else, so the row's receiver cannot
+        // disagree with the row's name.
         let add = |entries: &mut HashMap<SmolStr, RegistryEntry>,
                    name: &str,
-                   params: Vec<ScalarTy>,
+                   params: Vec<ParamSpec>,
                    ret: ScalarTy,
                    lowering: LoweringKind| {
-            let wasm_class = derive_wasm_class(&lowering);
+            let (recv, member) = split_receiver(name);
             entries.insert(
                 SmolStr::new(name),
                 RegistryEntry {
                     name: SmolStr::new(name),
+                    recv,
+                    member,
                     sig: SigSpec::new(params, ret),
                     lowering,
-                    wasm_class,
                 },
             );
         };
@@ -494,448 +514,609 @@ impl FunctionRegistry {
         //
         // This used to be eight, and the six that went were RDF term
         // constructors — `iri`, `triple`, `blank`, `literal`, `typed`, `emit`.
-        // Not one of the 119 `.fossil` programs in the tree called any of them,
-        // and three could not even lower: `triple`/`emit` are `Plan(Map)`, which
-        // codegen refuses as "a plan operator, not a value", and `blank` hits
-        // the same wall. They were a term algebra for one output format,
-        // catalogued and never wired.
-        // blank: () -> Iri / String -> Iri. v0.1 takes the named (String) form.
+        // Not one `.fossil` program in the tree called any of them. They took
+        // `InlineForm::Concat` and `InlineForm::BlankNode` with them, which is
+        // why the template notation above needs neither a variadic nor a hole
+        // that is not an argument.
         add(
             e,
             "core.lang",
-            vec![S::String, S::String],
-            S::String,
-            L::Inline(IF::Identity),
-        );
+            vec![p("value", S::String), p("tag", S::String)], S::String, expr("%0"));
         // require: forall T. T? -> T. v0.1 scalar approximation String -> String.
+        // The one row whose template reads its argument TWICE.
         add(
             e,
             "core.require",
-            vec![S::String],
+            vec![p("value", S::String)],
             S::String,
-            L::Inline(IF::RequireNonNull),
+            expr("CASE WHEN %0 IS NULL THEN error('core.require: value is null') ELSE %0 END"),
         );
 
-        // ── seq/ (13) — source pipeline ops; all Plan ⇒ PureSql (STDL-01) ──
-        // Higher-order Fn(...) args collapse to scalar placeholders in v0.1
-        // (surface pipeline syntax deferred, ADR-0009). Signatures are
-        // (String) -> String approximations; the PlanOp tag is the real datum.
+        // ── seq/ (13) — the relation verbs. Receiver::Relation ─────────────
+        //
+        // Higher-order arguments collapse to scalar placeholders in v0.1; the
+        // `PlanOp` tag is the real datum. `filter` and `project` were renamed to
+        // `where` and `select` so that the catalogue spells what the surface
+        // spells — `members_of(Relation)` is what an IDE offers, and offering
+        // `User.filter(…)` for a language whose word is `where` is a completion
+        // that is confidently wrong.
         add(
             e,
-            "seq.filter",
-            vec![S::String],
-            S::String,
-            L::Plan(P::Filter),
-        );
-        add(e, "seq.map", vec![S::String], S::String, L::Plan(P::Map));
+            "seq.where",
+            vec![p("rows", S::String)], S::String, L(P::Where));
+        add(
+            e,
+            "seq.map",
+            vec![p("rows", S::String)], S::String, L(P::Map));
         add(
             e,
             "seq.flatten",
-            vec![S::SeqString],
-            S::String,
-            L::Plan(P::Flatten),
-        );
+            vec![p("rows", S::SeqString)], S::String, L(P::Flatten));
         add(
             e,
             "seq.take",
-            vec![S::String, S::Integer],
-            S::String,
-            L::Plan(P::Take),
-        );
+            vec![p("rows", S::String), p("n", S::Integer)], S::String, L(P::Take));
         add(
             e,
             "seq.drop",
-            vec![S::String, S::Integer],
-            S::String,
-            L::Plan(P::Drop),
-        );
+            vec![p("rows", S::String), p("n", S::Integer)], S::String, L(P::Drop));
         add(
             e,
             "seq.distinct",
-            vec![S::String],
-            S::String,
-            L::Plan(P::Distinct),
-        );
-        add(e, "seq.sort", vec![S::String], S::String, L::Plan(P::Sort));
+            vec![p("rows", S::String)], S::String, L(P::Distinct));
         add(
             e,
-            "seq.project",
-            vec![S::String],
-            S::String,
-            L::Plan(P::Project),
-        );
+            "seq.sort",
+            vec![p("rows", S::String)], S::String, L(P::Sort));
+        add(
+            e,
+            "seq.select",
+            vec![p("rows", S::String)], S::String, L(P::Select));
         add(
             e,
             "seq.join",
-            vec![S::String, S::String],
-            S::String,
-            L::Plan(P::Join),
-        );
+            vec![p("rows", S::String), p("other", S::String)], S::String, L(P::Join));
         add(
             e,
             "seq.union",
-            vec![S::String, S::String],
-            S::String,
-            L::Plan(P::Union),
-        );
+            vec![p("rows", S::String), p("other", S::String)], S::String, L(P::Union));
         add(
             e,
             "seq.group_by",
-            vec![S::String],
-            S::String,
-            L::Plan(P::GroupBy),
-        );
+            vec![p("rows", S::String)], S::String, L(P::GroupBy));
         add(
             e,
             "seq.aggregate",
-            vec![S::String],
-            S::String,
-            L::Plan(P::Aggregate),
-        );
+            vec![p("rows", S::String)], S::String, L(P::Aggregate));
         add(
             e,
             "seq.count",
-            vec![S::String],
-            S::Integer,
-            L::Plan(P::Count),
-        );
+            vec![p("rows", S::String)], S::Integer, L(P::Count));
 
-        // ── clean/ (6) — trim/lower/upper builtin; rest UDF ────────────────
-        add(e, "clean.trim", vec![S::String], S::String, builtin("trim"));
-        add(
-            e,
-            "clean.lower",
-            vec![S::String],
-            S::String,
-            builtin("lower"),
-        );
-        add(
-            e,
-            "clean.upper",
-            vec![S::String],
-            S::String,
-            builtin("upper"),
-        );
-        add(
-            e,
-            "clean.slug",
-            vec![S::String],
-            S::String,
-            udf("fossil_slug"),
-        );
-        add(
-            e,
-            "clean.normalize_unicode",
-            vec![S::String, S::String],
-            S::String,
-            udf("fossil_unicode_norm"),
-        );
-        add(
-            e,
-            "clean.strip_html",
-            vec![S::String],
-            S::String,
-            udf("fossil_strip_html"),
-        );
-
-        // ── parse/ (7) — casts + strptime + json + csv_row; all PureSql ────
-        add(
-            e,
-            "parse.integer",
-            vec![S::String],
-            S::Integer,
-            L::Inline(IF::Cast {
-                sql_type: SmolStr::new("BIGINT"),
-            }),
-        );
-        add(
-            e,
-            "parse.float",
-            vec![S::String],
-            S::Float,
-            L::Inline(IF::Cast {
-                sql_type: SmolStr::new("DOUBLE"),
-            }),
-        );
-        // decimal: no Decimal type in MVP → returns Float (stdlib.md §parse/decimal).
-        add(
-            e,
-            "parse.decimal",
-            vec![S::String],
-            S::Float,
-            L::Inline(IF::Cast {
-                sql_type: SmolStr::new("DECIMAL(38,18)"),
-            }),
-        );
-        add(
-            e,
-            "parse.date",
-            vec![S::String, S::String],
-            S::Date,
-            builtin("strptime"),
-        );
-        add(
-            e,
-            "parse.datetime",
-            vec![S::String, S::String],
-            S::DateTime,
-            builtin("strptime"),
-        );
-        // json: forall T. (String, schema) -> T. Schema-directed parsing is
-        // post-surface-syntax (RESEARCH Open Q4); v0.1 lowers to a scalar
-        // json_extract returning String.
-        add(
-            e,
-            "parse.json",
-            vec![S::String],
-            S::String,
-            L::Inline(IF::JsonExtract),
-        );
-        add(
-            e,
-            "parse.csv_row",
-            vec![S::String, S::String],
-            S::String,
-            L::Inline(IF::SplitPart),
-        );
-
-        // ── math/ (6 — EXACTLY; NO ceil/floor) ─────────────────────────────
-        add(e, "math.sum", vec![S::Float], S::Float, builtin("sum"));
-        add(e, "math.avg", vec![S::Float], S::Float, builtin("avg"));
-        add(e, "math.min", vec![S::Float], S::Float, builtin("min"));
-        add(e, "math.max", vec![S::Float], S::Float, builtin("max"));
-        add(e, "math.abs", vec![S::Float], S::Float, builtin("abs"));
-        add(
-            e,
-            "math.round",
-            vec![S::Float],
-            S::Integer,
-            builtin("round"),
-        );
-
-        // ── str/ (8) — DuckDB string builtins; all PureSql ─────────────────
+        // ── str/ (13) — every operation on a string. Receiver::Scalar(String)
+        //
+        // Eight were here and five arrived from `clean/` (ruling 16):
+        // `trim`, `lower`, `upper`, `slug`, `strip_html`.
+        // `clean.normalize_unicode` did NOT arrive: it is deleted from the
+        // language, because `DuckDB` has `nfc_normalize` and therefore NFC
+        // only, and a `normalize_unicode(x, 'NFKD')` that silently gave NFC
+        // would be a function that lies.
         add(
             e,
             "str.length",
-            vec![S::String],
-            S::Integer,
-            builtin("length"),
-        );
+            vec![p("text", S::String)], S::Integer, expr("length(%0)"));
         add(
             e,
             "str.slice",
-            vec![S::String, S::Integer],
+            vec![p("text", S::String), p("start", S::Integer)],
             S::String,
-            builtin("substring"),
+            expr("substring(%0, %1)"),
         );
         add(
             e,
             "str.contains",
-            vec![S::String, S::String],
+            vec![p("text", S::String), p("needle", S::String)],
             S::Bool,
-            builtin("contains"),
+            expr("contains(%0, %1)"),
         );
         add(
             e,
             "str.starts_with",
-            vec![S::String, S::String],
+            vec![p("text", S::String), p("prefix", S::String)],
             S::Bool,
-            builtin("starts_with"),
+            expr("starts_with(%0, %1)"),
         );
         add(
             e,
             "str.ends_with",
-            vec![S::String, S::String],
+            vec![p("text", S::String), p("suffix", S::String)],
             S::Bool,
-            builtin("ends_with"),
+            expr("ends_with(%0, %1)"),
         );
         add(
             e,
             "str.replace",
-            vec![S::String, S::String, S::String],
+            vec![p("text", S::String), p("needle", S::String), p("replacement", S::String)],
             S::String,
-            builtin("replace"),
+            expr("replace(%0, %1, %2)"),
         );
         add(
             e,
             "str.split",
-            vec![S::String, S::String],
+            vec![p("text", S::String), p("separator", S::String)],
             S::SeqString,
-            builtin("string_split"),
+            expr("string_split(%0, %1)"),
         );
         add(
             e,
             "str.concat",
-            vec![S::String, S::String],
+            vec![p("text", S::String), p("other", S::String)],
             S::String,
-            builtin("concat"),
+            expr("concat(%0, %1)"),
+        );
+        add(
+            e,
+            "str.trim",
+            vec![p("text", S::String)], S::String, expr("trim(%0)"));
+        add(
+            e,
+            "str.lower",
+            vec![p("text", S::String)], S::String, expr("lower(%0)"));
+        add(
+            e,
+            "str.upper",
+            vec![p("text", S::String)], S::String, expr("upper(%0)"));
+        add(
+            e,
+            "str.slug",
+            vec![p("text", S::String)], S::String, expr(SLUG_TEMPLATE));
+        add(
+            e,
+            "str.strip_html",
+            vec![p("text", S::String)],
+            S::String,
+            expr(STRIP_HTML_TEMPLATE),
         );
 
-        // ── validate/ (5) — email/url/uuid/iso_date UDF; regex builtin ─────
+        // ── parse/ (7) — casts + strptime + json + csv_row ─────────────────
+        add(
+            e,
+            "parse.integer",
+            vec![p("text", S::String)],
+            S::Integer,
+            expr("CAST(%0 AS BIGINT)"),
+        );
+        add(
+            e,
+            "parse.float",
+            vec![p("text", S::String)],
+            S::Float,
+            expr("CAST(%0 AS DOUBLE)"),
+        );
+        // decimal: no Decimal type in MVP → returns Float.
+        add(
+            e,
+            "parse.decimal",
+            vec![p("text", S::String)],
+            S::Float,
+            expr("CAST(%0 AS DECIMAL(38,18))"),
+        );
+        add(
+            e,
+            "parse.date",
+            vec![p("text", S::String), p("format", S::String)],
+            S::Date,
+            expr("strptime(%0, %1)"),
+        );
+        add(
+            e,
+            "parse.datetime",
+            vec![p("text", S::String), p("format", S::String)],
+            S::DateTime,
+            expr("strptime(%0, %1)"),
+        );
+        // json: forall T. (String, path) -> T. Schema-directed parsing is
+        // post-surface-syntax; v0.1 lowers to a scalar extract. The old
+        // signature declared ONE parameter while its own doc-comment wrote
+        // `json_extract(s, path)` — the second argument is now in the signature
+        // instead of only in the prose.
+        add(
+            e,
+            "parse.json",
+            vec![p("text", S::String), p("path", S::String)],
+            S::String,
+            expr("json_extract(%0, %1)"),
+        );
+        // csv_row had the same defect and worse: two declared parameters, a
+        // doc-comment reading `split_part(s, sep, n)`, and no renderer, so
+        // nothing ever noticed. The field index is an argument now.
+        add(
+            e,
+            "parse.csv_row",
+            vec![p("text", S::String), p("separator", S::String), p("field", S::Integer)],
+            S::String,
+            expr("split_part(%0, %1, %2)"),
+        );
+
+        // ── math/ (6 — EXACTLY; NO ceil/floor) ─────────────────────────────
+        add(
+            e,
+            "math.sum",
+            vec![p("value", S::Float)], S::Float, expr("sum(%0)"));
+        add(
+            e,
+            "math.avg",
+            vec![p("value", S::Float)], S::Float, expr("avg(%0)"));
+        add(
+            e,
+            "math.min",
+            vec![p("value", S::Float)], S::Float, expr("min(%0)"));
+        add(
+            e,
+            "math.max",
+            vec![p("value", S::Float)], S::Float, expr("max(%0)"));
+        add(
+            e,
+            "math.abs",
+            vec![p("value", S::Float)], S::Float, expr("abs(%0)"));
+        add(
+            e,
+            "math.round",
+            vec![p("value", S::Float)], S::Integer, expr("round(%0)"));
+
+        // ── validate/ (5) ──────────────────────────────────────────────────
+        //
+        // Four were native Rust UDFs that returned the input when valid and
+        // raised a `DuckDB` error when not. The shape survives — the value or
+        // an error, never a null — and the PREDICATE is now SQL. Each delta
+        // against the Rust it replaces was measured against a real `DuckDB`.
         add(
             e,
             "validate.email",
-            vec![S::String],
+            vec![p("value", S::String)],
             S::String,
-            udf("fossil_validate_email"),
+            expr(VALIDATE_EMAIL_TEMPLATE),
         );
         add(
             e,
             "validate.url",
-            vec![S::String],
+            vec![p("value", S::String)],
             S::String,
-            udf("fossil_validate_url"),
+            expr(VALIDATE_URL_TEMPLATE),
         );
         add(
             e,
             "validate.uuid",
-            vec![S::String],
+            vec![p("value", S::String)],
             S::String,
-            udf("fossil_validate_uuid"),
+            expr(VALIDATE_UUID_TEMPLATE),
         );
         add(
             e,
             "validate.iso_date",
-            vec![S::String],
+            vec![p("value", S::String)],
             S::String,
-            udf("fossil_validate_iso_date"),
+            expr(VALIDATE_ISO_DATE_TEMPLATE),
         );
-        // regex: regex-expressible ⇒ PureSql (stdlib.md §validate/regex).
         add(
             e,
             "validate.regex",
-            vec![S::String, S::String],
+            vec![p("value", S::String), p("pattern", S::String)],
             S::String,
-            builtin("regexp_matches"),
+            expr("regexp_matches(%0, %1)"),
         );
 
-        // ── anon/ (3) — hash (sha256 builtin), hmac (udf), redact (inline) ──
-        // hash default (sha256, no salt) is the pure-SQL DuckDB builtin; salted
-        // / blake3 variants are the `hmac` UDF entry (stdlib.md §anon/hash).
+        // ── anon/ (2) ──────────────────────────────────────────────────────
+        //
+        // `anon.hmac` was here and is deleted from the language. HMAC needs a
+        // key schedule; `DuckDB` has `sha256` and no HMAC, so the only honest
+        // renderings were a native UDF (gone with `Udf`) or a thing called
+        // `hmac` that is not one.
         add(
             e,
             "anon.hash",
-            vec![S::String],
-            S::String,
-            builtin("sha256"),
-        );
-        add(
-            e,
-            "anon.hmac",
-            vec![S::String, S::String],
-            S::String,
-            udf("fossil_hmac"),
-        );
-        // redact: default mask "[REDACTED]" — a fixed inline literal ⇒ PureSql.
+            vec![p("value", S::String)], S::String, expr("sha256(%0)"));
         add(
             e,
             "anon.redact",
-            vec![S::String],
+            vec![p("value", S::String)],
             S::String,
-            L::Inline(IF::LiteralStr {
-                value: SmolStr::new("[REDACTED]"),
-            }),
+            // The one row whose template reads NO argument.
+            expr("'[REDACTED]'"),
         );
 
-        // ── io/ (3 in v0.1) — source constructors; Plan ⇒ PureSql (STDL-06) ─
-        // NOT part of the eight-namespace surface-function completeness set.
-        // io.sql / io.http are out of scope this milestone.
+        // ── io/ (3 in v0.1) — source constructors ──────────────────────────
         add(
             e,
             "io.csv",
-            vec![S::String],
+            vec![p("uri", S::String)],
             S::String,
-            L::Plan(P::Source(SourceFormatTag::Csv)),
+            L(P::Source(SourceFormatTag::Csv)),
         );
         add(
             e,
             "io.json",
-            vec![S::String],
+            vec![p("uri", S::String)],
             S::String,
-            L::Plan(P::Source(SourceFormatTag::Json)),
+            L(P::Source(SourceFormatTag::Json)),
         );
         add(
             e,
             "io.parquet",
-            vec![S::String],
+            vec![p("uri", S::String)],
             S::String,
-            L::Plan(P::Source(SourceFormatTag::Parquet)),
+            L(P::Source(SourceFormatTag::Parquet)),
         );
 
         reg
     }
 
-    /// Lookup a function entry by fully-qualified dotted name.
-    /// Returns `None` if the name is unknown.
+    /// Lookup a row by fully-qualified dotted name — the TYPE path,
+    /// `str.trim(x)`. Returns `None` if the name is unknown.
     #[must_use]
     pub fn lookup(&self, name: &str) -> Option<&RegistryEntry> {
         self.entries.get(name)
     }
 
-    /// Iterate every registered entry (unspecified order). Used by 05-03's UDF
-    /// manifest enumeration and 05-07's SC#1 CI classification gate.
+    /// Lookup a row by RECEIVER and MEMBER — the VALUE path, `x.trim()`.
+    ///
+    /// This and [`Self::lookup`] reach the same row for a
+    /// [`Receiver::Scalar`] entry: one entry, two ways in, and no second row
+    /// to keep in step.
+    #[must_use]
+    pub fn lookup_member(&self, recv: Receiver, member: &str) -> Option<&RegistryEntry> {
+        self.entries
+            .values()
+            .find(|e| e.recv == recv && e.member == member)
+    }
+
+    /// Every member of a receiver, unordered.
+    ///
+    /// The query that makes completion stop being approximate: an IDE asks
+    /// what a value HAS instead of offering the catalogue and hoping.
+    pub fn members_of(&self, recv: Receiver) -> impl Iterator<Item = &RegistryEntry> {
+        self.entries.values().filter(move |e| e.recv == recv)
+    }
+
+    /// Every row whose member is spelled `member`, across all receivers.
+    ///
+    /// The value path knows the member before it knows the receiver's type, so
+    /// this is what a lowering can ask. Exactly one hit is a resolution; more
+    /// than one needs the type and is the checker's to settle.
+    pub fn candidates_for_member(&self, member: &str) -> impl Iterator<Item = &RegistryEntry> {
+        self.entries
+            .values()
+            .filter(move |e| e.member == member && e.recv != Receiver::Namespace)
+    }
+
+    /// Is `head` the left half of any catalogued name?
+    ///
+    /// What separates `str.slug` from `orders.user_id` used to be an
+    /// open-coded `starts_with(&format!("{head}."))` scan in the lowering. It is
+    /// a question about the catalogue, so it lives here.
+    #[must_use]
+    pub fn is_catalogued_head(&self, head: &str) -> bool {
+        let prefix = format!("{head}.");
+        self.entries.keys().any(|k| k.starts_with(&prefix))
+    }
+
+    /// Iterate every registered entry (unspecified order).
     pub fn iter(&self) -> impl Iterator<Item = &RegistryEntry> {
         self.entries.values()
     }
 }
 
-/// SC#1 / STDL-07 single source of truth: the curated set of `DuckDB` builtin
-/// function names a pure-SQL [`LoweringKind::Builtin`] entry may render to.
-///
-/// The classification CI gate (plan 05-07, `tests/classification_gate.rs`)
-/// asserts that every `Builtin.duckdb_name` in [`FunctionRegistry::stdlib_default`]
-/// is a member of this allowlist — so a typo'd or non-`DuckDB` builtin name fails
-/// CI structurally. The native smoke (`fossil-runtime/tests/builtin_smoke.rs`)
-/// then proves each name is a *real* `DuckDB` 1.10502 function.
-///
-/// This set is kept aligned to the authoritative `stdlib.md` catalog: it carries
-/// **exactly** the `duckdb_name`s the catalog's `Builtin` entries use and ONLY
-/// those. In particular it has **no** `ceil`/`floor` — `stdlib.md`'s `math/` has
-/// exactly six functions (`sum`, `avg`, `min`, `max`, `abs`, `round`), none of
-/// which is `ceil`/`floor`. `split_part`/`json_extract` are likewise absent: they
-/// are `Inline` forms ([`InlineForm::SplitPart`]/[`InlineForm::JsonExtract`]), not
-/// named `Builtin` entries, so they never reach the allowlist check.
-pub const DUCKDB_BUILTIN_ALLOWLIST: &[&str] = &[
-    // clean/ string builtins
-    "trim",
-    "lower",
-    "upper",
-    // parse/ — date/datetime parsing
-    "strptime",
-    // math/ (EXACTLY 6 — NO ceil/floor)
-    "sum",
-    "avg",
-    "min",
-    "max",
-    "abs",
-    "round",
-    // str/ string builtins
-    "length",
-    "substring",
-    "contains",
-    "starts_with",
-    "ends_with",
-    "replace",
-    "string_split",
-    "concat",
-    // validate/regex
-    "regexp_matches",
-    // anon/hash (default sha256, no salt)
-    "sha256",
-];
+// ── The measured templates ─────────────────────────────────────────────────
+//
+// The six that were native Rust UDFs. Each one's text was measured against
+// `DuckDB` before it was written here, and each carries the delta it has
+// against the Rust it replaces — because "equivalent" was the claim that had to
+// be checked, not the claim that could be assumed.
 
-/// Helper: a `DuckDB` builtin lowering by name.
-fn builtin(name: &str) -> LoweringKind {
-    LoweringKind::Builtin {
-        duckdb_name: SmolStr::new(name),
-    }
+// Two facts about `CASE … error(…) END` that the four validators below rest on,
+// both MEASURED against DuckDB v1.5.3 rather than assumed:
+//
+// 1. `error()` in a `CASE` arm is LAZY, and lazy PER ROW — a column of 5,000
+//    valid values returns 5,000 values, and the one bad row at index 4,999 is
+//    what raises. Had it been eager, every one of these would be a query that
+//    always fails.
+// 2. A NULL predicate takes the ELSE branch, so the naive shape RAISES ON NULL.
+//    `regexp_matches(NULL, …)` is NULL, not false. Every validator therefore
+//    opens `%0 IS NULL OR …`, which passes NULL through unchanged — the
+//    behaviour a UDF over a nullable column had.
+//
+// And one difference from a UDF that no template can close, recorded because it
+// is real: DuckDB may prune a projection nobody consumes, so a validator whose
+// value is never read does not run. `SELECT count(*)` over a column with a bad
+// row measured 5,000, not an error. Validation happens where the value is USED.
+
+/// `str.slug` — replaces the `fossil_slug` UDF.
+///
+/// **The template this was specified with matches NEITHER Rust implementation,
+/// and measurement is the only reason we know.** The tree had two slug
+/// functions: the `fossil_slug` UDF (`slug::slugify`) and
+/// `crates/fossil-df/src/catalog.rs`'s own `slug`. Against a 16-case hand corpus
+/// the specified `'[^a-z0-9.-]+'` form scored 8/16 against the first and 7/16
+/// against the second — it is a hybrid of the two, keeping `.` like the one and
+/// collapsing runs like the other. Worse, it maps `ÅÄÖ` and `日本語` to the
+/// EMPTY STRING, which in a slug that ends up in an IRI is an identity
+/// collision and not a formatting difference.
+///
+/// This form is EXACT against `catalog.rs::slug`: 16/16 by hand and 0 mismatches
+/// over 240,998 fuzzed inputs. `slug::slugify` cannot be reproduced at all —
+/// it TRANSLITERATES (`Straße` → `strasse`, `€100` → `eur100`, `Москва` →
+/// `moskva`) and DuckDB ships no transliteration function. The best available
+/// approximation, over `strip_accents`, differs on 55.6% of Latin-accented
+/// input, so this keeps the implementation whose behaviour is expressible and
+/// says so.
+const SLUG_TEMPLATE: &str = r"trim(regexp_replace(lower(trim(%0)), '[^\p{L}\p{N}.-]', '-', 'g'), '-')";
+
+/// `str.strip_html` — replaces `voca_rs::strip::strip_tags`.
+///
+/// **NOT exact, and this is the one template that is not**: 27/29 by hand and
+/// 1,837 mismatches over 120,000 fuzzed inputs (1.5%). `voca_rs` is a parser
+/// and this is a regex, so the residue is entirely MALFORMED markup — an
+/// unbalanced quote makes voca swallow the rest of the string and a regex
+/// cannot. With a quote character present the disagreement rate is 10.9%;
+/// without one it is 0.6%.
+///
+/// The naive `'<[^>]*>'` scored 17/29. What this adds is the two things voca
+/// actually does: a bare `<` followed by whitespace is TEXT (`a < b` survives),
+/// and a quoted attribute may contain `>` (`<a href="x>y">link</a>` → `link`).
+const STRIP_HTML_TEMPLATE: &str =
+    r#"regexp_replace(%0, '<(?:>|$|[^\s](?:"[^"]*"|''[^'']*''|[^>"''])*(?:>|$))', '', 'g')"#;
+
+/// `validate.uuid` — replaces `uuid::Uuid::parse_str`. **Exact**: 20/20 by hand,
+/// 0 mismatches over 120,000 fuzzed inputs.
+///
+/// The four accepted forms were established by COMPILING the crate, not by
+/// reading its documentation: hyphenated, bare 32-hex, braced-and-hyphenated,
+/// and `urn:uuid:` — the last lowercase only, and neither the braced nor the
+/// urn form accepting a bare 32-hex body.
+///
+/// `TRY_CAST(%0 AS UUID)` looks like the obvious answer and is wrong in BOTH
+/// directions (17/20, 1,058 fuzz mismatches): it rejects `urn:uuid:…` and it
+/// accepts hyphens anywhere at all, including
+/// `--------550e8400e29b41d4a716446655440000`.
+const VALIDATE_UUID_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, \
+     '^(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$\
+     |^[0-9a-fA-F]{32}$\
+     |^\\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\}$') \
+     THEN %0 ELSE error('validate.uuid: not a UUID: ' || %0) END";
+
+/// `validate.iso_date` — replaces the hand-written `is_valid_iso_date`.
+/// **Exact**: 24/24 by hand, 0 mismatches over 120,000 fuzzed inputs.
+///
+/// Including the quirk, which is the part worth naming: the Rust range-checked
+/// month and day INDEPENDENTLY and never consulted a calendar, so `2026-02-31`
+/// and `2023-02-29` are valid. The regex reproduces that exactly.
+///
+/// `TRY_CAST(%0 AS DATE)` is not merely more lenient, it SILENTLY TRUNCATES:
+/// `2026-05-2a` casts to `2026-05-02` and `26-05-21` to `0026-05-21`. A
+/// validator that turns bad input into a different valid value is worse than
+/// one that is wrong.
+const VALIDATE_ISO_DATE_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, \
+     '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$') \
+     THEN %0 ELSE error('validate.iso_date: not a YYYY-MM-DD date: ' || %0) END";
+
+/// `validate.email` — replaces the hand-written `is_valid_email`. **Exact**:
+/// 35/35 by hand, 0 mismatches over 120,000 fuzzed inputs (9,972 of them
+/// positives). Both delta columns came back EMPTY.
+///
+/// It agrees on the awkward cases in both directions, which is what makes the
+/// zero meaningful: `a b@c.com` and `"quoted local"@b.com` are VALID on both
+/// sides (the Rust never looked at the local part), `a@b_c.com` and `a@b..com`
+/// are invalid on both.
+const VALIDATE_EMAIL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, \
+     '^[^@]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$') \
+     THEN %0 ELSE error('validate.email: not an email: ' || %0) END";
+
+/// `validate.url` — replaces the hand-written `is_valid_url`. **Exact**: 39/39
+/// by hand, 0 mismatches over 120,000 fuzzed inputs. Both delta columns EMPTY.
+///
+/// `(?s)` is load-bearing and was measured, not guessed: without it
+/// `https://\n` is false here and true in the Rust, because DuckDB's `$` is
+/// RE2's end-of-TEXT and `.` does not cross a newline.
+const VALIDATE_URL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, \
+     '^[A-Za-z][A-Za-z0-9+.-]*://(?s).+$') \
+     THEN %0 ELSE error('validate.url: not a URL: ' || %0) END";
+
+/// Helper: a scalar SQL expression template.
+fn expr(template: &str) -> LoweringKind {
+    LoweringKind::Expr(SmolStr::new(template))
 }
 
-/// Helper: a native Rust UDF lowering by name.
-fn udf(name: &str) -> LoweringKind {
-    LoweringKind::Udf {
-        udf_name: SmolStr::new(name),
+/// Helper: an operator of the algebra. Named for brevity in the catalogue table
+/// — thirteen `LoweringKind::Op(PlanOp::…)` in a column is a wall of noise.
+#[allow(non_snake_case)]
+fn L(op: PlanOp) -> LoweringKind {
+    LoweringKind::Op(op)
+}
+
+/// Substitute a template's `%N` holes with the caller's rendered arguments.
+///
+/// The single renderer, so that a template means one thing everywhere. `%N` is
+/// zero-based; `%%` is a literal `%`. A hole whose index is out of range is
+/// left verbatim rather than dropped — a template that names an argument the
+/// signature does not have is a catalogue bug, and a visible one beats SQL that
+/// silently loses a term.
+///
+/// # Errors
+///
+/// Never. A malformed template renders to text that will fail to parse, which
+/// is where it should be caught.
+#[must_use]
+pub fn render_template(template: &str, args: &[String]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let bytes: Vec<char> = template.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != '%' {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        if i + 1 < bytes.len() && bytes[i + 1] == '%' {
+            out.push('%');
+            i += 2;
+            continue;
+        }
+        let mut j = i + 1;
+        let mut digits = String::new();
+        while j < bytes.len() && bytes[j].is_ascii_digit() {
+            digits.push(bytes[j]);
+            j += 1;
+        }
+        match digits.parse::<usize>().ok().and_then(|n| args.get(n)) {
+            Some(a) => {
+                out.push_str(a);
+                i = j;
+            }
+            None => {
+                out.push('%');
+                i += 1;
+            }
+        }
     }
+    out
+}
+
+/// The `%N` hole indices a template names, ascending and deduplicated.
+///
+/// The catalogue's own guard reads this: a template may use fewer holes than
+/// the signature has parameters (`anon.redact` uses none) and may repeat one
+/// (`core.require` uses `%0` twice), but it may never name an index the
+/// signature does not have.
+#[must_use]
+pub fn template_holes(template: &str) -> Vec<usize> {
+    let chars: Vec<char> = template.chars().collect();
+    let mut holes = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '%' {
+            i += 1;
+            continue;
+        }
+        if i + 1 < chars.len() && chars[i + 1] == '%' {
+            i += 2;
+            continue;
+        }
+        let mut j = i + 1;
+        let mut digits = String::new();
+        while j < chars.len() && chars[j].is_ascii_digit() {
+            digits.push(chars[j]);
+            j += 1;
+        }
+        if let Ok(n) = digits.parse::<usize>() {
+            holes.push(n);
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    holes.sort_unstable();
+    holes.dedup();
+    holes
 }
 
 #[cfg(test)]

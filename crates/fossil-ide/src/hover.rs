@@ -9,7 +9,7 @@
 //!    in the property grammar) AND the enclosing `MAPPING` node.
 //! 3. Computes the per-MAPPING-kind dense index of the enclosing mapping
 //!    (matches `MappingLoc::index` and `body()`'s filter-then-nth contract
-//!    per ADR-0005 / plan 02-04 Blocker 2).
+//!    per plan 02-04 Blocker 2).
 //! 4. Computes the property's index inside `MAPPING_BODY` — this is the
 //!    `ExprId` per plan 02-04's `expr_count` advancement (one `ExprId` per
 //!    lowered property in source order).
@@ -54,6 +54,7 @@ use std::ops::Range;
 
 use fossil_base::SourceFile;
 use fossil_hir::body::{ExprId, body};
+use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
 use fossil_hir::lower::PropertyKey;
 use fossil_hir::provenance::{ExprTypeEntry, ProvenanceKind, ty_origin};
@@ -109,16 +110,18 @@ pub fn hover(
 /// Compute **bidirectional** hover info at an LSP position (SC#4).
 ///
 /// Like [`hover`], but also resolves the mapping's target `ShEx` shape via
-/// [`resolve_target_shape`], which reads the document the PROGRAM names
-/// (ADR-0055). When the hovered `.field`'s predicate matches a shape
+/// [`resolve_target_shape`], which reads the document the PROGRAM names.
+/// When the hovered `.field`'s predicate matches a shape
 /// constraint carrying a value type, the rendered Markdown appends a SECOND
 /// fenced block showing the **target-side** type (from
 /// `ShapeConstraint::value_ty`).
 ///
 /// The "if reachable" hedge (truth #2): if no shape resolves (the program
-/// names no document, or the document omits the mapping's shape, or the
+/// names no document, the host has not registered the one it names — see
+/// [`crate::shape_documents`] — the document omits the mapping's shape, or the
 /// predicate has no constraint), the hover shows the source-side block only —
-/// best-effort, no error.
+/// best-effort, no error. The last three are a `TargetShapeError` the CHECKER
+/// reports; a hover is not the place to.
 ///
 /// All type rendering routes through [`render_ty_kind`], so `TyKind::Unknown`
 /// never leaks (truth #4 / STATE.md "Do NOT expose `Unknown`").
@@ -135,7 +138,10 @@ pub fn hover_bidirectional(
     // Target-side: resolve the mapping's ShEx shape against the host descriptor
     // and find the constraint matching the hovered property's predicate IRI.
     let target_block = resolved.predicate_iri.as_deref().and_then(|pred| {
-        let shape = resolve_target_shape(db, resolved.mapping)?;
+        // The failure cases carry a `TargetShapeError` now; the diagnostic for
+        // them belongs to `typecheck_mapping`, and a hover that cannot resolve
+        // the target simply shows the source side.
+        let shape = resolve_target_shape(db, resolved.mapping).ok().flatten()?;
         let constraint = shape.constraint_for(pred)?;
         // `value_ty == None` means "any value" (no datatype narrowing) — render
         // it as `Iri` (the constraint's default node type), consistent with the
@@ -195,7 +201,7 @@ fn resolve_hover_target<'db>(
     let property_node = enclosing_property?;
 
     let cst = fossil_syntax::parse(db, file);
-    // Per ADR-0005 / plan 02-04 Blocker 2: MappingLoc.index is the position
+    // Per plan 02-04 Blocker 2: MappingLoc.index is the position
     // among MAPPING-kind top-level children — filter BEFORE indexing.
     let mapping_index = cst
         .root(db)
@@ -210,27 +216,60 @@ fn resolve_hover_target<'db>(
         .find(|m| m.index(db) == mapping_index)
         .copied()?;
 
-    // ExprId is the property's dense index within MAPPING_BODY (matches
-    // `body()` / `expr_types()` enumeration in plans 02-04 + 02-06).
-    let body_node = mapping_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?;
-    let property_index = body_node
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::PROPERTY)
-        .position(|p| p == property_node)?;
+    // The `ExprId` under the cursor, BY SPAN CONTAINMENT.
+    //
+    // This counted instead: the property's position among the CST's `PROPERTY`
+    // children, used both as the `ExprId` and (below) as an index into the HIR's
+    // `properties` vector. Those are two different numbers. `body()` numbers
+    // densely over the properties that LOWERED, and a property that parses and
+    // does not lower — every retired spelling in the corpus is one: a CURIE key,
+    // `iri =`, an absolute-IRI key — makes the CST longer than the HIR and
+    // shifts everything behind it. The hover then showed the short name and the
+    // predicate IRI of a DIFFERENT property, with no way to tell.
+    //
+    // `body()` publishes one span per lowered property at the property's own
+    // index, so the id is a lookup and the two vectors cannot drift: they are
+    // the same vector's indices.
+    let hir_body = body(db, mapping);
+    // `expr_spans` are mapping-relative (rowan resets offsets at the detached
+    // per-mapping root); the CST node here is in the file tree. Rebase the
+    // PROPERTY's range down, then take the property whose RHS span sits inside
+    // it — the RHS of a property is inside exactly one property.
+    let base = fossil_hir::spans::mapping_start_offset(db, mapping);
+    let range = property_node.text_range();
+    let lo = u32::from(range.start()).saturating_sub(base);
+    let hi = u32::from(range.end()).saturating_sub(base);
+    let property_index = hir_body
+        .expr_spans(db)
+        .iter()
+        .position(|s| s.start >= lo && s.end <= hi)?;
     let expr_id = ExprId(u32::try_from(property_index).unwrap_or(u32::MAX));
 
     // The hovered property's predicate IRI (for matching a shape constraint).
-    // Reads the SAME lowered `HirProperty` the checker uses — `PropertyKey::Iri`
-    // (the subject `iri =`) is not a shape predicate.
-    let predicate_iri = body(db, mapping)
+    //
+    // The key no longer carries it: a body writes a bare `name`, and the IRI is
+    // the shape document's to know. So the short name comes from
+    // the SAME lowered `HirProperty` the checker uses, and the IRI comes from
+    // the checker's own `predicates` table — the one `fossil-mir` reads for
+    // `rdf_uri`. One table, two consumers, no second resolution.
+    //
+    // `PropertyKey::Subject` is not a predicate at all: a shape declares a
+    // node's predicates, and in RDF the subject IS the node.
+    let short_name = hir_body
         .properties(db)
         .get(property_index)
         .and_then(|prop| match &prop.key {
-            PropertyKey::PrefixedName { iri } => Some(iri.to_string()),
-            PropertyKey::Iri => None,
+            PropertyKey::Name(name) => Some(name.clone()),
+            PropertyKey::Subject => None,
         });
+    let predicate_iri = short_name.and_then(|name| {
+        let output = typecheck_mapping(db, mapping).ok()?;
+        output
+            .predicates(db)
+            .iter()
+            .find(|(short, _)| *short == name)
+            .map(|(_, iri)| iri.to_string())
+    });
 
     let r = property_node.text_range();
     Some(ResolvedHover {
@@ -289,10 +328,16 @@ pub fn render_markdown_bidirectional(
 ) -> String {
     let field_ty = render_ty_kind(db, entry.ty.kind(db));
     let source_side = match &entry.provenance.kind {
-        // SC#3: the closure rendering ALREADY carries the row Record's field
-        // names + types (built by `render_closure` via `render_ty_kind` in
-        // plan 03-06), so it is reproduced verbatim as a fenced block. The
-        // field type below is the closure body's result type.
+        // SC#3: the rendering ALREADY carries the row Record's field names +
+        // types, so it is reproduced verbatim as a fenced block; the field type
+        // below is the closure body's result type.
+        //
+        // NOTHING IN THE COMPILER CONSTRUCTS THIS VARIANT ANY MORE. The
+        // producer was `fossil_hir::check::synthesize_closure`, deleted with the
+        // implicit closure (a reference names its own row, so a
+        // closure has nothing to capture). This arm and the two tests that build
+        // the variant by hand — here and in `fossil-lsp`'s hover smoke — are
+        // what is left of it, and they should go with the variant.
         ProvenanceKind::SynthesizedClosureRendering { rendering } => format!(
             "```fossil\n{rendering}\n```\n\n\
              field type: `{field_ty}`\n\n\
@@ -544,18 +589,18 @@ User : ex:Person from users
                 ty: int_ty,
             }],
         );
-        let sig = fossil_hir::ty::FnSig::new(&db, vec![int_ty], int_ty);
         let variants: Vec<TyKind<'_>> = vec![
             TyKind::Primitive(Primitive::String),
-            TyKind::Optional(int_ty),
             TyKind::Seq(int_ty),
             TyKind::Record(rec),
             TyKind::Iri,
             TyKind::IriTemplate,
-            TyKind::Fn(sig),
             TyKind::Unknown(InferenceId(7)),
         ];
-        // 10 surface-constructible variants + Error (constructed below) = 11.
+        // Every variant a caller can construct. There is no count to quote and
+        // there used to be («10 surface-constructible + Error = 11»): two of
+        // the eleven, `Optional` and `Fn`, were built by this list and by
+        // nothing else in the workspace, and both are gone.
         for kind in &variants {
             let s = render_ty_kind(&db, kind);
             assert!(

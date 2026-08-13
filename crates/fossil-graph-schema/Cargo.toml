@@ -14,6 +14,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Canonical property-graph schema (SQL/PGQ keys + references) — the universal-substrate contract"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
 [lib]

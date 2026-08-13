@@ -1,4 +1,4 @@
-// The embedded `.fossil` fixture uses template syntax (`${ex:}…/${.id}`) that
+// The embedded `.fossil` fixture uses interpolation syntax (`"…{Users.id}"`) that
 // clippy mistakes for format args in a plain string literal — it is not.
 #![allow(clippy::literal_string_with_formatting_args)]
 
@@ -10,9 +10,7 @@
 //! proves the types are self-consistent and nothing else — it cannot see a
 //! promise the format makes to somebody who is not us.
 //!
-//! ADR-0045 decided this shape on evidence rather than taste — the fourth of the
-//! decisions recorded there under «Decidido el 2026-08-05», not its §4, whose
-//! heading is about something else. `GraphAr` — whose
+//! The shape was chosen on evidence rather than taste. `GraphAr` — whose
 //! vocabulary fossil borrowed — ships a shared corpus that every language's CI
 //! clones, and **no job writes with one implementation and reads with another**.
 //! A fourth implementation landed there having re-derived the path arithmetic
@@ -23,15 +21,15 @@
 //! is why its gaps are enumerated skip-lines instead of wrong answers.
 //!
 //! **What this cannot prove yet, and it is the larger half.** This is one
-//! writer read by one independent engine. It is not the round trip that decision
-//! asks for — write with the Rust writer, read with the wasm reader *and* with
+//! writer read by one independent engine. It is not the full round trip —
+//! write with the Rust writer, read with the wasm reader *and* with
 //! the TypeScript/DuckDB path, diff the three — because two of those three live
 //! in another repository. What is here is the artefact validator that `GraphAr`
 //! explicitly lacks; the cross-implementation half arrives with the tile reader.
 //!
 //! **It does not freeze the Morton arithmetic.** No test vector for `morton2`
-//! appears below: ADR-0045 §8 puts the quantisation in motion — it may widen if
-//! flattened ids grow past 32 bits — and a vector for an arithmetic that is
+//! appears below: the quantisation is in motion — it may widen if flattened
+//! ids grow past 32 bits — and a vector for an arithmetic that is
 //! about to change would be precisely wrong rather than honestly absent. The
 //! *tile* arithmetic is settled and is frozen, but in `fossil-sinks`, beside the
 //! shift it describes, and not here: a border vector is a statement about a
@@ -56,24 +54,86 @@ use duckdb::Connection;
 const PEOPLE: u32 = 10_000;
 
 const PROGRAM: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 
-users := io.csv(\"users.csv\")
-knows := io.csv(\"knows.csv\")
+Users := io.csv(\"users.csv\")
+Knows := io.csv(\"knows.csv\")
 
-Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+People : Person from Users
+    @subject = \"https://example.org/person/{Users.id}\"
+    name = Users.name
 
-Knows : ex:Person from knows
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+Links : Person from Knows
+    @subject = \"https://example.org/person/{Knows.id}\"
+    name = Knows.name
     // An IRI-valued property *is* an edge: the endpoint resolves against the
     // vertex table by subject IRI, and an inner join drops it if no vertex
     // carries that IRI. It is not projected as a vertex column, which is why
     // the two mappings still union.
-    ex:knows = `${ex:}person/${.target}`
+    //
+    // AND THIS IS THE LINE THE WHOLE TEST IS ABOUT. It used to
+    // be `knows = `${ex:}person/${.target}`` — the endpoint IRI written out by
+    // hand — and it did not type-check, because the shape declares `knows`
+    // with a shape reference as its range, `expected_value_ty` reads that as
+    // `Iri`, and an interpolation was `String` outside the identity slot.
+    // Nothing in the language produced a per-row `Iri`.
+    //
+    // `Person(Knows.target)` is that thing: «the Person whose identity is
+    // built from this target». The lowering knows the type and uses THE
+    // template of that type — the `@subject` above, and a type has exactly
+    // one — so the endpoint is not spelled twice and cannot drift from the
+    // identity it has to match. That is also what makes the inner join below
+    // meaningful rather than lucky.
+    knows = Person(Knows.target)
 ";
+
+/// The output contract the program names, and it is not decoration: a property
+/// key is a BARE NAME now, and its meaning is the last segment of
+/// a predicate IRI **this document declares** — so without it neither `name`
+/// nor `knows` resolves to anything and the program writes no properties at all.
+///
+/// `knows` is `min: 0` because only the edge mapping writes it; the vertex
+/// mapping over `users.csv` satisfies the same shape with `name` alone.
+///
+/// Its `valueExpr` is a **shape reference** and that is what makes it an edge
+/// rather than a sixth vertex column: `apply_output_shape` classifies a
+/// predicate as an edge when the SHAPE says its range is a shape (an opaque
+/// `nodeKind IRI` or an `xsd:anyURI` is a column). This replaces the template
+/// skeleton-matching that used to guess it, which is why the shape document is
+/// now load-bearing for the corpus layout and not only for the diagnostics.
+const SHAPE: &str = r#"{
+  "@context": "http://www.w3.org/ns/shex.jsonld",
+  "type": "Schema",
+  "shapes": [
+    {
+      "type": "ShapeDecl",
+      "id": "https://example.org/Person",
+      "shapeExpr": {
+        "type": "Shape",
+        "expression": {
+          "type": "EachOf",
+          "expressions": [
+            {
+              "type": "TripleConstraint",
+              "predicate": "https://example.org/name",
+              "valueExpr": {
+                "type": "NodeConstraint",
+                "datatype": "http://www.w3.org/2001/XMLSchema#string"
+              }
+            },
+            {
+              "type": "TripleConstraint",
+              "predicate": "https://example.org/knows",
+              "valueExpr": "https://example.org/Person",
+              "min": 0,
+              "max": 1
+            }
+          ]
+        }
+      }
+    }
+  ]
+}"#;
 
 /// One vertex type, one self-edge, both fed from CSV — the smallest corpus that
 /// exercises the two orderings and three tiles.
@@ -95,6 +155,7 @@ fn write_fixture(dir: &Path) {
     }
     std::fs::write(dir.join("users.csv"), users).expect("write users.csv");
     std::fs::write(dir.join("knows.csv"), knows).expect("write knows.csv");
+    std::fs::write(dir.join("person.shex"), SHAPE).expect("write shape document");
     std::fs::write(dir.join("mapping.fossil"), PROGRAM).expect("write mapping");
 }
 
@@ -137,18 +198,19 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     write_fixture(dir.path());
 
     let dest = dir.path().join("out");
-    // `io.csv` resolves against the process's working directory, so the mapping's
-    // bare filenames only mean what they read as from beside them.
-    let previous = std::env::current_dir().expect("cwd");
-    std::env::set_current_dir(dir.path()).expect("chdir");
+    // No `chdir`. This used to stand the whole process in the fixture directory
+    // because `io.csv` resolved against the process's working directory — which
+    // is a global, and these tests run on threads, so two of them doing it at
+    // once was a race waiting to be written. A source path now resolves against
+    // the directory of the program that wrote it, so the fixture means the same
+    // thing from anywhere and the test does not have to move to read it.
     let status = fossil_engine::run(
         &dir.path().join("mapping.fossil"),
         &format!("file://{}", dest.display()),
         &fossil_engine::RunCreds::default(),
         None,
-    );
-    std::env::set_current_dir(previous).expect("restore cwd");
-    let status = status.expect("fossil run");
+    )
+    .expect("fossil run");
 
     let conn = Connection::open_in_memory().expect("duckdb");
     let vertices = dest.join("vertex/Person/*.parquet");
@@ -267,10 +329,10 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // is not in the tile its id names, and no row count anywhere would show it.
     // Every check below is that one question asked of a different family of file.
 
-    // 7. The manifest declares the tiling that was emitted. This is the gap
-    //    ADR-0041 is about — the manifest declared a chunking the writer did not
-    //    emit for months, and nothing failed, because a promise nobody checks is
-    //    free to make. The size is read from the artefact and every later
+    // 7. The manifest declares the tiling that was emitted. This is the gap the
+    //    tiling work is about — the manifest declared a chunking the writer did
+    //    not emit for months, and nothing failed, because a promise nobody
+    //    checks is free to make. The size is read from the artefact and every later
     //    assertion derives from it, so this test cannot agree with the writer by
     //    sharing a constant with it.
     let tile_rows = manifest_number(&dest.join("vertex/Person.vertex.yml"), "chunk_size");
@@ -314,8 +376,8 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "a vertex is in a tile its dense_id does not name"
     );
 
-    // 9. The edges are tiled too, by their **source's** tile — CSR, which
-    //    ADR-0042 §3.2 measured against hoisting an edge to the deepest tile
+    // 9. The edges are tiled too, by their **source's** tile — CSR, which was
+    //    measured against hoisting an edge to the deepest tile
     //    holding both endpoints (2.29× → 15.86× the over-read, 2.5–3.5× the
     //    tiles). Non-vacuity first: an empty directory satisfies every check
     //    after it.
@@ -375,7 +437,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     //
     //     Joined through `subject` and never through `dense_id`, because the
     //     renumbering is free to move every id and the IRI is the identity
-    //     (ADR-0045 §8). An assertion phrased in dense ids would be an assertion
+    //     An assertion phrased in dense ids would be an assertion
     //     about the address.
     let ring = format!(
         "FROM read_parquet('{edge_glob}') e \
@@ -412,6 +474,6 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // by orders of magnitude more; this one separates them by the boundaries.
     //
     // Nor do they see the target-ordered half. `by_target.parquet` is not tiled,
-    // on purpose (ADR-0042 §3.6): it answers "an edge with one endpoint off
+    // on purpose: it answers "an edge with one endpoint off
     // screen", which no measurement here has ever asked for.
 }

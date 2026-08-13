@@ -1,7 +1,9 @@
 //! [`ItemTree`] — signatures-only top-level summary of a `.fossil` file.
 //!
-//! This is the upper half of the CORE-02 invalidation-barrier pattern (see
-//! ADR-0005 for the full decision). [`crate::body::body`] is the lower half:
+//! This is the upper half of the CORE-02 invalidation-barrier pattern: an
+//! `ItemTree` carries SIGNATURES ONLY, never body content, so nothing that
+//! depends on it can be invalidated by an edit inside a mapping.
+//! [`crate::body::body`] is the lower half:
 //! per-mapping body content lives behind that separate query, so editing one
 //! mapping's body does NOT invalidate `item_tree(file)`.
 //!
@@ -22,7 +24,7 @@
 //! Editing the value of an existing property is NOT structural and MUST
 //! NOT.
 
-use crate::ast_id::{FileAstId, MappingNode, PrefixDeclNode, SourceDefNode, ast_id_map};
+use crate::ast_id::{FileAstId, MappingNode, SourceDefNode, ast_id_map};
 use fossil_base::SourceFile;
 use fossil_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
@@ -38,17 +40,13 @@ pub struct ItemTree<'db> {
 /// structural counts — NEVER body expression content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum ItemHeader {
-    PrefixDecl(PrefixDeclHeader),
     SourceDef(SourceDefHeader),
     Mapping(MappingHeader),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
-pub struct PrefixDeclHeader {
-    pub ast_id: FileAstId<PrefixDeclNode>,
-    pub name: SmolStr,
-    pub iri: SmolStr,
-}
+// A `PrefixDecl(PrefixDeclHeader)` variant carried a `(name, iri)` pair here.
+// The vocabulary declaration is gone — a program writes full IRIs inside
+// interpolated strings and short names everywhere else — and so is its node.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct SourceDefHeader {
@@ -88,11 +86,6 @@ pub fn item_tree<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> ItemTre
     for (idx, child) in cst.root(db).syntax().children().enumerate() {
         let ast_id_raw = u32::try_from(idx).expect("file with > u32::MAX top-level items");
         match child.kind() {
-            SyntaxKind::PREFIX_DECL => {
-                if let Some(h) = extract_prefix_decl_header(&child, FileAstId::new(ast_id_raw)) {
-                    items.push(ItemHeader::PrefixDecl(h));
-                }
-            }
             SyntaxKind::SOURCE_DEF => {
                 if let Some(h) = extract_source_def_header(&child, FileAstId::new(ast_id_raw)) {
                     items.push(ItemHeader::SourceDef(h));
@@ -113,31 +106,6 @@ pub fn item_tree<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> ItemTre
 // CRITICAL: each extractor reads ONLY header tokens (and counts PROPERTY
 // children for `body_property_count`). NONE of them iterates the EXPR / value
 // subtree of any PROPERTY. That's the invalidation barrier.
-
-fn extract_prefix_decl_header(
-    node: &SyntaxNode,
-    ast_id: FileAstId<PrefixDeclNode>,
-) -> Option<PrefixDeclHeader> {
-    let toks: Vec<_> = node
-        .children_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .filter(|t| {
-            !matches!(
-                t.kind(),
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
-            )
-        })
-        .collect();
-    // Pattern: KW_PREFIX IDENT SHAPE_SEP ABS_IRI
-    let name = toks.iter().find(|t| t.kind() == SyntaxKind::IDENT)?;
-    let iri = toks.iter().find(|t| t.kind() == SyntaxKind::ABS_IRI)?;
-    let iri_text = iri.text().trim_start_matches('<').trim_end_matches('>');
-    Some(PrefixDeclHeader {
-        ast_id,
-        name: SmolStr::from(name.text()),
-        iri: SmolStr::from(iri_text),
-    })
-}
 
 fn extract_source_def_header(
     node: &SyntaxNode,
@@ -234,31 +202,33 @@ mod tests {
     use std::sync::Arc;
 
     const HELLO_FOSSIL: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"personas.shex\")
 
-users := io.csv(\"examples/users.csv\")
+User := io.csv(\"examples/users.csv\")
 
-User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+Users : Person from User
+    @subject = \"https://example.org/user/{User.id}\"
+    name = User.name
 ";
 
     #[test]
-    fn item_tree_for_hello_fossil_has_three_items_signatures_only() {
+    fn item_tree_for_hello_fossil_has_two_items_signatures_only() {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, HELLO_FOSSIL.to_string(), "hello.fossil".to_string());
         let it = item_tree(&db, file);
         let items = it.items(&db);
-        assert_eq!(items.len(), 3);
-        assert!(matches!(items[0], ItemHeader::PrefixDecl(_)));
-        assert!(matches!(items[1], ItemHeader::SourceDef(_)));
-        match &items[2] {
+        // TWO, not three: the `type { … } := …` binding that replaced the
+        // `prefix` line has no `ItemHeader` variant, because nothing downstream
+        // reads a type binding's SIGNATURE — `def_map` reads the binding whole.
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[0], ItemHeader::SourceDef(_)));
+        match &items[1] {
             ItemHeader::Mapping(h) => {
-                assert_eq!(h.name.as_str(), "User");
+                assert_eq!(h.name.as_str(), "Users");
                 assert_eq!(h.body_property_count, 2);
-                assert_eq!(h.source_binding.as_deref(), Some("users"));
+                assert_eq!(h.source_binding.as_deref(), Some("User"));
             }
             other => panic!("expected Mapping, got {other:?}"),
         }
@@ -270,16 +240,16 @@ User : ex:Person from users
     #[test]
     fn item_tree_excludes_body() {
         let src_a = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    ex:a = .a
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Users : Person from User
+    a = .a
 ";
         let src_b = "\
-prefix ex: <https://example.org/>
-users := io.csv(\"x.csv\")
-User : ex:Person from users
-    ex:a = .b
+type { Person } := io.shex(\"personas.shex\")
+User := io.csv(\"x.csv\")
+Users : Person from User
+    a = .b
 "; // .a → .b — body-only edit
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db_a = fossil_base::FossilDb::new(system.clone());

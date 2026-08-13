@@ -19,31 +19,32 @@
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_syntax::ast::{Mapping, PrefixDecl};
+use fossil_syntax::ast::Mapping;
 use fossil_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
 
 /// The classification of a [`SymbolEntry`].
 ///
 /// Mirrors the LSP `SymbolKind` axes the outline maps onto (plan 06-06):
-/// `Prefix → Namespace`, `Mapping → Class/Struct`, `Shape → Interface`. Kept
+/// `Mapping → Class/Struct`, `Shape → Interface`. Kept
 /// as a Fossil-native enum so the index itself owes nothing to `lsp-types` —
 /// [`crate::outline`] is where the translation lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SymbolKind {
-    /// A `prefix xx: <iri>` declaration.
-    Prefix,
-    /// A mapping header name (`User` in `User : ex:Person from users`).
+    // A `Prefix` variant mapped to the LSP `Namespace` kind and indexed
+    // `prefix xx: <iri>`. The declaration is gone, and with it the only symbol
+    // this crate ever indexed that was not a mapping or a shape.
+    /// A mapping header name (`Users` in `Users : Person from Adults`).
     Mapping,
-    /// A shape reference used in a mapping header (`ex:Person`).
+    /// The shape name a mapping header targets (`Person`).
     Shape,
 }
 
 /// One named definition recorded in a [`SymbolIndex`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolEntry {
-    /// The symbol's surface name (`ex` for a prefix, `User` for a mapping,
-    /// `ex:Person` for a shape ref).
+    /// The symbol's surface name (`Users` for a mapping, `Person` for the
+    /// shape it targets).
     pub name: SmolStr,
     /// What kind of definition this is.
     pub kind: SymbolKind,
@@ -75,15 +76,6 @@ impl SymbolIndex {
         let mut entries = Vec::new();
         for item in root.children() {
             match item.kind() {
-                SyntaxKind::PREFIX_DECL => {
-                    if let Some(name) = PrefixDecl::cast(item.clone()).and_then(|d| d.name()) {
-                        entries.push(SymbolEntry {
-                            name,
-                            kind: SymbolKind::Prefix,
-                            range: node_range(&item),
-                        });
-                    }
-                }
                 SyntaxKind::MAPPING => {
                     if let Some(header) = Mapping::cast(item.clone()).and_then(|m| m.header()) {
                         if let Some(name) = header.name() {
@@ -93,15 +85,16 @@ impl SymbolIndex {
                                 range: node_range(&item),
                             });
                         }
-                        // A mapping's header carries a shape ref (`ex:Person`);
-                        // record it so goto-def on the shape resolves to its
-                        // declaring mapping site.
-                        if let Some(iri) = header.shape_expr().and_then(|s| s.primary_iri()) {
-                            let s = iri.syntax();
+                        // A mapping's header carries a shape NAME (`Person`);
+                        // record it so goto-def on the shape resolves to the
+                        // `type { … } := …` binding that introduced it.
+                        if let Some(shape) = header.shape_expr()
+                            && let Some(name) = shape.name()
+                        {
                             entries.push(SymbolEntry {
-                                name: SmolStr::from(s.text().to_string()),
+                                name,
                                 kind: SymbolKind::Shape,
-                                range: node_range(s),
+                                range: node_range(shape.syntax()),
                             });
                         }
                     }
@@ -149,31 +142,31 @@ mod tests {
     }
 
     const TWO_MAPPINGS: &str = "\
-prefix ex: <https://example.org/>
+type { Person, Organization } := io.shex(\"vocab.shex\")
 
-users := io.csv(\"users.csv\")
+User := io.csv(\"users.csv\")
 
-User : ex:Person from users
-    ex:name = .name
+Users : Person from User
+    name = User.name
 
-Org : ex:Organization from users
-    ex:title = .title
+Orgs : Organization from User
+    title = User.title
 ";
 
     #[test]
-    fn enumerates_prefix_mappings_and_shapes() {
+    fn enumerates_mappings_and_shapes() {
         let idx = index_of(TWO_MAPPINGS);
-        // 1 prefix.
-        assert_eq!(idx.of_kind(SymbolKind::Prefix).count(), 1);
-        // 2 mappings.
+        // 2 mappings. There is no third kind: the `prefix` line this fixture
+        // opened with, and the `SymbolKind::Prefix` entry it produced, are both
+        // gone: a program declares no vocabulary.
         let mappings: Vec<_> = idx.of_kind(SymbolKind::Mapping).collect();
         assert_eq!(mappings.len(), 2);
-        assert_eq!(mappings[0].name.as_str(), "User");
-        assert_eq!(mappings[1].name.as_str(), "Org");
-        // 2 shape refs.
+        assert_eq!(mappings[0].name.as_str(), "Users");
+        assert_eq!(mappings[1].name.as_str(), "Orgs");
+        // 2 shape names, bare — `Person`, not `ex:Person`.
         let shapes: Vec<_> = idx.of_kind(SymbolKind::Shape).collect();
         assert_eq!(shapes.len(), 2);
-        assert_eq!(shapes[0].name.as_str(), "ex:Person");
+        assert_eq!(shapes[0].name.as_str(), "Person");
     }
 
     #[test]
@@ -189,7 +182,7 @@ Org : ex:Organization from users
     #[test]
     fn lookup_finds_a_mapping() {
         let idx = index_of(TWO_MAPPINGS);
-        let entry = idx.lookup("Org").expect("Org is defined");
+        let entry = idx.lookup("Orgs").expect("Orgs is defined");
         assert_eq!(entry.kind, SymbolKind::Mapping);
     }
 }

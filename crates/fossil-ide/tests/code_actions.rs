@@ -9,15 +9,15 @@
 //!      inserting the `prefix xx: <iri>` line.
 //!   3. **split-mapping (SECOND-ORDER)** — a real `ShEx` `OneOf` shape produces
 //!      a diagnostic with a populated `suggestion_source` (the Phase-3
-//!      `generate_split_suggestion` snippet, ADR-0006); the split-mapping
+//!      `generate_split_suggestion` snippet); the split-mapping
 //!      `QuickFix` replaces the offending mapping with that snippet, and the
 //!      EDITED document re-compiles cleanly (`parse` + `def_map` + `typecheck`
 //!      with no new errors) — the same second-order assertion plan 03-08 used
 //!      for the suggestion text itself.
 //!
 //! The split-mapping case drives the `OneOf` rejection through the REAL
-//! `fossil_descriptors_output::ShExDescriptor` (the host-side descriptor a
-//! production LSP loads) and the REAL `generate_split_suggestion` — the code
+//! `fossil_shex::ShExDescriptor` (what the `ShEx` decoder row a production LSP
+//! installs produces) and the REAL `generate_split_suggestion` — the code
 //! action reads `suggestion_source` VERBATIM (never regenerates it).
 
 #![cfg(not(target_arch = "wasm32"))]
@@ -28,7 +28,7 @@
 use std::sync::Arc;
 
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, Severity, SourceFile, Span, System};
-use fossil_descriptors_output::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
+use fossil_shex::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
 use fossil_ide::code_actions;
 use lsp_types::{CodeAction, Position, Range, TextEdit};
 

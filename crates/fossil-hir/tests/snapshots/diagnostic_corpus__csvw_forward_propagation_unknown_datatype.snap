@@ -8,3 +8,5 @@ Error: CSVW column `duration` in source `events` has an unknown or missing datat
   at 0..0
 Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `events` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
   at 0..0
+Error: this program names no shape document, so it cannot write a property: a property key is the last segment of a predicate IRI that a shape declares. Bring one in with `type { … } = io.shex("shop.shex")`.
+  at 0..0

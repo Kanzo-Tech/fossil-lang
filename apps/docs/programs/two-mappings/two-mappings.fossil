@@ -1,0 +1,15 @@
+type { Person } := io.shex("two-mappings.shex")
+
+User := io.csv("data/users.csv")
+
+// #region both
+Adults : Person from User.where(User.age >= 18)
+    @subject = "https://shop.example/user/{User.email}"
+    email    = User.email
+    name     = User.name
+
+Minors : Person from User.where(User.age < 18)
+    @subject = "https://shop.example/user/{User.email}"
+    email    = User.email
+    name     = User.guardian_name
+// #endregion both

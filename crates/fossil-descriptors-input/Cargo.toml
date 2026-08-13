@@ -7,10 +7,12 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 # CSVW and ShEx are the two that exist. CSV, JSON and Parquet arrive as
-# `Inferred` because the HOST runs `DESCRIBE read_csv_auto(...)` (ADR-0037) —
+# `Inferred` because the HOST runs `DESCRIBE read_csv_auto(...)` —
 # there is no JSON Schema, Parquet or XSD descriptor here, and the description
-# claimed all three until ADR-0045 §3.
+# claimed all three for a long time.
 description = "Input descriptors (CSVW, ShEx, and host-inferred schemas) for forward type propagation"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
@@ -27,7 +29,7 @@ indexmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # `serde` feature on smol_str opt-in for `InferredDescriptor` JSON round-trip
-# (ADR-0037 + plan 13-01). Other consumers of smol_str in the workspace remain
+# (plan 13-01). Other consumers of smol_str in the workspace remain
 # unaffected — Cargo feature unification merges features additively.
 smol_str = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
@@ -39,5 +41,6 @@ thiserror = { workspace = true }
 fossil-shex = { path = "../fossil-shex" }
 # The primitive lattice (`Primitive`) — a column's datatype IS the enum the
 # checker types against, not the name of one. The crate is serde-only, so this
-# adds no weight and no WASM risk; it is what lets ADR-0007's string chain go.
+# adds no weight and no WASM risk; it is what lets the datatype-as-string chain
+# go — a column's type is never carried as its spelling.
 fossil-graph-schema = { path = "../fossil-graph-schema" }

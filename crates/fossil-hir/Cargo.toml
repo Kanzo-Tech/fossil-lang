@@ -7,35 +7,28 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "High-level IR: name resolution, item tree, type ADT, bidirectional checker"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# Per ADR-0002, fossil-hir collapses what was three crates
-# (fossil-types + fossil-resolve + fossil-typeck) into one.
+# fossil-hir collapses what was three crates (fossil-types + fossil-resolve +
+# fossil-typeck) into one: they shared every type and could not be built apart.
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
-# Phase 3: checker (plan 03-05) consumes CsvwDescriptor / OutputDescriptorKind via
-# these path deps. NOTE: the pre-existing cargo-deny wildcard warnings on path deps
-# are PRE-EXISTING from plans 02-01..02-07 (deferred chore — see
+# Phase 3: the checker (plan 03-05) consumes CsvwDescriptor via this path dep.
+# NOTE: the pre-existing cargo-deny wildcard warnings on path deps are
+# PRE-EXISTING from plans 02-01..02-07 (deferred chore — see
 # .planning/phases/02-full-grammar-hir-foundation/deferred-items.md).
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# The primitive lattice `TyKind::Primitive` carries. It lives in the leaf both
-# this crate and the descriptors depend on, which is what removed the string
-# bridge the old cycle-avoidance note described.
+# The primitive lattice `TyKind::Primitive` carries, AND the format-neutral
+# shape vocabulary (`OutputShapes` / `Shape` / `PropertyConstraint` / `Occurs` /
+# `Rejection`) the checker reads instead of a schema language. This crate names
+# no schema language at all: a host installs a decoder
+# (`fossil_base::ShapeDecoder`) and the compiler is handed a decoded value.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
-# Phase 3 plan 03-05: the checker inspects `ShEx` `valueExpr`
-# (`shex_ast::ShapeExpr::NodeConstraint`) when converting a `ShapeBinding`'s
-# constraint table into Fossil type space (`crate::shapes`). `shex_ast` is
-# WASM-clean per the Phase 0 spike (`decisions/rudof-wasm.md`).
-shex_ast = { workspace = true }
-# Plan 06-01 (LSP-01, ADR-0020): `resolve_target_shape` builds an `IriS` from a
-# mapping's fully-resolved shape IRI to drive `ShExDescriptor::lookup_shape`
-# (the production Db-wired path that resolves the Phase-3 deferral #3). Promoted
-# from a dev-dependency. `rudof_iri` is WASM-clean per `decisions/rudof-wasm.md`.
-rudof_iri = { workspace = true }
 salsa = { workspace = true }
 indexmap = { workspace = true }
 rowan = { workspace = true }
@@ -46,10 +39,11 @@ thiserror = { workspace = true }
 strsim = { workspace = true }
 
 [dev-dependencies]
-# The integration test builds `InferredColumn`s, which carry the lattice value.
-fossil-graph-schema = { path = "../fossil-graph-schema" }
-# Plan 03-08 diagnostic golden-file corpus: insta snapshots + IriS for the
-# helper-proven ShEx descriptor path (resolve_target_shape is None in the
-# production Db path until Phase 6, so the corpus drives ShExDescriptor +
-# ResolvedShape directly — see tests/diagnostic_corpus.rs module docs).
+# Plan 03-08 diagnostic golden-file corpus: insta snapshots over the neutral
+# shape vocabulary, built by hand (see tests/diagnostic_corpus.rs module docs).
 insta = { workspace = true }
+# The host with a shape decoder installed, formerly `src/test_support.rs` here.
+# A DEV-dependency and a DEV-only feature: the decoder reads a line format with
+# no schema language behind it, which is what lets this crate test against a
+# resolved shape without naming ShEx.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }

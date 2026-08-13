@@ -1,7 +1,7 @@
 //! E2E: an expression in a property position produces its column.
 //!
 //! This is the counterpart of the test that measured the hole. Until
-//! 2026-08-07, `ex:slug = clean.slug(.name)` was dropped between the CST and
+//! 2026-08-07, `ex:slug = str.slug(.name)` was dropped between the CST and
 //! the HIR: the compiler reported success and the column was simply not in the
 //! corpus. What is asserted here is the whole chain closing — the form in the
 //! HIR, the arm in the checker, the lowering to MIR, and the render on this
@@ -11,33 +11,38 @@
 //! `tests/fixtures/users.csv`.
 
 #![cfg(not(target_arch = "wasm32"))]
-
-use std::sync::Arc;
+// `${ex:}user/${.id}` is Fossil template syntax, not a Rust format arg.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray};
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_hir::def_map::def_map;
 
-/// `clean.slug` is a UDF: no engine ships it, so this exercises the fossil-side
-/// implementation as well as the plumbing. `clean.upper` is a builtin, so the
-/// same program covers both halves of `LoweringKind`.
+mod support;
+
+const EXPR_SHEX: &str = include_str!("fixtures/expressions.shex");
+
+/// `str.slug` is a multi-call template (`trim(regexp_replace(lower(trim(…))))`)
+/// and `str.upper` is a single call, so one program covers both the nested and
+/// the flat shape of a `LoweringKind::Expr`. `str.slug` used to be a native
+/// Rust UDF this engine could not run at all — ruling 15 made it a template,
+/// and this test is where that becomes visible as values.
 const CALLS: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:slug = clean.slug(.name)
-    ex:shout = clean.upper(.name)
+    @subject = `${ex:}user/${.id}`
+    slug = str.slug(.name)
+    shout = str.upper(.name)
 ";
 
 #[tokio::test]
 async fn a_call_produces_its_column() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, CALLS.to_string(), "calls.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(CALLS, "calls.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -52,7 +57,7 @@ async fn a_call_produces_its_column() {
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_vertex runs the DataFusion plan");
+    .unwrap_or_else(|e| panic!("execute_vertex runs the DataFusion plan: {e}; {:?}", support::diagnostics(&db, file)));
 
     let props: Vec<&str> = node.properties.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(
@@ -96,16 +101,16 @@ async fn a_call_produces_its_column() {
 async fn calls_nest() {
     const NESTED: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:tag = clean.slug(clean.upper(.name))
+    @subject = `${ex:}user/${.id}`
+    tag = str.slug(str.upper(.name))
 ";
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, NESTED.to_string(), "nested.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(NESTED, "nested.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -120,7 +125,7 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_vertex runs the nested plan");
+    .unwrap_or_else(|e| panic!("execute_vertex runs the nested plan: {e}; {:?}", support::diagnostics(&db, file)));
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
     let tag = column::<StringArray>(batch, 2);
@@ -148,16 +153,16 @@ fn column<A: Array + 'static>(
 async fn a_comparison_produces_a_boolean_column() {
     const COMPARES: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:senior = .id >= 2
+    @subject = `${ex:}user/${.id}`
+    senior = .id >= 2
 ";
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, COMPARES.to_string(), "cmp.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(COMPARES, "cmp.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -172,7 +177,7 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_vertex runs the comparison plan");
+    .unwrap_or_else(|e| panic!("execute_vertex runs the comparison plan: {e}; {:?}", support::diagnostics(&db, file)));
 
     assert_eq!(node.properties[0].name, "senior");
     assert_eq!(
@@ -200,16 +205,16 @@ User : ex:Person from users
 async fn a_conditional_chooses_per_row() {
     const TERNARY: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:band = .id >= 2 ? \"senior\" : \"junior\"
+    @subject = `${ex:}user/${.id}`
+    band = .id >= 2 ? \"senior\" : \"junior\"
 ";
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, TERNARY.to_string(), "tern.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(TERNARY, "tern.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -224,7 +229,7 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_vertex runs the conditional plan");
+    .unwrap_or_else(|e| panic!("execute_vertex runs the conditional plan: {e}; {:?}", support::diagnostics(&db, file)));
 
     assert_eq!(node.properties[0].name, "band");
     let batch = vertex.batches.first().expect("at least one RecordBatch");
@@ -237,27 +242,34 @@ User : ex:Person from users
     );
 }
 
-/// A pipeline in expression position is the call it desugars to.
+/// One catalogue entry, reached through the value or through the type.
 ///
-/// F2 §4, and it is deliberately small: `type-system.md` §4.6 says `|>` passes
-/// the left side as the first argument, so with `call` already landed there is
-/// no new form to carry — only the desugaring. The SOURCE-level pipeline
-/// (`users |> where(...)`, a relation rather than a value) is F5.
+/// `str.upper` is a member of the `str` TYPE, not a function in a drawer, so it
+/// is reached either way round — the precedent is `s.len()` ≡ `str::len(&s)` in
+/// Rust and `s.upper()` ≡ `str.upper(s)` in Python. It is a resolution rule and
+/// not a second way of saying the same thing, and the accepted cost is that
+/// both spellings will appear in the wild. The SOURCE-level pipeline
+/// (`User.where(...)`, a relation rather than a value) is F5.
 #[tokio::test]
-async fn a_pipeline_is_the_call_it_desugars_to() {
+async fn the_value_path_and_the_type_path_are_the_same_program() {
+    // `a |> f()` was the third spelling here and ruling 7 of 2026-08-11 retired
+    // it; the claim it pinned — two spellings, one program — survives as the two
+    // paths to a member. `x.upper()` and `str.upper(x)` are one catalogue row
+    // reached two ways, and this is the test that they produce the same column
+    // rather than merely resolving to the same name.
     const PIPED: &str = "\
 prefix ex: <https://example.org/>
+type { Person } = io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
 User : ex:Person from users
-    iri = `${ex:}user/${.id}`
-    ex:piped = .name |> clean.upper()
-    ex:called = clean.upper(.name)
+    @subject = `${ex:}user/${.id}`
+    piped = users.name.upper()
+    called = str.upper(users.name)
 ";
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, PIPED.to_string(), "piped.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(PIPED, "piped.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
         .mappings(&db)
         .first()
@@ -272,7 +284,7 @@ User : ex:Person from users
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_vertex runs the piped plan");
+    .unwrap_or_else(|e| panic!("execute_vertex runs both paths: {e}; {:?}", support::diagnostics(&db, file)));
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
     let piped = column::<StringArray>(batch, 2);
@@ -280,5 +292,5 @@ User : ex:Person from users
     let a: Vec<&str> = (0..piped.len()).map(|i| piped.value(i)).collect();
     let b: Vec<&str> = (0..called.len()).map(|i| called.value(i)).collect();
     assert_eq!(a, ["ALICE", "BOB", "CAROL"]);
-    assert_eq!(a, b, "the pipe and the call are the same program");
+    assert_eq!(a, b, "the value path and the type path are the same program");
 }

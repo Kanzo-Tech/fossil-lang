@@ -1,11 +1,25 @@
 PROGRAM
-  PREFIX_DECL
-    KW_PREFIX "prefix"
-    IDENT "ex"
-    SHAPE_SEP ":"
-    ABS_IRI "<https://example.org/>"
+  TYPE_DEF
+    IDENT "type"
+    LBRACE "{"
+    IDENT "Person"
+    RBRACE "}"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "shex"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"personas.shex\""
+        RPAREN ")"
   SOURCE_DEF
-    IDENT "users"
+    IDENT "User"
     DEFINE ":="
     EXPR
       POSTFIX_EXPR
@@ -22,23 +36,29 @@ PROGRAM
         RPAREN ")"
   MAPPING
     MAPPING_HEADER
-      IDENT "User"
+      IDENT "Users"
       SHAPE_SEP ":"
       SHAPE_EXPR
-        IRI_EXPR
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "Person"
+        IDENT "Person"
       KW_FROM "from"
       EXPR
         LITERAL_EXPR
-          IDENT "users"
+          IDENT "User"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          KW_IRI "iri"
+          AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          FIELD_REF_EXPR
-            DOT "."
-            IDENT "id"
+          INTERP_STRING_EXPR
+            STRING_OPEN "\""
+            STRING_TEXT "https://example.org/user/"
+            INTERPOLATION
+              INTERP_OPEN "{"
+              POSTFIX_EXPR
+                LITERAL_EXPR
+                  IDENT "User"
+                DOT "."
+                IDENT "id"
+              RBRACE "}"
+            STRING_CLOSE "\""

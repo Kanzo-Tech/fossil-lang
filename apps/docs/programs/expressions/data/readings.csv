@@ -1,0 +1,5 @@
+id,station,code,label,operator,taken_on,celsius
+1,  Northwind Ridge  ,NW-A ,  Ridge Station,ana@lab.example,2026-03-14,11.5
+2,Northwind Marsh,NW-B,Marsh Station  ,bea@lab.example,2026-03-14,13.0
+3,   ,NW-C,Pier Station,cesar@lab.example,2026-03-15,14.25
+4,Northwind Pier,NW-C,Pier Station,cesar@lab.example,2026-03-16,

@@ -1,2 +1,2 @@
-User : ex:Person from users
-    iri = users |> filter(.age >= 18)
+Users : Person from User
+    @subject = User |> filter(User.age >= 18)

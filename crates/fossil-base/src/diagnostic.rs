@@ -17,7 +17,7 @@
 //!
 //! Why structured (not Markdown-message-substring): type-safe, future-proof
 //! for other suggestion-emitting diagnostics, and avoids brittle string
-//! manipulation. See ADR-0006 §Consequences.
+//! manipulation.
 //!
 //! ## `did_you_mean` field (Phase 6 plan 06-08 — SC#5 code-actions)
 //!
@@ -28,8 +28,8 @@
 //! ..." suffix); Phase 6's `fossil_ide::code_action` did-you-mean quick-fix
 //! needs the `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
 //! `WorkspaceEdit` without re-parsing the message string. This mirrors the
-//! `suggestion_source` precedent exactly (ADR-0006 Approach A — structured, not
-//! string-parsed). Defaults to `None`; plain data (wasm-clean).
+//! `suggestion_source` precedent exactly — structured, not string-parsed.
+//! Defaults to `None`; plain data (wasm-clean).
 
 /// What a [`Diagnostic`]'s span was measured against.
 ///
@@ -44,13 +44,57 @@
 /// Making the frame part of the diagnostic is what stops that from being an
 /// unwritten rule nobody can check. `MappingRelative` is the default because
 /// nearly every diagnostic comes from a per-mapping query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+// `Hash` because `SpanLabel` derives it and carries one. NOT MINE — one word,
+// added because the whole workspace failed to compile without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SpanFrame {
     /// Offsets from the start of the enclosing mapping. Must be rebased.
     #[default]
     MappingRelative,
     /// Offsets from the start of the file. Already absolute; never rebase.
     FileAbsolute,
+}
+
+/// A SECOND place the same diagnostic points at, and what to say about it.
+///
+/// One diagnostic, several spans: `` `Users` and `Imported` mint two identities
+/// for Person `` underlines both `@subject` lines and names each one, which is
+/// the rule in as many words: the diagnostic NAMES the two mappings and the two
+/// templates. A message that says «and one other mapping» makes the reader grep
+/// for it.
+///
+/// # It carries its own [`SpanFrame`], and that is the whole point
+///
+/// A label routinely points at a DIFFERENT mapping than the one being blamed,
+/// and per-mapping spans are mapping-relative
+/// ([`fossil_hir::spans::rebase_to_file`](../../fossil_hir/spans/fn.rebase_to_file.html)).
+/// So a label's offsets are not necessarily in the same frame as
+/// [`Diagnostic::span`]: the emitter of a two-mapping report holds one span it
+/// measured itself and one it took from elsewhere. Giving the label its own
+/// frame is what stops that from being an unwritten rule — the rebasing layer
+/// shifts each part by ITS OWN frame, so a file-absolute label survives inside
+/// a mapping-relative diagnostic and vice versa.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SpanLabel {
+    /// The range to underline.
+    pub span: Span,
+    /// What to say about it, rendered under the caret.
+    pub text: String,
+    /// What [`Self::span`] was measured against — independently of the
+    /// diagnostic's own [`Diagnostic::frame`].
+    pub frame: SpanFrame,
+}
+
+impl SpanLabel {
+    /// A label at `span`, measured against `frame`, saying `text`.
+    #[must_use]
+    pub fn new(span: Span, text: impl Into<String>, frame: SpanFrame) -> Self {
+        Self {
+            span,
+            text: text.into(),
+            frame,
+        }
+    }
 }
 
 #[salsa::accumulator]
@@ -62,18 +106,37 @@ pub struct Diagnostic {
     /// What [`Self::span`] (and `did_you_mean.wrong_span`) were measured
     /// against — see [`SpanFrame`]. Hosts rebase only `MappingRelative` ones.
     pub frame: SpanFrame,
+    /// The spans this one diagnostic points at — see [`SpanLabel`]. Empty for
+    /// nearly every diagnostic; non-empty when the mistake is a RELATION
+    /// between two places and naming one of them is not enough.
+    ///
+    /// **Rendering contract**: when this is empty a host underlines
+    /// [`Self::span`] with a generic label, which is what every renderer did
+    /// when a diagnostic had exactly one span. When it is NOT empty these
+    /// replace that label entirely — a diagnostic that says what to underline
+    /// says all of it, and one that also emitted `span` as an unnamed label
+    /// would draw the same caret twice. [`Self::span`] stays authoritative for
+    /// the single-position consumers: the editor's squiggle and any correlation
+    /// by overlap.
+    pub labels: Vec<SpanLabel>,
+    /// The `help:` line rendered under the snippet: what to do about it, in
+    /// prose.
+    ///
+    /// Distinct from [`Self::suggestion_source`], which is generated Fossil
+    /// SOURCE a test compiles. Both reach miette's `#[help]`; this one wins,
+    /// and no diagnostic sets both.
+    pub help: Option<String>,
     /// Optional structured suggestion-source text. Populated by
     /// suggestion-emitting diagnostics (e.g. `ShEx` `OneOf` rejection's
     /// split-into-N-mappings code suggestion); read directly by consumers
-    /// via the typed field, NOT via Markdown delimiter parsing. See module
-    /// doc + ADR-0006.
+    /// via the typed field, NOT via Markdown delimiter parsing. See module doc.
     pub suggestion_source: Option<String>,
     /// Optional structured did-you-mean candidate. Populated by a diagnostic
     /// whose [`Severity::Error`] message proposes a Levenshtein replacement for
     /// a typo'd identifier; read directly by the `fossil_ide::code_action`
     /// did-you-mean quick-fix to build a `WorkspaceEdit` replacing
     /// [`DidYouMean::wrong_span`] with [`DidYouMean::replacement`], NOT by
-    /// parsing the message text. See module doc + ADR-0006.
+    /// parsing the message text. See module doc.
     pub did_you_mean: Option<DidYouMean>,
 }
 
@@ -118,9 +181,26 @@ impl Diagnostic {
             message: message.into(),
             span,
             frame: SpanFrame::MappingRelative,
+            labels: Vec::new(),
+            help: None,
             suggestion_source: None,
             did_you_mean: None,
         }
+    }
+
+    /// Point at a second place, and say what is there. See [`SpanLabel`] for
+    /// why the frame is spelled out at every call site.
+    #[must_use]
+    pub fn with_label(mut self, span: Span, text: impl Into<String>, frame: SpanFrame) -> Self {
+        self.labels.push(SpanLabel::new(span, text, frame));
+        self
+    }
+
+    /// Attach the `help:` line — what to do about it, in prose.
+    #[must_use]
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
     }
 
     /// Declare that this diagnostic's span is already file-absolute, so hosts
@@ -205,6 +285,8 @@ mod tests {
             message: "ok".into(),
             span: Span::new(0, 0),
             frame: SpanFrame::default(),
+            labels: Vec::new(),
+            help: None,
             suggestion_source: None,
             did_you_mean: None,
         };
@@ -217,6 +299,21 @@ mod tests {
         );
     }
 
+    /// A diagnostic that blames two places carries the second as a label with
+    /// its OWN frame — the file-absolute span of another mapping riding inside
+    /// an otherwise mapping-relative report. Losing that distinction is what
+    /// makes a caret land on a plausible, wrong line.
+    #[test]
+    fn a_label_keeps_its_own_frame() {
+        let d = Diagnostic::new(Severity::Error, "two identities", Span::new(10, 20))
+            .with_label(Span::new(400, 420), "`Users` mints this one", SpanFrame::FileAbsolute)
+            .with_help("a type has one identity");
+        assert_eq!(d.frame, SpanFrame::MappingRelative, "the default is unmoved");
+        assert_eq!(d.labels.len(), 1);
+        assert_eq!(d.labels[0].frame, SpanFrame::FileAbsolute);
+        assert_eq!(d.help.as_deref(), Some("a type has one identity"));
+    }
+
     #[test]
     fn diagnostic_default_did_you_mean_is_none() {
         let d = Diagnostic::new(Severity::Error, "oops", Span::new(0, 4));
@@ -226,7 +323,7 @@ mod tests {
     #[test]
     fn diagnostic_with_did_you_mean_carries_structured_candidate() {
         // The IDE quick-fix reads the (wrong_span, replacement) pair directly —
-        // no message-string parsing (ADR-0006 Approach A).
+        // no message-string parsing.
         let d = Diagnostic::new(
             Severity::Error,
             "unknown column `naem` — did you mean `name`?",

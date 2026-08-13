@@ -193,6 +193,17 @@ fn cmd_check(path: &Path) -> miette::Result<()> {
             eprintln!("{:?}", miette::Report::new(e));
         }
     }
+    // Clean, but empty: the file parsed and declared no mapping, so it compiles
+    // to no graph. Still exit 0 — nothing in it is wrong — but do not print the
+    // same line a real program gets, or `check` reads as a pass on a file that
+    // `fossil run` will refuse with `no mapping found`.
+    if outcome.mappings == 0 {
+        println!(
+            "ok — no errors in {}, but it declares no mapping and would build no graph",
+            path.display()
+        );
+        return Ok(());
+    }
     println!("ok — no errors in {}", path.display());
     Ok(())
 }
@@ -256,14 +267,20 @@ fn report(status: &RunStatus, output_json: bool) {
 
 /// A single type-check diagnostic, rendered rustc-style by miette's
 /// `GraphicalReportHandler` (source span + caret art + color + `help:`).
+///
+/// `labels` is how a diagnostic about a RELATION between two places renders:
+/// «`Users` and `Imported` mint two identities for Person» underlines both
+/// `@subject` lines and names each. When it is empty the single `span` is
+/// underlined with the generic «here», which is every other diagnostic —
+/// `fossil_base::Diagnostic::labels` carries the contract.
 #[derive(thiserror::Error, miette::Diagnostic, Debug)]
 #[error("{message}")]
 struct CheckError {
     message: String,
     #[source_code]
     src: NamedSource<String>,
-    #[label("here")]
-    span: SourceSpan,
+    #[label(collection)]
+    labels: Vec<miette::LabeledSpan>,
     #[help]
     help: Option<String>,
 }
@@ -278,19 +295,38 @@ struct CheckReport {
 }
 
 /// Convert a drained [`Diagnostic`] into a [`CheckError`]. The `#[help]` line is
-/// the structured `suggestion_source`, else an inline did-you-mean clause.
+/// the diagnostic's own prose, else the structured `suggestion_source`, else an
+/// inline did-you-mean clause.
 fn to_check_error(d: &Diagnostic, src: &NamedSource<String>) -> CheckError {
-    let len = d.span.end.saturating_sub(d.span.start) as usize;
     let help = d
-        .suggestion_source
+        .help
         .clone()
+        .or_else(|| d.suggestion_source.clone())
         .or_else(|| extract_did_you_mean(&d.message));
     CheckError {
         message: d.message.clone(),
         src: src.clone(),
-        span: SourceSpan::new((d.span.start as usize).into(), len),
+        labels: labels_of(d),
         help,
     }
+}
+
+/// The spans to underline: the diagnostic's own labels when it has them, else
+/// its single span under the generic «here».
+fn labels_of(d: &Diagnostic) -> Vec<miette::LabeledSpan> {
+    let at = |span: fossil_base::Span, text: &str| {
+        miette::LabeledSpan::new_with_span(
+            Some(text.to_string()),
+            SourceSpan::new(
+                (span.start as usize).into(),
+                span.end.saturating_sub(span.start) as usize,
+            ),
+        )
+    };
+    if d.labels.is_empty() {
+        return vec![at(d.span, "here")];
+    }
+    d.labels.iter().map(|l| at(l.span, &l.text)).collect()
 }
 
 /// If `message` contains an inline `did you mean …?` clause, lift it to a

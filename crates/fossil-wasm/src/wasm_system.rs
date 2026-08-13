@@ -23,7 +23,7 @@ use std::path::Path;
 use std::sync::RwLock;
 use std::time::SystemTime;
 
-use fossil_base::{FsError, System};
+use fossil_base::{FsError, Provider, System};
 use fossil_descriptors_input::DescriptorCache;
 
 // `pub(crate)` is the deliberate visibility: `WasmSystem` is an
@@ -37,7 +37,7 @@ use fossil_descriptors_input::DescriptorCache;
 #[derive(Debug, Default)]
 pub(crate) struct WasmSystem {
     fs: RwLock<HashMap<String, Vec<u8>>>,
-    /// Phase 13 INPUT-01 (ADR-0037), keyed by source URI since ADR-0050:
+    /// Phase 13 INPUT-01, keyed by the source URI the program writes:
     /// the descriptors the playground introspected with DuckDB-WASM and
     /// pushed in via [`crate::FossilPlayground::register_inferred_descriptor`]
     /// BEFORE invoking `compile()` / `compile_file()`. Consumed by
@@ -66,6 +66,16 @@ impl System for WasmSystem {
 
     fn descriptors(&self) -> Option<&DescriptorCache> {
         Some(&self.descriptors)
+    }
+
+    /// The playground COMPILES programs — it is the LSP server-side in the
+    /// browser — so it installs the same rows the native engine
+    /// does. A host with no rows checks every program against no output
+    /// contract, which would make the editor's target-side hover and
+    /// completion silently empty for exactly the programs that declare a
+    /// shape.
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
     }
 }
 

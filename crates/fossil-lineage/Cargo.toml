@@ -7,16 +7,24 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Parse-only source lineage + provider introspection, projected onto the host wire types"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
 
 [dependencies]
-# `providers` is a projection of `fossil_hir::stdlib::SOURCE_KINDS` and
-# `source_refs` walks the def map — both live in the language crate. This crate
+# `providers` is a projection of `fossil_base::providers` and
+# `source_refs` walks the def map. This crate
 # is the projection ONTO THE WIRE, which is why it is not in `fossil-hir`:
-# `fossil-run-status` is the host contract, and ADR-0046 F8 dissolves it into
+# `fossil-run-status` is the host contract, and that contract dissolves into
 # the shell. Keeping the edge here means that move takes this crate with it.
 fossil-hir = { path = "../fossil-hir" }
 fossil-base = { path = "../fossil-base" }
 fossil-run-status = { path = "../fossil-run-status" }
+
+[dev-dependencies]
+# The reference `DecodeTypes` — a row that reads types, with no schema language
+# behind it, so the `ProviderKind::Schema` projection can be tested without this
+# crate learning one.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }

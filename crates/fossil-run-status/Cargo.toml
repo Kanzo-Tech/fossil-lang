@@ -7,6 +7,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "The `fossil run --output-json` wire contract — RunStatus (dest + vertex/edge structure a host persists). One source of truth: the CLI emits it, host consumers (keasy) deserialize it, and `JsonSchema` derives the TS type. Dependency-light + WASM-clean."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true

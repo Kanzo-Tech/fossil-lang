@@ -9,7 +9,7 @@
 //!       CSVW file via the host filesystem), AND
 //!   (b) the **target-side** type, from the resolved `ShEx` shape constraint
 //!       (`ShapeConstraint::value_ty`), reached by `resolve_target_shape`
-//!       reading the document the PROGRAM names (ADR-0055, F4).
+//!       reading the document the PROGRAM names.
 //!
 //! Three cases:
 //!   1. The program names a document: hover shows BOTH the source-side
@@ -24,21 +24,51 @@
 //!
 //! # The db stand-in (`HostDb`)
 //!
-//! A `#[salsa::db]` struct carrying a `NativeSystem`, so the CSVW schema and the
-//! `ShEx` document are both readable from disk. That is all a host owes the
-//! checker now: a filesystem. It holds no descriptor of its own.
+//! A `#[salsa::db]` struct carrying a host `System` that reads the disk AND
+//! installs the `ShEx` decoder row, plus — in [`fixture`] — the registration of
+//! the document the program names. That is what a host owes the checker: a
+//! filesystem, a decoder table, and the documents put in the database before
+//! the queries look for them. It holds no descriptor of its own.
 
 #![cfg(not(target_arch = "wasm32"))]
 // The `.fossil` fixture sources contain `${ex:}` / `${.id}` template
 // placeholders — LITERAL Fossil source, not Rust format-string args.
 #![allow(clippy::literal_string_with_formatting_args)]
 
+use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use fossil_base::{Files, NativeSystem, SourceFile, System};
+use fossil_base::{Files, FsError, Provider, SourceFile, System};
+
+/// The test's host `System` — a filesystem plus the `ShEx` decoder row, the
+/// same pair `fossil-lsp`'s `LspSystem` installs. `fossil_base::NativeSystem`
+/// is not enough: its decoder table is the trait default `&[]`, and a document
+/// nothing decodes resolves no shape.
+#[derive(Debug, Default)]
+struct HostSystem(fossil_descriptors_input::DescriptorCache);
+
+impl System for HostSystem {
+    /// The introspected-schema table. It was the trait default `None`, so the
+    /// only way these tests could get a typed source row was the CSVW sidecar —
+    /// which is why deleting CSVW would have silently emptied them.
+    fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
+        Some(&self.0)
+    }
+
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
+    }
+    fn now(&self) -> SystemTime {
+        SystemTime::UNIX_EPOCH
+    }
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
+    }
+}
 
 /// A host db stand-in: a real Salsa db (so tracked queries run) over a
-/// `NativeSystem` (so the documents the program names are readable).
+/// [`HostSystem`] (so the documents the program names are readable).
 #[salsa::db]
 #[derive(Clone)]
 struct HostDb {
@@ -70,7 +100,7 @@ impl HostDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::default()),
+            system: Arc::new(HostSystem::default()),
             files: Files::default(),
         }
     }
@@ -78,16 +108,28 @@ impl HostDb {
 
 /// CSVW schema declaring a `name` column typed `xsd:integer` — see `SHEX_SRC`
 /// for why it is not `xsd:string` any more.
-const USERS_CSVW: &str = r#"{
-  "@context": "http://www.w3.org/ns/csvw",
-  "url": "users.csv",
-  "tableSchema": {
-    "columns": [
-      { "name": "id", "datatype": "string" },
-      { "name": "name", "datatype": "integer" }
-    ]
-  }
-}"#;
+/// The introspected `users` row, registered by the HOST before the compile —
+/// what `fossil_engine::pre_introspect_and_register` and the browser's
+/// `registerInferredDescriptor` do for real.
+///
+/// It was a `users.csvw` sidecar named by `schema = "users.csvw"`. CSVW is gone:
+/// its own `D-CSVW-DEPRECATED` diagnostic said types are inferred from the file
+/// directly, and this is that.
+fn register_users(db: &dyn fossil_base::Db) {
+    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    use fossil_graph_schema::Primitive;
+    let Some(cache) = db.system().descriptors() else {
+        panic!("the host keeps no descriptor table");
+    };
+    cache.insert(InferredDescriptor {
+        uri: "users.csv".into(),
+        columns: vec![
+            InferredColumn { name: "id".into(), primitive: Primitive::Integer },
+            InferredColumn { name: "name".into(), primitive: Primitive::String },
+        ],
+        freshness_token: String::new(),
+    });
+}
 
 /// A `ShEx` schema declaring `ex:Person` (full IRI `http://example.org/Person`)
 /// with a `ex:name` triple constraint narrowed to `xsd:float` — DELIBERATELY
@@ -96,12 +138,12 @@ const USERS_CSVW: &str = r#"{
 ///
 /// The pair used to be `String` against `Integer`, which is not merely distinct
 /// but INCOMPATIBLE. Now that `resolve_target_shape` reads the document the
-/// program names (ADR-0055, F4), the mismatch is a real error, the expression
+/// program names, the mismatch is a real error, the expression
 /// stops typing, and hover has no type to show. An unchecked mismatch is no
 /// longer a state this language can be in.
 ///
 /// `Integer` against `Float` keeps the two blocks distinct AND well-typed, via
-/// `S-IntFlt` — the subtyping rule ADR-0057's fourth amendment kept precisely so
+/// `S-IntFlt` — the subtyping rule kept precisely so
 /// an `Integer` column can feed an `xsd:float` property without a hand-written
 /// conversion. Nothing else in the suite exercises it.
 const SHEX_SRC: &str = r#"{
@@ -132,26 +174,30 @@ const SHEX_SRC: &str = r#"{
 /// CSVW file AND the shape document are written next to the `.fossil`, because
 /// both are read by relative path from the program.
 fn fixture(dir: &std::path::Path) -> (HostDb, SourceFile) {
-    std::fs::write(dir.join("users.csvw"), USERS_CSVW).expect("write CSVW");
     // The shape document sits beside the program, and the PROGRAM names it:
-    // `resolve_target_shape` reads what the program declares (ADR-0055, F4), so
+    // `resolve_target_shape` reads what the program declares, so
     // hover resolves a target type for the same reason the compiler does.
     std::fs::write(dir.join("person.shex"), SHEX_SRC).expect("write ShEx");
     let fossil_path = dir.join("person.fossil");
     let src = "\
 prefix ex: <http://example.org/>
 type { Person } = io.shex(\"person.shex\")
-users := io.csv(\"users.csv\", schema = \"users.csvw\")
+users := io.csv(\"users.csv\")
 User : ex:Person from users
     iri = `${ex:}u/${.id}`
     ex:name = .name
 ";
-    let db = HostDb::new();
+    let mut db = HostDb::new();
+    register_users(&db);
     let file = SourceFile::new(
         &db,
         src.to_string(),
         fossil_path.to_string_lossy().into_owned(),
     );
+    // The host's half: the shape document is a Salsa input, so it has to be in
+    // the database before any query goes looking for it. The CSVW schema is
+    // still read through `System::read_file` — the input side has not moved.
+    fossil_ide::register_missing_documents(&mut db, file, &|key| std::fs::read_to_string(key).ok());
     (db, file)
 }
 
@@ -212,23 +258,23 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
 
 /// Case 2 — the program names no output document: hover shows the source-side
 /// block ONLY (no target block, no error — the "if reachable" hedge). What
-/// decides it is the program, and nothing else: ADR-0055's F4.
+/// decides it is the program, and nothing else.
 #[test]
 fn hover_shows_source_only_when_the_program_names_no_document() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-accept-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).expect("mk tmp");
 
     // Same fixture, minus the `type { … } = io.shex(…)` line.
-    std::fs::write(tmp.join("users.csvw"), USERS_CSVW).expect("write CSVW");
     let fossil_path = tmp.join("person.fossil");
     let src = "\
 prefix ex: <http://example.org/>
-users := io.csv(\"users.csv\", schema = \"users.csvw\")
+users := io.csv(\"users.csv\")
 User : ex:Person from users
     iri = `${ex:}u/${.id}`
     ex:name = .name
 ";
     let db = HostDb::new();
+    register_users(&db);
     let file = SourceFile::new(
         &db,
         src.to_string(),

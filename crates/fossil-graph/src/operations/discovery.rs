@@ -84,8 +84,8 @@ pub enum ExpandMode {
     /// the set.
     ///
     /// **The form is right and the speed argument is not available here.**
-    /// ADR-0041 justified this mode by the membership mask Kùzu (`SEMI_MASKER`)
-    /// and Neo4j push inside the scan; ADR-0042 measured that `DuckDB` does not
+    /// The mode was justified by the membership mask Kùzu (`SEMI_MASKER`) and
+    /// Neo4j push inside the scan; then it was measured, and `DuckDB` does not
     /// accept that class of pruning — a range join against the ids costs more
     /// than not pruning at all. So this is a shape a caller wants, not a fast
     /// path we have.

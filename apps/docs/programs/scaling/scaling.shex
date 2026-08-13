@@ -1,0 +1,9 @@
+PREFIX lab: <https://lab.example/voc#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+lab:Batch {
+  lab:subtotal  xsd:float ;
+  lab:unit_cost xsd:float ;
+  lab:leftover  xsd:integer ;
+  lab:charged   xsd:float
+}

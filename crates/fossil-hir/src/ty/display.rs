@@ -3,10 +3,8 @@
 //!
 //! [`render_ty_kind`] was PROMOTED here from `fossil-ide::hover` in Phase 3
 //! plan 03-05 (Serious #7). It is consumed by:
-//!   - [`crate::check::compatible`]'s mismatch diagnostic messages (this plan),
-//!   - plan 03-06's closure-rendering helper,
-//!   - plan 03-07's LSP hover (which re-exports it from `fossil-ide::hover`
-//!     for back-compat).
+//!   - [`crate::check::compatible`]'s mismatch diagnostic messages,
+//!   - the LSP hover (which re-exports it from `fossil-ide::hover`).
 //!
 //! # `Unknown(InferenceId)` must never reach the surface
 //!
@@ -26,10 +24,8 @@ pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> 
         TyKind::Primitive(p) => format!("{p:?}"),
         TyKind::Iri => "Iri".to_string(),
         TyKind::IriTemplate => "IriTemplate".to_string(),
-        TyKind::Optional(inner) => format!("Optional<{}>", render_ty_kind(db, inner.kind(db))),
         TyKind::Seq(inner) => format!("Seq<{}>", render_ty_kind(db, inner.kind(db))),
         TyKind::Record(_) => "Record { ... }".to_string(),
-        TyKind::Fn(_) => "Fn(...)".to_string(),
         TyKind::Error(_) => "Error".to_string(),
         TyKind::Unknown(_) => "?".to_string(),
     }
@@ -55,12 +51,12 @@ mod tests {
     }
 
     #[test]
-    fn renders_nested_optional_seq() {
+    fn renders_nested_seq() {
         let db = db();
         let int = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
         let seq = Ty::new(&db, TyKind::Seq(int));
-        let opt = Ty::new(&db, TyKind::Optional(seq));
-        assert_eq!(render_ty_kind(&db, opt.kind(&db)), "Optional<Seq<Integer>>");
+        let seq_seq = Ty::new(&db, TyKind::Seq(seq));
+        assert_eq!(render_ty_kind(&db, seq_seq.kind(&db)), "Seq<Seq<Integer>>");
     }
 
     #[test]

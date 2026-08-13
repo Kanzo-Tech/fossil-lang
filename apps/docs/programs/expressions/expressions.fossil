@@ -1,0 +1,31 @@
+type { Reading } := io.shex("expressions.shex")
+
+Row := io.csv("data/readings.csv")
+
+// #region comparison
+Valid := Row.where(Row.celsius != "" and Row.station.trim() != "")
+// #endregion comparison
+
+Readings : Reading from Valid
+    // #region interpolation
+    @subject = "https://lab.example/reading/{Row.id}"
+    // #endregion interpolation
+    // #region literals
+    kit      = "Northwind field kit"
+    revision = 3
+    accuracy = 0.5
+    verified = true
+    // #endregion literals
+    // #region member-access
+    station  = Row.station.trim()
+    slug     = Row.station.slug()
+    // #endregion member-access
+    // #region two-paths
+    code     = Row.code.trim().lower()
+    label    = str.lower(str.trim(Row.label))
+    // #endregion two-paths
+    // #region named-arguments
+    operator = Row.operator.hash(salt = "lab")
+    taken_on = parse.date(Row.taken_on, format = "%Y-%m-%d")
+    // #endregion named-arguments
+    celsius  = parse.float(Row.celsius)

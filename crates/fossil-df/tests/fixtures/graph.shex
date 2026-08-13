@@ -1,0 +1,21 @@
+# The output contract of `execute_graph.rs` / `sink.rs`: two shapes, and one
+# predicate whose range is a SHAPE rather than a literal.
+#
+# `ex:placedBy @ex:Person` is what makes `placedBy` an EDGE. Nothing else can:
+# the template-skeleton guess that used to infer one (`fossil-mir`'s
+# `subject_skeletons`) is deleted, so an accept-all descriptor now yields a
+# string column named `placedBy` and no edge table at all.
+#
+# The values are deliberately un-narrowed (`.`) everywhere else: the columns
+# these tests assert on are typed by the MIR (String, absent a CSVW schema on
+# the source), and a datatype here would only add a second opinion.
+PREFIX ex: <https://example.org/>
+
+ex:Person {
+  ex:name .
+}
+
+ex:Order {
+  ex:placedBy @ex:Person ;
+  ex:total .
+}

@@ -4,7 +4,7 @@
 //! and a pair of `System` trait methods to reach it. They are one table now,
 //! and it is reached through a single accessor.
 //!
-//! Two properties are load-bearing, both from ADR-0046 §5:
+//! Two properties are load-bearing:
 //!
 //! - **It is ambient, never a query key.** A [`DescriptorCache`] is reached
 //!   through the context (`db.system().descriptors()`); no Salsa query is

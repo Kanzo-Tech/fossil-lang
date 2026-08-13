@@ -8,3 +8,5 @@ Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is depreca
   at 0..0
 Error: cannot read CSVW schema `descriptor.csvw.json` for source `users`: file not found: <FIXTURE>/tests/fixtures/diagnostics/csvw_forward_propagation/missing_descriptor/descriptor.csvw.json
   at 0..0
+Error: this program names no shape document, so it cannot write a property: a property key is the last segment of a predicate IRI that a shape declares. Bring one in with `type { … } = io.shex("shop.shex")`.
+  at 0..0

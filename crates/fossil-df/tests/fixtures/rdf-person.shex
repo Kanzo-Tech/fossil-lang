@@ -1,0 +1,16 @@
+# The output contract of `rdf_source.rs::io_rdf_runs_end_to_end_via_the_host_seam`.
+#
+# The two predicates are FOAF, not `ex:`, because that test asserts the pivot
+# columns carry exactly `http://xmlns.com/foaf/0.1/{name,age}` — the bare keys
+# `name` and `age` are the last segments of those IRIs and of nothing else.
+#
+# `ex:age` is `?`: bob has no foaf:age in `fixtures/people.ttl` and the test
+# asserts a NULL there, so declaring it required would describe a corpus the
+# fixture does not produce.
+PREFIX ex:   <https://example.org/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+
+ex:Person {
+  foaf:name . ;
+  foaf:age  . ?
+}

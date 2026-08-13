@@ -8,22 +8,34 @@
 //! `{id: String, name: String}` schema (sufficient for the `hello.fossil`
 //! walking-skeleton demo). Phase 3 CORE-05 (plan 03-02) ADDS a real CSVW
 //! thin parser at [`csvw`] over the W3C "Metadata Vocabulary for Tabular
-//! Data" minimum subset (see ADR-0007). The Phase 1 [`CsvDescriptor`] stub
+//! Data" minimum subset — a literal `@context` and nothing that would need
+//! JSON-LD resolution; [`csvw`] lists what is in and what is out. The Phase 1
+//! [`CsvDescriptor`] stub
 //! is preserved for walking-skeleton compatibility.
 //!
 //! Phase 5 STDL-06 may add JSON Schema / XSD / Parquet implementations.
 //!
 //! ## v0.2: drop user-facing CSVW; introduce `InferredDescriptor`
 //!
-//! Per ADR-0037, v0.2 deprecates the user-facing CSVW entry path: hosts no
-//! longer ship a CSVW JSON-LD sidecar. Instead they run `DuckDB` `DESCRIBE
-//! read_csv_auto(...)` (browser-side `DuckDB-WASM`, or native `duckdb` crate in
-//! `fossil-cli`) and pass the introspected column list as an
-//! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`. The
-//! [`CsvwDescriptor`] (Phase 3 CORE-05, ADR-0007) is retained as
-//! deprecated-but-functional internal IR: v0.1 `.fossil` files with an
-//! explicit `schema = "..."` argument still parse + compile (with a
-//! `D-CSVW-DEPRECATED` warning emitted by the checker in plan 13-02).
+//! A host does not ship a schema sidecar. It runs `DuckDB` `DESCRIBE
+//! read_csv_auto(...)` (browser-side `DuckDB-WASM`, or the native `duckdb`
+//! crate in `fossil-cli`) and passes the introspected column list as an
+//! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`.
+//!
+//! # `CsvwDescriptor` was here, and it is gone
+//!
+//! A CSVW JSON-LD sidecar named by `schema = "<path>"`, kept as
+//! "deprecated-but-functional internal IR" behind a `D-CSVW-DEPRECATED`
+//! diagnostic whose own text read «types will be inferred from the file
+//! directly. Remove the `schema = "..."` argument». The deprecation was right
+//! and it has been carried out: the sidecar has no reader, no error variants
+//! and no module.
+//!
+//! What settled it was the provider registry. `schema =` names a provider now
+//! (`schema = io.shex("…")`), so CSVW would have needed a ROW — and adding one
+//! is resurrecting a deprecated feature so the new model can express it. A
+//! model that leaves a deprecated form nowhere to sit is agreeing with the
+//! deprecation, not exposing a hole in itself.
 //!
 //! ## Trait stability
 //!
@@ -32,12 +44,10 @@
 //! for streaming descriptors) is allowed; method removal requires an ADR.
 
 pub mod cache;
-pub mod csvw;
 pub mod inferred;
 pub mod shex;
 
 pub use cache::DescriptorCache;
-pub use csvw::{CsvwDescriptor, CsvwMetadata};
 pub use inferred::{InferredColumn, InferredDescriptor};
 pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 
@@ -105,23 +115,9 @@ pub enum DescriptorError {
     MalformedJson(String),
 
     /// `@context` was anything other than the canonical literal IRI
-    /// `"http://www.w3.org/ns/csvw"`. Carries a human-readable message
-    /// suggesting the fix.
-    #[error("unsupported JSON-LD context: {0}")]
-    JsonLdContextNotSupported(String),
+    // `JsonLdContextNotSupported` and `UnknownDatatype` lived here. Both were
+    // about a CSVW sidecar; there is no sidecar.
 
-    /// A column declared a datatype that is not in the lattice (see
-    /// `fossil_graph_schema::Primitive::from_xsd_iri`). Emitted by the bidirectional
-    /// checker (plan 03-05) after [`CsvwDescriptor::type_for_column`]
-    /// returns `None` AND the column actually carried a `datatype` field.
-    #[error("unknown CSVW datatype `{datatype}` on column `{column}`")]
-    UnknownDatatype {
-        /// The column name whose datatype was unrecognised.
-        column: String,
-        /// The unrecognised datatype string (with `xsd:` prefix already
-        /// stripped, if present).
-        datatype: String,
-    },
 
     /// The descriptor parsed successfully but did not declare a
     /// `tableSchema`, and the consumer (plan 03-05) requires one for forward

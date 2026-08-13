@@ -1,11 +1,35 @@
 # cargo-deny configuration — RUSTSEC + license + duplicate audit.
 # Run locally: `cargo deny check`
-# CI: see .github/workflows/ci.yml `deny` job (hard gate; no continue-on-error).
+# CI: `.github/workflows/ci.yml` `deny` job — `EmbarkStudios/cargo-deny-action@v2`,
+# a hard gate with no continue-on-error. The action runs `cargo-deny 0.20.2`
+# (pinned in its Dockerfile) with `--all-features`; locally we are on 0.19.6 with
+# default features. Both read THIS file, and both produced the same verdict every
+# time they were compared. There is no local-vs-CI config skew, and there never
+# was one — see the ignore list below for the one thing `--all-features` changes.
 
 [advisories]
 db-path = "$CARGO_HOME/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
+# Each entry states what makes it safe TODAY and what would make it fail again.
+# `reason` is not decoration: an entry whose condition no longer holds is a bug,
+# and the condition is the only way to notice. Delete on sight when it lapses.
+ignore = [
+    # RUSTSEC-2026-0204 (crossbeam-epoch) lived here and was deleted by its own expiry
+    # condition: it named `cargo update -p crossbeam-epoch` as the outright fix, that update
+    # was run, and 0.9.20 is in the lockfile. An entry whose reason says how to delete it is
+    # the only kind worth writing — the rest of this list is entries that cannot yet say it.
+
+    # --- Unreachable code paths in a transitive RDF stack ---
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37.5: quadratic time checking a start tag for duplicate attribute names — a DoS on hostile XML. Reached only as oxrdfxml/sparesults inside oxigraph, pulled in wholesale by rudof_rdf <- shex_ast <- fossil-shex. Nothing in `crates/` parses RDF/XML or SPARQL results: `grep -rn 'rdf.\\?xml\\|quick_xml\\|oxigraph\\|sparql' crates/*/src` finds one unrelated comment. Not a lockfile fix — the patch is quick-xml >=0.41 and oxigraph 0.5.8 requires ^0.37, so it lands when oxigraph bumps. FAILS AGAIN / DELETE ME: the day any crate here reads RDF/XML or SPARQL-results XML, or oxigraph ships the bump." },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.37.5: unbounded namespace-declaration allocation in `NsReader`, memory-exhaustion DoS. Same crate, same unreachable path, same expiry as RUSTSEC-2026-0194 above — the two are one dependency bump apart." },
+    { id = "RUSTSEC-2026-0189", reason = "rmcp 0.16.0: DNS rebinding in the Streamable HTTP server transport. The advisory itself states stdio and child-process transports are NOT affected, and `fossil-mcp` is stdio only — the workspace enables `features = [\"server\", \"macros\", \"transport-io\"]` and `main.rs` calls `.serve(stdio())`. No HTTP listener is compiled, let alone bound. FAILS AGAIN / DELETE ME: the instant a `transport-streamable-http-server` or `transport-sse-server` feature appears in the rmcp dep line, or `fossil-mcp` grows an HTTP transport; the clean fix is rmcp >=1.4.0, a major bump this change does not own." },
+
+    # --- Unmaintained, compile-time only, and there is no upgrade to take ---
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 unmaintained. A proc-macro: it runs at compile time and contributes no code to any shipped binary or wasm module, so `unmaintained` here is a supply-chain concern, not a runtime one. RUSTSEC lists no safe upgrade. Two independent paths — `parquet` 58 and the rudof stack — so no single dependency choice of ours removes it. FAILS AGAIN / DELETE ME: when `cargo tree -i paste` comes back empty, i.e. when both parquet and rudof have dropped it." },
+    { id = "RUSTSEC-2020-0163", reason = "term_size 0.3.2 unmaintained (superseded by `terminal_size`). Unlike the two proc-macros above this one IS linked, but all it does is ask the tty for its width — it arrives as a direct dependency of `shex_ast`, whose CLI-facing formatting we never call, and it has no unsafe surface an attacker reaches. RUSTSEC lists no safe upgrade; the only fix is upstream. FAILS AGAIN / DELETE ME: when `cargo tree -i term_size` comes back empty, i.e. when shex_ast moves to `terminal_size`." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 2.0.1 unmaintained. Same shape as paste: a proc-macro dependency of `tabled_derive` <- `tabled` <- `rudof_rdf`/`shex_ast`, compile-time only, no safe upgrade published. We do not depend on `tabled` — it arrives with rudof's CLI-facing formatting. FAILS AGAIN / DELETE ME: when `cargo tree -i proc-macro-error2` comes back empty, or when rudof drops `tabled`." },
+]
 
 [licenses]
 allow = [
@@ -21,16 +45,28 @@ allow = [
     "CC0-1.0",
 ]
 confidence-threshold = 0.93
+# Scoped, not added to `allow` above. CDLA-Permissive-2.0 is a DATA licence, and
+# these two crates are data: Mozilla's root-certificate store compiled into Rust.
+# Allowing it globally would also allow it for a crate shipping code, which is a
+# different question we have not answered. Both arrive transitively (rustls via
+# oxhttp/oxigraph, and via reqwest under libduckdb-sys' build script).
+exceptions = [
+    { name = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    { name = "webpki-root-certs", allow = ["CDLA-Permissive-2.0"] },
+]
 
 [bans]
 multiple-versions = "warn"
-# NOTE: this is red today, and has nothing to do with the ring guard below.
-# Every workspace path dependency is a wildcard (no crate carries a version —
-# nothing is published), so all 19 members fail. `allow-wildcard-paths = true`
-# does NOT fix it: cargo-deny refuses to apply it to crates that do not set
-# `publish = false`, and none of ours do. That is the fix, and it is its own
-# change: 24 manifests, and a statement about what is publishable.
+# Every intra-workspace dependency is a bare `{ path = "..." }` with no version,
+# which `wildcards = "deny"` rejects. `allow-wildcard-paths` exempts exactly the
+# crates that cannot be published anyway — cargo-deny will not apply it to a crate
+# without `publish = false`, because crates.io itself forbids path deps outside
+# dev-dependencies. So the two halves are one statement: every manifest under
+# `crates/` now carries `publish = false`, and that is what makes the wildcards
+# legitimate rather than merely tolerated. Adding a crate WITHOUT `publish = false`
+# turns this check red again, which is the review we want.
 wildcards = "deny"
+allow-wildcard-paths = true
 deny = [
     # Strike-from-stack list per .planning/research/STACK.md
     { name = "serde_yml", reason = "RUSTSEC-2025-0068; use serde_yaml_ng" },

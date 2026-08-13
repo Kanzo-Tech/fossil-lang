@@ -1,8 +1,10 @@
 //! The verbs of the fossil-graph surface. **Six**, down from seventeen.
 //!
 //! `read` · `expand{into|all}` · `path` · `aggregate` · `schema` ·
-//! `execute_sql` — the set ADR-0042 closes the surface at. Eleven left, and
-//! only four of them were deleted rather than absorbed:
+//! `execute_sql` — the set the surface is closed at, and a seventh enters only
+//! if it serves a case these six demonstrably cannot, with the demonstration
+//! being a measurement. Eleven left, and only four of them were deleted rather
+//! than absorbed:
 //!
 //! - Four never had an implementation. Three were never verbs:
 //!   `summarize_cluster` and `answer_with_communities` are a `read` over a
@@ -13,9 +15,9 @@
 //!   grouping. `top_k` and `get_vertex` became `read`, because both were rows
 //!   of one type under a predicate, an order and a limit.
 //! - `viewport` and `materialize_graph` are gone with nowhere to go.
-//!   **The camera is addressed, not queried** (ADR-0042): the LOD is not a
-//!   filter, it is a different relation, and a `WHERE` cannot change which
-//!   table it reads. The tiles answer that, and they are not a verb.
+//!   **The camera is addressed, not queried**: the LOD is not a filter, it is
+//!   a different relation, and a `WHERE` cannot change which table it reads.
+//!   The tiles answer that, and they are not a verb.
 //!
 //! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
 //! `Params` and `Result` types in its own submodule. The enum is the closed

@@ -1,0 +1,14 @@
+type { Contact } := io.shex("disjunction.shex")
+
+Row := io.csv("data/contacts.csv")
+
+// #region filter
+Reachable := Row.where(Row.email != "" or Row.phone != "")
+// #endregion filter
+
+Contacts : Contact from Reachable
+    @subject = "https://shop.example/contact/{Row.id}"
+    name     = Row.name
+    // #region precedence
+    priority = Row.flagged == "y" or Row.tier == "gold" and Row.balance > 0
+    // #endregion precedence

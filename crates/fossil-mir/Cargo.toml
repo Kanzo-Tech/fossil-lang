@@ -7,6 +7,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Mid-level IR: typed operator algebra (Source, Project, Filter, Join, ...)"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
@@ -18,7 +20,7 @@ fossil-syntax   = { path = "../fossil-syntax" }
 fossil-hir      = { path = "../fossil-hir" }
 # The canonical, format-neutral model `apply_output_shape` classifies against —
 # and the ONLY schema dependency the middle of the compiler has. It is passed as
-# a function argument (ADR-0018: NEVER read through `Db::system()`), so this is a
+# a function argument, NEVER read through `Db::system()`, so this is a
 # plain data dep, not a Salsa input. No schema-language crate belongs here:
 # whichever document (ShEx, SHACL, accept-all) produced the schema is the caller's
 # business, and depending on one would drag ShEx into a crate that never names it.
@@ -28,3 +30,10 @@ smol_str        = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }
+# The host with a shape decoder installed. A DEV-dependency on a DEV-only
+# feature of a crate this one already depends on — NOT a new crate in the graph,
+# and above all not `fossil-shex` or `fossil-descriptors-output`, which `0e6898d`
+# cut out of here on purpose. The decoder reads a three-token line format with no
+# schema language behind it, so a test can resolve a shape without this crate
+# learning that ShEx exists.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }

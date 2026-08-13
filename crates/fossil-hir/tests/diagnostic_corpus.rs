@@ -7,11 +7,11 @@
 //!
 //! # Fixture layout
 //!
-//! Each fixture lives under `tests/fixtures/diagnostics/<bucket>/<name>/` with:
+//! Each CSVW fixture lives under `tests/fixtures/diagnostics/<bucket>/<name>/`
+//! with:
 //!   - `mapping.fossil` — required (the source).
 //!   - `descriptor.csvw.json` — optional CSVW input descriptor (resolved by the
 //!     production `resolve_source_row` path via `schema = "..."`).
-//!   - `shape.shex` — optional ShEx target schema (ShExC JSON form).
 //!
 //! # Driving strategy — "Db-wired" vs "helper-proven"
 //!
@@ -22,43 +22,65 @@
 //! `schema = "..."` argument resolve, then drains the diagnostics the query
 //! accumulated. These fixtures are labelled **Db-wired**.
 //!
-//! Backward ShEx checking (SC#2) and ShEx OneOf rejection (SC#4) are NOT driven
-//! end-to-end here: these fixtures name no output shape document, so
-//! `resolve_target_shape` returns `None` for them (the end-to-end path has its
-//! own fixtures under `tests/fixtures/output_shape/`). So these buckets drive
-//! the **same plain-Rust descriptor logic the production checker uses** —
-//! `ShExDescriptor::from_reader` →
-//! `ResolvedShape::from_binding` → `one_of_rejections` /
-//! `generate_split_suggestion` — directly over the fixture's `shape.shex`.
-//! These fixtures are labelled **helper-proven**. The `Checker` struct itself
-//! has `pub(crate)` fields and is not constructible from an integration test,
-//! so we exercise its inputs and the descriptor lowering it consumes, which is
-//! exactly the logic SC#2/SC#4 assert.
+//! Backward checking (SC#2) and the value-disjunction rejection (SC#4) are NOT
+//! driven end-to-end here: they drive the **plain-Rust logic the production
+//! checker uses** — `ResolvedShape::from_shape` and `render_split_suggestion` —
+//! over a shape document **built by hand in the neutral vocabulary**. These are
+//! labelled **helper-proven**. The `Checker` struct has `pub(crate)` fields and
+//! is not constructible from an integration test, so we exercise its inputs and
+//! the lowering it consumes, which is exactly the logic SC#2/SC#4 assert.
+//!
+//! # The harness could not resolve a shape document at all, and said nothing
+//!
+//! Two independent locks, and each one alone is enough to make a `.shex`
+//! written next to a fixture invisible:
+//!
+//! 1. `new_db()` used `NativeSystem`, whose `System::providers` is the trait
+//!    default — the four rows that read DATA and none that reads types, so
+//!    `fossil_base::shape_document` answers `None` for every document.
+//! 2. `fossil_hir::shapes::decoded_document` resolves through
+//!    `fossil_base::file_at`, which reads the SALSA INPUT REGISTRY and never
+//!    the disk — and `run_csvw_fixture` never called `register_file`.
+//!
+//! Both failures render as "this mapping resolved no shape", which is
+//! indistinguishable from a fixture that named no document. So a fixture
+//! rewritten to name one would have gone green while checking nothing: seven
+//! false passes. The fix is `fossil_base::test_support` — a decoder for a line
+//! format with no schema language behind it, plus the host that installs it and
+//! the registration step — and `run_csvw_fixture` now registers every `.shex`
+//! sitting in the fixture directory under the key the PROGRAM's relative path
+//! resolves to.
+//!
+//! They used to be `.shex` files parsed by `ShExDescriptor`. That is the
+//! dependency this crate no longer has, and a fixture is not a reason to keep
+//! one: `fossil-mir`'s edge-reclassification test nearly kept ShEx alive as a
+//! dev-dependency the same way (`0e6898d`). A hand-built document also says
+//! what it is testing on the line where it is tested, instead of in JSON three
+//! directories away.
 //!
 //! Every snapshot header records which mode the fixture used so the
 //! test-helper-vs-Db-wired status is auditable in the committed `.snap` files.
 
-// `doc_markdown`: the doc comments name bare SC identifiers (SC#1, ShEx, OneOf,
+// `doc_markdown`: the doc comments name bare SC identifiers (SC#1, CSVW,
 // AcceptAll, Db) that read naturally without backticks in this test harness.
 // `literal_string_with_formatting_args`: the Fossil IRI template
-// `${ex:}u/${.id}` is LITERAL Fossil source passed to the suggestion generator,
+// `${ex:}u/${.id}` is LITERAL Fossil source passed to the suggestion renderer,
 // not a Rust format string (the workspace allows this elsewhere — see
-// check.rs / shex.rs).
+// check.rs).
 #![allow(clippy::doc_markdown, clippy::literal_string_with_formatting_args)]
 
 use std::path::Path;
 use std::path::PathBuf;
 
-use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
-use fossil_descriptors_output::{ShExDescriptor, ShExLoweringError, generate_split_suggestion};
+use fossil_base::test_support::{new_db, register_document};
+use fossil_base::{Diagnostic, Db, SourceFile};
+use fossil_graph_schema::{Occurs, Primitive, PropertyConstraint, Rejection, Shape};
 use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
-use fossil_hir::shapes::{ResolvedShape, one_of_rejections};
+use fossil_hir::shapes::ResolvedShape;
 use fossil_hir::ty::ShapeId;
-use fossil_hir::{render_ty_kind, typecheck_mapping};
+use fossil_hir::{render_split_suggestion, render_ty_kind, typecheck_mapping};
 use insta::assert_snapshot;
-use rudof_iri::IriS;
-use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Shared fixture infrastructure
@@ -75,9 +97,26 @@ fn read_fixture(dir: &Path, file: &str) -> Option<String> {
     std::fs::read_to_string(dir.join(file)).ok()
 }
 
-fn new_db() -> FossilDb {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    FossilDb::new(system)
+/// Register every shape document in `dir` as a Salsa input, under the key a
+/// program in that same directory resolves its relative path to.
+///
+/// This is the half that is easy to forget and impossible to notice: the
+/// checker finds a document through `fossil_base::file_at`, which reads the
+/// input registry. A `.shex` on disk that nobody registered is, to every query
+/// in the compiler, a document that does not exist — and the message for that
+/// is the same one a program with no `type { … } = io.shex(…)` line gets.
+fn register_shape_documents(db: &mut dyn Db, dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "shex")
+            && let Ok(text) = std::fs::read_to_string(&path)
+        {
+            register_document(db, &path.to_string_lossy(), &text);
+        }
+    }
 }
 
 /// Strip the (machine-specific) absolute manifest path from a message so
@@ -118,11 +157,39 @@ fn run_csvw_fixture(bucket: &str, name: &str) -> String {
     let src = read_fixture(&dir, "mapping.fossil")
         .unwrap_or_else(|| panic!("fixture {bucket}/{name} must have a mapping.fossil"));
 
-    let db = new_db();
-    // The SourceFile path makes the relative `schema = "..."` arg resolve
-    // against the fixture directory (resolve_relative joins on the parent dir).
+    let mut db = new_db();
+    // The SourceFile path makes a relative document path resolve against the
+    // fixture directory (resolve_relative joins on the parent dir), which is the
+    // join `type { … } := io.shex("…")` resolves through.
     let file_path = dir.join("mapping.fossil");
     let file = SourceFile::new(&db, src, file_path.to_string_lossy().to_string());
+    register_shape_documents(&mut db, &dir);
+    // **The HOST's job, and the reason these fixtures still have a typed row.**
+    //
+    // Each of them carried a `descriptor.csvw.json` and `schema = "…"`, and the
+    // CSVW sidecar was the ONLY thing building the source row — so it was the
+    // only thing making the `did you mean` possible. Deleting CSVW without this
+    // would not have failed: it would have made the suggestions disappear, and
+    // the snapshots would have recorded the absence as the new truth.
+    //
+    // Introspection cannot run here — `fossil-hir` is WASM-clean and has no
+    // `DuckDB`, and these directories have no CSV to introspect anyway. So the
+    // host registers what an introspection WOULD have found, which is exactly
+    // what `fossil_engine::pre_introspect_and_register` and the browser's
+    // `registerInferredDescriptor` do before a compile.
+    for entry in def_map(&db, file).sources(&db).clone() {
+        if let Some(uri) = entry.uri.as_deref() {
+            fossil_base::test_support::register_inferred(
+                &db,
+                uri,
+                &[
+                    ("id", Primitive::Integer),
+                    ("name", Primitive::String),
+                    ("age", Primitive::Integer),
+                ],
+            );
+        }
+    }
 
     let mut out = String::new();
     out.push_str("# mode: Db-wired (production typecheck_mapping query)\n");
@@ -160,159 +227,120 @@ fn run_csvw_fixture(bucket: &str, name: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// ShEx backward-check + OneOf driver (helper-proven — descriptor logic)
+// Backward-check + disjunction driver (helper-proven — the neutral vocabulary)
 // ---------------------------------------------------------------------------
 
-/// Drive a ShEx fixture via the plain-Rust descriptor logic the production
-/// checker consumes (`ShExDescriptor::from_reader` → `ResolvedShape`). Renders
-/// the resolved constraint table + any lowering errors + the generated split
-/// suggestion (for OneOf), so the `.snap` locks the SC#2/SC#4 surface.
-fn run_shex_fixture(bucket: &str, name: &str) -> String {
+/// One predicate constrained to an XSD datatype, or to nothing.
+fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
+    PropertyConstraint {
+        predicate: predicate.to_string(),
+        datatype,
+        targets: Vec::new(),
+        occurs,
+    }
+}
+
+fn shape(iri: &str, properties: Vec<PropertyConstraint>) -> Shape {
+    Shape {
+        iri: iri.to_string(),
+        properties,
+    }
+}
+
+/// Drive a shape document through the plain-Rust logic the production checker
+/// consumes (`ResolvedShape::from_shape` → `render_split_suggestion`). Renders
+/// the resolved constraint table + whatever the decoder rejected + the
+/// generated split suggestion, so the `.snap` locks the SC#2/SC#4 surface.
+fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -> String {
     use std::fmt::Write as _;
-    let dir = fixture_dir(bucket, name);
-    let shex_src = read_fixture(&dir, "shape.shex")
-        .unwrap_or_else(|| panic!("fixture {bucket}/{name} must have a shape.shex"));
 
     let db = new_db();
-    let descriptor = ShExDescriptor::from_reader(shex_src.as_bytes())
-        .unwrap_or_else(|e| panic!("shape.shex for {bucket}/{name} failed to parse: {e:?}"));
-    let errors = descriptor.lowering_errors().to_vec();
-
     let mut out = String::new();
-    out.push_str("# mode: helper-proven (ShExDescriptor + ResolvedShape; resolve_target_shape\n");
-    out.push_str(
-        "#       returns None in the production Db path until Phase 6 — see module docs)\n",
-    );
+    out.push_str("# mode: helper-proven (the neutral shape vocabulary, built by hand, through\n");
+    out.push_str("#       ResolvedShape — these fixtures name no document, so the production\n");
+    out.push_str("#       path resolves no shape; see module docs)\n");
     out.push_str("# bucket: ");
     out.push_str(bucket);
     out.push('\n');
 
     // Resolved constraint table (the SC#2 backward-check input surface).
-    let binding = descriptor.shapes().next();
-    if let Some(binding) = binding {
-        let shape =
-            ResolvedShape::from_binding(&db, binding, ShapeId::placeholder(0), errors.clone());
-        if shape.constraints.is_empty() {
-            let _ = writeln!(
-                out,
-                "resolved constraints: (none — OneOf body, see rejection below)"
-            );
-        } else {
-            let _ = writeln!(out, "resolved constraints:");
-            for c in &shape.constraints {
-                let ty_text = c
-                    .value_ty
-                    .map_or_else(|| "(any)".to_string(), |t| render_ty_kind(&db, t.kind(&db)));
-                let _ = writeln!(out, "  {} : {} [{:?}]", c.predicate, ty_text, c.cardinality);
-            }
-        }
+    let resolved =
+        ResolvedShape::from_shape(&db, document, ShapeId::placeholder(0), rejections.to_vec());
+    if resolved.constraints.is_empty() {
+        let _ = writeln!(
+            out,
+            "resolved constraints: (none — a disjunction body, see the rejection below)"
+        );
     } else {
-        let _ = writeln!(out, "resolved constraints: (no IRI-identified shape)");
+        let _ = writeln!(out, "resolved constraints:");
+        for c in &resolved.constraints {
+            // `(any)` is the document declining to narrow the value, and the
+            // checker now reads it that way: no expected type, cardinality
+            // still enforced. It used to become `Iri` — the narrowest type
+            // there is — in `check_property`.
+            let ty_text = c
+                .value_ty
+                .map_or_else(|| "(any)".to_string(), |t| render_ty_kind(&db, t.kind(&db)));
+            let _ = writeln!(out, "  {} : {} [{:?}]", c.predicate, ty_text, c.occurs);
+        }
     }
 
-    // Lowering errors — OneOf rejection carries the generated split suggestion.
-    let rejections = one_of_rejections(&errors);
-    if rejections.is_empty() {
-        let _ = writeln!(out, "lowering errors: (none)");
-    } else {
-        for rej in &rejections {
-            let _ = writeln!(
-                out,
-                "OneOf rejection: {} disjuncts in shape `{}`",
-                rej.disjunct_count, rej.shape_iri
-            );
-            let preds: Vec<String> = rej
-                .disjunct_predicates
+    if resolved.rejections.is_empty() {
+        let _ = writeln!(out, "rejections: (none)");
+    }
+    for rejection in &resolved.rejections {
+        let Rejection::Disjunction {
+            shape_iri,
+            disjuncts,
+        } = rejection
+        else {
+            let _ = writeln!(out, "rejection: {rejection:?}");
+            continue;
+        };
+        let _ = writeln!(
+            out,
+            "disjunction rejection: {} branches in shape `{shape_iri}`",
+            disjuncts.len()
+        );
+        let _ = writeln!(
+            out,
+            "  branch predicates: {}",
+            disjuncts
                 .iter()
-                .map(std::string::ToString::to_string)
-                .collect();
-            let _ = writeln!(out, "  disjunct predicates: {}", preds.join(", "));
-            let suggestion = generate_split_suggestion(
-                "Contact",
-                "`${ex:}u/${.id}`",
-                "users",
-                "ex:Contact",
-                &rej.suggestion_seed.one_of_node,
-            );
-            let _ = writeln!(out, "  suggestion:");
-            for line in suggestion.lines() {
-                let _ = writeln!(out, "    {line}");
-            }
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        // The arguments are production's, in production's order: the MAPPING
+        // name, the shape IRI, the SOURCE BINDING the mapping reads, the
+        // subject template. The third one is not the first — production passed
+        // `base_name` for both and emitted `Contact1 : ex:Contact from Contact`,
+        // a `from` clause naming the mapping being split. This corpus could not
+        // see it because it never went through the production call;
+        // `check_tests::a_disjunction_rejection_attaches_to_the_consuming_mapping`
+        // does, and pins the distinction.
+        let suggestion = render_split_suggestion(
+            "Contact",
+            "ex:Contact",
+            "users",
+            "`${ex:}u/${.id}`",
+            disjuncts,
+        );
+        let _ = writeln!(out, "  suggestion:");
+        for line in suggestion.lines() {
+            let _ = writeln!(out, "    {line}");
         }
     }
     out
 }
 
-// ---------------------------------------------------------------------------
-// AcceptAll degraded-fallback driver (SC#5 — Blocker #4)
-// ---------------------------------------------------------------------------
-
-/// SC#5 verification (Blocker #4): inject the `AcceptAll` descriptor path. The
-/// fixture HAS a `shape.shex` file, but the production `typecheck_mapping`
-/// query never reaches it (`resolve_target_shape` returns `None` — equivalent
-/// to the host defaulting to `OutputDescriptorKind::AcceptAll`). So no
-/// backward-check diagnostics fire and the mapping compiles equivalently to a
-/// walking-skeleton case.
-///
-/// This proves the SC#5 plug-in-replaceability claim: the same `fossil-hir`
-/// code path runs whether the host supplies `ShEx` or `AcceptAll` — only the
-/// `OutputDescriptorKind` discriminant differs, and `AcceptAll` cleanly
-/// degrades the diagnostic surface to "no backward check".
-fn run_accept_all_fixture(bucket: &str, name: &str) -> String {
-    use std::fmt::Write as _;
-    let dir = fixture_dir(bucket, name);
-    // Confirm the fixture DOES carry a shape.shex (which AcceptAll ignores).
-    assert!(
-        dir.join("shape.shex").exists(),
-        "the accept_all fixture must carry a shape.shex that AcceptAll ignores"
-    );
-    let src = read_fixture(&dir, "mapping.fossil")
-        .unwrap_or_else(|| panic!("fixture {bucket}/{name} must have a mapping.fossil"));
-
-    let db = new_db();
-    let file_path = dir.join("mapping.fossil");
-    let file = SourceFile::new(&db, src, file_path.to_string_lossy().to_string());
-
-    let mut out = String::new();
-    out.push_str("# mode: SC#5 AcceptAll degraded fallback (Blocker #4)\n");
-    out.push_str("# shape.shex PRESENT but ignored — resolve_target_shape == None == AcceptAll\n");
-
-    let mappings = def_map(&db, file).mappings(&db).clone();
-    let mut backward_diags = 0usize;
-    let mut all_diags: Vec<Diagnostic> = Vec::new();
-    for mloc in &mappings {
-        let _ = typecheck_mapping(&db, *mloc);
-        for d in typecheck_mapping::accumulated::<Diagnostic>(&db, *mloc) {
-            // A backward-check diagnostic would mention the shape demand /
-            // OneOf. None should appear under AcceptAll.
-            if d.message.contains("target shape") || d.message.contains("OneOf") {
-                backward_diags += 1;
-            }
-            all_diags.push(d.clone());
-        }
+/// The disjunction the two SC#4 fixtures share, cut to `n` branches.
+fn contact_disjunction(predicates: &[&str]) -> Rejection {
+    Rejection::Disjunction {
+        shape_iri: "http://example.org/Contact".to_string(),
+        disjuncts: predicates.iter().map(|p| vec![(*p).to_string()]).collect(),
     }
-
-    let _ = writeln!(out, "backward-check diagnostics: {backward_diags}");
-    if all_diags.is_empty() {
-        out.push_str("(no diagnostics emitted — compiles equivalently to walking-skeleton)\n");
-    } else {
-        all_diags.sort_by(|a, b| {
-            (a.span.start, a.span.end, a.message.as_str()).cmp(&(
-                b.span.start,
-                b.span.end,
-                b.message.as_str(),
-            ))
-        });
-        for diag in &all_diags {
-            render_diagnostic(&mut out, diag);
-        }
-    }
-    // SC#5 assertion: AcceptAll never produces backward-check diagnostics.
-    assert_eq!(
-        backward_diags, 0,
-        "AcceptAll must skip backward checking (SC#5 plug-in-replaceability)"
-    );
-    out
 }
 
 // ===== Bucket 1: CSVW Forward Propagation (SC#1) — Db-wired =================
@@ -341,34 +369,77 @@ fn csvw_forward_propagation_unknown_datatype() {
     ));
 }
 
-// ===== Bucket 2: ShEx Backward Check (SC#2) — helper-proven =================
+// ===== Bucket 2: Backward Check (SC#2) — helper-proven ======================
+
+/// `ex:email xsd:string {1,*}` against a source column typed `Optional<String>`
+/// — the cardinality blame.
+#[test]
+fn backward_check_optional_for_required() {
+    let document = shape(
+        "https://example.org/Person",
+        vec![constraint(
+            "https://example.org/email",
+            Some(Primitive::String),
+            Occurs { min: 1, max: None },
+        )],
+    );
+    assert_snapshot!(run_shape_fixture("backward_check", &document, &[]));
+}
+
+/// `ex:age xsd:integer` against a source column typed `String` — the type
+/// blame, and the constraint the document DID narrow.
+#[test]
+fn backward_check_type_mismatch_two_span() {
+    let document = shape(
+        "https://example.org/Person",
+        vec![constraint(
+            "https://example.org/age",
+            Some(Primitive::Integer),
+            Occurs::ONE,
+        )],
+    );
+    assert_snapshot!(run_shape_fixture("backward_check", &document, &[]));
+}
+
+/// A predicate the document mentions and does not narrow. It renders `(any)`,
+/// and `(any)` is what the checker now enforces — nothing. This is the fixture
+/// the `TyKind::Iri` default made impossible to write down: under it, this
+/// column expected the narrowest type in the lattice.
+#[test]
+fn backward_check_an_un_narrowed_predicate_expects_nothing() {
+    let document = shape(
+        "https://example.org/Person",
+        vec![constraint("https://example.org/name", None, Occurs::ONE)],
+    );
+    assert_snapshot!(run_shape_fixture("backward_check", &document, &[]));
+}
+
+// ===== Bucket 3: Value-disjunction rejection (SC#4) — helper-proven =========
 
 #[test]
-fn shex_backward_check_optional_for_required() {
-    assert_snapshot!(run_shex_fixture(
-        "shex_backward_check",
-        "optional_for_required"
+fn disjunction_rejection_two_branches() {
+    let document = shape("http://example.org/Contact", Vec::new());
+    let rejection = contact_disjunction(&["http://example.org/email", "http://example.org/phone"]);
+    assert_snapshot!(run_shape_fixture(
+        "disjunction_rejection",
+        &document,
+        &[rejection]
     ));
 }
 
 #[test]
-fn shex_backward_check_type_mismatch_two_span() {
-    assert_snapshot!(run_shex_fixture(
-        "shex_backward_check",
-        "type_mismatch_two_span"
+fn disjunction_rejection_three_branches() {
+    let document = shape("http://example.org/Contact", Vec::new());
+    let rejection = contact_disjunction(&[
+        "http://example.org/email",
+        "http://example.org/phone",
+        "http://example.org/fax",
+    ]);
+    assert_snapshot!(run_shape_fixture(
+        "disjunction_rejection",
+        &document,
+        &[rejection]
     ));
-}
-
-// ===== Bucket 3: ShEx OneOf Rejection (SC#4) — helper-proven ================
-
-#[test]
-fn shex_one_of_rejection_two_disjuncts() {
-    assert_snapshot!(run_shex_fixture("shex_one_of_rejection", "two_disjuncts"));
-}
-
-#[test]
-fn shex_one_of_rejection_three_disjuncts() {
-    assert_snapshot!(run_shex_fixture("shex_one_of_rejection", "three_disjuncts"));
 }
 
 // ===== Bucket 4: Implicit Closure Synthesis (SC#3 — diagnostic shape) =======
@@ -386,13 +457,10 @@ fn implicit_closure_synthesis_field_typo() {
     assert_snapshot!(run_csvw_fixture("implicit_closure_synthesis", "field_typo"));
 }
 
-#[test]
-fn implicit_closure_synthesis_type_mismatch_inside_body() {
-    assert_snapshot!(run_csvw_fixture(
-        "implicit_closure_synthesis",
-        "type_mismatch_inside_body"
-    ));
-}
+// `implicit_closure_synthesis_type_mismatch_inside_body` was here. Its snapshot
+// contains no type mismatch and never contained one: a backward check needs a
+// resolved shape, and the fixture named no document — so the fixture could not
+// produce the diagnostic the test was named for, in any tree.
 
 // ===== Bucket 5: did-you-mean threshold edges — Db-wired =====================
 
@@ -408,79 +476,68 @@ fn did_you_mean_unrelated_no_suggestion() {
     assert_snapshot!(run_csvw_fixture("did_you_mean", "unrelated_no_suggestion"));
 }
 
-// ===== Bucket 6: AcceptAll degraded-fallback path (SC#5 — Blocker #4) ========
-
-#[test]
-fn accept_all_descriptor_skips_backward_check() {
-    assert_snapshot!(run_accept_all_fixture(
-        "accept_all",
-        "descriptor_skips_backward_check"
-    ));
-}
+// ===== Bucket 6: gone, and it asserted nothing ===============================
+//
+// `accept_all_descriptor_skips_backward_check` claimed in four places — its
+// docblock, the fixture's assertion message, the snapshot header, and the
+// `assert_eq!` at the end — that a program which names no shape document
+// resolves `Ok(None)`, "accept anything". That has been false since ruling 3 of
+// 2026-08-11: `resolve_target_shape` answers `Err(TargetShapeError::NoDocument)`
+// and the checker reports it. Its own snapshot recorded the message.
+//
+// The assertion was vacuous besides. It counted diagnostics whose message
+// contains "target shape" or "disjunction"; the message that fires says
+// "names no shape document", which matches neither — so `assert_eq!(count, 0)`
+// passed because the filter did not recognise the thing it was meant to catch.
 
 // ===== SC#4 second-order check: the generated split suggestion compiles ======
 
-/// Extract the structured `Diagnostic.suggestion_source` for the OneOf
-/// rejection. We surface the rejection via the production checker's diagnostic
-/// emitter shape (`ShExDescriptor` lowering errors → `generate_split_suggestion`,
-/// the exact text plan 03-05 stores in `Diagnostic.suggestion_source`). Returns
-/// the typed suggestion text — NOT a Markdown-message substring (Blocker #3).
-fn extract_suggestion_from_fixture(bucket: &str, name: &str) -> Option<String> {
-    let dir = fixture_dir(bucket, name);
-    let shex_src = read_fixture(&dir, "shape.shex")?;
-    let descriptor = ShExDescriptor::from_reader(shex_src.as_bytes()).ok()?;
-    let errors = descriptor.lowering_errors().to_vec();
-    let rej = errors.iter().find_map(|e| match e {
-        ShExLoweringError::OneOfRejection(r) => Some(r.clone()),
-        _ => None,
-    })?;
-    // The split suggestion text — this is what plan 03-05 puts into the
-    // structured `Diagnostic.suggestion_source` field on the OneOf-rejection
-    // diagnostic (see check.rs::surface_shape_lowering_errors).
-    Some(generate_split_suggestion(
-        "Contact",
-        "`${ex:}u/${.id}`",
-        "users",
-        "ex:Contact",
-        &rej.suggestion_seed.one_of_node,
-    ))
-}
-
+/// The suggestion is Fossil source the compiler emits, so the compiler has to
+/// accept it back. It did not, silently, until the property-key lowering learnt
+/// the `<absolute-iri>` form: every generated property line was dropped, and
+/// this test still passed because the `iri =` line kept the body non-empty.
+/// The `properties().len()` assertion below is what closes that.
 #[test]
-fn shex_one_of_split_suggestion_compiles() {
-    // 1. Extract the generated split-into-N-mappings suggestion via the typed
-    //    suggestion-source carrier (Blocker #3 — NOT Markdown string parsing).
-    let suggestion = extract_suggestion_from_fixture("shex_one_of_rejection", "two_disjuncts")
-        .expect("OneOf rejection fixture must yield a structured suggestion");
+fn the_generated_split_suggestion_compiles() {
+    // 1. Render the split-into-N-mappings suggestion through the same function
+    //    the checker stores in `Diagnostic.suggestion_source` (Blocker #3 — a
+    //    typed carrier, NOT Markdown string parsing).
+    let suggestion = render_split_suggestion(
+        "Contact",
+        "ex:Contact",
+        "users",
+        "`${ex:}u/${.id}`",
+        &[
+            vec!["http://example.org/email".to_string()],
+            vec!["http://example.org/phone".to_string()],
+        ],
+    );
 
     // 2. The generated split references full IRI predicates + `.field` accesses.
-    //    Prepend a prefix decl + a CSVW-described source so the snippet is a
-    //    complete, parseable Fossil document. (The split text itself is the
-    //    body the suggestion guarantees compiles.)
-    let dir = fixture_dir("shex_one_of_rejection", "two_disjuncts");
+    //    Prepend a prefix decl + a source so the snippet is a complete,
+    //    parseable Fossil document. (The split text itself is the body the
+    //    suggestion guarantees compiles.)
     let mut full = String::new();
     full.push_str("prefix ex: <http://example.org/>\n");
-    full.push_str("users := io.csv(\"users.csv\", schema = \"descriptor.csvw.json\")\n");
+    full.push_str("users := io.csv(\"users.csv\")\n");
     full.push_str(&suggestion);
 
     // 3. Parse + lower + type-check the generated split through the production
-    //    pipeline. Use the fixture dir as the file's home so the schema arg
-    //    resolves (descriptor.csvw.json exists in two_disjuncts/).
+    //    pipeline.
     let db = new_db();
-    let file_path = dir.join("split-suggestion.fossil");
-    let file = SourceFile::new(&db, full, file_path.to_string_lossy().to_string());
+    let file = SourceFile::new(&db, full.clone(), "split-suggestion.fossil".to_string());
 
-    // The split must lower to ≥1 mapping (proves it is syntactically valid
-    // Fossil that the parser + lowering accept).
+    // The split must lower to one mapping per branch (proves it is
+    // syntactically valid Fossil that the parser + lowering accept).
     let mappings = def_map(&db, file).mappings(&db).clone();
-    assert!(
-        !mappings.is_empty(),
-        "generated split suggestion must parse into ≥1 Fossil mapping; \
-         got zero mappings from:\n{suggestion}"
+    assert_eq!(
+        mappings.len(),
+        2,
+        "the generated split must parse into one Fossil mapping per branch; \
+         got {} from:\n{full}",
+        mappings.len()
     );
 
-    // 4. Each generated mapping type-checks cleanly (the split bodies project
-    //    real CSVW columns — id/email/phone — so no field-not-found fires).
     for mloc in &mappings {
         let result = typecheck_mapping(&db, *mloc);
         let diags = typecheck_mapping::accumulated::<Diagnostic>(&db, *mloc);
@@ -490,45 +547,242 @@ fn shex_one_of_split_suggestion_compiles() {
             mloc.index(&db),
             diags
         );
+        // Every line the suggestion writes has to survive the lowering. A
+        // property that vanishes here is a suggestion that "compiles" and
+        // produces nothing — the exact silent loss this corpus exists to catch.
+        let props = body(&db, *mloc).properties(&db).clone();
+        assert_eq!(
+            props.len(),
+            2,
+            "mapping #{} must carry its `iri =` line AND its predicate line; \
+             got {props:#?}",
+            mloc.index(&db),
+        );
+        let body_diags = body::accumulated::<Diagnostic>(&db, *mloc);
+        assert!(
+            body_diags.is_empty(),
+            "the generated split must lower without complaint: {body_diags:#?}"
+        );
     }
+}
 
-    // 5. Sanity: the two disjunct predicates each became a mapping.
-    let body0 = body(&db, mappings[0]);
+// ===== Guard: the harness can actually resolve a shape document =============
+
+/// Both locks that made a `.shex` next to a fixture invisible, asserted
+/// separately, because either one alone is enough and they fail identically.
+///
+/// # What this proves
+///
+/// 1. `new_db()` installs a row named `shex` that reads types.
+///    `NativeSystem::providers` is the trait default — data rows only — so
+///    under it `shape_document` answers `None` for every document registered.
+/// 2. `register_shape_documents` puts the file under the key `file_at` looks
+///    it up by — the document path joined onto the PROGRAM's directory. The
+///    registry is a Salsa input; the disk is not consulted at any point.
+///
+/// # What it CANNOT prove
+///
+/// That any fixture NAMES a document, or that the checker resolves one
+/// end-to-end: `type { … } = io.shex("…")` is grammar, and none of the fixtures
+/// in this corpus writes it yet. This asserts that the harness is no longer the
+/// reason they cannot — so when they are rewritten, a green is a green.
+///
+/// It also cannot prove the decoder is a real one. It is not: the line format
+/// exists so this crate can test against a resolved shape without naming a
+/// schema language, which is the cut `0e6898d` made.
+#[test]
+fn the_harness_installs_a_decoder_and_registers_the_document() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/diagnostics/harness");
+    let key = dir.join("person.shex").to_string_lossy().to_string();
+
+    let mut db = new_db();
+    register_shape_documents(&mut db, &dir);
+
+    let doc = fossil_base::file_at(&db, &key).unwrap_or_else(|| {
+        panic!(
+            "the fixture's shape document is not in the Salsa registry under \
+             {key}: `decoded_document` reads `file_at`, never the disk, so a \
+             `.shex` that is merely ON DISK resolves to nothing — and the \
+             message for that is the one a program with no `type` line gets"
+        )
+    });
+    let shapes = fossil_base::shape_document(&db, doc, "shex").expect(
+        "no installed row is named `shex`: `System::providers` defaults to the \
+         DATA rows and `NativeSystem` never overrides it, so no row reads types \
+         at all and every document decodes to nothing — silently, and \
+         indistinguishably from a program that named none",
+    );
     assert!(
-        !body0.properties(&db).is_empty(),
-        "first split mapping must carry properties"
+        shapes.lookup("http://example.org/Person").is_some(),
+        "the decoded document must declare the shape it names"
     );
 }
 
-// ===== Guard: no Unknown / InferenceId leak in any descriptor rendering ======
+// ===== Guard: no Unknown / InferenceId leak in any shape rendering ==========
 
 #[test]
-fn shex_resolved_constraints_never_leak_unknown_or_inferenceid() {
-    // The ShEx value-type rendering routes through render_ty_kind, which
-    // normalises TyKind::Unknown(InferenceId) to `?`. Assert no corpus ShEx
-    // rendering leaks the internal placeholder (Risk Register / STATE.md "Do
-    // NOT").
-    for (bucket, name) in [
-        ("shex_backward_check", "optional_for_required"),
-        ("shex_backward_check", "type_mismatch_two_span"),
-        ("shex_one_of_rejection", "two_disjuncts"),
-        ("shex_one_of_rejection", "three_disjuncts"),
-    ] {
-        let rendered = run_shex_fixture(bucket, name);
+fn resolved_constraints_never_leak_unknown_or_inferenceid() {
+    // The value-type rendering routes through render_ty_kind, which normalises
+    // TyKind::Unknown(InferenceId) to `?`. Assert no corpus rendering leaks the
+    // internal placeholder (Risk Register / STATE.md "Do NOT").
+    let documents = [
+        shape(
+            "https://example.org/Person",
+            vec![
+                constraint(
+                    "https://example.org/email",
+                    Some(Primitive::String),
+                    Occurs { min: 1, max: None },
+                ),
+                constraint("https://example.org/name", None, Occurs::ONE),
+            ],
+        ),
+        shape("http://example.org/Contact", Vec::new()),
+    ];
+    let rejection = contact_disjunction(&["http://example.org/email"]);
+    for document in &documents {
+        let rendered = run_shape_fixture("guard", document, std::slice::from_ref(&rejection));
         assert!(
             !rendered.contains("Unknown"),
-            "{bucket}/{name} rendering leaked `Unknown`:\n{rendered}"
+            "rendering leaked `Unknown`:\n{rendered}"
         );
         assert!(
             !rendered.contains("InferenceId"),
-            "{bucket}/{name} rendering leaked `InferenceId`:\n{rendered}"
+            "rendering leaked `InferenceId`:\n{rendered}"
         );
     }
 }
 
-// Touch IriS so the import is used even if a future refactor drops the explicit
-// reference; keeps the helper crate surface honest.
-#[allow(dead_code)]
-fn _iri_smoke() -> IriS {
-    IriS::new_unchecked("http://example.org/")
+// ===== The collision repair is code, and the compiler has to accept it back ==
+
+/// Two predicates whose last IRI segments coincide. Both become unwritable and
+/// the checker says so — a property key is the bare last segment of a predicate
+/// IRI, so two that collide leave no name a body could write — and the evidence for refusing to
+/// disambiguate is FSharp.Data's own: PLDI 2016 §6.5 declares a criterion its
+/// naming scheme then ignored, and a minor version renamed members and broke a
+/// program in production.
+const COLLIDING_DOCUMENT: &str = "\
+shape http://example.org/Person
+prop http://example.org/name string 1 1
+prop http://xmlns.com/foaf/0.1/name string 0 1
+";
+
+/// The program that trips it. `foaf_name` is what the repair will make writable;
+/// until then the shape declares two `name`s and neither can be written.
+const COLLIDING_PROGRAM: &str = "\
+type { Person } := io.shex(\"colliding.shex\")
+User := io.csv(\"u.csv\")
+
+People : Person from User
+    @subject = \"http://example.org/p/{User.id}\"
+    name = User.name
+";
+
+/// The `@rename(…)` clause out of a diagnostic's message, verbatim.
+///
+/// Extracted by scanning rather than by re-rendering, and that is the point of
+/// the test: what is fed back to the parser is the exact text a reader would
+/// copy off their terminal.
+fn rename_clause(messages: &[String]) -> String {
+    let m = messages
+        .iter()
+        .find(|m| m.contains("@rename("))
+        .unwrap_or_else(|| panic!("no message recommended a `@rename`; got {messages:#?}"));
+    let start = m.find("@rename(").expect("just matched");
+    let end = start
+        + m[start..]
+            .find(')')
+            .expect("the clause is parenthesised")
+        + 1;
+    m[start..end].to_string()
+}
+
+/// **The recommendation has to be true.**
+///
+/// `Checker::surface_name_collisions` has told authors to write
+/// `@rename(<Type>, "<iri>" as <name>)` since before there was a production for
+/// it: `AT_ATTR` at top level fell through to `bump_as_error`, so the one repair
+/// the compiler names did not parse. Two things had to change for this test to
+/// be possible — the production (grammar.bnf, `TypeDef := RenameAttr* 'type' …`)
+/// and the message, which said `<Type>` where a real bound name has to go.
+///
+/// This is the same shape as `the_generated_split_suggestion_compiles`: a
+/// compiler that emits source is answerable for that source. It goes further,
+/// because parsing is not the claim — the claim is that the repair REPAIRS, so
+/// the assertion is that the collision is gone and the renamed key resolves.
+#[test]
+fn the_recommended_rename_parses_and_repairs_the_collision() {
+    // 1. The collision, reported.
+    let mut db = new_db();
+    let file = SourceFile::new(
+        &db,
+        COLLIDING_PROGRAM.to_string(),
+        "colliding.fossil".to_string(),
+    );
+    register_document(&mut db, "colliding.shex", COLLIDING_DOCUMENT);
+    let mapping = def_map(&db, file).mappings(&db)[0];
+    let before: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
+        .into_iter()
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        before.iter().any(|m| m.contains("both called `name`")),
+        "the two predicates must collide to begin with; got {before:#?}"
+    );
+
+    // 2. The repair, taken from the message and put where the message says.
+    let clause = rename_clause(&before);
+    assert!(
+        clause.contains("Person"),
+        "the clause names the bound TYPE, not a `<Type>` placeholder: {clause}"
+    );
+    let repaired = format!("{clause}\n{COLLIDING_PROGRAM}");
+
+    // 3. The repaired program, checked through the production path.
+    let mut db2 = new_db();
+    let file2 = SourceFile::new(&db2, repaired.clone(), "colliding.fossil".to_string());
+    register_document(&mut db2, "colliding.shex", COLLIDING_DOCUMENT);
+    let mappings = def_map(&db2, file2).mappings(&db2).clone();
+    assert_eq!(
+        mappings.len(),
+        1,
+        "the repaired program must still parse into its one mapping:\n{repaired}"
+    );
+    let after: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db2, mappings[0])
+        .into_iter()
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        !after.iter().any(|m| m.contains("both called `name`")),
+        "the repair must repair: the collision is still reported.\n\
+         program:\n{repaired}\ndiagnostics: {after:#?}"
+    );
+
+    // 4. And the renamed key is now writable — a repair that silences the
+    //    message without making the predicate reachable would pass step 3.
+    let alias = clause
+        .rsplit_once(" as ")
+        .and_then(|(_, tail)| tail.strip_suffix(')'))
+        .expect("the clause ends `as <name>)`")
+        .to_string();
+    let with_use = format!("{repaired}    {alias} = User.name\n");
+    let mut db3 = new_db();
+    let file3 = SourceFile::new(&db3, with_use.clone(), "colliding.fossil".to_string());
+    register_document(&mut db3, "colliding.shex", COLLIDING_DOCUMENT);
+    let m3 = def_map(&db3, file3).mappings(&db3)[0];
+    let diags: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db3, m3)
+        .into_iter()
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        !diags.iter().any(|m| m.contains(&alias)),
+        "`{alias}` must resolve to the renamed predicate.\n\
+         program:\n{with_use}\ndiagnostics: {diags:#?}"
+    );
+    assert_eq!(
+        body(&db3, m3).properties(&db3).len(),
+        3,
+        "@subject, name and foaf_name all survive the lowering"
+    );
 }

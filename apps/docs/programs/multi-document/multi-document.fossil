@@ -1,0 +1,15 @@
+// #region bindings
+type { Persona } := io.shex("es.shex")
+type { Human }   := io.shex("en.shex")
+// #endregion bindings
+
+Padron := io.csv("data/padron.csv")
+Roll   := io.csv("data/roll.csv")
+
+Personas : Persona from Padron
+    @subject = "https://ayto.example/persona/{Padron.dni}"
+    nombre   = Padron.nombre
+
+Humans : Human from Roll
+    @subject = "https://council.example/person/{Roll.reference}"
+    name     = Roll.name

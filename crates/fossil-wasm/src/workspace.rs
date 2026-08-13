@@ -1,6 +1,6 @@
 //! Workspace lifecycle — the `ty_wasm`-shaped multi-file API the playground
 //! and the WASM LSP Worker share. Mirrors Astral's `ty_wasm::Workspace`
-//! exactly (see ADR-0024 + Phase 7 RESEARCH §"Workspace API"): a small
+//! exactly (see Phase 7 RESEARCH §"Workspace API"): a small
 //! `FileHandle` newtype on the JS boundary plus an internal
 //! `HashMap<FileHandle, SourceFile>` open-files map.
 //!
@@ -9,8 +9,8 @@
 //! The map keys are plain `u32` newtypes — they NEVER enter a Salsa key,
 //! NEVER appear inside `Box<dyn Trait>`. `update_file` mutates the SAME
 //! `SourceFile` Salsa input via the [`salsa::Setter`] (`set_text`); this is
-//! the EXACT mechanism the Phase-6 LSP `didChange` path uses (ADR-0022 — the
-//! revision bump is the cancellation trigger). No new tracked queries land
+//! the EXACT mechanism the Phase-6 LSP `didChange` path uses (the revision
+//! bump is the cancellation trigger). No new tracked queries land
 //! in the Workspace lifecycle path, so `MAX_PER_MAPPING_FAN_OUT` stays at 1
 //! (verified by `fossil-hir::tests::invalidation_regression`, 3/3).
 //!
@@ -42,7 +42,7 @@ pub struct FileHandle(pub(crate) u32);
 /// Salsa [`SourceFile`] inputs that downstream queries (`def_map`,
 /// `typecheck_mapping`) consume. Replacing the `SourceFile` for a given
 /// handle on `update_file` is NOT how this works — we KEEP the `SourceFile`
-/// and call `set_text` (Salsa `Setter`, ADR-0022) so the revision bumps and
+/// and call `set_text` (Salsa `Setter`) so the revision bumps and
 /// queries are invalidated incrementally.
 ///
 /// `by_uri` is a secondary index so `lookup_uri` (used by the LSP Worker

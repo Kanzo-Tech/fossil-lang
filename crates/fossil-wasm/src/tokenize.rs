@@ -1,4 +1,4 @@
-//! `tokenize` export — single grammar source of truth across compiler, LSP, editor (ADR-0030).
+//! `tokenize` export — single grammar source of truth across compiler, LSP, editor.
 //!
 //! ## What it provides
 //!
@@ -17,7 +17,7 @@
 //!
 //! `TokenRow.kind` is `fossil_syntax::lexer::Token as u32`. The numeric value
 //! comes from the enum's discriminant — i.e. variant declaration order in
-//! `fossil_syntax::lexer::Token`. Per ADR-0030 "Negative consequences":
+//! `fossil_syntax::lexer::Token`. What follows from that:
 //!
 //! - APPENDING a new variant at the end is backwards-compatible — old
 //!   consumers see the new tag as an unknown highlight category (rendered with

@@ -1,4 +1,4 @@
-//! Phase-5 registry tests (Task 1 smoke + Task 2 completeness/invariant).
+//! The catalogue's own guards: the row set, the receiver, and the templates.
 
 use super::*;
 use std::sync::Arc;
@@ -9,32 +9,20 @@ fn db() -> fossil_base::FossilDb {
 }
 
 /// The registry answers, and says no when it should.
-///
-/// This was `back_compat_phase1_entries_present` and it pinned four
-/// "historical" entries, three of which were RDF term constructors no program
-/// ever called. A house with no backwards compatibility should not have a test
-/// with that name; what it needs pinned is that the source constructor the
-/// walking skeleton depends on is there and that a miss is a miss.
 #[test]
 fn the_registry_answers_and_refuses() {
     let r = FunctionRegistry::stdlib_default();
     assert!(r.lookup("io.csv").is_some());
     assert!(r.lookup("nonexistent").is_none());
-    // phase1_default is now a thin alias for stdlib_default.
-    assert!(
-        FunctionRegistry::phase1_default()
-            .lookup("io.csv")
-            .is_some()
-    );
 }
 
 #[test]
 fn signature_materializes_real_fn_sig() {
     let db = db();
     let r = FunctionRegistry::stdlib_default();
-    let trim = r.lookup("clean.trim").expect("clean.trim present");
+    let trim = r.lookup("str.trim").expect("str.trim present");
     let sig = trim.signature(&db);
-    // clean.trim :: String -> String.
+    // str.trim :: String -> String.
     assert_eq!(sig.params(&db).len(), 1);
     let want = crate::ty::Ty::new(
         &db,
@@ -44,31 +32,180 @@ fn signature_materializes_real_fn_sig() {
     assert_eq!(sig.params(&db)[0], want);
 }
 
+// ── The receiver ───────────────────────────────────────────────────────────
+
+/// `recv` and `member` are DERIVED, never passed — so no row can carry a
+/// receiver that disagrees with the name written beside it.
+///
+/// This is the guard the whole change rests on. A `recv` field a call site
+/// filled by hand would be a field that drifts, which is the defect one level
+/// down (dispatch by string) reappearing one level up.
 #[test]
-fn anon_redact_is_inline_literal_pure_sql() {
+fn every_rows_receiver_agrees_with_its_own_name() {
+    let r = FunctionRegistry::stdlib_default();
+    for e in r.iter() {
+        let (recv, member) = split_receiver(e.name.as_str());
+        assert_eq!(e.recv, recv, "`{}` carries a receiver its name denies", e.name);
+        assert_eq!(e.member, member, "`{}` carries a member its name denies", e.name);
+        assert!(
+            e.name.contains('.'),
+            "`{}` is not a dotted catalogue name",
+            e.name
+        );
+    }
+}
+
+/// The type path and the value path reach ONE row.
+///
+/// `str.lower(str.trim(x))` and `x.trim().lower()` are the same entry, which is
+/// what `grammar.bnf, PostfixExpr` promises and what the `expressions` and
+/// `contacts` conformance programs spell on purpose.
+#[test]
+fn the_type_path_and_the_value_path_reach_the_same_row() {
+    let r = FunctionRegistry::stdlib_default();
+    for name in ["str.trim", "str.lower", "str.upper", "str.slug"] {
+        let by_path = r.lookup(name).unwrap_or_else(|| panic!("`{name}` present"));
+        let member = name.split_once('.').expect("dotted").1;
+        let by_member = r
+            .lookup_member(Receiver::Scalar(ScalarTy::String), member)
+            .unwrap_or_else(|| panic!("`{member}` reachable on a String value"));
+        assert_eq!(
+            by_path.name, by_member.name,
+            "`{name}` must be ONE row reached two ways"
+        );
+    }
+}
+
+/// A namespace row is reachable by its dotted name and by NOTHING else.
+///
+/// `io` is the clearest case: its entries CREATE the thing, so
+/// there is no receiver to hang them off and `x.csv()` must not resolve.
+#[test]
+fn a_namespace_row_has_no_value_path() {
+    let r = FunctionRegistry::stdlib_default();
+    assert!(r.lookup("io.csv").is_some());
+    assert_eq!(
+        r.candidates_for_member("csv").count(),
+        0,
+        "`io.csv` must not be reachable as a member of a value"
+    );
+    for e in r.iter().filter(|e| e.recv == Receiver::Namespace) {
+        assert!(
+            r.lookup_member(Receiver::Namespace, e.member.as_str())
+                .is_some(),
+            "a Namespace row must still be findable by receiver+member"
+        );
+    }
+}
+
+/// `members_of` is what makes completion stop being approximate, so it has to
+/// actually partition the catalogue.
+#[test]
+fn members_of_partitions_the_catalogue() {
+    let r = FunctionRegistry::stdlib_default();
+    let total = r.iter().count();
+    let by_recv = r.members_of(Receiver::Namespace).count()
+        + r.members_of(Receiver::Scalar(ScalarTy::String)).count()
+        + r.members_of(Receiver::Relation).count();
+    assert_eq!(by_recv, total, "every row belongs to exactly one receiver");
+    // The relation's members are the verbs: `where` and `join` are catalogue
+    // ROWS and not grammar productions, so a new verb is a row, never a rule.
+    assert!(
+        r.lookup_member(Receiver::Relation, "where").is_some(),
+        "`where` must be a member of a relation"
+    );
+    assert!(
+        r.lookup_member(Receiver::Relation, "join").is_some(),
+        "`join` must be a member of a relation"
+    );
+}
+
+/// The value path resolves a member by name, so an ambiguous member would make
+/// it guess. Today none is ambiguous, and this is what says so out loud —
+/// `crate::lower` has an arm for the ambiguous case that is unreachable while
+/// this passes.
+#[test]
+fn no_member_is_spelled_on_two_receivers() {
+    let r = FunctionRegistry::stdlib_default();
+    for e in r.iter().filter(|e| e.recv != Receiver::Namespace) {
+        let n = r.candidates_for_member(e.member.as_str()).count();
+        assert_eq!(
+            n, 1,
+            "`{}` is spelled on {n} receivers; the value path cannot resolve it",
+            e.member
+        );
+    }
+}
+
+// ── The lowering ───────────────────────────────────────────────────────────
+
+#[test]
+fn anon_redact_is_a_template_that_ignores_its_argument() {
     let r = FunctionRegistry::stdlib_default();
     let redact = r.lookup("anon.redact").expect("anon.redact present");
-    assert_eq!(redact.wasm_class, WasmClass::PureSql);
-    match &redact.lowering {
-        LoweringKind::Inline(InlineForm::LiteralStr { value }) => {
-            assert_eq!(value.as_str(), "[REDACTED]");
+    let LoweringKind::Expr(t) = &redact.lowering else {
+        panic!("anon.redact must be an Expr row, got {:?}", redact.lowering);
+    };
+    assert_eq!(t.as_str(), "'[REDACTED]'");
+    // The ZERO-hole case, and half the reason the notation is indexed rather
+    // than sequential: a sequential placeholder cannot say "ignore".
+    assert!(template_holes(t.as_str()).is_empty());
+    assert_eq!(redact.sig.params.len(), 1);
+}
+
+#[test]
+fn core_require_is_a_template_that_reads_its_argument_twice() {
+    let r = FunctionRegistry::stdlib_default();
+    let require = r.lookup("core.require").expect("core.require present");
+    let LoweringKind::Expr(t) = &require.lowering else {
+        panic!("core.require must be an Expr row");
+    };
+    // The REPEATED-hole case, the other half of the reason. `%0` twice, one
+    // parameter: a sequential placeholder would demand two.
+    assert_eq!(template_holes(t.as_str()), vec![0]);
+    assert_eq!(t.as_str().matches("%0").count(), 2);
+    assert_eq!(require.sig.params.len(), 1);
+}
+
+/// **A template may never name an argument the signature does not have.**
+///
+/// This is the one invariant the notation needs and the only one it can be
+/// given: a template does NOT determine arity (see the two tests above), so the
+/// check is one-directional — every hole is a parameter, but not every
+/// parameter need be a hole.
+#[test]
+fn no_template_names_a_hole_its_signature_lacks() {
+    let r = FunctionRegistry::stdlib_default();
+    for e in r.iter() {
+        let LoweringKind::Expr(t) = &e.lowering else {
+            continue;
+        };
+        for hole in template_holes(t.as_str()) {
+            assert!(
+                hole < e.sig.params.len(),
+                "`{}` names `%{hole}` and declares {} parameter(s): {t}",
+                e.name,
+                e.sig.params.len()
+            );
         }
-        other => panic!("anon.redact must be Inline(LiteralStr), got {other:?}"),
     }
 }
 
 #[test]
-fn validate_regex_is_builtin_regexp_matches_pure_sql() {
-    let r = FunctionRegistry::stdlib_default();
-    let regex = r.lookup("validate.regex").expect("validate.regex present");
-    assert_eq!(regex.wasm_class, WasmClass::PureSql);
-    match &regex.lowering {
-        LoweringKind::Builtin { duckdb_name } => {
-            assert_eq!(duckdb_name.as_str(), "regexp_matches");
-        }
-        other => panic!("validate.regex must be Builtin, got {other:?}"),
-    }
+fn render_template_substitutes_by_index_and_escapes_double_percent() {
+    let args = ["A".to_string(), "B".to_string()];
+    assert_eq!(render_template("f(%0, %1)", &args), "f(A, B)");
+    // Repeated and out-of-order.
+    assert_eq!(render_template("%1 || %0 || %1", &args), "B || A || B");
+    // `%%` is a literal percent, so a LIKE pattern survives.
+    assert_eq!(render_template("like(%0, '%%')", &args), "like(A, '%')");
+    // An out-of-range hole is left verbatim rather than dropped: a template
+    // that names an argument the signature lacks must be VISIBLE, and the
+    // guard above is what catches it.
+    assert_eq!(render_template("f(%9)", &args), "f(%9)");
 }
+
+// ── The row set ────────────────────────────────────────────────────────────
 
 #[test]
 fn math_namespace_has_exactly_six_no_ceil_floor() {
@@ -90,35 +227,27 @@ fn math_namespace_has_exactly_six_no_ceil_floor() {
     );
 }
 
-/// The authoritative function set from `stdlib.md`, eight surface namespaces.
-/// `io/` is intentionally excluded (source constructors; `io.sql`/`io.http`
-/// out of scope this milestone).
+/// The authoritative function set. `io/` is excluded (source constructors).
 fn expected_stdlib_names() -> Vec<&'static str> {
     vec![
         // core/ (2)
         "core.lang",
         "core.require",
-        // seq/ (13)
-        "seq.filter",
+        // seq/ (13) — the relation verbs. `filter`/`project` are spelled
+        // `where`/`select`, which is what the surface spells.
+        "seq.where",
         "seq.map",
         "seq.flatten",
         "seq.take",
         "seq.drop",
         "seq.distinct",
         "seq.sort",
-        "seq.project",
+        "seq.select",
         "seq.join",
         "seq.union",
         "seq.group_by",
         "seq.aggregate",
         "seq.count",
-        // clean/ (6)
-        "clean.trim",
-        "clean.lower",
-        "clean.upper",
-        "clean.slug",
-        "clean.normalize_unicode",
-        "clean.strip_html",
         // parse/ (7)
         "parse.integer",
         "parse.float",
@@ -134,7 +263,9 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "math.max",
         "math.abs",
         "math.round",
-        // str/ (8)
+        // str/ (13) — the eight that were here plus the five from `clean/`
+        // (ruling 16). `clean.normalize_unicode` is NOT among them: it left
+        // the language with `Foreign`.
         "str.length",
         "str.slice",
         "str.contains",
@@ -143,25 +274,29 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "str.replace",
         "str.split",
         "str.concat",
+        "str.trim",
+        "str.lower",
+        "str.upper",
+        "str.slug",
+        "str.strip_html",
         // validate/ (5)
         "validate.email",
         "validate.url",
         "validate.uuid",
         "validate.iso_date",
         "validate.regex",
-        // anon/ (3)
+        // anon/ (2) — `anon.hmac` left the language: HMAC needs a key
+        // schedule and DuckDB has sha256 and no HMAC.
         "anon.hash",
-        "anon.hmac",
         "anon.redact",
     ]
 }
 
 #[test]
-fn catalog_is_bidirectionally_complete_against_stdlib_md() {
+fn catalog_is_bidirectionally_complete() {
     use std::collections::BTreeSet;
 
     let r = FunctionRegistry::stdlib_default();
-    // The catalog set, excluding the io/ source constructors (not surface fns).
     let catalog: BTreeSet<String> = r
         .iter()
         .map(|en| en.name.to_string())
@@ -177,45 +312,37 @@ fn catalog_is_bidirectionally_complete_against_stdlib_md() {
 
     assert!(
         missing.is_empty() && extra.is_empty(),
-        "catalog must equal the stdlib.md eight-namespace set exactly.\n  MISSING (omissions): {missing:?}\n  EXTRA (not in stdlib.md): {extra:?}"
+        "catalog must equal the declared set exactly.\n  MISSING: {missing:?}\n  EXTRA: {extra:?}"
     );
-    // Sanity on the count: 2 + 13 + 6 + 7 + 6 + 8 + 5 + 3 = 50 surface functions.
-    assert_eq!(catalog.len(), 50);
-    // The three io/ constructors are retained on top.
-    assert_eq!(r.iter().count(), 50 + 3);
+    // 2 + 13 + 7 + 6 + 13 + 5 + 2 = 48 surface functions.
+    assert_eq!(catalog.len(), 48);
+    // The three io/ constructors on top.
+    assert_eq!(r.iter().count(), 48 + 3);
 }
 
+/// `clean/` does not exist, and neither do the two functions that were deleted
+/// from the language rather than ported.
 #[test]
-fn pure_sql_iff_non_udf_invariant_holds_for_every_entry() {
+fn the_deleted_names_are_gone() {
     let r = FunctionRegistry::stdlib_default();
-    for en in r.iter() {
-        assert_eq!(
-            en.wasm_class,
-            derive_wasm_class(&en.lowering),
-            "entry {} violates the PureSql ⟺ non-Udf invariant",
-            en.name
-        );
-        // Equivalent direct statement of the invariant.
-        let is_udf = matches!(en.lowering, LoweringKind::Udf { .. });
-        assert_eq!(
-            en.wasm_class == WasmClass::NativeUdfOnly,
-            is_udf,
-            "entry {} : NativeUdfOnly must hold iff lowering is Udf",
-            en.name
-        );
+    for gone in [
+        // Ruling 16: five renames and the namespace disappears.
+        "clean.trim",
+        "clean.lower",
+        "clean.upper",
+        "clean.slug",
+        "clean.strip_html",
+        // Ruling 15: these two cannot be done honestly in SQL.
+        "clean.normalize_unicode",
+        "anon.hmac",
+        // The old spellings of the two renamed verbs.
+        "seq.filter",
+        "seq.project",
+    ] {
+        assert!(r.lookup(gone).is_none(), "`{gone}` must not exist");
     }
-}
-
-#[test]
-fn no_builtin_has_an_empty_duckdb_name() {
-    let r = FunctionRegistry::stdlib_default();
-    for en in r.iter() {
-        if let LoweringKind::Builtin { duckdb_name } = &en.lowering {
-            assert!(
-                !duckdb_name.is_empty(),
-                "entry {} has an empty Builtin duckdb_name",
-                en.name
-            );
-        }
-    }
+    assert!(
+        !r.is_catalogued_head("clean"),
+        "`clean` must not be a catalogued head — a binding may be called `clean`"
+    );
 }

@@ -11,14 +11,19 @@ heavy, so the parity is split into tiers (ADR-0014):
 
 | Tier | Where | When | What it proves |
 |------|-------|------|----------------|
-| 1. Snapshot | `crates/fossil-codegen/tests/corpus.rs` | every PR (`cargo test`) | the 30-mapping corpus' generated SQL text is stable |
-| 2. Native exec | `crates/fossil-runtime/tests/corpus_exec.rs` | every PR (`cargo test`) | the executable subset runs on native `duckdb` 1.10502, asserts result bytes, and **writes** `native_baseline.json` + `corpus_sql.json` |
-| 3. WASM exec (THIS) | `tests/wasm_parity/run-parity.mjs` | **manual, phase close** | the SAME SQL runs on DuckDB-WASM, reproduces the digests, and diffs them against the native baseline |
+| Native exec | `crates/fossil-runtime/tests/corpus_exec.rs` | every PR (`cargo test`) | the executable corpus runs on native `duckdb` 1.10502, asserts result bytes, and **writes** `native_baseline.json` + `corpus_sql.json` |
+| WASM exec (THIS) | `tests/wasm_parity/run-parity.mjs` | **manual, phase close** | the SAME SQL runs on DuckDB-WASM, reproduces the digests, and diffs them against the native baseline |
 
-## The two-tier contract
+There used to be a snapshot tier above these — `fossil-codegen/tests/corpus.rs`,
+locking the generated SQL text of a 30-mapping corpus. `af39ff4` deleted the
+SQL-codegen path and the `fossil-codegen` crate with it. What survives is the
+executable corpus in `corpus_exec.rs`; the `sql_sha256` check below now carries
+what the snapshot used to.
 
-Tier 2 (`corpus_exec.rs`) is the **producer**: every time it runs it (re-)writes
-two checked-in artifacts under `crates/fossil-codegen/tests/wasm_parity/`:
+## The producer/consumer contract
+
+`corpus_exec.rs` is the **producer**: every time it runs it (re-)writes two
+checked-in artifacts, beside `run-parity.mjs` in this directory:
 
 - **`native_baseline.json`** — one object per natively-executed mapping:
   ```json
@@ -28,9 +33,25 @@ two checked-in artifacts under `crates/fossil-codegen/tests/wasm_parity/`:
 - **`corpus_sql.json`** — `{ "<mapping>": "<SQL text>" }`, so the SQL stays
   **single-sourced** from the Rust corpus (this harness never re-derives it).
 
-Tier 3 (this harness) is the **consumer**: it reads both artifacts, re-runs each
-SQL on DuckDB-WASM, recomputes the digests with the identical serialization, and
+It writes them here on purpose. It used to write into `crates/fossil-codegen/`,
+and after that crate was deleted the test recreated the directory on every run —
+`members = ["crates/*"]` then failed to load it, breaking every cargo command in
+the workspace until someone deleted it again. The comment in `corpus_exec.rs`
+records that.
+
+`run-parity.mjs` is the **consumer**: it reads both artifacts, re-runs each SQL
+on DuckDB-WASM, recomputes the digests with the identical serialization, and
 asserts equality — exiting non-zero on any divergence.
+
+### The SC#2 io tier is dormant
+
+`run-parity.mjs` also looks for `io_parity_baseline.json` + `io_parity_sql.json`
+— the `io/csv` + `io/json` + `io/parquet` source tier — and its three fixtures
+are committed under `fixtures/`. **The producer is not in the tree:** the
+harness names `crates/fossil-runtime/tests/io_parity_corpus.rs` and no such file
+exists. The load is wrapped in a `try`, so today the harness prints a `WARN`,
+reports `io=0`, and gates on the corpus tier alone. Do not read a green run as
+covering the source formats.
 
 ### The result-set serialization (kept in sync with `corpus_exec.rs`)
 
@@ -67,8 +88,9 @@ npm install            # fetches @duckdb/duckdb-wasm 1.33.x (~6.4 MB)
 node run-parity.mjs    # exits 0 iff every entry matches native_baseline.json
 ```
 
-`node_modules/` and `package-lock.json` are gitignored — only the harness
-sources (`package.json`, `run-parity.mjs`, this README) are committed.
+`node_modules/` and `package-lock.json` are gitignored (see `.gitignore` here).
+Committed: `package.json`, `run-parity.mjs`, this README, the two baseline
+artifacts, and `fixtures/`.
 
 ## Regenerating the baseline
 
@@ -83,6 +105,6 @@ means the corpus SQL or fixtures changed — review it like any other snapshot.
 
 ## When the run is recorded
 
-`node run-parity.mjs` exiting 0 is the documented **phase-close** evidence; its
-PASS is recorded in the Phase 4 SUMMARY (plan 04-08). It is NOT part of
-`cargo test` / CI.
+`node run-parity.mjs` exiting 0 is the documented **phase-close** evidence. It is
+NOT part of `cargo test` / CI — nothing runs it for you, so a PASS only exists if
+someone ran it and said so in the commit that closed the work.

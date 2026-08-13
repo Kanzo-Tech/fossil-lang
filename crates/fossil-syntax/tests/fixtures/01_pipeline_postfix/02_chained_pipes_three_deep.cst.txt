@@ -1,28 +1,25 @@
 PROGRAM
   MAPPING
     MAPPING_HEADER
-      IDENT "User"
+      IDENT "Users"
       SHAPE_SEP ":"
       SHAPE_EXPR
-        IRI_EXPR
-          IDENT "ex"
-          SHAPE_SEP ":"
-          IDENT "Person"
+        IDENT "Person"
       KW_FROM "from"
       EXPR
         LITERAL_EXPR
-          IDENT "users"
+          IDENT "User"
     MAPPING_BODY
       PROPERTY
         PROPERTY_LHS
-          KW_IRI "iri"
+          AT_ATTR "@subject"
         ASSIGN "="
         EXPR
           PIPELINE_EXPR
             PIPELINE_EXPR
               PIPELINE_EXPR
                 LITERAL_EXPR
-                  IDENT "users"
+                  IDENT "User"
                 PIPE "|>"
                 POSTFIX_EXPR
                   LITERAL_EXPR
@@ -31,7 +28,9 @@ PROGRAM
                   ARG_LIST
                     ARG
                       BINARY_EXPR
-                        FIELD_REF_EXPR
+                        POSTFIX_EXPR
+                          LITERAL_EXPR
+                            IDENT "User"
                           DOT "."
                           IDENT "age"
                         GE ">="
@@ -45,7 +44,9 @@ PROGRAM
                 LPAREN "("
                 ARG_LIST
                   ARG
-                    FIELD_REF_EXPR
+                    POSTFIX_EXPR
+                      LITERAL_EXPR
+                        IDENT "User"
                       DOT "."
                       IDENT "name"
                 RPAREN ")"
@@ -56,7 +57,9 @@ PROGRAM
               LPAREN "("
               ARG_LIST
                 ARG
-                  FIELD_REF_EXPR
+                  POSTFIX_EXPR
+                    LITERAL_EXPR
+                      IDENT "User"
                     DOT "."
                     IDENT "name"
               RPAREN ")"

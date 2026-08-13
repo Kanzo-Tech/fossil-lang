@@ -11,6 +11,7 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "WASM wrapper for the fossil DataFusion executor — runs mappings in the browser"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
 [lib]
@@ -24,11 +25,16 @@ workspace = true
 # The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
 fossil-df = { path = "../fossil-df" }
 # FossilDb (production salsa db) + SourceFile + the System trait. The executor
-# takes the output descriptor as an argument (ADR-0018), never off the db.
+# takes the output descriptor as an argument, never off the db.
 fossil-base = { path = "../fossil-base" }
 # The program-resident output descriptor: ShEx text → OutputDescriptorKind,
 # threaded into execute_graph (drives edge/cardinality classification).
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# The `ShEx` AST behind that descriptor, named directly:
+# `fossil-descriptors-output` stopped re-exporting it. This host is one of the
+# consumers that genuinely wants the parse — it lowers the schema blob the
+# browser handed it before any query runs.
+fossil-shex = { path = "../fossil-shex" }
 # The host↔fossil wire status keasy consumes for DCAT (serialized to JS).
 fossil-run-status = { path = "../fossil-run-status" }
 
@@ -68,7 +74,7 @@ console_error_panic_hook = { workspace = true }
 # getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
 # `datafusion-datasource`, and getrandom 0.2 through `const-random` ← `ahash` ←
 # `arrow`. Salsa's own hashbrown hashes with foldhash and draws no randomness.
-# The line here used to say salsa→hashbrown→ahash; ADR-0052 read the tree.
+# The line here used to say salsa→hashbrown→ahash, until the tree was read.
 getrandom = { workspace = true }
 
 [dev-dependencies]

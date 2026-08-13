@@ -1,0 +1,5 @@
+id,parent,label
+c-1,,Kitchen
+c-2,c-1,Kettles
+c-3,c-1,Teapots
+c-4,c-2,Stovetop kettles

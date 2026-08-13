@@ -18,7 +18,7 @@
 //! verbatim — the Phase-1 smoke test and the STDL-07 classification path
 //! both keep working without change.
 //!
-//! ## Architecture (ADR-0024)
+//! ## Architecture
 //!
 //! `fossil-wasm` is the LSP server-side IN THE BROWSER — NOT a recompiled
 //! `fossil-lsp` (which has a `compile_error!` cfg-tripwire because
@@ -31,7 +31,7 @@
 //!
 //! `update_file` mutates the SAME [`fossil_base::SourceFile`] input via the
 //! Salsa [`salsa::Setter`] (`set_text`) — the EXACT mechanism Phase 6's LSP
-//! `didChange` path uses (ADR-0022 — the revision bump is the cancellation
+//! `didChange` path uses (the revision bump is the cancellation
 //! trigger). NO new tracked queries land in the lifecycle path, so
 //! `MAX_PER_MAPPING_FAN_OUT` stays at 1 (verified by
 //! `fossil-hir::tests::invalidation_regression`, 3/3).
@@ -66,10 +66,11 @@ use crate::workspace::OpenFiles;
 /// The Salsa database the WASM host owns.
 ///
 /// Mirrors `fossil-lsp::LspDb` (06-09): the Salsa runtime + the host
-/// [`System`] (here [`WasmSystem`]). The target-side `ShEx` type/properties
-/// `fossil-ide` surfaces are reachable because the PROGRAM names its output
-/// document and `resolve_target_shape` reads it through the system
-/// (ADR-0055) — the playground supplies a filesystem, not a contract.
+/// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
+/// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
+/// names its output document and the host REGISTERS it (see
+/// [`FossilPlayground::open_file_native`]) — the playground supplies documents,
+/// not a contract.
 #[salsa::db]
 #[derive(Clone)]
 struct WasmDb {
@@ -117,10 +118,10 @@ impl WasmDb {
 pub struct FossilPlayground {
     db: WasmDb,
     /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
-    /// typed `Arc<WasmSystem>` here so future host wiring (e.g. an in-memory
-    /// `VirtualFS` import in plan 07-10) can call `WasmSystem::write`
-    /// without round-tripping through the trait object.
-    #[allow(dead_code)]
+    /// typed `Arc<WasmSystem>` here to reach the in-memory filesystem — the
+    /// shape-document loop reads through it, and future host wiring (e.g. a
+    /// `VirtualFS` import) writes to it — without round-tripping through the
+    /// trait object.
     system: Arc<WasmSystem>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
@@ -155,27 +156,9 @@ impl FossilPlayground {
         }
     }
 
-    /// Return the stdlib classification manifest as a JS array of
-    /// `{ name, wasm_class }` objects (STDL-07).
-    ///
-    /// `wasm_class` is the string `"pure_sql"` or `"native_udf_only"`. The
-    /// playground reads this once at startup to render `native_udf_only`
-    /// functions as disabled with a "native-only — unavailable in the browser"
-    /// tooltip (SC#1 playground half). `DuckDB`-WASM cannot register the Rust
-    /// UDFs those functions need (Pitfall 3), so the classification is the
-    /// authority on what is runnable in-browser.
-    ///
-    /// This is pure read-only data projected from the `&'static`-ready
-    /// `fossil_hir::stdlib::FunctionRegistry` — no `DuckDB`, no native UDF code,
-    /// WASM-clean.
-    ///
-    /// # Errors
-    ///
-    /// Returns a JS error only if the manifest fails to serialize to `JsValue`.
-    pub fn classification(&self) -> Result<JsValue, JsError> {
-        let manifest = stdlib_classification();
-        serde_wasm_bindgen::to_value(&manifest).map_err(JsError::from)
-    }
+    // A `classification()` method sat here, returning the `{ name, wasm_class }`
+    // manifest for the playground to gray out the native-only functions. There
+    // are none: see the tombstone below `inferred_descriptor_native`.
 
     // ----- Phase 7 Workspace lifecycle (ty_wasm pattern — WASM-02) -----
 
@@ -198,7 +181,7 @@ impl FossilPlayground {
 
     /// Apply an edit to an open file. Mutates the SAME `SourceFile` via the
     /// Salsa [`salsa::Setter`] (`set_text`) — this BUMPS THE REVISION, the
-    /// real cancellation trigger (ADR-0022): any in-flight analysis from the
+    /// real cancellation trigger: any in-flight analysis from the
     /// previous keystroke observes the new revision at its next cooperative
     /// checkpoint. NO new `SourceFile` is interned — the Salsa input
     /// identity stays stable across the file's lifetime, so memoised
@@ -265,7 +248,7 @@ impl FossilPlayground {
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
 
-    // ----- Phase 13 (ADR-0037) — register a host-introspected descriptor -----
+    // ----- Phase 13 — register a host-introspected descriptor -----
 
     /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
     /// source binding name BEFORE invoking [`Self::compile`] /
@@ -293,7 +276,7 @@ impl FossilPlayground {
     /// invoking `compile()` / `compile_file()`. Keyed by the source URI as the
     /// program writes it (`"examples/users.csv"` for
     /// `users := io.csv("examples/users.csv")`), NOT by the binding name and
-    /// NOT by the resolved URL the host fetched — ADR-0050.
+    /// NOT by the resolved URL the host fetched.
     ///
     /// Idempotent: re-registering the same `uri` OVERWRITES the previous entry
     /// — intentional, since the host re-introspects when the source changes.
@@ -345,7 +328,7 @@ pub enum WorkspaceError {
     NoMappingInFile,
     /// The `register_inferred_descriptor` JSON payload did not deserialise
     /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
-    /// underlying `serde_json` error message. Phase 13 (ADR-0037).
+    /// underlying `serde_json` error message. Phase 13.
     MalformedDescriptor(String),
 }
 
@@ -413,10 +396,21 @@ impl FossilPlayground {
             .get(handle)
             .ok_or(WorkspaceError::UnknownHandle)?;
         file.set_text(&mut self.db).to(contents);
+        // The edit may have just added the `type { … } = io.shex("…")` line
+        // that names a document. A no-op once the document is in (the loop
+        // skips what the registry already holds), and the `def_map` it consults
+        // is the one `check` is about to run anyway.
+        self.register_named_documents(file);
         Ok(())
     }
 
     /// Native-reachable close — pure-Rust mirror of `close_file`.
+    ///
+    /// The file leaves the workspace but STAYS in the registry. Deregistering
+    /// would be right if there were a disk to fall back to; here there is not,
+    /// so dropping a closed `.shex` would delete the only copy of it the
+    /// compiler has and silently turn off the output contract of every program
+    /// naming it.
     ///
     /// # Errors
     ///
@@ -432,9 +426,36 @@ impl FossilPlayground {
     /// Native-reachable open — pure-Rust mirror of `open_file`. Returns the
     /// fresh handle directly (panics on `u32::MAX` counter overflow, same
     /// as the wasm-bindgen wrapper).
+    ///
+    /// Two registrations happen here, and they are different things. The buffer
+    /// goes into the file registry under its own path, so that opening a
+    /// `.shex` makes the OPEN COPY the document every program naming it reads —
+    /// the editor's buffer is the truth, not whatever the host staged. Then the
+    /// documents THIS file names are registered if nobody has them yet.
     pub fn open_file_native(&mut self, path: String, contents: String) -> FileHandle {
         let file = fossil_base::SourceFile::new(&self.db, contents, path.clone());
-        self.files.insert(path, file)
+        fossil_base::register_file(&mut self.db, path.clone(), file);
+        let handle = self.files.insert(path, file);
+        self.register_named_documents(file);
+        handle
+    }
+
+    /// Register every shape document `file` names that is not in the database
+    /// already — see [`fossil_ide::register_missing_documents`].
+    ///
+    /// The playground's filesystem is [`WasmSystem`]'s in-memory map, which is
+    /// empty unless a host staged something in it. So in the browser this
+    /// normally registers NOTHING, and that is the honest answer: a document
+    /// the host never opened is not there. It is not a dead end either — the
+    /// registry is a Salsa input, so `open_file`ing that document later
+    /// re-executes every query that missed it. The playground's way to give the
+    /// compiler a shape document is to open it.
+    fn register_named_documents(&mut self, file: fossil_base::SourceFile) {
+        let system = &self.system;
+        fossil_ide::register_missing_documents(&mut self.db, file, &|key| {
+            let bytes = system.read_file(std::path::Path::new(key)).ok()?;
+            String::from_utf8(bytes).ok()
+        });
     }
 
     // ----- LSP-worker dispatch helpers (07-03 — pub(crate)) -----
@@ -478,7 +499,7 @@ impl FossilPlayground {
         diagnostics_for_file(&self.db, file)
     }
 
-    // ----- Phase 13 (ADR-0037) — inferred-descriptor registration -----
+    // ----- Phase 13 — inferred-descriptor registration -----
 
     /// Pure-Rust mirror of [`Self::register_inferred_descriptor`] (the
     /// `#[wasm_bindgen]` wrapper).
@@ -522,42 +543,16 @@ impl FossilPlayground {
     }
 }
 
-/// One stdlib function's WASM classification (STDL-07). Serialized to a JS
-/// object `{ name, wasm_class }` for the playground.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct FnClassification {
-    /// Fully-qualified dotted name (e.g. `"clean.slug"`, `"clean.trim"`).
-    pub name: String,
-    /// `"pure_sql"` (runs in the browser) or `"native_udf_only"` (disabled).
-    pub wasm_class: String,
-}
-
-/// Project the full stdlib registry into the serializable classification
-/// manifest: every function name + its `wasm_class` string.
-///
-/// Read directly from `fossil_hir::stdlib::FunctionRegistry::stdlib_default()`,
-/// the single source of truth (SC#1 — the playground and the native UDFs agree
-/// on which functions are `native_udf_only`).
-#[must_use]
-pub fn stdlib_classification() -> Vec<FnClassification> {
-    use fossil_hir::stdlib::WasmClass;
-
-    let registry = fossil_hir::stdlib::FunctionRegistry::stdlib_default();
-    let mut manifest: Vec<FnClassification> = registry
-        .iter()
-        .map(|entry| FnClassification {
-            name: entry.name.to_string(),
-            wasm_class: match entry.wasm_class {
-                WasmClass::PureSql => "pure_sql".to_string(),
-                WasmClass::NativeUdfOnly => "native_udf_only".to_string(),
-            },
-        })
-        .collect();
-    // Stable order so the manifest (and any consumer snapshot) is deterministic;
-    // the registry iterates a HashMap (unspecified order).
-    manifest.sort_by(|a, b| a.name.cmp(&b.name));
-    manifest
-}
+// `FnClassification` and `stdlib_classification()` lived here — one row per
+// stdlib function, carrying `"pure_sql"` or `"native_udf_only"`, so the browser
+// playground could render the native-only functions as disabled.
+//
+// Ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering kind, and with it
+// the `WasmClass` concept the manifest projected. Every catalogued function is
+// a pure SQL expression template now, so there is nothing to disable and a
+// manifest saying `"pure_sql"` fifty-one times says nothing at all. **The
+// language runs entirely in the browser**, which is what the manifest existed
+// to deny.
 
 impl Default for FossilPlayground {
     fn default() -> Self {
@@ -565,7 +560,7 @@ impl Default for FossilPlayground {
     }
 }
 
-// ----- Parse-only lineage + providers (one crate, two hosts — ADR-0024) -----
+// ----- Parse-only lineage + providers (one crate, two hosts) -----
 //
 // `refs` and `providers` mirror the native `fossil refs` / `fossil providers`
 // CLI commands for the BROWSER host: keasy's client-compute job runner reads a
@@ -579,15 +574,19 @@ impl Default for FossilPlayground {
 // program-text-driven (the job runner has the script string, not the editor's
 // open-file workspace), mirroring the existing free `tokenize` export.
 
-/// The data-source providers fossil supports (`io.csv`, `io.rdf`, …) as a JS
-/// array of `{ name, extensions, kind }`. Pure projection of the stdlib source
-/// registry — no parsing, no db.
+/// The providers this host installs (`io.csv`, `io.rdf`, `io.shex`, …) as a JS
+/// array of `{ name, extensions, kind }`. Pure projection of the provider
+/// registry — no parsing, no db. `kind` is read off each row's capabilities, so
+/// the two shape-document rows come back as `Schema`.
 ///
 /// # Errors
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
 #[wasm_bindgen]
 pub fn providers() -> Result<JsValue, JsError> {
-    serde_wasm_bindgen::to_value(&fossil_lineage::providers()).map_err(JsError::from)
+    serde_wasm_bindgen::to_value(&fossil_lineage::providers(
+        fossil_descriptors_output::PROVIDERS,
+    ))
+    .map_err(JsError::from)
 }
 
 /// Parse `program` and return its external references — every data URI +

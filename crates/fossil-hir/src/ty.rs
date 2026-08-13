@@ -1,17 +1,24 @@
-//! Type ADT — Phase 2 (CORE-03) expansion to all 11 kinds.
+//! Type ADT.
 //!
-//! 10 surface kinds (type-system.md §2) + 1 internal `Unknown(InferenceId)`
-//! kind for bidirectional checker state (per Phase 2 RESEARCH.md §Q4 — the
-//! "11th kind" interpretation). The internal kind is never exposed in surface
-//! diagnostics; it appears only during checking-in-flight.
+//! The surface kinds (type-system.md §2) + 1 internal `Unknown(InferenceId)`
+//! kind for bidirectional checker state (per Phase 2 RESEARCH.md §Q4). The
+//! internal kind is never exposed in surface diagnostics; it appears only
+//! during checking-in-flight.
+//!
+//! There is no count to quote here, and there used to be: this said «all 11
+//! kinds», and two of them — `Optional` and `Fn` — were constructed by nothing
+//! but the test that enumerated them. Both are gone. `grammar.bnf` has no `T?`
+//! and declares `FunctionDecl` absent (the user declares no functions), so
+//! neither had a way into the language.
 //!
 //! Interning strategy per RESEARCH.md §Q4:
 //! - `Ty<'db>` itself is `#[salsa::interned]` so structural equality → pointer eq.
 //! - `Record<'db>` is separately interned (many distinct field sets).
-//! - `FnSig<'db>` is separately interned (many distinct function signatures).
+//! - `FnSig<'db>` is separately interned. It is the STDLIB's signature type
+//!   (`crate::stdlib::SigSpec::to_fn_sig`), not a `TyKind` any more.
 //! - All other kinds inline in `TyKind` directly.
 //!
-//! `'db` lifetime per Salsa 0.20+ (ADR-0003 + RESEARCH.md §Q7).
+//! `'db` lifetime per Salsa 0.20+ (RESEARCH.md §Q7).
 
 use fossil_base::ErrorGuaranteed;
 // The primitive lattice is NOT the type system's to own: the schema contract, the
@@ -36,13 +43,11 @@ pub struct Ty<'db> {
     pub kind: TyKind<'db>,
 }
 
-/// All 11 type kinds.
+/// Every type kind the compiler can build.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum TyKind<'db> {
     /// Primitive types per type-system.md §2 line 41-42 (9 variants).
     Primitive(Primitive),
-    /// `T?` — nullable wrapper, type-system.md §2.
-    Optional(Ty<'db>),
     /// `T*` — sequence / repeated, type-system.md §2.
     Seq(Ty<'db>),
     /// Tabular row type — interned separately for fast equality.
@@ -51,11 +56,8 @@ pub enum TyKind<'db> {
     Iri,
     /// An IRI template — backtick string with `${...}` placeholders.
     IriTemplate,
-    /// Function signature — interned separately for fast equality.
-    Fn(FnSig<'db>),
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
-    /// promotion of Phase 1's local taint-wrapper newtype — see ADR-0004 +
-    /// RESEARCH.md §Q6).
+    /// promotion of Phase 1's local taint-wrapper newtype — RESEARCH.md §Q6).
     Error(ErrorGuaranteed),
     /// Internal inference-state placeholder. Used by bidirectional checker
     /// during synthesis-mode descent; never exposed in surface diagnostics.
@@ -80,7 +82,12 @@ pub struct Record<'db> {
 }
 
 /// Function signature — `(τ₁, ..., τₙ) → τ_r`. Interned so many distinct
-/// signatures (from the function registry) share storage.
+/// signatures (from the stdlib catalog) share storage.
+///
+/// NOT a [`TyKind`]. `TyKind::Fn(FnSig)` existed and nothing constructed it:
+/// the checker reads `crate::stdlib`'s `SigSpec` directly in `synth_call` and
+/// never needs a function-typed VALUE, because the language has no way to write
+/// one down (`grammar.bnf`: no `FunctionDecl`, no `LambdaExpr`).
 #[salsa::interned(debug)]
 pub struct FnSig<'db> {
     #[returns(ref)]
@@ -88,15 +95,16 @@ pub struct FnSig<'db> {
     pub return_ty: Ty<'db>,
 }
 
-/// Shape identifier — newtype around a raw `u32`. Resolved by
-/// `fossil-descriptors-output` in Phase 3 (`ShEx` integration); Phase 2 ships
-/// the variant + a `placeholder` constructor for test fixtures.
+/// Shape identifier — newtype around a raw `u32`. Minted per-mapping by
+/// [`crate::shapes::resolve_target_shape`] from the mapping's index, since a
+/// mapping targets at most one shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ShapeId(pub u32);
 
 impl ShapeId {
-    /// Placeholder shape id used by Phase 2 tests; Phase 3 will replace with
-    /// real `ShEx` resolution via the `OutputDescriptor` trait.
+    /// The per-mapping id, and the one tests construct directly. It is called
+    /// `placeholder` because it is not yet an interning of the shape's IRI —
+    /// two mappings targeting one shape have two ids.
     #[must_use]
     pub const fn placeholder(raw: u32) -> Self {
         Self(raw)
@@ -134,14 +142,11 @@ mod tests {
         let db = db();
         let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
         let _: TyKind<'_> = TyKind::Primitive(Primitive::String);
-        let _: TyKind<'_> = TyKind::Optional(int_ty);
         let _: TyKind<'_> = TyKind::Seq(int_ty);
         let rec = Record::new(&db, vec![]);
         let _: TyKind<'_> = TyKind::Record(rec);
         let _: TyKind<'_> = TyKind::Iri;
         let _: TyKind<'_> = TyKind::IriTemplate;
-        let sig = FnSig::new(&db, vec![int_ty], int_ty);
-        let _: TyKind<'_> = TyKind::Fn(sig);
         // Reference the helper so the dead-code lint doesn't flag it.
         let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
         let _: TyKind<'_> = TyKind::Unknown(InferenceId(0));
@@ -158,13 +163,12 @@ mod tests {
         let seq_int_b = Ty::new(&db, TyKind::Seq(b));
         assert_eq!(seq_int_a, seq_int_b);
 
-        let opt_seq_a = Ty::new(&db, TyKind::Optional(seq_int_a));
-        let opt_seq_b = Ty::new(&db, TyKind::Optional(seq_int_b));
-        assert_eq!(opt_seq_a, opt_seq_b);
+        let seq_seq_a = Ty::new(&db, TyKind::Seq(seq_int_a));
+        let seq_seq_b = Ty::new(&db, TyKind::Seq(seq_int_b));
+        assert_eq!(seq_seq_a, seq_seq_b, "nesting interns structurally too");
 
         // Different shape → different id.
-        let opt_int = Ty::new(&db, TyKind::Optional(a));
-        assert_ne!(opt_int, opt_seq_a);
+        assert_ne!(seq_int_a, seq_seq_a);
     }
 
     #[test]

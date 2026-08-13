@@ -1,172 +1,181 @@
-// canonical_200.fossil — the canonical ~200-line Fossil program used as the
-// LSP performance fixture (didChange round-trip budget) AND the cross-file
-// feature test input.
+// canonical_200.fossil — the LSP performance fixture (the didChange round-trip
+// budget) AND the input of the end-to-end feature test.
 //
-// Authored by plan 06-09 (Research Wave 0 gap / Phase-0 Open Question #4): no
-// realistic multi-mapping Fossil corpus existed before this. It exercises the
-// full v0.1 surface — prefix decls, source bindings, mapping headers with
-// shape refs, IRI templates, field refs, and stdlib calls
-// across the io / clean / str / math / core namespaces — and type-checks
-// cleanly under AcceptAll (no sibling .shex).
+// IT IS NOT A CONFORMANCE PROGRAM. The conformance set is `apps/docs/programs/`
+// and grammar.bnf names it; this is a BENCH. 8 sources and 15 mappings, and the
+// size is the whole point: `crates/fossil-lsp/tests/didchange_budget.rs` is a
+// hard CI gate at 400 ms, and a budget measured over a twelve-line file asserts
+// nothing. The largest conformance program has ~30 lines.
+//
+// It also deliberately spells three corners no conformance program exercises:
+// `str.trim` / `lower` / `upper` / `slug` (the five that used to be `clean.*`
+// before ruling 16 folded that namespace into `str`), `math.round`, and
+// `str.concat` with two arguments.
+//
+// The second file is `canonical_200.shex`, and what crosses between them is a
+// LANGUAGE boundary: every shape name in a header below and every property key
+// is defined in that document, not here (ruling 12). `crates/fossil-ide`'s
+// goto-def is what walks it.
 //
 // Comment lines use `//` (the Fossil comment syntax). A bare `#` is unlexable
-// and would hang the parser (06-07 deferred-items.md) — it MUST NOT appear.
+// and would hang the parser — it MUST NOT appear.
 
-prefix ex:    <https://example.org/>
-prefix schema: <https://schema.org/>
-prefix foaf:  <http://xmlns.com/foaf/0.1/>
-prefix org:   <https://example.org/org/>
-prefix prod:  <https://example.org/product/>
+// ─── The output contract ─────────────────────────────────────────────────────
+//
+// Fifteen names, bound POSITIONALLY to the fifteen shapes the document declares
+// in its own order. One shape per mapping.
 
-// ─── Source bindings ─────────────────────────────────────────────────────
+type { Person, Organization, Product, Order, Review, Membership, PostalAddress, Category, ProductCategory, Profile, OrderLine, Contact, PriceSnapshot, ReviewSummary, GeoAddress } := io.shex("canonical_200.shex")
 
-users := io.csv("users.csv")
+// ─── Source bindings ─────────────────────────────────────────────────────────
 
-orders := io.csv("orders.csv")
+Users := io.csv("users.csv")
 
-products := io.csv("products.csv")
+Orders := io.csv("orders.csv")
 
-orgs := io.csv("organizations.csv")
+Products := io.csv("products.csv")
 
-memberships := io.csv("memberships.csv")
+Orgs := io.csv("organizations.csv")
 
-reviews := io.csv("reviews.csv")
+Memberships := io.csv("memberships.csv")
 
-addresses := io.csv("addresses.csv")
+Reviews := io.csv("reviews.csv")
 
-categories := io.csv("categories.csv")
+Addresses := io.csv("addresses.csv")
 
-// ─── Mapping 1: people ───────────────────────────────────────────────────
+Categories := io.csv("categories.csv")
 
-Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    foaf:name = clean.trim(.name)
-    foaf:nick = clean.lower(.nick)
-    schema:email = .email
-    ex:age = .age
-    ex:active = .active
+// ─── Mapping 1: people ───────────────────────────────────────────────────────
 
-// ─── Mapping 2: organizations ──────────────────────────────────────────────
+People : Person from Users
+    @subject = "https://example.org/person/{Users.id}"
+    name = str.trim(Users.name)
+    nick = str.lower(Users.nick)
+    email = Users.email
+    age = Users.age
+    active = Users.active
 
-Organization : ex:Organization from orgs
-    iri = `${org:}${.org_id}`
-    schema:name = clean.upper(.org_name)
-    schema:legalName = .legal_name
-    ex:country = .country
-    ex:founded = .founded_year
+// ─── Mapping 2: organizations ────────────────────────────────────────────────
 
-// ─── Mapping 3: products ───────────────────────────────────────────────────
+Companies : Organization from Orgs
+    @subject = "https://example.org/org/{Orgs.org_id}"
+    name = str.upper(Orgs.org_name)
+    legalName = Orgs.legal_name
+    country = Orgs.country
+    founded = Orgs.founded_year
 
-Product : ex:Product from products
-    iri = `${prod:}${.sku}`
-    schema:name = .product_name
-    schema:price = math.round(.price)
-    ex:currency = .currency
-    ex:inStock = .in_stock
-    ex:slug = clean.slug(.product_name)
+// ─── Mapping 3: products ─────────────────────────────────────────────────────
 
-// ─── Mapping 4: orders ─────────────────────────────────────────────────────
+Catalogue : Product from Products
+    @subject = "https://example.org/product/{Products.sku}"
+    name = Products.product_name
+    price = math.round(Products.price)
+    currency = Products.currency
+    inStock = Products.in_stock
+    slug = str.slug(Products.product_name)
 
-Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
-    schema:total = math.round(.amount)
-    ex:quantity = .quantity
-    ex:orderedAt = .created_at
+// ─── Mapping 4: orders ───────────────────────────────────────────────────────
 
-// ─── Mapping 5: reviews ────────────────────────────────────────────────────
+Purchases : Order from Orders
+    @subject = "https://example.org/order/{Orders.order_id}"
+    placedBy = "https://example.org/person/{Orders.user_id}"
+    total = math.round(Orders.amount)
+    quantity = Orders.quantity
+    orderedAt = Orders.created_at
 
-Review : schema:Review from reviews
-    iri = `${ex:}review/${.review_id}`
-    schema:author = `${ex:}person/${.author_id}`
-    schema:itemReviewed = `${prod:}${.sku}`
-    schema:reviewBody = clean.trim(.body)
-    schema:ratingValue = .rating
+// ─── Mapping 5: reviews ──────────────────────────────────────────────────────
 
-// ─── Mapping 6: memberships (joins person ↔ org) ────────────────────────────
+Ratings : Review from Reviews
+    @subject = "https://example.org/review/{Reviews.review_id}"
+    author = "https://example.org/person/{Reviews.author_id}"
+    itemReviewed = "https://example.org/product/{Reviews.sku}"
+    reviewBody = str.trim(Reviews.body)
+    ratingValue = Reviews.rating
 
-Membership : ex:Membership from memberships
-    iri = `${ex:}membership/${.membership_id}`
-    ex:member = `${ex:}person/${.user_id}`
-    ex:organization = `${org:}${.org_id}`
-    ex:role = clean.upper(.role)
-    ex:since = .joined_at
+// ─── Mapping 6: memberships (person ↔ org) ───────────────────────────────────
 
-// ─── Mapping 7: addresses ──────────────────────────────────────────────────
+Members : Membership from Memberships
+    @subject = "https://example.org/membership/{Memberships.membership_id}"
+    member = "https://example.org/person/{Memberships.user_id}"
+    organization = "https://example.org/org/{Memberships.org_id}"
+    role = str.upper(Memberships.role)
+    since = Memberships.joined_at
 
-Address : schema:PostalAddress from addresses
-    iri = `${ex:}address/${.address_id}`
-    schema:streetAddress = clean.trim(.street)
-    schema:addressLocality = .city
-    schema:postalCode = .zip
-    schema:addressCountry = clean.upper(.country_code)
+// ─── Mapping 7: addresses ────────────────────────────────────────────────────
 
-// ─── Mapping 8: categories ─────────────────────────────────────────────────
+Places : PostalAddress from Addresses
+    @subject = "https://example.org/address/{Addresses.address_id}"
+    streetAddress = str.trim(Addresses.street)
+    addressLocality = Addresses.city
+    postalCode = Addresses.zip
+    addressCountry = str.upper(Addresses.country_code)
 
-Category : ex:Category from categories
-    iri = `${ex:}category/${.category_id}`
-    schema:name = .category_name
-    ex:slug = clean.slug(.category_name)
-    ex:parent = .parent_id
+// ─── Mapping 8: categories ───────────────────────────────────────────────────
 
-// ─── Mapping 9: product → category link ─────────────────────────────────────
+Sections : Category from Categories
+    @subject = "https://example.org/category/{Categories.category_id}"
+    name = Categories.category_name
+    slug = str.slug(Categories.category_name)
+    parent = Categories.parent_id
 
-ProductCategory : ex:Product from products
-    iri = `${prod:}${.sku}`
-    ex:belongsTo = `${ex:}category/${.category_id}`
-    ex:displayName = str.concat(.product_name, .currency)
+// ─── Mapping 9: product → category link ──────────────────────────────────────
 
-// ─── Mapping 10: enriched person profile ────────────────────────────────────
+Shelving : ProductCategory from Products
+    @subject = "https://example.org/product/{Products.sku}/category"
+    belongsTo = "https://example.org/category/{Products.category_id}"
+    displayName = str.concat(Products.product_name, Products.currency)
 
-PersonProfile : foaf:Person from users
-    iri = `${ex:}profile/${.id}`
-    foaf:name = clean.trim(.name)
-    foaf:mbox = .email
-    ex:displayLabel = str.concat(.name, .nick)
-    ex:ageGroup = .age
-    ex:homepage = `${ex:}person/${.id}/home`
+// ─── Mapping 10: enriched person profile ─────────────────────────────────────
 
-// ─── Mapping 11: order line items ───────────────────────────────────────────
+Profiles : Profile from Users
+    @subject = "https://example.org/profile/{Users.id}"
+    name = str.trim(Users.name)
+    mbox = Users.email
+    displayLabel = str.concat(Users.name, Users.nick)
+    ageGroup = Users.age
+    homepage = "https://example.org/person/{Users.id}/home"
 
-OrderLine : ex:OrderLine from orders
-    iri = `${ex:}orderline/${.order_id}/${.user_id}`
-    ex:lineOrder = `${ex:}order/${.order_id}`
-    ex:lineProduct = `${prod:}${.sku}`
-    schema:quantity = .quantity
-    schema:price = math.round(.amount)
+// ─── Mapping 11: order line items ────────────────────────────────────────────
 
-// ─── Mapping 12: organization contacts ──────────────────────────────────────
+Lines : OrderLine from Orders
+    @subject = "https://example.org/orderline/{Orders.order_id}/{Orders.user_id}"
+    lineOrder = "https://example.org/order/{Orders.order_id}"
+    lineProduct = "https://example.org/product/{Orders.sku}"
+    quantity = Orders.quantity
+    price = math.round(Orders.amount)
 
-OrgContact : ex:Contact from orgs
-    iri = `${org:}${.org_id}/contact`
-    ex:contactOf = `${org:}${.org_id}`
-    schema:name = clean.trim(.contact_name)
-    schema:email = clean.lower(.contact_email)
-    schema:telephone = .phone
+// ─── Mapping 12: organization contacts ───────────────────────────────────────
 
-// ─── Mapping 13: product pricing snapshot ───────────────────────────────────
+Contacts : Contact from Orgs
+    @subject = "https://example.org/org/{Orgs.org_id}/contact"
+    contactOf = "https://example.org/org/{Orgs.org_id}"
+    name = str.trim(Orgs.contact_name)
+    email = str.lower(Orgs.contact_email)
+    telephone = Orgs.phone
 
-PriceSnapshot : ex:PriceSnapshot from products
-    iri = `${prod:}${.sku}/price`
-    ex:snapshotOf = `${prod:}${.sku}`
-    schema:price = math.round(.price)
-    schema:priceCurrency = clean.upper(.currency)
-    ex:capturedAt = .updated_at
+// ─── Mapping 13: product pricing snapshot ────────────────────────────────────
 
-// ─── Mapping 14: review summary per product ─────────────────────────────────
+Prices : PriceSnapshot from Products
+    @subject = "https://example.org/product/{Products.sku}/price"
+    snapshotOf = "https://example.org/product/{Products.sku}"
+    price = math.round(Products.price)
+    priceCurrency = str.upper(Products.currency)
+    capturedAt = Products.updated_at
 
-ReviewSummary : ex:ReviewSummary from reviews
-    iri = `${ex:}review/${.review_id}/summary`
-    ex:summaryOf = `${prod:}${.sku}`
-    ex:reviewer = `${ex:}person/${.author_id}`
-    schema:reviewRating = .rating
-    ex:headline = clean.trim(.body)
+// ─── Mapping 14: review summary per product ──────────────────────────────────
 
-// ─── Mapping 15: address geocoding stub ─────────────────────────────────────
+Summaries : ReviewSummary from Reviews
+    @subject = "https://example.org/review/{Reviews.review_id}/summary"
+    summaryOf = "https://example.org/product/{Reviews.sku}"
+    reviewer = "https://example.org/person/{Reviews.author_id}"
+    reviewRating = Reviews.rating
+    headline = str.trim(Reviews.body)
 
-GeoAddress : ex:GeoAddress from addresses
-    iri = `${ex:}geo/${.address_id}`
-    ex:locationOf = `${ex:}address/${.address_id}`
-    schema:addressLocality = clean.upper(.city)
-    ex:postalCode = .zip
-    ex:countryCode = clean.upper(.country_code)
+// ─── Mapping 15: address geocoding stub ──────────────────────────────────────
+
+Geo : GeoAddress from Addresses
+    @subject = "https://example.org/geo/{Addresses.address_id}"
+    locationOf = "https://example.org/address/{Addresses.address_id}"
+    addressLocality = str.upper(Addresses.city)
+    postalCode = Addresses.zip
+    countryCode = str.upper(Addresses.country_code)

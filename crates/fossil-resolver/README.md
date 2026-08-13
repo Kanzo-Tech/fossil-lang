@@ -2,7 +2,7 @@
 
 Host-injected cloud path resolution. Maps a user-written `.fossil` path string (`s3://bucket/users.csv`, `@conn-name/users.csv`, `file:///tmp/x.csv`) to a concrete URL + provider-specific cloud configuration the runtime threads into DuckDB.
 
-The `PathResolver` trait is the host-injection seam (same shape as `fossil-base::System` for the filesystem, per ADR-0003). `fossil-cli` and the playground mount the `DefaultPathResolver` which only handles local + public URLs; multi-tenant hosts like Keasy mount an implementation that resolves `@conn-name` against the calling org's per-connection credentials.
+The `PathResolver` trait is the host-injection seam, the same shape `fossil-base::System` has for the filesystem: a host capability goes behind one trait so the query surface never widens to meet it. `fossil-cli` and the playground mount the `DefaultPathResolver` which only handles local + public URLs; multi-tenant hosts like Keasy mount an implementation that resolves `@conn-name` against the calling org's per-connection credentials.
 
 ## Quick shape
 

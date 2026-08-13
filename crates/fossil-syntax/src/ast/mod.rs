@@ -1,7 +1,7 @@
 //! Typed AST views over the lossless CST.
 //!
 //! Phase 1 ships only the wrappers downstream `fossil-hir` needs to walk
-//! the program: `PrefixDecl`, `SourceDef`, `Mapping`, `MappingHeader`,
+//! the program: `SourceDef`, `Mapping`, `MappingHeader`,
 //! `MappingBody`, `Property`. Each is a thin newtype around `SyntaxNode`
 //! with `cast` (kind-checking constructor) + `syntax` (back-edge accessor)
 //! and a few convenience accessors for child tokens.
@@ -11,7 +11,7 @@
 //! (offsets, trivia, error recovery in later phases).
 
 pub mod items;
-pub use items::{IriExpr, ShapeExpr};
+pub use items::ShapeExpr;
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
@@ -38,36 +38,17 @@ macro_rules! ast_node {
     };
 }
 
-ast_node!(PrefixDecl, PREFIX_DECL);
+// `PrefixDecl` was a view here, with `name()` and `iri()` accessors reading a
+// `PREFIX_DECL`'s `IDENT` and `ABS_IRI` tokens. The node kind is gone and so are
+// both tokens — there is no vocabulary declaration left to introduce, and a
+// constant IRI is a STRING; its two consumers were
+// `fossil_hir::def_map`'s prefix table and `fossil_ide::prefix_index`, and both
+// went with it.
 ast_node!(SourceDef, SOURCE_DEF);
 ast_node!(Mapping, MAPPING);
 ast_node!(MappingHeader, MAPPING_HEADER);
 ast_node!(MappingBody, MAPPING_BODY);
 ast_node!(Property, PROPERTY);
-
-impl PrefixDecl {
-    /// The local name of the prefix (e.g. `ex` in `prefix ex: <...>`).
-    #[must_use]
-    pub fn name(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT)
-            .map(|t| smol_str::SmolStr::from(t.text()))
-    }
-
-    /// The IRI text with the surrounding `<>` stripped.
-    #[must_use]
-    pub fn iri(&self) -> Option<smol_str::SmolStr> {
-        self.0
-            .children_with_tokens()
-            .filter_map(rowan::NodeOrToken::into_token)
-            .find(|t| t.kind() == SyntaxKind::ABS_IRI)
-            .map(|t| {
-                smol_str::SmolStr::from(t.text().trim_start_matches('<').trim_end_matches('>'))
-            })
-    }
-}
 
 impl SourceDef {
     /// The bound name on the LHS of `:=` (e.g. `users` in `users := io.csv(...)`).
@@ -113,7 +94,7 @@ impl MappingHeader {
             .map(|t| smol_str::SmolStr::from(t.text()))
     }
 
-    /// The header's `ShapeExpr` (`ex:Person`).
+    /// The header's `ShapeExpr` (`Person` in `Users : Person from Adults`).
     /// Plan 02-04's `ItemTree` consumes this to build `Mapping.shape_id`.
     #[must_use]
     pub fn shape_expr(&self) -> Option<items::ShapeExpr> {

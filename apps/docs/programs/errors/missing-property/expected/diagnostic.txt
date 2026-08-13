@@ -1,0 +1,12 @@
+× `People` never writes `email`, and Person requires it
+   ╭─[program.fossil:5:1]
+ 5 │ People : Person from User
+   · ────────────┬────────────
+   ·             ╰── this mapping produces Person
+   ╰────
+   ╭─[shape.shex:5:3]
+ 5 │   shop:email xsd:string ;
+   ·   ──────────┬──────────
+   ·             ╰── required here: exactly one shop:email
+   ╰────
+  help: add `email = ` to the body. `shop:phone` is optional and may stay out.

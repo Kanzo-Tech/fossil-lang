@@ -10,29 +10,30 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::sync::Arc;
-
 use datafusion::arrow::array::{Array, StringArray};
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+
+mod support;
 
 const PROGRAM: &str = "\
 prefix ex:   <https://example.org/>
 prefix foaf: <http://xmlns.com/foaf/0.1/>
+type { Person } = io.shex(\"rdf-person.shex\")
 
 people := io.rdf(\"tests/fixtures/people.ttl\")
 
 Person : ex:Person from people
-    iri = .subject
-    foaf:name = .name
-    foaf:age = .age
+    @subject = .subject
+    name = .name
+    age = .age
 ";
+
+const RDF_PERSON_SHEX: &str = include_str!("fixtures/rdf-person.shex");
 
 #[tokio::test]
 async fn io_rdf_runs_end_to_end_via_the_host_seam() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, PROGRAM.to_string(), "rdf.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(PROGRAM, "rdf.fossil", &[("rdf-person.shex", RDF_PERSON_SHEX)]);
 
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
@@ -78,7 +79,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_graph over an io.rdf source");
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // One vertex type; no edges. Subject selection by rdf:type drops the Org.
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -127,18 +128,21 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
 // a typed KB→Project edge that UNNESTs to two edges (kb/1 points at two projects).
 const KB_PROGRAM: &str = "\
 prefix ex: <https://ex.org/>
+type { KB, Project } = io.shex(\"kb-graph.shex\")
 
 { KB, Project } := io.rdf(\"tests/fixtures/kb_graph.ttl\")
 
 KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
-    ex:hasProject = .hasProject
+    @subject = .subject
+    label = .label
+    hasProject = .hasProject
 
 Project : ex:Project from Project
-    iri = .subject
-    ex:title = .title
+    @subject = .subject
+    title = .title
 ";
+
+const KB_GRAPH_SHEX: &str = include_str!("fixtures/kb-graph.shex");
 
 const KB_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type": "Schema", "shapes": [
   {"type":"ShapeDecl","id":"https://ex.org/KB","shapeExpr":{"type":"Shape","expression":{"type":"EachOf","expressions":[
@@ -151,11 +155,11 @@ const KB_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type
 
 #[tokio::test]
 async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
-    use fossil_descriptors_output::{OutputDescriptorKind, ShExDescriptor};
+    use fossil_descriptors_output::OutputDescriptorKind;
+    use fossil_shex::ShExDescriptor;
 
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, KB_PROGRAM.to_string(), "kb.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(KB_PROGRAM, "kb.fossil", &[("kb-graph.shex", KB_GRAPH_SHEX)]);
 
     let descriptor = OutputDescriptorKind::ShEx(
         ShExDescriptor::from_reader(KB_SHEX.as_bytes()).expect("parse ShEx"),
@@ -178,7 +182,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_graph with the ShEx descriptor");
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Two vertex types, each from ITS shape: KB carries `label` (NOT hasProject —
     // that's an edge), Project carries `title`.

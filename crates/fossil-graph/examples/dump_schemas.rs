@@ -3,7 +3,7 @@
 //! This is the codegen source for the TS binding (`@fossil-lang/graph`): its
 //! `scripts/gen-types.sh` pipes this output through `json-schema-to-typescript`
 //! to produce `src/generated.ts`. The same schemas are snapshot-tested in
-//! `tests/schemas.rs` (the canonical wire contract per ADR-0039) — this example
+//! `tests/schemas.rs` (the canonical wire contract) — this example
 //! just re-shapes them into a single `{ definitions, properties }` doc that
 //! `json2ts` can compile in one pass.
 //!

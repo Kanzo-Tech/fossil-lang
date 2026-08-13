@@ -8,13 +8,9 @@
 //! 1. **stdlib functions** (the gleam-lsp auto-import pattern). Every
 //!    [`fossil_hir::stdlib::RegistryEntry`] from [`FunctionRegistry::stdlib_default`]
 //!    becomes a `CompletionItem` (kind = Function, detail = the rendered
-//!    signature). When the function's namespace prefix is NOT yet present in the
-//!    file, the item carries an `additional_text_edits` insertion adding the
-//!    `use <ns>` line at the top of the file — accepting the completion inserts
-//!    BOTH the call AND the import in one step (Research §completion). A
-//!    [`WasmClass::NativeUdfOnly`] entry is tagged `DEPRECATED` (the only
-//!    `CompletionItemTag` in LSP 3.17) + a `(native-only)` detail suffix so the
-//!    playground can gray it out.
+//!    signature). There is no auto-import edit and no `(native-only)` tag: the
+//!    first named a `use <ns>` line no program writes, and the second named
+//!    `WasmClass::NativeUdfOnly`, a class that no longer exists.
 //! 2. **prefixes** — declared prefixes from the cross-file
 //!    [`crate::WorkspaceIndex`] + the well-known set
 //!    ([`crate::WELL_KNOWN_PREFIXES`]: rdf/rdfs/xsd/owl), the latter
@@ -22,7 +18,7 @@
 //!    insertion when not already declared).
 //! 3. **shape properties** — when the cursor is in a mapping whose target `ShEx`
 //!    shape resolves (the program names its output document with
-//!    `type { … } = io.shex("…")`, ADR-0055), the shape's
+//!    `type { … } = io.shex("…")`), the shape's
 //!    `constraints[].predicate` names are offered as `Field` completions.
 //!
 //! # Domain + WASM boundary
@@ -31,21 +27,24 @@
 //! source needs only the static catalog (`stdlib_default()`, no db); the prefix
 //! source needs the `WorkspaceIndex` (a CST-walk struct, no Salsa query); the
 //! shape-property source calls `resolve_target_shape`, which reads the document
-//! the program names through `System::read_file` — no Salsa input dependency,
-//! so no new per-mapping key. The per-mapping `body()` fan-out is unchanged
+//! the program names as a Salsa INPUT — through `file_at` and the tracked
+//! `shape_document`, which the HOST must have registered (see
+//! [`crate::shape_documents`]). Both dependencies are file-keyed, not
+//! per-mapping: ten mappings checked against one document share one decode, so
+//! no new per-mapping key appears and the `body()` fan-out is unchanged
 //! (Research Pitfall #3). All type rendering routes through
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
 //! `detail` string (Risk Register).
 
-use crate::{PrefixIndex, WELL_KNOWN_PREFIXES, WorkspaceIndex};
+
 use fossil_base::SourceFile;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
-use fossil_hir::stdlib::{FunctionRegistry, WasmClass};
+use fossil_hir::stdlib::FunctionRegistry;
 use fossil_hir::ty::TyKind;
 use fossil_syntax::SyntaxKind;
-use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag, Position, Range, TextEdit};
+use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag};
 
 use crate::position::{node_at_position, token_at_position};
 
@@ -60,16 +59,18 @@ use crate::position::{node_at_position, token_at_position};
 #[must_use]
 pub fn completions(
     db: &dyn fossil_base::Db,
-    files: &[SourceFile],
+    // The open-file set. It fed `prefix_completions`, the one source that was
+    // cross-file; nothing left here reads past `file`, and the parameter stays
+    // because it is `fossil-lsp`'s call shape and the next cross-file source
+    // (shape names from a `type` binding in a sibling file) wants it back.
+    _files: &[SourceFile],
     file: SourceFile,
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
     let mut items = Vec::new();
-    let prefixes = PrefixIndex::build(db, file);
 
-    stdlib_completions(&prefixes, &mut items);
-    prefix_completions(db, files, &prefixes, &mut items);
+    stdlib_completions(&mut items);
     shape_property_completions(db, file, line, character, &mut items);
     source_field_completions(db, file, line, character, &mut items);
 
@@ -78,30 +79,30 @@ pub fn completions(
 
 /// Source 1: stdlib functions with the gleam-lsp auto-import edit + native-only
 /// tag.
-fn stdlib_completions(prefixes: &PrefixIndex, items: &mut Vec<CompletionItem>) {
+fn stdlib_completions(items: &mut Vec<CompletionItem>) {
     let registry = FunctionRegistry::stdlib_default();
     for entry in registry.iter() {
         let name = entry.name.as_str();
-        // The namespace is the dotted prefix (`clean` in `clean.trim`).
+        // The receiver is the dotted prefix (`str` in `str.trim`).
         let namespace = name.split('.').next().unwrap_or(name);
-        let native_only = entry.wasm_class == WasmClass::NativeUdfOnly;
 
-        let mut detail = render_sig(namespace, entry);
-        let tags = if native_only {
-            detail.push_str("  (native-only)");
-            Some(vec![CompletionItemTag::DEPRECATED])
-        } else {
-            None
-        };
+        // A `WasmClass::NativeUdfOnly` entry was tagged DEPRECATED here with a
+        // `(native-only)` detail suffix, so the browser playground could gray
+        // it out. There is no such entry and no such class: ruling 15 of
+        // `SURFACE-PLAN.md` deleted the `Udf` lowering, and with it the only
+        // reason a catalogued function could fail to run in a browser. Every
+        // row runs everywhere, so nothing is grayed.
+        let detail = render_sig(namespace, entry);
+        let tags: Option<Vec<CompletionItemTag>> = None;
 
-        // gleam-lsp auto-import: if the namespace prefix is not yet declared in
-        // the file, attach a top-of-file `use <ns>` insertion so accepting the
-        // completion also imports the namespace.
-        let additional_text_edits = if prefixes.is_declared(namespace) {
-            None
-        } else {
-            Some(vec![import_edit(namespace)])
-        };
+        // A gleam-lsp auto-import edit sat here: a top-of-file `use <ns>`
+        // insertion, offered when the file's `PrefixIndex` said the namespace
+        // was not declared. There is no `use` production — `use` is an ordinary
+        // identifier and there is no module system for a name to come from —
+        // and no prefix table to ask, and `io` / `str` / `clean` are resolved
+        // by the checker against a catalogue rather than imported at all — so
+        // the edit named a line no program writes.
+        let additional_text_edits = None;
 
         items.push(CompletionItem {
             label: name.to_string(),
@@ -114,49 +115,12 @@ fn stdlib_completions(prefixes: &PrefixIndex, items: &mut Vec<CompletionItem>) {
     }
 }
 
-/// Source 2: declared (cross-file) prefixes + well-known prefixes (the latter
-/// auto-importable when not yet declared).
-fn prefix_completions(
-    db: &dyn fossil_base::Db,
-    files: &[SourceFile],
-    local: &PrefixIndex,
-    items: &mut Vec<CompletionItem>,
-) {
-    let ws = WorkspaceIndex::build(db, files);
-
-    // Declared prefixes across the open-file set (cross-file). De-dup by name.
-    let mut seen: Vec<String> = Vec::new();
-    for f in ws.files() {
-        let pidx = PrefixIndex::build(db, f);
-        for binding in pidx.declared() {
-            let p = binding.prefix.as_str();
-            if seen.iter().any(|s| s == p) {
-                continue;
-            }
-            seen.push(p.to_string());
-            items.push(CompletionItem {
-                label: format!("{p}:"),
-                kind: Some(CompletionItemKind::MODULE),
-                detail: Some(format!("prefix {p}: <{}>", binding.iri)),
-                ..Default::default()
-            });
-        }
-    }
-
-    // Well-known prefixes: offered as auto-importable when not already declared.
-    for (prefix, iri) in WELL_KNOWN_PREFIXES {
-        if local.is_declared(prefix) || seen.iter().any(|s| s == prefix) {
-            continue;
-        }
-        items.push(CompletionItem {
-            label: format!("{prefix}:"),
-            kind: Some(CompletionItemKind::MODULE),
-            detail: Some(format!("well-known prefix <{iri}>")),
-            additional_text_edits: Some(vec![prefix_import_edit(prefix, iri)]),
-            ..Default::default()
-        });
-    }
-}
+// `prefix_completions` was source 2 here: every prefix declared across the open
+// files, plus the four well-known ones offered as auto-importable. Both halves
+// went with the declaration, and a vocabulary declaration is not a form of this
+// language any more. The sources are now stdlib,
+// shape predicates and source fields — and the module header's numbering
+// above is one short because of it.
 
 /// Source 3: shape predicate names, when the enclosing mapping's target `ShEx`
 /// shape resolves against the document the program names.
@@ -170,7 +134,12 @@ fn shape_property_completions(
     let Some(mapping) = enclosing_mapping_loc(db, file, line, character) else {
         return;
     };
-    let Some(shape) = resolve_target_shape(db, mapping) else {
+    // A document that is missing, undecodable or does not declare this shape is
+    // a [`fossil_hir::shapes::TargetShapeError`], and `typecheck_mapping` is
+    // where it becomes a diagnostic the user reads. A completion list is not a
+    // place to report it: the honest answer here is to offer no shape
+    // properties, which is what a program with no output contract gets too.
+    let Ok(Some(shape)) = resolve_target_shape(db, mapping) else {
         return;
     };
     for constraint in &shape.constraints {
@@ -244,7 +213,11 @@ fn at_field_ref_context(
     let mut current = token.parent();
     while let Some(node) = current {
         match node.kind() {
-            SyntaxKind::FIELD_REF_EXPR => return true,
+            // `SyntaxKind::FIELD_REF_EXPR => return true` was the first arm.
+            // A leading `.` starts nothing, so the `DOT`
+            // check above is the whole of the trigger — which is right for the
+            // qualified form too: the cursor sits on the `.` of `User.` when
+            // the completion is wanted.
             SyntaxKind::MAPPING => return false,
             _ => current = node.parent(),
         }
@@ -253,8 +226,8 @@ fn at_field_ref_context(
 }
 
 /// Resolve the cursor's enclosing mapping to its [`def_map`] `MappingLoc`
-/// (mirrors `hover::resolve_hover_target`'s filter-then-nth contract per
-/// ADR-0005, without the property-level resolution).
+/// (mirrors `hover::resolve_hover_target`'s filter-then-nth contract,
+/// without the property-level resolution).
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn enclosing_mapping_loc<'db>(
     db: &'db dyn fossil_base::Db,
@@ -295,8 +268,7 @@ fn render_sig(namespace: &str, entry: &fossil_hir::stdlib::RegistryEntry) -> Str
         .sig
         .params
         .iter()
-        .copied()
-        .map(scalar_name)
+        .map(|p| scalar_name(p.ty))
         .collect::<Vec<_>>()
         .join(", ");
     let ret = scalar_name(entry.sig.ret);
@@ -320,32 +292,9 @@ fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
     .to_string()
 }
 
-/// A top-of-file `use <namespace>` import edit (the gleam-lsp auto-import for an
-/// un-imported stdlib namespace).
-fn import_edit(namespace: &str) -> TextEdit {
-    TextEdit::new(top_of_file(), format!("use {namespace}\n"))
-}
-
-/// A top-of-file `prefix <p>: <iri>` declaration edit (auto-import for a
-/// well-known prefix).
-fn prefix_import_edit(prefix: &str, iri: &str) -> TextEdit {
-    TextEdit::new(top_of_file(), format!("prefix {prefix}: <{iri}>\n"))
-}
-
-/// The zero-width range at the very start of the file (line 0, char 0) — where
-/// auto-import insertions land.
-const fn top_of_file() -> Range {
-    Range {
-        start: Position {
-            line: 0,
-            character: 0,
-        },
-        end: Position {
-            line: 0,
-            character: 0,
-        },
-    }
-}
+// `import_edit` and `prefix_import_edit` lived here, plus the `top_of_file`
+// zero-width range both inserted at. One wrote `use <namespace>`, the other
+// `prefix <p>: <iri>`; neither line is a production the language has.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -484,7 +433,7 @@ mod tests {
             .descriptors()
             .expect("the test host keeps a descriptor table")
             .insert(InferredDescriptor {
-                // Keyed by the URI the binding names, not by `u` (ADR-0050) —
+                // Keyed by the URI the binding names, not by `u` —
                 // so the program below has to declare the binding for the
                 // completion to find anything.
                 uri: "u.csv".into(),

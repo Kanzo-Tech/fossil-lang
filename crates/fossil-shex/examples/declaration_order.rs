@@ -1,8 +1,8 @@
 //! Does declaration order survive the parse, and is `ShExDescriptor::shapes()` stable?
 //!
-//! ADR-0057's tenth amendment binds `type { A, B } = io.shex(...)` **by order**, so
-//! the order has to exist and be the file's. Two things are measured here, both
-//! named as unverified in that amendment:
+//! `type { A, B } = io.shex(...)` binds **by order**, so the order has to exist
+//! and be the file's. Two things are measured here, both unverified until this
+//! ran:
 //!
 //! 1. Whether rudof's `Schema::shapes()` returns the shapes in the order the
 //!    document declares them, for both surface syntaxes (`ShExC` and `ShExJ`).

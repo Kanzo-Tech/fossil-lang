@@ -1,7 +1,18 @@
 //! `SyntaxKind` — the kind tag for every node and token in the Fossil CST,
 //! plus the `rowan::Language` impl that wires it into the green/red tree.
 //!
-//! Every variant here is a kind the lexer or the parser actually produces.
+//! Every variant here is a kind the lexer or the parser actually produces —
+//! which is NOT the same as a terminal of `grammar.bnf`. Not one of them names a
+//! retired spelling any more, and the grammar no longer has a terminal with no
+//! kind here: `BOOL` was the last, and `true` / `false` arrived as `IDENT` until
+//! it existed. The parser is what this enum describes.
+//!
+//! Nine kinds left in the same commit as the surface they named: `KW_PREFIX`,
+//! `ABS_IRI`, `TEMPLATE`, `PREFIX_DECL`, `TEMPLATE_EXPR`, `IRI_EXPR`,
+//! `FIELD_REF_EXPR`, and — with step 6 of `SURFACE-PLAN.md` — `PIPE` and
+//! `PIPELINE_EXPR`. Each is a tombstone in `grammar.bnf` — the file declares the
+//! form ABSENT and names no production for it — and none has a node to be built
+//! from any more.
 //! The `repr(u16)` values are an implementation detail of the rowan green
 //! tree and are NOT a compatibility surface: nothing persists a raw value
 //! across a build, so adding or removing a variant renumbers the rest, and
@@ -12,8 +23,8 @@
 //! these — see `packages/codemirror-fossil/src/tags.ts`.
 
 // SCREAMING_SNAKE_CASE is the rust-analyzer / rowan-ecosystem convention for
-// SyntaxKind variants (matches the BNF terminal naming in `grammar.bnf`).
-// Suppress the rustc style warning crate-wide for this enum only.
+// SyntaxKind variants, and it is the naming `grammar.bnf` uses for its
+// terminals. Suppress the rustc style warning crate-wide for this enum only.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
@@ -27,23 +38,26 @@ pub enum SyntaxKind {
     IDENT,
     INTEGER,
     FLOAT,
-    STRING,
-    TEMPLATE,
-    /// The opening delimiter of an interpolated string — `"` or a backtick.
+    /// `true` / `false` — `BOOL := 'true' | 'false'` (grammar.bnf, BOOL).
     ///
-    /// A string with no interpolation stays one `STRING` (or `TEMPLATE`) token:
-    /// the carve happens only where there is something to carve, so every
-    /// string that was one token before this existed is still one token.
+    /// ONE kind for both spellings: which one it is, is the token's text, and a
+    /// pair of kinds would make every consumer match twice to learn one bit.
+    BOOL,
+    STRING,
+    /// The opening `"` of an interpolated string.
+    ///
+    /// A string with no interpolation stays one `STRING` token: the carve
+    /// happens only where there is something to carve, so every string that was
+    /// one token before this existed is still one token.
     STRING_OPEN,
     /// A literal run between two interpolations, or between a delimiter and
     /// one. Carries its source text verbatim, `{{` included.
     STRING_TEXT,
-    /// The opening of a hole — `{`, or `${` in the backtick spelling that
-    /// ADR-0057's seventh amendment retires.
+    /// The opening of a hole — `{`. There is one spelling; `${` went with the
+    /// backtick, and neither is a token.
     INTERP_OPEN,
-    /// The closing delimiter. The hole's own `}` is an ordinary `RBRACE`.
+    /// The closing `"`. The hole's own `}` is an ordinary `RBRACE`.
     STRING_CLOSE,
-    ABS_IRI,
     AT_ATTR,
 
     // ─── Punctuation / operators ──────────────────────────────────────
@@ -56,7 +70,9 @@ pub enum SyntaxKind {
     RPAREN,
     LBRACE,
     RBRACE,
-    PIPE,
+    // There was a `PIPE` here — `|>`, retired by ruling 7 of 2026-08-11.
+    // `|` matches no lexer rule now, so the bytes reach the parser as an ERROR
+    // token and are refused by name.
     EQ,
     NEQ,
     LT,
@@ -71,12 +87,14 @@ pub enum SyntaxKind {
     T_QUESTION,
 
     // ─── Keywords ─────────────────────────────────────────────────────
-    KW_PREFIX,
+    // Four, and the grammar reserves exactly six
+    // (grammar.bnf, § RESERVED KEYWORDS) — these four plus `true` / `false`,
+    // which are literals and arrive as [`SyntaxKind::BOOL`] rather than as
+    // keywords of their own. `KW_PREFIX` was a fifth and went with the CURIE.
     KW_FROM,
     KW_AND,
     KW_OR,
     KW_NOT,
-    KW_IRI,
 
     // ─── Virtual (post-lexer) ─────────────────────────────────────────
     INDENT,
@@ -84,39 +102,90 @@ pub enum SyntaxKind {
 
     // ─── Composite item nodes ─────────────────────────────────────────
     PROGRAM,
-    PREFIX_DECL,
+    // There was a `PREFIX_DECL` here. `prefix ex: <http://example.org/>`
+    // introduced the CURIE, and the CURIE is gone from every position it held —
+    // a shape name, a property key, an expression and an interpolation hole are
+    // bare names or full IRIs in strings now. A vocabulary declaration that
+    // nothing spells is a statement about nothing.
     SOURCE_DEF,
     /// `{ A, B, ... } := io.rdf(uri, schema = shex)` — a destructuring source
     /// definition binding N members (one per declared shape) to a single source.
     MULTI_SOURCE_DEF,
-    /// `type { A, B } = io.shex("s.shex")` — a type binding. Same destructuring
-    /// as `MULTI_SOURCE_DEF`, in type position: one catalogue, two binders
-    /// (ADR-0057, seventh amendment). Binding is positional (tenth).
+    /// `type { A, B } := io.shex("s.shex")` — a type binding. The same
+    /// destructuring as `MULTI_SOURCE_DEF`, in type position, and binding is
+    /// POSITIONAL: the Nth name binds the Nth shape the document declares.
+    ///
+    /// The binder is `:=` — one binder, and what is being bound is read off the
+    /// left-hand side (grammar.bnf, DEFINE). Every `=` in the
+    /// grammar is an ASSIGNMENT: a body property, `@subject`, a named argument.
+    /// Naming a shape document is MANDATORY (ruling 3 of 2026-08-11): a bare
+    /// property key takes its name from a predicate that a shape declares, so a
+    /// program with no `type` binding cannot write a single property.
+    ///
+    /// A `TYPE_DEF` may carry [`SyntaxKind::RENAME_ATTR`] children BEFORE its
+    /// `type` token — `RenameAttr*` is part of this production
+    /// (grammar.bnf, TypeDef), not a top-level item of its own, because a
+    /// `@rename` renames a predicate OF ONE BINDING and there is nowhere else
+    /// for it to hang.
     TYPE_DEF,
+    /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` —
+    /// `RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN`
+    /// (grammar.bnf, RenameAttr).
+    ///
+    /// The repair for two predicates whose last IRI segments coincide, in the
+    /// shape of Prisma's `@map`: all constants, above the declaration, and in
+    /// the PROGRAM rather than in the `.shex` because the vocabulary may not be
+    /// yours. Its `IDENT` is one of the names the binding below it introduces.
+    ///
+    /// It shares its `AT_ATTR` token with `@subject` and POSITION tells them
+    /// apart (disambiguation rule 6; grammar.bnf, § DISAMBIGUATION RULES):
+    /// `@rename` above a `type` binding, `@subject` as the first line of a
+    /// mapping body. Neither name is valid in the other's position and no third
+    /// name is valid anywhere.
+    RENAME_ATTR,
+    /// One `"…" as name` inside a [`SyntaxKind::RENAME_ATTR`] —
+    /// `Rename := STRING 'as' IDENT` (grammar.bnf, Rename).
+    ///
+    /// The first of the two places `as` survives, and one of the two that make
+    /// it CONTEXTUAL rather than reserved: it is recognised between a `STRING`
+    /// and a bare `IDENT`, where no expression could continue, so one token of
+    /// lookahead settles it and `as` stays an ordinary identifier everywhere
+    /// else (rule 7; grammar.bnf, § DISAMBIGUATION RULES).
+    RENAME,
     MAPPING,
     MAPPING_HEADER,
     MAPPING_BODY,
     PROPERTY,
     PROPERTY_LHS,
-    /// The mapping header's shape. One `IRI_EXPR` and only one: the `&`
-    /// intersection went when the lowering was found to keep the first shape
-    /// and drop the rest in silence.
+    /// The mapping header's shape (grammar.bnf, ShapeExpr) — `ShapeExpr :=
+    /// IDENT`. One `IDENT` token child and nothing else: one of the names a
+    /// `type { … } := …` binding introduced. The `&` intersection went when the
+    /// lowering was found to keep the first shape and drop the rest in silence,
+    /// and the `IRI_EXPR` wrapper went with the CURIE.
     SHAPE_EXPR,
 
     // ─── Composite expression nodes ───────────────────────────────────
     EXPR,
-    TEMPLATE_EXPR,
+    // There was a `TEMPLATE_EXPR` here — a backtick literal with no hole. The
+    // backtick is not a token and `"…{expr}…"` is the one spelling, so there is
+    // nothing left for a second node to be built from.
     /// A string with at least one hole — `STRING_OPEN (STRING_TEXT |
-    /// INTERPOLATION)* STRING_CLOSE`. Both spellings produce this node.
+    /// INTERPOLATION)* STRING_CLOSE`. One spelling, one node.
     INTERP_STRING_EXPR,
     /// One hole — `INTERP_OPEN Expression RBRACE`. The expression is an
     /// ordinary expression, parsed by the ordinary expression parser: there is
     /// no format mini-language to keep in step with the checker.
     INTERPOLATION,
-    IRI_EXPR,
+    // There was an `IRI_EXPR` here — the CURIE, the absolute IRI and the
+    // backtick template, the three spellings of "an IRI written in the source".
+    // A constant IRI is a STRING now, and the shape decides that it denotes
+    // rather than reads.
     LITERAL_EXPR,
-    FIELD_REF_EXPR,
-    PIPELINE_EXPR,
+    // There was a `FIELD_REF_EXPR` here — `.name`, a column of an anonymous
+    // current row. The row has a name now, so every reference is qualified and a
+    // leading `.` starts nothing.
+    // There was a `PIPELINE_EXPR` here — the node `a |> f()` built. The member
+    // call is the spelling and `|>` is not a token, so the pipeline has no node.
     TERNARY_EXPR,
     BINARY_EXPR,
     UNARY_EXPR,
@@ -125,6 +194,16 @@ pub enum SyntaxKind {
     ARG_LIST,
     ARG,
     NAMED_ARG,
+    /// `Node as Other` — `AliasArg := IDENT 'as' IDENT` (grammar.bnf, AliasArg).
+    ///
+    /// The self-join's alias, and the OTHER place `as` survives:
+    /// `Node.join(Node as Other, on = Node.parent == Other.id)` binds a second
+    /// name for the same source so the two sides can be told apart, and the
+    /// mapping body then writes `Other.label` next to `Node.label`.
+    ///
+    /// Same one-token lookahead as [`SyntaxKind::RENAME`]: an operand followed
+    /// by a bare `IDENT`, which no expression can continue.
+    ALIAS_ARG,
 
     // ─── Error / sentinel ─────────────────────────────────────────────
     ERROR,
@@ -145,9 +224,9 @@ impl SyntaxKind {
     /// Reverse map from a raw `u16` (as stored by `rowan`) back to the typed enum.
     ///
     /// Implemented as an explicit `match` rather than `unsafe { transmute }` so
-    /// the workspace `unsafe_code = "deny"` lint stays clean here. ADR-0004
-    /// permits `#[allow(unsafe_code)]` only at third-party-trait integration
-    /// boundaries; a value-to-enum decode is not such a boundary.
+    /// the workspace `unsafe_code = "deny"` lint stays clean here. An
+    /// `#[allow(unsafe_code)]` belongs only at a third-party-trait integration
+    /// boundary; a value-to-enum decode is not one.
     ///
     /// The match arms MUST stay in lock-step with the enum declaration order;
     /// the `syntax_kind_round_trip_for_all_variants` unit test guards this.
@@ -159,73 +238,67 @@ impl SyntaxKind {
             3 => Self::IDENT,
             4 => Self::INTEGER,
             5 => Self::FLOAT,
-            6 => Self::STRING,
-            7 => Self::TEMPLATE,
+            6 => Self::BOOL,
+            7 => Self::STRING,
             8 => Self::STRING_OPEN,
             9 => Self::STRING_TEXT,
             10 => Self::INTERP_OPEN,
             11 => Self::STRING_CLOSE,
-            12 => Self::ABS_IRI,
-            13 => Self::AT_ATTR,
-            14 => Self::DEFINE,
-            15 => Self::ASSIGN,
-            16 => Self::SHAPE_SEP,
-            17 => Self::DOT,
-            18 => Self::COMMA,
-            19 => Self::LPAREN,
-            20 => Self::RPAREN,
-            21 => Self::LBRACE,
-            22 => Self::RBRACE,
-            23 => Self::PIPE,
-            24 => Self::EQ,
-            25 => Self::NEQ,
-            26 => Self::LT,
-            27 => Self::LE,
-            28 => Self::GT,
-            29 => Self::GE,
-            30 => Self::PLUS,
-            31 => Self::MINUS,
-            32 => Self::STAR,
-            33 => Self::SLASH,
-            34 => Self::PERCENT,
-            35 => Self::T_QUESTION,
-            36 => Self::KW_PREFIX,
-            37 => Self::KW_FROM,
-            38 => Self::KW_AND,
-            39 => Self::KW_OR,
-            40 => Self::KW_NOT,
-            41 => Self::KW_IRI,
-            42 => Self::INDENT,
-            43 => Self::DEDENT,
-            44 => Self::PROGRAM,
-            45 => Self::PREFIX_DECL,
-            46 => Self::SOURCE_DEF,
-            47 => Self::MULTI_SOURCE_DEF,
-            48 => Self::TYPE_DEF,
-            49 => Self::MAPPING,
-            50 => Self::MAPPING_HEADER,
-            51 => Self::MAPPING_BODY,
-            52 => Self::PROPERTY,
-            53 => Self::PROPERTY_LHS,
-            54 => Self::SHAPE_EXPR,
-            55 => Self::EXPR,
-            56 => Self::TEMPLATE_EXPR,
-            57 => Self::INTERP_STRING_EXPR,
-            58 => Self::INTERPOLATION,
-            59 => Self::IRI_EXPR,
-            60 => Self::LITERAL_EXPR,
-            61 => Self::FIELD_REF_EXPR,
-            62 => Self::PIPELINE_EXPR,
-            63 => Self::TERNARY_EXPR,
-            64 => Self::BINARY_EXPR,
-            65 => Self::UNARY_EXPR,
-            66 => Self::POSTFIX_EXPR,
-            67 => Self::PAREN_EXPR,
-            68 => Self::ARG_LIST,
-            69 => Self::ARG,
-            70 => Self::NAMED_ARG,
-            71 => Self::ERROR,
-            72 => Self::EOF,
+            12 => Self::AT_ATTR,
+            13 => Self::DEFINE,
+            14 => Self::ASSIGN,
+            15 => Self::SHAPE_SEP,
+            16 => Self::DOT,
+            17 => Self::COMMA,
+            18 => Self::LPAREN,
+            19 => Self::RPAREN,
+            20 => Self::LBRACE,
+            21 => Self::RBRACE,
+            22 => Self::EQ,
+            23 => Self::NEQ,
+            24 => Self::LT,
+            25 => Self::LE,
+            26 => Self::GT,
+            27 => Self::GE,
+            28 => Self::PLUS,
+            29 => Self::MINUS,
+            30 => Self::STAR,
+            31 => Self::SLASH,
+            32 => Self::PERCENT,
+            33 => Self::T_QUESTION,
+            34 => Self::KW_FROM,
+            35 => Self::KW_AND,
+            36 => Self::KW_OR,
+            37 => Self::KW_NOT,
+            38 => Self::INDENT,
+            39 => Self::DEDENT,
+            40 => Self::PROGRAM,
+            41 => Self::SOURCE_DEF,
+            42 => Self::MULTI_SOURCE_DEF,
+            43 => Self::TYPE_DEF,
+            44 => Self::RENAME_ATTR,
+            45 => Self::RENAME,
+            46 => Self::MAPPING,
+            47 => Self::MAPPING_HEADER,
+            48 => Self::MAPPING_BODY,
+            49 => Self::PROPERTY,
+            50 => Self::PROPERTY_LHS,
+            51 => Self::SHAPE_EXPR,
+            52 => Self::EXPR,
+            53 => Self::INTERP_STRING_EXPR,
+            54 => Self::INTERPOLATION,
+            55 => Self::LITERAL_EXPR,
+            56 => Self::TERNARY_EXPR,
+            57 => Self::BINARY_EXPR,
+            58 => Self::UNARY_EXPR,
+            59 => Self::POSTFIX_EXPR,
+            60 => Self::PAREN_EXPR,
+            61 => Self::ARG_LIST,
+            62 => Self::ARG,
+            63 => Self::NAMED_ARG,
+            64 => Self::ALIAS_ARG,
+            65 => Self::ERROR,
+            66 => Self::EOF,
             _ => panic!("invalid SyntaxKind raw value: {v}"),
         }
     }

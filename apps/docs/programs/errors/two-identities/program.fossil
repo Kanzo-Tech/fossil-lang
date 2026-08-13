@@ -1,0 +1,12 @@
+type { Person } := io.shex("shape.shex")
+
+User   := io.csv("data/users.csv")
+Legacy := io.csv("data/legacy.csv")
+
+Users : Person from User
+    @subject = "https://shop.example/user/{User.email}"
+    name     = User.name
+
+Imported : Person from Legacy
+    @subject = "https://shop.example/user/{Legacy.account_id}"
+    name     = Legacy.full_name

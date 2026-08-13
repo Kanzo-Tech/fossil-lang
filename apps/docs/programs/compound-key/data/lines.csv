@@ -1,0 +1,5 @@
+tenant,id,order_id,quantity
+north,L-1,1001,2
+north,L-2,1001,1
+north,L-3,1002,7
+south,L-1,1001,3

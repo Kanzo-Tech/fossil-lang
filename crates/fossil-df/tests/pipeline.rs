@@ -1,8 +1,9 @@
 //! The three relational operators the source pipeline needs, executed.
 //!
 //! `Op::Filter`, `Op::Project` and `Op::Join` have been defined since phase 4
-//! and reached by nothing (ADR-0009 accepted that debt; ADR-0054 starts paying
-//! it). The lowering that will emit them is F5; this file is the other half —
+//! and reached by nothing: the operator algebra was defined WHOLE and lowered in
+//! part on purpose, and the source pipeline is what starts paying that debt back.
+//! The lowering that will emit them is F5; this file is the other half —
 //! it builds the op list by hand, which is the pattern this repo already uses
 //! for an operator no `.fossil` can produce yet, and asserts the **rows that
 //! come out**, not the plan that was built.
@@ -12,7 +13,6 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, Int64Array, StringArray};
@@ -23,6 +23,18 @@ use fossil_graph_schema::Primitive;
 use fossil_hir::ty::{Record, RecordField};
 use fossil_hir::{CmpOp, Ty, TyKind};
 use fossil_mir::{Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
+
+/// The anchor these op-list tests resolve their sources against.
+///
+/// They build the ops by hand, so there is no program on disk to take a
+/// directory from: the empty path anchors a relative URI to itself, which is
+/// what every one of these fixtures wants — `users.csv` beside the test's own
+/// working directory. It is spelled out rather than defaulted because the whole
+/// point of `SourceAnchor` is that no caller resolves a path without saying
+/// what it is resolved against.
+fn anchor() -> fossil_base::SourceAnchor<'static> {
+    fossil_base::SourceAnchor::beside(std::path::Path::new(""))
+}
 use smol_str::SmolStr;
 
 fn db() -> FossilDb {
@@ -62,8 +74,9 @@ fn col(source: &str, column: &str) -> Expr<'static> {
     }
 }
 
-/// The `on = .k` condition ADR-0054 §3 admits, spelled as the lowering will
-/// spell it: `BinOp { Eq, ColRef(left.k), ColRef(right.k) }`.
+/// The `on = .k` condition this engine admits — one key name on both sides,
+/// `USING (k)` — spelled as the lowering will spell it:
+/// `BinOp { Eq, ColRef(left.k), ColRef(right.k) }`.
 fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str) -> Expr<'db> {
     Expr::BinOp {
         op: CmpOp::Eq,
@@ -124,7 +137,7 @@ async fn a_filter_keeps_the_rows_its_predicate_admits() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 1, &HashMap::new())
+    let df = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
         .await
         .expect("the filter plans");
     let batch = one(df.collect().await.expect("the filter runs"));
@@ -151,7 +164,7 @@ async fn a_projection_restricts_the_row_to_the_columns_it_names() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 1, &HashMap::new())
+    let df = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
         .await
         .expect("the projection plans");
     let batch = one(df.collect().await.expect("the projection runs"));
@@ -179,7 +192,7 @@ async fn an_inner_join_composes_the_rows_and_names_the_key_once() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 2, &HashMap::new())
+    let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect("the join plans")
         .sort_by(vec![datafusion::prelude::col("id")])
@@ -230,7 +243,7 @@ async fn the_three_operators_compose_in_one_chain() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 4, &HashMap::new())
+    let df = fossil_df::plan_relation(&ctx, &ops, 4, anchor())
         .await
         .expect("the chain plans");
     let batch = one(df.collect().await.expect("the chain runs"));
@@ -293,7 +306,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
     ];
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex_ops(&ctx, &db, &ops, &HashMap::new())
+    let (vertex, node) = fossil_df::execute_vertex_ops(&ctx, &db, &ops, anchor())
         .await
         .expect("the joined vertex materialises");
 
@@ -341,7 +354,7 @@ async fn an_outer_join_is_refused_by_name() {
             },
         ];
         let ctx = SessionContext::new();
-        let err = fossil_df::plan_relation(&ctx, &ops, 2, &HashMap::new())
+        let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
             .await
             .expect_err("only Inner is executable")
             .to_string();
@@ -385,7 +398,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
             },
             "integer literal",
         ),
-        // Two different names — the extension ADR-0054 declares and defers.
+        // Two different names — the extension that is declared and not built.
         (
             Expr::BinOp {
                 op: CmpOp::Eq,
@@ -410,7 +423,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
             right_name: SmolStr::new_static("teams"),
         });
         let ctx = SessionContext::new();
-        let err = fossil_df::plan_relation(&ctx, &ops, 2, &HashMap::new())
+        let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
             .await
             .expect_err("only `on = .k` is admitted")
             .to_string();
@@ -421,8 +434,10 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
     }
 }
 
-/// `a |> join(a, on = .k)` collides on every column but the key (ADR-0054 §4),
-/// so it never reaches a plan. The checker is meant to catch it; the backend
+/// `a.join(a, on = .k)` collides on every column but the key — a join
+/// identifies the key and nothing else, so any other shared name is an error
+/// rather than a shadowing — and it never reaches a plan. The checker is meant
+/// to catch it; the backend
 /// does not paper over it if it does not.
 #[tokio::test]
 async fn a_self_join_collides_and_says_which_column() {
@@ -440,7 +455,7 @@ async fn a_self_join_collides_and_says_which_column() {
         },
     ];
     let ctx = SessionContext::new();
-    let err = fossil_df::plan_relation(&ctx, &ops, 2, &HashMap::new())
+    let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect_err("a shared non-key column is not joinable")
         .to_string();
@@ -461,7 +476,7 @@ async fn an_unexecuted_operator_fails_as_itself() {
         Op::Union { left: 0, right: 1 },
     ];
     let ctx = SessionContext::new();
-    let err = fossil_df::plan_relation(&ctx, &ops, 2, &HashMap::new())
+    let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect_err("Union is defined and unreached")
         .to_string();

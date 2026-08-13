@@ -1,32 +1,40 @@
 # `fossil-syntax` parser corpus
 
-28-fixture parser corpus that drives `tests/parse_corpus.rs`. Layout follows
-RESEARCH.md §Q10 (5 buckets, plus a separate 10-mapping invalidation pair in
-`crates/fossil-hir/tests/fixtures/`). Two of the original 30 exercised forms
-the language no longer has — partial application (`map(_, f)`) and
-`@export` with a type annotation — and went with them.
+18-fixture parser corpus that drives `tests/parse_corpus.rs`. Layout follows
+RESEARCH.md §Q10, minus one bucket (plus a separate 10-mapping invalidation pair
+in `crates/fossil-hir/tests/fixtures/`).
+
+**Every fixture is written in the spelling `grammar.bnf` specifies.** That is a
+guard, not a claim: `no_fixture_spells_a_retired_form` parses all 18 and fails if
+any one of them produces a `RetiredSpelling` diagnostic. Regenerating a snapshot
+with `UPDATE_EXPECT=1` therefore cannot bake a dead form into the baseline.
 
 | Bucket | Path | Theme |
 |--------|------|-------|
-| 1 | `01_pipeline_postfix/`     | Pratt L1 (`\|>`) + L9 (postfix, calls, member access) |
-| 2 | `02_ternary_arithmetic/`   | Pratt L2 (ternary) through L7 (arithmetic) precedence walk |
-| 3 | `03_mappings_annotations/` | Mapping headers with `in`/shape intersection + annotation blocks |
-| 4 | `04_prefix_iri_triple/`    | Imports, IRI templates, RDF 1.2 triple terms |
-| 5 | `05_toplevel_indent/`      | Multiple top-level items, record literals, INDENT/DEDENT edge cases |
+| 1 | `01_pipeline_postfix/`     | Pratt `\|>` + postfix (calls, member access) |
+| 2 | `02_ternary_arithmetic/`   | Ternary through arithmetic, the precedence walk |
+| 3 | `03_mappings_annotations/` | Mapping headers, property keys, string interpolation |
+| 5 | `05_toplevel_indent/`      | Multiple top-level items, INDENT/DEDENT edge cases |
+
+## The counts, and what moved them
+
+30 → 28 → 20 → 18. Two went with partial application (`map(_, f)`) and `@export`;
+eight with the forms the HIR never read; three with the CURIE and the backtick.
+
+**Bucket 4 (`04_prefix_iri_triple/`) is gone entirely** — imports, IRI templates
+and RDF 1.2 triple terms, and every one of the three left the language. Its last
+two fixtures and the one deleted from bucket 1 are named in `parse_corpus.rs`'s
+module header, each with the form it proved and the `grammar.bnf` tombstone that
+retired it. A fixture whose subject the language no longer has is deleted rather
+than rewritten: converting it would give it a history it does not have.
+
+`|>` is the one retired spelling still WRITTEN here, and deliberately: ruling 7
+of 2026-08-11 kills it and step 6 of `SURFACE-PLAN.md` removes it, so bucket 1
+spells what this parser still accepts. It goes when the verbs become a catalogue.
 
 ## File pairs
 
-Every `NN_<name>.fossil` source has a paired `NN_<name>.cst.txt` snapshot:
-
-- **Wave 0** (plan 02-01) ships placeholder snapshots — every `.cst.txt`
-  contains the single line `PLACEHOLDER — Wave 1 wires fossil_syntax::parse`.
-  The 30 driver tests still PASS because placeholder equals placeholder; the
-  point of Wave 0 is to lock the corpus layout and the test wiring.
-- **Wave 1** (plans 02-02 + 02-03) implements the Pratt sub-parser and the
-  full item parser, then regenerates real CST snapshots via
-  `UPDATE_EXPECT=1 cargo test -p fossil-syntax --test parse_corpus`.
-- **Wave 4** (plan 02-07) audits that NO fixture still carries the
-  `PLACEHOLDER` text — every `.cst.txt` must reflect a real CST.
+Every `NN_<name>.fossil` source has a paired `NN_<name>.cst.txt` snapshot.
 
 ## Regenerating snapshots
 
@@ -40,7 +48,8 @@ sub-second iteration matters less than diff ergonomics.
 
 ## Convention for new fixtures
 
-If a sixth bucket is added, the rule is: 3 happy + 3 recovery per bucket.
-The driver `parse_corpus.rs` uses a `fixture_test!` macro with `(name, bucket,
-stem)` arguments, so adding a fixture is a one-line addition to the macro
-table.
+If a bucket is added, the rule is: 3 happy + 3 recovery per bucket. The driver
+uses a `fixture_test!` macro with `(name, bucket, stem)` arguments, so adding a
+fixture is a one-line addition to the macro table — plus the count in
+`no_fixture_spells_a_retired_form`, which is asserted so the table and the disk
+cannot drift apart.

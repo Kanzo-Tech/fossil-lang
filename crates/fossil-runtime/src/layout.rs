@@ -10,7 +10,7 @@
 //!
 //! - [`community_hierarchy`] — modularity communities, and the whole hierarchy
 //!   of them, which is what [`enrich_layout`] partitions by. This is the pyramid
-//!   the level-of-detail plan is built from (ADR-0041 §1).
+//!   the level-of-detail plan is built from.
 //! - [`weakly_connected_components`] — reachability (union-find). It is a real
 //!   graph property and stays, but it is **no longer what the layout uses**: on
 //!   a connected graph it answers "one component", and measured on the million
@@ -204,8 +204,8 @@ pub struct VertexLayoutTarget {
     /// enriched vertices are emitted as chunks under [`Self::chunk_prefix`].
     pub vertex_parquet: String,
     /// Where the tiles go — the manifest's `prefix`, e.g. `…/vertex/Person/`,
-    /// trailing separator included. Files are named `chunk{k}.parquet`
-    /// (ADR-0016).
+    /// trailing separator included. Files are named `chunk{k}.parquet`, which is
+    /// what the manifest declares.
     pub chunk_prefix: String,
     /// Rows per tile — the manifest's `chunk_size`. The manifest and the files
     /// have to agree, so this comes from whoever wrote the manifest rather than
@@ -214,7 +214,7 @@ pub struct VertexLayoutTarget {
     /// **A power of two, and refused otherwise.** Tile `k` is the `dense_id`
     /// range `[k·chunk_size, (k+1)·chunk_size)`, and the point of the range being
     /// fixed is that a reader finds it with `dense_id >> shift` instead of a
-    /// division and a table (ADR-0042 §3.3). A size that is not a power of two
+    /// division and a table. A size that is not a power of two
     /// still *emits* correctly and quietly costs every reader that arithmetic,
     /// which is why it is an error here rather than a rounding.
     pub chunk_size: u64,
@@ -320,9 +320,10 @@ pub enum LayoutError {
 /// reorder the *rows* by Morton code while leaving the *values* alone — which
 /// made the file's physical order spatial and its chunk definition not. Measured
 /// on the five-million corpus in 41 chunks, a window touched 41 of 41 chunks by
-/// `dense_id` and 6 of 41 by physical row order (ADR-0041 §2).
+/// `dense_id` and 6 of 41 by physical row order.
 ///
-/// ADR-0041 assumed this meant moving the layout ahead of the edge phase. It
+/// The obvious reading is that this means moving the layout ahead of the edge
+/// phase. It
 /// does not: this pass already runs last, holding the `DuckDB` connection, with
 /// every adjacency already written as Parquet. Renumbering after the fact is a
 /// join against a mapping table, which is strictly less invasive than reordering
@@ -346,7 +347,7 @@ pub enum LayoutError {
 /// And finally the source-ordered adjacencies are emitted as tiles too, under
 /// `by_source/tile{k}.parquet`, **keyed by the same range as the vertices**: tile
 /// `k` holds every edge whose `src_dense` is in vertex tile `k`. That is CSR, and
-/// it is the placement ADR-0042 §3.2 measured against the alternative of hoisting
+/// it is the placement measured against the alternative of hoisting
 /// an edge to the deepest tile holding both its endpoints — which reads 2.29× to
 /// 15.86× more edges across 200k/1M/5M/10M against CSR's flat 1.95× to 2.89×,
 /// and touches 2.5–3.5× the tiles. The mechanism is that near the root of such a
@@ -356,7 +357,7 @@ pub enum LayoutError {
 ///
 /// The target-ordered adjacency is **not** tiled. It is the half that would
 /// answer "an edge with one endpoint off screen", which is a different question
-/// and doubles the addressing to ask it (ADR-0042 §3.6).
+/// and doubles the addressing to ask it.
 ///
 /// # Errors
 ///
@@ -425,7 +426,7 @@ pub fn enrich_layout(
         // ten million), counted degrees in a second pass and scattered through a
         // cloned cursor (80 MB) doing random writes over the 568. None of the
         // three is asked for by the algorithm; all three exist because the
-        // parameter was an unordered bag (ADR-0043 §1).
+        // parameter was an unordered bag.
         //
         // Both orientations, because the layout is undirected: the file grouped
         // by source holds each vertex's out-neighbours and the one grouped by
@@ -562,7 +563,7 @@ pub fn enrich_layout(
         // naming convention forces is not the cost it looks like: at five million
         // 200 files took 0.18 s to write. `PARTITION_BY` would be one statement
         // but emits `chunk=0/data_0.parquet` rather than the `chunk{k}.parquet`
-        // ADR-0016 specifies, which is a directory listing wearing a filename.
+        // that address needs, which is a directory listing wearing a filename.
         let tiles = u64::from(vertex_count).div_ceil(target.chunk_size);
         let mut emission = String::new();
         for k in 0..tiles {
@@ -666,8 +667,8 @@ pub fn enrich_layout(
     // past. The file is sorted on the very column each tile filters, so Parquet's
     // own row-group statistics prune the scan, and a staging table would hold a
     // second copy of the adjacency beside the one the remap already materialises
-    // — 568 MB at ten million, which is the allocation ADR-0043 stage 1 spent
-    // itself removing.
+    // — 568 MB at ten million, the very allocation this path was rewritten to
+    // remove.
     for adjacency in adjacencies {
         if adjacency.ordered_by != Endpoint::Src {
             continue;
@@ -794,7 +795,7 @@ fn csc_beside<'a>(adjacencies: &'a [AdjacencyTarget], csr: &str) -> Option<&'a s
 ///
 /// `stream_arrow` and not `query_map`: the latter materialises the whole result
 /// set, which is what the first attempt at this measured — the process peak went
-/// 17.0 → 24.4 GiB while the three parity tests stayed green (ADR-0043 §1). The
+/// 17.0 → 24.4 GiB while the three parity tests stayed green. The
 /// item of a stream is a `RecordBatch`, so the two columns arrive as the `u32`
 /// slices the builder wants and no row is ever a Rust tuple.
 fn read_orientation(
@@ -1087,7 +1088,7 @@ mod tests {
 
     #[test]
     fn shift_for_accepts_only_powers_of_two() {
-        // The default tile, and the shift ADR-0045 §8 publishes for it.
+        // The default tile, and the shift a reader addresses it with.
         assert_eq!(shift_for(4_096), Some(12));
         assert_eq!(shift_for(2), Some(1));
         assert_eq!(shift_for(1), Some(0));
@@ -1322,7 +1323,7 @@ const fn morton_decode(code: u32) -> (u32, u32) {
 /// Level 0 is the graph the artefact stores and every edge there weighs one, so
 /// the array is not stored at all; only [`Weighted::contract`] sums weights and
 /// therefore has to keep them. Measured at ten million, the `f64` per half-edge
-/// was 1,136 MB — 16 of the 53 B/edge the core costs (ADR-0043 §1).
+/// was 1,136 MB — 16 of the 53 B/edge the core costs.
 enum Weights {
     Unit,
     Stored(Vec<f64>),
@@ -1369,7 +1370,7 @@ impl Csr {
 ///
 /// A run of equal keys **is** a vertex's neighbour list, so the offsets are
 /// written as the runs close and nothing is counted twice or written out of
-/// place. That is the whole of ADR-0043 stage 1: the degree pre-pass and the
+/// place. That is the whole of it: the degree pre-pass and the
 /// cursor scatter [`Weighted::from_edges`] needs exist only because its
 /// parameter is an unordered bag, and the file on disk has never been one.
 struct CsrBuilder {
@@ -1469,7 +1470,7 @@ impl Weighted {
     ///
     /// This is what an unordered bag costs — a degree pass, a prefix sum and a
     /// scatter through a cloned cursor — and it is kept for callers that have
-    /// one, which since ADR-0043 stage 1 means the tests and
+    /// one, which now means the tests and
     /// `examples/layout_memory.rs`. The write path reads [`Csr`]s instead.
     fn from_edges(vertex_count: u32, edges: &[(u32, u32)]) -> Self {
         let n = vertex_count as usize;
@@ -1831,7 +1832,7 @@ mod hierarchy_tests {
         builder.finish()
     }
 
-    /// The claim the whole of ADR-0043 stage 1 rests on: reading the two
+    /// The claim the CSR read path rests on: reading the two
     /// orientations the artefact already stores builds the **same graph** as
     /// handing the same edges over as an unordered bag. Exactly the same, not
     /// nearly — modularity is defined over sums, every weight at level 0 is one,

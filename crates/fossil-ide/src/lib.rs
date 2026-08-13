@@ -11,7 +11,7 @@
 //!   `SyntaxNode`. Memoised line-offset table via Salsa-tracked
 //!   [`position::line_offsets`].
 //! - [`hover`]: walks position → enclosing PROPERTY → enclosing MAPPING →
-//!   `MappingLoc` (per ADR-0005 filter-then-nth) → `ExprId` →
+//!   `MappingLoc` (filter-then-nth) → `ExprId` →
 //!   [`fossil_hir::provenance::ty_origin`] → Markdown. Destructures
 //!   `ExprTypeEntry` (not a tuple) per planner checker Blocker 5.
 //!
@@ -32,13 +32,20 @@
 //! Pitfall #3):
 //!   - [`SymbolIndex`] — per-file table of `{prefix, mapping, function, shape}`
 //!     definitions with byte ranges (outline + goto-def hit resolution).
-//!   - [`PrefixIndex`] — prefix → IRI resolution with a well-known fallback
 //!     (the gleam-lsp auto-import completion pattern).
 //!   - [`WorkspaceIndex`] — cross-file aggregation under the
-//!     open-files-as-workspace model (ADR-0023), so a prefix/mapping/function/
+//!     open-files-as-workspace model, so a prefix/mapping/function/
 //!     shape declared in file A resolves from file B.
 //!
-//! They were `fossil-ide-db` until ADR-0045 §6, on the strength of
+//! ## The host's half ([`shape_documents`])
+//!
+//! Not a feature — the wiring both editor hosts need before any feature is
+//! correct. The shape document a program names is a Salsa **input**, so
+//! `fossil-lsp` and `fossil-wasm` have to register it before the checker asks
+//! for it, and both do it from the same three functions there. See that
+//! module's docs for why an editor needs this more than a batch compile does.
+//!
+//! They were `fossil-ide-db` until this crate absorbed them, on the strength of
 //! rust-analyzer's `ide-db`/`ide` split. That split carries ~20k lines shared
 //! by five crates; this one carried 592 lines with one consumer, no Salsa, no
 //! macro, no `tests/`, and a dependency set that was a strict subset of this
@@ -51,8 +58,8 @@ pub mod hover;
 pub mod line_index;
 pub mod outline;
 pub mod position;
-pub mod prefix_index;
 pub mod semantic;
+pub mod shape_documents;
 pub mod symbol_index;
 pub mod workspace;
 
@@ -66,8 +73,8 @@ pub use position::{
     LineOffsets, line_index, line_offsets, node_at_position, offset_to_lsp_position,
     position_to_offset, token_at_position,
 };
-pub use prefix_index::{PrefixBinding, PrefixIndex, WELL_KNOWN_PREFIXES};
 pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_tokens};
+pub use shape_documents::{documents_named, register_missing_documents, registry_key};
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;
 

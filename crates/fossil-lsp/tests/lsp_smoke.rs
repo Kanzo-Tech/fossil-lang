@@ -24,42 +24,18 @@ use std::sync::OnceLock;
 
 /// Walk up two levels from `CARGO_MANIFEST_DIR` (= `…/crates/fossil-lsp`) to
 /// find the workspace root. Mirrors `crates/fossil-cli/tests/cli_integration.rs`.
-fn repo_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("CARGO_MANIFEST_DIR has at least two parents")
-        .to_path_buf()
-}
-
-/// Build `target/debug/fossil-lsp` once per test process via `cargo build`,
-/// memoised through `OnceLock` so the second test (if any are added) does not
-/// pay the build cost or race against the first on the binary path.
+/// The `fossil-lsp` binary this test drives — cargo's own path for it.
+///
+/// This shelled out to `cargo build` and then hard-coded
+/// `<repo>/target/debug/fossil-lsp`, which is a test that can pass against a
+/// binary it did not build: with `CARGO_TARGET_DIR` set the build lands
+/// elsewhere and that path holds whatever was left there last. Measured on
+/// 2026-08-13 — the file there was two days old. `CARGO_BIN_EXE_<name>` is set
+/// by cargo for an integration test, and cargo has already built the binary
+/// before the test runs.
 fn fossil_lsp_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| {
-        let status = Command::new(env!("CARGO"))
-            .args([
-                "build",
-                "--quiet",
-                "-p",
-                "fossil-lsp",
-                "--bin",
-                "fossil-lsp",
-            ])
-            .status()
-            .expect("spawn cargo build for fossil-lsp");
-        assert!(status.success(), "cargo build -p fossil-lsp failed");
-
-        let bin = repo_root().join("target").join("debug").join("fossil-lsp");
-        assert!(
-            bin.exists(),
-            "fossil-lsp binary not found at {} after cargo build",
-            bin.display(),
-        );
-        bin
-    })
+    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil-lsp")))
 }
 
 /// Encode a JSON-RPC body as an LSP frame: `Content-Length: N\r\n\r\n<body>`.

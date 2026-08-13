@@ -1,0 +1,13 @@
+× `total` expects Float, and this is String
+   ╭─[program.fossil:7:16]
+ 7 │     total    = Purchase.reference
+   ·                ─────────┬────────
+   ·                         ╰── `Purchase.reference` is String
+   ╰────
+   ╭─[shape.shex:5:3]
+ 5 │   shop:total xsd:float
+   ·   ──────────┬─────────
+   ·             ╰── shop:Order declares shop:total as xsd:float
+   ╰────
+  help: `Purchase.amount` is Float. If `reference` really holds the number,
+        parse.float(Purchase.reference) converts it.

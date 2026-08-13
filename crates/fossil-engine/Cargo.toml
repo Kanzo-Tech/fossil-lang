@@ -7,6 +7,8 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 description = "Native orchestration surface — compile + run + catalog + check + refs + providers. The fossil binaries are thin shells over this."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
 
 [lints]
 workspace = true
@@ -15,11 +17,21 @@ workspace = true
 # Compiler core + IR.
 fossil-base     = { path = "../fossil-base" }
 fossil-hir      = { path = "../fossil-hir" }
+# The CST, for `census`: the properties an author WROTE are `PROPERTY` nodes,
+# and the count that matters is theirs against the `HirBody`'s. Reading the
+# survivors alone cannot see a property lowering dropped.
+fossil-syntax   = { path = "../fossil-syntax" }
 fossil-mir      = { path = "../fossil-mir" }
 fossil-lineage = { path = "../fossil-lineage" }
-# Descriptors (input forward-propagation + output shape).
+# Descriptors: the input forward-propagation table, and the output side — the
+# `SHEX` decoder row this host installs plus the `OutputDescriptorKind` the
+# executor is handed.
 fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# `fossil-shex` was here for one consumer: `read_output_shape`, which named
+# `ShExDescriptor::from_reader` directly and could therefore read only ShExJ
+# while the checker read both syntaxes through the `shex` ROW. The run goes
+# through the same row now, so the engine names no schema language at all.
 # Pre-introspection types a column: the DuckDB type string lands on the lattice.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The DataFusion executor — the SINGLE `run` path (lower_to_mir_pg → execute_graph
@@ -47,6 +59,17 @@ tracing  = { workspace = true }
 
 [dev-dependencies]
 secrecy = { workspace = true }
+# The conformance-set harness (tests/programs.rs) keeps each program's rendered
+# diagnostic as a committed artefact, and it has to be the text `fossil check`
+# prints — so it renders through miette's `GraphicalReportHandler`, which needs
+# `fancy-base`. The LIBRARY still takes miette bare: rustc-style rendering is the
+# binary's job, and a test that renders is not the engine rendering.
+miette = { workspace = true, features = ["fancy-no-syscall"] }
+# The shape-document invalidation test edits a registered document through its
+# Salsa input (`Setter::set_text`) and counts `WillExecute` events — the only
+# way to assert that editing the document re-runs the checker and that editing
+# the program does not re-run the decode.
+salsa = { workspace = true }
 # The artefact validator (tests/conformance.rs) writes a corpus and reads it
 # back with plain SQL — never through our own reader. tempfile gives it a
 # destination; duckdb is already a regular dep for the layout pass.
