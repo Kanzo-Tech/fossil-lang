@@ -1,8 +1,7 @@
 //! Bidirectional type checker — Phase 3 (CORE-04/05/06) graduates Phase 2's
 //! stub into the real `synth`/`check`/`compatible` algorithm.
 //!
-//! RESEARCH.md §"Bidirectional Checker Shape" carries the design. The
-//! architectural keystone: [`typecheck_mapping`] is the ONLY new Salsa-tracked
+//! The architectural keystone: [`typecheck_mapping`] is the ONLY new Salsa-tracked
 //! entry per mapping. `synth` / `check` / `check_property` / `lookup_field` /
 //! `compatible` are plain-Rust helpers called from inside it — this preserves
 //! Phase 2's `MAX_PER_MAPPING_FAN_OUT = 1` invariant (LOAD-BEARING).
@@ -29,7 +28,7 @@
 //! read. The shape is a decoded document, not a schema language: nothing here
 //! names one.
 //!
-//! # No silent coercion (P-CRIT-4)
+//! # No silent coercion
 //!
 //! Every type mismatch emits a [`Diagnostic`] via [`delay_span_bug`] AND
 //! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
@@ -89,7 +88,7 @@ pub struct TypeckOutput<'db> {
 /// Reads `body` + `spans` + the source row (CSVW) + the target shape,
 /// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`].
 /// Returns `Err(ErrorGuaranteed)` if the body has any type error (every error
-/// also pushes ≥1 [`Diagnostic`] to the accumulator — P-CRIT-4).
+/// also pushes ≥1 [`Diagnostic`] to the accumulator).
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn typecheck_mapping<'db>(

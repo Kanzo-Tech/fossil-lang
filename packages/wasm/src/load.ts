@@ -26,7 +26,7 @@ let _initPromise: Promise<unknown> | null = null;
  * {@link tokenize}, {@link semanticLegend}, or instantiating
  * {@link FossilPlayground}. Memoised — subsequent calls return the same promise.
  *
- * Per 08-RESEARCH.md Pattern 3 (wasm-bindgen --target web), consumers control
+ * With `wasm-bindgen --target web`, consumers control
  * the `.wasm` URL — this avoids tying library users to a specific bundler's
  * `.wasm` import magic. See `packages/wasm/README.md` for consumer patterns.
  */

@@ -1,8 +1,7 @@
 //! `fossil-lsp` — the native LSP transport (Phase 6 LSP-01).
 //!
-//! Wires the LSP server from day 1 (per ROADMAP.md Phase 1 success
-//! criterion #4 + RESEARCH.md commit #9 of 10) so Fossil avoids the fase-4
-//! trap that killed the predecessor project. Phase 6 LSP-01 grows the stub
+//! Wires the LSP server from day 1, so Fossil avoids the parser-and-typecheck
+//! first, integration-last trap that killed the predecessor project. Phase 6 LSP-01 grows the stub
 //! into the full transport: it advertises and serves the complete capability
 //! set, each handler being a thin adapter over a `fossil-ide` free function:
 //!
@@ -29,8 +28,7 @@
 //!
 //! The transport is `lsp-server`, NOT `tower-lsp`, and CLAUDE.md "Hard Rules"
 //! (`fossil-lsp` is native-only). The dispatch loop pattern is derived from
-//! `rust-analyzer/lsp-server/examples/goto_def.rs` (verified via `WebFetch`
-//! per `01-RESEARCH.md` Example 16).
+//! `rust-analyzer/lsp-server/examples/goto_def.rs`.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(

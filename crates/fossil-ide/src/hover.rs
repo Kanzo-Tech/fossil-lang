@@ -1,7 +1,6 @@
 //! `textDocument/hover` query — position → enclosing `PROPERTY` → `ty_origin`.
 //!
-//! Phase 2 plan 02-06 (per RESEARCH.md §Q9): the minimum delta to wire the
-//! LSP hover end-to-end. The handler:
+//! The minimum delta that wires LSP hover end-to-end. The handler:
 //!
 //! 1. Resolves the LSP position to a [`fossil_syntax::SyntaxNode`] via
 //!    [`crate::position::node_at_position`].
@@ -289,7 +288,9 @@ fn resolve_hover_target<'db>(
 ///    synthesised closure. Render the closure binding as a fenced `fossil`
 ///    code block ABOVE the field type, then a `*synthesised closure parameter
 ///    binding*` tagline. Both the closure binding AND the field type appear —
-///    the synthesis is NEVER hidden from the user (RESEARCH.md §Pitfall 6).
+///    the synthesis is NEVER hidden from the user. Hover sits downstream of
+///    the checker, so a binding only `check.rs` knows about is invisible
+///    unless this layer reads the provenance and says so.
 ///
 /// 2. Every other provenance kind (the Phase 2 literal subset + Phase 3's
 ///    CSVW-`FieldRef` widening): a fenced `fossil` type block + an italic

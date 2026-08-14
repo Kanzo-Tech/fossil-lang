@@ -11,7 +11,8 @@
     clippy::similar_names
 )]
 
-//! CORE-02 SC#2 mechanical gate. Per RESEARCH.md Q8.
+//! CORE-02 SC#2 mechanical gate: editing one mapping's body must not
+//! re-execute any sibling's.
 //!
 //! The test installs an event callback on FossilDb that counts every
 //! `EventKind::WillExecute` event. After warming the cache, we reset the
@@ -70,8 +71,8 @@
 //! WHY THE THRESHOLD IS 16, NOT 4
 //! ─────────────────────────────────────────────────────────────────────────
 //!
-//! The original RESEARCH.md §Q8 threshold of "≤ 4 (parse + body_3 +
-//! typecheck_3 + expr_types_3)" conflated two distinct Salsa events:
+//! The threshold this replaced — "≤ 4 (parse + body_3 + typecheck_3 +
+//! expr_types_3)" — conflated two distinct Salsa events:
 //!
 //!   * WillExecute: query body ran (cache miss OR upstream changed).
 //!   * DidValidateMemoizedValue: query output validated unchanged (cache hit
@@ -116,8 +117,9 @@
 //! PHASE 6 AUDIT (LSP-02 / SC#3) — fan-out unchanged
 //! ─────────────────────────────────────────────────────────────────────────
 //!
-//! Phase 6 was audited against P-CRIT-3 (the load-bearing fan-out invariant)
-//! when the SC#3 regression was grown (plan 06-04). Findings:
+//! Phase 6 was audited against the fan-out invariant — the load-bearing one,
+//! because a Salsa graph that re-executes every sibling is what makes an LSP
+//! stop answering inside 100 ms. Findings:
 //!
 //!   * `resolve_target_shape` returns `Some` in production because it READS the
 //!     shape document the program names. It used to read it through
@@ -212,8 +214,8 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
         "fixture pair must differ in body content only, not signatures"
     );
 
-    // Install a counter callback on a fresh FossilDb. Per RESEARCH.md Q8 + plan
-    // 02-01's `FossilDb::with_event_callback` constructor.
+    // Install a counter callback on a fresh FossilDb, via
+    // `FossilDb::with_event_callback`.
     let counter: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
     let counter_clone = counter.clone();
     let callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static> = Box::new(move |event| {

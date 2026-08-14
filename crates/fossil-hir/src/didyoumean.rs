@@ -1,7 +1,8 @@
 //! Did-you-mean suggestions via Damerau-Levenshtein.
 //!
 //! Threshold: `max(2, name_len / 3)`. Inspired by the rustc + clap heuristics
-//! (see RESEARCH.md §Pitfall 4). The threshold scales with the length of the
+//! A single fixed threshold does not scale: 2 catches `naem ↔ name` and
+//! misses a transposition inside a longer name. So it scales with the length of the
 //! typo so a short field name (e.g. `id`) does not match an unrelated short
 //! name, while a longer name (`username`) tolerates more edits.
 //!

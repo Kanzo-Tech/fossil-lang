@@ -10,7 +10,7 @@
 //!
 //! Like [`SymbolIndex`] this is a plain struct (no Salsa query of its own), so
 //! it adds zero tracked queries and keeps the per-mapping `body()` fan-out at 1
-//! (Research Pitfall #3). It is rebuilt from the open-file set on demand; the
+//! It is rebuilt from the open-file set on demand; the
 //! per-file `SymbolIndex::build` underneath is itself cheap (one CST walk).
 
 use fossil_base::SourceFile;

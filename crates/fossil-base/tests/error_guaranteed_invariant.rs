@@ -1,6 +1,6 @@
 //! Contract test: [`fossil_base::ErrorGuaranteed`] invariants.
 //!
-//! Per RESEARCH.md §Q6 + plan 02-05 Task 2:
+//! Two invariants:
 //!
 //! 1. Every construction path ([`delay_span_bug`] / [`bug`]) returns an
 //!    `ErrorGuaranteed` AND accumulates at least one [`Diagnostic`].
@@ -117,7 +117,7 @@ fn error_guaranteed_cannot_be_default_constructed() {
 
 #[test]
 fn error_guaranteed_is_send_and_sync() {
-    // PhantomData<()> preserves Send + Sync per RESEARCH.md §Q6. Verify at
+    // PhantomData<()> preserves Send + Sync. Verify at
     // the type level so a future change to PhantomData<*const ()> (which
     // would break the Salsa accumulator cross-thread flow) trips compilation
     // here.

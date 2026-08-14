@@ -15,7 +15,7 @@
 //! Phase 5 STDL-05 will register Rust UDFs on the connection before
 //! `execute_batch` is called. Phase 6 CLI-01..03 wraps `duckdb::Error` in
 //! `miette::Diagnostic` for CLI display. Phase 1 deliberately keeps the API
-//! to a single function returning the raw `duckdb::Error` — see RESEARCH.md
+//! to a single function returning the raw `duckdb::Error` —
 //! §"Phase 1 Recommended Commit Strategy" commit #7.
 
 #[cfg(target_arch = "wasm32")]
@@ -174,7 +174,7 @@ mod tests {
         assert!(metadata.len() > 0, "output.parquet should be non-empty");
 
         // Read back through DuckDB to confirm the Parquet file is valid and
-        // matches the 5-row hello.fossil expectation (RESEARCH.md Example 3).
+        // matches the 5-row hello.fossil expectation.
         let conn = Connection::open_in_memory().expect("open in-memory db");
         let mut stmt = conn
             .prepare(&format!(

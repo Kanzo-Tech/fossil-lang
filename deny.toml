@@ -68,7 +68,7 @@ multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
 deny = [
-    # Strike-from-stack list per .planning/research/STACK.md
+    # Strike-from-stack list. Each entry carries the reason it is banned.
     { name = "serde_yml", reason = "RUSTSEC-2025-0068; use serde_yaml_ng" },
     { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server (per ADR-0001)" },
     { name = "wasm-pack", reason = "Archived July 2025; use wasm-bindgen-cli + Vite" },

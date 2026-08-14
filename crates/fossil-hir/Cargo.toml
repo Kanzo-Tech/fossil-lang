@@ -18,10 +18,7 @@ workspace = true
 # fossil-typeck) into one: they shared every type and could not be built apart.
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
-# Phase 3: the checker (plan 03-05) consumes CsvwDescriptor via this path dep.
-# NOTE: the pre-existing cargo-deny wildcard warnings on path deps are
-# PRE-EXISTING from plans 02-01..02-07 (deferred chore — see
-# .planning/phases/02-full-grammar-hir-foundation/deferred-items.md).
+# The checker consumes the input descriptor via this path dep.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # The primitive lattice `TyKind::Primitive` carries, AND the format-neutral
 # shape vocabulary (`OutputShapes` / `Shape` / `PropertyConstraint` / `Occurs` /

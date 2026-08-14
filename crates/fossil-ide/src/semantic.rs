@@ -17,10 +17,10 @@
 //! `tokenType` is an *index* into the legend's `token_types`; `length` and
 //! `deltaStartChar` are **UTF-16 code units** (Monaco counts UTF-16), so we route
 //! every column / length through the 06-05 [`crate::line_index::LineIndex`]
-//! (Research Pitfall #4) — without it any source with a multi-byte character
+//! — without it any source with a multi-byte character
 //! (non-ASCII IRIs, emoji in comments) colors the wrong span.
 //!
-//! # FILE-keyed, WASM-clean (Research Pitfall #3)
+//! # FILE-keyed, WASM-clean
 //!
 //! [`semantic_tokens`] is a whole-file CST walk — it re-runs **once** per edit
 //! (no per-mapping Salsa key, so `MAX_PER_MAPPING_FAN_OUT` is untouched). It is a

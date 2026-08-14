@@ -19,8 +19,7 @@
 //! a leading `.`, and the backtick. See [`parser::diag::retired`] — the wording
 //! is written down once because the corpus test of step 8 will read it.
 //!
-//! Public API contract for Phase 2-9 (see `01-02-PLAN.md` and RESEARCH.md
-//! §"Architecture Patterns" Pattern 3):
+//! Public API contract for Phase 2-9:
 //!
 //! ```ignore
 //! #[salsa::tracked]

@@ -4,7 +4,7 @@
 //! The output of [`raw_lex`] is fed to the post-lexer INDENT/DEDENT pass
 //! in [`crate::indent`] before the parser consumes it.
 //!
-//! Per RESEARCH.md §"INDENT/DEDENT lexing eats a week" we keep `Whitespace`
+//! We keep `Whitespace`
 //! and `Newline` as real tokens (NOT `#[logos(skip)]`) because the indent
 //! pass needs them to measure leading columns.
 //!

@@ -18,7 +18,7 @@ workspace = true
 # src/lib.rs enforces the workspace contract that this crate is never built
 # for wasm32. The `bundled` feature is inherited from the workspace pin
 # `duckdb = { version = "1.10502", features = ["bundled"] }` (~80MB C++,
-# 3-5 min cold-cache compile per RESEARCH.md Risk 6).
+# 3-5 min cold-cache compile).
 duckdb = { workspace = true }
 
 # The six `native_udf_only` UDF impl crates (unicode-normalization, slug,
@@ -62,7 +62,7 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 # SC#1 native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
 # per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
-# builtin fails CI on native DuckDB (Pitfall 4). fossil-hir is WASM-clean; it
+# builtin fails CI on native DuckDB. fossil-hir is WASM-clean; it
 # is a dev-dep only here so the native-only runtime's wasm32 tripwire is unaffected.
 fossil-hir = { path = "../fossil-hir" }
 # `salsa` was here too, and no test in this crate has ever named it: the module

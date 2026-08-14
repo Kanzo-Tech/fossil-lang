@@ -4,7 +4,7 @@
 //! The full node-driven end-to-end exercise lives in `test-wasm-workspace.js`
 //! (loaded by `wasm-bindgen --target nodejs` + node ≥18); that script is
 //! manual + CI-job-driven, not per-PR `cargo test` (matches the Phase-1
-//! `test-wasm.js` pattern from `01-RESEARCH.md` Example 18).
+//! `test-wasm.js` pattern).
 //!
 //! This file is the cargo-test mirror that catches API regressions on every
 //! PR without needing the wasm-bindgen + node toolchain installed. Each test

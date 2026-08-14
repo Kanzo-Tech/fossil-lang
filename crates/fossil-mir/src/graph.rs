@@ -23,7 +23,7 @@ pub struct MirGraph<'db> {
     /// `examples/users.csv`. It also must not panic: `lower_to_mir_pg` runs on
     /// every keystroke from the LSP, over half-written programs. So it taints
     /// instead, following rustc's `ErrorGuaranteed` discipline — the marker's
-    /// presence implies ≥1 accumulated `Diagnostic` (`fossil_base` P-CRIT-4), so
+    /// presence implies ≥1 accumulated `Diagnostic`, so
     /// the editor shows the error while consumers refuse the graph.
     ///
     /// Consumers MUST check this before executing; `fossil_df::execute_graph` is

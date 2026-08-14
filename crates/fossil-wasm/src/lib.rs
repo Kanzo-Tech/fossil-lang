@@ -37,7 +37,7 @@
 //! `fossil-hir::tests::invalidation_regression`, 3/3).
 //!
 //! See `decisions/rudof-wasm.md` for the Phase 0 spike that validated the
-//! WASM-first architecture, and RESEARCH.md §"WASM API scope" / Example 17
+//! WASM-first architecture, and the WASM API scope
 //! for the verbatim API contract this file implements.
 
 pub(crate) mod lsp_worker;
@@ -141,7 +141,7 @@ impl std::fmt::Debug for FossilPlayground {
 impl FossilPlayground {
     /// Construct a new playground.
     ///
-    /// Installs `console_error_panic_hook` (idempotent — RESEARCH.md
+    /// Installs `console_error_panic_hook` (idempotent —
     /// Don't-Hand-Roll #8) so any panic inside compiler-core surfaces as a
     /// `console.error` stack trace in the host (browser `DevTools` or Node).
     #[wasm_bindgen(constructor)]

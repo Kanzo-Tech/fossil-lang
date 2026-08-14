@@ -8,7 +8,7 @@
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
  * - {@link FossilPlayground} — Workspace API class for the LSP.
  *
- * Consumer pattern (wasm-bindgen --target web — RESEARCH.md Pattern 3):
+ * Consumer pattern (wasm-bindgen --target web):
  *
  *   import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
  *   import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';  // Vite

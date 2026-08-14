@@ -11,8 +11,8 @@
 //!   two more and neither was ever constructed outside a test.
 //! - [`DefMap`] = prefix table + source bindings + mapping list, populated by
 //!   the [`def_map`] Salsa query.
-//! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (rust-analyzer pattern,
-//!   per RESEARCH.md §"Architecture Patterns" Pattern 2 + 3).
+//! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (the rust-analyzer
+//!   pattern).
 //! - [`item_tree`] signature-only query + [`body`] per-mapping body query
 //!   (rust-analyzer invalidation-barrier pattern, plan 02-04): the signature
 //!   query is what everything else depends on, so editing one mapping's body
@@ -24,7 +24,7 @@
 //!   pattern (plan 02-06) — pointer-equality only for Phase 2; Phase 3
 //!   wires real subtyping + facets.
 //! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`
-//!   per RESEARCH.md §Q5; [`provenance::expr_types`] populates the Phase 2
+//!   [`provenance::expr_types`] populates the Phase 2
 //!   literal subset (`StringLit` / `Template`); [`provenance::ty_origin`]
 //!   is the user-facing lookup returning `Option<ExprTypeEntry>` (per
 //!   planner checker Blocker 5 — tuples don't auto-impl `salsa::Update`).
@@ -37,7 +37,7 @@
 //!   `MAX_PER_MAPPING_FAN_OUT = 1` invariant. The spans live in a side table
 //!   rather than in a `span` field on every `HirExpr` so that lowering stays
 //!   span-free and only the layers that emit diagnostics pay for them (same
-//!   rationale as Phase 2 RESEARCH §Q5 for provenance).
+//!   rationale as the provenance side table).
 //!
 //! # Phase 2-9 contract (locked)
 //!

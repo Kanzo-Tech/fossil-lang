@@ -56,7 +56,7 @@ roxmltree = "0.20"
 
 # === Output descriptor (Phase 3+; rudof spike resolved 2026-05-15 — see decisions/rudof-wasm.md) ===
 # Major-pinned; allow patch drift. shex_validation intentionally NOT included — Phase 3 is AST-only
-# (no runtime ShEx validation), per 03-RESEARCH.md §"Standard Stack".
+# (no runtime ShEx validation).
 shex_ast = "0.3"
 rudof_iri = "0.3"
 prefixmap = "0.3"
@@ -110,7 +110,7 @@ duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
 
 # === Native Rust UDF impl crates (Phase 5 STDL-03/05 — NATIVE ONLY) ===
 # Implement the native_udf_only stdlib functions registered on the DuckDB
-# connection in fossil-runtime. NEVER referenced by a WASM-gated crate (Pitfall 3).
+# connection in fossil-runtime. NEVER referenced by a WASM-gated crate.
 unicode-normalization = "0.1"           # clean.normalize_unicode (NFC/NFD/NFKC/NFKD)
 slug = "0.1"                            # clean.slug (URL slugification)
 voca_rs = "1"                           # clean.strip_html (strip tags → text)
@@ -136,7 +136,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
 # === Logging (CLI + LSP — NATIVE ONLY in Phase 1) ===
-# default-features=false to avoid pulling mio (which breaks the WASM gate per RESEARCH.md Pitfall 3).
+# default-features=false to avoid pulling mio, which breaks the WASM gate.
 # Only the env-filter and fmt features are needed for Phase 1.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }

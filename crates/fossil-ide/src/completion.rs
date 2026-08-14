@@ -32,7 +32,7 @@
 //! [`crate::shape_documents`]). Both dependencies are file-keyed, not
 //! per-mapping: ten mappings checked against one document share one decode, so
 //! no new per-mapping key appears and the `body()` fan-out is unchanged
-//! (Research Pitfall #3). All type rendering routes through
+//! All type rendering routes through
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
 //! `detail` string (Risk Register).
 

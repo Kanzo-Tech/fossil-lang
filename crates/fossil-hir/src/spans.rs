@@ -11,8 +11,7 @@
 //! change its `PartialEq`/`Hash`, which Salsa uses for `salsa::Update`. Two
 //! source-identical expressions at different source positions would no
 //! longer dedupe in interning, defeating the "structural equality at the
-//! HIR layer → pointer equality after Salsa interning" contract per
-//! Phase 3 RESEARCH.md §Pattern 2.
+//! HIR layer → pointer equality after Salsa interning" contract.
 //!
 //! Three options were considered:
 //! 1. Add `span: Span` field to every `HirExpr` variant. REJECTED — breaks

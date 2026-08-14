@@ -8,7 +8,7 @@ import init from '../pkg/fossil_graph_wasm.js';
 export interface InitFossilGraphWasmOpts {
   /**
    * URL or path to `fossil_graph_wasm_bg.wasm`. Consumers control resolution
-   * (mirrors @fossil-lang/wasm — see RESEARCH.md Pattern 3):
+   * (mirrors @fossil-lang/wasm):
    *  - Vite: `import wasmUrl from '@fossil-lang/graph/pkg/fossil_graph_wasm_bg.wasm?url'`
    *  - Next.js: serve from `public/` and pass the static URL
    *  - Web Worker: `new URL('@fossil-lang/graph/pkg/fossil_graph_wasm_bg.wasm', import.meta.url)`

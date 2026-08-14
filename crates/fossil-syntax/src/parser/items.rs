@@ -6,7 +6,7 @@
 //! Item-level recursive-descent parser.
 //!
 //! Items are LL(1) on the leading token, so no backtracking is needed.
-//! Per RESEARCH.md §Q1 we keep RD here and delegate every expression slot
+//! We keep recursive descent here and delegate every expression slot
 //! to the Pratt sub-parser in [`super::expr::parse_expression`].
 //!
 //! # What this module parses, against what `grammar.bnf` specifies
@@ -170,9 +170,8 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 // in `p.pos`. We CANNOT call `recover_to(p, TOP_LEVEL_ANCHORS)`
                 // here because `IDENT` is itself in `TOP_LEVEL_ANCHORS` and
                 // `recover_to` would no-op while the outer `loop` re-enters
-                // this arm forever (see `.planning/phases/06-cli-complete-lsp/
-                // deferred-items.md` — parser-hang on bare `#`, the bytes
-                // logos drops silently which leave IDENT as the next token).
+                // this arm forever. That was the parser-hang on a bare `#`: the
+                // bytes logos dropped silently left IDENT as the next token.
                 _ => p.bump_as_error(),
             },
             // Always make progress on a token we don't know what to do with

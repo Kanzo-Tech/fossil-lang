@@ -19,7 +19,7 @@ test = false
 workspace = true
 
 [dependencies]
-# Compiler-core crates wired into FossilPlayground::compile per RESEARCH.md
+# Compiler-core crates wired into FossilPlayground::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
 # fossil-runtime (native DuckDB), NO fossil-cli/fossil-lsp (binaries), NO
 # fossil-sinks/fossil-codegen (the SQL/GraphAr backend — the browser does not
@@ -42,7 +42,7 @@ smol_str = { workspace = true }
 # Phase 5 STDL-07: the stdlib classification table the playground reads to
 # disable native_udf_only functions in-browser. fossil-hir is WASM-clean
 # (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does
-# NOT pull fossil-runtime or any native UDF crate (Pitfall 3).
+# NOT pull fossil-runtime or any native UDF crate (the WASM gate).
 fossil-lineage = { path = "../fossil-lineage" }
 # WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
 # surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host
@@ -67,12 +67,12 @@ salsa = { workspace = true }
 # 1:1); web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
 # `start_lsp_worker` entrypoint installs. Both are wasm32-clean (lsp-types
 # proven by the 9-crate gate from Phase 6; web-sys is the canonical
-# JsCast-able binding crate). No tokio, no mio (Pitfall 5).
+# JsCast-able binding crate). No tokio, no mio.
 lsp-types = { workspace = true }
 web-sys = { workspace = true, features = ["MessageEvent", "DedicatedWorkerGlobalScope"] }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) per
-# RESEARCH.md Pitfall 5: the lib version MUST match the wasm-bindgen-cli
+# The lib version MUST match the wasm-bindgen-cli
 # version installed locally / in CI.
 wasm-bindgen             = { workspace = true }
 serde-wasm-bindgen       = { workspace = true }

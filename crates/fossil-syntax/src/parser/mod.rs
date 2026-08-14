@@ -139,7 +139,7 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
     let tokens = lex_with_indents(text);
     let mut parser = Parser::new(tokens);
     parser.parse_program();
-    // RESEARCH.md §Q11: parser is pure (not Salsa-tracked), so it cannot
+    // The parser is pure (not Salsa-tracked), so it cannot
     // call `.accumulate(db)` itself. Drain its internal `Vec<ParseDiagnostic>`
     // here, inside the wrapping Salsa query, so each parse error reaches
     // the host (CLI / LSP / WASM) via the `Diagnostic` accumulator.
@@ -168,7 +168,7 @@ pub(crate) struct Parser {
     pos: usize,
     pub(crate) builder: GreenNodeBuilder<'static>,
     /// Parser-internal diagnostic queue. Drained by the wrapping `parse()`
-    /// Salsa query (RESEARCH.md §Q11) into the public `Diagnostic`
+    /// Salsa query into the public `Diagnostic`
     /// accumulator after CST construction. Public to `super::recover` and
     /// `super::items` so the recovery helpers can push diagnostics without
     /// going through a `impl Parser { … }` shim per call site.
@@ -529,7 +529,7 @@ impl Parser {
     // --- expressions -----------------------------------------------------
     //
     // Phase 2: expression parsing is delegated to the Pratt sub-parser in
-    // `parser::expr` (per RESEARCH.md §Q1 + Crafting Interpreters Ch. 17).
+    // `parser::expr` (Crafting Interpreters Ch. 17).
     // The item parser keeps a thin `parse_expr` wrapper that wraps the
     // expression in an `EXPR` node for back-compat with Phase 1 callers
     // (`parse_property`, etc.) that expect the outer node kind.

@@ -1,4 +1,4 @@
-//! Parser corpus driver — per RESEARCH.md §Q10. Eighteen fixtures; it was
+//! Parser corpus driver. Eighteen fixtures; it was
 //! thirty until the forms the HIR never read left the grammar, then twenty,
 //! and then three more went with the CURIE and the backtick.
 //!
@@ -214,8 +214,8 @@ fixture_test!(
 // The `fixture_test!`s above verify the SHAPE of the resulting CST
 // (snapshot tests). This test verifies the BLAME PATH — that every
 // recovery fixture actually pushes a `Diagnostic` into the public
-// accumulator via the wrapping `parse()` Salsa query (RESEARCH.md §Q11
-// wiring). The LSP (Phase 6) consumes diagnostics through exactly this
+// accumulator via the wrapping `parse()` Salsa query. The LSP consumes
+// diagnostics through exactly this
 // accumulator, so the recovery + diagnostic plumbing must be exercised
 // independently of CST shape.
 //

@@ -58,7 +58,7 @@ url = "2"
 chrono = { version = "0.4", features = ["wasmbind"] }
 
 # WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
-# the wasm-bindgen-cli version (RESEARCH.md Pitfall 5). `run()` is async, so
+# the wasm-bindgen-cli version exactly. `run()` is async, so
 # wasm-bindgen-futures bridges the Rust future to a JS Promise.
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }

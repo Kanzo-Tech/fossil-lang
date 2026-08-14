@@ -13,7 +13,7 @@
 //! highlighting) and the full `{prefix, mapping, function, shape}` symbol set
 //! (for the outline + completion), so it walks the CST directly. Crucially this
 //! keeps the symbol index FILE-keyed: it is rebuilt whole on any edit (one
-//! re-run, Research Pitfall #3 — NO per-mapping Salsa key is added here, so the
+//! re-run — NO per-mapping Salsa key is added here, so the
 //! per-mapping `body()` fan-out stays at 1).
 
 use std::ops::Range;

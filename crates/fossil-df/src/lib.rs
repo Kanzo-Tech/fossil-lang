@@ -275,7 +275,7 @@ pub async fn execute_vertex_ops<'db>(
 /// carries no ops, so executing it would either panic on the `expect`s below or
 /// silently produce an empty graph. Neither is acceptable: the run must fail
 /// with the reason, which the accumulated `Diagnostic` already carries
-/// (`fossil_base` P-CRIT-4 guarantees at least one).
+/// (`fossil_base` guarantees at least one).
 ///
 /// Checking here is also what makes the `expect`s below sound: a graph that is
 /// not poisoned always carries its `Source` and `EmitVertex`.

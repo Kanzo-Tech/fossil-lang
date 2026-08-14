@@ -1,8 +1,8 @@
 //! Graph layout precompute (W3.1) — pure, host-agnostic algorithms.
 //!
-//! Per `.planning/W3-LAYOUT-PLAN.md`: the W0b writer emits `x`/`y`/`cluster_id`
-//! as placeholders (`0`); W3 fills them so the viewport verb returns meaningful
-//! positions and the Parquet can be morton-sorted for predicate pushdown.
+//! The writer emits `x`/`y`/`cluster_id` as placeholders (`0`); this fills them,
+//! so the viewport verb returns meaningful positions and the Parquet can be
+//! morton-sorted for predicate pushdown.
 //!
 //! This module is the **algorithmic core** — deliberately decoupled from the
 //! `materialize` hot path (which reads the edge set + rewrites the vertex
@@ -883,8 +883,8 @@ fn morton_ranks(morton: &[u32]) -> Vec<u32> {
 ///
 /// The gap is [`TYPE_GUTTER`], wide enough that the seam reads as a seam. This
 /// separates the types; it does not lay them out together — cross-type edges
-/// still pull on nothing, which is the later slice
-/// (`.planning/W3-LAYOUT-PLAN.md` §5). Separated is wrong in a way a reader can
+/// still pull on nothing, which is the `ForceAtlas2` slice (see `SURFACE-PLAN.md`,
+/// the layout slices). Separated is wrong in a way a reader can
 /// see and reason about; overlapped is wrong in a way that looks like data.
 fn place_after(positions: &mut [(f32, f32)], origin_x: f32) -> f32 {
     let mut width = 0.0f32;

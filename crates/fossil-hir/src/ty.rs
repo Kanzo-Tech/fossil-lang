@@ -1,7 +1,7 @@
 //! Type ADT.
 //!
 //! The surface kinds (type-system.md §2) + 1 internal `Unknown(InferenceId)`
-//! kind for bidirectional checker state (per Phase 2 RESEARCH.md §Q4). The
+//! kind for bidirectional checker state. The
 //! internal kind is never exposed in surface diagnostics; it appears only
 //! during checking-in-flight.
 //!
@@ -11,14 +11,14 @@
 //! and declares `FunctionDecl` absent (the user declares no functions), so
 //! neither had a way into the language.
 //!
-//! Interning strategy per RESEARCH.md §Q4:
+//! Interning strategy:
 //! - `Ty<'db>` itself is `#[salsa::interned]` so structural equality → pointer eq.
 //! - `Record<'db>` is separately interned (many distinct field sets).
 //! - `FnSig<'db>` is separately interned. It is the STDLIB's signature type
 //!   (`crate::stdlib::SigSpec::to_fn_sig`), not a `TyKind` any more.
 //! - All other kinds inline in `TyKind` directly.
 //!
-//! `'db` lifetime per Salsa 0.20+ (RESEARCH.md §Q7).
+//! `'db` lifetime per Salsa 0.20+.
 
 use fossil_base::ErrorGuaranteed;
 // The primitive lattice is NOT the type system's to own: the schema contract, the
@@ -57,7 +57,7 @@ pub enum TyKind<'db> {
     /// An IRI template — backtick string with `${...}` placeholders.
     IriTemplate,
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
-    /// promotion of Phase 1's local taint-wrapper newtype — RESEARCH.md §Q6).
+    /// promotion of a local taint-wrapper newtype).
     Error(ErrorGuaranteed),
     /// Internal inference-state placeholder. Used by bidirectional checker
     /// during synthesis-mode descent; never exposed in surface diagnostics.

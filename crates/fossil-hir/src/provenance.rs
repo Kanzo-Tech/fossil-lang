@@ -1,6 +1,6 @@
 //! Type provenance side table (CORE-11) + `expr_types` / `ty_origin` queries.
 //!
-//! Per Phase 2 RESEARCH.md §Q5: provenance is recorded in a SEPARATE Salsa
+//! Provenance is recorded in a SEPARATE Salsa
 //! tracked struct keyed by `(MappingLoc, ExprId)`, NOT baked into [`Ty<'db>`].
 //! Baking provenance into `Ty` would defeat structural interning (one entry per
 //! AST position instead of one per shape; ~50-100× cardinality blow-up for a
@@ -74,7 +74,7 @@ pub struct Provenance {
 
 /// Categorical type-origin reason.
 ///
-/// Covers the seven Phase 2 provenance channels per RESEARCH.md §Q5. Phase 3
+/// Covers the seven Phase 2 provenance channels. Phase 3
 /// may refactor `InputDescriptor` / `OutputDescriptor` to carry interned ids
 /// instead of [`SmolStr`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -112,7 +112,7 @@ pub enum ProvenanceKind {
     /// `rendering` is the displayable form of the closure, e.g.
     /// `(row: Record<{id: String, name: String, age: Integer}>) => row.age >= 18`.
     /// LSP hover (plan 03-07) renders this above the field type so the synthesis
-    /// is NEVER hidden from the user (RESEARCH.md §Pitfall 6).
+    /// is NEVER hidden from the user.
     ///
     /// CRITICAL (Risk Register): `rendering` MUST NEVER contain the substring
     /// `Unknown` or `InferenceId` — it is built via [`crate::render_ty_kind`]
@@ -153,7 +153,7 @@ pub struct ExprTypeEntry<'db> {
 /// including `FieldRef` resolved against the CSVW source row). `expr_types` is
 /// the projection — it returns `typecheck_mapping(db, mapping)?.expr_types(db)`,
 /// or an empty table if the mapping had a type error (the error already
-/// emitted ≥1 diagnostic per P-CRIT-4).
+/// emitted ≥1 diagnostic).
 ///
 /// Phase 2's literal-subset behaviour is preserved as a strict widening: a
 /// `Template` RHS still synthesises `IriTemplate`, a `StringLit` still

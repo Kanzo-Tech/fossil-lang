@@ -4,7 +4,7 @@
 // they need `pub(crate)` visibility.
 #![allow(clippy::redundant_pub_crate)]
 
-//! Error recovery per RESEARCH.md §Q2: anchor-based "bump until we see a known
+//! Error recovery: anchor-based "bump until we see a known
 //! start-of-the-next-thing" recovery. Anchors are kept tiny — Fossil's INDENT/
 //! DEDENT layer + the small set of item-leading keywords makes this trivial.
 //!
@@ -89,11 +89,10 @@ pub(crate) const MAPPING_BODY_ANCHORS: &[SyntaxKind] =
 /// See `crates/fossil-syntax/src/parser/items.rs::parse_program` for the
 /// canonical example of the safe shape: when the IDENT lookahead doesn't
 /// match `DEFINE` or `SHAPE_SEP`, the fall-through is `p.bump_as_error()`,
-/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`. Historical bug:
-/// `.planning/phases/06-cli-complete-lsp/deferred-items.md` (parser-hang on
-/// a bare `#` — the logos lexer drops `#` silently, the next non-trivia
-/// token is often IDENT, and `IDENT ∈ TOP_LEVEL_ANCHORS` made the call a
-/// no-op).
+/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`. The historical bug was the
+/// parser-hang on a bare `#`: the logos lexer dropped `#` silently, the next
+/// non-trivia token was often IDENT, and `IDENT ∈ TOP_LEVEL_ANCHORS` made the
+/// call a no-op.
 pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
     p.skip_trivia();
     if at_anchor(p, anchors) {

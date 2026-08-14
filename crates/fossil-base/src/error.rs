@@ -6,9 +6,9 @@
 //! produce N diagnostics, not N².
 //!
 //! `PhantomData<()>` (NOT `PhantomData<*const ()>`) preserves `Send + Sync`
-//! so this taint can flow through the Salsa accumulator across threads. Per
-//! RESEARCH.md §Q6 — the raw-pointer variant would un-impl `Send`/`Sync` and
-//! break the `Diagnostic` accumulator's cross-thread flow.
+//! so this taint can flow through the Salsa accumulator across threads: the
+//! raw-pointer variant would un-impl `Send`/`Sync` and break the `Diagnostic`
+//! accumulator's cross-thread flow.
 //!
 //! # Construction invariant
 //!

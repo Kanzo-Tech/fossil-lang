@@ -58,7 +58,7 @@
 //! `WorkspaceIndex` is a plain struct built by a CST walk, and the two document
 //! paths read queries that the checker already runs for this file
 //! (`def_map`, `resolve_target_shape`), so the per-mapping `body()` fan-out is
-//! unchanged (Research Pitfall #3).
+//! unchanged.
 //!
 //! # Nothing here does index arithmetic
 //!

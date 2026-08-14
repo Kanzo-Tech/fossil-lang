@@ -28,8 +28,7 @@
 //! ## The search layer ([`symbol_index`], [`prefix_index`], [`workspace`])
 //!
 //! Three plain-struct indexes built by a CST walk, and **no Salsa query of
-//! their own** — so the per-mapping `body()` fan-out stays at 1 (Research
-//! Pitfall #3):
+//! their own** — so the per-mapping `body()` fan-out stays at 1:
 //!   - [`SymbolIndex`] — per-file table of `{prefix, mapping, function, shape}`
 //!     definitions with byte ranges (outline + goto-def hit resolution).
 //!     (the gleam-lsp auto-import completion pattern).

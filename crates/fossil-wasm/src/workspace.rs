@@ -1,6 +1,6 @@
 //! Workspace lifecycle — the `ty_wasm`-shaped multi-file API the playground
 //! and the WASM LSP Worker share. Mirrors Astral's `ty_wasm::Workspace`
-//! exactly (see Phase 7 RESEARCH §"Workspace API"): a small
+//! exactly: a small
 //! `FileHandle` newtype on the JS boundary plus an internal
 //! `HashMap<FileHandle, SourceFile>` open-files map.
 //!

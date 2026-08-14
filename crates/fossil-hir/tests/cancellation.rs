@@ -33,7 +33,7 @@
 //!     `Err(Cancelled)` so the worker can discard the stale result cleanly.
 //!
 //! ─────────────────────────────────────────────────────────────────────────
-//! DETERMINISM (Pitfall #2 — no sleeps)
+//! DETERMINISM — no sleeps
 //! ─────────────────────────────────────────────────────────────────────────
 //!
 //! The proof is fully deterministic via two `std::sync::Barrier`s (the exact

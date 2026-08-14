@@ -1,4 +1,4 @@
-//! SC#4 / P-CRIT-4 native negative test — the named runtime assertion must FAIL
+//! SC#4 native negative test — the named runtime assertion must FAIL
 //! LOUDLY (never silently) when its guard is tripped at runtime.
 //!
 //! Plan 04-06 emits, where a static check cannot be discharged,
@@ -8,7 +8,8 @@
 //! row whose guarded column is NULL, execute the assertion SQL via
 //! [`fossil_runtime::execute`], and assert it returns `Err` with the `DuckDB`
 //! error message CONTAINING the named assertion (`fossil_assertion_…`). If the
-//! assertion silently passed (the P-CRIT-4 failure mode), `execute` would
+//! assertion silently passed — a mapping that compiles and emits wrong RDF —
+//! `execute` would
 //! return `Ok` and this test would fail.
 //!
 //! NATIVE-ONLY: `fossil-runtime` carries a `compile_error!` cfg-tripwire on
@@ -34,7 +35,7 @@ fn null_field_trips_named_assertion_loudly() {
     let result = fossil_runtime::execute(ASSERTION_SQL);
 
     let err = result.expect_err(
-        "P-CRIT-4: a NULL field in an IRI template MUST trip the named runtime \
+        "a NULL field in an IRI template MUST trip the named runtime \
          assertion (DuckDB error) — never silently produce a malformed IRI",
     );
     let msg = err.to_string();

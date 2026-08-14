@@ -1,6 +1,6 @@
 //! [`WasmSystem`] — in-memory [`fossil_base::System`] impl for the WASM host.
 //!
-//! Per RESEARCH.md Pitfall 4, `SystemTime::now()` panics on
+//! `SystemTime::now()` panics on
 //! `wasm32-unknown-unknown` (the upstream `std` impl unconditionally calls
 //! `__wasi_clock_time_get` which is unavailable in the bare wasm target).
 //! Phase 1 has zero callers of `Db::system().now()` on the compile path, so
@@ -59,7 +59,7 @@ impl System for WasmSystem {
 
     fn now(&self) -> SystemTime {
         // Phase 1: no callers; UNIX_EPOCH avoids the wasm32 SystemTime::now()
-        // panic documented in RESEARCH.md Pitfall 4. Phase 7+ adds the
+        // panic. Phase 7+ adds the
         // `web-time` crate.
         SystemTime::UNIX_EPOCH
     }

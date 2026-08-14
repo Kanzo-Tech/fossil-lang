@@ -8,7 +8,7 @@
 //! order, so adding/editing one mapping does NOT renumber the others — the
 //! previous indices remain valid pointers to the same node identity.
 //!
-//! `'db` lifetime per Salsa 0.26 — RESEARCH.md §Q7. Reference: rust-analyzer
+//! `'db` lifetime per Salsa 0.26. Reference: rust-analyzer
 //! PR #19495 ("Start infesting ide crates with `'db` lifetime").
 
 use fossil_base::SourceFile;
@@ -136,8 +136,7 @@ pub struct AstIdEntry {
 }
 
 /// Build the per-file `AstIdMap` by walking top-level CST children once. Body
-/// content is NOT inspected — that's the invalidation-barrier guarantee
-/// (RESEARCH.md §Q3).
+/// content is NOT inspected — that's the invalidation-barrier guarantee.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
 pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdMap<'db> {

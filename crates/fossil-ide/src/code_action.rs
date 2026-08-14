@@ -23,7 +23,7 @@
 //! Returns `lsp_types::CodeAction` directly — no stdio / JSON-RPC. All edits use
 //! UTF-16 LSP ranges (06-05 [`crate::line_index::LineIndex`]); the byte spans on
 //! the incoming diagnostics are converted via the FILE-keyed line index, so no
-//! new per-mapping Salsa query is added (Research Pitfall #3). No `Box<dyn>`; no
+//! new per-mapping Salsa query is added. No `Box<dyn>`; no
 //! `TyKind::Unknown` ever reaches a title or edit (the action text is built from
 //! the structured candidate / the pre-generated snippet, never from a type).
 

@@ -4,7 +4,7 @@
 //! names — `version: gar/v1`, `type`, `chunk_size`, `prefix`, `property_groups`, and edge
 //! `src_type`/`dst_type`/`adj_lists`. This deliberately supersedes the Phase-1 hand-templated
 //! spelling (`graphar_version: 1.0.0`, `vertex_types:`, `data_type: string`), which conformed
-//! to no `GraphAr` reader (see `RESEARCH` Pitfall 2).
+//! to no `GraphAr` reader.
 //!
 //! The structs are plain serializable data — no `Box<dyn Trait>`, safe to pass through Salsa
 //! queries (CLAUDE.md hard rule). `data_type` strings are derived from [`arrow_schema::DataType`]
@@ -12,7 +12,7 @@
 //!
 //! Fossil never byte-writes Parquet from Rust — the runtime materializes tiles via
 //! `DuckDB` `COPY ... (FORMAT PARQUET)` into the manifest-declared `prefix`. The vertex-tile naming
-//! convention is `<prefix>chunk{k}.parquet` (`RESEARCH` Open Q1) and the edge-tile one is
+//! convention is `<prefix>chunk{k}.parquet` and the edge-tile one is
 //! `<prefix>by_source/tile{k}.parquet`. This module declares the tiling; it does not emit bytes,
 //! and `fossil-runtime`'s `enrich_layout` is the only thing that does — **what the emitter writes
 //! is what the manifest says**, asserted on the artefact by
@@ -281,7 +281,7 @@ impl GraphInfo {
 
 /// Map an [`arrow_schema::DataType`] to its `GraphAr` `data_type` string spelling.
 ///
-/// `arrow-schema` is the single authority for the spellings (`RESEARCH` §"Don't Hand-Roll"):
+/// `arrow-schema` is the single authority for the spellings — never hand-rolled:
 /// the manifest's declared types must match what `DuckDB` COPY actually writes. Unhandled
 /// arrow types fall back to `binary` (the `GraphAr` catch-all for opaque columns).
 #[must_use]
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn vertex_yaml_carries_graphar_v1_field_names() {
         let yaml = person_vertex().to_yaml().expect("vertex serialization");
-        // Pitfall-2 field-name guard: spec spellings present, NOT the Phase-1 template.
+        // Field-name guard: spec spellings present, NOT the Phase-1 template.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
         assert!(yaml.contains("type: Person"), "{yaml}");
         // Asserted against the constant, not a literal: the value is a measured trade-off

@@ -683,10 +683,7 @@ fn typecheck_mapping_returns_error_guaranteed_on_any_diagnostic() {
     let (db, file) = db_with(HELLO);
     assert!(shim(&db, file), "missing column must record an error");
     let diags = shim::accumulated::<Diagnostic>(&db, file);
-    assert!(
-        !diags.is_empty(),
-        "ErrorGuaranteed implies ≥1 Diagnostic (P-CRIT-4)"
-    );
+    assert!(!diags.is_empty(), "ErrorGuaranteed implies ≥1 Diagnostic");
 }
 
 #[test]

@@ -44,7 +44,7 @@ impl FossilDb {
     /// Used by the invalidation regression test
     /// (`crates/fossil-hir/tests/invalidation_regression.rs`, added in Wave 4
     /// plan 02-07) to count `EventKind::WillExecute` events across an
-    /// edit-trigger boundary — see RESEARCH.md §Q8 and Phase 2 SC#2 (the
+    /// edit-trigger boundary — Phase 2 SC#2 (the
     /// `≤4 re-executed queries after a body-only edit in 1-of-10 mappings`
     /// gate).
     ///

@@ -13,8 +13,8 @@
 //! Entry point: [`parse_expression`].
 //!
 //! Reference: Crafting Interpreters Ch. 17 (Nystrom) + rust-analyzer's
-//! `crates/parser/src/grammar/expressions.rs`. Per RESEARCH.md §Q1 the
-//! Pratt shape is materially cleaner than nested-precedence-functions.
+//! `crates/parser/src/grammar/expressions.rs`. The Pratt shape is materially
+//! cleaner than nested precedence functions.
 //!
 //! The specified table has EIGHT levels and this parser now implements exactly
 //! those eight. `|>` held a ninth at the tightest-binding end of the low side

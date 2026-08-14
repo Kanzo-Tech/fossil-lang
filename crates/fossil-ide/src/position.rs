@@ -17,7 +17,7 @@
 //! LSP positions use UTF-16 code units (Monaco / VS Code). Phase 2 treated the
 //! `character` column as a raw byte offset — correct only for ASCII source.
 //! Phase 6 plumbs proper conversion via [`crate::line_index::LineIndex`]
-//! (rust-analyzer pattern, Research Pitfall #4): [`position_to_offset`] now
+//! (the rust-analyzer pattern): [`position_to_offset`] now
 //! interprets `character` as a UTF-16 code unit, and [`offset_to_lsp_position`]
 //! converts a byte offset back to a UTF-16 column. Both build the index from
 //! the SAME FILE-keyed [`line_offsets`] table, so no new per-mapping Salsa
@@ -59,7 +59,7 @@ pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> Line
 /// `character` is interpreted as a UTF-16 code unit (the LSP wire convention),
 /// converted to a UTF-8 byte offset via the [`LineIndex`]. Returns `None` if
 /// `line` is past the end of the file. (Phase 6 LSP-01 — replaces Phase 2's
-/// byte-offset-as-column assumption; Research Pitfall #4.)
+/// byte-offset-as-column assumption.)
 #[must_use]
 pub fn position_to_offset(index: &LineIndex, line: u32, character: u32) -> Option<u32> {
     index.offset(Utf16Position { line, character })

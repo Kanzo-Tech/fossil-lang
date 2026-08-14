@@ -7,7 +7,7 @@
   "scripts": {
     "parity": "node run-parity.mjs"
   },
-  "comment": "SC#1 targets DuckDB-WASM 1.33.x. The 1.33.x line is currently published only as the npm `latest` dev pre-release (1.33.1-devN.0); the last fully-stable tag is 1.32.0. We pin the npm `latest` (a 1.33.x build) for the manual parity gate; bump to a 1.33.x final when one ships. The native side is duckdb 1.10502 — the asymmetry is intentional (see ADR-0014 / RESEARCH Pitfall 6).",
+  "comment": "SC#1 targets DuckDB-WASM 1.33.x. The 1.33.x line is currently published only as the npm `latest` dev pre-release (1.33.1-devN.0); the last fully-stable tag is 1.32.0. We pin the npm `latest` (a 1.33.x build) for the manual parity gate; bump to a 1.33.x final when one ships. The native side is duckdb 1.10502 — the asymmetry is intentional, and this harness is what would catch a native/WASM divergence.",
   "dependencies": {
     "@duckdb/duckdb-wasm": "latest",
     "apache-arrow": "^17.0.0"

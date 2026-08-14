@@ -42,7 +42,7 @@
 //!   call (a malformed source) falls back to `examples/users.csv` / `Csv` so
 //!   `lower_to_mir` never panics.
 //!
-//! # CRITICAL barrier rule (RESEARCH Pitfall 3)
+//! # CRITICAL barrier rule
 //!
 //! `lower_to_mir` may read `body(db, mapping)`, `typecheck_mapping(db, mapping)`
 //! — all barrier-routed through `mapping_cst_node`.
@@ -337,7 +337,7 @@ pub fn lower_to_mir_pg<'db>(
 }
 
 /// A tainted, op-less graph. `eg` is the [`fossil_base::ErrorGuaranteed`] whose
-/// construction already accumulated the explaining `Diagnostic` (P-CRIT-4), so
+/// construction already accumulated the explaining `Diagnostic`, so
 /// the caller never has to remember to emit one.
 fn poisoned(db: &dyn fossil_base::Db, eg: fossil_base::ErrorGuaranteed) -> MirGraph<'_> {
     MirGraph::new(db, Vec::new(), Some(eg))
@@ -608,7 +608,7 @@ fn lower_source_chain<'db>(
 /// binding (STDL-06).
 ///
 /// Reads the `(constructor, uri)` pair off the already-loaded [`DefMap`]
-/// (file-keyed — NO new per-mapping fan-out, RESEARCH Pitfall 3). The format is
+/// (file-keyed — NO new per-mapping fan-out). The format is
 /// resolved by looking the constructor up in the provider registry
 /// ([`fossil_base::providers`], the one table since ruling 13 of
 /// `SURFACE-PLAN.md`) — no string-matching here. A
@@ -703,7 +703,7 @@ const fn native_reader_format(r: fossil_base::NativeReader) -> SourceFormat {
 /// Resolve the 1-based, MAPPING-RELATIVE source line of the `iri = ...`
 /// property's RHS expression for the SC#4 named assertion (`line=<N>`).
 ///
-/// # Why mapping-relative (RESEARCH Pitfall 3)
+/// # Why mapping-relative
 ///
 /// The `spans` side table records MAPPING-RELATIVE byte offsets (rowan's
 /// `new_root` resets offsets to zero — see `fossil_hir::spans` offset-semantics
@@ -800,10 +800,7 @@ fn lower_iri_property<'db>(
 /// which `render_expr` honoured verbatim, producing `users.id` even when the
 /// URI was `@examples/hello.csv` (view aliased as `hello`) — DuckDB-WASM
 /// rejected with `Binder Error: Referenced table "users" not found! Candidate
-/// tables: "hello"`. See
-/// `.planning/phases/08-playground-react-library-v0-1/deferred-items.md`
-/// (CODEGEN-LOWERING-01) and
-/// `.planning/phases/09-playground-polish-differentiators/09-01-PLAN.md`.
+/// tables: "hello"`.
 /// Replace every [`HirExpr::Edge`] with the target type's identity template,
 /// this row's values in its holes.
 ///
@@ -1400,8 +1397,8 @@ User : ex:Person from rows
     #[test]
     fn a_per_row_hole_wraps_in_a_named_assertion_when_subject_context() {
         // `assert_line = Some(N)` (the subject position) → the hole is wrapped
-        // in `Assert { name: "iri_template_unbound", span_line: N }` (SC#4 /
-        // P-CRIT-4). The assertion NAME is a fixed snake_case identifier —
+        // in `Assert { name: "iri_template_unbound", span_line: N }` (SC#4).
+        // The assertion NAME is a fixed snake_case identifier —
         // never type text.
         let db = test_db();
         let parts = vec![

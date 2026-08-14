@@ -1,6 +1,6 @@
 //! UTF-16 ↔ UTF-8 position conversion (rust-analyzer `LineIndex` pattern).
 //!
-//! # Why this exists (Phase 6 LSP-01, Research Pitfall #4)
+//! # Why this exists
 //!
 //! LSP positions are **UTF-16 code units** (Monaco / VS Code count columns in
 //! UTF-16), but Fossil source is stored and indexed in **UTF-8 bytes** (rowan
@@ -31,8 +31,8 @@
 //!
 //! This module is pure (no native deps) and operates over the Salsa-tracked,
 //! FILE-keyed [`crate::position::line_offsets`] — it adds **no new per-mapping
-//! Salsa query**, so `MAX_PER_MAPPING_FAN_OUT` is untouched (Research Pitfall
-//! #3). The [`LineIndex`] is built on demand from the file text + the existing
+//! Salsa query**, so `MAX_PER_MAPPING_FAN_OUT` is untouched. The
+//! [`LineIndex`] is built on demand from the file text + the existing
 //! line-offset table; callers may build it once per request and reuse it.
 
 /// One non-ASCII character on a line, recorded for UTF-16 ↔ UTF-8 conversion.

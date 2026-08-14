@@ -17,8 +17,9 @@
 //!    byte. It counts as a real token for step 3, so a stray character at
 //!    column 0 closes the block above it exactly as any other token would.
 //!
-//! Per RESEARCH.md Pitfall 1 this is the highest-overrun risk in Phase 1;
-//! the 3-fixture corpus at the bottom of this file is the gate.
+//! INDENT/DEDENT lexing is the classic week-eater in an indentation-sensitive
+//! language, and it was named as this phase's highest-overrun risk before a line
+//! of it existed. The 3-fixture corpus at the bottom of this file is the gate.
 
 use crate::kind::SyntaxKind;
 use crate::lexer::{Token, raw_lex_lossless};

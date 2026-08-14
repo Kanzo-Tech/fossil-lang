@@ -23,7 +23,7 @@
 //! now be MISSPELT and reported rather than expanded into an IRI that happens to
 //! denote nothing.
 //!
-//! Per RESEARCH.md §"Architecture Patterns" Pattern 2 + 3, mapping and source
+//! Mapping and source
 //! locations are interned with a `'db` lifetime so downstream queries can be
 //! keyed per-item (rust-analyzer's per-item Salsa fan-out). Even though the
 //! Phase 1 example has only one mapping, the SHAPE of the query graph matters

@@ -1,9 +1,9 @@
 //! Phase 3 diagnostic golden-file corpus (plan 03-08).
 //!
 //! Locks SC#1..SC#5 of the Phase 3 ROADMAP success criteria as regression
-//! tests. Grows in Phase 4-6 toward the 30+ target per ROADMAP
-//! §"Cross-Phase Concerns" ("Negative-test suite for silent semantic errors
-//! (each P-CRIT-4 pattern)").
+//! tests, and grows toward a negative-test suite for SILENT SEMANTIC ERRORS:
+//! a mapping that compiles and emits wrong RDF, which is the failure class
+//! this whole corpus exists to make impossible.
 //!
 //! # Fixture layout
 //!

@@ -10,10 +10,10 @@
 //!
 //! The heavy lifting (the CST walk that finds named definitions + their byte
 //! ranges) already lives in [`crate::SymbolIndex`]
-//! (FILE-keyed, no per-mapping Salsa key — Research Pitfall #3). This module is a
+//! (FILE-keyed, no per-mapping Salsa key). This module is a
 //! thin adapter: it builds that index, maps each Fossil [`crate::SymbolKind`]
 //! to an LSP [`lsp_types::SymbolKind`], and converts each byte range to a UTF-16
-//! [`lsp_types::Range`] via the 06-05 [`LineIndex`] (Research Pitfall #4 — Monaco
+//! [`lsp_types::Range`] via the [`LineIndex`] (Monaco
 //! counts UTF-16, so a byte range would mis-highlight after a multi-byte char).
 //!
 //! # Kind mapping (Research §Outline)

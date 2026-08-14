@@ -1,6 +1,6 @@
 //! Parser-internal diagnostic enum.
 //!
-//! Per RESEARCH.md §Q11: the parser is a pure helper (NOT a Salsa-tracked
+//! The parser is a pure helper (NOT a Salsa-tracked
 //! function), so it cannot call `.accumulate(db)` directly. Instead the
 //! parser collects `ParseDiagnostic`s in a `Vec` and the wrapping
 //! `parse(db, file)` Salsa query iterates them after CST construction,

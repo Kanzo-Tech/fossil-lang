@@ -10,7 +10,8 @@
 //! (forward reference to a named `EachOf`/`OneOf`/`TripleConstraint`
 //! declared elsewhere in the same schema).
 //!
-//! We pre-resolve the AST at construction time (`RESEARCH.md` §Pitfall 5):
+//! We pre-resolve the AST at construction time — a forward shape reference
+//! (`Ref`) left unresolved would be walked as if it denoted nothing:
 //! walking a shape body without resolving refs produces "unknown property"
 //! false positives. Cycle detection during walk (DFS-visited) — only acyclic
 //! shape graphs are supported per `type-system.md` §11.
@@ -41,7 +42,7 @@
 //! column types from it, and [`generate_split_suggestion`] re-emits `ShEx`'s own
 //! syntax, which only a crate that knows the syntax can do.
 //!
-//! ## WASM safety (Pitfall 1)
+//! ## WASM safety
 //!
 //! We use ONLY `Schema::from_reader` (byte-stream input) — never
 //! `Schema::from_iri` which would pull `reqwest`/`tokio` into the WASM build
@@ -411,7 +412,8 @@ impl ShExDescriptor {
     /// Parse a `ShEx` schema from a JSON byte stream and build the resolved
     /// constraint table.
     ///
-    /// Uses [`Schema::from_reader`] — no network access (Pitfall 1).
+    /// Uses [`Schema::from_reader`] — no network access, so nothing here can
+    /// drag a transitive `tokio`/`reqwest` into the WASM gate.
     pub fn from_reader<R: std::io::Read>(rdr: R) -> Result<Self, ShExLoweringError> {
         let schema = Schema::from_reader(rdr)
             .map_err(|e| ShExLoweringError::MalformedSchema(e.to_string()))?;
@@ -575,7 +577,7 @@ fn lower_shape_decl(
 
     // Phase 3 v0.1 supports `ShapeExpr::Shape(_)` only. Other variants
     // (`ShapeOr` / `ShapeAnd` / `ShapeNot` / `External` / `NodeConstraint` /
-    // `Ref`) are deferred per `RESEARCH.md` §"Deferred Ideas".
+    // `Ref`) are deferred.
     let ShapeExpr::Shape(shape) = &decl.shape_expr else {
         return None;
     };

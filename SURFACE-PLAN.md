@@ -397,6 +397,18 @@ defecto, que DuckDB no escribe y no piensa hacerlo; (2) un fichero con row group
 fichero por tesela; (3) el footer como directorio raíz y las cajas `x`/`y` como índice — **medido:
 1,05×–1,21×**. **Hecho cuando:** una ventana cuesta lo que la tabla dice, con el mismo arnés.
 
+**Las slices de layout, cosechadas de `W3-LAYOUT-PLAN.md`** — que resultó no ser de keasy:
+`fossil-runtime/src/layout.rs` lo citaba. La primera está construida (comunidades por modularidad,
+la jerarquía, el morton-sort); las cuatro siguientes añaden **una** capacidad pesada cada una detrás
+de la costura que la primera dejó estable, y cada una necesita su decisión antes de empezar:
+
+| slice | trabajo | la decisión que necesita |
+|---|---|---|
+| **W3.2 Leiden** | dep `single-clustering`; Leiden por componente WCC para partir la componente gigante; `cluster_id` plano = (componente, sub-Leiden) | auditoría de dependencia (rayon, encaje de la licencia BSD-3); si se guardan los niveles de la jerarquía, que pide extender el manifiesto; el parámetro de resolución por defecto |
+| **W3.3 ForceAtlas2** | dep `forceatlas2`; sembrar desde las posiciones de la slice 1; iterar a convergencia; re-morton-sort | iteraciones contra presupuesto de reloj a 1–5M nodos; theta de Barnes-Hut; **y la de verdad**: si se topa N para la pasada en RAM y por encima se cae a las posiciones sembradas — ése es el techo real de larger-than-RAM |
+| **W3.4 Embeddings** | columna opcional de embedding por nodo para búsqueda semántica | modelo y dimensionalidad; si los embeddings dirigen el layout (estilo UMAP) en vez de FA2; la historia fuera de memoria |
+| **W3.5 Resúmenes de cluster** | `cluster_summary` generado por LLM para `summarize_cluster` | dónde viven los resúmenes (Parquet aparte o manifiesto); qué superficie LLM; granularidad de nivel. **Es una decisión de producto, no de layout** |
+
 **Track paralelo · RDF 1.2.** No es una fase, es una obligación que atraviesa F2 y F4. Lo que se
 puede hacer ya: la dirección base en literales (`rdf:dirLangString`, `@en--ltr`) — el perfil
 `1.2-basic` es exactamente el productor que la emite sin reificación y es el primer objetivo
