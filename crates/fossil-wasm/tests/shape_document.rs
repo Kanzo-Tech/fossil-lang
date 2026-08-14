@@ -21,8 +21,8 @@
 //!   4. Editing the PROGRAM does not change what it is checked against.
 
 #![cfg(not(target_arch = "wasm32"))]
-// `${ex:}` / `${.id}` are Fossil template placeholders in a literal program,
-// not Rust format-string arguments.
+// `{users.id}` is a Fossil interpolation hole in a literal program, not a Rust
+// format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use fossil_wasm::FossilPlayground;
@@ -34,12 +34,11 @@ use fossil_wasm::FossilPlayground;
 /// IRI `http://example.org/name` the shape declares — and the identity is the
 /// `@subject` slot, first line of the body.
 const PROGRAM: &str = "\
-prefix ex: <http://example.org/>
-type { Person } = io.shex(\"person.shex\")
+type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"users.csv\")
-User : ex:Person from users
-    @subject = `${ex:}u/${.id}`
-    name = .name
+User : Person from users
+    @subject = \"http://example.org/u/{users.id}\"
+    name = users.name
 ";
 
 /// `http://example.org/name` narrowed to `xsd:integer`.
@@ -150,7 +149,7 @@ fn opening_and_editing_the_document_re_checks_the_program_that_names_it() {
 
     // (4) And the converse: editing the PROGRAM does not move the shape it is
     //     checked against.
-    pg.update_file_native(program, PROGRAM.replace("u/${.id}", "v/${.id}"))
+    pg.update_file_native(program, PROGRAM.replace("u/{users.id}", "v/{users.id}"))
         .expect("update_file_native");
     assert_eq!(
         messages(&pg),

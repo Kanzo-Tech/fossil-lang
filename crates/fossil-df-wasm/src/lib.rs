@@ -36,7 +36,7 @@ use std::time::SystemTime;
 
 use datafusion::execution::context::SessionContext;
 use datafusion::prelude::SessionConfig;
-use fossil_base::{FossilDb, FsError, SourceFile, System};
+use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 // The `ShEx` AST, named from its own crate: `fossil-descriptors-output` stopped
 // re-exporting it, so a consumer that wants it says so in its `Cargo.toml`.
@@ -95,21 +95,26 @@ pub struct ExecOutput {
 /// `NotFound`) and `now` returns the wasm-safe `UNIX_EPOCH` placeholder
 /// (`SystemTime::now()` panics on `wasm32-unknown-unknown`).
 ///
-/// Two accessors stay at their trait defaults, and both are real answers rather
-/// than stubs:
+/// `descriptors` stays at its trait default `None`: typing falls back to the
+/// passed output descriptor / string defaults — the descriptor is an argument,
+/// not read here.
 ///
-/// - `descriptors` is `None`: typing falls back to the passed output descriptor
-///   / string defaults — the descriptor is an argument, not read here.
-/// - `providers` is the default, `fossil_base::providers::DATA`: the four rows
-///   that read DATA, and **no row that reads types**. Its schema arrives already
-///   decided, as the `shex` argument to [`execute_core`] —
-///   the browser fetched it and the host lowered it in [`build_descriptor`]
-///   before any query ran. Installing a type-reading row would put a second,
-///   differently sourced answer to "what shape does this program write?" inside
-///   the database, and the executor would then have two. It runs a plan; it does
-///   not resolve one. Nothing registers a shape document here either, for the
-///   same reason — see [`build_program`]. The DATA rows are not optional in the
-///   same way: without them nothing recognises `io.csv`.
+/// **`providers` is no longer the default, and the argument for the default was
+/// overtaken.** It used to be `fossil_base::providers::DATA` — the four rows
+/// that read DATA and **no row that reads types** — on the reasoning that the
+/// schema arrives already decided as the `shex` argument to [`execute_core`],
+/// so a type-reading row would put a second, differently sourced answer to
+/// "what shape does this program write?" inside the database.
+///
+/// That reasoning held while a mapping header carried its own shape IRI
+/// (`Person : ex:Person from users`). Since ruling 3 of 2026-08-11 the header
+/// names a BARE name bound positionally by `type { … } := io.shex("…")`, so the
+/// shape IRI — and with it the vertex label and every property's `rdf_uri` —
+/// comes from the registered DOCUMENT and from nowhere else. Without a decoder
+/// row the executor wrote `vertex/.parquet` and columns whose `rdf_uri` was
+/// `None`, and neither is a second answer: it is no answer. There is still one
+/// schema here; [`build_program`] registers that one text under the name the
+/// program writes, so both consumers read the same bytes.
 #[derive(Debug, Default)]
 struct ExecutorSystem;
 
@@ -119,6 +124,9 @@ impl System for ExecutorSystem {
     }
     fn now(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH
+    }
+    fn providers(&self) -> &'static [&'static Provider] {
+        fossil_descriptors_output::PROVIDERS
     }
 }
 
@@ -192,12 +200,26 @@ pub fn program_sources_core(
 /// Build the executor's db + interned program + output descriptor — shared by
 /// [`execute_core`] and [`program_sources_core`].
 ///
-/// **No shape document is registered here, deliberately.** The other hosts
-/// register what `type { … } = io.shex("…")` names, because their checker has
-/// to decode it; this one installs no decoder row (see [`ExecutorSystem`]), so
-/// a registered document could only sit in the database unread. The shape this
-/// host acts on is the `shex` argument, and it is already an
-/// [`OutputDescriptorKind`] by the time the executor sees it.
+/// **The one schema this host holds is registered under the name the program
+/// writes, and is also the descriptor.** It used to be registered nowhere: the
+/// other hosts register what `type { … } := io.shex("…")` names because their
+/// checker has to decode it, and this one installed no decoder row, so a
+/// registered document could only have sat in the database unread.
+///
+/// A bare property key means the last segment of a predicate IRI the DOCUMENT
+/// declares, and a bare header name is bound positionally against the same
+/// document — so with nothing registered the mapping still compiled (an
+/// unregistered document is informational, not fatal) and produced an empty
+/// predicate table and an empty shape IRI. Measured: `vertex/.parquet`, and a
+/// `RunStatus` column `("name", None)` where `None` is the `rdf_uri` that is the
+/// wire contract's whole point.
+///
+/// The order is forced and it is `fossil-engine`'s: parse → ask the def-map what
+/// the program names → register → compile. Registering bumps the registry's
+/// revision, so the `def_map` computed here is re-derived once on the way to the
+/// plan. This host reads no filesystem, so there is exactly one text to
+/// register and no loop: whatever the first `type` binding names is what the
+/// browser fetched.
 fn build_program(
     program: &str,
     shex: Option<&str>,
@@ -207,8 +229,23 @@ fn build_program(
         None => OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
     };
     let system: Arc<dyn System> = Arc::new(ExecutorSystem);
-    let db = FossilDb::new(system);
+    let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "program.fossil".to_string());
+
+    // The key must be what the reader passes to `file_at` — the path the
+    // program wrote, resolved against the program's own directory. Same
+    // `SourceAnchor` call `fossil-engine`'s `registry_key` makes, so there is
+    // nothing to drift: a key that stops matching reads exactly like a document
+    // nobody registered.
+    if let Some(text) = shex
+        && let Some(document) = fossil_hir::def_map::def_map(&db, file).output_shape_document(&db)
+    {
+        let dir = fossil_base::program_dir(file.path(&db));
+        let key = fossil_base::SourceAnchor::beside(&dir).locator(&document);
+        let doc = SourceFile::new(&db, text.to_string(), key.clone());
+        fossil_base::register_file(&mut db, key, doc);
+    }
+
     Ok((db, file, descriptor))
 }
 

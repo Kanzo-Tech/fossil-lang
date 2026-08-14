@@ -1,5 +1,5 @@
-// The embedded `.fossil` fixture uses template syntax (`${ex:}…/${.id}`) that
-// clippy mistakes for format args in a plain string literal — it is not.
+// The embedded `.fossil` fixture interpolates (`"…/{users.id}"`), which clippy
+// mistakes for format args in a plain string literal — it is not.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 //! A declared budget is honoured by spilling, not by fitting.
@@ -21,9 +21,9 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+mod support;
 
 /// 5k people, 400k orders: the orders are what make the corpus too big for the
 /// budget (each is an `Order` vertex *and* an edge), while the people stay small
@@ -31,20 +31,29 @@ use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 const PEOPLE: u32 = 5_000;
 const ORDERS: u32 = 400_000;
 
+/// `{dir}` is the ONLY hole `run` substitutes: `{users.id}` and its siblings are
+/// Fossil interpolation and are left alone by a literal `replace("{dir}", …)`.
 const PROGRAM: &str = "\
-prefix ex: <https://example.org/>
+type { Person, Order } := io.shex(\"spill.shex\")
 
 users := io.csv(\"{dir}/users.csv\")
 orders := io.csv(\"{dir}/orders.csv\")
 
-Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 
-Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
+Order : Order from orders
+    @subject = \"https://example.org/order/{orders.order_id}\"
+    placedBy = \"https://example.org/person/{orders.user_id}\"
 ";
+
+/// The document the program names, and the descriptor the executor is given.
+/// `ex:placedBy @ex:Person` is what makes `placedBy` an edge — under
+/// `ACCEPT_ALL_DEFAULT` it degrades to a string column, the edge table
+/// disappears, and this test's premise ("one edge table to join and sort
+/// twice") goes with it silently.
+const SPILL_SHEX: &str = include_str!("fixtures/spill.shex");
 
 /// The budget, and why it is per-core rather than a round number.
 ///
@@ -103,19 +112,21 @@ fn a_ridiculous_budget_spills_and_writes_the_same_corpus() {
 
 /// One `run_to_dir` over `program` — local CSV sources, no RDF seam.
 fn run(program: &str, dest: &Path, memory_bytes: Option<u64>) {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, program.to_string(), "spill.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(program, "spill.fossil", &[("spill.shex", SPILL_SHEX)]);
+    let descriptor = fossil_df::OutputDescriptorKind::ShEx(
+        fossil_shex::ShExDescriptor::from_shex_source(SPILL_SHEX).expect("parse spill.shex"),
+    );
     fossil_df::run_to_dir(
         &db,
         file,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &descriptor,
         dest,
         &std::collections::HashMap::new(),
         |uri| Err(format!("no RDF source expected: {uri}")),
         memory_bytes,
     )
-    .expect("run_to_dir");
+    .unwrap_or_else(|e| panic!("run_to_dir: {e}; {:#?}", support::diagnostics(&db, file)));
 }
 
 /// `PEOPLE` people and `ORDERS` orders, each order pointing at a person — two

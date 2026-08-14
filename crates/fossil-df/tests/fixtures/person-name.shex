@@ -6,7 +6,7 @@
 # and every body writes it, so `check_required_properties` is satisfied.
 #
 # `xsd:string` is the one narrowing that is safe here: absent a CSVW schema on
-# the source, `.name` synthesises no type at all, so the constraint is never
+# the source, `users.name` synthesises no type at all, so the constraint is never
 # actually exercised — but the GraphAr column IS a string, and a document that
 # said otherwise would be lying about the corpus.
 PREFIX ex: <https://example.org/>

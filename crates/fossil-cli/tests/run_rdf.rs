@@ -76,20 +76,30 @@ const GRAPH_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "t
 ] }"#;
 
 // The single path: one destructuring `io.rdf` (read once) binding both members
-// `KB` and `Project` — each member's local-name is a shape in the schema, and
+// `KB` and `Project` — each member's position selects a shape in the schema, and
 // its rows are selected by `rdf:type`. NO `.smap`, no `select=`.
-const CPI_FOSSIL: &str = r#"prefix ex: <https://ex.org/>
+//
+// The document is named TWICE and neither naming is redundant. `io.rdf(schema =
+// …)` types the ROWS that come out of the graph; the `type { … }` binding above
+// it is what puts shape NAMES in scope, and a mapping header takes a name (`from
+// KB` is the relation, `: KBShape` is the shape). A destructuring source binds
+// relations only — spelling `KB : KB from KB` reports «`KB` is not a shape this
+// program declares». The two bindings are deliberately given different names for
+// that reason: one side is rows, the other is the contract they are written
+// against, and the vertex type is still `KB` because it comes from the shape's
+// own IRI (`https://ex.org/KB`), never from the local label.
+const CPI_FOSSIL: &str = r#"type { KBShape, ProjectShape } := io.shex("graph.shex")
 
 { KB, Project } := io.rdf("graph.ttl", schema = io.shex("graph.shex"))
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
-    ex:hasProject = .hasProject
+KBs : KBShape from KB
+    @subject = KB.subject
+    label = KB.label
+    hasProject = KB.hasProject
 
-Project : ex:Project from Project
-    iri = .subject
-    ex:title = .title
+Projects : ProjectShape from Project
+    @subject = Project.subject
+    title = Project.title
 "#;
 
 #[test]
@@ -209,18 +219,28 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
 // The `.fossil` for the @conn test: data AND schema are `@conn` references — the
 // data in `@data`, the ShEx in `@vocab` — proving every URI-valued argument
 // resolves uniformly through the connection map (not just the positional data).
-const CPI_FOSSIL_CONN: &str = r#"prefix ex: <https://ex.org/>
+//
+// The `type { … }` binding reads the SAME document by a program-relative path
+// (`vocab/graph.shex`), deliberately and not for want of trying: a `@conn`
+// reference in a TYPE BINDING resolves to nothing today —
+// `fossil check` answers «`KBShape` is declared and bound nothing: its document
+// `@vocab/graph.shex` could not be read (no document is registered at that
+// path)», and the run then fails in the reader with `No field named label`.
+// That is `fossil-engine`'s document registry, not this test's subject; what
+// this test is FOR is the `schema =` argument below, which is the reference a
+// regex over the data URI cannot see, and it goes through `@vocab`.
+const CPI_FOSSIL_CONN: &str = r#"type { KBShape, ProjectShape } := io.shex("vocab/graph.shex")
 
 { KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
-    ex:hasProject = .hasProject
+KBs : KBShape from KB
+    @subject = KB.subject
+    label = KB.label
+    hasProject = KB.hasProject
 
-Project : ex:Project from Project
-    iri = .subject
-    ex:title = .title
+Projects : ProjectShape from Project
+    @subject = Project.subject
+    title = Project.title
 "#;
 
 #[test]
@@ -339,16 +359,20 @@ const LEAF_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "ty
 
 // `Tag` is a property-less member (a leaf edge target) — a subset of the schema's
 // shapes is allowed; here both shapes are bound. One read-once `io.rdf`.
-const LEAF_FOSSIL: &str = r#"prefix ex: <https://ex.org/>
+//
+// `Tags` writes NOTHING but its identity, which is the fixture: `@subject` is a
+// required slot and the body below it may be empty, so a leaf type is spellable
+// at all. Its whole content is the subject the edge has to resolve against.
+const LEAF_FOSSIL: &str = r#"type { ItemShape, TagShape } := io.shex("graph.shex")
 
 { Item, Tag } := io.rdf("graph.ttl", schema = io.shex("graph.shex"))
 
-Item : ex:Item from Item
-    iri = .subject
-    ex:tag = .tag
+Items : ItemShape from Item
+    @subject = Item.subject
+    tag = Item.tag
 
-Tag : ex:Tag from Tag
-    iri = .subject
+Tags : TagShape from Tag
+    @subject = Tag.subject
 "#;
 
 #[test]

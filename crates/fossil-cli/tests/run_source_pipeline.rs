@@ -1,5 +1,7 @@
-// The embedded `.fossil` fixture uses template syntax (`${ex:}…/${.id}`) that
-// clippy mistakes for format args in a plain string literal — it is not.
+// The embedded `.fossil` programs carry `"…{users.id}"` interpolation holes —
+// LITERAL fossil source, which clippy mistakes for format args in a plain Rust
+// string literal. Same allow, same reason, as `fossil-engine`'s
+// `provider_registry.rs`.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 //! F5's done-when, through the binary: a source pipeline that compiles, types,
@@ -41,12 +43,26 @@ fn fossil_binary() -> &'static PathBuf {
     BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
 }
 
+/// The output contract both programs below name. `ex:city` is optional (`?`)
+/// because only the join program writes it — a required predicate the filter
+/// program never writes is a different failure, and not the one under test.
+const PERSON_SHEX: &str = "\
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:string ;
+  ex:city xsd:string ?
+}
+";
+
 /// Five people, three of them adults; three cities, two of which match a person
 /// (and one, `9`, matching nobody). So the answers are all different numbers:
 /// 5 rows in, 3 after the filter, 2 after the join, and `Eve` is the row the
 /// join drops but the filter keeps.
 fn workdir(name: &str, program: &str) -> PathBuf {
     let tmp = common::unique_workdir("fossil-cli-pipeline", name);
+    std::fs::write(tmp.join("person.shex"), PERSON_SHEX).expect("write person.shex");
     std::fs::write(
         tmp.join("users.csv"),
         "id,name,edad,persona_id\n1,Alice,30,1\n2,Bob,12,2\n3,Carol,45,3\n4,Dave,7,4\n5,Eve,18,5\n",
@@ -101,14 +117,14 @@ fn a_filtered_pipeline_writes_only_the_rows_that_pass() {
     let wd = workdir(
         "where",
         "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 
 users := io.csv(\"users.csv\")
-adultos := users |> where(.edad >= 18)
+adultos := users.where(users.edad >= 18)
 
-User : ex:Person from adultos
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
+User : Person from adultos
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
 ",
     );
     let dest = run(&wd);
@@ -122,26 +138,28 @@ User : ex:Person from adultos
     );
 }
 
-/// `join` reaches the corpus, and brings a column with it: `ex:city` reads
-/// `.ciudad`, which is not a column of `users` at all. Eve passes the filter and
-/// has no city, so the inner join drops her — the outer join that would keep her
-/// with a NULL is deliberately not in the first version, because it fabricates
-/// NULLs and no output shape can declare a nullable property yet.
+/// `join` reaches the corpus, and brings a column with it: `city` reads
+/// `ciudades.ciudad`, which is not a column of `users` at all — and the
+/// qualified name is what says so, where the old `.ciudad` named a column of an
+/// anonymous row and left which side it came from to be inferred. Eve passes the
+/// filter and has no city, so the inner join drops her — the outer join that
+/// would keep her with a NULL is deliberately not in the first version, because
+/// it fabricates NULLs and no output shape can declare a nullable property yet.
 #[test]
 fn a_joined_pipeline_writes_a_column_its_source_does_not_have() {
     let wd = workdir(
         "join",
         "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 
 users := io.csv(\"users.csv\")
 ciudades := io.csv(\"ciudades.csv\")
-localizados := users |> join(ciudades, on = .persona_id) |> where(.edad >= 18)
+localizados := users.join(ciudades, on = users.persona_id == ciudades.persona_id).where(users.edad >= 18)
 
-User : ex:Person from localizados
-    iri = `${ex:}user/${.id}`
-    ex:name = .name
-    ex:city = .ciudad
+User : Person from localizados
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
+    city = ciudades.ciudad
 ",
     );
     let dest = run(&wd);

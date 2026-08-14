@@ -28,7 +28,8 @@ use fossil_base::SourceAnchor;
 use crate::{read_source, render};
 
 /// The name the right side of a join carries its key under while the join is
-/// being built. A join identifies its key: `on = .k` is `USING (k)`, so the key
+/// being built. A join identifies its key: `on = users.k == teams.k` is
+/// `USING (k)`, so the key
 /// appears **once** in the result row and not twice, and DataFusion's join keeps
 /// both sides' keys — so the right one is renamed out of the way and dropped
 /// after the join. The `__fossil_` prefix is not a column any source can spell.
@@ -92,12 +93,14 @@ async fn build(
         // `where(.edad >= 18)`: the predicate is a MIR expression like any
         // other, so the render is the one every property already goes through.
         Op::Filter { input: i, pred } => input(*i)?.filter(render(pred)),
-        // `select(.a, .b)`: restrict the row to the named columns, in the order
-        // named. `new_unqualified` (NOT `col()`) for the same reason `render`
-        // uses it — a source column's case is the source's, not SQL's.
+        // `select(users.a, users.b)`: restrict the row to the named columns, in
+        // the order named. `new_unqualified` (NOT `col()`) for the same reason
+        // `render` uses it — a source column's case is the source's, not SQL's,
+        // and it is the same reason `Expr::ColRef` drops its `source` here: the
+        // join re-projects both sides to unqualified names before it runs.
         Op::Project { input: i, cols } => input(*i)?.select(
             cols.iter()
-                .map(|c| DfExpr::Column(Column::new_unqualified(c.as_str())))
+                .map(|c| DfExpr::Column(Column::new_unqualified(c.column.as_str())))
                 .collect::<Vec<_>>(),
         ),
         Op::Join {
@@ -187,8 +190,10 @@ fn join(
 /// The one key name a join condition names, or the error that says what
 /// arrived instead.
 ///
-/// The admitted form is `on = .k` ≡ `USING (k)`: `BinOp { Eq, ColRef, ColRef }`
-/// with the **same** column on both sides. A `ColRef`'s `source` is either the
+/// The admitted form is `on = users.k == teams.k` ≡ `USING (k)`:
+/// `BinOp { Eq, ColRef, ColRef }` with the **same** column on both sides. The
+/// surface spelling was a bare `on = .k` until ruling 17; the MIR form did not
+/// move, because the key name alone was always what reached here. A `ColRef`'s `source` is either the
 /// corresponding input's name or empty — today's lowering leaves it empty and
 /// lets the backend supply the relation (`lower_property_value`,
 /// CODEGEN-LOWERING-01) — and since the key name alone determines the SQL,
@@ -203,8 +208,8 @@ fn join_key(on: &Expr<'_>, left_name: &str, right_name: &str) -> datafusion::err
     } = on
     else {
         return Err(DataFusionError::Plan(format!(
-            "a join condition is an equality by name (`on = .k` ≡ `USING (k)`); this one \
-             is {}",
+            "a join condition is an equality by name (`on = a.k == b.k` ≡ `USING (k)`); this \
+             one is {}",
             expr_name(on)
         )));
     };
@@ -220,7 +225,7 @@ fn join_key(on: &Expr<'_>, left_name: &str, right_name: &str) -> datafusion::err
     ) = (lhs.as_ref(), rhs.as_ref())
     else {
         return Err(DataFusionError::Plan(format!(
-            "a join condition equates two column references (`on = .k`); this one \
+            "a join condition equates two column references (`on = a.k == b.k`); this one \
              equates {} and {}",
             expr_name(lhs),
             expr_name(rhs)
@@ -228,7 +233,7 @@ fn join_key(on: &Expr<'_>, left_name: &str, right_name: &str) -> datafusion::err
     };
     if lc != rc {
         return Err(DataFusionError::Plan(format!(
-            "a join key is one name on both sides (`on = .k` ≡ `USING (k)`); this one names \
+            "a join key is one name on both sides (`on = a.k == b.k` ≡ `USING (k)`); this one names \
              `{lc}` and `{rc}`. Two keys with different names are an extension this engine \
              does not build"
         )));

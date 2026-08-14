@@ -75,13 +75,18 @@ pub enum HirSourceOp {
     /// `where(User.age >= 18)` — keeps the rows the predicate holds for. The row
     /// type is unchanged, which is why it is the cheap one.
     Where(HirExpr),
-    /// `select(User.id, User.name)` — restricts the row to the named columns.
+    /// `select(User.id, User.name)` — restricts the row to the named columns,
+    /// each under the binding that owns it.
     ///
-    /// The qualification is read and then DROPPED: the payload is the column
-    /// half. That is not a decision, it is the shape this variant already had,
-    /// and it is the one place in the source algebra where a qualified
-    /// reference still loses its binding.
-    Select(Vec<SmolStr>),
+    /// The qualification used to be read and then DROPPED — the payload was the
+    /// column half alone — so a name was looked for in the rows in order and
+    /// taken from the first that had it, and after a join `select(id)` meant
+    /// «the left side's id» for a reason the author never wrote. Open question 4
+    /// of `grammar.bnf, § OPEN` was decided on 2026-08-14 the way the surface
+    /// already read: `select` MAY follow a `join`, and it names a QUALIFIED
+    /// column. So the binding travels with the column and the ambiguity has
+    /// nowhere left to live.
+    Select(Vec<SelectedColumn>),
     /// `join(User, on = Purchase.user_id == User.id)` — an inner join whose
     /// condition is a PREDICATE (ruling 17 of `SURFACE-PLAN.md`).
     ///
@@ -99,6 +104,22 @@ pub enum HirSourceOp {
         alias: Option<SmolStr>,
         on: HirExpr,
     },
+}
+
+/// One column a [`HirSourceOp::Select`] keeps, under the binding that owns it.
+///
+/// A named struct and not a `(SmolStr, SmolStr)`: the two halves are the two
+/// halves of [`HirExpr::ColumnRef`], which spells them `binding` and `column`,
+/// and the four places that read this pair read them by those names. A tuple
+/// would spell the same pair `.0` and `.1` at every one of them, and the pair
+/// is exactly the kind whose order nobody can recover from the site.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct SelectedColumn {
+    /// The binding whose row the column belongs to — `Employee` in
+    /// `Active.select(Employee.id)`.
+    pub binding: SmolStr,
+    /// The column itself — `id`.
+    pub column: SmolStr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -1040,7 +1061,7 @@ fn lower_source_stage(
             }
             let mut cols = Vec::with_capacity(positional.len());
             for arg in &positional {
-                let Some(HirExpr::ColumnRef { column, .. }) = lower_expr_inner(db, arg, types)
+                let Some(HirExpr::ColumnRef { binding, column }) = lower_expr_inner(db, arg, types)
                 else {
                     diagnose(
                         db,
@@ -1052,7 +1073,7 @@ fn lower_source_stage(
                     );
                     return None;
                 };
-                cols.push(column);
+                cols.push(SelectedColumn { binding, column });
             }
             Some(HirSourceOp::Select(cols))
         }
@@ -1347,7 +1368,7 @@ fn lower_mapping_node<'db>(
 ///
 /// Two situations, and `DefMap::lookup_type` returns `None` for both:
 ///
-/// 1. **Nobody bound the name.** A typo, or a `type { … } = io.shex(…)` line
+/// 1. **Nobody bound the name.** A typo, or a `type { … } := io.shex(…)` line
 ///    that was never written.
 /// 2. **The binding is there and it FAILED.** `type { Person } =
 ///    io.shex("shop.shex")` with no such document, an unreadable one, one no
@@ -1376,7 +1397,7 @@ fn unbound_shape_message(
         return match err {
             ShapeBindError::NoSchema => format!(
                 "`{shape_name}` is declared and bound nothing: its `type` binding names \
-                 no document. Give it one — `type {{ {shape_name} }} = io.shex(\"shop.shex\")`."
+                 no document. Give it one — `type {{ {shape_name} }} := io.shex(\"shop.shex\")`."
             ),
             ShapeBindError::Unreadable { path, cause } => format!(
                 "`{shape_name}` is declared and bound nothing: its document `{path}` \
@@ -1399,7 +1420,7 @@ fn unbound_shape_message(
     // list what the table does hold.
     let declared: Vec<&str> = dm.types(db).iter().map(|t| t.name.as_str()).collect();
     let known = if declared.is_empty() {
-        "this program declares no `type { … } = io.shex(…)` binding, so it has no \
+        "this program declares no `type { … } := io.shex(…)` binding, so it has no \
          shape names at all"
             .to_string()
     } else {
@@ -3096,9 +3117,15 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
         let [HirSourceOp::Select(cols)] = pipes[1].ops.as_slice() else {
             panic!("expected one Select, got {:?}", pipes[1].ops);
         };
+        // The BINDING survives the lowering. `select` names a qualified column
+        // (open question 4, decided 2026-08-14), and the refusal above it has
+        // always insisted on one — this is the assertion that the insistence
+        // buys something.
         assert_eq!(
-            cols.iter().map(SmolStr::as_str).collect::<Vec<_>>(),
-            ["id", "name"]
+            cols.iter()
+                .map(|c| (c.binding.as_str(), c.column.as_str()))
+                .collect::<Vec<_>>(),
+            [("User", "id"), ("User", "name")]
         );
 
         assert_eq!(pipes[2].base.as_str(), "Adults");

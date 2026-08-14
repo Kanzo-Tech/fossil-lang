@@ -27,5 +27,5 @@ pub mod schema;
 // (`fossil_mir::lower::lower_to_mir_pg`) to avoid name shadowing with modules.
 pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
-pub use op::{AggFn, AggSpec, Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
+pub use op::{AggFn, AggSpec, Expr, JoinKind, Op, ProjectedColumn, SinkRef, SourceFormat, VProp};
 pub use schema::{free_cols, schema_of};

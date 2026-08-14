@@ -22,7 +22,7 @@ use fossil_base::{FossilDb, NativeSystem, System};
 use fossil_graph_schema::Primitive;
 use fossil_hir::ty::{Record, RecordField};
 use fossil_hir::{BinOp, Ty, TyKind};
-use fossil_mir::{Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
+use fossil_mir::{Expr, JoinKind, Op, ProjectedColumn, SinkRef, SourceFormat, VProp};
 
 /// The anchor these op-list tests resolve their sources against.
 ///
@@ -74,7 +74,8 @@ fn col(source: &str, column: &str) -> Expr<'static> {
     }
 }
 
-/// The `on = .k` condition this engine admits — one key name on both sides,
+/// The `on = left.k == right.k` condition this engine admits — one key name on
+/// both sides,
 /// `USING (k)` — spelled as the lowering will spell it:
 /// `BinOp { Eq, ColRef(left.k), ColRef(right.k) }`.
 fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str) -> Expr<'db> {
@@ -151,7 +152,7 @@ async fn a_filter_keeps_the_rows_its_predicate_admits() {
     assert_eq!(strings(&batch, 1), ["Bob", "Carol"]);
 }
 
-/// `select(.name)` restricts the row to the columns it names, in that order.
+/// `select(users.name)` restricts the row to the columns it names, in that order.
 #[tokio::test]
 async fn a_projection_restricts_the_row_to_the_columns_it_names() {
     let db = db();
@@ -159,7 +160,10 @@ async fn a_projection_restricts_the_row_to_the_columns_it_names() {
         source(&db, "users.csv", "users", &["id", "name"]),
         Op::Project {
             input: 0,
-            cols: vec![SmolStr::new_static("name")],
+            cols: vec![ProjectedColumn {
+                source: SmolStr::new_static("users"),
+                column: SmolStr::new_static("name"),
+            }],
         },
     ];
 
@@ -173,7 +177,8 @@ async fn a_projection_restricts_the_row_to_the_columns_it_names() {
     assert_eq!(strings(&batch, 0), ["Alice", "Bob", "Carol"]);
 }
 
-/// `join(teams, on = .id)` is `USING (id)`: the key is in the result once, the
+/// `join(teams, on = users.id == teams.id)` is `USING (id)`: the key is in the
+/// result once, the
 /// two rows compose, and a row with no partner on either side is not there.
 #[tokio::test]
 async fn an_inner_join_composes_the_rows_and_names_the_key_once() {
@@ -238,7 +243,16 @@ async fn the_three_operators_compose_in_one_chain() {
         },
         Op::Project {
             input: 3,
-            cols: vec![SmolStr::new_static("name"), SmolStr::new_static("team")],
+            cols: vec![
+                ProjectedColumn {
+                    source: SmolStr::new_static("users"),
+                    column: SmolStr::new_static("name"),
+                },
+                ProjectedColumn {
+                    source: SmolStr::new_static("teams"),
+                    column: SmolStr::new_static("team"),
+                },
+            ],
         },
     ];
 
@@ -425,7 +439,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
         let ctx = SessionContext::new();
         let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
             .await
-            .expect_err("only `on = .k` is admitted")
+            .expect_err("only `on = a.k == b.k` is admitted")
             .to_string();
         assert!(
             err.contains(expected),
@@ -434,7 +448,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
     }
 }
 
-/// `a.join(a, on = .k)` collides on every column but the key — a join
+/// `a.join(a as b, on = a.k == b.k)` collides on every column but the key — a join
 /// identifies the key and nothing else, so any other shared name is an error
 /// rather than a shadowing — and it never reaches a plan. The checker is meant
 /// to catch it; the backend

@@ -210,7 +210,7 @@ fn surface_target_shape_error<'db>(
     let message = match e {
         TargetShapeError::NoDocument => "this program names no shape document, so it cannot \
              write a property: a property key is the last segment of a predicate IRI that a \
-             shape declares. Bring one in with `type { … } = io.shex(\"shop.shex\")`."
+             shape declares. Bring one in with `type { … } := io.shex(\"shop.shex\")`."
             .to_string(),
         TargetShapeError::Unregistered { document } => format!(
             "the shape document `{document}` is not there, so this mapping's \
@@ -274,10 +274,22 @@ fn surface_target_shape_error<'db>(
 /// second and the shape fourth, so a call site could swap the shape and the
 /// `from` clause and still compile, still parse, and still pass a test that
 /// only counted mappings. One did, in this commit, before this reorder.
+///
+/// # Every argument is SOURCE TEXT, and three of them were not
+///
+/// The header names a bound shape NAME — the word a `type { … } := io.shex(…)`
+/// binding introduced — and never an IRI; the subject is a real `@subject`
+/// right-hand side; a property's value is a QUALIFIED reference. All three were
+/// written in the retired surface here, and each one alone made the emitted
+/// mapping unparseable or silently short a property. `render_split_suggestion`
+/// cannot check any of them — it is a formatter over strings — so what enforces
+/// it is that its one production call site,
+/// `Checker::surface_shape_lowering_errors`, reads all four out of the mapping
+/// it is splitting rather than inventing them.
 #[must_use]
 pub fn render_split_suggestion(
     base_mapping_name: &str,
-    base_shape_iri: &str,
+    base_shape_name: &str,
     base_from_clause: &str,
     base_iri_template: &str,
     disjuncts: &[Vec<String>],
@@ -290,7 +302,7 @@ pub fn render_split_suggestion(
         // `write!` into a `String` is infallible.
         let _ = write!(
             out,
-            "{base_mapping_name}{idx} : {base_shape_iri} from {base_from_clause}\n    @subject = {base_iri_template}\n",
+            "{base_mapping_name}{idx} : {base_shape_name} from {base_from_clause}\n    @subject = {base_iri_template}\n",
         );
         if branch.is_empty() {
             // A branch whose predicates the decoder could not name — a nested
@@ -300,7 +312,15 @@ pub fn render_split_suggestion(
         }
         for predicate in branch {
             let short = local_name(predicate);
-            let _ = writeln!(out, "    {short} = .{short}");
+            // `{base_from_clause}.{short}`, and the qualifier is the whole
+            // repair. It was `.{short}` — the retired `FieldRef`, a leading dot
+            // naming a column of an anonymous current row. The parser refuses
+            // it, so the property never lowered and the mapping this function
+            // emitted came back with ONE property where it had written two: the
+            // compiler emitting source it cannot read back. A reference is
+            // qualified now, and the row it qualifies against is the binding the
+            // `from` clause names.
+            let _ = writeln!(out, "    {short} = {base_from_clause}.{short}");
         }
         out.push('\n');
     }
@@ -1526,10 +1546,6 @@ impl<'db> Checker<'db> {
     /// split suggestion) as diagnostics on this mapping. The disjunction one is
     /// informational — it does NOT error the mapping out, because the body may
     /// still check the parts that DID lower.
-    // `literal_string_with_formatting_args`: the placeholder Fossil IRI
-    // template (`${ex:}item/${.id}`) passed to the suggestion renderer is
-    // LITERAL Fossil source, not a Rust format string.
-    #[allow(clippy::literal_string_with_formatting_args)]
     fn surface_shape_lowering_errors(&mut self) {
         let Some(shape) = self.resolved_shape.as_ref() else {
             return;
@@ -1541,6 +1557,19 @@ impl<'db> Checker<'db> {
         let rejections = shape.rejections.clone();
         let base_name = self.mapping_name();
         let source_name = self.source_binding_name();
+        // The header names a bound shape NAME, not an IRI. This argument was
+        // the `Rejection`'s `shape_iri`, so the suggestion emitted
+        // `Contact1 : http://example.org/Contact from users` — a header the
+        // parser refuses outright.
+        let shape_name = self.target_type_name();
+        // …and the identity is the one this mapping already declares. It was
+        // the placeholder `` `${ex:}item/${.id}` ``: a backtick template with
+        // `${…}` holes and a leading-dot reference, three retired spellings in
+        // one argument, none of which parse. A split is a rewrite of ONE
+        // mapping into N, so every branch keeps that mapping's identity — the
+        // placeholder was never the right answer either, only a less visible
+        // wrong one.
+        let subject = self.subject_source_text();
         for rejection in &rejections {
             match rejection {
                 Rejection::Disjunction {
@@ -1549,7 +1578,7 @@ impl<'db> Checker<'db> {
                 } => {
                     let suggestion = render_split_suggestion(
                         base_name.as_str(),
-                        shape_iri,
+                        shape_name.as_str(),
                         // The `from` clause is the SOURCE BINDING, not the
                         // mapping. This argument was `base_name` — the mapping's
                         // own name — so the suggestion emitted
@@ -1561,12 +1590,7 @@ impl<'db> Checker<'db> {
                         // adjacent and did not stop them being the same string.
                         // No test saw it: the corpus passed `"users"` by hand.
                         source_name.as_str(),
-                        // Phase 3 v0.1 has no structured access to the consuming
-                        // mapping's iri-template / from-clause text here; pass
-                        // placeholders the renderer fills with the branch
-                        // predicates. (The corpus test in plan 03-08 pins the
-                        // exact rendered text.)
-                        "`${ex:}item/${.id}`",
+                        subject.as_str(),
                         disjuncts,
                     );
                     let n = disjuncts.len();
@@ -1625,6 +1649,47 @@ impl<'db> Checker<'db> {
             .mappings(self.db)
             .get(self.mapping.index(self.db))
             .map_or_else(|| SmolStr::from(""), |m| m.source_binding.clone())
+    }
+
+    /// This mapping's `@subject` right-hand side, VERBATIM — the source text a
+    /// generated rewrite of this mapping has to carry through.
+    ///
+    /// Read off the CST and not off [`crate::body::HirBody`], because the HIR
+    /// is not printable: `HirExpr::Interpolation` holds lowered parts and
+    /// rendering them back would be a second, unproven spelling of the surface.
+    /// The text is the surface.
+    ///
+    /// It reads [`mapping_cst_node`] — the per-mapping invalidation barrier this
+    /// file already goes through for [`mapping_header_span`] — and NEVER
+    /// `parse(db, file)`, which is the whole-file read the barrier exists to
+    /// keep out of the compile path.
+    ///
+    /// A mapping with no `@subject` cannot reach here: the identity is required,
+    /// exactly one, and first (`crate::body::check_identity`). The fallback is a
+    /// constant IRI, which is a legal identity — a suggestion is worth nothing
+    /// if it cannot be pasted, and a missing right-hand side would emit
+    /// `@subject = ` and take the parser down with it.
+    fn subject_source_text(&self) -> String {
+        use fossil_syntax::SyntaxKind;
+
+        crate::body::mapping_cst_node(self.db, self.mapping)
+            .syntax()
+            .and_then(|node| {
+                node.children()
+                    .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::PROPERTY)
+                    .find(|p| {
+                        p.descendants_with_tokens()
+                            .filter_map(fossil_syntax::SyntaxElement::into_token)
+                            .any(|t| t.kind() == SyntaxKind::AT_ATTR && t.text() == "@subject")
+                    })?
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::EXPR)
+                    .map(|e| e.text().to_string().trim().to_string())
+            })
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "\"https://example.org/item\"".to_string())
     }
 
     /// The LOCAL name of the type this mapping targets — `Person`, the word a

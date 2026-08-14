@@ -501,39 +501,56 @@ fn apply_source_op<'db>(
         }
         // `select` restricts, and it restricts EACH ROW: `Employee.id` stays a
         // column of `Employee` after `Active.select(Employee.id, …)`, because
-        // the binding is what a body writes. The payload has lost its
-        // qualification (`HirSourceOp::Select` carries column names only), so a
-        // name is looked for in the rows in order and taken from the first that
-        // has it — which is the one place a qualified reference still cannot be
-        // told apart from a bare one, and `select` over a join is left open for
-        // that reason.
+        // the binding is what a body writes. The payload CARRIES the binding
+        // (`HirSourceOp::Select` holds `SelectedColumn`s since open question 4
+        // was decided on 2026-08-14), so the row is chosen by the name the
+        // author wrote and the column is looked for in that row alone.
+        //
+        // It used to look a bare name up in the rows in order and take the
+        // first that had it. After a join that made `select(id)` mean «the left
+        // side's id» for a reason nobody wrote, and it was the one place a
+        // qualified reference could not be told apart from a bare one. There
+        // are therefore two refusals here and not one: an unknown BINDING and
+        // an unknown COLUMN of a known binding are different mistakes, and a
+        // single "its input does not have it" cannot say which.
         HirSourceOp::Select(cols) => {
             let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> =
                 scope.bindings().map(|b| (b.clone(), Vec::new())).collect();
             for col in cols {
-                let mut found = false;
-                for (binding, out) in &mut kept {
-                    if let Some(f) = scope
-                        .fields_of(db, binding)
-                        .and_then(|fs| fs.into_iter().find(|f| &f.name == col))
-                    {
-                        out.push(f);
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
+                let (binding, column) = (&col.binding, &col.column);
+                let Some((_, out)) = kept.iter_mut().find(|(b, _)| b == binding) else {
                     return Err(pipe_error(
                         db,
                         pipe,
                         format!(
-                            "`select` in `{}` names `.{col}`, which its input does not have. \
-                             It has: {}",
+                            "`select` in `{}` names `{binding}.{column}`, and `{}` carries no row \
+                             called `{binding}`. It draws on: {}",
                             pipe.name,
-                            column_list(&fields),
+                            pipe.name,
+                            scope
+                                .bindings()
+                                .map(|b| format!("`{b}`"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
                         ),
                     ));
-                }
+                };
+                let Some(f) = scope
+                    .fields_of(db, binding)
+                    .and_then(|fs| fs.into_iter().find(|f| &f.name == column))
+                else {
+                    return Err(pipe_error(
+                        db,
+                        pipe,
+                        format!(
+                            "`select` in `{}` names `{binding}.{column}`, which `{binding}` does \
+                             not have. It has: {}",
+                            pipe.name,
+                            column_list(&scope.fields_of(db, binding).unwrap_or_default()),
+                        ),
+                    ));
+                };
+                out.push(f);
             }
             Ok(RowScope {
                 rows: kept

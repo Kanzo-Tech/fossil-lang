@@ -57,7 +57,15 @@ pub enum Op<'db> {
 
     /// `ProjectOp(input, cols)` — restrict the row to the selected columns
     /// (operator-algebra.md §2.2).
-    Project { input: usize, cols: Vec<SmolStr> },
+    ///
+    /// Each column names the relation it belongs to, because after a
+    /// [`Op::Join`] a bare name does not identify one: two sides may both carry
+    /// `id`, and which one `select(id)` meant was decided by the order the two
+    /// were joined in. See [`ProjectedColumn`].
+    Project {
+        input: usize,
+        cols: Vec<ProjectedColumn>,
+    },
 
     /// `ExtendOp(input, field, expr)` — add a computed field whose type is the
     /// expression's type (operator-algebra.md §2.3). `input` indexes into
@@ -156,6 +164,23 @@ pub enum Op<'db> {
     /// about; a variant of its own is self-documenting and keeps `schema_of`
     /// total.
     Empty { schema: Vec<SmolStr> },
+}
+
+/// One column an [`Op::Project`] keeps, under the relation that owns it —
+/// `source` and `column`, the same pair [`Expr::ColRef`] carries and spelled the
+/// same way, because it is the same pair.
+///
+/// It was a bare [`SmolStr`]. `HirSourceOp::Select` had lost the qualification
+/// before the lowering ever saw it, so there was nothing to carry; open question
+/// 4 of `grammar.bnf, § OPEN` was decided on 2026-08-14 (`select` may follow a
+/// `join` and names a QUALIFIED column) and the binding now reaches here.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct ProjectedColumn {
+    /// The relation the column belongs to — `Employee` in
+    /// `Active.select(Employee.id)`.
+    pub source: SmolStr,
+    /// The column itself — `id`.
+    pub column: SmolStr,
 }
 
 /// Relational join flavour (operator-algebra.md §2.6).

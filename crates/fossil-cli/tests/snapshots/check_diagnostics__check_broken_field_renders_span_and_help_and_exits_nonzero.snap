@@ -2,37 +2,14 @@
 source: crates/fossil-cli/tests/check_diagnostics.rs
 expression: normalised
 ---
-Error:   × type-checking failed: 3 error(s)
+Error:   × type-checking failed: 1 error(s)
 
 Error: 
-  × D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is
-  │ deprecated; types will be inferred from the file directly. Remove the
-  │ `schema = "..."` argument.
-   ╭─[<FIXTURE>/mapping.fossil:1:1]
- 1 │ prefix ex: <https://example.org/>
-   · ▲
-   · ╰── here
- 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
-   ╰────
-
-Error: 
-  × this program names no shape document, so it cannot write a property: a
-  │ property key is the last segment of a predicate IRI that a shape declares.
-  │ Bring one in with `type { … } = io.shex("shop.shex")`.
-   ╭─[<FIXTURE>/mapping.fossil:3:1]
- 2 │ users := io.csv("users.csv", schema = "descriptor.csvw.json")
- 3 │ User : ex:Person from users
-   · ▲
-   · ╰── here
- 4 │     @subject = `${ex:}user/${.id}`
-   ╰────
-
-Error: 
-  × unknown column `naem` — did you mean `name`?
-   ╭─[<FIXTURE>/mapping.fossil:5:12]
- 4 │     @subject = `${ex:}user/${.id}`
- 5 │     name = .naem
-   ·            ──┬──
-   ·              ╰── here
+  × unknown column `naem` on `users` — did you mean `name`?
+   ╭─[<FIXTURE>/mapping.fossil:6:12]
+ 5 │     @subject = "https://example.org/u/{users.id}"
+ 6 │     name = users.naem
+   ·            ─────┬────
+   ·                 ╰── here
    ╰────
   help: did you mean `name`?

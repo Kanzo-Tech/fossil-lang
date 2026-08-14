@@ -3,46 +3,56 @@
 //! reads back with the rows the executor produced.
 
 #![cfg(not(target_arch = "wasm32"))]
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use std::fs;
-use std::sync::Arc;
 
 use datafusion::prelude::SessionContext;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
+mod support;
+
 const PROGRAM: &str = "\
-prefix ex: <https://example.org/>
+type { Person, Order } := io.shex(\"graph.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 orders := io.csv(\"tests/fixtures/orders.csv\")
 
-Person : ex:Person from users
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 
-Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
-    ex:total = .amount
+Order : Order from orders
+    @subject = \"https://example.org/order/{orders.order_id}\"
+    placedBy = \"https://example.org/person/{orders.user_id}\"
+    total = orders.amount
 ";
+
+/// The document the program names — shared with `execute_graph.rs`, and the
+/// same text goes to the executor as the descriptor. `ex:placedBy @ex:Person`
+/// is what makes `placedBy` an edge; under `ACCEPT_ALL_DEFAULT` it degrades to
+/// a string column and the whole `edge/` half of the tree asserted below
+/// silently stops existing.
+const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
 
 #[tokio::test]
 async fn write_to_dir_lays_out_the_graphar_tree() {
-    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-    let db = FossilDb::new(system);
-    let file = SourceFile::new(&db, PROGRAM.to_string(), "graph.fossil".to_string());
+    let (db, file) =
+        support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
+    let descriptor = fossil_df::OutputDescriptorKind::ShEx(
+        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX).expect("parse graph.shex"),
+    );
 
     let ctx = SessionContext::new();
     let graph = fossil_df::execute_graph(
         &ctx,
         &db,
         file,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+        &descriptor,
         &std::collections::HashMap::new(),
     )
     .await
-    .expect("execute_graph");
+    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     let dir = tempfile::tempdir().expect("tempdir");
     graph.write_to_dir(dir.path()).expect("write_to_dir");

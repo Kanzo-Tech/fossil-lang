@@ -1,5 +1,7 @@
-// The embedded `.fossil` fixtures use template syntax (`${ex:}…/${.id}`) that
-// clippy mistakes for format args in a plain string literal — they are not.
+// The embedded `.fossil` fixture carries `"…{people.id}"` interpolation holes —
+// LITERAL fossil source, which clippy mistakes for format args in a plain Rust
+// string literal. Same allow, same reason, as `fossil-engine`'s
+// `provider_registry.rs`.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 //! `fossil run --dest <url>` W0b path integration test.
@@ -110,8 +112,9 @@ fn assert_vertex_tiles(dest: &Path, vtype: &str) -> String {
 
 /// Acceptance: the W0b path produces `GraphAr` Parquet + YAML manifests
 /// under --dest, with the W0b vertex column shape declared in the
-/// vertex.yml manifest. The vertex type `Person` is derived from the mapping's
-/// shape IRI (`ex:Person`) — no `--shape` needed.
+/// vertex.yml manifest. The vertex type `Person` is derived from the IRI of the
+/// shape its header names (`https://example.org/Person`, declared in
+/// `hello.shex`) — no `--shape` flag needed.
 #[test]
 fn run_w0b_writes_graph_ar_under_dest() {
     let bin = fossil_binary();
@@ -259,34 +262,58 @@ fn workdir_with_files(test_name: &str, files: &[(&str, &str)]) -> PathBuf {
     tmp
 }
 
-/// Slice 8 end-to-end: a TWO-mapping program with NO `--shape`. The synthesised
-/// (`AcceptAll`) descriptor must (a) materialise BOTH vertex types and (b) turn
-/// `Order.ex:placedBy = ${ex:}person/${.user_id}` into a cross-type edge to the
-/// `Person` mapping (same subject-template skeleton `${ex:}person/${.id}`), whose
-/// CSR Parquet joins the order subjects to the person subjects. Proves Phase B
-/// edge synthesis (8a) + multi-mapping merge/materialisation (8b) on real `DuckDB`.
+/// Slice 8 end-to-end: a TWO-mapping program with no `--shape` FLAG — the output
+/// descriptor is program-resident, read from the `type { … } := io.shex(…)`
+/// binding the program names. It must (a) materialise BOTH vertex types and (b)
+/// turn `placedBy = Person(orders.user_id)` into a cross-type edge to the
+/// `Person` mapping, whose CSR Parquet joins the order subjects to the person
+/// subjects. Proves Phase B edge synthesis (8a) + multi-mapping
+/// merge/materialisation (8b) on real `DuckDB`.
+///
+/// **The edge is now a CALL, and both halves of that moved.** It used to be
+/// GUESSED: `ex:placedBy = ${ex:}person/${.user_id}` was matched against every
+/// mapping's subject template by SKELETON — every per-row hole blanked to a
+/// `\u{1}` marker — and a match made it a foreign key. `Person(orders.user_id)`
+/// says it instead: the destination type applied to an expression, resolved
+/// through the one identity template that type has. The `.shex` below is the
+/// other half — `ex:placedBy @ex:Person` is what classifies the predicate as an
+/// edge rather than a property, and `ex:amount` beside it stays a column.
 #[test]
 fn run_no_shape_writes_cross_type_edge_from_two_mappings() {
     let bin = fossil_binary();
     let program = "\
-prefix ex: <https://example.org/>
+type { Person, Order } := io.shex(\"prog.shex\")
 
 people := io.csv(\"people.csv\")
 orders := io.csv(\"orders.csv\")
 
-Person : ex:Person from people
-    iri = `${ex:}person/${.id}`
-    ex:name = .name
+People : Person from people
+    @subject = \"https://example.org/person/{people.id}\"
+    name = people.name
 
-Order : ex:Order from orders
-    iri = `${ex:}order/${.order_id}`
-    ex:placedBy = `${ex:}person/${.user_id}`
-    ex:amount = .amount
+Orders : Order from orders
+    @subject = \"https://example.org/order/{orders.order_id}\"
+    placedBy = Person(orders.user_id)
+    amount = orders.amount
+";
+    let shex = "\
+PREFIX ex: <https://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:string
+}
+
+ex:Order {
+  ex:placedBy @ex:Person ;
+  ex:amount   .
+}
 ";
     let workdir = workdir_with_files(
         "cross-type-edge",
         &[
             ("prog.fossil", program),
+            ("prog.shex", shex),
             ("people.csv", "id,name\n1,Ada\n2,Linus\n3,Grace\n"),
             (
                 "orders.csv",

@@ -11,14 +11,13 @@ use datafusion::prelude::SessionContext;
 mod support;
 
 const JSON_PROGRAM: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"person.shex\")
+type { Person } := io.shex(\"person.shex\")
 
 users := io.json(\"tests/fixtures/users.json\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    name = .name
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
 ";
 
 const PERSON_SHEX: &str = include_str!("fixtures/person-name.shex");

@@ -12,8 +12,8 @@ disjunction rejection: 2 branches in shape `http://example.org/Contact`
   suggestion:
     Contact1 : Contact from users
         @subject = "https://example.org/u/{users.id}"
-        email = .email
+        email = users.email
     
     Contact2 : Contact from users
         @subject = "https://example.org/u/{users.id}"
-        phone = .phone
+        phone = users.phone

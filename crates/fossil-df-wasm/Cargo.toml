@@ -30,6 +30,13 @@ fossil-base = { path = "../fossil-base" }
 # The program-resident output descriptor: ShEx text → OutputDescriptorKind,
 # threaded into execute_graph (drives edge/cardinality classification).
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# `def_map` — the one question this host asks the compiler before it runs
+# anything: which document does `type { … } := io.shex("…")` name? It has to
+# know, because that is the key the checker will look the schema up under. It is
+# already in the graph through `fossil-df`; naming it is what makes the call
+# legal. NOT `fossil-ide`: sharing that crate's twin of this loop is the
+# arrangement `fossil-lineage` exists to prevent.
+fossil-hir = { path = "../fossil-hir" }
 # The `ShEx` AST behind that descriptor, named directly:
 # `fossil-descriptors-output` stopped re-exporting it. This host is one of the
 # consumers that genuinely wants the parse — it lowers the schema blob the

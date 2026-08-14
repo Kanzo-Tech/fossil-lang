@@ -557,9 +557,18 @@ fn lower_source_chain<'db>(
                     pred,
                 });
             }
+            // The binding travels with the column. `select` names a QUALIFIED
+            // column (open question 4, decided 2026-08-14), and after a join
+            // that is the only thing that says which side `id` came from.
             HirSourceOp::Select(cols) => ops.push(Op::Project {
                 input: chain.last,
-                cols: cols.clone(),
+                cols: cols
+                    .iter()
+                    .map(|c| crate::op::ProjectedColumn {
+                        source: c.binding.clone(),
+                        column: c.column.clone(),
+                    })
+                    .collect(),
             }),
             HirSourceOp::Join { right, alias, on } => {
                 let right_chain = lower_source_chain(db, dm, file, right, span, ops, depth + 1)?;

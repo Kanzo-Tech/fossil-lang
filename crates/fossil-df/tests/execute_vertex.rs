@@ -8,7 +8,7 @@
 //! como `tests/fixtures/users.csv` (relativa a `crates/fossil-df`).
 
 #![cfg(not(target_arch = "wasm32"))]
-// `${ex:}user/${.id}` is Fossil template syntax, not a Rust format arg.
+// `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray, UInt32Array};
@@ -18,14 +18,13 @@ use fossil_hir::def_map::def_map;
 mod support;
 
 const HELLO: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"hello.shex\")
+type { Person } := io.shex(\"hello.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    name = .name
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
 ";
 
 /// The document `hello.fossil` names. `name` — the bare key the body writes —

@@ -17,7 +17,7 @@
 //! # The document the program names
 //!
 //! [`resolve_target_shape`] reads the shape document the PROGRAM brings in with
-//! `type { … } = io.shex("…")`. It used to take the descriptor as a borrowed
+//! `type { … } := io.shex("…")`. It used to take the descriptor as a borrowed
 //! ARGUMENT threaded in by the host; the in-query caller had nothing to thread
 //! and passed `ACCEPT_ALL_DEFAULT`, so backward checking was off for every
 //! program compiled through the checker — an axis with exactly one value.

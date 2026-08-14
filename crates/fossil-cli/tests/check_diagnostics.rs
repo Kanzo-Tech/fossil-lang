@@ -1,7 +1,7 @@
 //! `fossil check` golden-output test (CLI-02 / SC#1).
 //!
-//! Invokes the `fossil` binary on a deliberately-broken fixture — a `.naem`
-//! field typo against a CSVW-described source whose columns are `id`/`name`,
+//! Invokes the `fossil` binary on a deliberately-broken fixture — a
+//! `users.naem` column typo against a source whose header is `id,name,age`,
 //! which triggers the Phase-3 did-you-mean diagnostic — captures stderr, strips
 //! ANSI color codes for a stable snapshot, and asserts:
 //!   1. the process exits non-zero (an error diagnostic was accumulated);
@@ -87,10 +87,9 @@ fn check_broken_field_renders_span_and_help_and_exits_nonzero() {
     let output = Command::new(bin)
         .args(["check", fixture.to_str().expect("utf8 fixture path")])
         .env("NO_COLOR", "1")
-        // Silence tracing. The fixture names a `users.csv` that does not exist,
-        // so pre-introspection logs a WARN to stderr — and the snapshot below is
-        // of stderr. Its timestamp made this test unpassable: every run produced
-        // a line the golden file could never match.
+        // Silence tracing. Every log line goes to stderr, and the snapshot below
+        // is OF stderr — a timestamped line made this test unpassable, because
+        // every run produced text the golden file could never match.
         .env("RUST_LOG", "off")
         .output()
         .expect("spawn fossil check");
@@ -235,26 +234,35 @@ fn check_unparseable_file_exits_nonzero_and_reports_the_parse_error() {
 /// The double-report guard. `def_map` sits in EVERY mapping's dependency
 /// subtree, so draining it alongside the per-mapping loop would publish each
 /// parse error twice. One mapping, one parse error, one line about it.
+///
+/// The break is a property written without its `=`. It is chosen because it is
+/// the only thing wrong with the file and the parser recovers from it cleanly —
+/// exactly ONE `ParseDiagnostic` comes out of `parse`, so a second line about it
+/// on stderr can only have been published twice. The old fixture broke a
+/// `prefix` line, which the current parser answers with a retired-spelling
+/// refusal and a cascade behind it; a fixture that produces thirty-four errors
+/// cannot say anything about how many times one of them is printed.
+///
+/// The count is `assert_eq!`, never `>= 1`: "at least once" is the assertion
+/// this test would pass with the bug it exists to catch.
 #[test]
 fn a_parse_error_in_a_file_with_a_mapping_is_reported_once() {
-    // The missing `:` after `prefix ex` — the same break the variations
-    // harness curates as `02-syntax-error.fossil`.
     let output = check_text(
         "parse-error-once",
         concat!(
-            "prefix ex <https://example.org/>\n",
+            "type { Person } := io.shex(\"person.shex\")\n",
             "\n",
             "users := io.csv(\"users.csv\")\n",
             "\n",
-            "User : ex:Person from users\n",
-            "    @subject = `${ex:}user/${.id}`\n",
-            "    name = .name\n",
+            "User : Person from users\n",
+            "    @subject = \"https://example.org/user/{users.id}\"\n",
+            "    name users.name\n",
         ),
     );
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     assert!(!output.status.success(), "the file does not parse");
-    let occurrences = stderr.matches("expected SHAPE_SEP").count();
+    let occurrences = stderr.matches("expected ASSIGN, found IDENT").count();
     assert_eq!(
         occurrences, 1,
         "the parse error must be reported exactly once; got {occurrences} in:\n{stderr}"

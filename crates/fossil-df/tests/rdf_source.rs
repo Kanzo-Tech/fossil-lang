@@ -16,16 +16,14 @@ use datafusion::prelude::SessionContext;
 mod support;
 
 const PROGRAM: &str = "\
-prefix ex:   <https://example.org/>
-prefix foaf: <http://xmlns.com/foaf/0.1/>
-type { Person } = io.shex(\"rdf-person.shex\")
+type { Person } := io.shex(\"rdf-person.shex\")
 
 people := io.rdf(\"tests/fixtures/people.ttl\")
 
-Person : ex:Person from people
-    @subject = .subject
-    name = .name
-    age = .age
+Person : Person from people
+    @subject = people.subject
+    name = people.name
+    age = people.age
 ";
 
 const RDF_PERSON_SHEX: &str = include_str!("fixtures/rdf-person.shex");
@@ -127,22 +125,26 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
 // ── Multi-shape + multi-valued edges driven by a ShEx descriptor ────────────
 
 // The run_rdf.rs case at the fossil-df level: a destructuring `io.rdf` binds two
-// shapes from one file; `ex:hasProject` is a multi-valued (`*`) shape-ref →
+// shapes from one file; `hasProject` is a multi-valued (`*`) shape-ref →
 // a typed KB→Project edge that UNNESTs to two edges (kb/1 points at two projects).
+//
+// The destructuring binds the SOURCE names, and `type { … } := io.shex(…)` binds
+// the SHAPE names positionally against the same document — so `KB : KB from KB`
+// reads type, then binding, and the two `KB`s are two namespaces, not one name
+// written twice.
 const KB_PROGRAM: &str = "\
-prefix ex: <https://ex.org/>
-type { KB, Project } = io.shex(\"kb-graph.shex\")
+type { KB, Project } := io.shex(\"kb-graph.shex\")
 
 { KB, Project } := io.rdf(\"tests/fixtures/kb_graph.ttl\")
 
-KB : ex:KB from KB
-    @subject = .subject
-    label = .label
-    hasProject = .hasProject
+KB : KB from KB
+    @subject = KB.subject
+    label = KB.label
+    hasProject = KB.hasProject
 
-Project : ex:Project from Project
-    @subject = .subject
-    title = .title
+Project : Project from Project
+    @subject = Project.subject
+    title = Project.title
 ";
 
 const KB_GRAPH_SHEX: &str = include_str!("fixtures/kb-graph.shex");

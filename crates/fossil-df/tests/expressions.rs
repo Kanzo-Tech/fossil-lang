@@ -1,7 +1,7 @@
 //! E2E: an expression in a property position produces its column.
 //!
 //! This is the counterpart of the test that measured the hole. Until
-//! 2026-08-07, `ex:slug = str.slug(.name)` was dropped between the CST and
+//! 2026-08-07, `slug = str.slug(users.name)` was dropped between the CST and
 //! the HIR: the compiler reported success and the column was simply not in the
 //! corpus. What is asserted here is the whole chain closing — the form in the
 //! HIR, the arm in the checker, the lowering to MIR, and the render on this
@@ -11,7 +11,7 @@
 //! `tests/fixtures/users.csv`.
 
 #![cfg(not(target_arch = "wasm32"))]
-// `${ex:}user/${.id}` is Fossil template syntax, not a Rust format arg.
+// `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray};
@@ -28,15 +28,14 @@ const EXPR_SHEX: &str = include_str!("fixtures/expressions.shex");
 /// Rust UDF this engine could not run at all — ruling 15 made it a template,
 /// and this test is where that becomes visible as values.
 const CALLS: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"expr.shex\")
+type { Person } := io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    slug = str.slug(.name)
-    shout = str.upper(.name)
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    slug = str.slug(users.name)
+    shout = str.upper(users.name)
 ";
 
 #[tokio::test]
@@ -104,14 +103,13 @@ async fn a_call_produces_its_column() {
 #[tokio::test]
 async fn calls_nest() {
     const NESTED: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"expr.shex\")
+type { Person } := io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    tag = str.slug(str.upper(.name))
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    tag = str.slug(str.upper(users.name))
 ";
     let (db, file) = support::db_with_shapes(NESTED, "nested.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
@@ -154,20 +152,19 @@ fn column<A: Array + 'static>(
 
 /// A comparison produces a boolean column, and its integer literal survives.
 ///
-/// F2 §2: `.id >= 2` is the shape a filter predicate has, and until it lowered,
-/// `Expr::BinOp` and `Expr::LitBool` were constructed by nothing and the
-/// backend answered `unimplemented!()` for both.
+/// F2 §2: `users.id >= 2` is the shape a filter predicate has, and until it
+/// lowered, `Expr::BinOp` and `Expr::LitBool` were constructed by nothing and
+/// the backend answered `unimplemented!()` for both.
 #[tokio::test]
 async fn a_comparison_produces_a_boolean_column() {
     const COMPARES: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"expr.shex\")
+type { Person } := io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    senior = .id >= 2
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    senior = users.id >= 2
 ";
     let (db, file) = support::db_with_shapes(COMPARES, "cmp.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
@@ -216,14 +213,13 @@ User : ex:Person from users
 #[tokio::test]
 async fn a_conditional_chooses_per_row() {
     const TERNARY: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"expr.shex\")
+type { Person } := io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    band = .id >= 2 ? \"senior\" : \"junior\"
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    band = users.id >= 2 ? \"senior\" : \"junior\"
 ";
     let (db, file) = support::db_with_shapes(TERNARY, "tern.fossil", &[("expr.shex", EXPR_SHEX)]);
     let mapping = *def_map(&db, file)
@@ -274,13 +270,12 @@ async fn the_value_path_and_the_type_path_are_the_same_program() {
     // reached two ways, and this is the test that they produce the same column
     // rather than merely resolving to the same name.
     const PIPED: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"expr.shex\")
+type { Person } := io.shex(\"expr.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
     piped = users.name.upper()
     called = str.upper(users.name)
 ";

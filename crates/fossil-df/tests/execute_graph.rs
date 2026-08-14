@@ -1,5 +1,5 @@
 //! E2E del backend DataFusion (paso 3, edge phase): un programa con dos
-//! mappings (Person, Order) y un foreign-key template (`ex:placedBy` →
+//! mappings (Person, Order) y un foreign-key interpolado (`placedBy` →
 //! Person) → [`fossil_df::execute_graph`] → dos tablas vertex + una tabla edge
 //! CSR/CSC con los `dense_id` resueltos por join en memoria.
 //!
@@ -7,28 +7,19 @@
 //! edge-join calca el SQL del writer (`e.src_iri=s.subject`, `e.dst_iri=t.subject`,
 //! CSR `ORDER BY src_dense,dst_dense` / CSC `ORDER BY dst_dense,src_dense`).
 
-//! ⚠️ **RED, and the premise is what died** — see the report of 2026-08-12.
+//! **This was RED and the premise has since been repaired** — the note is kept
+//! because the repair is the thing worth knowing.
 //!
 //! `placedBy` can only be an edge if the shape declares its range to be a shape
-//! (`ex:placedBy @ex:Person`); the template-skeleton guess that used to infer
-//! one is deleted. But `expected_value_ty` turns a shape-ref constraint into an
-//! expectation of `Iri`, while `HirExpr::Interpolation` OUTSIDE `@subject`
-//! synthesises `String` — and `String` is not a subtype of `Iri`. So the same
-//! document that makes the executor emit the edge makes the checker refuse the
-//! body:
-//!
-//! ```text
-//! expected `Iri`, got `String` (expected because of the constraint at Span { start: 86, end: 112 })
-//! ```
-//!
-//! An edge is spelled by NAMING THE DESTINATION TYPE: `buyer = Person(User.email)`
-//! — "the Person whose identity is built from this email" — so the lowering knows
-//! the type and uses that type's one identity template. That syntax does not exist
-//! yet (step 7), and until it does there is no way to write an edge that both
-//! compiles and reaches the executor. Splitting the
-//! document in two (a lenient one registered for the checker, the typed one
-//! passed as the descriptor) makes both tests pass, which is how the executor
-//! half below was proved intact; it is not a fixture anyone should ship.
+//! (`ex:placedBy @ex:Person` in `graph.shex`); the template-skeleton guess that
+//! used to infer one is deleted. `expected_value_ty` turns a shape-ref
+//! constraint into an expectation of `Iri`, and an interpolation used to
+//! synthesise `String` everywhere but `@subject` — so the same document that
+//! made the executor emit the edge made the checker refuse the body with
+//! `expected Iri, got String`. `Checker::iri_position` is now set from the
+//! EXPECTATION as well as from the identity's key, `IriTemplate <: Iri`, and one
+//! typed document serves both halves. That is why this file registers
+//! `graph.shex` for the checker and passes the same text as the descriptor.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -40,20 +31,19 @@ use datafusion::prelude::SessionContext;
 mod support;
 
 const PROGRAM: &str = "\
-prefix ex: <https://example.org/>
-type { Person, Order } = io.shex(\"graph.shex\")
+type { Person, Order } := io.shex(\"graph.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 orders := io.csv(\"tests/fixtures/orders.csv\")
 
-Person : ex:Person from users
-    @subject = `${ex:}person/${.id}`
-    name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 
-Order : ex:Order from orders
-    @subject = `${ex:}order/${.order_id}`
-    placedBy = `${ex:}person/${.user_id}`
-    total = .amount
+Order : Order from orders
+    @subject = \"https://example.org/order/{orders.order_id}\"
+    placedBy = \"https://example.org/person/{orders.user_id}\"
+    total = orders.amount
 ";
 
 const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");

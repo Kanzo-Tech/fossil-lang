@@ -81,7 +81,7 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
     };
     match op {
         Op::Source { row_type, .. } => record_field_names(db, *row_type),
-        Op::Project { cols, .. } => cols.clone(),
+        Op::Project { cols, .. } => cols.iter().map(|c| c.column.clone()).collect(),
         Op::Extend { input, field, .. } => {
             let mut schema = schema_of(db, ops, *input);
             if !schema.contains(field) {
@@ -318,7 +318,10 @@ mod tests {
             },
             Op::Project {
                 input: 1,
-                cols: vec![SmolStr::new_static("full_name")],
+                cols: vec![crate::op::ProjectedColumn {
+                    source: SmolStr::new_static("u"),
+                    column: SmolStr::new_static("full_name"),
+                }],
             },
         ];
         assert_eq!(

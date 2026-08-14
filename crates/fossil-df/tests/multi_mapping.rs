@@ -16,19 +16,18 @@ const PERSON_SHEX: &str = include_str!("fixtures/person-name.shex");
 // Eve). person/3 overlaps → single-valued dedup collapses it. Expect ONE Person
 // table with 5 distinct subjects.
 const PROGRAM: &str = "\
-prefix ex: <https://example.org/>
-type { Person } = io.shex(\"person.shex\")
+type { Person } := io.shex(\"person.shex\")
 
 users := io.csv(\"tests/fixtures/users.csv\")
 extra := io.csv(\"tests/fixtures/people_extra.csv\")
 
-Person : ex:Person from users
-    @subject = `${ex:}person/${.id}`
-    name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 
-Person : ex:Person from extra
-    @subject = `${ex:}person/${.id}`
-    name = .name
+Person : Person from extra
+    @subject = \"https://example.org/person/{extra.id}\"
+    name = extra.name
 ";
 
 #[tokio::test]

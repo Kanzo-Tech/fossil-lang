@@ -4,27 +4,35 @@
 //! flow through the `#[wasm_bindgen]` wrapper to prove `execute_graph().collect()`
 //! works under wasm-bindgen-futures.
 
-//! ⚠️ **These three pass, and one of them passes for the wrong reason.**
+//! **One of these used to pass for the wrong reason, and `rdf_uri` is what says
+//! it no longer does.**
 //!
-//! `fossil-df-wasm`'s `ExecutorSystem` installs no shape decoder and
-//! `build_program` registers no shape document — both deliberate, and both
-//! written before ruling 3 of 2026-08-11. So `resolve_target_shape` answers
+//! `fossil-df-wasm`'s `ExecutorSystem` installed no shape decoder and
+//! `build_program` registered no shape document — both deliberate, and both
+//! written before ruling 3 of 2026-08-11. So `resolve_target_shape` answered
 //! `Unregistered` for the `executor.shex` the program names; that is
-//! informational, NOT fatal, so the mapping still compiles — with an EMPTY
-//! predicate table. Measured here on 2026-08-12:
+//! informational, NOT fatal, so the mapping still compiled — with an EMPTY
+//! predicate table. Measured on 2026-08-12:
 //!
 //! ```text
 //! RunStatus vertex Person → columns = [("name", None)]
 //! ```
 //!
-//! The column keeps the bare name the author wrote and LOSES its predicate IRI.
-//! Nothing in this file asserts `rdf_uri`, which is why it goes green. Two
-//! things break silently downstream: keasy's DCAT (`rdf_uri` is the wire
-//! contract's whole point) and every edge, because `apply_output_shape`
-//! classifies on `p.rdf_uri` and `None` matches no predicate. The `shex`
-//! ARGUMENT cannot supply it: a bare property key means the last segment of a
-//! predicate IRI a shape declares, so the IRI comes from
-//! `TypeckOutput.predicates`, which comes from the REGISTERED document.
+//! The column kept the bare name the author wrote and LOST its predicate IRI,
+//! and nothing here asserted `rdf_uri`, which is why it went green. Two things
+//! broke silently downstream: keasy's DCAT (`rdf_uri` is the wire contract's
+//! whole point) and every edge, because `apply_output_shape` classifies on
+//! `p.rdf_uri` and `None` matches no predicate. The `shex` ARGUMENT cannot
+//! supply either: a bare property key means the last segment of a predicate IRI
+//! a shape declares, so the IRI comes from `TypeckOutput.predicates`, which
+//! comes from the REGISTERED document — and once the header stopped carrying its
+//! own CURIE, so did the vertex LABEL, which is how this finally became loud
+//! (`vertex/.parquet`).
+//!
+//! `build_program` now registers the one text it holds under the name the
+//! program writes. The assertion on `rdf_uri` below is the guard: it is the
+//! cheapest thing that distinguishes "the document was read" from "the mapping
+//! compiled anyway".
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -37,14 +45,13 @@ use fossil_df_wasm::{SourceInput, SourceKind, execute_core, program_sources_core
 const EXECUTOR_SHEX: &str = include_str!("fixtures/executor.shex");
 
 const PROGRAM: &str = "\
-prefix ex: <https://example.org/>
-type { Person, Order } = io.shex(\"executor.shex\")
+type { Person, Order } := io.shex(\"executor.shex\")
 
 users := io.csv(\"https://data.example.com/users.csv\")
 
-Person : ex:Person from users
-    @subject = `${ex:}person/${.id}`
-    name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 ";
 
 #[tokio::test]
@@ -89,22 +96,41 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     let v = &out.run_status.vertices[0];
     assert_eq!(v.vertex_type, "Person");
     assert_eq!(v.count, Some(3));
+
+    // The document was READ, not merely named: `name` is a bare key, so its
+    // predicate IRI exists only if `executor.shex` reached the checker. `None`
+    // here is what a run that skipped registration produced, and it is
+    // indistinguishable from success everywhere else in this file.
+    assert_eq!(
+        v.rdf_type.as_deref(),
+        Some("https://example.org/Person"),
+        "the vertex's type IRI comes from the registered document"
+    );
+    let name = v
+        .columns
+        .iter()
+        .find(|c| c.name == "name")
+        .expect("Person carries the name column");
+    assert_eq!(
+        name.rdf_uri.as_deref(),
+        Some("https://example.org/name"),
+        "a bare key's predicate IRI comes from the registered document"
+    );
 }
 
 const TWO_SOURCE_PROGRAM: &str = "\
-prefix ex: <https://example.org/>
-type { Person, Order } = io.shex(\"executor.shex\")
+type { Person, Order } := io.shex(\"executor.shex\")
 
 users := io.csv(\"https://data.example.com/users.csv\")
 orders := io.csv(\"https://data.example.com/orders.csv\")
 
-Person : ex:Person from users
-    @subject = `${ex:}person/${.id}`
-    name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 
-Order : ex:Order from orders
-    @subject = `${ex:}order/${.order_id}`
-    placedBy = `${ex:}person/${.user_id}`
+Order : Order from orders
+    @subject = \"https://example.org/order/{orders.order_id}\"
+    placedBy = \"https://example.org/person/{orders.user_id}\"
 ";
 
 #[test]
@@ -119,14 +145,13 @@ fn program_sources_lists_each_distinct_source_with_its_format() {
 }
 
 const CONN_PROGRAM: &str = "\
-prefix ex: <https://example.org/>
-type { Person, Order } = io.shex(\"executor.shex\")
+type { Person, Order } := io.shex(\"executor.shex\")
 
 users := io.csv(\"@mybucket/users.csv\")
 
-Person : ex:Person from users
-    @subject = `${ex:}person/${.id}`
-    name = .name
+Person : Person from users
+    @subject = \"https://example.org/person/{users.id}\"
+    name = users.name
 ";
 
 #[tokio::test]

@@ -1940,6 +1940,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-output",
  "fossil-df",
+ "fossil-hir",
  "fossil-run-status",
  "fossil-shex",
  "getrandom 0.3.4",

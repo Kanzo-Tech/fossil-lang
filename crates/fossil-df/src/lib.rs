@@ -838,7 +838,7 @@ pub fn program_sources(
 /// ops: each vertex prop AND each edge endpoint whose source value is a `ColRef`
 /// contributes `{ name: <that column>, predicate: <its IRI>, multi: <not single
 /// valued> }`. The column name is the value `ColRef` (what the projection / edge
-/// join reads), NOT the predicate's local name — so `foaf:name = .fullName`
+/// join reads), NOT the predicate's local name — so `name = people.fullName`
 /// pivots `foaf:name` into a `fullName` column. A multi-valued constraint pivots
 /// into a `List` (a multi-valued vertex prop, or — after UNNEST — an edge per
 /// object); the vertex `subject` id needs no pivot column (`rdf_to_batch` always
@@ -892,7 +892,7 @@ pub fn register_rdf(
 /// The `SessionContext` table name a provider (RDF) source is registered under.
 /// Namespaced away from the vertex tables [`finalize_vertex`] registers
 /// (`node.label`): for an RDF shape the source binding *is* the shape local name
-/// (`{ KB } := io.rdf …` + `KB : ex:KB from KB`), so an un-namespaced source
+/// (`{ KB } := io.rdf …` + `KB : KB from KB`), so an un-namespaced source
 /// table `KB` would collide with the vertex table `KB` (DataFusion folds
 /// identifiers to lowercase, so even case wouldn't save it). Mirrors the legacy
 /// `fossil_codegen::provider_relation` indirection.
