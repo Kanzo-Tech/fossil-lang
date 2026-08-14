@@ -318,9 +318,48 @@ están allí, y eso no se decide desde aquí. Lo que sí consta: los paquetes de
 enteros, y el fichero que `W3-LAYOUT-PLAN` nombra como ancla —`fossil-sinks/src/writer.rs`— **ya no
 existe**.
 
-**`phases/`, `milestones/` y `research/` no se han tocado.** Son **106.466 líneas en 332 ficheros**,
-gitignoradas, así que borrarlas es irreversible y git no las recupera. Nadie las ha leído hoy y no se
-borra a ciegas un volumen así: es una decisión aparte, con su propia sesión.
+### `phases/`, `milestones/`, `research/` — auditados el 2026-08-14
+
+106.466 líneas en 332 ficheros no se auditan leyéndolas: se auditan por estructura. Dieciocho fases,
+todas de v0.1 (cerrada el 26 de mayo) y v0.2 (cerrada el 28). Los `PLAN`/`SUMMARY`/`VERIFICATION` son
+el registro de ejecución de dos hitos cerrados, y ese registro ya está en la historia de git como
+commits reales. **Lo único que podía seguir vivo son los doce `deferred-items.md`** — lo que
+explícitamente no se hizo — y cada item es una afirmación comprobable contra el árbol.
+
+**De ~40 items diferidos, sobreviven tres.** Todo lo demás lo cerró lo que se construyó:
+
+- El mayor de la fase 2 era **exactamente el hueco que se cerró esta mañana**: `lower_expr` no
+  manejaba el prefixed-name y el test lo esquivaba fabricando un `HirExpr::PrefixedName` a mano.
+  Llevaba tres meses anotado como «el arreglo es pequeño: resuelve vía la tabla de prefijos». Esa
+  tabla ya no existe, y `08d67fe` borró la variante y el test.
+- **LEXER-DIAG-01**, arrastrado de la fase 7 a la 8: el lexer se tragaba los bytes inlexables y
+  `parse("#")` daba cero diagnósticos. **Cerrado**: hoy da exactamente uno que nombra el byte, con
+  test en `fossil-syntax/tests/recovery.rs`.
+- Todo el `cargo deny` de las fases 1, 2, 4 y 5 (wildcards, licencias, advisories): **verde**.
+- Las derivas de `rustfmt` y `clippy` de las fases 1, 2, 4 y 9: **verdes** desde `a0e2700` y `5a5ece0`.
+- Las fases **8, 10, 15, 16 y 17** difieren cosas del playground, el editor, el viewer y el puente
+  CSS de keasy. Los paquetes se retiraron enteros: muertas por construcción.
+
+**Los tres vivos, y están arriba en «deuda cosechada»:** el pin de `@duckdb/duckdb-wasm` en `latest`
+(una pre-release de dev, `tests/wasm_parity/package.json`), `arrow`/`parquet` clavados en **58**
+esperando el 59, y **enviar el correo a Labra Gayo**, que es una acción humana y no vive en ningún
+otro sitio.
+
+`milestones/` **borrado**: nadie lo citaba, y el propio audit de v0.2 dice de sus huecos *«ALL gaps
+are bookkeeping or operational, not implementation»* — el operacional era REL-01, que ahora está en
+`CONTRIBUTING.md`.
+
+### Y por qué `phases/` y `research/` NO se borran todavía
+
+**El código los cita 88 veces.** `RESEARCH.md` aparece en 28 ficheros fuente de ocho crates;
+`P-CRIT-4` doce veces; los `Pitfall N` otras quince. Borrarlos ahora no limpia una referencia
+paralela: **fabrica 88 citas muertas**, que es literalmente el defecto que el paso 9 existe para
+cerrar y el mismo que dejó 159 referencias podridas con CI en verde.
+
+Así que esto no es «pendiente de leer»: es **trabajo del paso 9, y lo agranda**. La operación es la
+misma que con `decisions/` — cada cita se sustituye por lo que decía, o su contenido se muda a una
+página — y sólo después se borra la carpeta. Los sitios están acotados: `fossil-syntax` y
+`fossil-hir` concentran 18 de las 28.
 
 ### Lo que cada fase pendiente pide, cosechado del documento que se borró
 
@@ -370,6 +409,18 @@ derivar del manifiesto la URL de una tesela de aristas (caen en
 `edge/<dir>/by_source/tile{k}.parquet` y el YAML sólo declara `prefix: edge/<dir>/`). Las otras tres
 de aquella lista están cerradas: `cargo fmt` (`a0e2700`), `timeout_ms` (`329d7ef`), y los quads, que
 `apps/corpus/content/docs/conventions/adjacency.mdx` cubre.
+
+**Deuda cosechada de `.planning/phases/`, verificada hoy y viva:**
+
+- **`@duckdb/duckdb-wasm` pinado a `latest`** en `tests/wasm_parity/package.json` — es una
+  pre-release de dev (`1.33.1-devN.0`); el último estable es 1.32.0. Repinar a un 1.33.x final
+  cuando salga. El arnés de paridad es lo que detecta una divergencia nativo↔WASM, así que un pin
+  móvil es un arnés que puede cambiar bajo los pies.
+- **`arrow` y `parquet` clavados en 58**, porque la línea 59 no estaba publicada cuando se pinó.
+  Revisar, y al subir volver a pasar la puerta WASM. **Toca a F7**, que quiere `arrow-rs` en vez de
+  `COPY`: no se cambia el escritor sobre un pin que se sabe viejo.
+- **Enviar el correo a Labra Gayo.** Es una acción humana, arrastrada desde la fase 0, y no vive en
+  ningún otro sitio del árbol.
 
 **Deuda del propio documento, antes de F8:** el diagrama de `/docs/architecture` nombra `registry` en
 el grupo *language* y ese crate se borró en `510eb87`, y **omite `fossil-lineage`**, que es parse-only
