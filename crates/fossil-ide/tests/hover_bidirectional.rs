@@ -1,20 +1,20 @@
 //! SC#4 (LSP-01 hover half) — bidirectional hover integration test.
 //!
 //! Proves the headline Phase-6 LSP feature end-to-end through the PUBLIC
-//! [`fossil_ide::hover_bidirectional`] entry: hovering on a `.field` reference
-//! whose predicate matches a target `ShEx` shape constraint surfaces BOTH
+//! [`fossil_ide::hover_bidirectional`] entry: hovering on a `users.field`
+//! reference whose property key matches a target `ShEx` shape constraint
+//! surfaces BOTH
 //!
-//!   (a) the **source-side** type, from the CSVW input descriptor (forward
-//!       propagation — `resolve_source_row` reads the `schema = "<path>"`
-//!       CSVW file via the host filesystem), AND
+//!   (a) the **source-side** type, from the input descriptor the host
+//!       registered for the row (forward propagation), AND
 //!   (b) the **target-side** type, from the resolved `ShEx` shape constraint
 //!       (`ShapeConstraint::value_ty`), reached by `resolve_target_shape`
 //!       reading the document the PROGRAM names.
 //!
 //! Three cases:
 //!   1. The program names a document: hover shows BOTH the source-side
-//!      (`Integer`, from CSVW) and the target-side (`Float`, from `ShEx`) type,
-//!      with the target block carrying the `ShEx` tagline.
+//!      (`Integer`, from the input descriptor) and the target-side (`Float`,
+//!      from `ShEx`) type, with the target block carrying the `ShEx` tagline.
 //!   2. The program names none: hover shows the source-side block ONLY — no
 //!      target block, no error (the "if reachable" hedge).
 //!   3. No `Unknown` literal leaks into either output.
@@ -31,8 +31,8 @@
 //! the queries look for them. It holds no descriptor of its own.
 
 #![cfg(not(target_arch = "wasm32"))]
-// The `.fossil` fixture sources contain `${ex:}` / `${.id}` template
-// placeholders — LITERAL Fossil source, not Rust format-string args.
+// The `.fossil` fixture sources interpolate — `"…/{users.id}"` is LITERAL
+// Fossil source, not a Rust format-string arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use std::path::Path;
@@ -106,11 +106,10 @@ impl HostDb {
     }
 }
 
-/// CSVW schema declaring a `name` column typed `xsd:integer` — see `SHEX_SRC`
-/// for why it is not `xsd:string` any more.
 /// The introspected `users` row, registered by the HOST before the compile —
 /// what `fossil_engine::pre_introspect_and_register` and the browser's
-/// `registerInferredDescriptor` do for real.
+/// `registerInferredDescriptor` do for real. Its `name` column is
+/// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
 ///
 /// It was a `users.csvw` sidecar named by `schema = "users.csvw"`. CSVW is gone:
 /// its own `D-CSVW-DEPRECATED` diagnostic said types are inferred from the file
@@ -130,17 +129,19 @@ fn register_users(db: &dyn fossil_base::Db) {
             },
             InferredColumn {
                 name: "name".into(),
-                primitive: Primitive::String,
+                primitive: Primitive::Integer,
             },
         ],
         freshness_token: String::new(),
     });
 }
 
-/// A `ShEx` schema declaring `ex:Person` (full IRI `http://example.org/Person`)
-/// with a `ex:name` triple constraint narrowed to `xsd:float` — DELIBERATELY
-/// different from the CSVW source-side `Integer`, so the two type blocks are
-/// visibly distinct (source renders `Integer`, target renders `Float`).
+/// A `ShEx` schema declaring `http://example.org/Person` with an
+/// `http://example.org/name` triple constraint narrowed to `xsd:float` —
+/// DELIBERATELY different from the source-side `Integer`, so the two type blocks
+/// are visibly distinct (source renders `Integer`, target renders `Float`).
+/// The property key `name` is what binds the two: a bare key is the last segment
+/// of a predicate IRI **the document declares**.
 ///
 /// The pair used to be `String` against `Integer`, which is not merely distinct
 /// but INCOMPATIBLE. Now that `resolve_target_shape` reads the document the
@@ -174,11 +175,11 @@ const SHEX_SRC: &str = r#"{
   ]
 }"#;
 
-/// Build a `.fossil` source whose `users` source declares the CSVW schema
-/// (so source-side `.name` resolves to `Integer`) and whose mapping targets
-/// `ex:Person` (so target-side resolution finds the `ShEx` shape). Both the
-/// CSVW file AND the shape document are written next to the `.fossil`, because
-/// both are read by relative path from the program.
+/// Build a `.fossil` source whose `users` row the host has introspected (so
+/// source-side `users.name` resolves to `Integer`) and whose mapping targets
+/// `Person` (so target-side resolution finds the `ShEx` shape). The shape
+/// document is written next to the `.fossil`, because it is read by relative
+/// path from the program.
 fn fixture(dir: &std::path::Path) -> (HostDb, SourceFile) {
     // The shape document sits beside the program, and the PROGRAM names it:
     // `resolve_target_shape` reads what the program declares, so
@@ -186,12 +187,11 @@ fn fixture(dir: &std::path::Path) -> (HostDb, SourceFile) {
     std::fs::write(dir.join("person.shex"), SHEX_SRC).expect("write ShEx");
     let fossil_path = dir.join("person.fossil");
     let src = "\
-prefix ex: <http://example.org/>
-type { Person } = io.shex(\"person.shex\")
+type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"users.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
     let mut db = HostDb::new();
     register_users(&db);
@@ -201,25 +201,25 @@ User : ex:Person from users
         fossil_path.to_string_lossy().into_owned(),
     );
     // The host's half: the shape document is a Salsa input, so it has to be in
-    // the database before any query goes looking for it. The CSVW schema is
-    // still read through `System::read_file` — the input side has not moved.
+    // the database before any query goes looking for it. The `users` row came
+    // in through the descriptor cache above — the input side has not moved.
     fossil_ide::register_missing_documents(&mut db, file, &|key| std::fs::read_to_string(key).ok());
     (db, file)
 }
 
-/// Hover position for `.name` on line 5 (`    ex:name = .name`). Column 14 is
-/// inside the `.name` RHS value of the property. Line 5 and not 4 because the
-/// program now carries the `type { Person } = io.shex(...)` line that names its
+/// Hover position for the `name` property on line 4 (`    name = users.name`).
+/// Column 14 is inside the `users.name` RHS value. Line 4 and not 3 because the
+/// program carries the `type { Person } := io.shex(...)` line that names its
 /// output document.
-const NAME_LINE: u32 = 5;
+const NAME_LINE: u32 = 4;
 
 /// The same position in the fixture that names NO document, which is one line
 /// shorter.
-const NAME_LINE_NO_DOCUMENT: u32 = 4;
+const NAME_LINE_NO_DOCUMENT: u32 = 3;
 const NAME_COL: u32 = 14;
 
-/// Case 1 — the `Some`-shape path: hover shows BOTH the source-side (CSVW
-/// `String`) AND the target-side (`ShEx` `Integer`) type, target block tagged.
+/// Case 1 — the `Some`-shape path: hover shows BOTH the source-side
+/// (`Integer`) AND the target-side (`ShEx` `Float`) type, target block tagged.
 #[test]
 fn hover_shows_source_and_target_type_when_shape_resolves() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-bidi-{}", std::process::id()));
@@ -227,15 +227,15 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
     let (db, file) = fixture(&tmp);
 
     let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE, NAME_COL)
-        .expect("hover on `.name` with a CSVW schema must return Some");
+        .expect("hover on `users.name` with a registered descriptor must return Some");
     let md = &info.markdown;
 
-    // (a) source-side: the CSVW `name` column is `Integer`.
+    // (a) source-side: the introspected `name` column is `Integer`.
     assert!(
         md.contains("Integer"),
-        "hover must show the source-side CSVW type `Integer`; got {md:?}",
+        "hover must show the source-side type `Integer`; got {md:?}",
     );
-    // (b) target-side: the ShEx constraint narrows `ex:name` to `Float`. The
+    // (b) target-side: the ShEx constraint narrows `name` to `Float`. The
     //     pair is well-typed by `S-IntFlt`, which is why hover has anything to
     //     show at all — see the SHEX_SRC doc comment.
     assert!(
@@ -270,14 +270,13 @@ fn hover_shows_source_only_when_the_program_names_no_document() {
     let tmp = std::env::temp_dir().join(format!("fossil-hover-accept-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).expect("mk tmp");
 
-    // Same fixture, minus the `type { … } = io.shex(…)` line.
+    // Same fixture, minus the `type { … } := io.shex(…)` line.
     let fossil_path = tmp.join("person.fossil");
     let src = "\
-prefix ex: <http://example.org/>
 users := io.csv(\"users.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
     let db = HostDb::new();
     register_users(&db);
@@ -288,7 +287,7 @@ User : ex:Person from users
     );
 
     let info = fossil_ide::hover_bidirectional(&db, file, NAME_LINE_NO_DOCUMENT, NAME_COL)
-        .expect("hover on `.name` still returns the source-side type with no output contract");
+        .expect("hover on `users.name` still returns the source-side type with no output contract");
     let md = &info.markdown;
 
     // Source-side present — the input descriptor still types the column.

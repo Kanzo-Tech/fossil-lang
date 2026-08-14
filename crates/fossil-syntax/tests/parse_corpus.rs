@@ -6,9 +6,17 @@
 //! rewrite was a rewrite rather than a patch: a shape is a bare name resolved
 //! against a `type { … } := …` binding, a reference is qualified (`User.name`),
 //! an identity is a quoted string with `{expr}` holes, and no file declares a
-//! prefix. The one thing NOT rewritten is `|>`: ruling 7 of 2026-08-11 kills it
-//! and step 6 of `SURFACE-PLAN.md` removes it, so bucket 1 spells what the
-//! parser still accepts.
+//! prefix.
+//!
+//! `|>` was the last retired spelling still written here, and it is gone too:
+//! step 6 of `SURFACE-PLAN.md` took the token out of the lexer, so `a |> f()`
+//! now arrives as an unlexable `|` and a `GT` and the parser answers
+//! `retired::PIPELINE`. Bucket 1 spells the member call the ruling kept —
+//! `User.filter(…)`, chained — and `no_fixture_spells_a_retired_form` reads
+//! `retired::PIPELINE` along with the other four, so the operator cannot come
+//! back through a regenerated snapshot. The bucket keeps its name because it
+//! keeps its subject: a pipeline is a chain, and the chain is now spelled with
+//! the dot every other postfix form already used.
 //!
 //! # The three that were deleted rather than rewritten
 //!
@@ -99,6 +107,10 @@ macro_rules! fixture_test {
 }
 
 // ─── Bucket 1: pipeline + postfix ─────────────────────────────────────
+// One member call, three chained, a call with a hole where an argument goes,
+// and a receiver whose member name never arrives. `05` is the trailing `|>`
+// fixture transcribed: a dangling `.` is what a chain that stops halfway looks
+// like now, and the DOT lands in an ERROR node with the diagnostic beside it.
 fixture_test!(pipe_basic_01, "01_pipeline_postfix", "01_basic_pipe");
 fixture_test!(
     pipe_chained_three_deep_02,
@@ -224,8 +236,9 @@ fixture_test!(
 //
 //   - `12_double_minus_unary_recovers.fossil` (`@subject = - - x`) parses
 //     cleanly: unary `-` is right-associative (L7 in grammar.bnf
-//     §OPERATOR PRECEDENCE TABLE, L8 in the parser's own table, which
-//     still counts `|>`), so `- - x` is the valid
+//     §OPERATOR PRECEDENCE TABLE and L7 in the parser's own table — the
+//     two agree now that `|>` no longer holds L1 in either), so
+//     `- - x` is the valid
 //     `UNARY(MINUS, UNARY(MINUS, x))` tree. The fixture name reflects
 //     a Wave 0 (plan 02-01) over-eager labeling; the parser correctly
 //     does NOT emit an error here.
@@ -319,6 +332,10 @@ fn no_fixture_spells_a_retired_form() {
         retired::ABSOLUTE_IRI,
         retired::LEADING_DOT,
         retired::BACKTICK,
+        // `|>`. It was excluded while bucket 1 still wrote it; bucket 1 writes
+        // the member call now, so the last spelling this list did not read is
+        // read here.
+        retired::PIPELINE,
     ];
 
     let root = format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR"));

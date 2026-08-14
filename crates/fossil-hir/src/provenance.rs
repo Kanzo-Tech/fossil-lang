@@ -225,23 +225,23 @@ Users : Person from User
         (db, file)
     }
 
-    /// Property 0 of `hello.fossil` is the `iri = ...` template — a
-    /// `Template` RHS. Phase 2 synthesises `IriTemplate` with `Literal`
-    /// provenance.
+    /// Property 0 of `hello.fossil` is the `@subject = "…{…}…"` identity — an
+    /// interpolated-string RHS, where it was `iri = ` and a backtick template.
+    /// Phase 2 synthesises `IriTemplate` with `Literal` provenance.
     #[test]
     fn expr_types_returns_iri_template_for_iri_property() {
         let (db, file) = db_with_text(HELLO);
         let m = mapping_at(&db, file, 0).expect("hello has one mapping");
         let entry =
-            ty_origin(&db, m, ExprId(0)).expect("property 0 (iri = template) must have an entry");
+            ty_origin(&db, m, ExprId(0)).expect("property 0 (the identity) must have an entry");
         assert_eq!(entry.ty.kind(&db), &TyKind::IriTemplate);
         assert_eq!(entry.provenance.kind, ProvenanceKind::Literal);
         assert_eq!(entry.expr_id, ExprId(0));
     }
 
-    /// Property 1 of `hello.fossil` is `name = .name` — the RHS is a
-    /// `FieldRef`. Phase 2 returns `None` (deferred to Phase 3 — needs
-    /// source-row type).
+    /// Property 1 of `hello.fossil` is `name = User.name` — the RHS is a
+    /// qualified reference, where it was the leading-dot `.name`. Phase 2
+    /// returns `None` (deferred to Phase 3 — needs source-row type).
     #[test]
     fn ty_origin_returns_none_for_field_ref() {
         let (db, file) = db_with_text(HELLO);

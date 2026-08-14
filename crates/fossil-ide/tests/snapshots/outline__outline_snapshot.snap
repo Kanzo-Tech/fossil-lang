@@ -2,8 +2,7 @@
 source: crates/fossil-ide/tests/outline.rs
 expression: render(FIXTURE)
 ---
-namespace  ex               @ 0:0-0:33
 class      User             @ 4:0-7:0
-interface  ex:Person        @ 4:7-4:16
+interface  Person           @ 4:7-4:13
 class      Org              @ 7:0-9:0
-interface  ex:Organization  @ 7:6-7:21
+interface  Organization     @ 7:6-7:18

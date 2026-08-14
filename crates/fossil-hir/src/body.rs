@@ -363,10 +363,10 @@ mod tests {
 
     const HELLO: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
-    name = User.name
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
 
     #[test]
@@ -383,38 +383,44 @@ Users : Person from User
 
     /// Regression test for the wrong-body bug (plan-checker Blocker 2).
     ///
-    /// A file with `prefix + source_def + 3 mappings` MUST return the right
-    /// mapping for each `body(M_i)` call. The three mappings have distinct
-    /// property counts (3, 2, 1), so an off-by-N indexing bug surfaces as
-    /// the wrong property count. Specifically:
+    /// A file with `type binding + source_def + 3 mappings` MUST return the
+    /// right mapping for each `body(M_i)` call. The three mappings have
+    /// distinct property counts (3, 2, 1), so an off-by-N indexing bug
+    /// surfaces as the wrong property count. Specifically:
     ///
     /// - `body(M_0)` returns `Mapping_A` (3 properties)
     /// - `body(M_1)` returns `Mapping_B` (2 properties)
     /// - `body(M_2)` returns `Mapping_C` (1 property)
     ///
     /// The unfiltered `.nth(2)` form would return `Mapping_A` for `body(M_2)`
-    /// (the 3rd top-level child is `mapping_0` because `prefix` + `source_def`
-    /// occupy positions 0 and 1), so the wrong test would see 3 properties
-    /// where 1 is expected. That's the silent corruption the filter-before-
-    /// nth ordering prevents.
+    /// (the 3rd top-level child is `mapping_0` because the `type` binding +
+    /// `source_def` occupy positions 0 and 1), so the wrong test would see 3
+    /// properties where 1 is expected. That's the silent corruption the
+    /// filter-before-nth ordering prevents.
+    ///
+    /// The two non-mapping children were `prefix ex: <…>` + the source; the
+    /// `type { … } := …` binding is what stands in front of the mappings now,
+    /// and it has to, or this asserts nothing about filtering. `@subject` is
+    /// one of the counted properties — the identity is a property with a
+    /// language-owned key, so `Mapping_C`'s single property IS its identity.
     #[test]
     fn body_filters_to_mapping_kind_before_indexing() {
         let src = "\
-prefix ex: <https://example.org/>
+type { Shape } := io.shex(\"s.shex\")
 
 users := io.csv(\"x.csv\")
 
-Mapping_A : ex:Shape from users
-    a = .a
-    b = .b
-    c = .c
+Mapping_A : Shape from users
+    @subject = \"https://example.org/a/{users.a}\"
+    b = users.b
+    c = users.c
 
-Mapping_B : ex:Shape from users
-    a = .a
-    b = .b
+Mapping_B : Shape from users
+    @subject = \"https://example.org/b/{users.a}\"
+    b = users.b
 
-Mapping_C : ex:Shape from users
-    c = .c
+Mapping_C : Shape from users
+    @subject = \"https://example.org/c/{users.c}\"
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);

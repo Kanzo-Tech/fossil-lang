@@ -20,10 +20,10 @@ use std::sync::Arc;
 
 const HELLO: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
-    name = User.name
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
 
 fn db_with(src: &str) -> (FossilDb, SourceFile) {
@@ -145,8 +145,9 @@ fn about_the_body(diags: &[&Diagnostic]) -> Vec<String> {
 
 #[test]
 fn literal_subset_regression() {
-    // Property 0 of hello is `iri = template` → IriTemplate. typecheck_mapping
-    // records it; expr_types projects it (same as Phase 2's
+    // Property 0 of hello is `@subject = "…{…}…"` → IriTemplate, where it was
+    // `iri = ` and a backtick template. typecheck_mapping records it;
+    // expr_types projects it (same as Phase 2's
     // expr_types_returns_iri_template_for_iri_property).
     let (db, file) = db_with(HELLO);
     let m = first_mapping(&db, file);
@@ -157,7 +158,7 @@ fn literal_subset_regression() {
 #[test]
 fn fieldref_without_schema_synthesises_no_type_phase_2_compat() {
     // hello's `users` source has NO CSVW schema arg → source_row = None →
-    // FieldRef `.name` synthesises no entry (preserving Phase 2's None, keeping
+    // the `users.name` reference synthesises no entry (preserving Phase 2's None, keeping
     // the walking-skeleton free of spurious errors).
     let (db, file) = db_with(HELLO);
     let m = first_mapping(&db, file);
@@ -427,10 +428,11 @@ fn compatible_string_to_integer_fails() {
 #[test]
 fn an_un_narrowed_constraint_accepts_a_string() {
     const SRC: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"personas.shex\")
 users := io.csv(\"x.csv\")
-Contact : ex:Person from users
-    name = User.name
+Contact : Person from users
+    @subject = \"https://example.org/c/{users.id}\"
+    name = users.name
 ";
     /// `value_ty: None`, `occurs` = exactly one. A `String` satisfies it.
     #[salsa::tracked]
@@ -481,19 +483,37 @@ Contact : ex:Person from users
 
 /// Every one of these was a silent `None` — the same answer as "this program
 /// names no document" — so the commonest mistake, a misspelt shape name,
-/// produced no message at all. This drives the production query, so it also
-/// proves the diagnostics reach the accumulator.
+/// produced no message at all.
+///
+/// # The message moved, and the assertions moved with it
+///
+/// It asserted four `TargetShapeError` renderings, emitted per MAPPING by
+/// `surface_target_shape_error`. A header names a bare name now, so the
+/// document is read where the NAME is bound (`type { T } := io.shex(…)`,
+/// `def_map`'s positional binding) and every one of these four failures lands
+/// there first; by the time a mapping asks for its target shape there is no
+/// shape IRI left to fail with, and `resolve_target_shape` answers `Ok(None)`.
+/// `crate::shapes`'s
+/// `a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause`
+/// pins that collapse and its tombstone says what it costs.
+///
+/// What survives is the guarantee this test was written for — a named document
+/// that cannot answer says WHICH WAY it failed, and says it through the
+/// accumulator — so the expected substrings are `unbound_shape_message`'s,
+/// which name the document and the reason. The misspelt-shape row is gone with
+/// the CURIE: a bare name that binds nothing is a name nobody declared, which
+/// is a different sentence and the last case below.
 #[test]
 fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
 
     fn program(document: &str, shape: &str) -> String {
         format!(
-            "prefix ex: <http://example.org/>\n\
-             type {{ T }} = io.shex(\"{document}\")\n\
+            "type {{ T }} := io.shex(\"{document}\")\n\
              users := io.csv(\"x.csv\")\n\
-             User : ex:{shape} from users\n    \
-             name = User.name\n"
+             User : {shape} from users\n    \
+             @subject = \"http://example.org/u/{{users.id}}\"\n    \
+             name = users.name\n"
         )
     }
 
@@ -501,28 +521,28 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     // message must carry).
     let cases: &[(String, &str, &str, &str)] = &[
         (
+            program("missing.shex", "T"),
+            "person.shex",
+            PERSON_DOCUMENT,
+            "its document `missing.shex` could not be read",
+        ),
+        (
+            program("person.unknown", "T"),
+            "person.unknown",
+            PERSON_DOCUMENT,
+            "its document `person.unknown` could not be read as a shape document",
+        ),
+        (
+            program("broken.shex", "T"),
+            "broken.shex",
+            "!malformed expected a shape line\n",
+            "expected a shape line",
+        ),
+        (
             program("person.shex", "Persn"),
             "person.shex",
             PERSON_DOCUMENT,
-            "declares no shape `http://example.org/Persn` — did you mean",
-        ),
-        (
-            program("missing.shex", "Person"),
-            "person.shex",
-            PERSON_DOCUMENT,
-            "`missing.shex` is not there",
-        ),
-        (
-            program("person.unknown", "Person"),
-            "person.unknown",
-            PERSON_DOCUMENT,
-            "nothing here reads `person.unknown` as a shape document",
-        ),
-        (
-            program("broken.shex", "Person"),
-            "broken.shex",
-            "!malformed expected a shape line\n",
-            "did not parse: expected a shape line",
+            "`Persn` is not a shape this program declares",
         ),
     ];
 
@@ -533,7 +553,7 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
             .first()
             .expect("one mapping");
         let _ = typecheck_mapping(&db, m);
-        let diags = typecheck_mapping::accumulated::<Diagnostic>(&db, m);
+        let diags = crate::lower::lower_to_hir::accumulated::<Diagnostic>(&db, file);
         assert!(
             diags.iter().any(|d| d.message.contains(expected)),
             "expected a diagnostic containing {expected:?}, got {diags:#?}"
@@ -590,7 +610,7 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
         .suggestion_source
         .as_deref()
         .expect("suggestion_source set");
-    // HELLO is `User : ex:Person from users` — the mapping is `User`, the
+    // HELLO is `User : Person from users` — the mapping is `User`, the
     // source binding is `users`, and telling them apart is the whole assertion.
     // Production passed the MAPPING name as the `from` clause, so it emitted
     // `User1 : … from User`: a `from` pointing at the mapping being split. This
@@ -623,16 +643,38 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
 /// The rendering the decoder used to own. It walked a cloned `OneOf` AST node
 /// carried through the whole compiler for this one purpose; it now reads the
 /// branch predicates, which is all it ever took out of that node.
-// The `${ex:}u/${.id}` here is LITERAL Fossil source — the subject template the
+///
+/// The shape is a BARE NAME and the subject is an interpolated string, because
+/// the arguments are what the caller has: `surface_shape_lowering_errors`
+/// passes the mapping's own header and subject through verbatim.
+///
+/// # THIS TEST IS RED, AND IT IS THE RENDERER THAT IS WRONG
+///
+/// `render_split_suggestion` (`crate::check`, the `writeln!` in its branch
+/// loop) emits `"    {short} = .{short}"`. A leading `.` is the retired
+/// `FieldRef` and the parser refuses it, so the mapping it emits comes back
+/// with one property where it wrote two — **the compiler emitting source it
+/// cannot read back**, which is exactly what the renderer's own doc comment
+/// promises it does not do, and what
+/// `tests/diagnostic_corpus.rs::the_generated_split_suggestion_compiles` is
+/// there to catch.
+///
+/// The expectation below is the CORRECT output — the `from` clause is the
+/// binding a body's references are qualified against, so `email` reads
+/// `users.email`. Rewriting it to match what the function does would make a
+/// test fixture decide that the defect is the contract, and it is not a fixture
+/// rewrite's call to make. Left failing on purpose; the repair is one line of
+/// non-test code and belongs with whoever owns it.
+// The `{users.id}` here is LITERAL Fossil source — the subject template the
 // suggestion carries through — not a Rust format string.
 #[allow(clippy::literal_string_with_formatting_args)]
 #[test]
 fn the_split_suggestion_is_one_mapping_per_branch() {
     let rendered = crate::check::render_split_suggestion(
         "Contact",
-        "ex:Contact",
+        "Contact",
         "users",
-        "`${ex:}u/${.id}`",
+        "\"https://example.org/u/{users.id}\"",
         &[
             vec!["http://example.org/email".to_string()],
             vec!["http://example.org/phone".to_string()],
@@ -640,12 +682,12 @@ fn the_split_suggestion_is_one_mapping_per_branch() {
     );
     assert_eq!(
         rendered,
-        "Contact1 : ex:Contact from users\n    \
-         @subject = \"https://example.org/u/{User.id}\"\n    \
-         email = .email\n\n\
-         Contact2 : ex:Contact from users\n    \
-         @subject = \"https://example.org/u/{User.id}\"\n    \
-         phone = .phone\n\n"
+        "Contact1 : Contact from users\n    \
+         @subject = \"https://example.org/u/{users.id}\"\n    \
+         email = users.email\n\n\
+         Contact2 : Contact from users\n    \
+         @subject = \"https://example.org/u/{users.id}\"\n    \
+         phone = users.phone\n\n"
     );
 }
 
@@ -653,8 +695,7 @@ fn the_split_suggestion_is_one_mapping_per_branch() {
 /// the user has to notice is empty.
 #[test]
 fn a_branch_with_no_named_predicate_says_so() {
-    let rendered =
-        crate::check::render_split_suggestion("C", "ex:C", "users", "`t`", &[Vec::new()]);
+    let rendered = crate::check::render_split_suggestion("C", "C", "users", "\"t\"", &[Vec::new()]);
     assert!(rendered.contains("# TODO"), "got {rendered:?}");
 }
 
@@ -827,11 +868,17 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
         "Integer is not a String, got {bad}"
     );
     let diags = shim::accumulated::<fossil_base::Diagnostic>(&db, file);
+    // Argument 0 of a `Receiver::Scalar` row IS the receiver — `str.trim(x)`
+    // and `x.trim()` are one row, and both put the value there — so the message
+    // is about what the value IS, not about a position. This asserted
+    // "argument 1 of `str.trim`", which is the OTHER branch of `synth_call`:
+    // the one that fires for an argument the author actually wrote as one.
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("argument 1 of `str.trim`")),
-        "the diagnostic must name the argument and the function, got: {:?}",
+            .any(|d| d.message.contains("`trim` is a member of String")
+                && d.message.contains("this is Integer")),
+        "the diagnostic must name the member and both types, got: {:?}",
         diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
     );
 }

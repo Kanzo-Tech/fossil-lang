@@ -1,2 +1,2 @@
 Users : Person from User
-    @subject = User |> filter(User.age >= 18)
+    @subject = User.filter(User.age >= 18)

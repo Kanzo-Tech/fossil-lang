@@ -12,25 +12,28 @@ use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_ide::document_symbols;
 use lsp_types::SymbolKind;
 
-/// A multi-item fixture: a prefix decl, a source def, and two mappings (each
+/// A multi-item fixture: a type binding, a source def, and two mappings (each
 /// with a shape ref).
+///
+/// It opened with `prefix ex: <https://example.org/>`, and the outline carried a
+/// NAMESPACE for it. There is no vocabulary declaration and so no namespace to
+/// outline — `outline.rs`'s `map_kind` emits CLASS and INTERFACE and nothing
+/// else, which is why `kind_name` names only those two.
 const FIXTURE: &str = "\
-prefix ex: <https://example.org/>
+type { Person, Organization } := io.shex(\"org.shex\")
 
 users := io.csv(\"users.csv\")
 
-User : ex:Person from users
-    ex:name = .name
+User : Person from users
+    name = users.name
 
-Org : ex:Organization from users
-    ex:title = .title
+Org : Organization from users
+    title = users.title
 ";
 
 const fn kind_name(k: SymbolKind) -> &'static str {
     match k {
-        SymbolKind::NAMESPACE => "namespace",
         SymbolKind::CLASS => "class",
-        SymbolKind::FUNCTION => "function",
         SymbolKind::INTERFACE => "interface",
         _ => "other",
     }

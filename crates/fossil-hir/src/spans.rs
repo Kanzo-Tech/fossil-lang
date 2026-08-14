@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn expr_id_selects_the_same_property_in_both_tables() {
         const SRC: &str = "\
-type { Person, Order } = io.shex(\"shop.shex\")
+type { Person, Order } := io.shex(\"shop.shex\")
 User := io.csv(\"users.csv\")
 Row := io.csv(\"orders.csv\")
 
@@ -374,7 +374,7 @@ Orders : Order from Row
     #[test]
     fn the_header_span_covers_the_header_and_nothing_else() {
         const SRC: &str = "\
-type { Person } = io.shex(\"shop.shex\")
+type { Person } := io.shex(\"shop.shex\")
 User := io.csv(\"users.csv\")
 
 Users : Person from User
@@ -403,15 +403,15 @@ Users : Person from User
     #[test]
     fn rebase_lands_on_the_same_text_in_the_file() {
         const SRC: &str = "\
-prefix ex: <https://example.org/>
+type { A, B } := io.shex(\"two.shex\")
 users := io.csv(\"x.csv\")
-First : ex:A from users
-    @subject = `${ex:}a/${.id}`
-    name = User.name
+First : A from users
+    @subject = \"https://example.org/a/{users.id}\"
+    name = users.name
 
-Second : ex:B from users
-    @subject = `${ex:}b/${.id}`
-    name = .other
+Second : B from users
+    @subject = \"https://example.org/b/{users.id}\"
+    name = users.other
 ";
         let (db, file) = db_with_text(SRC, "two.fossil");
         let second = *def_map(&db, file)
@@ -423,7 +423,10 @@ Second : ex:B from users
             .get(&db, ExprId(1))
             .expect("the 2nd property's RHS");
         let local = &mapping_text(&db, second)[raw.start as usize..raw.end as usize];
-        assert_eq!(local, ".other", "sanity: the raw span is mapping-relative");
+        assert_eq!(
+            local, "users.other",
+            "sanity: the raw span is mapping-relative"
+        );
 
         let base = mapping_start_offset(&db, second);
         assert!(base > 0, "the 2nd mapping does not start at the file head");
@@ -457,15 +460,15 @@ Second : ex:B from users
     #[test]
     fn rebase_leaves_file_absolute_diagnostics_alone() {
         const SRC: &str = "\
-prefix ex: <https://example.org/>
+type { A, B } := io.shex(\"two.shex\")
 users := io.csv(\"x.csv\")
-First : ex:A from users
-    @subject = `${ex:}a/${.id}`
-    name = User.name
+First : A from users
+    @subject = \"https://example.org/a/{users.id}\"
+    name = users.name
 
-Second : ex:B from users
-    @subject = `${ex:}b/${.id}`
-    name = .other
+Second : B from users
+    @subject = \"https://example.org/b/{users.id}\"
+    name = users.other
 ";
         let (db, file) = db_with_text(SRC, "two.fossil");
         let second = *def_map(&db, file)
@@ -503,18 +506,23 @@ Second : ex:B from users
             .to_string()
     }
 
-    /// Property 0 of `hello.fossil` is the iri template property. Phase 2
-    /// synthesises a `Template` RHS for it. The recorded mapping-relative
-    /// span MUST cover the entire RHS expression (backtick to backtick
-    /// inclusive) and be non-zero width.
+    /// Property 0 of `hello.fossil` is the identity. Its RHS is an
+    /// INTERPOLATED STRING, and the recorded mapping-relative span MUST cover
+    /// the whole of it — opening quote to closing quote — and be non-zero
+    /// width.
+    ///
+    /// It was a backtick template, and this asserted backtick-to-backtick. The
+    /// delimiter is the only thing that changed: what is being pinned is that
+    /// the span is the EXPR node's own `text_range()`, which is
+    /// delimiter-inclusive, and not the run of text inside it.
     #[test]
-    fn spans_for_template_property() {
+    fn spans_for_the_interpolated_subject() {
         const SRC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
-    name = User.name
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
         let (db, file) = db_with_text(SRC, "tpl.fossil");
         let m = *def_map(&db, file)
@@ -524,39 +532,43 @@ Users : Person from User
         let s = spans(&db, m);
         let span = s
             .get(&db, ExprId(0))
-            .expect("property 0 (iri = template) must have a recorded span");
+            .expect("property 0 (the `@subject` identity) must have a recorded span");
         assert!(
             span.end > span.start,
-            "Template span must be non-zero width: {span:?}"
+            "the subject's span must be non-zero width: {span:?}"
         );
         // Spans are mapping-relative; slice into the mapping's own text.
         let text = mapping_text(&db, m);
         let extracted = &text[span.start as usize..span.end as usize];
         assert!(
-            extracted.starts_with('`'),
-            "Template span must start at the opening backtick, got {extracted:?}"
+            extracted.starts_with('"'),
+            "the span must start at the opening quote, got {extracted:?}"
         );
         assert!(
-            extracted.ends_with('`'),
-            "Template span must end at the closing backtick, got {extracted:?}"
+            extracted.ends_with('"'),
+            "the span must end at the closing quote, got {extracted:?}"
         );
         assert!(
-            extracted.contains("${.id}"),
-            "Template span must cover the full backtick-delimited body, got {extracted:?}"
+            extracted.contains("{users.id}"),
+            "the span must cover the hole as well as the text, got {extracted:?}"
         );
     }
 
-    /// Property 1 of `hello.fossil` is `name = .name` — a `FieldRef`
-    /// RHS. The recorded mapping-relative span MUST cover `.name`
-    /// (5 chars including the leading dot) and be non-zero width.
+    /// Property 1 of `hello.fossil` is `name = users.name` — a qualified
+    /// reference. The recorded mapping-relative span MUST cover
+    /// `users.name` — the binding AND the column, because the reference is
+    /// both — and be non-zero width.
+    ///
+    /// It was `name = .name` and asserted the five characters of `.name`,
+    /// leading dot included. There is no leading dot: the row has a name.
     #[test]
-    fn spans_for_field_ref() {
+    fn spans_for_a_qualified_reference() {
         const SRC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
-    name = User.name
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
         let (db, file) = db_with_text(SRC, "fref.fossil");
         let m = *def_map(&db, file)
@@ -566,16 +578,16 @@ Users : Person from User
         let s = spans(&db, m);
         let span = s
             .get(&db, ExprId(1))
-            .expect("property 1 (name = .name) must have a recorded span");
+            .expect("property 1 (name = users.name) must have a recorded span");
         assert!(
             span.end > span.start,
-            "FieldRef span must be non-zero width: {span:?}"
+            "the reference's span must be non-zero width: {span:?}"
         );
         let text = mapping_text(&db, m);
         let extracted = &text[span.start as usize..span.end as usize];
         assert_eq!(
-            extracted, ".name",
-            "FieldRef span must cover exactly `.name`, got {extracted:?}"
+            extracted, "users.name",
+            "the span must cover exactly `users.name`, got {extracted:?}"
         );
     }
 
@@ -591,9 +603,9 @@ Users : Person from User
     fn spans_for_string_lit_property() {
         const SRC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
     greeting = \"Alice\"
 ";
         let (db, file) = db_with_text(SRC, "lit.fossil");
@@ -625,9 +637,9 @@ Users : Person from User
     fn spans_get_returns_none_for_unknown_expr_id() {
         const SRC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
 ";
         let (db, file) = db_with_text(SRC, "unk.fossil");
         let m = *def_map(&db, file)
@@ -646,10 +658,10 @@ Users : Person from User
     fn spans_is_memoised_per_mapping() {
         const SRC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
-    name = User.name
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
         let (db, file) = db_with_text(SRC, "memo.fossil");
         let m = *def_map(&db, file)

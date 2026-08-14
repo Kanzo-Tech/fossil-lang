@@ -1,12 +1,8 @@
 ---
 source: crates/fossil-hir/tests/diagnostic_corpus.rs
-expression: "run_csvw_fixture(\"implicit_closure_synthesis\", \"field_typo\")"
+expression: "run_db_wired_fixture(\"implicit_closure_synthesis\", \"field_typo\")"
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: implicit_closure_synthesis
-Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
-  at 0..0
-Error: this program names no shape document, so it cannot write a property: a property key is the last segment of a predicate IRI that a shape declares. Bring one in with `type { … } = io.shex("shop.shex")`.
-  at 0..0
-Error: unknown column `aeg` — did you mean `age`?
-  at 70..74
+Error: unknown column `aeg` on `users` — did you mean `age`?
+  at 85..94

@@ -514,8 +514,12 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
 /// Whitespace/CRLF-resilient per warning W2: line counts ignore empty lines.
 fn diff_is_body_only(baseline: &str, edited: &str) -> bool {
     fn structural_signature(s: &str) -> Vec<(&'static str, usize)> {
+        // There was a `("prefix", s.matches("prefix ").count())` row here. The
+        // vocabulary declaration is gone from the language, so the fixtures
+        // declare none and the row counted 0 against 0 in every tree — a
+        // signature entry that cannot discriminate is not a check. The four
+        // below still move on any header edit.
         vec![
-            ("prefix", s.matches("prefix ").count()),
             (":=", s.matches(":=").count()),
             (" : ", s.matches(" : ").count()),
             (" from ", s.matches(" from ").count()),

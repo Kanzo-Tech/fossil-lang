@@ -11,7 +11,7 @@ with `UPDATE_EXPECT=1` therefore cannot bake a dead form into the baseline.
 
 | Bucket | Path | Theme |
 |--------|------|-------|
-| 1 | `01_pipeline_postfix/`     | Pratt `\|>` + postfix (calls, member access) |
+| 1 | `01_pipeline_postfix/`     | Postfix: calls, member access, and the chain of both |
 | 2 | `02_ternary_arithmetic/`   | Ternary through arithmetic, the precedence walk |
 | 3 | `03_mappings_annotations/` | Mapping headers, property keys, string interpolation |
 | 5 | `05_toplevel_indent/`      | Multiple top-level items, INDENT/DEDENT edge cases |
@@ -28,9 +28,12 @@ module header, each with the form it proved and the `grammar.bnf` tombstone that
 retired it. A fixture whose subject the language no longer has is deleted rather
 than rewritten: converting it would give it a history it does not have.
 
-`|>` is the one retired spelling still WRITTEN here, and deliberately: ruling 7
-of 2026-08-11 kills it and step 6 of `SURFACE-PLAN.md` removes it, so bucket 1
-spells what this parser still accepts. It goes when the verbs become a catalogue.
+`|>` was the one retired spelling still written here, and it is gone: step 6 of
+`SURFACE-PLAN.md` took the token out of the lexer, so bucket 1 spells the member
+call ruling 7 of 2026-08-11 kept — `User.filter(…)`, chained three deep, and a
+receiver whose member name never arrives where the trailing `|>` used to be.
+`retired::PIPELINE` joined the five messages `no_fixture_spells_a_retired_form`
+reads, so the operator cannot come back through a regenerated snapshot either.
 
 ## File pairs
 

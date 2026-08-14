@@ -1,13 +1,11 @@
-//! SC#5 (LSP-01 code-actions half) — integration test for the three code
+//! SC#5 (LSP-01 code-actions half) — integration test for the two code
 //! actions through the PUBLIC [`fossil_ide::code_actions`] entry.
 //!
-//! Three cases (Research test-map):
+//! Two cases (Research test-map):
 //!   1. **did-you-mean** — a typo'd-identifier diagnostic carrying the
 //!      structured [`fossil_base::DidYouMean`] candidate yields a `QuickFix`
 //!      whose `WorkspaceEdit` replaces the typo span with the suggestion.
-//!   2. **auto-import** — an unknown-prefix diagnostic yields a `QuickFix`
-//!      inserting the `prefix xx: <iri>` line.
-//!   3. **split-mapping (SECOND-ORDER)** — a real `ShEx` `OneOf` shape produces
+//!   2. **split-mapping (SECOND-ORDER)** — a real `ShEx` `OneOf` shape produces
 //!      a diagnostic with a populated `suggestion_source` (the Phase-3
 //!      `generate_split_suggestion` snippet); the split-mapping
 //!      `QuickFix` replaces the offending mapping with that snippet, and the
@@ -102,7 +100,7 @@ fn apply_edits(src: &str, edits: &[TextEdit]) -> String {
 #[test]
 fn did_you_mean_action_replaces_typo_with_suggestion() {
     let db = db();
-    let src = "User : ex:Person from users\n    ex:n = .naem\n";
+    let src = "User : Person from users\n    name = users.naem\n";
     let f = file(&db, src);
     let start = u32::try_from(src.find("naem").unwrap()).unwrap();
     let span = Span::new(start, start + 4);
@@ -125,27 +123,12 @@ fn did_you_mean_action_replaces_typo_with_suggestion() {
     );
 }
 
-#[test]
-fn auto_import_action_inserts_prefix_decl() {
-    let db = db();
-    let src = "User : ex:Person from users\n    ex:age = xsd:integer\n";
-    let f = file(&db, src);
-    let diag = Diagnostic::new(
-        Severity::Error,
-        "undeclared prefix `xsd:` in IRI expression `xsd:integer`",
-        Span::new(0, 5),
-    );
-    let actions = code_actions(&db, f, whole(src), &[diag]);
-    let a = actions
-        .iter()
-        .find(|a| a.title.contains("xsd"))
-        .expect("an auto-import action must be offered");
-    let edited = apply_edits(src, &edits_of(a));
-    assert!(
-        edited.starts_with("prefix xsd: <http://www.w3.org/2001/XMLSchema#>"),
-        "auto-import must prepend the canonical xsd prefix decl; got {edited:?}",
-    );
-}
+// `auto_import_action_inserts_prefix_decl` stood here: it fed an «undeclared
+// prefix `xsd:`» diagnostic in and expected a top-of-file `prefix xsd: <…>`
+// insertion back. `lower.rs` emits no such diagnostic and `prefix` is not a
+// production, so the action, its message parser and the `WELL_KNOWN_PREFIXES`
+// table went together — see `code_action.rs`, where the same note sits over the
+// hole `auto_import_action` left.
 
 /// A `ShEx` schema declaring `ex:Contact` with a `OneOf` over (`ex:email` |
 /// `ex:phone`) — the same shape Phase 3's tests use to exercise the rejection.
@@ -188,12 +171,13 @@ const CONTACT_ONEOF_SCHEMA: &str = r#"{
 fn split_mapping_action_recompiles_second_order() {
     let db = db();
 
-    // The consuming mapping targets `ex:Contact` (the OneOf shape). Its prefix
-    // is declared so the split snippet (which uses `ex:` predicates) re-compiles.
+    // The consuming mapping targets the `Contact` shape (the OneOf one) through
+    // the `type` binding that brings the document in — the only way a header
+    // names a shape now.
     let src = "\
-prefix ex: <http://example.org/>
-Contact : ex:Contact from contacts
-    ex:email = .email
+type { Contact } := io.shex(\"contact.shex\")
+Contact : Contact from contacts
+    email = contacts.email
 ";
     let f = file(&db, src);
 
@@ -218,7 +202,7 @@ Contact : ex:Contact from contacts
 
     let suggestion = generate_split_suggestion(
         "Contact",
-        "`${ex:}contact/${.id}`",
+        "\"https://example.org/contact/{contacts.id}\"",
         "contacts",
         rej.shape_iri.to_string().as_str(),
         &rej.suggestion_seed.one_of_node,
@@ -245,17 +229,16 @@ Contact : ex:Contact from contacts
     );
 
     // SECOND-ORDER: the edited document re-compiles cleanly. Replace the OneOf
-    // mapping with the split snippet (keeping the prefix decl) and assert
+    // mapping with the split snippet (keeping the `type` binding) and assert
     // parse + def_map + typecheck_mapping produce NO error for any mapping (the
-    // split mappings are flat — no OneOf — so they type-check under the
-    // AcceptAll target).
+    // split mappings are flat — no OneOf — so nothing constrains them).
     let edited = apply_edits(src, &produced);
     assert!(
         edited.contains("Contact1") && edited.contains("Contact2"),
         "the edited document must contain the two split mappings; got {edited:?}",
     );
     assert!(
-        !edited.contains("ex:Contact from contacts\n    ex:email = .email\n}"),
+        !edited.contains("Contact : Contact from contacts"),
         "the original OneOf mapping must be gone",
     );
 

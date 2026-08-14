@@ -2420,11 +2420,21 @@ mod tests {
     const HELLO_FOSSIL: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    name = User.name
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
+";
+
+    /// What `personas.shex` says, in the line format
+    /// [`fossil_base::test_support`] decodes. Binding is POSITIONAL, so the one
+    /// name `type { Person }` writes takes the one shape declared here — which
+    /// is what makes `shape_iri` an IRI rather than the empty string, and the
+    /// only reason `lower_hello_produces_one_mapping_header` can assert on it.
+    const PERSONAS_DOCUMENT: &str = "\
+shape https://example.org/Person
+prop https://example.org/name - 1 1
 ";
 
     fn lower_src(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
@@ -2440,7 +2450,7 @@ Users : Person from User
     #[test]
     fn a_qualified_reference_lowers_to_a_column_ref() {
         let (db, file) = lower_src(
-            "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n    name = User.name\n",
+            "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n    name = users.name\n",
         );
         let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
         let body = crate::body::body(&db, mapping);
@@ -2460,7 +2470,7 @@ Users : Person from User
     #[test]
     fn a_stdlib_name_without_its_call_is_still_an_error() {
         let (db, file) = lower_src(
-            "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n    name = str.slug\n",
+            "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n    name = str.slug\n",
         );
         let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
         let body = crate::body::body(&db, mapping);
@@ -2480,7 +2490,7 @@ Users : Person from User
     #[test]
     fn a_quoted_string_interpolates_and_its_hole_is_an_expression() {
         let (db, file) = lower_src(
-            "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n    @subject = \"https://example.org/user/{User.id}\"\n",
+            "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n    @subject = \"https://example.org/user/{users.id}\"\n",
         );
         let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
         let body = crate::body::body(&db, mapping);
@@ -2510,7 +2520,7 @@ Users : Person from User
     #[test]
     fn a_doubled_brace_is_one_brace_and_a_closing_brace_needs_no_escape() {
         let (db, file) = lower_src(
-            "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n    a = \"{{literal}\"\n    b = \"{{x}{users.id}\"\n",
+            "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n    a = \"{{literal}\"\n    b = \"{{x}{users.id}\"\n",
         );
         let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
         let body = crate::body::body(&db, mapping);
@@ -2542,7 +2552,7 @@ Users : Person from User
     /// `check_identity`.
     #[test]
     fn the_call_shaped_subject_is_gone_and_says_so() {
-        const HEAD: &str = "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n";
+        const HEAD: &str = "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n";
         let (db, file) = lower_src(&format!(
             "{HEAD}    @subject(iri = \"https://example.org/u/{{users.id}}\")\n"
         ));
@@ -2559,7 +2569,7 @@ Users : Person from User
     /// second identity — a type has exactly one, and it is declared once.
     #[test]
     fn the_identity_is_required_once_and_first() {
-        const HEAD: &str = "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n";
+        const HEAD: &str = "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n";
         let msgs = |src: &str| {
             let (db, file) = lower_src(src);
             let m = crate::def_map::def_map(&db, file).mappings(&db)[0];
@@ -2570,7 +2580,7 @@ Users : Person from User
                 .collect::<Vec<_>>()
         };
         assert!(
-            msgs(&format!("{HEAD}    name = User.name\n"))
+            msgs(&format!("{HEAD}    name = users.name\n"))
                 .iter()
                 .any(|m| m.contains("declares no `@subject`")),
             "an identity is required"
@@ -2585,7 +2595,7 @@ Users : Person from User
         );
         assert!(
             msgs(&format!(
-                "{HEAD}    name = User.name\n    @subject = \"a\"\n"
+                "{HEAD}    name = users.name\n    @subject = \"a\"\n"
             ))
             .iter()
             .any(|m| m.contains("is the first line of a mapping body")),
@@ -2599,7 +2609,7 @@ Users : Person from User
     #[test]
     fn an_unknown_attribute_is_a_diagnostic_and_not_a_dropped_property() {
         let (db, file) = lower_src(
-            "type { Person } := io.shex(\"personas.shex\")\n\nUser := io.csv(\"u.csv\")\n\nUsers : Person from User\n    @sensitive(iri = \"x\")\n    name = User.name\n",
+            "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n    @sensitive(iri = \"x\")\n    name = users.name\n",
         );
         let mapping = crate::def_map::def_map(&db, file).mappings(&db)[0];
         let body = crate::body::body(&db, mapping);
@@ -2615,15 +2625,21 @@ Users : Person from User
         );
     }
 
+    /// The hello program with its shape document registered beside it.
+    ///
+    /// A bare `NativeSystem` cannot answer `io.shex` at all, so `Person` bound
+    /// nothing and `shape_iri` came back empty — which is the whole of what
+    /// `lower_hello_produces_one_mapping_header` asserts on. The registry key is
+    /// the document joined onto the PROGRAM's directory, so a program in
+    /// `examples/` names `personas.shex` and the document is registered at
+    /// `examples/personas.shex`.
     fn db_with_hello() -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(
-            &db,
-            HELLO_FOSSIL.to_string(),
-            "examples/hello.fossil".to_string(),
-        );
-        (db, file)
+        fossil_base::test_support::db_with_document_at(
+            "examples/hello.fossil",
+            HELLO_FOSSIL,
+            "examples/personas.shex",
+            PERSONAS_DOCUMENT,
+        )
     }
 
     /// The call that used to be a hole is now a `Call` in the HIR.
@@ -2640,11 +2656,11 @@ Users : Person from User
         const CALLS_A_BUILTIN: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    slug = str.slug(User.name)
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    slug = str.slug(users.name)
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -2668,7 +2684,15 @@ Users : Person from User
         };
         assert_eq!(func.as_str(), "str.slug");
         assert_eq!(args.len(), 1);
-        assert_eq!(args[0], HirExpr::FieldRef(SmolStr::from("name")));
+        // The argument was `.name`, and the leading dot is gone: an argument is
+        // an ordinary expression, so it is qualified like every other reference.
+        assert_eq!(
+            args[0],
+            HirExpr::ColumnRef {
+                binding: "users".into(),
+                column: "name".into()
+            }
+        );
     }
 
     /// A comparison lowers, with its integer literal.
@@ -2683,11 +2707,11 @@ Users : Person from User
         const COMPARES: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    adult = .age >= 18
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    adult = users.age >= 18
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -2707,7 +2731,13 @@ Users : Person from User
             panic!("expected a BinOp, got {:?}", props[1].value);
         };
         assert_eq!(*op, BinOp::Ge);
-        assert_eq!(**lhs, HirExpr::FieldRef(SmolStr::from("age")));
+        assert_eq!(
+            **lhs,
+            HirExpr::ColumnRef {
+                binding: "users".into(),
+                column: "age".into()
+            }
+        );
         assert_eq!(**rhs, HirExpr::IntLit(18));
     }
 
@@ -2723,11 +2753,11 @@ Users : Person from User
         const GROUPED: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    adult = (.age >= 18)
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    adult = (users.age >= 18)
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -2738,7 +2768,7 @@ Users : Person from User
         let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
         assert!(
             diagnostics.is_empty(),
-            "`(.age >= 18)` must lower without a word, got: {:?}",
+            "`(users.age >= 18)` must lower without a word, got: {:?}",
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
@@ -2747,36 +2777,44 @@ Users : Person from User
             props[1].value,
             HirExpr::BinOp {
                 op: BinOp::Ge,
-                lhs: Box::new(HirExpr::FieldRef(SmolStr::from("age"))),
+                lhs: Box::new(HirExpr::ColumnRef {
+                    binding: "users".into(),
+                    column: "age".into()
+                }),
                 rhs: Box::new(HirExpr::IntLit(18)),
             },
             "the parens must leave no trace in the HIR",
         );
     }
 
-    /// The loud-drop guarantee, re-pinned on a form that is still a hole.
+    /// The loud-drop guarantee, on the only thing that still reaches the
+    /// fallback arm.
     ///
-    /// `call` (F2 §1) and `comparison` (F2 §2) have landed; `conditional` and
-    /// `pipeline` follow, and arithmetic has no MIR operator to be carried
-    /// into. Until then a property whose value is one of them is still dropped
-    /// — and this asserts the drop stays **loud**, which is the difference
-    /// between a known limitation and silent corruption. The day there is no
-    /// form left, this test is deleted, not weakened.
+    /// The fixture was `doble = .id * 2` and BOTH halves of why it was
+    /// unlowerable have gone: arithmetic has a `BinOp` (`*` is `BinOp::Mul`)
+    /// and lowers like every other binary operator, and the leading `.` is not
+    /// a form the parser reads. Every `*_EXPR` kind now has an arm, so nothing
+    /// a well-formed parse produces can fall through — what reaches `other =>`
+    /// is the parser's `ERROR` node, which is exactly the property a retired
+    /// spelling leaves behind.
+    ///
+    /// That is why this is not deleted with the fixture it was written for: the
+    /// guarantee it pins is the DROP being loud, and while the surface is being
+    /// replaced a refused spelling is the commonest way to reach it.
     #[test]
     fn an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop() {
-        const ARITHMETIC: &str = "\
+        const REFUSED: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    doble = .id * 2
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    doble = .id
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
-        let file =
-            fossil_base::SourceFile::new(&db, ARITHMETIC.to_string(), "t.fossil".to_string());
+        let file = fossil_base::SourceFile::new(&db, REFUSED.to_string(), "t.fossil".to_string());
 
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
@@ -2789,7 +2827,7 @@ Users : Person from User
         let d = &diagnostics[0];
         assert_eq!(d.severity, fossil_base::Severity::Error);
         assert!(
-            d.message.contains(".id * 2"),
+            d.message.contains(".id"),
             "the diagnostic must quote what the user wrote, got: {}",
             d.message,
         );
@@ -2803,123 +2841,88 @@ Users : Person from User
         assert_eq!(props.len(), 1, "the unlowerable property is still dropped");
     }
 
-    /// The same guarantee, on the three places that were still silent.
-    ///
-    /// An undeclared prefix WAS one missing `prefix` line — there are no
-    /// `prefix` lines and no CURIEs in the language now, so the fixture below
-    /// spells forms the parser refuses outright, and what it still pins is that
-    /// none of the three positions drops anything in silence. The lowering
-    /// answered it with a bare `?` in three of the five places it looked one up:
-    /// in a mapping's header the WHOLE MAPPING disappeared from the HIR, and in
-    /// a property key or a CURIE value the property did. The other two already
-    /// reported it, and one of them carries a comment naming "the legacy
-    /// `LITERAL_EXPR` branch's silent-drop behaviour" — the branch three lines
-    /// from this fix. `lower_property_public`'s own doc comment claimed the key
-    /// position reported it, and that was false for as long as the comment
-    /// existed.
-    ///
-    /// This is the failure mode a corpus rewrite turns into a green, empty
-    /// suite: nothing fails, and the data is simply not there.
+    /// And the other half of that fixture landed instead of dropping:
+    /// `.id * 2` was the unlowerable form, and `users.id * 2` is arithmetic the
+    /// lowering reads. This is the assertion the test above used to carry, kept
+    /// because deleting it would leave `BinOp::Mul` with no lowering test at
+    /// all.
     #[test]
-    fn an_undeclared_prefix_is_a_diagnostic_and_not_a_silent_drop() {
-        // No `prefix ex:` line anywhere: the header, the property key and the
-        // CURIE value each name one that is not declared.
-        const NO_PREFIX: &str = "\
-users := io.csv(\"examples/users.csv\")
-
-User : ex:Person from users
-    @subject = \"x\"
-    kind = ex:Human
-";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(&db, NO_PREFIX.to_string(), "t.fossil".to_string());
-
-        // The header: the mapping vanishes from the HIR, and now says so.
-        let hir = lower_to_hir(&db, file);
-        assert!(
-            hir.mappings(&db).is_empty(),
-            "the header names an undeclared prefix, so the mapping is not lowered"
-        );
-        let header_diags = lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
-        assert!(
-            header_diags
-                .iter()
-                .any(|d| d.message.contains("undeclared prefix `ex:`")
-                    && d.message.contains("not compiled")),
-            "a mapping that disappears must say why, got: {header_diags:#?}"
-        );
-
-        // The body: only the CURIE VALUE is left to drop. The key half of this
-        // test went with the CURIE key — a bare name has no prefix to fail to
-        // find — so what used to be two silent drops is one.
-        let dm = crate::def_map::def_map(&db, file);
-        let mloc = *dm.mappings(&db).first().expect("one MAPPING node");
-        let props = crate::body::body(&db, mloc).properties(&db);
-        assert_eq!(props.len(), 1, "`kind = ex:Human` drops, got {props:#?}");
-        let body_diags = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
-        let prefix_diags: Vec<_> = body_diags
-            .iter()
-            .filter(|d| d.message.contains("undeclared prefix `ex:`"))
-            .collect();
-        assert_eq!(
-            prefix_diags.len(),
-            1,
-            "the dropped CURIE value is reported, got: {body_diags:#?}"
-        );
-        for d in &prefix_diags {
-            assert_eq!(d.severity, fossil_base::Severity::Error);
-            assert!(d.span.end > d.span.start, "got {:?}", d.span);
-        }
-    }
-
-    /// `<https://example.org/name> = .name` is no longer a property name.
-    ///
-    /// It was one — the key position had no arm for it and fell through to a
-    /// silent `None`, and the arm that fixed that is now gone with the form.
-    /// There is one spelling left for a key, a bare name, and the message
-    /// has to say which bare name: an author who wrote the IRI knows the IRI,
-    /// and the last segment is the thing they now write instead.
-    #[test]
-    fn an_absolute_iri_is_not_a_property_name_and_the_message_says_what_is() {
-        const ABS: &str = "\
+    fn arithmetic_lowers_and_is_no_longer_a_hole() {
+        const ARITHMETIC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"x\"
-    <https://example.org/name> = .name
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    doble = users.id * 2
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(&db, ABS.to_string(), "t.fossil".to_string());
+        let file =
+            fossil_base::SourceFile::new(&db, ARITHMETIC.to_string(), "t.fossil".to_string());
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
-        let props = crate::body::body(&db, mloc).properties(&db);
-        assert_eq!(props.len(), 1, "only the identity lowers, got {props:#?}");
-        let diags = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+
+        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("not by an absolute IRI")
-                    && d.message.contains("`name = …`")),
-            "the message must name the bare key to write instead, got: {diags:#?}"
+            diagnostics.is_empty(),
+            "arithmetic must lower without a word, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
+        let props = crate::body::body(&db, mloc).properties(&db);
+        assert_eq!(props.len(), 2, "the arithmetic property survives lowering");
+        assert_eq!(
+            props[1].value,
+            HirExpr::BinOp {
+                op: BinOp::Mul,
+                lhs: Box::new(HirExpr::ColumnRef {
+                    binding: "users".into(),
+                    column: "id".into()
+                }),
+                rhs: Box::new(HirExpr::IntLit(2)),
+            },
         );
     }
+
+    // `an_undeclared_prefix_is_a_diagnostic_and_not_a_silent_drop` stood here.
+    // It wrote `User : ex:Person from users` with `kind = ex:Human` and no
+    // `prefix` line, and asserted that the header position and the value
+    // position each said «undeclared prefix `ex:`» rather than dropping in
+    // silence. There is no prefix table and no CURIE in any position, so there
+    // is no lookup left to fail: a shape is one of the names a `type { … } :=
+    // …` binding introduced and a value is a qualified reference. The
+    // loud-drop guarantee it shared with the two tests above is pinned by
+    // `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`.
+
+    // `an_absolute_iri_is_not_a_property_name_and_the_message_says_what_is`
+    // stood here, on `<https://example.org/name> = .name`. The `ABS_IRI` arm of
+    // the property-key lowering is gone with the token — `<` and `>` have one
+    // reading each — so the message it asserted on («not by an absolute IRI …
+    // write `name = …`») is not emitted from this crate at all. The parser
+    // refuses the form where it is written, which is where the span is, and
+    // `fossil_syntax::parser::diag::ABSOLUTE_IRI` is the message now.
 
     /// A name that is not catalogued is a type error, not a lowering hole: the
     /// HIR carries the call, and the checker is what refuses it.
+    ///
+    /// The typo is `str.slugg` and not `str.sluggify`, and that is the fixture
+    /// carrying its own threshold: `did_you_mean` allows `max(2, len / 3)`
+    /// edits, so `sluggify` is four from `slug` and gets no suggestion at all —
+    /// a fixture that quietly asserted only half of what it says. The miss is
+    /// also reported by RECEIVER and member («`str` has no member `slugg`»),
+    /// never as the dotted name in one piece, which is why the assertion below
+    /// names the two halves separately.
     #[test]
     fn an_uncatalogued_function_lowers_and_the_checker_refuses_it() {
         const UNKNOWN_FN: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    slug = str.sluggify(User.name)
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    slug = str.slugg(users.name)
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -2936,9 +2939,9 @@ Users : Person from User
         let diags =
             crate::check::typecheck_mapping::accumulated::<fossil_base::Diagnostic>(&db, mloc);
         assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("str.sluggify") && d.message.contains("did you mean")),
+            diags.iter().any(|d| d.message.contains("`str`")
+                && d.message.contains("`slugg`")
+                && d.message.contains("did you mean `str.slug`")),
             "the checker must name the function and suggest one, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
         );
@@ -2984,22 +2987,33 @@ Users : Person from User
         // `Hole(PrefixedName)` — the `${ex:}` prefix-with-no-local-part, which
         // only the interpolation body ever admitted. There is no such hole and
         // no such variant.
+        //
+        // The hole was `${.id}` and is `{users.id}`, so what it holds is a
+        // QUALIFIED reference: a hole takes an ordinary expression, and every
+        // reference names the row it reads.
         match &p0.value {
             HirExpr::Interpolation(parts) => {
                 assert!(
                     parts.iter().any(|p| matches!(
                         p,
-                        InterpolationPart::Hole(HirExpr::FieldRef(f)) if f == "id"
+                        InterpolationPart::Hole(HirExpr::ColumnRef { binding, column })
+                            if binding == "users" && column == "id"
                     )),
-                    "the field hole is a field reference, got {parts:?}"
+                    "the field hole is a qualified reference, got {parts:?}"
                 );
             }
             other => panic!("expected an interpolation, got {other:?}"),
         }
     }
 
+    /// The key is a BARE NAME and the value is a QUALIFIED reference.
+    ///
+    /// It was `lower_hello_property_one_is_prefixed_name_field_ref`, and both
+    /// halves of that name are retired spellings: the key was `ex:name`, a
+    /// CURIE expanded against a prefix table, and the value was `.name`, a
+    /// column of a row with no name.
     #[test]
-    fn lower_hello_property_one_is_prefixed_name_field_ref() {
+    fn lower_hello_property_one_is_a_bare_key_over_a_qualified_value() {
         let (db, file) = db_with_hello();
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("hello has one mapping");
@@ -3012,8 +3026,11 @@ Users : Person from User
             PropertyKey::Subject => panic!("expected a named key, got the identity"),
         }
         match &p1.value {
-            HirExpr::FieldRef(f) => assert_eq!(f.as_str(), "name"),
-            other => panic!("expected FieldRef value, got {other:?}"),
+            HirExpr::ColumnRef { binding, column } => {
+                assert_eq!(binding.as_str(), "users");
+                assert_eq!(column.as_str(), "name");
+            }
+            other => panic!("expected a qualified ColumnRef value, got {other:?}"),
         }
     }
 

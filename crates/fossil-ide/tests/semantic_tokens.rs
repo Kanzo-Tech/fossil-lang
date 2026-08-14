@@ -6,25 +6,39 @@
 //! readable table when the classifier or fixture changes.
 
 #![cfg(not(target_arch = "wasm32"))]
+// The fixture interpolates — `"…/{users.id}"` is LITERAL Fossil source, not a
+// Rust format-string arg.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use std::sync::Arc;
 
 use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
 use fossil_ide::{decode_tokens, legend_type_name, semantic_tokens};
 
-/// A fixture exercising every legend token type: comment, keyword (`prefix` /
-/// `from`), namespace (prefix name + abs IRI), type (shape ref),
-/// property (`ex:name`), function (stdlib call), number, string, operators
-/// (`:=`, `=`, `|>`), field ref (`.name`), variable (mapping subject).
+/// A fixture exercising every legend token type the classifier can still
+/// produce: comment, keyword (`from` and the `@subject` sigil), function (a
+/// bare call callee), property (the member-access side of `users.name`), number,
+/// string (including the parts an interpolation carves the literal into),
+/// operators (`:=`, `=`, the interpolation's `{`) and variable (a mapping
+/// subject, a binding, a shape name).
+///
+/// Two legend entries have no fixture and cannot get one: NAMESPACE and TYPE.
+/// The first was the prefix segment of `ex:Person` plus the `<…>` absolute IRI,
+/// and the second the shape ref — `semantic.rs` deleted the rules for both when
+/// the CURIE and the IRI literal left the grammar, and a shape name is now an
+/// ordinary IDENT that falls through to variable. They stay in the legend
+/// because the legend is a wire index, and dropping an entry renumbers the ones
+/// after it.
 const FIXTURE: &str = "\
 // a Fossil mapping
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 
 users := io.csv(\"users.csv\")
 
-User : ex:Person from users
-    ex:name = upper(.name)
-    ex:age = .age
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = upper(users.name)
+    age = 42
 ";
 
 fn render(src: &str) -> String {

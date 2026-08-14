@@ -1,2 +1,2 @@
 Users : Person from User
-    @subject = User |> filter(User.age >= 18) |> map(User.name) |> sort(User.name)
+    @subject = User.filter(User.age >= 18).map(User.name).sort(User.name)

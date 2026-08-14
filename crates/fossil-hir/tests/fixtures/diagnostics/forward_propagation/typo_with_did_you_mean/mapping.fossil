@@ -3,4 +3,4 @@ users := io.csv("users.csv")
 
 User : Person from users
     @subject = "https://example.org/u/{users.id}"
-    name = users.zzqwxyv
+    name = users.naem

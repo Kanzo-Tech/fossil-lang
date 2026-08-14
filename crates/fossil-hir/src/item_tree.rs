@@ -204,11 +204,11 @@ mod tests {
     const HELLO_FOSSIL: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
-User := io.csv(\"examples/users.csv\")
+users := io.csv(\"examples/users.csv\")
 
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    name = User.name
+User : Person from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
 ";
 
     #[test]
@@ -226,31 +226,32 @@ Users : Person from User
         assert!(matches!(items[0], ItemHeader::SourceDef(_)));
         match &items[1] {
             ItemHeader::Mapping(h) => {
-                assert_eq!(h.name.as_str(), "Users");
+                assert_eq!(h.name.as_str(), "User");
                 assert_eq!(h.body_property_count, 2);
-                assert_eq!(h.source_binding.as_deref(), Some("User"));
+                assert_eq!(h.source_binding.as_deref(), Some("users"));
             }
             other @ ItemHeader::SourceDef(_) => panic!("expected Mapping, got {other:?}"),
         }
     }
 
     /// Compile-time + runtime guarantee that `ItemHeader::Mapping` does not
-    /// carry property values. Editing a property's right-hand side (`.a` →
-    /// `.b`) leaves the structural signal (count, names, shape) unchanged.
+    /// carry property values. Editing a property's right-hand side
+    /// (`users.a` → `users.b`) leaves the structural signal (count, names,
+    /// shape) unchanged.
     #[test]
     fn item_tree_excludes_body() {
         let src_a = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    a = .a
+users := io.csv(\"x.csv\")
+User : Person from users
+    a = users.a
 ";
         let src_b = "\
 type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    a = .b
-"; // .a → .b — body-only edit
+users := io.csv(\"x.csv\")
+User : Person from users
+    a = users.b
+"; // users.a → users.b — body-only edit
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db_a = fossil_base::FossilDb::new(system.clone());
         let db_b = fossil_base::FossilDb::new(system);
@@ -261,16 +262,19 @@ Users : Person from User
         let items_a = it_a.items(&db_a);
         let items_b = it_b.items(&db_b);
         assert_eq!(items_a.len(), items_b.len());
-        let m_a = match &items_a[2] {
+        // Index 1, not 2: the `type { … } := …` binding that replaced the
+        // `prefix` line contributes no `ItemHeader`, so the mapping follows the
+        // one `SourceDef` directly. See the count above.
+        let m_a = match &items_a[1] {
             ItemHeader::Mapping(m) => m,
             other @ ItemHeader::SourceDef(_) => {
-                panic!("expected Mapping in items_a[2], got {other:?}")
+                panic!("expected Mapping in items_a[1], got {other:?}")
             }
         };
-        let m_b = match &items_b[2] {
+        let m_b = match &items_b[1] {
             ItemHeader::Mapping(m) => m,
             other @ ItemHeader::SourceDef(_) => {
-                panic!("expected Mapping in items_b[2], got {other:?}")
+                panic!("expected Mapping in items_b[1], got {other:?}")
             }
         };
         assert_eq!(m_a.name, m_b.name);

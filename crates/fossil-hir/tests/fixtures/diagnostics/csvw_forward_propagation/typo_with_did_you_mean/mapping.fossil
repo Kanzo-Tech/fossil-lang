@@ -1,5 +1,0 @@
-prefix ex: <https://example.org/>
-users := io.csv("users.csv")
-User : ex:Person from users
-    @subject = `${ex:}u/${.id}`
-    name = .naem

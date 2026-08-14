@@ -15,10 +15,9 @@ use fossil_hir::infer::source_row_inferred;
 use fossil_hir::ty::TyKind;
 use std::sync::Arc;
 
-const PROGRAM: &str = "prefix ex: <https://example.org/>\n\
-                       users := io.csv(\"data/users.csv\")\n\
-                       User : ex:Person from users\n    \
-                       name = .name\n";
+const PROGRAM: &str = "users := io.csv(\"data/users.csv\")\n\
+                       User : Person from users\n    \
+                       name = users.name\n";
 
 fn descriptor(uri: &str, columns: &[(&str, Primitive)]) -> InferredDescriptor {
     InferredDescriptor {

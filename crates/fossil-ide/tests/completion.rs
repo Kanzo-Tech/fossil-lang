@@ -1,35 +1,38 @@
-//! SC#4 (LSP-01 completion half) — three-source completion integration test.
+//! SC#4 (LSP-01 completion half) — completion integration test.
 //!
-//! Proves [`fossil_ide::completions`] merges the three SC#4 sources end-to-end:
+//! Proves [`fossil_ide::completions`] merges its sources end-to-end:
 //!
-//!   (a) a stdlib completion for an un-imported namespace carries a non-empty
-//!       `additional_text_edits` (the gleam-lsp auto-import edit);
-//!   (b) a `NativeUdfOnly` entry is tagged so the playground can gray it out;
-//!   (c) a declared prefix appears as a completion;
-//!   (d) when the cursor's mapping resolves a target `ShEx` shape, the shape's
-//!       predicate names appear as completions.
+//!   (a) when the cursor's mapping resolves a target `ShEx` shape, the shape's
+//!       predicate names appear as `Field` completions;
+//!   (b) a program that names no document contributes none of those, while the
+//!       stdlib catalogue still answers — the "if reachable" hedge.
 //!
-//! Case (d) needs a program that NAMES its output shape document and
+//! Three cases stood in front of (a) and all three named something that no
+//! longer exists: a `clean.trim` whose completion carried a top-of-file
+//! `use clean` auto-import edit, a `clean.slug` tagged `DEPRECATED` for being
+//! `NativeUdfOnly`, and a declared `ex:` prefix offered as its own item. There
+//! is no `use` production, no `WasmClass::NativeUdfOnly`, and no `prefix`
+//! declaration; the catalogue is `str.*` / `io.*` / `seq.*` and every row of it
+//! runs everywhere. `completion.rs`'s own `stdlib_entries_are_offered_bare` is
+//! what asserts that now, and case (b) below is what keeps a stdlib assertion at
+//! the integration layer.
+//!
+//! Case (a) needs a program that NAMES its output shape document and
 //! a HOST that has done its two jobs for it: installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the
 //! query asks for it. That is what `HostDb::new` + [`file`] do here, and it is
 //! what `fossil-lsp` and `fossil-wasm` do in production. A host that skips
 //! either one resolves no shape — which is the correct answer, not a bug, and
-//! is why case (d) would otherwise fail silently.
-//! Cases (a)-(c) only need the stdlib catalog + the cross-file prefix index,
-//! which any db provides.
+//! is why case (a) would otherwise fail silently.
 
 #![cfg(not(target_arch = "wasm32"))]
-// The `.fossil` fixtures contain `${ex:}` / `${.id}` template placeholders —
-// LITERAL Fossil source, not Rust format-string args.
-#![allow(clippy::literal_string_with_formatting_args)]
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use fossil_base::{Files, FsError, Provider, SourceFile, System};
-use lsp_types::{CompletionItemKind, CompletionItemTag};
+use lsp_types::CompletionItemKind;
 
 /// The test's host `System`: a filesystem plus the `ShEx` decoder row, exactly
 /// as `fossil-lsp`'s `LspSystem` installs it. `fossil_base::NativeSystem` is
@@ -90,18 +93,18 @@ impl HostDb {
 }
 
 /// The program NAMES its output shape document — `tests/fixtures/person.shex`,
-/// which declares `ex:Person` with an `ex:name` triple constraint narrowed to
-/// `xsd:integer`. `resolve_target_shape` reads it, so the
-/// completion path resolves a shape here for the same reason the compiler does,
-/// and stops resolving one when the program stops asking.
+/// which declares `http://example.org/Person` with an `http://example.org/name`
+/// triple constraint narrowed to `xsd:integer`. `resolve_target_shape` reads it,
+/// so the completion path resolves a shape here for the same reason the compiler
+/// does, and stops resolving one when the program stops asking.
 ///
 /// The line numbers below are load-bearing for the cursor positions in these
-/// tests: the mapping body is line 3 now, not line 2.
+/// tests: the mapping body is line 3.
 const SRC: &str = "\
-prefix ex: <http://example.org/>
-type { Person } = io.shex(\"tests/fixtures/person.shex\")
-User : ex:Person from users
-    ex:name = .name
+type { Person } := io.shex(\"tests/fixtures/person.shex\")
+users := io.csv(\"users.csv\")
+User : Person from users
+    name = users.name
 ";
 
 /// Intern the program AND register the documents it names — the host's half,
@@ -112,73 +115,15 @@ fn file(db: &mut HostDb, src: &str) -> SourceFile {
     f
 }
 
-/// (a) A stdlib completion for an un-imported namespace carries a non-empty
-///     auto-import `additional_text_edits` (the gleam-lsp pattern).
-#[test]
-fn stdlib_completion_for_unimported_namespace_has_auto_import_edit() {
-    let mut db = HostDb::new();
-    let f = file(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
-
-    let trim = items
-        .iter()
-        .find(|i| i.label == "clean.trim")
-        .expect("clean.trim must be offered");
-    assert_eq!(trim.kind, Some(CompletionItemKind::FUNCTION));
-    let edits = trim
-        .additional_text_edits
-        .as_ref()
-        .expect("an un-imported namespace must carry an auto-import edit");
-    assert!(!edits.is_empty(), "auto-import edit must be non-empty");
-    assert!(
-        edits[0].new_text.contains("use clean"),
-        "the auto-import edit must insert `use clean`; got {:?}",
-        edits[0].new_text,
-    );
-}
-
-/// (b) A `NativeUdfOnly` entry is tagged DEPRECATED so the playground can gray
-///     it out.
-#[test]
-fn native_only_stdlib_entry_is_tagged() {
-    let mut db = HostDb::new();
-    let f = file(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
-
-    // `clean.slug` lowers to a Rust UDF → NativeUdfOnly.
-    let slug = items
-        .iter()
-        .find(|i| i.label == "clean.slug")
-        .expect("clean.slug must be offered");
-    assert_eq!(
-        slug.tags.as_deref(),
-        Some(&[CompletionItemTag::DEPRECATED][..]),
-        "a NativeUdfOnly entry must be tagged",
-    );
-}
-
-/// (c) A declared prefix appears as a completion.
-#[test]
-fn declared_prefix_is_offered() {
-    let mut db = HostDb::new();
-    let f = file(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
-
-    assert!(
-        items.iter().any(|i| i.label == "ex:"),
-        "the declared `ex` prefix must be offered; labels = {:?}",
-        items.iter().map(|i| &i.label).collect::<Vec<_>>(),
-    );
-}
-
-/// (d) When the cursor's mapping resolves a target `ShEx` shape, the shape's
+/// (a) When the cursor's mapping resolves a target `ShEx` shape, the shape's
 ///     predicate names appear as Field completions.
 #[test]
 fn shape_property_names_are_offered_when_shape_resolves() {
     let mut db = HostDb::new();
     let f = file(&mut db, SRC);
-    // Line 3 (`    ex:name = .name`) is inside the `User : ex:Person` mapping
-    // whose target shape resolves to `ex:Person`; column 14 is inside the body.
+    // Line 3 (`    name = users.name`) is inside the `User : Person` mapping
+    // whose target shape resolves to `http://example.org/Person`; column 14 is
+    // inside the body and is not the `.` that would trigger source fields.
     let items = fossil_ide::completions(&db, &[f], f, 3, 14);
 
     let shape_prop = items
@@ -187,7 +132,7 @@ fn shape_property_names_are_offered_when_shape_resolves() {
         .expect("a resolved target shape must contribute Field (shape-property) completions");
     assert_eq!(
         shape_prop.label, "http://example.org/name",
-        "the shape's `ex:name` predicate IRI must be offered as a property; got {:?}",
+        "the shape's `name` predicate IRI must be offered as a property; got {:?}",
         shape_prop.label,
     );
     // Risk Register: the rendered detail must not leak internal type state.
@@ -198,17 +143,22 @@ fn shape_property_names_are_offered_when_shape_resolves() {
     );
 }
 
-/// A program that names NO document contributes no shape properties, while
-/// stdlib and prefixes still do — the "if reachable" hedge.
+/// (b) A program that names NO document contributes no shape properties, while
+///     the stdlib catalogue still does — the "if reachable" hedge.
 ///
 /// What turns backward checking off is the program declaring no output
 /// contract; there is nowhere else for that condition to come from any more.
+///
+/// This is also the one integration-level assertion left that the stdlib source
+/// answers at all: the three tests that used to make it did so about entries
+/// (`clean.trim`, `clean.slug`) and an item kind (`ex:`) the catalogue no longer
+/// has. `str.trim` is a row it does have.
 #[test]
 fn a_program_naming_no_document_yields_no_shape_properties_but_keeps_stdlib() {
     const NO_DOCUMENT: &str = "\
-prefix ex: <http://example.org/>
-User : ex:Person from users
-    ex:name = .name
+users := io.csv(\"users.csv\")
+User : Person from users
+    name = users.name
 ";
     let mut db = HostDb::new();
     let f = file(&mut db, NO_DOCUMENT);
@@ -223,7 +173,12 @@ User : ex:Person from users
          (Field) completions",
     );
     assert!(
-        items.iter().any(|i| i.label == "clean.trim"),
-        "stdlib completions must still be offered",
+        items.iter().any(|i| i.label == "str.trim"),
+        "stdlib completions must still be offered; labels = {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>(),
+    );
+    assert!(
+        !items.iter().any(|i| i.label.ends_with(':')),
+        "a `prefix:` completion is a form this language does not have",
     );
 }

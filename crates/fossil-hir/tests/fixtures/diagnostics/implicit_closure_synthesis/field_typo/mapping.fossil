@@ -1,5 +1,6 @@
-prefix ex: <https://example.org/>
+type { Person } := io.shex("person.shex")
 users := io.csv("users.csv")
-User : ex:Person from users
-    @subject = `${ex:}u/${.id}`
-    age = .aeg
+
+User : Person from users
+    @subject = "https://example.org/u/{users.id}"
+    age = users.aeg

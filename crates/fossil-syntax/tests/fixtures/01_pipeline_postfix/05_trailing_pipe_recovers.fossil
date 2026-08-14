@@ -1,2 +1,2 @@
 Users : Person from User
-    @subject = User |>
+    @subject = User.

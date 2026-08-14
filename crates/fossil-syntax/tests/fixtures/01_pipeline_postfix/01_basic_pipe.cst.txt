@@ -15,23 +15,22 @@ PROGRAM
           AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          PIPELINE_EXPR
-            LITERAL_EXPR
-              IDENT "User"
-            PIPE "|>"
+          POSTFIX_EXPR
             POSTFIX_EXPR
               LITERAL_EXPR
-                IDENT "filter"
-              LPAREN "("
-              ARG_LIST
-                ARG
-                  BINARY_EXPR
-                    POSTFIX_EXPR
-                      LITERAL_EXPR
-                        IDENT "User"
-                      DOT "."
-                      IDENT "age"
-                    GE ">="
+                IDENT "User"
+              DOT "."
+              IDENT "filter"
+            LPAREN "("
+            ARG_LIST
+              ARG
+                BINARY_EXPR
+                  POSTFIX_EXPR
                     LITERAL_EXPR
-                      INTEGER "18"
-              RPAREN ")"
+                      IDENT "User"
+                    DOT "."
+                    IDENT "age"
+                  GE ">="
+                  LITERAL_EXPR
+                    INTEGER "18"
+            RPAREN ")"

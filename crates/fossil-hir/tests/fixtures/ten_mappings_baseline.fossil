@@ -1,63 +1,61 @@
-prefix ex: <https://example.org/>
-
 users := io.csv("data.csv")
 
-Mapping_1 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/1`
-    a = .a
-    b = .b
-    c = .c
+Mapping_1 : Shape from users
+    @subject = "https://example.org/u/{users.id}/1"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_2 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/2`
-    a = .a
-    b = .b
-    c = .c
+Mapping_2 : Shape from users
+    @subject = "https://example.org/u/{users.id}/2"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_3 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/3`
-    a = .a
-    b = .b
-    c = .c
+Mapping_3 : Shape from users
+    @subject = "https://example.org/u/{users.id}/3"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_4 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/4`
-    a = .a
-    b = .b
-    c = .c
+Mapping_4 : Shape from users
+    @subject = "https://example.org/u/{users.id}/4"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_5 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/5`
-    a = .a
-    b = .b
-    c = .c
+Mapping_5 : Shape from users
+    @subject = "https://example.org/u/{users.id}/5"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_6 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/6`
-    a = .a
-    b = .b
-    c = .c
+Mapping_6 : Shape from users
+    @subject = "https://example.org/u/{users.id}/6"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_7 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/7`
-    a = .a
-    b = .b
-    c = .c
+Mapping_7 : Shape from users
+    @subject = "https://example.org/u/{users.id}/7"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_8 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/8`
-    a = .a
-    b = .b
-    c = .c
+Mapping_8 : Shape from users
+    @subject = "https://example.org/u/{users.id}/8"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_9 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/9`
-    a = .a
-    b = .b
-    c = .c
+Mapping_9 : Shape from users
+    @subject = "https://example.org/u/{users.id}/9"
+    a = users.a
+    b = users.b
+    c = users.c
 
-Mapping_10 : ex:Shape from users
-    @subject = `${ex:}u/${.id}/10`
-    a = .a
-    b = .b
-    c = .c
+Mapping_10 : Shape from users
+    @subject = "https://example.org/u/{users.id}/10"
+    a = users.a
+    b = users.b
+    c = users.c

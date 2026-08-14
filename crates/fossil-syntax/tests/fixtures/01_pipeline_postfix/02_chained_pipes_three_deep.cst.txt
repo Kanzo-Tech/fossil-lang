@@ -15,31 +15,30 @@ PROGRAM
           AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          PIPELINE_EXPR
-            PIPELINE_EXPR
-              PIPELINE_EXPR
-                LITERAL_EXPR
-                  IDENT "User"
-                PIPE "|>"
-                POSTFIX_EXPR
-                  LITERAL_EXPR
-                    IDENT "filter"
-                  LPAREN "("
-                  ARG_LIST
-                    ARG
-                      BINARY_EXPR
-                        POSTFIX_EXPR
-                          LITERAL_EXPR
-                            IDENT "User"
-                          DOT "."
-                          IDENT "age"
-                        GE ">="
-                        LITERAL_EXPR
-                          INTEGER "18"
-                  RPAREN ")"
-              PIPE "|>"
+          POSTFIX_EXPR
+            POSTFIX_EXPR
               POSTFIX_EXPR
-                LITERAL_EXPR
+                POSTFIX_EXPR
+                  POSTFIX_EXPR
+                    POSTFIX_EXPR
+                      LITERAL_EXPR
+                        IDENT "User"
+                      DOT "."
+                      IDENT "filter"
+                    LPAREN "("
+                    ARG_LIST
+                      ARG
+                        BINARY_EXPR
+                          POSTFIX_EXPR
+                            LITERAL_EXPR
+                              IDENT "User"
+                            DOT "."
+                            IDENT "age"
+                          GE ">="
+                          LITERAL_EXPR
+                            INTEGER "18"
+                    RPAREN ")"
+                  DOT "."
                   IDENT "map"
                 LPAREN "("
                 ARG_LIST
@@ -50,16 +49,14 @@ PROGRAM
                       DOT "."
                       IDENT "name"
                 RPAREN ")"
-            PIPE "|>"
-            POSTFIX_EXPR
-              LITERAL_EXPR
-                IDENT "sort"
-              LPAREN "("
-              ARG_LIST
-                ARG
-                  POSTFIX_EXPR
-                    LITERAL_EXPR
-                      IDENT "User"
-                    DOT "."
-                    IDENT "name"
-              RPAREN ")"
+              DOT "."
+              IDENT "sort"
+            LPAREN "("
+            ARG_LIST
+              ARG
+                POSTFIX_EXPR
+                  LITERAL_EXPR
+                    IDENT "User"
+                  DOT "."
+                  IDENT "name"
+            RPAREN ")"

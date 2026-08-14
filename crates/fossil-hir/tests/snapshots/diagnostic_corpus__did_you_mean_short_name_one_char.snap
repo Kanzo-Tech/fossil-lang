@@ -1,12 +1,8 @@
 ---
 source: crates/fossil-hir/tests/diagnostic_corpus.rs
-expression: "run_csvw_fixture(\"did_you_mean\", \"short_name_one_char\")"
+expression: "run_db_wired_fixture(\"did_you_mean\", \"short_name_one_char\")"
 ---
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: did_you_mean
-Error: D-CSVW-DEPRECATED: explicit CSVW descriptor for source `users` is deprecated; types will be inferred from the file directly. Remove the `schema = "..."` argument.
-  at 0..0
-Error: this program names no shape document, so it cannot write a property: a property key is the last segment of a predicate IRI that a shape declares. Bring one in with `type { … } = io.shex("shop.shex")`.
-  at 0..0
-Error: unknown column `ig` — did you mean `id`?
-  at 71..74
+Error: unknown column `ig` on `users` — did you mean `id`?
+  at 86..94

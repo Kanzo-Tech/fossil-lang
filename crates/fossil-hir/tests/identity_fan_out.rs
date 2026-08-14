@@ -30,7 +30,8 @@
 //! 3. **An edit that does not touch an identity costs ZERO.** `check_identities`
 //!    reads `subject_templates`' OUTPUT, which is structurally equal when the
 //!    edited property is not the `@subject`, so it validates instead of
-//!    re-executing. Editing `a = .a` into `a = .x` is free at this layer.
+//!    re-executing. Editing `name = users.a` into `name = users.x` is free at
+//!    this layer.
 //!
 //! Counts are asserted as bounds and PRINTED, because the exact total is a
 //! measurement and a test that hardcodes it goes red for a reason that is not a

@@ -599,8 +599,8 @@ fn rejection_targets(rejection: &Rejection, shape_iri: &str) -> bool {
     }
 }
 
-// The `.fossil` sources below contain `${ex:}` / `${.id}` template placeholders
-// and `type { … }` braces — LITERAL Fossil source, not Rust format-string args.
+// The `.fossil` sources below contain `{users.id}` interpolation holes and
+// `type { … }` braces — LITERAL Fossil source, not Rust format-string args.
 // Same allow, same reason, as the two `fossil-ide` integration tests.
 #[allow(clippy::literal_string_with_formatting_args)]
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -665,28 +665,32 @@ mod tests {
 
     // --- resolve_target_shape reads the document the program names ---------
 
-    /// A `.fossil` program whose single mapping targets `ex:Person` and which
-    /// NAMES its output shape document. The document is the whole point: before
-    /// this, a CSV-sourced program had nowhere to declare one, so the checker
-    /// was handed `ACCEPT_ALL_DEFAULT` and checked nothing.
+    /// A `.fossil` program whose single mapping targets the one shape
+    /// `document` declares, and which NAMES that document. The document is the
+    /// whole point: before this, a CSV-sourced program had nowhere to declare
+    /// one, so the checker was handed `ACCEPT_ALL_DEFAULT` and checked nothing.
+    ///
+    /// The header names `Person`, a BARE NAME, and it is not looked up in the
+    /// document: `type { Person } := …` binds POSITIONALLY, so `Person` is
+    /// whatever the document declares first. The CURIE `ex:Person` that stood
+    /// here read as a shape IRI in its own right, which is why the misspelling
+    /// tests below could reach the document at all.
     fn src_naming(document: &str) -> String {
         format!(
-            "prefix ex: <http://example.org/>\n\
-             type {{ Person }} = io.shex(\"{document}\")\n\
+            "type {{ Person }} := io.shex(\"{document}\")\n\
              users := io.csv(\"x.csv\")\n\
-             User : ex:Person from users\n    \
-             @subject = `${{ex:}}u/${{.id}}`\n    \
-             name = User.name\n"
+             User : Person from users\n    \
+             @subject = \"http://example.org/u/{{users.id}}\"\n    \
+             name = users.name\n"
         )
     }
 
     /// The same program with no `type` line — it names no document at all.
     const SRC_WITHOUT_DOCUMENT: &str = "\
-prefix ex: <http://example.org/>
 users := io.csv(\"x.csv\")
-User : ex:Person from users
-    @subject = \"https://example.org/u/{User.id}\"
-    name = User.name
+User : Person from users
+    @subject = \"http://example.org/u/{users.id}\"
+    name = users.name
 ";
 
     fn first_mapping(db: &fossil_base::FossilDb, file: fossil_base::SourceFile) -> MappingLoc<'_> {
@@ -710,14 +714,41 @@ User : ex:Person from users
     /// nothing was checked. The ruling of 2026-08-11 made it an error, and this
     /// test is that rule: a property key is the last segment of a predicate IRI
     /// that a shape declares, so a program with no shape document cannot write
-    /// a property at all. A silent no-op becomes a message with its own
-    /// variant.
+    /// a property at all.
+    ///
+    /// **The message moved, and this is the test that says where to.** It used
+    /// to be `TargetShapeError::NoDocument`, raised here. A header names a BARE
+    /// NAME now, and a bare name is resolved by `def_map`'s type bindings
+    /// before this function ever runs: a program with no `type` line binds no
+    /// name, `lower_to_hir` reports it and leaves `shape_iri` empty, and an
+    /// empty shape IRI reads here as «no shape clause» — `Ok(None)`. So the
+    /// rule is enforced one layer up, and `NoDocument` is unreachable. See the
+    /// tombstone below for the other four.
     #[test]
     fn a_program_that_names_no_document_is_an_error_now() {
         let (db, file) = db_with_document(SRC_WITHOUT_DOCUMENT, "unused.shex", PERSON_DOCUMENT);
-        assert_eq!(
-            resolve_target_shape(&db, first_mapping(&db, file)).unwrap_err(),
-            TargetShapeError::NoDocument
+        // `!Ok(Some(_))`, not `== Ok(None)`: what the rule of 2026-08-11 says
+        // is that such a program gets no output contract and is TOLD so, and
+        // both halves below hold whether this returns `Ok(None)` (what it does)
+        // or is repaired to return an error again. Pinning the exact variant
+        // would make this fixture decide which, and that is not a fixture's
+        // call.
+        assert!(
+            !matches!(
+                resolve_target_shape(&db, first_mapping(&db, file)),
+                Ok(Some(_))
+            ),
+            "the name bound nothing, so there is no output contract"
+        );
+        let diagnostics =
+            crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+        assert!(
+            diagnostics.iter().any(|d| d
+                .message
+                .contains("`Person` is not a shape this program declares")
+                && d.message.contains("no shape names at all")),
+            "and the program is still told so, got: {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
         );
     }
 
@@ -755,70 +786,92 @@ User : ex:Person from users
     }
 
     // --- the four failures that used to be one silent `None` (defect 2) ----
+    //
+    // Four tests stood here, one per way a NAMED document fails to produce a
+    // shape: `a_shape_the_document_does_not_declare_says_which_ones_it_does`
+    // (`Undeclared`), `a_document_nothing_registered_is_its_own_failure`
+    // (`Unregistered`), `a_document_no_decoder_reads_is_its_own_failure`
+    // (`Undecodable`) and `a_document_the_decoder_rejected_carries_the_reason`
+    // (`Unparseable`). Each asserted its own `TargetShapeError` variant.
+    //
+    // None of the four can fire any more, and it is not the fixtures that
+    // changed — it is the ORDER. A header names a bare name, `def_map` binds
+    // names POSITIONALLY against the same decoded document this function reads,
+    // and every one of the four failures happens THERE first: the binding gets
+    // a `ShapeBindError`, `lookup_type` answers `None`, `lower_to_hir` reports
+    // it and leaves `shape_iri` empty, and this function's first guard reads an
+    // empty IRI as «no shape clause» and returns `Ok(None)`. `Undeclared` is
+    // doubly unreachable: positional binding takes the Nth shape the document
+    // DECLARES, so the IRI it hands over is one the document declares by
+    // construction, and a misspelt LOCAL name binds nothing at all.
+    //
+    // The four CAUSES are still covered, by the tests that own them:
+    // `def_map`'s `ShapeBindError` tests, and `lower.rs`'s
+    // `unbound_shape_message`, which turns each into a sentence naming the
+    // document and the reason. What is left uncovered is the mapping from a
+    // cause to a `TargetShapeError`, and that is because there is no longer a
+    // path to it — reported as a defect, not repaired here: five of
+    // `TargetShapeError`'s variants and the five arms of
+    // `check::surface_target_shape_error` that render them are dead code.
+    //
+    // The one thing below them that IS live is the collapse itself, and this is
+    // the replacement test for it.
 
-    /// The commonest mistake. The program targets `ex:Persn`; the document
-    /// declares `ex:Person`. This was `None` — indistinguishable from "the
-    /// program names no document" — so the message a user got was no message.
+    /// Every way a named document fails now lands on `Ok(None)` here.
+    ///
+    /// Written to REPLACE the four above, and it asserts what is true rather
+    /// than what they wanted: the failure has already been reported at the
+    /// binding by the time a mapping asks for its target shape.
     #[test]
-    fn a_shape_the_document_does_not_declare_says_which_ones_it_does() {
-        let src = src_naming("person.shex").replace("ex:Person from", "ex:Persn from");
-        let (db, file) = db_with_document(&src, "person.shex", PERSON_DOCUMENT);
-        assert_eq!(
-            resolve_target_shape(&db, first_mapping(&db, file)).unwrap_err(),
-            TargetShapeError::Undeclared {
-                document: "person.shex".into(),
-                shape: "http://example.org/Persn".into(),
-                declared: vec!["http://example.org/Person".into()],
-            }
-        );
-    }
+    fn a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause() {
+        // (the program, the path registered, the text registered).
+        let cases: [(String, &str, &str); 4] = [
+            // A document nobody registered.
+            (src_naming("missing.shex"), "person.shex", PERSON_DOCUMENT),
+            // A document no decoder claims — here by extension.
+            (
+                src_naming("person.unknown"),
+                "person.unknown",
+                PERSON_DOCUMENT,
+            ),
+            // A document the decoder rejected.
+            (
+                src_naming("broken.shex"),
+                "broken.shex",
+                "!malformed expected a shape line\n",
+            ),
+            // A local name nobody bound — the misspelling that used to reach
+            // the document and come back `Undeclared`.
+            (
+                src_naming("person.shex").replace(": Person from", ": Persn from"),
+                "person.shex",
+                PERSON_DOCUMENT,
+            ),
+        ];
 
-    /// A document nobody registered is not a program with no output contract.
-    #[test]
-    fn a_document_nothing_registered_is_its_own_failure() {
-        let (db, file) =
-            db_with_document(&src_naming("missing.shex"), "person.shex", PERSON_DOCUMENT);
-        assert_eq!(
-            resolve_target_shape(&db, first_mapping(&db, file)).unwrap_err(),
-            TargetShapeError::Unregistered {
-                document: "missing.shex".into()
-            }
-        );
-    }
-
-    /// A document no decoder claims — here by extension — is a third cause.
-    #[test]
-    fn a_document_no_decoder_reads_is_its_own_failure() {
-        let (db, file) = db_with_document(
-            &src_naming("person.unknown"),
-            "person.unknown",
-            PERSON_DOCUMENT,
-        );
-        assert_eq!(
-            resolve_target_shape(&db, first_mapping(&db, file)).unwrap_err(),
-            TargetShapeError::Undecodable {
-                document: "person.unknown".into()
-            }
-        );
-    }
-
-    /// And a document the decoder rejected carries the decoder's own reason.
-    /// `OutputShapes::rejected` is `Some(_)`, never `None`, precisely so this
-    /// evidence survives the crossing.
-    #[test]
-    fn a_document_the_decoder_rejected_carries_the_reason() {
-        let (db, file) = db_with_document(
-            &src_naming("broken.shex"),
-            "broken.shex",
-            "!malformed expected a shape line\n",
-        );
-        assert_eq!(
-            resolve_target_shape(&db, first_mapping(&db, file)).unwrap_err(),
-            TargetShapeError::Unparseable {
-                document: "broken.shex".into(),
-                cause: "expected a shape line".into(),
-            }
-        );
+        for (src, path, text) in cases {
+            let (db, file) = db_with_document(&src, path, text);
+            // `!Ok(Some(_))` rather than the exact variant — see
+            // `a_program_that_names_no_document_is_an_error_now`. Today it is
+            // `Ok(None)`; whether that is right is the open question the
+            // tombstone above raises, and this assertion holds either way.
+            assert!(
+                !matches!(
+                    resolve_target_shape(&db, first_mapping(&db, file)),
+                    Ok(Some(_))
+                ),
+                "the binding failed, so the mapping has no output contract: {src}"
+            );
+            let diagnostics =
+                crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("checked against nothing")),
+                "and the failure is reported where it happened, got: {:?}",
+                diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            );
+        }
     }
 
     /// The whole reason the document became a Salsa input: editing it must

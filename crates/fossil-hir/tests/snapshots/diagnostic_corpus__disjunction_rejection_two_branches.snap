@@ -10,10 +10,10 @@ resolved constraints: (none — a disjunction body, see the rejection below)
 disjunction rejection: 2 branches in shape `http://example.org/Contact`
   branch predicates: http://example.org/email, http://example.org/phone
   suggestion:
-    Contact1 : ex:Contact from users
-        @subject = `${ex:}u/${.id}`
+    Contact1 : Contact from users
+        @subject = "https://example.org/u/{users.id}"
         email = .email
     
-    Contact2 : ex:Contact from users
-        @subject = `${ex:}u/${.id}`
+    Contact2 : Contact from users
+        @subject = "https://example.org/u/{users.id}"
         phone = .phone

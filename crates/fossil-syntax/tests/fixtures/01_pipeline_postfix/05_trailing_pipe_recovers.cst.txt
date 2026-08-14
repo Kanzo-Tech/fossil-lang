@@ -15,8 +15,7 @@ PROGRAM
           AT_ATTR "@subject"
         ASSIGN "="
         EXPR
-          PIPELINE_EXPR
-            LITERAL_EXPR
-              IDENT "User"
-            PIPE "|>"
-            ERROR
+          LITERAL_EXPR
+            IDENT "User"
+      ERROR
+        DOT "."

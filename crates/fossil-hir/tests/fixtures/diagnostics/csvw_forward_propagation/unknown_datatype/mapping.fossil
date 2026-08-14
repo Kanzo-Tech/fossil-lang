@@ -1,5 +1,0 @@
-prefix ex: <https://example.org/>
-events := io.csv("events.csv")
-Event : ex:Event from events
-    @subject = `${ex:}e/${.id}`
-    name = .name
