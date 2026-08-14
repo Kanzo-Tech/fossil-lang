@@ -1,8 +1,15 @@
 # El plan de construcción
 
-**Reescrito 2026-08-11**, después de auditar el corpus entero. Las decisiones vivas son
-`decisions/0058-…` (la identidad) y `decisions/0059-…` (la superficie, con el programa objetivo).
-**Esto es el orden de construirlo** — si algo aquí contradice a un ADR alto, gana el ADR.
+**Reescrito 2026-08-11**, después de auditar el corpus entero. **Ampliado 2026-08-14**: absorbe las
+fases F1–F8, que vivían en un segundo documento fuera del repo. **Esto es el orden de construirlo**,
+y es el único sitio donde está.
+
+> **Por qué hay uno y no dos.** Las fases F describían el mismo compilador desde el otro extremo —
+> los tipos, Salsa, el escritor de Parquet, los crates — y estaban en `~/.claude/plans/`, fuera del
+> árbol y sin guardia. Medido el 2026-08-14: **el trabajo de superficie había cerrado F1, F2 y media
+> F5 sin que ninguno de los dos documentos lo supiera**, y los dos habían acumulado afirmaciones que
+> el otro ya había invalidado. Dos planes sobre un compilador es el mismo defecto que el paso 9
+> existe para cerrar, con la agravante de que uno de ellos no estaba versionado.
 
 Cada paso dice **qué lo desbloquea** y **qué prueba que está hecho**, porque este repo tiene tres
 casos documentados de dar algo por terminado porque estaba escrito: la fase 3 marcada `8/8` con el
@@ -205,34 +212,31 @@ cuenta como deuda.
 ┌─ 0 · CORTE DEL DESCRIPTOR DE SALIDA ─────────────────── HECHO
 ├─ 1 · CLAVES DESNUDAS   name = …  ────────────────────── HECHO
 ├─ 4 · IDENTIDAD  @subject = expr  ────────────────────── HECHO
-│     mató subject_skeletons, PropertyKey::Iri, KW_IRI
-│
-├──▶ 2 · CABECERA   Users : Person from Adults          ← AQUÍ
-│    │  ShapeExpr := IDENT, resuelto contra los nombres
-│    │  que introduce `type { … }`. Muere el CURIE en cabecera.
-│    └──▶ 3 · FUERA `prefix`
-│           el lexer pierde `prefix`, ABS_IRI, `${ex:}`;
-│           el HIR pierde PrefixEntry y la expansión
-│
-├──▶ 5 · TIPOS DE ENTRADA CON NOMBRE   User := io.csv(…)
-│    └──▶ REFERENCIA POR TIPO   User.age
-│           muere FieldRef, y con él las tres piezas de
-│           la clausura implícita
-│
-├──▶ 6 · VERBOS COMO CATÁLOGO   (+ muere `|>`)
-│    └─ RegistryEntry gana tipo de receptor; el despacho
-│       deja de ir por cadena. Toca el checker.
-│
-└──▶ 7 · `:=` para `type`; ARISTA CON CONSTRUCTOR; `@rename`
+├─ 2 · CABECERA   Users : Person from Adults ─────────── HECHO
+├─ 3 · FUERA `prefix`, el CURIE, ABS_IRI, `${ex:}` ───── HECHO
+├─ 5 · TIPOS DE ENTRADA CON NOMBRE  User := io.csv(…) ── HECHO
+├─ 6 · VERBOS COMO CATÁLOGO  (+ murió `|>`) ──────────── HECHO
+└─ 7 · `:=` para `type`; ARISTA; `@rename` ───────────── HECHO
                     ▼
-        8 · LOS PROGRAMAS DE LA DOCUMENTACIÓN SON EL CORPUS
-            los 18 se compilan y se guarda su salida o su
-            diagnóstico; reescritura única de lo que sobreviva
+        8 · LOS PROGRAMAS DE LA DOCUMENTACIÓN SON EL CORPUS   ← AQUÍ
+            los 23 se compilan y se guarda su salida o su
+            diagnóstico. 104 tests rojos, en DOS montones.
                     ▼
         9 · UNA SOLA REFERENCIA, Y ES LA BASELINE
+            la cirugía está hecha; falta borrar `decisions/`
+                    ▼
+     ┌──────────────┴──────────────┐
+     ▼                             ▼
+ F3 · LA CACHÉ              F4 · LA FORMA ES EL CONTRATO
+ F6 · SALSA SE ENCOGE       F5 · EL PIPELINE, medido
+ F7 · EL ESCRITOR             (los tres se miden CONTRA el corpus)
+     └──────────────┬──────────────┘
+                    ▼
+        F8 · LOS CRATES, Y SON DOS ÁRBOLES
 ```
 
-**Ruta crítica:** 2 → 3 → 5 → **7** → 6 → 8 → 9.
+**Ruta crítica:** ~~2 → 3 → 5 → 7 → 6~~ → **8** → 9 → F4/F5 → F8.
+F3, F6 y F7 no tocan la gramática ni el corpus y corren en paralelo desde ya.
 
 **El paso 7 subió a la ruta crítica el 2026-08-12**, y este árbol lo dibujaba como rama lateral.
 El motivo: la **única** prueba end-to-end que existe —`fossil run` real → Parquet → DuckDB, las doce
@@ -244,6 +248,58 @@ parsea, resuelve la forma, baja, y muere en el checker con `expected Iri, got St
 **Corren en paralelo, sin tocar la gramática:** la poda de lo ya muerto (§«Ya muerto»), los tres
 spans `0..0`, el `from` de `render_split_suggestion`, la guardia de `assertion_line`, el arnés de
 `diagnostic_corpus`, y la cirugía de `apps/docs` que desengancha `decisions/`.
+
+---
+
+## Las fases F, absorbidas y medidas el 2026-08-14
+
+Venían de `~/.claude/plans/`, gobernadas por ADR-0046 «un núcleo y carcasas finas» — cuyo contenido
+ya vive en `/docs/architecture`, así que sobrevive al paso 9. **El estado no es el que decían.**
+
+| | qué pedía | medido el 14 |
+|---|---|---|
+| **F1** | `Primitive` a un crate hoja | ✅ vive en `fossil-graph-schema`; `InferredColumn.primitive` es `Primitive` |
+| **F2** | call, comparison, conditional, pipeline en el HIR | ✅ `HirExpr` pasó de **4 variantes a 13**; `UNARY_EXPR` desciende (`lower.rs:1663`) |
+| **F3** | la caché existe de verdad | ◐ el `Providers`-de-rustc **ya está** (§4 del F-plan = el registro de proveedores); `freshness_token` real en `fossil-engine`; falta la clave por URI |
+| **F4** | el descriptor real llega al typecheck | ◐ el checker lee el documento; `fossil-engine/src/lib.rs:470` **sigue devolviendo `ACCEPT_ALL_DEFAULT`** |
+| **F5** | el pipeline compila y `rewrite.rs` no existe | ◐ `rewrite.rs` borrado; `lower_source_pipe` escrito; los dos e2e rojos por fixture |
+| **F6** | Salsa fuera de `engine` y `df-wasm` | ❌ `fossil-engine/src/system.rs:111` y `fossil-df-wasm/src/lib.rs:210` siguen construyendo un `FossilDb` por llamada |
+| **F7** | `arrow-rs` en vez de `COPY` | ❌ sigue `DuckDB COPY (FORMAT PARQUET)` en `fossil-sinks` |
+| **F8** | los crates | ⛔ bloqueada a propósito, y **redibujada**: ver abajo |
+
+**F1, F2 y media F5 las cerró el trabajo de superficie**, que no sabía que las estaba cerrando. Ésa
+es la evidencia de que eran un plan y no dos.
+
+### Dos correcciones que sólo se ven leyendo los dos juntos
+
+- **El criterio de F5 estaba escrito en sintaxis muerta.** Decía *«hecho cuando `users |> where(.edad
+  >= 18)` compila»*, y `|>` es una tumba en `grammar.bnf`: *«`a |> f()` y `a.f()` eran una idea con
+  dos grafías, y ganó el punto»*. **El criterio nuevo:** `users.where(User.edad >= 18)` compila, tipa
+  y produce el corpus correcto, y `rewrite.rs` no existe. Los dos tests e2e rojos escriben `|>`, que
+  es la misma causa y se arregla en el paso 8.
+- **F6 y F7 no se movieron, pero sus citas sí.** ADR-0046 citaba `system.rs:60-65`; hoy es la 111. El
+  problema intacto, la referencia rota — que es exactamente el modo de fallo que el paso 9 ataca.
+
+### F8 · Los crates, y son DOS árboles
+
+**Decidido el 2026-08-14.** ADR-0046 pedía «24 a 5–8» en un árbol. El corte por producto lo redibuja:
+`apps/docs` documenta el lenguaje y `apps/corpus` el formato, y la página de arquitectura ya agrupa
+`graph` / `graph-wasm` / `mcp` como *corpus* con **una sola arista al resto del árbol**, vía
+`fossil-sinks`. Esa arista única es el corte. Así que F8 no es una consolidación: es **una separación
+y después una consolidación por lado**, y la costura entre los dos es el corpus en disco — que es
+precisamente lo que `apps/corpus/guards/` ya sabe comprobar sin fossil, sin Rust y sin pnpm.
+
+Sigue en pie lo que el F-plan decía de F8, y sigue siendo la regla que la gobierna: **cada movimiento
+tiene que estar forzado por un documento, no por una taxonomía.** `lsp-types` en un `Cargo.toml`.
+`fossil-base` pierde su arista y se llama por lo que es. `fossil-run-status` se disuelve en la
+carcasa. `fossil-mcp` está mal colocado y mal llamado — es la cara IA del lado grafo, y con el corte
+en dos árboles eso deja de ser deuda y pasa a ser su sitio.
+
+**Deuda del propio documento, antes de F8:** el diagrama de `/docs/architecture` nombra `registry` en
+el grupo *language* y ese crate se borró en `510eb87`, y **omite `fossil-lineage`**, que es parse-only
+y WASM-clean y pertenece a ese grupo. Los totales cuadran en 24 por casualidad: uno compensa al otro.
+El recuento de aristas («43») es de antes del borrado y no se ha recalculado. `content.test.ts` no
+puede verlo, porque comprueba rutas citadas y un rótulo de nodo mermaid no es una ruta.
 
 ---
 
@@ -578,8 +634,9 @@ apuntan dentro.
 
 ## Deuda anotada, no pagada
 
-- **`UNARY_EXPR` sigue siendo un agujero.** Necesita una variante de `HirExpr` que no existe: es
-  decisión, no brazo.
+- ~~**`UNARY_EXPR` sigue siendo un agujero.**~~ **Caducado, comprobado el 14.** La variante existe
+  (`HirExpr::UnaryOp { op, operand }`, `lower.rs:369`) y `UNARY_EXPR` desciende (`lower.rs:1663`).
+  Se cerró con el trabajo de superficie y este párrafo no se enteró.
 - **Los verbos como catálogo tocan el checker**, y eso no está dimensionado.
 - **`select` cuando la relación viene de un join** no tiene sitio (ADR-0059 lo deja abierto).
 - **`io` sólo nombra la entrada.** El destino no tiene sintaxis ninguna.
@@ -587,7 +644,8 @@ apuntan dentro.
   el argumento es la entrada del hueco o su valor terminado.
 - **Las destructuraciones cortas** (nombrar menos miembros de los que el documento declara) no están
   especificadas.
-- **`crates/fossil-mcp` está mal colocado y mal llamado**: es la cara IA del lado grafo.
+- **`crates/fossil-mcp` está mal colocado y mal llamado**: es la cara IA del lado grafo. **Ya tiene
+  dueño**: F8, donde el corte en dos árboles le da su sitio en vez de sólo moverlo.
 
 ---
 
