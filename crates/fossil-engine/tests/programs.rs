@@ -272,11 +272,12 @@ fn properties_in_text(text: &str) -> usize {
                 return false; // not indented, or a comment
             }
             let mut chars = trimmed.char_indices();
-            let mut end = 0;
-            if let Some((_, '@')) = chars.clone().next() {
+            let mut end = if let Some((_, '@')) = chars.clone().next() {
                 chars.next();
-                end = 1;
-            }
+                1
+            } else {
+                0
+            };
             let mut saw_ident = false;
             for (i, c) in chars {
                 if c.is_alphanumeric() || c == '_' {

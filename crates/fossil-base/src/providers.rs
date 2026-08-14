@@ -49,7 +49,7 @@
 //!
 //! Because the *host* supplies the table and `System` is here. A row that reads
 //! types carries a `fn` pointer into a schema language, and the compiler may not
-//! link one — `0e6898d` cut ShEx out of `fossil-mir` and the same cut applies to
+//! link one — `0e6898d` cut `ShEx` out of `fossil-mir` and the same cut applies to
 //! `fossil-hir`. So the rows that read rows are `&'static` constants below (the
 //! compiler can name a `DuckDB` reader), the rows that read types come from the
 //! crate that owns the parser, and [`crate::system::System::providers`] is where
@@ -416,7 +416,17 @@ mod tests {
     /// rule this replaces they would have been one row.
     #[test]
     fn a_row_is_identified_by_its_address_not_by_its_decode() {
-        assert_eq!(SHEX.reads_types, SHACL.reads_types, "one `decode`");
+        // `assert_eq!` on the two `Option<fn>` is what this said, and it is not a
+        // comparison the compiler will stand behind: two `fn` pointers can differ
+        // across codegen units and two distinct functions can be merged to one
+        // address. `std::ptr::fn_addr_eq` is the spelling that admits that.
+        assert!(
+            std::ptr::fn_addr_eq(
+                SHEX.reads_types.expect("shex reads types"),
+                SHACL.reads_types.expect("shacl reads types"),
+            ),
+            "one `decode`"
+        );
         assert_ne!(SHEX, SHACL, "and still two rows");
         assert_eq!(&SHEX, &SHEX);
 

@@ -188,7 +188,7 @@ enum Wanted<'db> {
 
 /// The shape name the cursor is on, if it is on one.
 ///
-/// `ShapeExpr := IDENT` under a `MAPPING_HEADER` (grammar.bnf, ShapeExpr). The
+/// `ShapeExpr := IDENT` under a `MAPPING_HEADER` (grammar.bnf, `ShapeExpr`). The
 /// token's own parent is the `SHAPE_EXPR`, so no walk is needed — and no walk is
 /// WANTED: climbing further would claim the mapping name and the `from`
 /// expression too,
@@ -203,7 +203,7 @@ fn shape_name_under_cursor(token: &SyntaxToken) -> Option<String> {
 
 /// The `(mapping, key)` the cursor is on, if it is on a property key.
 ///
-/// `PropertyLhs := IDENT` (grammar.bnf, PropertyLhs). `@subject` is deliberately
+/// `PropertyLhs := IDENT` (grammar.bnf, `PropertyLhs`). `@subject` is deliberately
 /// NOT one: it lexes as `AT_ATTR`, and a shape declares a node's predicates
 /// while in RDF the subject IS the node — there is nothing in the document for
 /// it to name.
@@ -318,7 +318,10 @@ fn document_targets(
 /// The IRI to look for in the document.
 fn wanted_iri(db: &dyn fossil_base::Db, entry: &TypeEntry, wanted: &Wanted<'_>) -> Option<String> {
     match wanted {
-        Wanted::Shape => entry.shape_iri.as_ref().map(|s| s.to_string()),
+        Wanted::Shape => entry
+            .shape_iri
+            .as_ref()
+            .map(std::string::ToString::to_string),
         Wanted::Predicate { mapping, key } => {
             // `short_names` IS the rule — the last segment of
             // the predicate IRI, with `@rename` substituted first — so this
@@ -384,8 +387,8 @@ fn brace_members(node: &SyntaxNode) -> Vec<String> {
 /// the module docs for why it may not cheaply grow any), so there is no exact
 /// answer to hand back and this recovers one from the bytes. Two tiers:
 ///
-/// 1. **the IRI verbatim.** ShExJ writes it out in full (`"predicate":
-///    "http://example.org/name"`), ShExC writes it inside `<…>`, and the line
+/// 1. **the IRI verbatim.** `ShExJ` writes it out in full (`"predicate":
+///    "http://example.org/name"`), `ShExC` writes it inside `<…>`, and the line
 ///    format `fossil_base::test_support` decodes writes it bare.
 /// 2. **a prefixed name**, when the document declares a prefix whose expansion
 ///    the IRI starts with. `PREFIX shop: <https://shop.example/voc#>` makes
@@ -446,9 +449,9 @@ fn is_name_char(c: char) -> bool {
 /// The `prefix → expansion` pairs a document declares.
 ///
 /// Recognises the two spellings the corpus contains: SPARQL/ShExC's
-/// `PREFIX p: <iri>` (case-insensitively — ShExC accepts both) and Turtle's
+/// `PREFIX p: <iri>` (case-insensitively — `ShExC` accepts both) and Turtle's
 /// `@prefix p: <iri> .`, which is what a SHACL document written in Turtle uses.
-/// ShExJ declares none and needs none: it writes every IRI out in full, so tier
+/// `ShExJ` declares none and needs none: it writes every IRI out in full, so tier
 /// 1 already answers for it.
 ///
 /// This is the one piece of schema-language syntax this module knows, and it is
@@ -460,11 +463,10 @@ fn declared_prefixes(text: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim_start();
-        let rest = if let Some(rest) = trimmed.strip_prefix('@') {
-            strip_keyword(rest, "prefix")
-        } else {
-            strip_keyword(trimmed, "prefix")
-        };
+        let rest = trimmed.strip_prefix('@').map_or_else(
+            || strip_keyword(trimmed, "prefix"),
+            |rest| strip_keyword(rest, "prefix"),
+        );
         let Some(rest) = rest else { continue };
         let rest = rest.trim_start();
         let Some((name, rest)) = rest.split_once(':') else {
@@ -557,7 +559,7 @@ shop:Person {
         );
     }
 
-    /// ShExJ writes every IRI out, so tier 1 answers without a prefix table.
+    /// `ShExJ` writes every IRI out, so tier 1 answers without a prefix table.
     #[test]
     fn a_verbatim_iri_is_located_without_any_prefix_declaration() {
         let doc = "{ \"id\": \"http://example.org/Person\" }";

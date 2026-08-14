@@ -124,13 +124,13 @@ pub enum SyntaxKind {
     ///
     /// A `TYPE_DEF` may carry [`SyntaxKind::RENAME_ATTR`] children BEFORE its
     /// `type` token — `RenameAttr*` is part of this production
-    /// (grammar.bnf, TypeDef), not a top-level item of its own, because a
+    /// (grammar.bnf, `TypeDef`), not a top-level item of its own, because a
     /// `@rename` renames a predicate OF ONE BINDING and there is nowhere else
     /// for it to hang.
     TYPE_DEF,
     /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` —
     /// `RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN`
-    /// (grammar.bnf, RenameAttr).
+    /// (grammar.bnf, `RenameAttr`).
     ///
     /// The repair for two predicates whose last IRI segments coincide, in the
     /// shape of Prisma's `@map`: all constants, above the declaration, and in
@@ -157,7 +157,7 @@ pub enum SyntaxKind {
     MAPPING_BODY,
     PROPERTY,
     PROPERTY_LHS,
-    /// The mapping header's shape (grammar.bnf, ShapeExpr) — `ShapeExpr :=
+    /// The mapping header's shape (grammar.bnf, `ShapeExpr`) — `ShapeExpr :=
     /// IDENT`. One `IDENT` token child and nothing else: one of the names a
     /// `type { … } := …` binding introduced. The `&` intersection went when the
     /// lowering was found to keep the first shape and drop the rest in silence,
@@ -194,7 +194,7 @@ pub enum SyntaxKind {
     ARG_LIST,
     ARG,
     NAMED_ARG,
-    /// `Node as Other` — `AliasArg := IDENT 'as' IDENT` (grammar.bnf, AliasArg).
+    /// `Node as Other` — `AliasArg := IDENT 'as' IDENT` (grammar.bnf, `AliasArg`).
     ///
     /// The self-join's alias, and the OTHER place `as` survives:
     /// `Node.join(Node as Other, on = Node.parent == Other.id)` binds a second

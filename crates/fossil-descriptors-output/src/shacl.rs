@@ -305,7 +305,7 @@ mod tests {
     // (→ a narrowed constraint, single-valued via sh:maxCount 1), an opaque IRI
     // (sh:nodeKind sh:IRI → AnyUri), a plain edge (sh:class), and an OR edge
     // (sh:or → two targets on one constraint, one EdgeType each).
-    const SHAPES: &str = r#"
+    const SHAPES: &str = r"
 @prefix sh:  <http://www.w3.org/ns/shacl#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 @prefix ex:  <https://ex.org/> .
@@ -316,7 +316,7 @@ ex:PersonShape a sh:NodeShape ;
     sh:property [ sh:path ex:homepage ; sh:nodeKind sh:IRI ] ;
     sh:property [ sh:path ex:knows    ; sh:class ex:Person ] ;
     sh:property [ sh:path ex:contact  ; sh:or ( [ sh:class ex:Person ] [ sh:class ex:Org ] ) ] .
-"#;
+";
 
     #[test]
     fn shacl_lowers_literals_iris_and_edges_into_the_neutral_vocabulary() {
@@ -387,13 +387,13 @@ ex:PersonShape a sh:NodeShape ;
     /// `BTreeMap` this walk used to iterate would have swapped them.
     #[test]
     fn shapes_come_out_in_declaration_order_not_alphabetical() {
-        const TWO: &str = r#"
+        const TWO: &str = r"
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <https://ex.org/> .
 
 ex:ZetaShape  a sh:NodeShape ; sh:targetClass ex:Zeta .
 ex:AlphaShape a sh:NodeShape ; sh:targetClass ex:Alpha .
-"#;
+";
         let doc = decode_shacl("two.ttl", TWO).expect("parses");
         let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
         assert_eq!(order, ["https://ex.org/Zeta", "https://ex.org/Alpha"]);
@@ -402,12 +402,12 @@ ex:AlphaShape a sh:NodeShape ; sh:targetClass ex:Alpha .
     /// A shape with no `sh:targetClass` is typed by its own IRI.
     #[test]
     fn a_shape_without_a_target_class_is_typed_by_itself() {
-        const SELF_TYPED: &str = r#"
+        const SELF_TYPED: &str = r"
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <https://ex.org/> .
 
 ex:Thing a sh:NodeShape ; sh:property [ sh:path ex:label ] .
-"#;
+";
         let doc = decode_shacl("t.ttl", SELF_TYPED).expect("parses");
         assert!(doc.lookup("https://ex.org/Thing").is_some());
     }

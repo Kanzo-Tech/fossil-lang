@@ -180,7 +180,7 @@ pub enum CmpOp {
     Rem,
 }
 
-/// A `-` or a `not` — the two operators of L7 (grammar.bnf, UnaryExpr).
+/// A `-` or a `not` — the two operators of L7 (grammar.bnf, `UnaryExpr`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub enum UnOp {
     /// `-Row.drift` — arithmetic negation. Numeric operand, numeric result.
@@ -291,8 +291,8 @@ pub enum HirExpr {
     ///
     /// # It is a call, and it needed no production
     ///
-    /// A type name is a `PrimaryExpr` (grammar.bnf, PrimaryExpr) and application
-    /// is the ordinary call (grammar.bnf, PostfixOp); what makes this a distinct
+    /// A type name is a `PrimaryExpr` (grammar.bnf, `PrimaryExpr`) and application
+    /// is the ordinary call (grammar.bnf, `PostfixOp`); what makes this a distinct
     /// HIR form is the LOWERING, which knows the type and uses THE template of
     /// that type — unique because a type has exactly ONE identity, declared once
     /// by the program as its `@subject`. That is what retired
@@ -330,8 +330,8 @@ pub enum HirExpr {
     /// `true` / `false` — a boolean literal.
     ///
     /// It needed a `BOOL` token before it could exist. As an `IDENT`, `true` was
-    /// a [`Self::FieldRef`] and `verified = true` reported `unknown column
-    /// `true`` — a literal sent to look for a binding it can never have.
+    /// a [`Self::FieldRef`] and `verified = true` reported "unknown column
+    /// `true`" — a literal sent to look for a binding it can never have.
     BoolLit(bool),
     /// `.age >= 18`, `gross - discount` — a comparison, a boolean connective or
     /// arithmetic. One node for all three: the CST builds one `BINARY_EXPR` and
@@ -341,7 +341,7 @@ pub enum HirExpr {
         lhs: Box<HirExpr>,
         rhs: Box<HirExpr>,
     },
-    /// `-Row.drift`, `not Row.degraded` — L7 (grammar.bnf, UnaryExpr).
+    /// `-Row.drift`, `not Row.degraded` — L7 (grammar.bnf, `UnaryExpr`).
     ///
     /// # Why this is a node and not a desugaring
     ///
@@ -799,7 +799,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
 /// a CATALOGUED head and `User` is not — a question about the catalogue, asked
 /// of the catalogue ([`FunctionRegistry::is_catalogued_head`]). This is the
 /// receiver doing the work the string-matching used to do badly: before it, the
-/// two were told apart by which SyntaxKind the parser happened to build.
+/// two were told apart by which `SyntaxKind` the parser happened to build.
 fn lower_source_pipe(
     db: &dyn fossil_base::Db,
     source_def: &fossil_syntax::SyntaxNode,
@@ -1067,22 +1067,21 @@ fn lower_source_stage(
             // `Purchase.join(User, on = …)` and the self-join
             // `Node.join(Node as Other, on = …)`. The alias is an `ALIAS_ARG`
             // and not a positional argument, so the two are read apart.
-            let (right, alias) = match alias_arg(&args) {
-                Some((source, alias)) => (source, Some(alias)),
-                None => {
-                    let Some(right) = positional.first().and_then(bare_name) else {
-                        diagnose(
-                            db,
-                            stage,
-                            format!(
-                                "`join` in `{pipe}` does not name the source binding it joins. \
-                                 e.g. `join(User, on = Purchase.user_id == User.id)`."
-                            ),
-                        );
-                        return None;
-                    };
-                    (right, None)
-                }
+            let (right, alias) = if let Some((source, alias)) = alias_arg(&args) {
+                (source, Some(alias))
+            } else {
+                let Some(right) = positional.first().and_then(bare_name) else {
+                    diagnose(
+                        db,
+                        stage,
+                        format!(
+                            "`join` in `{pipe}` does not name the source binding it joins. \
+                             e.g. `join(User, on = Purchase.user_id == User.id)`."
+                        ),
+                    );
+                    return None;
+                };
+                (right, None)
             };
             // `on = <predicate>`, and the predicate form is the one that
             // survived: `on = .k` needed a `FieldRef` to name a column of an
@@ -1141,7 +1140,7 @@ fn lower_receiver_is_value(node: &fossil_syntax::SyntaxNode) -> bool {
 
 /// The `X as Y` of a self-join, read off an `ARG_LIST`'s children.
 ///
-/// `ALIAS_ARG := IDENT 'as' IDENT` (grammar.bnf, AliasArg). Returns the source
+/// `ALIAS_ARG := IDENT 'as' IDENT` (grammar.bnf, `AliasArg`). Returns the source
 /// being aliased and the alias, in that order.
 fn alias_arg(args: &[fossil_syntax::SyntaxNode]) -> Option<(SmolStr, SmolStr)> {
     use fossil_syntax::SyntaxKind;
@@ -1253,7 +1252,7 @@ fn emit_item(db: &dyn fossil_base::Db, span: Span, message: String) {
 /// or emits its own.
 ///
 /// `dm` is threaded in for the shape. `ShapeExpr := IDENT` (grammar.bnf,
-/// ShapeExpr) — one of the names a `type { … } := io.shex(…)` binding
+/// `ShapeExpr`) — one of the names a `type { … } := io.shex(…)` binding
 /// introduced — so the IRI comes from the binding rather than from a prefix
 /// expansion the program spelled out.
 fn lower_mapping_node<'db>(
@@ -1331,27 +1330,18 @@ fn lower_mapping_node<'db>(
     // properties never lowered, `body()` never ran on them, and every `ExprId`
     // after it shifted. A mapping that cannot name its shape is still a mapping
     // whose body the author wants checked.
-    let shape_iri = match dm.lookup_type(db, shape_name.as_str()) {
-        Some(iri) => iri,
-        // The name is written and resolves to no shape, and there are TWO
-        // reasons for that. `lookup_type` answers `None` to both, which is what
-        // made the second one silent.
-        None => {
-            // `diagnose_item`, not `diagnose`: this is reached from
-            // `lower_to_hir`, which walks the WHOLE-FILE CST, so the range is
-            // already file-absolute. The default `SpanFrame::MappingRelative`
-            // would make `spans::rebase_to_file` shift it by the mapping's own
-            // start — invisible in a one-mapping file and wrong in every other.
-            // `diagnose_item`, not `diagnose`. This is reached only from
-            // `lower_to_hir`, which walks the WHOLE-FILE CST, so `shape_expr`'s
-            // range is already a file offset. Left in the default
-            // `MappingRelative` frame, `spans::rebase_to_file` would shift it by
-            // the mapping's own start — zero for the first mapping in a file,
-            // and wrong for every one after it.
-            diagnose_item(db, &shape_expr, unbound_shape_message(db, dm, &shape_name));
-            SmolStr::default()
-        }
-    };
+    // The name is written and resolves to no shape, and there are TWO reasons
+    // for that. `lookup_type` answers `None` to both, which is what made the
+    // second one silent.
+    let shape_iri = dm.lookup_type(db, shape_name.as_str()).unwrap_or_else(|| {
+        // `diagnose_item`, not `diagnose`: this is reached from `lower_to_hir`,
+        // which walks the WHOLE-FILE CST, so `shape_expr`'s range is already a
+        // file offset. Left in the default `SpanFrame::MappingRelative` frame,
+        // `spans::rebase_to_file` would shift it by the mapping's own start —
+        // zero for the first mapping in a file, and wrong for every one after.
+        diagnose_item(db, &shape_expr, unbound_shape_message(db, dm, &shape_name));
+        SmolStr::default()
+    });
 
     Some(HirMapping {
         name,
@@ -1432,7 +1422,7 @@ fn unbound_shape_message(
 ///
 /// `from Adults`, `from User.where(User.age >= 18)` and
 /// `from Purchase.join(User, on = …)` are one production (grammar.bnf,
-/// MappingHeader), and the first IDENT of all three is the relation being read.
+/// `MappingHeader`), and the first IDENT of all three is the relation being read.
 fn source_binding_of(header: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
     use fossil_syntax::SyntaxKind;
     header
@@ -1844,7 +1834,7 @@ fn lower_expr_inner(
     }
 }
 
-/// Lower a `UNARY_EXPR` — `-x` or `not x` (grammar.bnf, UnaryExpr).
+/// Lower a `UNARY_EXPR` — `-x` or `not x` (grammar.bnf, `UnaryExpr`).
 ///
 /// The parser builds the node right-associatively, so `- - x` is a `UNARY_EXPR`
 /// wrapping a `UNARY_EXPR`, and this recurses through
@@ -2364,22 +2354,21 @@ fn place_args(
     // Positions `0..offset` belong to the receiver and are not this vector's.
     let mut out = Vec::with_capacity(slots.len().saturating_sub(offset));
     for (at, slot) in slots.into_iter().enumerate().skip(offset) {
-        match slot {
-            Some(e) => out.push(e),
-            None => {
-                let name = sig
-                    .and_then(|s| s.params.get(at))
-                    .map_or_else(|| at.to_string(), |p| p.name.to_string());
-                emit(
-                    &list,
-                    format!(
-                        "`{func}` is given nothing for `{name}`, and something after it. A \
-                         parameter cannot be skipped: name the ones you are giving, or give them \
-                         all in order."
-                    ),
-                );
-                return None;
-            }
+        if let Some(e) = slot {
+            out.push(e);
+        } else {
+            let name = sig
+                .and_then(|s| s.params.get(at))
+                .map_or_else(|| at.to_string(), |p| p.name.to_string());
+            emit(
+                &list,
+                format!(
+                    "`{func}` is given nothing for `{name}`, and something after it. A \
+                     parameter cannot be skipped: name the ones you are giving, or give them \
+                     all in order."
+                ),
+            );
+            return None;
         }
     }
     Some(out)

@@ -358,9 +358,12 @@ mod tests {
     fn the_test_support_table_carries_the_line_row_under_the_name_shex() {
         let row = crate::providers::provider(TABLE, "io.shex").expect("installed");
         assert_eq!(row.name, "shex");
-        assert_eq!(
-            row.reads_types,
-            Some(decode_lines as crate::providers::DecodeTypes)
+        assert!(
+            std::ptr::fn_addr_eq(
+                row.reads_types.expect("the row reads types"),
+                decode_lines as crate::providers::DecodeTypes,
+            ),
+            "the row's `decode` is `decode_lines`"
         );
     }
 }

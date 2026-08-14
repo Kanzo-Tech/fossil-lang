@@ -514,6 +514,11 @@ fn subtypes<'db>(db: &'db dyn fossil_base::Db, actual: Ty<'db>, expected: Ty<'db
     {
         return true;
     }
+    // S-IntFlt and S-TmplIri both answer `true`, and they are not one arm: each
+    // is a named subtyping rule with its own reason, and the reason is what the
+    // arm above it carries. Merged, the two rules would share one comment and
+    // neither would be findable by name.
+    #[allow(clippy::match_same_arms)]
     match (actual.kind(db), expected.kind(db)) {
         // S-IntFlt: Integer <: Float.
         (TyKind::Primitive(Primitive::Integer), TyKind::Primitive(Primitive::Float)) => true,
@@ -752,6 +757,11 @@ impl<'db> Checker<'db> {
         // the fact. It used to be, and the consequence was measurable — an
         // interpolated IRI in value position was `String`, unsatisfiable
         // against every predicate whose range is a shape.
+        // `Subject` and the unguarded `Name(_)` both answer `None` and cannot be
+        // merged: the guarded `Name(name) if self.resolved_shape.is_some()` arm
+        // sits between them, and match arms are tried in order. One combined arm
+        // would have to go first, and it would shadow the guard.
+        #[allow(clippy::match_same_arms)]
         let expectation = match &prop.key {
             PropertyKey::Subject => None,
             PropertyKey::Name(name) if self.resolved_shape.is_some() => {
@@ -1069,7 +1079,7 @@ impl<'db> Checker<'db> {
 
         let arity = template.arity();
         if args.len() != arity {
-            let declared = template.mapping_name.clone();
+            let declared = template.mapping_name;
             let eg = delay_span_bug(
                 db,
                 self.span_of(expr_id),

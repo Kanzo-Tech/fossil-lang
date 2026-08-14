@@ -106,7 +106,7 @@ fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 /// host — the LSP keys by `file://` URI — which is why registration takes the
 /// text and not the path.
 fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
-    let dir = fossil_base::program_dir(&file.path(db));
+    let dir = fossil_base::program_dir(file.path(db));
     fossil_base::SourceAnchor::beside(&dir).locator(document)
 }
 
@@ -122,6 +122,11 @@ fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
 /// the span of the `io.shex("…")` that named it, and this loop has a path and
 /// an `io::Error`. Skipping leaves `file_at` returning `None`, which is exactly
 /// the state the checker's own diagnostic reads.
+// `pub(crate)` and not `pub`: this module is private, so clippy calls the
+// restriction redundant and rustc's `unreachable_pub` calls the unrestricted
+// form unreachable. Only one of the two can be satisfied, and the rustc lint is
+// the one this workspace opted into by name.
+#[allow(clippy::redundant_pub_crate)]
 pub(crate) fn register_shape_documents(db: &mut FossilDb, file: SourceFile) {
     // Read first, register second: `register_file` takes the database
     // exclusively and `System::read_file` borrows it shared.

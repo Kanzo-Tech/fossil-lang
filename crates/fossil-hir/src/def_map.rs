@@ -758,7 +758,7 @@ pub(crate) struct RenameAttr {
 /// Every `RENAME_ATTR` above one `TYPE_DEF`, flattened to one entry per
 /// `RENAME`.
 ///
-/// `RenameAttr*` is part of the `TypeDef` production (grammar.bnf, TypeDef), so
+/// `RenameAttr*` is part of the `TypeDef` production (grammar.bnf, `TypeDef`), so
 /// these are CHILDREN of the node and not siblings of it — which is what makes a
 /// rename belong to one binding rather than to the file.
 ///
@@ -949,7 +949,7 @@ pub(crate) fn resolve_relative(
     file: fossil_base::SourceFile,
     schema_path: &str,
 ) -> std::path::PathBuf {
-    let dir = fossil_base::program_dir(&file.path(db));
+    let dir = fossil_base::program_dir(file.path(db));
     std::path::PathBuf::from(fossil_base::SourceAnchor::beside(&dir).locator(schema_path))
 }
 

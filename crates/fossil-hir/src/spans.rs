@@ -110,7 +110,7 @@ impl<'db> Spans<'db> {
 /// This used to walk the CST a second time and number the properties by their
 /// POSITION among the `PROPERTY` children, via an `.enumerate()`. Its own
 /// comment said the opposite — «Skip properties that wouldn't have lowered to
-/// an `ExprId` … Spans matches body()'s indexing» — and the code did not skip
+/// an `ExprId` … Spans matches `body()`'s indexing» — and the code did not skip
 /// anything: the counter advanced on every CST child, lowered or not. `body()`
 /// numbers densely over the ones that DID lower, so the two agreed exactly
 /// until one property failed to lower, and then every id after it was off by

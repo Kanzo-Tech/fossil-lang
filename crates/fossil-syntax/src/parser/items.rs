@@ -797,7 +797,7 @@ mod disambiguation {
     /// The source text a span selects. A refusal whose span points at a
     /// plausible wrong place is worse than one that points nowhere, so every
     /// retired-spelling test below asserts on this rather than on the offsets.
-    fn underlined<'a>(src: &'a str, span: (u32, u32)) -> &'a str {
+    fn underlined(src: &str, span: (u32, u32)) -> &str {
         &src[span.0 as usize..span.1 as usize]
     }
 

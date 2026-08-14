@@ -100,7 +100,7 @@ fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
 ///   0: type { Person } := io.shex("hover.shex")
 ///   1: Users := io.csv("x.csv")
 ///   2: People : Person from Users
-///   3:     @subject = "https://example.org/u/{Users.id}"
+///   3:     @subject = "<https://example.org/u/{Users.id>}"
 ///   4:     name = Users.name
 ///
 /// The hover request targets line 3, character 10 — inside the identity

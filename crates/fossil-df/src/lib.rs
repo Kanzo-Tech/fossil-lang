@@ -151,7 +151,7 @@ pub async fn execute_graph<'db>(
     // anchor — so `io.csv("data/items.csv")` meant a different file depending
     // on where you invoked from, while `io.shex("shop.shex")` in the same
     // program was already resolved beside it.
-    let program_dir = fossil_base::program_dir(&file.path(db));
+    let program_dir = fossil_base::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
     let mut probe = Probe::new(&format!("execute_graph — {} mapping(s)", mappings.len()));
@@ -240,7 +240,7 @@ pub async fn execute_vertex<'db>(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let program_dir = fossil_base::program_dir(&mapping.file(db).path(db));
+    let program_dir = fossil_base::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared]).await
@@ -752,7 +752,7 @@ pub fn provider_bindings(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
-    let program_dir = fossil_base::program_dir(&file.path(db));
+    let program_dir = fossil_base::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();
@@ -817,7 +817,7 @@ pub fn program_sources(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<SourceRef> {
-    let program_dir = fossil_base::program_dir(&file.path(db));
+    let program_dir = fossil_base::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();

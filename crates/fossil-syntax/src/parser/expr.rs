@@ -57,7 +57,7 @@
 //! and `false` are specified as tokens (grammar.bnf, BOOL) because a program
 //! writes `verified = true` and there is no binding for the name to resolve
 //! against. They arrived as `IDENT` until the lexer had a rule for them, which
-//! made `verified = true` report `unknown column `true``.
+//! made `verified = true` report "unknown column `true`".
 
 use crate::kind::SyntaxKind;
 
@@ -274,8 +274,8 @@ fn parse_arg_list(p: &mut Parser) {
 }
 
 /// `Arg := NamedArg | AliasArg | Expression` (grammar.bnf, Arg), with
-/// `NamedArg := IDENT ASSIGN Expression` (grammar.bnf, NamedArg) and
-/// `AliasArg := IDENT 'as' IDENT` (grammar.bnf, AliasArg).
+/// `NamedArg := IDENT ASSIGN Expression` (grammar.bnf, `NamedArg`) and
+/// `AliasArg := IDENT 'as' IDENT` (grammar.bnf, `AliasArg`).
 ///
 /// # The three forks, and why one token of lookahead is enough for all of them
 ///
@@ -325,7 +325,7 @@ fn parse_arg(p: &mut Parser) {
 }
 
 /// `PrimaryExpr := Literal | IDENT | LPAREN Expression RPAREN`
-/// (grammar.bnf, PrimaryExpr), where `Literal` is `INTEGER | FLOAT | STRING |
+/// (grammar.bnf, `PrimaryExpr`), where `Literal` is `INTEGER | FLOAT | STRING |
 /// BOOL | InterpolatedString` (grammar.bnf, Literal).
 ///
 /// Three alternatives, as specified, plus three REFUSALS. The refusals are not
@@ -335,6 +335,12 @@ fn parse_arg(p: &mut Parser) {
 /// exactly, and this file's whole failure history is silence in that position.
 fn parse_primary(p: &mut Parser) {
     p.skip_trivia();
+    // The literal arm and the bare-`IDENT` arm have the same body and cannot be
+    // merged: the guarded CURIE refusal sits between them, and match arms are
+    // tried in order. Folding `IDENT` into the literal arm above would shadow
+    // that guard, and `ex:name` would parse as a literal instead of naming what
+    // replaced it.
+    #[allow(clippy::match_same_arms)]
     match p.current() {
         // Literal-like primary tokens: numeric literals and strings. Both
         // wrap as LITERAL_EXPR with a single token payload.
@@ -504,7 +510,7 @@ mod tests {
             .iter()
             .filter_map(|d| match d {
                 crate::parser::diag::ParseDiagnostic::RetiredSpelling { message, span } => {
-                    Some((message.clone(), span.clone()))
+                    Some((message.clone(), *span))
                 }
                 _ => None,
             })

@@ -58,17 +58,21 @@ const MAX_PER_MAPPING_FAN_OUT: usize = 1;
 /// Ten mappings, one type, one identity — the shape of a real program, where
 /// `subject_templates` reads all ten bodies. `{n}` is the mapping's number.
 fn ten_mappings(third_property: &str) -> String {
+    use std::fmt::Write as _;
+
     let mut src = String::from(
         "type { Person } := io.shex(\"person.shex\")\n\
          users := io.csv(\"data.csv\")\n\n",
     );
     for n in 1..=10 {
         let a = if n == 3 { third_property } else { "users.a" };
-        src.push_str(&format!(
+        write!(
+            src,
             "Mapping_{n} : Person from users\n    \
              @subject = \"http://example.org/p/{{users.id}}\"\n    \
              name = {a}\n\n"
-        ));
+        )
+        .expect("writing to a String cannot fail");
     }
     src
 }
@@ -123,8 +127,7 @@ fn measure(edit: bool) -> Vec<String> {
         .to(ten_mappings(if edit { "users.x" } else { "users.a" }));
     warm(&db);
 
-    let out = keys.lock().unwrap().clone();
-    out
+    keys.lock().unwrap().clone()
 }
 
 #[test]

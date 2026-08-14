@@ -206,7 +206,7 @@ pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) 
             )
             .collect(),
         // Empty means "never fresh", which is right for a table nobody re-reads.
-        freshness_token: String::new().into(),
+        freshness_token: String::new(),
     });
 }
 

@@ -60,12 +60,11 @@
 
 use fossil_base::{Span, delay_span_bug};
 use fossil_descriptors_input::InferredDescriptor;
-use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use fossil_graph_schema::{Primitive, Shape, local_name};
 
-use crate::def_map::{MappingLoc, ShapeBindError, def_map, resolve_relative};
+use crate::def_map::{MappingLoc, ShapeBindError, def_map};
 use crate::ty::{Record, RecordField, Ty, TyKind};
 
 /// The source-row [`Ty`] (a `Record`) for a mapping as known from the
@@ -345,6 +344,11 @@ pub fn resolve_binding_scope<'db>(
 /// Lifted out of [`resolve_binding_scope`] unchanged when the scope arrived:
 /// every branch below answers the same question it always did, about ONE
 /// binding, and the name it answers under is the caller's business.
+// No branch here errors TODAY, and the `Result` stays: this is one of four
+// functions in this module with the same signature, called with `?` from the
+// scope walk, and the taint an `ErrorGuaranteed` carries is the thing that must
+// be able to propagate from any of them.
+#[allow(clippy::unnecessary_wraps)]
 fn resolve_leaf_row<'db>(
     db: &'db dyn fossil_base::Db,
     file: fossil_base::SourceFile,
@@ -805,13 +809,13 @@ fn pipe_error(
 ///
 /// # Why the edge column is `Iri` and not `String`
 ///
-/// It used to be `String`, with this very doc-comment calling it «the referenced
-/// subject's IRI» in the same sentence. Three places then contradicted each
+/// It used to be `String`, with this very doc-comment calling it "the referenced
+/// subject's IRI" in the same sentence. Three places then contradicted each
 /// other: [`crate::shapes::expected_value_ty`] demands `Iri` of a predicate
 /// whose range is a shape, this row supplied `String`, and
 /// [`crate::check`]'s `subtypes` has no rule between them — so
 /// `hasProject = .hasProject`, copying an edge straight from an RDF input to an
-/// RDF output, was **unsatisfiable**: `expected `Iri`, got `String``. And a type
+/// RDF output, was **unsatisfiable**: "expected `Iri`, got `String`". And a type
 /// error is not informational — it taints `typecheck_mapping`, which poisons
 /// `lower_to_mir_pg`, which fails the run.
 ///

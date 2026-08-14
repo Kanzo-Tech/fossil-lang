@@ -75,31 +75,28 @@ impl SymbolIndex {
     pub fn from_root(root: &SyntaxNode) -> Self {
         let mut entries = Vec::new();
         for item in root.children() {
-            match item.kind() {
-                SyntaxKind::MAPPING => {
-                    if let Some(header) = Mapping::cast(item.clone()).and_then(|m| m.header()) {
-                        if let Some(name) = header.name() {
-                            entries.push(SymbolEntry {
-                                name,
-                                kind: SymbolKind::Mapping,
-                                range: node_range(&item),
-                            });
-                        }
-                        // A mapping's header carries a shape NAME (`Person`);
-                        // record it so goto-def on the shape resolves to the
-                        // `type { … } := …` binding that introduced it.
-                        if let Some(shape) = header.shape_expr()
-                            && let Some(name) = shape.name()
-                        {
-                            entries.push(SymbolEntry {
-                                name,
-                                kind: SymbolKind::Shape,
-                                range: node_range(shape.syntax()),
-                            });
-                        }
-                    }
+            if item.kind() == SyntaxKind::MAPPING
+                && let Some(header) = Mapping::cast(item.clone()).and_then(|m| m.header())
+            {
+                if let Some(name) = header.name() {
+                    entries.push(SymbolEntry {
+                        name,
+                        kind: SymbolKind::Mapping,
+                        range: node_range(&item),
+                    });
                 }
-                _ => {}
+                // A mapping's header carries a shape NAME (`Person`);
+                // record it so goto-def on the shape resolves to the
+                // `type { … } := …` binding that introduced it.
+                if let Some(shape) = header.shape_expr()
+                    && let Some(name) = shape.name()
+                {
+                    entries.push(SymbolEntry {
+                        name,
+                        kind: SymbolKind::Shape,
+                        range: node_range(shape.syntax()),
+                    });
+                }
             }
         }
         Self { entries }

@@ -230,7 +230,7 @@ Users : Person from User
                 assert_eq!(h.body_property_count, 2);
                 assert_eq!(h.source_binding.as_deref(), Some("User"));
             }
-            other => panic!("expected Mapping, got {other:?}"),
+            other @ ItemHeader::SourceDef(_) => panic!("expected Mapping, got {other:?}"),
         }
     }
 
@@ -263,11 +263,15 @@ Users : Person from User
         assert_eq!(items_a.len(), items_b.len());
         let m_a = match &items_a[2] {
             ItemHeader::Mapping(m) => m,
-            other => panic!("expected Mapping in items_a[2], got {other:?}"),
+            other @ ItemHeader::SourceDef(_) => {
+                panic!("expected Mapping in items_a[2], got {other:?}")
+            }
         };
         let m_b = match &items_b[2] {
             ItemHeader::Mapping(m) => m,
-            other => panic!("expected Mapping in items_b[2], got {other:?}"),
+            other @ ItemHeader::SourceDef(_) => {
+                panic!("expected Mapping in items_b[2], got {other:?}")
+            }
         };
         assert_eq!(m_a.name, m_b.name);
         assert_eq!(m_a.body_property_count, m_b.body_property_count);

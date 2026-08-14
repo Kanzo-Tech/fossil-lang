@@ -275,7 +275,7 @@ pub fn subject_templates<'db>(
 /// once per FILE, beside `def_map` and `lower_to_hir`.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
-pub fn check_identities<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> usize {
+pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
     use salsa::Accumulator as _;
 
     let dm = def_map(db, file);
@@ -435,10 +435,7 @@ mod tests {
     /// which is why `fossil_engine::check` filters this drain by frame. These
     /// fixtures are clean, so the filter here is belt-and-braces: it keeps a
     /// failure in one of those readable as ITS failure rather than as this one.
-    fn conflicts<'db>(
-        db: &'db fossil_base::FossilDb,
-        file: SourceFile,
-    ) -> Vec<&'db fossil_base::Diagnostic> {
+    fn conflicts(db: &fossil_base::FossilDb, file: SourceFile) -> Vec<&fossil_base::Diagnostic> {
         check_identities::accumulated::<fossil_base::Diagnostic>(db, file)
             .into_iter()
             .filter(|d| d.message.contains("mint two identities"))

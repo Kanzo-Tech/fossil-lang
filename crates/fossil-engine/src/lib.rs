@@ -406,7 +406,7 @@ fn pre_introspect_and_register(
 ///    2026-08-11 makes MANDATORY. It is what the CHECKER reads
 ///    ([`fossil_hir::def_map::DefMap::output_shape_document`]), and it is
 ///    consulted FIRST.
-/// 2. `io.rdf(schema = …)` — an RDF *input* whose ShEx doubles as the output
+/// 2. `io.rdf(schema = …)` — an RDF *input* whose `ShEx` doubles as the output
 ///    contract. It stays as the fallback for a program that reads a graph and
 ///    writes one back.
 ///

@@ -24,6 +24,11 @@ use std::path::PathBuf;
 ///
 /// Nothing removes the directory afterwards — a failed run leaves its parquet,
 /// program and manifest on disk to be read.
+// `pub(crate)` and not `pub`: this module is private, so clippy calls the
+// restriction redundant and rustc's `unreachable_pub` calls the unrestricted
+// form unreachable. Only one of the two can be satisfied, and the rustc lint is
+// the one this workspace opted into by name.
+#[allow(clippy::redundant_pub_crate)]
 pub(crate) fn unique_workdir(prefix: &str, test_name: &str) -> PathBuf {
     let tmp = std::env::temp_dir().join(format!("{prefix}-{test_name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);

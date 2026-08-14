@@ -11,7 +11,7 @@
 //! # What each test here is evidence for
 //!
 //! - `catalogue` is the conformance program whose type document is **not**
-//!   ShEx, and it exists to prove the shape-document seam is not ShEx-specific
+//!   `ShEx`, and it exists to prove the shape-document seam is not ShEx-specific
 //!   (`SURFACE-PLAN.md` ruling 13). It was the only one of the eighteen failing
 //!   for that cause: nothing decoded SHACL, so `Product` bound no shape, and by
 //!   ruling 3 of 2026-08-11 no property in that mapping was writable.

@@ -99,7 +99,7 @@ pub struct FunctionRegistry {
 }
 
 /// What sits to the LEFT of the dot, and therefore what decides which members
-/// exist (`grammar.bnf`, PostfixExpr).
+/// exist (`grammar.bnf`, `PostfixExpr`).
 ///
 /// This is the field that turns dispatch from a string match into a type
 /// question. Before it, `where` / `select` / `join` were productions in the
@@ -227,7 +227,7 @@ pub struct SigSpec {
 /// One parameter of a catalogue row: what it is called, and what it takes.
 ///
 /// The name is here and nowhere else, and that placement is the whole of the
-/// named-argument decision (`grammar.bnf`, NamedArg). `NamedArg := IDENT ASSIGN
+/// named-argument decision (`grammar.bnf`, `NamedArg`). `NamedArg := IDENT ASSIGN
 /// Expression` is a production, so the grammar is normative and `format =
 /// "%Y-%m-%d"` is a program fossil must accept; what it needed was somewhere for
 /// `format` to MEAN something. A signature is that somewhere:
@@ -1031,7 +1031,7 @@ impl FunctionRegistry {
 /// This form is EXACT against `catalog.rs::slug`: 16/16 by hand and 0 mismatches
 /// over 240,998 fuzzed inputs. `slug::slugify` cannot be reproduced at all —
 /// it TRANSLITERATES (`Straße` → `strasse`, `€100` → `eur100`, `Москва` →
-/// `moskva`) and DuckDB ships no transliteration function. The best available
+/// `moskva`) and `DuckDB` ships no transliteration function. The best available
 /// approximation, over `strip_accents`, differs on 55.6% of Latin-accented
 /// input, so this keeps the implementation whose behaviour is expressible and
 /// says so.
@@ -1102,7 +1102,7 @@ const VALIDATE_EMAIL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0
 /// by hand, 0 mismatches over 120,000 fuzzed inputs. Both delta columns EMPTY.
 ///
 /// `(?s)` is load-bearing and was measured, not guessed: without it
-/// `https://\n` is false here and true in the Rust, because DuckDB's `$` is
+/// `https://\n` is false here and true in the Rust, because `DuckDB`'s `$` is
 /// RE2's end-of-TEXT and `.` does not cross a newline.
 const VALIDATE_URL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, \
      '^[A-Za-z][A-Za-z0-9+.-]*://(?s).+$') \
@@ -1116,7 +1116,7 @@ fn expr(template: &str) -> LoweringKind {
 /// Helper: an operator of the algebra. Named for brevity in the catalogue table
 /// — thirteen `LoweringKind::Op(PlanOp::…)` in a column is a wall of noise.
 #[allow(non_snake_case)]
-fn L(op: PlanOp) -> LoweringKind {
+const fn L(op: PlanOp) -> LoweringKind {
     LoweringKind::Op(op)
 }
 
@@ -1154,15 +1154,12 @@ pub fn render_template(template: &str, args: &[String]) -> String {
             digits.push(bytes[j]);
             j += 1;
         }
-        match digits.parse::<usize>().ok().and_then(|n| args.get(n)) {
-            Some(a) => {
-                out.push_str(a);
-                i = j;
-            }
-            None => {
-                out.push('%');
-                i += 1;
-            }
+        if let Some(a) = digits.parse::<usize>().ok().and_then(|n| args.get(n)) {
+            out.push_str(a);
+            i = j;
+        } else {
+            out.push('%');
+            i += 1;
         }
     }
     out

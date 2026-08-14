@@ -49,7 +49,7 @@ fn first_mapping(db: &FossilDb, file: SourceFile) -> MappingLoc<'_> {
 /// replaces it is the INFERRED descriptor: the shape a host registers after
 /// introspecting the file, which is the direction the deprecation already
 /// pointed at. Same three columns, same types, one less way to say it.
-fn users_row<'db>(db: &'db dyn fossil_base::Db) -> Ty<'db> {
+fn users_row(db: &dyn fossil_base::Db) -> Ty<'_> {
     crate::infer::record_from_inferred(
         db,
         &InferredDescriptor {
@@ -68,7 +68,7 @@ fn users_row<'db>(db: &'db dyn fossil_base::Db) -> Ty<'db> {
                     primitive: Primitive::Integer,
                 },
             ],
-            freshness_token: String::new().into(),
+            freshness_token: String::new(),
         },
     )
 }
