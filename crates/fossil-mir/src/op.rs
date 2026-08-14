@@ -29,7 +29,7 @@
 //!   [`crate::graph::MirGraph::ops`] in topological order. Two-input ops carry
 //!   two indices.
 
-use fossil_hir::CmpOp;
+use fossil_hir::BinOp;
 use fossil_hir::Ty;
 use fossil_hir::UnOp;
 use smol_str::SmolStr;
@@ -272,7 +272,7 @@ pub enum Expr<'db> {
     },
     /// Binary operator: `lhs <op> rhs`, result typed `ty`.
     BinOp {
-        op: CmpOp,
+        op: BinOp,
         lhs: Box<Expr<'db>>,
         rhs: Box<Expr<'db>>,
         ty: Ty<'db>,

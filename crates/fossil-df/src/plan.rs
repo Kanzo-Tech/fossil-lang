@@ -20,7 +20,7 @@ use datafusion::common::Column;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
 use datafusion::prelude::{DataFrame, SessionContext};
-use fossil_hir::CmpOp;
+use fossil_hir::BinOp;
 use fossil_mir::{Expr, JoinKind, Op};
 
 use fossil_base::SourceAnchor;
@@ -196,7 +196,7 @@ fn join(
 /// here rather than becoming a quietly different plan.
 fn join_key(on: &Expr<'_>, left_name: &str, right_name: &str) -> datafusion::error::Result<String> {
     let Expr::BinOp {
-        op: CmpOp::Eq,
+        op: BinOp::Eq,
         lhs,
         rhs,
         ..

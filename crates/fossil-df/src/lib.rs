@@ -1036,7 +1036,7 @@ pub fn run_to_dir(
 /// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
 /// reach, which is what makes a property that type-checks a property that runs.
 pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
-    use fossil_hir::{CmpOp, UnOp};
+    use fossil_hir::{BinOp, UnOp};
     match e {
         Expr::LitString(s) => lit(s.to_string()),
         // `new_unqualified` (NOT `col()`): a bare `col("hasProject")` folds the
@@ -1056,7 +1056,7 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
         // Casting the left operand makes the engine compute what the type says
         // rather than making the type describe whatever the engine did.
         Expr::BinOp {
-            op: CmpOp::Div,
+            op: BinOp::Div,
             lhs,
             rhs,
             ..
@@ -1091,25 +1091,25 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
 /// The `DataFusion` operator for a fossil one. The two sets coincide exactly —
 /// this is a spelling, not a translation, and it is total, so a new operator in
 /// the language stops compiling here rather than reaching a plan wrong.
-const fn df_operator(op: fossil_hir::CmpOp) -> Operator {
-    use fossil_hir::CmpOp;
+const fn df_operator(op: fossil_hir::BinOp) -> Operator {
+    use fossil_hir::BinOp;
     match op {
-        CmpOp::Eq => Operator::Eq,
-        CmpOp::Ne => Operator::NotEq,
-        CmpOp::Lt => Operator::Lt,
-        CmpOp::Le => Operator::LtEq,
-        CmpOp::Gt => Operator::Gt,
-        CmpOp::Ge => Operator::GtEq,
-        CmpOp::And => Operator::And,
-        CmpOp::Or => Operator::Or,
-        CmpOp::Add => Operator::Plus,
-        CmpOp::Sub => Operator::Minus,
-        CmpOp::Mul => Operator::Multiply,
+        BinOp::Eq => Operator::Eq,
+        BinOp::Ne => Operator::NotEq,
+        BinOp::Lt => Operator::Lt,
+        BinOp::Le => Operator::LtEq,
+        BinOp::Gt => Operator::Gt,
+        BinOp::Ge => Operator::GtEq,
+        BinOp::And => Operator::And,
+        BinOp::Or => Operator::Or,
+        BinOp::Add => Operator::Plus,
+        BinOp::Sub => Operator::Minus,
+        BinOp::Mul => Operator::Multiply,
         // Reached only through the general `BinOp` arm above, which `Div` never
         // takes — it has its own arm because it needs a cast. Kept total so a
         // new operator stops compiling here rather than reaching a plan wrong.
-        CmpOp::Div => Operator::Divide,
-        CmpOp::Rem => Operator::Modulo,
+        BinOp::Div => Operator::Divide,
+        BinOp::Rem => Operator::Modulo,
     }
 }
 

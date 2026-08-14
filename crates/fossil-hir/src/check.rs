@@ -43,7 +43,7 @@ use crate::def_map::MappingLoc;
 use crate::didyoumean::did_you_mean;
 use crate::infer::resolve_source_scope;
 use crate::lower::{
-    CmpOp, HirExpr, HirProperty, InterpolationPart, PropertyKey, UnOp, lower_to_hir,
+    BinOp, HirExpr, HirProperty, InterpolationPart, PropertyKey, UnOp, lower_to_hir,
 };
 use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
 use crate::shapes::{NameCollision, ResolvedShape, TargetShapeError, resolve_target_shape};
@@ -482,21 +482,21 @@ const fn un_op_text(op: UnOp) -> &'static str {
 }
 
 /// The source spelling of an operator, for diagnostics.
-const fn op_text(op: CmpOp) -> &'static str {
+const fn op_text(op: BinOp) -> &'static str {
     match op {
-        CmpOp::Eq => "==",
-        CmpOp::Ne => "!=",
-        CmpOp::Lt => "<",
-        CmpOp::Le => "<=",
-        CmpOp::Gt => ">",
-        CmpOp::Ge => ">=",
-        CmpOp::And => "and",
-        CmpOp::Or => "or",
-        CmpOp::Add => "+",
-        CmpOp::Sub => "-",
-        CmpOp::Mul => "*",
-        CmpOp::Div => "/",
-        CmpOp::Rem => "%",
+        BinOp::Eq => "==",
+        BinOp::Ne => "!=",
+        BinOp::Lt => "<",
+        BinOp::Le => "<=",
+        BinOp::Gt => ">",
+        BinOp::Ge => ">=",
+        BinOp::And => "and",
+        BinOp::Or => "or",
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Rem => "%",
     }
 }
 
@@ -1243,7 +1243,7 @@ impl<'db> Checker<'db> {
     /// `3.5` there. Typing it `Float` picks the answer that loses nothing, and
     /// `fossil_df::render` casts the left operand so the engine agrees with the
     /// type instead of the type flattering the engine.
-    fn synth_binop(&mut self, expr_id: ExprId, op: CmpOp, lhs: &HirExpr, rhs: &HirExpr) -> Ty<'db> {
+    fn synth_binop(&mut self, expr_id: ExprId, op: BinOp, lhs: &HirExpr, rhs: &HirExpr) -> Ty<'db> {
         let db = self.db;
         let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
         let l = self.synth_ty(expr_id, lhs).map(|(t, _)| t);
@@ -1257,7 +1257,7 @@ impl<'db> Checker<'db> {
 
         match op {
             // T-And / T-Or: each side must BE Bool.
-            CmpOp::And | CmpOp::Or => {
+            BinOp::And | BinOp::Or => {
                 for (side, ty) in [("left", l), ("right", r)] {
                     let Some(ty) = ty else { continue };
                     if !subtypes(db, ty, bool_ty) {
@@ -1279,7 +1279,7 @@ impl<'db> Checker<'db> {
             // and Float compare (the promotion `subtypes` already encodes);
             // a string against a number does not, and that is the mistake
             // worth catching — it is the one a mapping actually makes.
-            CmpOp::Eq | CmpOp::Ne | CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge => {
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 if let (Some(l), Some(r)) = (l, r)
                     && !subtypes(db, l, r)
                     && !subtypes(db, r, l)
@@ -1301,7 +1301,7 @@ impl<'db> Checker<'db> {
             // T-Arith. Unlike the two above, the RESULT is the operands' and not
             // the operator's, so this arm returns rather than falling through to
             // `bool_ty`.
-            CmpOp::Add | CmpOp::Sub | CmpOp::Mul | CmpOp::Div | CmpOp::Rem => {
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
                 return self.synth_arith(expr_id, op, l, r);
             }
         }
@@ -1313,7 +1313,7 @@ impl<'db> Checker<'db> {
     fn synth_arith(
         &mut self,
         expr_id: ExprId,
-        op: CmpOp,
+        op: BinOp,
         l: Option<Ty<'db>>,
         r: Option<Ty<'db>>,
     ) -> Ty<'db> {
@@ -1345,7 +1345,7 @@ impl<'db> Checker<'db> {
                 // names the row rather than only refusing.
                 kind => {
                     let hint = if matches!(kind, TyKind::Primitive(Primitive::String))
-                        && matches!(op, CmpOp::Add)
+                        && matches!(op, BinOp::Add)
                     {
                         ". Two strings are joined with `str.concat`, not `+`"
                     } else {
@@ -1371,7 +1371,7 @@ impl<'db> Checker<'db> {
 
         // `/` is Float whatever it is given — the one rule that is the
         // operator's rather than the operands'. See `synth_binop`.
-        if matches!(op, CmpOp::Div) {
+        if matches!(op, BinOp::Div) {
             return float_ty;
         }
         match widest {

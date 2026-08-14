@@ -749,7 +749,7 @@ fn comparing_a_string_column_with_an_integer_is_an_error() {
         let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::BinOp {
-            op: crate::lower::CmpOp::Ge,
+            op: crate::lower::BinOp::Ge,
             lhs: Box::new(crate::lower::HirExpr::FieldRef("name".into())),
             rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
         };
@@ -780,7 +780,7 @@ fn comparing_an_integer_column_with_an_integer_is_bool() {
         let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::BinOp {
-            op: crate::lower::CmpOp::Ge,
+            op: crate::lower::BinOp::Ge,
             lhs: Box::new(crate::lower::HirExpr::FieldRef("age".into())),
             rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
         };
@@ -847,7 +847,7 @@ fn a_conditional_with_mismatched_branches_is_an_error() {
         let mut cx = build_checker(db, m, Some(row), None);
         let e = crate::lower::HirExpr::Ternary {
             cond: Box::new(crate::lower::HirExpr::BinOp {
-                op: crate::lower::CmpOp::Ge,
+                op: crate::lower::BinOp::Ge,
                 lhs: Box::new(crate::lower::HirExpr::FieldRef("age".into())),
                 rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
             }),

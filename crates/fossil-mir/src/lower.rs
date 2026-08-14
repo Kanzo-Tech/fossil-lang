@@ -854,13 +854,13 @@ fn operator_ty<'db>(
     e: &HirExpr,
     field_ty: &impl Fn(&str) -> Ty<'db>,
 ) -> Ty<'db> {
-    use fossil_hir::{CmpOp, UnOp};
+    use fossil_hir::{BinOp, UnOp};
     let prim = |p| Ty::new(db, TyKind::Primitive(p));
     let is_float = |t: Ty<'db>| matches!(t.kind(db), TyKind::Primitive(Primitive::Float));
     match e {
         HirExpr::BinOp { op, lhs, rhs } => match op {
-            CmpOp::Div => prim(Primitive::Float),
-            CmpOp::Add | CmpOp::Sub | CmpOp::Mul | CmpOp::Rem => {
+            BinOp::Div => prim(Primitive::Float),
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Rem => {
                 let l = operator_ty(db, lhs, field_ty);
                 let r = operator_ty(db, rhs, field_ty);
                 if is_float(l) || is_float(r) {
@@ -1254,7 +1254,7 @@ User : ex:Person from adultos
         // the convention every property in the tree already follows, and which
         // the backend resolves against the relation the op reads.
         assert!(
-            matches!(pred, Expr::BinOp { op: fossil_hir::CmpOp::Ge, lhs, .. }
+            matches!(pred, Expr::BinOp { op: fossil_hir::BinOp::Ge, lhs, .. }
                 if matches!(&**lhs, Expr::ColRef { column, .. } if column.as_str() == "edad")),
             "the predicate reads `.edad`, got {pred:?}"
         );
@@ -1313,7 +1313,7 @@ Venta : ex:Person from ventas
         assert_eq!(left_name.as_str(), "pedidos");
         assert_eq!(right_name.as_str(), "personas");
         let Expr::BinOp {
-            op: fossil_hir::CmpOp::Eq,
+            op: fossil_hir::BinOp::Eq,
             lhs,
             rhs,
             ..

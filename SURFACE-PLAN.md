@@ -226,9 +226,10 @@ cuenta como deuda.
         8 · LOS PROGRAMAS DE LA DOCUMENTACIÓN SON EL CORPUS   ← AQUÍ
             los 23 se compilan y se guarda su salida o su
             diagnóstico. 104 tests rojos, en DOS montones.
+            (el paso 9 se adelantó: no dependía de éste)
                     ▼
-        9 · UNA SOLA REFERENCIA, Y ES LA BASELINE
-            la cirugía está hecha; falta borrar `decisions/`
+        9 · UNA SOLA REFERENCIA, Y ES LA BASELINE ─────────── HECHO
+            `decisions/` y `.planning/` borrados, 173 citas sustituidas
                     ▼
      ┌──────────────┴──────────────┐
      ▼                             ▼

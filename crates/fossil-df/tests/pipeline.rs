@@ -21,7 +21,7 @@ use datafusion::prelude::SessionContext;
 use fossil_base::{FossilDb, NativeSystem, System};
 use fossil_graph_schema::Primitive;
 use fossil_hir::ty::{Record, RecordField};
-use fossil_hir::{CmpOp, Ty, TyKind};
+use fossil_hir::{BinOp, Ty, TyKind};
 use fossil_mir::{Expr, JoinKind, Op, SinkRef, SourceFormat, VProp};
 
 /// The anchor these op-list tests resolve their sources against.
@@ -79,7 +79,7 @@ fn col(source: &str, column: &str) -> Expr<'static> {
 /// `BinOp { Eq, ColRef(left.k), ColRef(right.k) }`.
 fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str) -> Expr<'db> {
     Expr::BinOp {
-        op: CmpOp::Eq,
+        op: BinOp::Eq,
         lhs: Box::new(col(left, key)),
         rhs: Box::new(col(right, key)),
         ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
@@ -128,7 +128,7 @@ async fn a_filter_keeps_the_rows_its_predicate_admits() {
         Op::Filter {
             input: 0,
             pred: Expr::BinOp {
-                op: CmpOp::Ge,
+                op: BinOp::Ge,
                 lhs: Box::new(col("users", "id")),
                 rhs: Box::new(Expr::LitInt(2)),
                 ty: Ty::new(&db, TyKind::Primitive(Primitive::Bool)),
@@ -230,7 +230,7 @@ async fn the_three_operators_compose_in_one_chain() {
         Op::Filter {
             input: 2,
             pred: Expr::BinOp {
-                op: CmpOp::Eq,
+                op: BinOp::Eq,
                 lhs: Box::new(col("", "team")),
                 rhs: Box::new(Expr::LitString(SmolStr::new_static("Red"))),
                 ty: Ty::new(&db, TyKind::Primitive(Primitive::Bool)),
@@ -381,7 +381,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
         // Not `==`.
         (
             Expr::BinOp {
-                op: CmpOp::Lt,
+                op: BinOp::Lt,
                 lhs: Box::new(col("users", "id")),
                 rhs: Box::new(col("teams", "id")),
                 ty: bool_ty,
@@ -391,7 +391,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
         // Not two column references.
         (
             Expr::BinOp {
-                op: CmpOp::Eq,
+                op: BinOp::Eq,
                 lhs: Box::new(col("users", "id")),
                 rhs: Box::new(Expr::LitInt(1)),
                 ty: bool_ty,
@@ -401,7 +401,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
         // Two different names — the extension that is declared and not built.
         (
             Expr::BinOp {
-                op: CmpOp::Eq,
+                op: BinOp::Eq,
                 lhs: Box::new(col("users", "id")),
                 rhs: Box::new(col("teams", "team")),
                 ty: bool_ty,

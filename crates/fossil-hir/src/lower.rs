@@ -143,13 +143,11 @@ pub enum PropertyKey {
 /// the parser reads and the checker types cannot be defined downstream of both.
 /// `fossil-mir` and the backends name this one.
 ///
-/// **The name is now wrong and is left alone deliberately.** It has held `And`
-/// and `Or` — which compare nothing — since it was written, and L5/L6 make that
-/// worse rather than different: `CmpOp::Mul` is a lie in the type's name. The
-/// rename to `BinOp` is a mechanical one-token change across six files, two of
-/// which (`check.rs`, `infer.rs`) were under concurrent edit when this landed,
-/// and a rename is the one change that cannot be merged with a conflict. It is
-/// owed, and it is the whole of what is owed.
+/// It was called `CmpOp`, and that name was a lie: it has held `And` and `Or` —
+/// which compare nothing — since it was written, and the arithmetic levels made
+/// it worse rather than different. `CmpOp::Mul` was the clearest form of it. The
+/// rename waited because it is the one change that cannot be merged through a
+/// conflict, and two of its files were under concurrent edit when it landed.
 ///
 /// # The five arithmetic operators, and where their meaning is fixed
 ///
@@ -158,7 +156,7 @@ pub enum PropertyKey {
 /// and `fossil_df::render` decides what the engine computes. Neither can be
 /// read off this enum, which is a tag and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub enum CmpOp {
+pub enum BinOp {
     Eq,
     Ne,
     Lt,
@@ -332,7 +330,7 @@ pub enum HirExpr {
     /// arithmetic. One node for all three: the CST builds one `BINARY_EXPR` and
     /// the operator is the only thing that differs.
     BinOp {
-        op: CmpOp,
+        op: BinOp,
         lhs: Box<HirExpr>,
         rhs: Box<HirExpr>,
     },
@@ -1953,19 +1951,19 @@ fn lower_binary(
         })?;
 
     let op = match op_token.kind() {
-        SyntaxKind::EQ => CmpOp::Eq,
-        SyntaxKind::NEQ => CmpOp::Ne,
-        SyntaxKind::LT => CmpOp::Lt,
-        SyntaxKind::LE => CmpOp::Le,
-        SyntaxKind::GT => CmpOp::Gt,
-        SyntaxKind::GE => CmpOp::Ge,
-        SyntaxKind::KW_AND => CmpOp::And,
-        SyntaxKind::KW_OR => CmpOp::Or,
-        SyntaxKind::PLUS => CmpOp::Add,
-        SyntaxKind::MINUS => CmpOp::Sub,
-        SyntaxKind::STAR => CmpOp::Mul,
-        SyntaxKind::SLASH => CmpOp::Div,
-        SyntaxKind::PERCENT => CmpOp::Rem,
+        SyntaxKind::EQ => BinOp::Eq,
+        SyntaxKind::NEQ => BinOp::Ne,
+        SyntaxKind::LT => BinOp::Lt,
+        SyntaxKind::LE => BinOp::Le,
+        SyntaxKind::GT => BinOp::Gt,
+        SyntaxKind::GE => BinOp::Ge,
+        SyntaxKind::KW_AND => BinOp::And,
+        SyntaxKind::KW_OR => BinOp::Or,
+        SyntaxKind::PLUS => BinOp::Add,
+        SyntaxKind::MINUS => BinOp::Sub,
+        SyntaxKind::STAR => BinOp::Mul,
+        SyntaxKind::SLASH => BinOp::Div,
+        SyntaxKind::PERCENT => BinOp::Rem,
         // Unreachable: the `find` above admits exactly the thirteen kinds
         // matched here. It is a diagnostic and not a panic because the
         // walking-skeleton invariant says the lowering never panics, and a
@@ -2708,7 +2706,7 @@ Users : Person from User
         let HirExpr::BinOp { op, lhs, rhs } = &props[1].value else {
             panic!("expected a BinOp, got {:?}", props[1].value);
         };
-        assert_eq!(*op, CmpOp::Ge);
+        assert_eq!(*op, BinOp::Ge);
         assert_eq!(**lhs, HirExpr::FieldRef(SmolStr::from("age")));
         assert_eq!(**rhs, HirExpr::IntLit(18));
     }
@@ -2748,7 +2746,7 @@ Users : Person from User
         assert_eq!(
             props[1].value,
             HirExpr::BinOp {
-                op: CmpOp::Ge,
+                op: BinOp::Ge,
                 lhs: Box::new(HirExpr::FieldRef(SmolStr::from("age"))),
                 rhs: Box::new(HirExpr::IntLit(18)),
             },
@@ -3099,7 +3097,7 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
         // The condition is a PREDICATE relating two QUALIFIED columns — the
         // whole of ruling 17's first half. It was a bare `on = .k`.
         let HirExpr::BinOp {
-            op: CmpOp::Eq,
+            op: BinOp::Eq,
             lhs,
             rhs,
         } = on
@@ -3110,7 +3108,7 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
             (&**lhs, &**rhs),
             (HirExpr::ColumnRef { .. }, HirExpr::ColumnRef { .. })
         ));
-        assert!(matches!(pred, HirExpr::BinOp { op: CmpOp::Ge, .. }));
+        assert!(matches!(pred, HirExpr::BinOp { op: BinOp::Ge, .. }));
     }
 
     /// **The self-join.** `Node.join(Node as Other, on = …)` — the alias is the

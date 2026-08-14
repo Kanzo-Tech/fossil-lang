@@ -33,7 +33,7 @@ use crate::op::{Expr, Op};
 fn join_key(on: &Expr<'_>) -> Option<SmolStr> {
     match on {
         Expr::BinOp {
-            op: fossil_hir::CmpOp::Eq,
+            op: fossil_hir::BinOp::Eq,
             lhs,
             rhs,
             ..
@@ -204,7 +204,7 @@ mod tests {
     use super::*;
     use crate::op::{SinkRef, SourceFormat, VProp};
     use fossil_graph_schema::Primitive;
-    use fossil_hir::CmpOp;
+    use fossil_hir::BinOp;
     use fossil_hir::ty::{Record, RecordField};
     use std::sync::Arc;
 
@@ -337,7 +337,7 @@ mod tests {
         let db = db();
         let bool_ty = Ty::new(&db, TyKind::Primitive(Primitive::Bool));
         let expr = Expr::BinOp {
-            op: CmpOp::Eq,
+            op: BinOp::Eq,
             lhs: Box::new(Expr::ColRef {
                 source: SmolStr::default(),
                 column: SmolStr::new_static("status"),
