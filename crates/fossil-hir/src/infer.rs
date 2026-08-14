@@ -774,11 +774,8 @@ fn collect_refs(expr: &crate::lower::HirExpr, out: &mut Vec<Reference>) {
                 }
             }
         }
-        HirExpr::StringLit(_)
-        | HirExpr::PrefixedName { .. }
-        | HirExpr::IntLit(_)
-        | HirExpr::FloatLit(_)
-        | HirExpr::BoolLit(_) => {}
+        HirExpr::StringLit(_) | HirExpr::IntLit(_) | HirExpr::FloatLit(_) | HirExpr::BoolLit(_) => {
+        }
     }
 }
 

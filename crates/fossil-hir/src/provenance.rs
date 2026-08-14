@@ -14,7 +14,7 @@
 //! - [`ExprTypeEntry`]: `(expr_id, ty, provenance)` triple.
 //! - [`ExprTypes`]: per-mapping interned vector of [`ExprTypeEntry`].
 //! - [`expr_types`]: `MappingLoc -> ExprTypes` Salsa query, populates the
-//!   Phase 2 literal subset (`StringLit` / `Template` / `PrefixedName`);
+//!   Phase 2 literal subset (`StringLit` / `Template`);
 //!   `FieldRef` returns None (deferred to Phase 3 — needs source-row type
 //!   from CSVW).
 //! - [`ty_origin`]: convenience lookup `(MappingLoc, ExprId) -> Option<ExprTypeEntry>`.
@@ -57,11 +57,7 @@ use crate::def_map::{MappingLoc, def_map};
 use crate::ty::Ty;
 
 #[cfg(test)]
-use crate::lower::HirExpr;
-#[cfg(test)]
 use crate::ty::TyKind;
-#[cfg(test)]
-use fossil_graph_schema::Primitive;
 
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
 /// type was synthesised) + a categorical [`ProvenanceKind`] (semantic reason).
@@ -193,84 +189,6 @@ pub fn ty_origin<'db>(
         .cloned()
 }
 
-/// Phase 2 literal-subset type synthesis — span-free form.
-///
-/// Phase 3 plan 03-05 moved the production path into
-/// [`crate::check::Checker::synth`] (the bidirectional checker is now the
-/// source of truth). This helper is retained `#[cfg(test)]`-only for the
-/// plan 02-06 `ty_origin_returns_iri_for_iri_literal_in_property` test, which
-/// synthesises a `HirExpr::PrefixedName` directly.
-#[cfg(test)]
-fn infer_literal_type_kind<'db>(
-    db: &'db dyn fossil_base::Db,
-    expr: &HirExpr,
-) -> Option<(Ty<'db>, ProvenanceKind)> {
-    match expr {
-        HirExpr::StringLit(_) => Some((
-            Ty::new(db, TyKind::Primitive(Primitive::String)),
-            ProvenanceKind::Literal,
-        )),
-        HirExpr::PrefixedName { .. } => Some((Ty::new(db, TyKind::Iri), ProvenanceKind::Literal)),
-        HirExpr::IntLit(_) => Some((
-            Ty::new(db, TyKind::Primitive(Primitive::Integer)),
-            ProvenanceKind::Literal,
-        )),
-        HirExpr::FloatLit(_) => Some((
-            Ty::new(db, TyKind::Primitive(Primitive::Float)),
-            ProvenanceKind::Literal,
-        )),
-        HirExpr::BoolLit(_) => Some((
-            Ty::new(db, TyKind::Primitive(Primitive::Bool)),
-            ProvenanceKind::Literal,
-        )),
-        // A field reference needs the source row; a call needs the catalog; an
-        // operator needs both sides typed; an interpolation needs the position
-        // it sits in; an edge needs the target type's identity template. None
-        // is a literal, and this helper only knows literals.
-        //
-        // `Edge` is the one that reads closest to belonging here — it always
-        // synthesises `Iri`, exactly as `PrefixedName` above does — and it does
-        // not: a `PrefixedName` IS its IRI, while `Person(User.email)` is a
-        // template applied to a column, so its type is `Iri` only if the
-        // constructor is well-formed. Answering `Iri` here without the check
-        // would be this helper claiming a literal it cannot verify.
-        //
-        // `UnaryOp` joins them for the same reason `BinOp` is here: `-x` is its
-        // operand's type and `not x` needs that operand to BE Bool, so neither
-        // is answerable without typing what is underneath.
-        HirExpr::Interpolation(_)
-        | HirExpr::FieldRef(_)
-        | HirExpr::ColumnRef { .. }
-        | HirExpr::Call { .. }
-        | HirExpr::Edge { .. }
-        | HirExpr::BinOp { .. }
-        | HirExpr::UnaryOp { .. }
-        | HirExpr::Ternary { .. } => None,
-    }
-}
-
-/// Test-only wrapper retained for Phase 2 plan-02-06's
-/// `ty_origin_returns_iri_for_iri_literal_in_property` test, which
-/// constructs a synthetic `HirExpr::PrefixedName` and calls this helper
-/// directly (sidestepping `lower_expr`). New callers should use
-/// [`infer_literal_type_kind`] and read the real span from
-/// [`crate::spans::spans`].
-#[cfg(test)]
-fn infer_literal_type<'db>(
-    db: &'db dyn fossil_base::Db,
-    expr: &HirExpr,
-) -> Option<(Ty<'db>, Provenance)> {
-    infer_literal_type_kind(db, expr).map(|(ty, kind)| {
-        (
-            ty,
-            Provenance {
-                span: Span { start: 0, end: 0 },
-                kind,
-            },
-        )
-    })
-}
-
 /// Look up the [`MappingLoc`] for the `n`th MAPPING in a file.
 ///
 /// Used by the hover handler in `fossil-ide` to bridge CST position →
@@ -334,25 +252,13 @@ Users : Person from User
         );
     }
 
-    /// `HirExpr::PrefixedName` synthesises [`TyKind::Iri`] with `Literal`
-    /// provenance. Tested at the [`infer_literal_type`] helper layer (rather
-    /// than via the end-to-end Salsa query) because the Phase 1 lowering of
-    /// `EXPR > IRI_EXPR > IDENT SHAPE_SEP IDENT` returns `None` (the
-    /// `IRI_EXPR` branch of `lower_expr` currently expects an `ABS_IRI` token; the
-    /// prefixed-name form is a pre-existing limitation tracked separately and
-    /// outside the plan-02-06 scope boundary). Synthesising the `HirExpr`
-    /// directly tests the type-inference layer regardless.
-    #[test]
-    fn ty_origin_returns_iri_for_iri_literal_in_property() {
-        let (db, _file) = db_with_text(HELLO);
-        let expr = HirExpr::PrefixedName {
-            iri: smol_str::SmolStr::from("https://example.org/Foo"),
-        };
-        let (ty, prov) =
-            infer_literal_type(&db, &expr).expect("PrefixedName must synthesise an Iri type");
-        assert_eq!(ty, Ty::new(&db, TyKind::Iri));
-        assert_eq!(prov.kind, ProvenanceKind::Literal);
-    }
+    // `ty_origin_returns_iri_for_iri_literal_in_property` lived here, and with
+    // it the two `#[cfg(test)]` helpers it was the only caller of. It built a
+    // `HirExpr::PrefixedName` by hand because the lowering of `IDENT SHAPE_SEP
+    // IDENT` returned `None` — a limitation its own doc-comment called
+    // pre-existing and tracked elsewhere. It was not tracked: it was decided.
+    // The CURIE is gone, so the variant is gone, so the only test that could
+    // reach it was a test of a form the language does not have.
 
     /// Compile-time confirmation per planner checker Blocker 5: `ty_origin`
     /// returns `Option<ExprTypeEntry<'_>>` (NOT `Option<(Ty, Provenance)>`).

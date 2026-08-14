@@ -394,7 +394,6 @@ fn identity_form(e: &HirExpr) -> String {
                 .collect();
             format!("\"{body}\"")
         }
-        HirExpr::PrefixedName { iri } => iri.to_string(),
         HirExpr::Call { func, args } => {
             let rendered: Vec<String> = args.iter().map(identity_form).collect();
             format!("{func}({})", rendered.join(", "))

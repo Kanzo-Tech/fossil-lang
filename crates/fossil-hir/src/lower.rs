@@ -267,11 +267,6 @@ pub enum HirExpr {
     ColumnRef { binding: SmolStr, column: SmolStr },
     /// `"hello"` → literal text without surrounding quotes.
     StringLit(SmolStr),
-    /// A full IRI, already resolved — and UNREACHABLE from the surface: the
-    /// `ex:foo` CURIE that used to build one is gone, and nothing in this file
-    /// constructs the variant. Deleting it reaches four other modules, so it is
-    /// its own change.
-    PrefixedName { iri: SmolStr },
     /// `str.slug(User.name)` — a stdlib function applied to positional arguments.
     ///
     /// `func` is the fully-qualified dotted name exactly as
@@ -1808,11 +1803,8 @@ fn lower_expr_inner(
         // which only the parser's interpolation body admitted. All three
         // spellings are gone — `<` and `>` have one reading each, a `:` that is
         // not a mapping header or a ternary is an error, and a hole takes an
-        // expression and nothing else — and so is the node.
-        // `HirExpr::PrefixedName` survives them and is now
-        // UNREACHABLE from the surface: nothing this file reads constructs one.
-        // Deleting the variant reaches `check`, `infer`, `provenance` and
-        // `fossil-mir`, so it is its own change.
+        // expression and nothing else — and so is the node. `HirExpr::PrefixedName`
+        // outlived them as an unreachable variant and is gone too.
         other => {
             let range = inner.text_range();
             let span = Span::new(range.start().into(), range.end().into());
@@ -1823,7 +1815,7 @@ fn lower_expr_inner(
                 format!(
                     "`{source}` is not an expression fossil can lower yet, so this property \
                      will not be written to the corpus. A property value may be a template, \
-                     a field reference, a string literal, a prefixed name or a call. \
+                     a field reference, a string literal or a call. \
                      (parsed as {other:?})"
                 ),
                 span,
@@ -2987,18 +2979,15 @@ Users : Person from User
         let body = crate::body::body(&db, mloc);
         let p0 = &body.properties(&db)[0];
         assert!(matches!(p0.key, PropertyKey::Subject));
-        // The subject is parts now, not text: the prefix resolved to its IRI at
-        // lowering time and the hole is a `FieldRef` node, so this asserts on
-        // the tree rather than on a substring of the token.
+        // The subject is parts now, not text, so this asserts on the tree
+        // rather than on a substring of the token.
+        //
+        // A first assertion here required `parts.first()` to be a
+        // `Hole(PrefixedName)` — the `${ex:}` prefix-with-no-local-part, which
+        // only the interpolation body ever admitted. There is no such hole and
+        // no such variant.
         match &p0.value {
             HirExpr::Interpolation(parts) => {
-                assert_eq!(
-                    parts.first(),
-                    Some(&InterpolationPart::Hole(HirExpr::PrefixedName {
-                        iri: "https://example.org/".into()
-                    })),
-                    "the prefix hole resolves to the prefix IRI, in HIR"
-                );
                 assert!(
                     parts.iter().any(|p| matches!(
                         p,
@@ -3038,135 +3027,11 @@ Users : Person from User
         assert_eq!(a, b);
     }
 
-    // ===== Plan 03-01 Task 2: `IRI_EXPR` prefixed-name arm =====
-
-    /// Fixture that exercises the `IRI_EXPR` prefixed-name RHS form
-    /// (`link = ex:Foo`). Pre-plan-03-01 this property was silently
-    /// dropped from `HirBody.properties` — see the `deferred-items.md`
-    /// under `.planning/phases/02-full-grammar-hir-foundation/`.
-    const HELLO_WITH_IRI_RHS: &str = "\
-type { Person } := io.shex(\"personas.shex\")
-
-User := io.csv(\"examples/users.csv\")
-
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    link = ex:Foo
-";
-
-    /// Same source as [`HELLO_WITH_IRI_RHS`] but with prefix `ex:` REPLACED
-    /// by `nope:` on the RHS — so the prefix `nope:` is undeclared. The
-    /// LHS keeps `ex:` so the property's key still parses; only the value
-    /// fails prefix resolution. Validates the undeclared-prefix diagnostic
-    /// path without confounding the test by also breaking the LHS.
-    const HELLO_WITH_UNKNOWN_PREFIX_RHS: &str = "\
-type { Person } := io.shex(\"personas.shex\")
-
-User := io.csv(\"examples/users.csv\")
-
-Users : Person from User
-    @subject = \"https://example.org/user/{User.id}\"
-    link = nope:Foo
-";
-
-    /// Plan 03-01 Task 2 — happy path: `link = ex:Foo` no longer
-    /// silently drops. The property appears in `body.properties()` with
-    /// a `HirExpr::PrefixedName { iri: "https://example.org/Foo" }` value.
-    /// This is the structural fix the deferred-items.md flagged.
-    #[test]
-    fn iri_expr_lowers_prefixed_name_form() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(
-            &db,
-            HELLO_WITH_IRI_RHS.to_string(),
-            "iri_rhs.fossil".to_string(),
-        );
-        let dm = crate::def_map::def_map(&db, file);
-        let mloc = *dm.mappings(&db).first().expect("one mapping");
-        let body = crate::body::body(&db, mloc);
-        let props = body.properties(&db);
-
-        assert_eq!(
-            props.len(),
-            2,
-            "link = ex:Foo must NOT be silently dropped — \
-             expected 2 properties (iri + ex:link), got {}: {:?}",
-            props.len(),
-            props
-        );
-
-        // The second property is `link = ex:Foo`.
-        let p1 = &props[1];
-        match &p1.key {
-            PropertyKey::Name(name) => {
-                assert_eq!(name.as_str(), "link", "the LHS key is a bare name");
-            }
-            PropertyKey::Subject => panic!("expected a named LHS, got the identity"),
-        }
-        match &p1.value {
-            HirExpr::PrefixedName { iri } => {
-                assert_eq!(
-                    iri.as_str(),
-                    "https://example.org/Foo",
-                    "RHS prefixed-name must resolve to full IRI via prefix table"
-                );
-            }
-            other => panic!("expected HirExpr::PrefixedName for RHS `ex:Foo`, got {other:?}"),
-        }
-    }
-
-    /// Plan 03-01 Task 2 — error path: an undeclared prefix on the RHS
-    /// (`link = nope:Foo`) emits a diagnostic via the Salsa accumulator
-    /// AND still drops the property (matches the rest of `lower_expr`'s
-    /// silent-None convention; the `IRI_EXPR` branch is the only one that
-    /// adds the diagnostic emit on top).
-    #[test]
-    fn iri_expr_unknown_prefix_emits_diagnostic() {
-        use fossil_base::Diagnostic;
-
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(
-            &db,
-            HELLO_WITH_UNKNOWN_PREFIX_RHS.to_string(),
-            "unknown_prefix_rhs.fossil".to_string(),
-        );
-        let dm = crate::def_map::def_map(&db, file);
-        let mloc = *dm.mappings(&db).first().expect("one mapping");
-
-        // Drive the body() Salsa query so the accumulator fires.
-        let body = crate::body::body(&db, mloc);
-        let props = body.properties(&db);
-        // `link = nope:Foo` is still dropped (the diagnostic does not
-        // prevent the outer property's `?` from short-circuiting). Only
-        // the `iri = template` property remains.
-        assert_eq!(
-            props.len(),
-            1,
-            "undeclared-prefix RHS still drops the property (silent-None \
-             convention), got {} properties",
-            props.len()
-        );
-
-        // The diagnostic IS emitted via the accumulator, keyed on the
-        // body() query that triggered the lowering.
-        let diags = crate::body::body::accumulated::<Diagnostic>(&db, mloc);
-        assert!(
-            !diags.is_empty(),
-            "undeclared RHS prefix `nope:` MUST emit at least one Diagnostic \
-             (not silent drop)"
-        );
-        let msg = &diags[0].message;
-        assert!(
-            msg.contains("nope"),
-            "diagnostic must name the offending prefix `nope`, got {msg:?}"
-        );
-        assert!(
-            msg.contains("undeclared") || msg.contains("undefined") || msg.contains("unknown"),
-            "diagnostic must say the prefix is undeclared, got {msg:?}"
-        );
-    }
+    // The `IRI_EXPR` prefixed-name arm had two tests here, with a fixture each:
+    // `link = ex:Foo` had to lower to a `PrefixedName` instead of being dropped,
+    // and `link = nope:Foo` had to say the prefix was undeclared. Both were
+    // about a CURIE on the right-hand side. There is no CURIE and no prefix
+    // table, so neither has a form to be about.
 
     fn db_with(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());

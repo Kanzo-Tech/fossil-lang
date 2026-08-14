@@ -25,7 +25,7 @@
 //!   wires real subtyping + facets.
 //! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`
 //!   per RESEARCH.md §Q5; [`provenance::expr_types`] populates the Phase 2
-//!   literal subset (`StringLit` / `Template` / `PrefixedName`); [`provenance::ty_origin`]
+//!   literal subset (`StringLit` / `Template`); [`provenance::ty_origin`]
 //!   is the user-facing lookup returning `Option<ExprTypeEntry>` (per
 //!   planner checker Blocker 5 — tuples don't auto-impl `salsa::Update`).
 //! - [`spans`] side table: per-mapping real-span lookup

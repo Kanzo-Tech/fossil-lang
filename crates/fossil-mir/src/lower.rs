@@ -245,7 +245,6 @@ pub fn lower_to_mir_pg<'db>(
                     rdf_uri: iri.clone(),
                     single_valued: true,
                 }),
-            HirExpr::PrefixedName { .. } => {} // constant IRI → not an edge
             // A computed property: the value is whatever the function returns,
             // typed by its catalog entry. It is never an edge — an edge is a
             // reference to another shape's subject, and v0.1 has no function
@@ -780,8 +779,7 @@ fn lower_iri_property<'db>(
 
 /// Lower a property RHS [`HirExpr`] (one of the 4 leaf forms) to a typed
 /// [`Expr`]. `FieldRef` → `ColRef`; `StringLit` → `LitString`;
-/// `Template` → the concat-chain of literals + column refs;
-/// `PrefixedName` → `LitString` of the resolved IRI.
+/// `Template` → the concat-chain of literals + column refs.
 ///
 /// `assert_line` is `Some(N)` when lowering an IRI-template subject context
 /// (the `iri = ...` property), `None` for object positions. When `Some`, each
@@ -890,10 +888,9 @@ fn operator_ty<'db>(
             .map_or_else(|| prim(Primitive::String), |entry| entry.sig.ret.to_ty(db)),
         // A conditional's branches agree by construction, so either answers.
         HirExpr::Ternary { then, .. } => operator_ty(db, then, field_ty),
-        HirExpr::StringLit(_)
-        | HirExpr::Interpolation(_)
-        | HirExpr::PrefixedName { .. }
-        | HirExpr::Edge { .. } => prim(Primitive::String),
+        HirExpr::StringLit(_) | HirExpr::Interpolation(_) | HirExpr::Edge { .. } => {
+            prim(Primitive::String)
+        }
     }
 }
 
@@ -920,7 +917,6 @@ fn contains_edge(e: &HirExpr) -> bool {
         | HirExpr::IntLit(_)
         | HirExpr::FloatLit(_)
         | HirExpr::BoolLit(_)
-        | HirExpr::PrefixedName { .. }
         | HirExpr::FieldRef(_)
         | HirExpr::ColumnRef { .. } => false,
     }
@@ -1001,9 +997,6 @@ fn lower_property_value<'db>(
         HirExpr::Interpolation(parts) => {
             lower_interpolation(db, parts, source_binding, assert_line)
         }
-        // A `PrefixedName` RHS resolved to its full IRI by the HIR; render it
-        // as a literal string value (the IRI text).
-        HirExpr::PrefixedName { iri } => Expr::LitString(iri.clone()),
         // The result type comes from the same catalog entry the checker typed
         // this call against — the backend derives the column's datatype from
         // it, so a call is no less typed than a column reference.
@@ -1166,11 +1159,9 @@ fn is_per_row(e: &HirExpr) -> bool {
             InterpolationPart::Text(_) => false,
             InterpolationPart::Hole(e) => is_per_row(e),
         }),
-        HirExpr::StringLit(_)
-        | HirExpr::IntLit(_)
-        | HirExpr::FloatLit(_)
-        | HirExpr::BoolLit(_)
-        | HirExpr::PrefixedName { .. } => false,
+        HirExpr::StringLit(_) | HirExpr::IntLit(_) | HirExpr::FloatLit(_) | HirExpr::BoolLit(_) => {
+            false
+        }
     }
 }
 
@@ -1442,14 +1433,13 @@ User : ex:Person from rows
 
     #[test]
     fn a_constant_hole_takes_no_assertion_and_fuses_with_its_neighbours() {
-        // The prefix arrives RESOLVED — HIR did that lookup, against the prefix
-        // table that lives there. What MIR still owes is the fusion codegen's
-        // snapshots depend on: one literal, not three concatenated.
+        // A hole whose expression is constant — it was the resolved prefix, and
+        // a string literal is the same thing without the CURIE. What MIR owes is
+        // the fusion the codegen's snapshots depend on: one literal, not three
+        // concatenated.
         let db = test_db();
         let parts = vec![
-            InterpolationPart::Hole(HirExpr::PrefixedName {
-                iri: "https://example.org/".into(),
-            }),
+            InterpolationPart::Hole(HirExpr::StringLit("https://example.org/".into())),
             InterpolationPart::Text("user/".into()),
             InterpolationPart::Hole(HirExpr::FieldRef("id".into())),
         ];

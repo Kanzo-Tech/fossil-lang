@@ -580,38 +580,9 @@ Users : Person from User
         );
     }
 
-    /// `link = ex:Foo` exercises the `IRI_EXPR` prefixed-name RHS form
-    /// (the plan 03-01 fix). The recorded mapping-relative span MUST
-    /// cover the 6 characters of `ex:Foo` exactly.
-    #[test]
-    fn spans_for_prefixed_name_rhs() {
-        const SRC: &str = "\
-type { Person } := io.shex(\"personas.shex\")
-User := io.csv(\"x.csv\")
-Users : Person from User
-    @subject = \"https://example.org/u/{User.id}\"
-    link = ex:Foo
-";
-        let (db, file) = db_with_text(SRC, "pn.fossil");
-        let m = *def_map(&db, file)
-            .mappings(&db)
-            .first()
-            .expect("one mapping");
-        let s = spans(&db, m);
-        let span = s
-            .get(&db, ExprId(1))
-            .expect("property 1 (link = ex:Foo) must have a recorded span");
-        assert!(
-            span.end > span.start,
-            "PrefixedName span must be non-zero width: {span:?}"
-        );
-        let text = mapping_text(&db, m);
-        let extracted = &text[span.start as usize..span.end as usize];
-        assert_eq!(
-            extracted, "ex:Foo",
-            "PrefixedName span must cover `ex:Foo` exactly, got {extracted:?}"
-        );
-    }
+    // `spans_for_prefixed_name_rhs` lived here: `link = ex:Foo` had to record a
+    // span covering the six characters exactly. What it proved about spans, the
+    // `StringLit` test below proves on a form the language still has.
 
     /// `greeting = "Alice"` exercises the `StringLit` RHS form. The
     /// recorded mapping-relative span MUST cover the literal INCLUDING

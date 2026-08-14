@@ -596,8 +596,6 @@ impl<'db> Checker<'db> {
                 };
                 (Ty::new(db, kind), ProvenanceKind::Literal)
             }
-            // T-PrefixedName: an IRI literal.
-            HirExpr::PrefixedName { .. } => (Ty::new(db, TyKind::Iri), ProvenanceKind::Literal),
             // T-Column: the qualified spelling. Same resolution as T-Field,
             // plus the check the anonymous form could never make — that the
             // name on the left is a row this mapping actually reads. That check
