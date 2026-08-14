@@ -295,6 +295,55 @@ tiene que estar forzado por un documento, no por una taxonomía.** `lsp-types` e
 carcasa. `fossil-mcp` está mal colocado y mal llamado — es la cara IA del lado grafo, y con el corte
 en dos árboles eso deja de ser deuda y pasa a ser su sitio.
 
+### Lo que cada fase pendiente pide, cosechado del documento que se borró
+
+**F3 · la caché de descriptores.** Va pronto porque es donde está el trabajo caro: programas
+pequeños, fuentes grandes. (1) clave por **URI**, no por nombre de binding; (2) `content_hash`
+poblado — mtime, ETag o hash, y el documento elige y dice por qué; (3) `register_inferred_descriptor`
+deja de ser un `panic!` por defecto; (4) el registro como `Providers` de rustc — **hecho**, es el
+registro de proveedores. **Hecho cuando:** cambiar el CSV y re-ejecutar re-introspecciona; no
+cambiarlo, no.
+
+**F4 · la forma es el contrato.** Bloqueada por media hora de investigación que hay que hacer antes
+de escribir una línea: si la comprobación de ShEx a medias decide que esto es SHACL. (1) el
+descriptor de salida real llega al typecheck; (2) propiedad no declarada, cardinalidad rota,
+primitiva incompatible → error; (3) **después**, la sensibilidad como tipo: `anon.hmac` devuelve un
+seudónimo y es lo único asignable a una propiedad marcada. **Hecho cuando:** `edad = User.nombre` es
+un error contra una forma que declara `xsd:integer`.
+
+**F5 · el pipeline.** Hay una decisión antes de empezar: **si `join` entra en la primera versión**,
+que es lo que hace difícil el checker; `where` y `select` puede que basten un tiempo. MIR tipa,
+DataFusion planifica.
+
+**F6 · Salsa se encoge.** Medido ya: el camino por lotes compra tres entradas clavadas por fichero
+—`parse`, `def_map`, `lower_to_hir`— y las cinco por mapping ejecutan una vez cada una **sin un solo
+acierto**. (1) el camino por lotes deja de construir un `FossilDb`: tres `OnceCell` en un contexto;
+(2) `fossil-df-wasm` deja de construir una base de usar y tirar para alojar una consulta; (3) Salsa
+se queda en los crates que sirven al editor. **Hecho cuando:** `grep salsa crates/*/Cargo.toml` no
+encuentra `fossil-engine` ni `fossil-df-wasm`, `fossil check` da lo mismo, **y se cronometra antes y
+después** — la medición cuenta ejecuciones, no milisegundos, así que el −52 % de Apollo es una
+estimación prestada hasta que sea nuestra.
+
+**F7 · el escritor de Parquet.** Bloqueada por una medición que falta: escribir 5M de las dos formas
+y contar footer, peticiones y bytes por ventana — la estimación de 566 kB es aritmética. (1)
+`arrow-rs` en vez de `COPY`, ya en el árbol vía DataFusion, y escribe el índice de páginas por
+defecto, que DuckDB no escribe y no piensa hacerlo; (2) un fichero con row groups de 4.096, no un
+fichero por tesela; (3) el footer como directorio raíz y las cajas `x`/`y` como índice — **medido:
+1,05×–1,21×**. **Hecho cuando:** una ventana cuesta lo que la tabla dice, con el mismo arnés.
+
+**Track paralelo · RDF 1.2.** No es una fase, es una obligación que atraviesa F2 y F4. Lo que se
+puede hacer ya: la dirección base en literales (`rdf:dirLangString`, `@en--ltr`) — el perfil
+`1.2-basic` es exactamente el productor que la emite sin reificación y es el primer objetivo
+realista; y encender la feature `rdf-12` de `oxttl`, cuya medición está en el `Cargo.toml` raíz. El
+triple term como primitiva necesita F2; el almacenamiento con discriminador necesita F7.
+
+**Deuda cosechada que no bloquea a nadie**, y que **no he verificado hoy**: que `fossil-engine`
+rechace destinos cloud pese a que el emisor está escrito para URLs, y que un lector tercero no pueda
+derivar del manifiesto la URL de una tesela de aristas (caen en
+`edge/<dir>/by_source/tile{k}.parquet` y el YAML sólo declara `prefix: edge/<dir>/`). Las otras tres
+de aquella lista están cerradas: `cargo fmt` (`a0e2700`), `timeout_ms` (`329d7ef`), y los quads, que
+`apps/corpus/content/docs/conventions/adjacency.mdx` cubre.
+
 **Deuda del propio documento, antes de F8:** el diagrama de `/docs/architecture` nombra `registry` en
 el grupo *language* y ese crate se borró en `510eb87`, y **omite `fossil-lineage`**, que es parse-only
 y WASM-clean y pertenece a ese grupo. Los totales cuadran en 24 por casualidad: uno compensa al otro.
