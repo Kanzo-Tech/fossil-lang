@@ -295,6 +295,33 @@ tiene que estar forzado por un documento, no por una taxonomía.** `lsp-types` e
 carcasa. `fossil-mcp` está mal colocado y mal llamado — es la cara IA del lado grafo, y con el corte
 en dos árboles eso deja de ser deuda y pasa a ser su sitio.
 
+### `.planning/` — el tercer plan, y por qué la mayoría ya no dice nada
+
+Catorce documentos, 2.332 líneas, gitignorados. Auditados el 2026-08-14 **contra el árbol**, no
+contra su propia cabecera. Casi todos describen cosas que ya pasaron o que se decidieron de otra
+manera:
+
+| documento | destino | por qué, comprobado |
+|---|---|---|
+| `RELEASE-RUNBOOK.md` | **→ `CONTRIBUTING.md`** | **Vivo y exacto**: `fossil-image.yml`, el `Dockerfile`, `fossil-mcp` y `release.yml` existen, y sus tres acciones de operador siguen sin darse |
+| `HOST-BOUNDARY-MODEL.md` | borrar | `/docs/design/three-hosts` lleva la tesis, con un criterio más afilado que el original |
+| `CONNECTION-SHAPE-MODEL.md` | borrar | su paso 3 lo superó `HOST-BOUNDARY-MODEL`, que a su vez ya está en el sitio |
+| `OUTPUT-MODEL.md` | borrar | ShEx + SHACL → `GraphSchema` **se construyó**: `fossil-descriptors-output/src/shacl.rs`, y `catalogue` corre con una fila SHACL real |
+| `W2-DUCKEXECUTOR-PLAN.md` | borrar | planifica **14 verbos**; el sitio del corpus documenta **seis**, y la cámara salió del enum (se direcciona, no se consulta) |
+| `W0-MIGRATION-MAP.md` | borrar | su propio sucesor lo llama *stale* en la línea 3 |
+| `PROJECT.md` | borrar | describe el DSL «con pipeline `\|>`», que es una tumba en `grammar.bnf` |
+| `MILESTONES.md`, `ROADMAP.md`, `STATE.md`, `RETROSPECTIVE.md` | borrar | contabilidad GSD de hitos cerrados en mayo; `STATE.md` dice `status: completed`, `last_updated: 2026-05-28` |
+
+**Tres se quedan, y no por cautela**: `EDITOR-SCHEMA-AWARE-PLAN.md`, `W0-SUBPROCESS-PLAN.md` y
+`W3-LAYOUT-PLAN.md` describen la costura con **keasy**, que es otro checkout. Si están vivos, lo
+están allí, y eso no se decide desde aquí. Lo que sí consta: los paquetes de editor se retiraron
+enteros, y el fichero que `W3-LAYOUT-PLAN` nombra como ancla —`fossil-sinks/src/writer.rs`— **ya no
+existe**.
+
+**`phases/`, `milestones/` y `research/` no se han tocado.** Son **106.466 líneas en 332 ficheros**,
+gitignoradas, así que borrarlas es irreversible y git no las recupera. Nadie las ha leído hoy y no se
+borra a ciegas un volumen así: es una decisión aparte, con su propia sesión.
+
 ### Lo que cada fase pendiente pide, cosechado del documento que se borró
 
 **F3 · la caché de descriptores.** Va pronto porque es donde está el trabajo caro: programas

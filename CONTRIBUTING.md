@@ -149,6 +149,46 @@ local enforcement, put `cargo fmt --all -- --check`, `cargo clippy --workspace
 `.git/hooks/pre-commit` and `chmod +x` it. Note: that slows commits by ~30s
 (clippy) + ~15s (WASM check); skip it for fast iteration loops.
 
+## Releasing
+
+One rmlext release publishes **three artifacts at the same version `vX.Y.Z`**, and keasy consumes
+all three:
+
+| Artifact | Registry | Workflow |
+|---|---|---|
+| `@fossil-lang/*` (npm packages) | npmjs.org (public) | `.github/workflows/release.yml` (changesets) |
+| `ghcr.io/kanzo-tech/fossil:X.Y.Z` (`fossil` + `fossil-mcp`) | GHCR | `.github/workflows/fossil-image.yml` |
+| `fossil-run-status` (wire-contract crate) | git tag `vX.Y.Z` | the tag itself (keasy uses a git-dep) |
+
+The version's source of truth is the git tag `vX.Y.Z` that `changesets/action` creates when it
+publishes. `fossil-image.yml` triggers on `push: tags: ['v*']`, so npm and the image land on the
+same tag with no manual coordination.
+
+**Nothing has been published yet, and three one-time operator actions gate the first release.**
+
+1. **npm Trusted Publisher.** npmjs.com → scope `@fossil-lang` → Settings → Trusted Publishers →
+   repository `Kanzo-Tech/fossil-lang`, workflow `release.yml`, environment blank. Without it the
+   first `changeset publish --provenance` fails with a missing-OIDC error. **That is the gate
+   working, not a bug** — do not debug it as one.
+2. **The first stable version.** The linked `@fossil-lang/*` group sits at `0.3.0-alpha.0`. When
+   merging the "Version Packages" PR, confirm it lands on `0.3.0` rather than jumping to `1.0.0`.
+3. **GHCR visibility.** Public means keasy's `COPY --from` needs no auth, which is the simple path.
+   Private means keasy's image build must `docker login ghcr.io` first, with an org-visible package
+   or a PAT carrying `read:packages`. GitHub → org → Packages → `fossil` → visibility.
+
+After that the per-release flow has no manual step beyond one merge: land changes with
+`pnpm changeset`; `release.yml` opens the "Version Packages" PR; merging it publishes to npm and
+creates the tag; the tag builds and pushes the image with provenance; keasy's Renovate opens one
+grouped PR bumping the packages, the git-dep tag and the image together.
+
+Three dry runs, none of which publish:
+
+```bash
+pnpm --filter @fossil-lang/wasm pack --dry-run   # confirm pkg/fossil_wasm_bg.wasm is listed
+docker build -t fossil:local . && docker run --rm fossil:local --help
+cargo build -p fossil-run-status --features utoipa   # the contract crate, isolated
+```
+
 ## Issues, PRs, communication
 
 Fossil is pre-public: no GitHub issue tracker, no PR workflow. Until it goes
