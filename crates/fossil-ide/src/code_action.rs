@@ -263,58 +263,6 @@ mod tests {
     }
 
     #[test]
-    fn auto_import_inserts_well_known_prefix_line() {
-        let db = db();
-        // `xsd` used but undeclared.
-        let src = "User : ex:Person from users\n    ex:age = xsd:integer\n";
-        let f = file(&db, src);
-        let diag = Diagnostic::new(
-            Severity::Error,
-            "undeclared prefix `xsd:` in IRI expression `xsd:integer`",
-            Span::new(0, 5),
-        );
-        let actions = code_actions(&db, f, whole(&db, f), &[diag]);
-        let a = actions
-            .iter()
-            .find(|a| a.title.contains("xsd"))
-            .expect("an auto-import action must be offered");
-        let edits = edits_of(a);
-        assert_eq!(edits.len(), 1);
-        assert!(
-            edits[0]
-                .new_text
-                .contains("prefix xsd: <http://www.w3.org/2001/XMLSchema#>"),
-            "auto-import must insert the canonical xsd decl; got {:?}",
-            edits[0].new_text,
-        );
-        // Inserted at the very top of the file.
-        assert_eq!(edits[0].range.start, Position::new(0, 0));
-    }
-
-    #[test]
-    fn auto_import_unknown_prefix_uses_placeholder() {
-        let db = db();
-        let src = "User : ex:Person from users\n";
-        let f = file(&db, src);
-        let diag = Diagnostic::new(
-            Severity::Error,
-            "undeclared prefix `foo:` in IRI expression `foo:bar`",
-            Span::new(0, 5),
-        );
-        let actions = code_actions(&db, f, whole(&db, f), &[diag]);
-        let a = actions
-            .iter()
-            .find(|a| a.title.contains("foo"))
-            .expect("an auto-import action for the unknown prefix must be offered");
-        let edits = edits_of(a);
-        assert!(
-            edits[0].new_text.contains("prefix foo: <>"),
-            "an unknown prefix must get a `<>` placeholder; got {:?}",
-            edits[0].new_text,
-        );
-    }
-
-    #[test]
     fn split_mapping_replaces_with_suggestion_source() {
         let db = db();
         let src = "Contact : ex:Contact from c\n    ex:email = .email\n";

@@ -367,11 +367,11 @@ mod tests {
     use std::sync::Arc;
 
     const HELLO: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"x.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.name
 ";
 
     fn db_with_text(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
@@ -388,14 +388,14 @@ User : ex:Person from users
     fn hover_on_iri_template_returns_iri_template_markdown() {
         let (db, file) = db_with_text(HELLO);
         // Lines in HELLO are 0-indexed:
-        //   0: prefix ex: <...>
+        //   0: type { Person } := io.shex(...)
         //   1: users := io.csv(...)
-        //   2: User : ex:Person from users
-        //   3:     iri = `${ex:}u/${.id}`
-        //   4:     ex:name = .name
-        // Cursor inside the template text at character 10 (within the iri
-        // line, comfortably inside the property).
-        let info = hover(&db, file, 3, 10).expect("hover at (3, 10) must return Some");
+        //   2: User : Person from users
+        //   3:     @subject = "https://example.org/u/{users.id}"
+        //   4:     name = users.name
+        // Cursor inside the interpolated string at character 20, comfortably
+        // inside the property.
+        let info = hover(&db, file, 3, 20).expect("hover at (3, 20) must return Some");
         assert!(
             info.markdown.contains("IriTemplate"),
             "expected hover markdown to mention IriTemplate, got {:?}",

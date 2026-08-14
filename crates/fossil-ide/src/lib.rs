@@ -25,16 +25,16 @@
 //!   - semantic tokens (Monaco depends on this)
 //!   - document outline (textDocument/documentSymbol)
 //!
-//! ## The search layer ([`symbol_index`], [`prefix_index`], [`workspace`])
+//! ## The search layer ([`symbol_index`], [`workspace`])
 //!
-//! Three plain-struct indexes built by a CST walk, and **no Salsa query of
-//! their own** — so the per-mapping `body()` fan-out stays at 1:
-//!   - [`SymbolIndex`] — per-file table of `{prefix, mapping, function, shape}`
-//!     definitions with byte ranges (outline + goto-def hit resolution).
-//!     (the gleam-lsp auto-import completion pattern).
+//! Plain-struct indexes built by a CST walk, and **no Salsa query of their
+//! own** — so the per-mapping `body()` fan-out stays at 1:
+//!   - [`SymbolIndex`] — per-file table of `{mapping, shape}` definitions with
+//!     byte ranges (outline + goto-def hit resolution). It indexed prefix
+//!     declarations too, until there were none.
 //!   - [`WorkspaceIndex`] — cross-file aggregation under the
-//!     open-files-as-workspace model, so a prefix/mapping/function/
-//!     shape declared in file A resolves from file B.
+//!     open-files-as-workspace model, so a mapping or shape declared in file A
+//!     resolves from file B.
 //!
 //! ## The host's half ([`shape_documents`])
 //!

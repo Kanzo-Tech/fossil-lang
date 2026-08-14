@@ -108,23 +108,20 @@ mod tests {
     }
 
     const FIXTURE: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"person.shex\")
 
 users := io.csv(\"users.csv\")
 
-User : ex:Person from users
-    ex:name = .name
+User : Person from users
+    name = users.name
 ";
 
+    /// A NAMESPACE for the `ex` prefix was the third thing asserted here. There
+    /// is no prefix declaration, so there is no namespace to outline.
     #[test]
-    fn outline_has_prefix_mapping_and_shape() {
+    fn outline_has_the_mapping_and_the_shape_it_targets() {
         let (db, file) = db_file(FIXTURE);
         let syms = document_symbols(&db, file);
-        assert!(
-            syms.iter()
-                .any(|s| s.kind == LspSymbolKind::NAMESPACE && s.name == "ex"),
-            "expected a NAMESPACE for the `ex` prefix: {syms:?}"
-        );
         assert!(
             syms.iter()
                 .any(|s| s.kind == LspSymbolKind::CLASS && s.name == "User"),
@@ -132,8 +129,8 @@ User : ex:Person from users
         );
         assert!(
             syms.iter()
-                .any(|s| s.kind == LspSymbolKind::INTERFACE && s.name == "ex:Person"),
-            "expected an INTERFACE for the `ex:Person` shape ref: {syms:?}"
+                .any(|s| s.kind == LspSymbolKind::INTERFACE && s.name == "Person"),
+            "expected an INTERFACE for the `Person` shape ref: {syms:?}"
         );
     }
 

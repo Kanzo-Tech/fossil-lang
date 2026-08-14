@@ -1,31 +1,31 @@
-//! `textDocument/completion` — three-source completion (SC#4).
+//! `textDocument/completion` — three sources.
 //!
-//! Merges the three completion sources SC#4 requires into a single
-//! `Vec<lsp_types::CompletionItem>` (the `lsp-types`-direct shape confirmed
-//! WASM-clean by 06-01 Spike A, so the playground and the LSP both consume it
-//! without a second conversion):
+//! Merges three completion sources into a single `Vec<lsp_types::CompletionItem>`
+//! (the `lsp-types`-direct shape is WASM-clean, so the browser host and the LSP
+//! both consume it without a second conversion):
 //!
-//! 1. **stdlib functions** (the gleam-lsp auto-import pattern). Every
-//!    [`fossil_hir::stdlib::RegistryEntry`] from [`FunctionRegistry::stdlib_default`]
-//!    becomes a `CompletionItem` (kind = Function, detail = the rendered
-//!    signature). There is no auto-import edit and no `(native-only)` tag: the
-//!    first named a `use <ns>` line no program writes, and the second named
-//!    `WasmClass::NativeUdfOnly`, a class that no longer exists.
-//! 2. **prefixes** — declared prefixes from the cross-file
-//!    [`crate::WorkspaceIndex`] + the well-known set
-//!    ([`crate::WELL_KNOWN_PREFIXES`]: rdf/rdfs/xsd/owl), the latter
-//!    offered as auto-importable (a `prefix <p>: <iri>` `additional_text_edits`
-//!    insertion when not already declared).
-//! 3. **shape properties** — when the cursor is in a mapping whose target `ShEx`
+//! 1. **stdlib functions**. Every [`fossil_hir::stdlib::RegistryEntry`] from
+//!    [`FunctionRegistry::stdlib_default`] becomes a `CompletionItem` (kind =
+//!    Function, detail = the rendered signature). There is no auto-import edit
+//!    and no `(native-only)` tag: the first named a `use <ns>` line no program
+//!    writes, and the second named `WasmClass::NativeUdfOnly`, a class that no
+//!    longer exists.
+//! 2. **shape properties** — when the cursor is in a mapping whose target `ShEx`
 //!    shape resolves (the program names its output document with
-//!    `type { … } = io.shex("…")`), the shape's
-//!    `constraints[].predicate` names are offered as `Field` completions.
+//!    `type { … } := io.shex("…")`), the shape's `constraints[].predicate` names
+//!    are offered as `Field` completions.
+//! 3. **source fields** — the columns of the row the mapping reads, when the
+//!    host has registered a descriptor for it.
+//!
+//! A source between the first and the second was **prefixes**: declared ones
+//! from the cross-file index plus a well-known set offered as auto-importable.
+//! It went whole with the `prefix` declaration; a vocabulary is not a form this
+//! language has.
 //!
 //! # Domain + WASM boundary
 //!
 //! Returns `lsp_types::CompletionItem` directly; no stdio / JSON-RPC. The stdlib
-//! source needs only the static catalog (`stdlib_default()`, no db); the prefix
-//! source needs the `WorkspaceIndex` (a CST-walk struct, no Salsa query); the
+//! source needs only the static catalog (`stdlib_default()`, no db); the
 //! shape-property source calls `resolve_target_shape`, which reads the document
 //! the program names as a Salsa INPUT — through `file_at` and the tracked
 //! `shape_document`, which the HOST must have registered (see
@@ -113,13 +113,6 @@ fn stdlib_completions(items: &mut Vec<CompletionItem>) {
         });
     }
 }
-
-// `prefix_completions` was source 2 here: every prefix declared across the open
-// files, plus the four well-known ones offered as auto-importable. Both halves
-// went with the declaration, and a vocabulary declaration is not a form of this
-// language any more. The sources are now stdlib,
-// shape predicates and source fields — and the module header's numbering
-// above is one short because of it.
 
 /// Source 3: shape predicate names, when the enclosing mapping's target `ShEx`
 /// shape resolves against the document the program names.
@@ -344,81 +337,39 @@ mod tests {
         SourceFile::new(db, src.to_string(), "c.fossil".to_string())
     }
 
-    /// These programs name no output document, so there are no shape
-    /// properties; the stdlib + prefix sources are unconditional.
+    /// The stdlib source is unconditional and BARE: every catalogued entry is
+    /// offered wherever the cursor is, with no auto-import edit and no tag.
+    ///
+    /// Four tests stood here and all four asserted the opposite. Two wanted an
+    /// `additional_text_edits` inserting `use clean` — there is no `use`
+    /// production and no module system for a name to come from. One wanted a
+    /// `DEPRECATED` tag and a `(native-only)` detail on `clean.slug`, from a
+    /// `WasmClass::NativeUdfOnly` that no longer exists: every catalogued row
+    /// runs everywhere now, so nothing is grayed. Two more wanted `ex:` and
+    /// `xsd:` offered as prefix completions.
     #[test]
-    fn offers_stdlib_with_auto_import_for_unimported_namespace() {
+    fn stdlib_entries_are_offered_bare() {
         let db = db();
-        // No `clean` namespace declared → the `clean.*` items must carry an
-        // auto-import edit.
-        let f = file(&db, "User : ex:Person from u\n    ex:name = .name\n");
+        let f = file(&db, "Users : Person from u\n    name = u.name\n");
         let items = completions(&db, &[f], f, 0, 0);
         let trim = items
             .iter()
-            .find(|i| i.label == "clean.trim")
-            .expect("clean.trim must be offered");
+            .find(|i| i.label == "str.trim")
+            .expect("str.trim must be offered");
         assert_eq!(trim.kind, Some(CompletionItemKind::FUNCTION));
-        let edits = trim
-            .additional_text_edits
-            .as_ref()
-            .expect("un-imported namespace must carry an auto-import edit");
         assert!(
-            edits[0].new_text.contains("use clean"),
-            "auto-import edit must insert `use clean`; got {:?}",
-            edits[0].new_text,
-        );
-    }
-
-    #[test]
-    fn native_only_entries_are_tagged() {
-        let db = db();
-        let f = file(&db, "User : ex:Person from u\n");
-        let items = completions(&db, &[f], f, 0, 0);
-        // `clean.slug` lowers to a Rust UDF → NativeUdfOnly.
-        let slug = items
-            .iter()
-            .find(|i| i.label == "clean.slug")
-            .expect("clean.slug must be offered");
-        assert_eq!(
-            slug.tags.as_deref(),
-            Some(&[CompletionItemTag::DEPRECATED][..]),
-            "a NativeUdfOnly entry must be tagged so the playground can gray it",
+            trim.additional_text_edits.is_none(),
+            "there is no import line to add; got {:?}",
+            trim.additional_text_edits,
         );
         assert!(
-            slug.detail.as_deref().unwrap_or("").contains("native-only"),
-            "native-only entry detail must say so; got {:?}",
-            slug.detail,
+            trim.tags.is_none(),
+            "no entry is native-only any more; got {:?}",
+            trim.tags,
         );
-    }
-
-    #[test]
-    fn offers_declared_prefix() {
-        let db = db();
-        let f = file(&db, "prefix ex: <https://example.org/>\n");
-        let items = completions(&db, &[f], f, 0, 0);
         assert!(
-            items.iter().any(|i| i.label == "ex:"),
-            "the declared `ex` prefix must be offered as a completion",
-        );
-    }
-
-    #[test]
-    fn well_known_prefix_carries_auto_import() {
-        let db = db();
-        let f = file(&db, "User : ex:Person from u\n");
-        let items = completions(&db, &[f], f, 0, 0);
-        let xsd = items
-            .iter()
-            .find(|i| i.label == "xsd:")
-            .expect("the well-known xsd prefix must be offered");
-        let edits = xsd
-            .additional_text_edits
-            .as_ref()
-            .expect("a non-declared well-known prefix must carry an auto-import edit");
-        assert!(
-            edits[0].new_text.contains("prefix xsd:"),
-            "well-known prefix auto-import must insert the prefix decl; got {:?}",
-            edits[0].new_text,
+            !items.iter().any(|i| i.label.ends_with(':')),
+            "a `prefix:` completion is a form this language does not have",
         );
     }
 

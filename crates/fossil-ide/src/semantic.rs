@@ -397,30 +397,44 @@ mod tests {
         );
     }
 
-    #[test]
-    fn tokens_are_a_multiple_of_five() {
-        let (db, file) = db_file("prefix ex: <https://example.org/>\n");
-        let data = semantic_tokens(&db, file);
-        assert_eq!(data.len() % 5, 0, "the token stream must be 5-tuples");
-        assert!(!data.is_empty(), "a prefix decl should emit tokens");
-    }
+    /// A whole small program, so the token stream is the one a real file emits.
+    /// These fixtures were `prefix ex: <https://example.org/>` — one retired
+    /// line, which lexes to error tokens now and asserts nothing about colour.
+    const SRC: &str = "\
+type { Person } := io.shex(\"person.shex\")
+users := io.csv(\"users.csv\")
+Users : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+";
 
     #[test]
-    fn prefix_keyword_is_first_token() {
-        let (db, file) = db_file("prefix ex: <https://example.org/>\n");
+    fn tokens_are_a_multiple_of_five() {
+        let (db, file) = db_file(SRC);
+        let data = semantic_tokens(&db, file);
+        assert_eq!(data.len() % 5, 0, "the token stream must be 5-tuples");
+        assert!(!data.is_empty(), "a program should emit tokens");
+    }
+
+    /// `prefix` was the keyword this asserted, at line 0 column 0. The reserved
+    /// set is `from`, `and`, `or`, `not` and the `@attr` sigils — `prefix` left
+    /// it, and painting an ordinary identifier as a keyword is the failure the
+    /// classifier's own comment warns about.
+    #[test]
+    fn from_is_painted_as_a_keyword() {
+        let (db, file) = db_file(SRC);
         let decoded = decode_tokens(&semantic_tokens(&db, file));
-        // The `prefix` keyword is at line 0, col 0, length 6, type keyword.
-        let first = decoded.first().expect("at least one token");
-        assert_eq!(first.0, 0, "line");
-        assert_eq!(first.1, 0, "col");
-        assert_eq!(first.2, 6, "len of `prefix`");
-        assert_eq!(first.3, ty::KEYWORD, "type keyword");
+        let kw = decoded
+            .iter()
+            .find(|&&(_, _, _, t)| t == ty::KEYWORD)
+            .expect("a keyword token");
+        assert_eq!(kw.0, 2, "`from` is on the mapping header line");
+        assert_eq!(kw.2, 4, "len of `from`");
     }
 
     #[test]
     fn comment_classified_as_comment() {
         // Fossil comments are `//`-to-EOL (lexer.rs), NOT `#`.
-        let (db, file) = db_file("// a comment\nprefix ex: <https://example.org/>\n");
+        let (db, file) = db_file(&format!("// a comment\n{SRC}"));
         let decoded = decode_tokens(&semantic_tokens(&db, file));
         assert!(
             decoded.iter().any(|&(_, _, _, t)| t == ty::COMMENT),
@@ -453,15 +467,17 @@ mod tests {
     #[test]
     fn utf16_columns_for_multibyte_comment() {
         // A comment with a 2-byte `é`; the token AFTER it on the next line must
-        // start at a UTF-16-correct column (the LineIndex handles this).
-        let (db, file) = db_file("// café\nprefix ex: <https://example.org/>\n");
+        // start at a UTF-16-correct column (the LineIndex handles this). Read as
+        // bytes, `café` is five and the column would be off by one.
+        let (db, file) = db_file(&format!("// café\n{SRC}"));
         let decoded = decode_tokens(&semantic_tokens(&db, file));
-        // `prefix` on line 1, col 0.
-        let kw = decoded
+        let first_on_line_1 = decoded
             .iter()
-            .find(|&&(_, _, _, t)| t == ty::KEYWORD)
-            .expect("a keyword token");
-        assert_eq!(kw.0, 1, "prefix is on line 1");
-        assert_eq!(kw.1, 0, "prefix starts at col 0");
+            .find(|&&(line, _, _, _)| line == 1)
+            .expect("a token on the line after the comment");
+        assert_eq!(
+            first_on_line_1.1, 0,
+            "the line after the comment starts at column 0"
+        );
     }
 }

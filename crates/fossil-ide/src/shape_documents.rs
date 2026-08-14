@@ -150,12 +150,11 @@ mod tests {
     use super::*;
 
     const NAMES_A_DOCUMENT: &str = "\
-prefix ex: <http://example.org/>
-type { Person } = io.shex(\"shapes/person.shex\")
+type { Person } := io.shex(\"shapes/person.shex\")
 users := io.csv(\"users.csv\")
-User : ex:Person from users
-    iri = `${ex:}u/${.id}`
-    ex:name = .name
+User : Person from users
+    @subject = \"http://example.org/u/{users.id}\"
+    name = users.name
 ";
 
     fn db() -> FossilDb {
