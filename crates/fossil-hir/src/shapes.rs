@@ -247,9 +247,9 @@ pub struct NameCollision {
 /// A name to suggest for a colliding predicate — `foaf_name` for
 /// `http://xmlns.com/foaf/0.1/name`.
 ///
-/// # This is a SUGGESTION, and that is the whole distinction ADR-0059 §8 draws
+/// # This is a SUGGESTION, and that distinction is the whole point
 ///
-/// The ADR bans the compiler from **deriving** a name: FSharp.Data's numeric
+/// The compiler is banned from **deriving** a name: FSharp.Data's numeric
 /// suffix (`PascalCase2`) and its singulariser renamed members across a minor
 /// version and broke a program in production, and its own PLDI-2016 §6.5
 /// criterion — nothing where *«a small change in the sample causes a large
@@ -266,7 +266,7 @@ pub struct NameCollision {
 /// # The rule
 ///
 /// The vocabulary that brought the predicate in, plus the short name — which is
-/// exactly what ADR-0059 §8 writes by hand in its own example. The vocabulary
+/// exactly what the design writes by hand in its own example. The vocabulary
 /// is the last token of the IRI **before** its last segment that is not one of
 /// the tokens no vocabulary is told apart by: a scheme, `www`, a bare version
 /// number, or a public suffix. `http://xmlns.com/foaf/0.1/name` yields

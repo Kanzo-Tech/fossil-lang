@@ -46,8 +46,7 @@
 //!
 //! We use ONLY `Schema::from_reader` (byte-stream input) — never
 //! `Schema::from_iri` which would pull `reqwest`/`tokio` into the WASM build
-//! path. Verified by the Phase 0 spike (`decisions/rudof-wasm.md`) and the
-//! plan 03-01 re-verification.
+//! path. Verified by the Phase 0 spike and re-verified since.
 
 // `result_large_err`: `ShExLoweringError` carries a `TripleExpr` via
 // `OneOfRejection::suggestion_seed::one_of_node`. The two `pub` constructors

@@ -36,9 +36,8 @@
 //! `MAX_PER_MAPPING_FAN_OUT` stays at 1 (verified by
 //! `fossil-hir::tests::invalidation_regression`, 3/3).
 //!
-//! See `decisions/rudof-wasm.md` for the Phase 0 spike that validated the
-//! WASM-first architecture, and the WASM API scope
-//! for the verbatim API contract this file implements.
+//! The WASM-first architecture was validated by the Phase 0 rudof spike; this
+//! file implements the WASM API contract verbatim.
 
 pub(crate) mod lsp_worker;
 pub mod tokenize;

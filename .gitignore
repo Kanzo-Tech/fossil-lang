@@ -4,7 +4,7 @@
 Cargo.lock.bak
 
 # WASM build outputs (wasm-bindgen-cli writes ./pkg next to the crate;
-# also covers the new packages/wasm/pkg/ home per ADR-0031)
+# also covers the packages/wasm/pkg/ home)
 /crates/fossil-wasm/pkg/
 
 # IDE
@@ -25,17 +25,18 @@ RETURNING.md
 # review`, and it is the one file that legitimately carries `assertion_line:`.
 *.snap.new
 
-# GSD planning artifacts (commit_docs=false per .planning/config.json)
-.planning/
+# `.planning/` was ignored here. It is deleted, and the ignore goes with it: if a
+# tool recreates that directory, it must show up in `git status` rather than
+# accumulate a second plan out of sight. That is how the first one got to 106k lines.
 
-# Walking-skeleton local-run artefacts (per Phase 1 plan 01-07).
+# Walking-skeleton local-run artefacts.
 # `fossil compile examples/hello.fossil` writes these to cwd; ignore them at
 # repo root so casual smoke tests don't dirty the tree.
 /output.parquet
 /manifest.yaml
 /.scratch-walking-skel/
 
-# === JS/TS ecosystem (pnpm monorepo per ADR-0031) ===
+# === JS/TS ecosystem (pnpm monorepo) ===
 node_modules/
 **/dist/
 **/.next/

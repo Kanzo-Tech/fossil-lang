@@ -1,4 +1,4 @@
-# DuckDB-WASM parity harness (SC#1 manual tier — ADR-0014)
+# DuckDB-WASM parity harness (SC#1 manual tier)
 
 This is the **manual, on-demand** tier of the two-tier cross-engine SQL parity
 strategy that discharges SC#1's claim:
@@ -7,7 +7,7 @@ strategy that discharges SC#1's claim:
 > native DuckDB 1.10502 **and** DuckDB-WASM 1.33.x.
 
 Running the full DuckDB-WASM bundle (~6.4 MB MVP) in CI on every PR is too
-heavy, so the parity is split into tiers (ADR-0014):
+heavy, so the parity is split into tiers:
 
 | Tier | Where | When | What it proves |
 |------|-------|------|----------------|

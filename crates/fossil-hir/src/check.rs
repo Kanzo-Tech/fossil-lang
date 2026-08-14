@@ -850,8 +850,8 @@ impl<'db> Checker<'db> {
         //
         // Now the type is the bound name this mapping targets, the alias comes
         // from the vocabulary that brought the predicate in (see
-        // `shapes::suggested_alias` for why a SUGGESTION is not the derivation
-        // ADR-0059 §8 bans), and the production exists.
+        // `shapes::suggested_alias` for why a SUGGESTION is not the banned
+        // derivation), and the production exists.
         // `the_recommended_rename_parses_and_repairs_the_collision` feeds this
         // exact text back through the compiler and checks that the collision
         // goes away and the renamed key resolves.

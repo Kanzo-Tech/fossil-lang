@@ -31,8 +31,8 @@ import { repoRoot } from "@/lib/repo";
  *
  *   - That a `backedBy` path actually *tests* the claim. It checks that the file is there, not that
  *     it asserts anything. A path to a source file that merely contains the feature passes here,
- *     and two of them do today — see `bounded-write.mdx`, whose spill test ADR-0043 stage 4 owes
- *     and has not written. The page says so in its own prose; a reader gets the truth, the guard
+ *     and two of them do today — see `bounded-write.mdx`, whose spill test is owed and has not
+ *     been written. The page says so in its own prose; a reader gets the truth, the guard
  *     only gets the path.
  *   - That either sentence is *true*. No test can. What it can do is make the citation falsifiable,
  *     which is the difference between a claim and an assertion.
@@ -124,8 +124,8 @@ describe("every governed page declares both registers", () => {
  * says about two cores hangs off that number. Left as prose it is a sentence somebody measured in
  * August 2026; here it is a build failure the moment it stops holding — in either direction, which
  * is the point. A second dependency appearing means the graph core has started to grow roots into
- * the language; the last one *disappearing* means ADR-0042 §2 landed and the page's `today:` block
- * now understates what is true. Both deserve a red test, because both need the page rewritten.
+ * the language; the last one *disappearing* means the graph core has been cut loose entirely and
+ * the page's `today:` block now understates what is true. Both deserve a red test, because both need the page rewritten.
  *
  * `[dev-dependencies]` are deliberately out of scope: a test may depend on whatever it likes, and
  * `fossil-graph`'s do not include a fossil crate today anyway.
@@ -332,9 +332,9 @@ describe("every cited path is still there", () => {
  *     is deliberate. Nothing mechanical compares the two — the 23 programs of `apps/docs/programs/`
  *     are the only check the file has.
  *
- * **What it does not scan, and why:** `decisions/`, which is being deleted outright, and
- * `SURFACE-PLAN.md`, which has an owner. Both still carry the old spelling. Widening `CITED_TREES`
- * is the whole of the change when that stops being true.
+ * **What it does not scan, and why:** `SURFACE-PLAN.md`, which has an owner and still carries the
+ * old spelling. Widening `CITED_TREES` is the whole of the change when that stops being true.
+ * `decisions/` used to be named here too; it is gone.
  */
 const GRAMMAR = join(repoRoot, "grammar.bnf");
 

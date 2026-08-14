@@ -33,7 +33,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
 # `schemars` derives JSON Schema from Rust types. Adopted in `fossil-graph`
-# (ADR-0039) to publish a per-verb param/result schema once and have every
+# to publish a per-verb param/result schema once and have every
 # transport binding (fossil-mcp, fossil-http, @fossil-lang/graph) consume the
 # SAME schema — no hand-written contract duplicated across bindings. Pin 0.8
 # because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
@@ -54,7 +54,7 @@ csv = "1.3"
 jsonschema = { version = "0.42", default-features = false }
 roxmltree = "0.20"
 
-# === Output descriptor (Phase 3+; rudof spike resolved 2026-05-15 — see decisions/rudof-wasm.md) ===
+# === Output descriptor (the rudof WASM spike resolved this 2026-05-15) ===
 # Major-pinned; allow patch drift. shex_validation intentionally NOT included — Phase 3 is AST-only
 # (no runtime ShEx validation).
 shex_ast = "0.3"
@@ -77,7 +77,7 @@ prefixmap = "0.3"
 # 1.2 reach a property of rudof's dependency graph: dropping rudof, or rudof
 # dropping the feature, turns our Turtle parser back into an RDF 1.1 one and
 # breaks that arm at compile time for a reason no one would connect. Declaring it
-# here is a no-op for today's graph and the guard for tomorrow's. See ADR-0051.
+# here is a no-op for today's graph and the guard for tomorrow's.
 oxttl = { version = "0.2", features = ["rdf-12"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 
@@ -93,7 +93,7 @@ regex = "1"
 
 # === Sinks (Phase 5+) ===
 # `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc;
-# SC#5 / ADR-0017). The `arrow` umbrella + `parquet` stay for native byte-level test deps.
+# SC#5). The `arrow` umbrella + `parquet` stay for native byte-level test deps.
 # Pinned to 58 — the latest published arrow/parquet line (59 is not on crates.io as of
 # 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
 # is what Cargo.lock already resolves transitively via duckdb's parquet.
@@ -171,7 +171,7 @@ tempfile = "3"
 log = "0.4"
 
 [workspace.lints.rust]
-unsafe_code = "deny"   # per ADR-0004 — per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
+unsafe_code = "deny"   # per-item #[allow] permitted with justification at third-party-trait integration boundaries (e.g., Salsa Update for rowan types)
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 elided_lifetimes_in_paths = "warn"

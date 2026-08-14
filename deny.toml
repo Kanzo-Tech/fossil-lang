@@ -70,31 +70,32 @@ allow-wildcard-paths = true
 deny = [
     # Strike-from-stack list. Each entry carries the reason it is banned.
     { name = "serde_yml", reason = "RUSTSEC-2025-0068; use serde_yaml_ng" },
-    { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server (per ADR-0001)" },
+    { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server, as all three reference implementations do" },
     { name = "wasm-pack", reason = "Archived July 2025; use wasm-bindgen-cli + Vite" },
     { name = "sqlx", reason = "Not WASM-compatible; out of MVP scope" },
 
-    # The ADR-0044 ring guard. A crate may depend on its ring and lower ones,
+    # The engine guard. A crate may depend on its own layer and lower ones,
     # never on an engine its ring does not declare — so the engines are denied
     # workspace-wide and the ring-2 crates are named as wrappers. The list IS
     # the ring boundary: adding a name here is declaring that crate native, and
     # that is the review the rule exists to force.
     #
     # These are ratchets over ground already held, not a migration to finish.
-    # ADR-0044 believed six crates reached `duckdb` and that the reader ring got
-    # there transitively via `fossil-ide -> fossil-engine`; ADR-0045 §7 showed
-    # that edge runs the other way and that the reader ring was already clean.
-    # `cargo tree -e normal -i duckdb --workspace` is the authority, not prose.
+    # The design this replaced believed six crates reached `duckdb` and that the
+    # reader layer got there transitively via `fossil-ide -> fossil-engine`.
+    # Measured, that edge runs the other way and the reader layer was already
+    # clean. `cargo tree -e normal -i duckdb --workspace` is the authority here,
+    # never prose.
     { name = "duckdb", wrappers = [
         "fossil-engine",
         "fossil-mcp",
         "fossil-runtime",
         "fossil-cli",
-    ], reason = "Ring 2 only (ADR-0044): the native engine. Ring 1 must start in milliseconds and ring 3 addresses bytes — neither may link a database. `fossil-cli` keeps it as a dev-dependency to read the written Parquet back, which is not a ring crossing." },
+    ], reason = "The engine layer only: the native engine. Ring 1 must start in milliseconds and ring 3 addresses bytes — neither may link a database. `fossil-cli` keeps it as a dev-dependency to read the written Parquet back, which is not a ring crossing." },
     { name = "datafusion", wrappers = [
         "fossil-df",
         "fossil-df-wasm",
-    ], reason = "Ring 2 only (ADR-0044): the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — ADR-0044 deletes it, and compiling the engine to the browser asserts the opposite of ADR-0042 §1." },
+    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried." },
 ]
 
 [sources]

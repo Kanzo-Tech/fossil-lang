@@ -1,7 +1,7 @@
 //! How much does salsa save inside **one** batch invocation?
 //!
-//! `decisions/0046-un-nucleo-y-carcasas-finas.md` §6 keeps salsa but says its
-//! scope is wrong, and it refuses to settle that on an argument. The open
+//! The design keeps salsa but says its scope is wrong, and refuses to settle
+//! that on an argument. The open
 //! question is narrow: the CLI builds a `FossilDb` with empty storage on every
 //! call (`crates/fossil-engine/src/system.rs:60`), so there is no incrementality
 //! across invocations by construction — the only thing salsa can be buying the

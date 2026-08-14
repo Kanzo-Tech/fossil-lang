@@ -63,7 +63,7 @@ const hist = await graph.aggregate({
 - **`executeSql`** — the escape hatch, for the question the other five cannot
   shape.
 
-**None of them draws.** ADR-0042: the camera is addressed, not queried — the
+**None of them draws.** The camera is addressed, not queried — the
 LOD is not a filter but a different relation, and a `WHERE` cannot change which
 table it reads. A filter that must change the picture answers with ids, and the
 canvas masks its resident tiles with them.
@@ -76,4 +76,4 @@ pnpm --filter @fossil-lang/graph build   # build:wasm → gen:types → tsc
 
 `build:wasm` needs `wasm-bindgen` 0.2.120 (`cargo install --version 0.2.120
 wasm-bindgen-cli`); `gen:types` runs `cargo` to dump the schemas. Both are
-mirrors of the [`@fossil-lang/wasm`](../wasm) build (ADR-0030 / `--target web`).
+mirrors of the [`@fossil-lang/wasm`](../wasm) build (`--target web`).

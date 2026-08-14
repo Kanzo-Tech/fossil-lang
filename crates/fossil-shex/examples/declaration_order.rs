@@ -93,6 +93,6 @@ fn main() {
     report("ShExJ (JSON interchange)", SHEXJ);
     println!(
         "\nRun twice. `descriptor order` differing between runs is the HashMap \
-         finding of ADR-0057's tenth amendment, not a flake."
+         finding this example exists to show, not a flake."
     );
 }

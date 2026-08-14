@@ -272,8 +272,8 @@ fn editing_body_of_mapping_3_does_not_invalidate_item_tree() {
          mapping_cst_node + per-mapping fan-out: 1 body + 1 expr_types + 1 \
          spans = 17). If you exceed this bound, a NEW query has been added \
          that depends on parse(file) without an intermediate per-item \
-         invalidation barrier — fix the data layout per ADR-0005, do NOT \
-         relax the threshold."
+         invalidation barrier — fix the data layout, do NOT relax the \
+         threshold."
     );
 }
 
@@ -436,7 +436,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
          after a single-mapping body edit (cap = {MAX_PER_MAPPING_FAN_OUT}). \
          If body_count == 10, ALL sibling mappings are being invalidated — \
          the mapping_cst_node invalidation barrier is broken. \
-         Fix the data layout per ADR-0005; do NOT silence. keys: {keys:#?}"
+         Fix the data layout; do NOT silence. keys: {keys:#?}"
     );
     assert_eq!(
         body_count, 1,
@@ -492,9 +492,9 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         spans_count <= MAX_PER_MAPPING_FAN_OUT,
         "FORBIDDEN per-mapping fan-out: spans re-executed {spans_count} \
          times after a single-mapping body edit (cap = \
-         {MAX_PER_MAPPING_FAN_OUT}). If spans_count == 10, the ADR-0008 \
-         claim that `spans(db, mapping)` reads `mapping_cst_node` (NOT \
-         `parse(db, file)`) is broken — fix the data layout in \
+         {MAX_PER_MAPPING_FAN_OUT}). If spans_count == 10, the claim that \
+         `spans(db, mapping)` reads `mapping_cst_node` (NOT `parse(db, file)`) \
+         is broken — fix the data layout in \
          crates/fossil-hir/src/spans.rs. keys: {keys:#?}"
     );
     assert_eq!(

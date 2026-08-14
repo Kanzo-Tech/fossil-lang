@@ -4,6 +4,11 @@
 fases F1–F8, que vivían en un segundo documento fuera del repo. **Esto es el orden de construirlo**,
 y es el único sitio donde está.
 
+> **Sobre los `ADR-00NN` que aparecen aquí.** `decisions/` está borrado. Los números que quedan en
+> este documento son **etiquetas de un suceso**, no punteros a un fichero: cada frase que nombra uno
+> dice a continuación lo que aquella decisión decía, y el argumento vive en `/docs/design`. Un
+> número aquí no es una instrucción de ir a leer nada, y no hay nada que leer.
+
 > **Por qué hay uno y no dos.** Las fases F describían el mismo compilador desde el otro extremo —
 > los tipos, Salsa, el escritor de Parquet, los crates — y estaban en `~/.claude/plans/`, fuera del
 > árbol y sin guardia. Medido el 2026-08-14: **el trabajo de superficie había cerrado F1, F2 y media

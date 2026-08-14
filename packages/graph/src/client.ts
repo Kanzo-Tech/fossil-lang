@@ -57,7 +57,7 @@ export interface CreateGraphClientOpts {
  * Rust verb structs.
  *
  * There is no viewport method and there will not be one: the camera is
- * addressed, not queried (ADR-0042). These verbs answer questions and return
+ * addressed, not queried. These verbs answer questions and return
  * ids; what gets drawn comes from tiles.
  */
 export interface GraphClient {
