@@ -27,18 +27,32 @@ somewhere else.
 ## Build & Test Commands
 
 ```bash
-cargo check --workspace                                          # native, all crates
-cargo test --workspace                                           # native tests
+cargo check --workspace --all-targets                            # native, all crates AND their tests
+cargo test --workspace --no-fail-fast                            # native tests, every crate
 cargo fmt --all -- --check                                       # format check
 cargo clippy --workspace --all-targets -- -D warnings            # lint check
 cargo deny check                                                 # advisories + licenses + bans
-cargo wasm-check                                                 # WASM gate; xtask derives the crate set
+cargo xtask wasm-check                                           # WASM gate; xtask derives the crate set
 ```
+
+**Both flags on the first two lines are load-bearing.** Without `--all-targets`, `check` does
+not compile `tests/`, and a signature change that breaks four test files reads as green — it
+did, on 2026-08-13. Without `--no-fail-fast`, `test` stops at the first failing suite and
+reports the tests it happened to reach as if they were the workspace.
 
 CI runs all of the above on every PR. Locally, the WASM gate is the highest-leverage
 check — run it before any commit that touches a compiler-core crate. It needs a
-wasm-capable `clang` for `fossil-df-wasm`'s `zstd-sys` (Apple clang is not one; CI installs
-LLVM and sets `CC_wasm32_unknown_unknown`). Without it, check the compiler closure directly:
+wasm-capable `clang` for `fossil-df-wasm`'s `zstd-sys`; Apple clang is not one, and the
+failure is `unknown target triple 'wasm32-unknown-unknown'` from `cc-rs`. On this machine
+Homebrew LLVM is, and the full gate runs with it:
+
+```bash
+CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang \
+AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar \
+cargo xtask wasm-check
+```
+
+Without any LLVM at all, check the compiler closure directly — it is the smaller claim:
 `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
 
 ## Hard Rules
