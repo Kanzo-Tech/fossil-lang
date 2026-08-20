@@ -1,10 +1,9 @@
 //! Structural MIR helpers: [`schema_of`] and [`free_cols`].
 //!
 //! These are plain-Rust functions (NOT `#[salsa::tracked]` queries), so they
-//! do NOT affect `MAX_PER_MAPPING_FAN_OUT`. The rewriting engine (plans
-//! 04-02/04-03) and codegen (plans 04-04/04-05) call them to reason about the
-//! column schema flowing through a [`crate::graph::MirGraph`] and the free
-//! column references inside an [`Expr`] (for the R3/R5 `free(p)` guards).
+//! do NOT affect `MAX_PER_MAPPING_FAN_OUT`. They reason about the column schema
+//! flowing through a [`crate::graph::MirGraph`] and the free column references
+//! inside an [`Expr`].
 //!
 //! # `schema_of` takes `&dyn fossil_base::Db`
 //!
@@ -23,57 +22,36 @@ use smol_str::SmolStr;
 
 use crate::op::{Expr, Op};
 
-/// The one column name an `Op::Join`'s condition equates, when both sides name
-/// the SAME column — the shape the retired `on = .k` sugar produced, and the
-/// only one where the key can be identified rather than duplicated.
-/// `None` for anything else: a condition equating two DIFFERENTLY named keys
-/// (the ordinary case now that both sides are written qualified), a conjunction
-/// of equalities, or a hand-constructed graph's arbitrary predicate. Those keep
-/// the concatenating behaviour rather than guessing which name to drop.
-fn join_key(on: &Expr<'_>) -> Option<SmolStr> {
-    match on {
-        Expr::BinOp {
-            op: fossil_hir::BinOp::Eq,
-            lhs,
-            rhs,
-            ..
-        } => match (&**lhs, &**rhs) {
-            (Expr::ColRef { column: l, .. }, Expr::ColRef { column: r, .. }) if l == r => {
-                Some(l.clone())
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 /// Output column schema of the op at `idx`.
 ///
-/// Computed by structural induction over the topo-ordered DAG
-/// (operator-algebra.md §3). Returns column names in schema order.
+/// Computed by structural induction over the topo-ordered DAG. That induction
+/// is what makes the algebra's preservation property hold: if every operator's
+/// input schema matches its signature, every node in the plan carries a
+/// well-typed output schema. Returns column names in schema order.
 ///
-/// Per-operator rules (operator-algebra.md §3):
+/// Per-operator rules:
 /// - `Source` → field names of `row_type` (deref the interned `Record`)
 /// - `Project` → `cols`
 /// - `Extend` → input schema ∪ `{field}` (field appended if not already present)
 /// - `Rename` → input schema with `old` → `new`
 /// - `Filter` / `Distinct` → input schema unchanged
-/// - `Join` → left schema ++ right schema minus the key, when the condition
-///   equates one name with itself and so identifies it rather than duplicating
-///   it. Any OTHER shared name used to be a compile error, and is not any more:
-///   the join no longer flattens two rows into one, every reference is written
-///   qualified, so two sources with a column of the same name are legal. This
-///   concatenation can therefore produce a duplicate name, and nothing here
-///   breaks the tie.
+/// - `Join` → left schema ++ right schema, whole. A shared name used to be a
+///   compile error, and is not any more: the join no longer flattens two rows
+///   into one, every reference is written qualified, so two sources with a
+///   column of the same name are legal. This concatenation can therefore
+///   produce a duplicate name, and nothing here breaks the tie — these are bare
+///   names, and the qualifier that does break the tie lives on the `ColRef`
+///   that reads them, not in this list.
 /// - `Union` → left schema (asserted equal to right in debug builds)
 /// - `GroupBy` → `keys`
 /// - `Aggregate` → input schema ∪ agg `out_field`s
-/// - `TripleEmit` / `Sink` → input schema unchanged (terminal-ish)
+/// - `EmitVertex` / `EmitEdge` / `Sink` → input schema unchanged (terminal-ish)
 /// - `Empty` → its declared `schema`
 ///
 /// An out-of-range `idx` (or an input index that points past the slice)
-/// yields an empty schema rather than panicking — callers in the rewriting
-/// engine handle malformed intermediate graphs gracefully.
+/// yields an empty schema rather than panicking: a caller may hold a
+/// half-built or hand-constructed graph, and a panic there would take the LSP
+/// with it.
 #[must_use]
 pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<SmolStr> {
     let Some(op) = ops.get(idx) else {
@@ -106,21 +84,15 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => schema_of(db, ops, *input),
-        // A condition equating one name with itself IDENTIFIES that key, so it
-        // appears once. This concatenated both sides until 2026-08-07 and
-        // disagreed with the row the backend actually executes — the executor
-        // drops the right side's key, so a schema that kept it described a
-        // column nobody would find.
-        Op::Join {
-            left, right, on, ..
-        } => {
-            let mut schema = schema_of(db, ops, *left);
-            let key = join_key(on);
-            for col in schema_of(db, ops, *right) {
-                if Some(&col) != key.as_ref() {
-                    schema.push(col);
-                }
-            }
+        // `fila(izq) ++ fila(der)`, whole. This dropped the right side's copy of
+        // the key between 2026-08-07 and 2026-08-19, because the executor did:
+        // the join was `USING (k)`, so a schema that kept the second `k`
+        // described a column nobody would find. The executor no longer
+        // identifies anything — a join relates two qualified relations and both
+        // keep every column — so neither does this.
+        Op::Join { left, right, .. } => {
+            let mut schema = schema_of(db, ops, left.input);
+            schema.extend(schema_of(db, ops, right.input));
             schema
         }
         Op::Union { left, right } => {
@@ -146,7 +118,8 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
     }
 }
 
-/// Free column references in an expression (for the R3/R5 `free(p)` guards).
+/// Free column references in an expression — the columns a predicate reads,
+/// which is what decides whether it may be evaluated against a given schema.
 ///
 /// Walks the [`Expr`] recursively collecting `ColRef.column` names;
 /// `LitString` / `LitBool` contribute nothing; `Concat` / `Call` / `BinOp` /

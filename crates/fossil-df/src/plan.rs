@@ -16,24 +16,16 @@
 
 use std::collections::HashMap;
 
-use datafusion::common::Column;
+use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
+use datafusion::logical_expr::{Expr as DfExpr, JoinType, LogicalPlanBuilder};
 use datafusion::prelude::{DataFrame, SessionContext};
 use fossil_hir::BinOp;
-use fossil_mir::{Expr, JoinKind, Op};
+use fossil_mir::{Expr, JoinKind, JoinSide, Op};
 
 use fossil_base::SourceAnchor;
 
 use crate::{read_source, render};
-
-/// The name the right side of a join carries its key under while the join is
-/// being built. A join identifies its key: `on = users.k == teams.k` is
-/// `USING (k)`, so the key
-/// appears **once** in the result row and not twice, and DataFusion's join keeps
-/// both sides' keys — so the right one is renamed out of the way and dropped
-/// after the join. The `__fossil_` prefix is not a column any source can spell.
-const JOIN_KEY: &str = "__fossil_join_key";
 
 /// The relation the op at `index` produces, as an un-collected [`DataFrame`].
 ///
@@ -47,9 +39,9 @@ const JOIN_KEY: &str = "__fossil_join_key";
 ///   (the list is not topologically ordered);
 /// - the op at `index` is not a relational operator (an emit op is read by
 ///   [`crate::execute_vertex_ops`], not planned here);
-/// - a [`Op::Join`] whose `kind` is not `Inner`, or whose `on` is not an
-///   equality between the same column name on both sides — the only join
-///   condition this engine plans;
+/// - a [`Op::Join`] whose `kind` is not `Inner`, or whose `on` is not a
+///   conjunction of equalities between columns of the two inputs — see
+///   [`join_equalities`];
 /// - any DataFusion read/plan error.
 pub async fn plan_relation(
     ctx: &SessionContext,
@@ -84,23 +76,28 @@ async fn build(
         })
     };
     match &ops[index] {
+        // A source relation is qualified by the binding that names it, which is
+        // the name every `ColRef` reading it carries (CODEGEN-LOWERING-01). It
+        // is what lets a self-join keep two `label` columns apart, and what
+        // lets `Purchase.id` and `User.id` coexist in one joined row.
         Op::Source {
             uri,
             format,
             binding,
             ..
-        } => read_source(ctx, &anchor.locator(uri), format, binding).await,
-        // `where(.edad >= 18)`: the predicate is a MIR expression like any
+        } => qualify(
+            read_source(ctx, &anchor.locator(uri), format, binding).await?,
+            binding,
+        ),
+        // `where(User.age >= 18)`: the predicate is a MIR expression like any
         // other, so the render is the one every property already goes through.
         Op::Filter { input: i, pred } => input(*i)?.filter(render(pred)),
         // `select(users.a, users.b)`: restrict the row to the named columns, in
-        // the order named. `new_unqualified` (NOT `col()`) for the same reason
-        // `render` uses it — a source column's case is the source's, not SQL's,
-        // and it is the same reason `Expr::ColRef` drops its `source` here: the
-        // join re-projects both sides to unqualified names before it runs.
+        // the order named — under the relation each was written against, which
+        // after a join is the only thing that says which side `id` came from.
         Op::Project { input: i, cols } => input(*i)?.select(
             cols.iter()
-                .map(|c| DfExpr::Column(Column::new_unqualified(c.column.as_str())))
+                .map(|c| column(&c.source, &c.column))
                 .collect::<Vec<_>>(),
         ),
         Op::Join {
@@ -108,15 +105,13 @@ async fn build(
             right,
             on,
             kind,
-            left_name,
-            right_name,
         } => join(
-            input(*left)?,
-            input(*right)?,
+            input(left.input)?,
+            input(right.input)?,
+            left,
+            right,
             on,
             *kind,
-            left_name,
-            right_name,
         ),
         other => Err(DataFusionError::Plan(format!(
             "`{}` is defined in the operator algebra and this engine does not execute it \
@@ -126,22 +121,33 @@ async fn build(
     }
 }
 
-/// `fila(izq) ⊎ fila(der)`: the key is identified once, and any OTHER name the
-/// two sides share is an error rather than a shadowing or an auto-qualification.
+/// `fila(izq) ++ fila(der)`: both sides keep every column they have, under the
+/// relation each is addressed by.
 ///
-/// Both sides are re-projected to unqualified names first: two `read_csv`
-/// frames carry the same synthetic qualifier, so without this the join schema
-/// would hold two `?table?.k` fields and the plan would not build. Once
-/// unqualified the only name they share is the key — the checker rejects any
-/// other collision — and the key is carried on the right under [`JOIN_KEY`] so
-/// it can be dropped after the equality has been made.
+/// **Nothing is identified and nothing is dropped.** Until 2026-08-19 this was
+/// `USING (k)` — one key name, present once in the result, with the right side's
+/// copy renamed out of the way and dropped after the equality — and any other
+/// name the two sides shared was refused as a collision. Both rules were the
+/// same rule: the row was flat, so two columns called `id` could not both be
+/// there. The row is not flat any more. `fossil-hir` deleted its half on
+/// 2026-08-14 (ruling 17: `RowScope` keeps one entry per binding and a shared
+/// column name means nothing), and this is the other half — the sides are
+/// qualified rather than flattened, so `Purchase.id` and `User.id` are two
+/// columns and the join has nothing to arbitrate.
+///
+/// A side is re-qualified only when the surface wrote `X as Y`: an alias is a
+/// second name for the same source and the only thing that can tell the two
+/// halves of a self-join apart. A side WITHOUT an alias is left alone, because
+/// what qualifies it is already the name its columns are written under —
+/// `Purchase.join(Adults, …)` reads a pipeline called `Adults` whose body says
+/// `User.email`.
 fn join(
     left: DataFrame,
     right: DataFrame,
+    left_side: &JoinSide,
+    right_side: &JoinSide,
     on: &Expr<'_>,
     kind: JoinKind,
-    left_name: &str,
-    right_name: &str,
 ) -> datafusion::error::Result<DataFrame> {
     if kind != JoinKind::Inner {
         return Err(DataFusionError::Plan(format!(
@@ -149,124 +155,172 @@ fn join(
              NULL, and no output shape can declare a nullable property yet)"
         )));
     }
-    let key = join_key(on, left_name, right_name)?;
-
-    for (df, side, name) in [(&left, "left", left_name), (&right, "right", right_name)] {
-        if !df.schema().has_column_with_unqualified_name(&key) {
-            return Err(DataFusionError::Plan(format!(
-                "the join key `{key}` is not a column of the {side} side `{name}`: it has {:?}",
-                df.schema().field_names()
-            )));
+    let equalities = join_equalities(on, left_side, right_side)?;
+    for (side, df, spec) in [("left", &left, left_side), ("right", &right, right_side)] {
+        for (source, column) in condition_refs(on) {
+            if source == spec.name().as_str()
+                && !df.schema().has_column_with_unqualified_name(column)
+            {
+                return Err(DataFusionError::Plan(format!(
+                    "the join condition names `{source}.{column}`, and the {side} side has {:?}",
+                    df.schema().field_names()
+                )));
+            }
         }
     }
-    let shared: Vec<String> = left
-        .schema()
-        .columns()
-        .iter()
-        .map(|c| c.name().to_string())
-        .filter(|n| *n != key && right.schema().has_column_with_unqualified_name(n))
-        .collect();
-    if !shared.is_empty() {
-        return Err(DataFusionError::Plan(format!(
-            "`{left_name}` and `{right_name}` both carry {shared:?}, and a join identifies only \
-             the key `{key}` — the checker refuses this before it gets here"
-        )));
-    }
 
-    let left = unqualified(left, None)?;
-    let right = unqualified(right, Some(&key))?;
-    left.join_on(
-        right,
-        JoinType::Inner,
-        [binary_expr(
-            DfExpr::Column(Column::new_unqualified(key.as_str())),
-            Operator::Eq,
-            DfExpr::Column(Column::new_unqualified(JOIN_KEY)),
-        )],
-    )?
-    .drop_columns(&[JOIN_KEY])
+    let left = alias_of(left, left_side)?;
+    let right = alias_of(right, right_side)?;
+    left.join_on(right, JoinType::Inner, equalities)
 }
 
-/// The one key name a join condition names, or the error that says what
-/// arrived instead.
+/// Re-qualify `df` under a side's alias, or hand it back untouched when the
+/// side has none. See [`join`] for why "none" is not the same as "its own name".
+fn alias_of(df: DataFrame, side: &JoinSide) -> datafusion::error::Result<DataFrame> {
+    match &side.alias {
+        Some(alias) => qualify(df, alias),
+        None => Ok(df),
+    }
+}
+
+/// The equalities a join condition is made of, rendered — or the error that says
+/// what arrived instead.
 ///
-/// The admitted form is `on = users.k == teams.k` ≡ `USING (k)`:
-/// `BinOp { Eq, ColRef, ColRef }` with the **same** column on both sides. The
-/// surface spelling was a bare `on = .k` until ruling 17; the MIR form did not
-/// move, because the key name alone was always what reached here. A `ColRef`'s `source` is either the
-/// corresponding input's name or empty — today's lowering leaves it empty and
-/// lets the backend supply the relation (`lower_property_value`,
-/// CODEGEN-LOWERING-01) — and since the key name alone determines the SQL,
-/// which side is written first does not change the join. Anything else fails
-/// here rather than becoming a quietly different plan.
-fn join_key(on: &Expr<'_>, left_name: &str, right_name: &str) -> datafusion::error::Result<String> {
-    let Expr::BinOp {
-        op: BinOp::Eq,
-        lhs,
-        rhs,
-        ..
-    } = on
-    else {
-        return Err(DataFusionError::Plan(format!(
-            "a join condition is an equality by name (`on = a.k == b.k` ≡ `USING (k)`); this \
-             one is {}",
-            expr_name(on)
-        )));
-    };
-    let (
-        Expr::ColRef {
-            source: ls,
-            column: lc,
-        },
-        Expr::ColRef {
-            source: rs,
-            column: rc,
-        },
-    ) = (lhs.as_ref(), rhs.as_ref())
-    else {
-        return Err(DataFusionError::Plan(format!(
-            "a join condition equates two column references (`on = a.k == b.k`); this one \
-             equates {} and {}",
-            expr_name(lhs),
-            expr_name(rhs)
-        )));
-    };
-    if lc != rc {
-        return Err(DataFusionError::Plan(format!(
-            "a join key is one name on both sides (`on = a.k == b.k` ≡ `USING (k)`); this one names \
-             `{lc}` and `{rc}`. Two keys with different names are an extension this engine \
-             does not build"
-        )));
-    }
-    for (side, source) in [("left", ls), ("right", rs)] {
-        if !source.is_empty() && source != left_name && source != right_name {
+/// The admitted form is a conjunction of equalities between column references:
+/// `on = a.k == b.k`, and `on = a.k == b.k and a.j == b.j` for a compound key.
+/// The two columns need NOT share a name — `on = Purchase.user_id == User.id`
+/// is the ordinary case, and the rule that refused it (*"a join key is one name
+/// on both sides"*) was never a decision. It was the only thing this function
+/// could do while every `ColRef` reaching it carried an empty source: with no
+/// binding there was nothing to say which side a name belonged to, so equal
+/// names were the one shape whose plan could be guessed. The binding arrives
+/// now (CODEGEN-LOWERING-01), and the rule went with the ignorance that forced
+/// it.
+///
+/// What is still refused, and why each survives the deletion:
+///
+/// - a conjunct that is not `==` between two column references — a join is an
+///   equijoin here, and a theta join or a constant comparison would silently
+///   become a nested loop over the product of two corpora;
+/// - a reference qualified by a relation that is neither input — this check was
+///   already written and never once fired, because an empty source can never be
+///   unequal to both names;
+/// - a reference naming a column its own side does not have ([`join`]).
+///
+/// Which side is written first does not matter: the equality is a filter over
+/// the joined schema, so `a.k == b.k` and `b.k == a.k` plan identically.
+fn join_equalities(
+    on: &Expr<'_>,
+    left: &JoinSide,
+    right: &JoinSide,
+) -> datafusion::error::Result<Vec<DfExpr>> {
+    let mut out = Vec::new();
+    for conjunct in conjuncts(on) {
+        let Expr::BinOp {
+            op: BinOp::Eq,
+            lhs,
+            rhs,
+            ..
+        } = conjunct
+        else {
             return Err(DataFusionError::Plan(format!(
-                "the {side} side of the join condition qualifies `{lc}` with `{source}`, which \
-                 is neither input (`{left_name}`, `{right_name}`)"
+                "a join condition is an equality between columns (`on = a.k == b.k`, or several \
+                 joined by `and`); this one is {}",
+                expr_name(conjunct)
             )));
+        };
+        let (Expr::ColRef { source: ls, .. }, Expr::ColRef { source: rs, .. }) =
+            (lhs.as_ref(), rhs.as_ref())
+        else {
+            return Err(DataFusionError::Plan(format!(
+                "a join condition equates two column references (`on = a.k == b.k`); this one \
+                 equates {} and {}",
+                expr_name(lhs),
+                expr_name(rhs)
+            )));
+        };
+        for (side, source) in [("left", ls), ("right", rs)] {
+            if !source.is_empty() && source != left.name() && source != right.name() {
+                return Err(DataFusionError::Plan(format!(
+                    "the {side} side of the join condition qualifies a column with `{source}`, \
+                     which is neither input (`{}`, `{}`)",
+                    left.name(),
+                    right.name()
+                )));
+            }
         }
+        out.push(render(conjunct));
     }
-    Ok(lc.to_string())
+    Ok(out)
 }
 
-/// Re-project every column of `df` under its bare name, optionally carrying
-/// `rename_key` under [`JOIN_KEY`]. Aliasing drops the relation qualifier, so
-/// the two sides of a join can be told apart by name alone.
-fn unqualified(df: DataFrame, rename_key: Option<&str>) -> datafusion::error::Result<DataFrame> {
-    let exprs: Vec<DfExpr> = df
-        .schema()
-        .columns()
-        .into_iter()
-        .map(|c| {
-            let out = if rename_key == Some(c.name()) {
-                JOIN_KEY.to_string()
-            } else {
-                c.name().to_string()
-            };
-            DfExpr::Column(c).alias(out)
-        })
-        .collect();
-    df.select(exprs)
+/// Split a condition on `and` — one element for a single key, N for a compound
+/// one. A conjunction is the only structure a join condition is taken apart by;
+/// everything else is a leaf for [`join_equalities`] to admit or refuse.
+fn conjuncts<'e, 'db>(on: &'e Expr<'db>) -> Vec<&'e Expr<'db>> {
+    match on {
+        Expr::BinOp {
+            op: BinOp::And,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let mut out = conjuncts(lhs);
+            out.extend(conjuncts(rhs));
+            out
+        }
+        other => vec![other],
+    }
+}
+
+/// Every `(source, column)` a join condition names, qualified ones only — an
+/// unqualified reference has no side to be checked against.
+fn condition_refs<'e>(on: &'e Expr<'_>) -> Vec<(&'e str, &'e str)> {
+    let mut out = Vec::new();
+    let mut stack = vec![on];
+    while let Some(e) = stack.pop() {
+        match e {
+            Expr::ColRef { source, column } if !source.is_empty() => {
+                out.push((source.as_str(), column.as_str()));
+            }
+            Expr::BinOp { lhs, rhs, .. } | Expr::Concat(lhs, rhs) => {
+                stack.push(lhs);
+                stack.push(rhs);
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Re-qualify every column of `df` under `name` — the relational half of
+/// `ColRef { source, column }`.
+///
+/// `TableReference::bare` (NOT `DataFrame::alias`, which takes a `&str` and
+/// parses it as a SQL identifier): parsing folds an unquoted name to lowercase,
+/// so `Other` would become `other` while the `ColRef` reading it still says
+/// `Other`, and the column would resolve against nothing. It is the same trap
+/// [`crate::render`] avoids by using `Column::new_unqualified` instead of
+/// `col()`, and a source binding's case is the author's either way.
+fn qualify(df: DataFrame, name: &str) -> datafusion::error::Result<DataFrame> {
+    let (state, plan) = df.into_parts();
+    let plan = LogicalPlanBuilder::from(plan)
+        .alias(TableReference::bare(name))?
+        .build()?;
+    Ok(DataFrame::new(state, plan))
+}
+
+/// A `(source, column)` pair as a DataFusion column reference — qualified when
+/// the source is known, bare when it is not (a retired `.column`, or a
+/// hand-built op list). A bare reference resolves against whichever relation
+/// carries the name, and is ambiguous if two do; that is DataFusion's rule and
+/// its error names both candidates.
+fn column(source: &str, column: &str) -> DfExpr {
+    DfExpr::Column(if source.is_empty() {
+        datafusion::common::Column::new_unqualified(column)
+    } else {
+        datafusion::common::Column::new(Some(TableReference::bare(source)), column)
+    })
 }
 
 /// The op indices `index` depends on, itself included, in ascending order.
@@ -315,7 +369,8 @@ fn inputs(op: &Op<'_>) -> Vec<usize> {
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => vec![*input],
-        Op::Join { left, right, .. } | Op::Union { left, right } => vec![*left, *right],
+        Op::Join { left, right, .. } => vec![left.input, right.input],
+        Op::Union { left, right } => vec![*left, *right],
     }
 }
 

@@ -1,8 +1,8 @@
 //! The three relational operators the source pipeline needs, executed.
 //!
-//! `Op::Filter`, `Op::Project` and `Op::Join` have been defined since phase 4
-//! and reached by nothing: the operator algebra was defined WHOLE and lowered in
-//! part on purpose, and the source pipeline is what starts paying that debt back.
+//! `Op::Filter`, `Op::Project` and `Op::Join` have been defined since the
+//! algebra was completed and reached by nothing: the operator algebra was
+//! defined WHOLE and lowered in part on purpose, and the source pipeline is what starts paying that debt back.
 //! The lowering that will emit them is F5; this file is the other half —
 //! it builds the op list by hand, which is the pattern this repo already uses
 //! for an operator no `.fossil` can produce yet, and asserts the **rows that
@@ -22,7 +22,7 @@ use fossil_base::{FossilDb, NativeSystem, System};
 use fossil_graph_schema::Primitive;
 use fossil_hir::ty::{Record, RecordField};
 use fossil_hir::{BinOp, Ty, TyKind};
-use fossil_mir::{Expr, JoinKind, Op, ProjectedColumn, SinkRef, SourceFormat, VProp};
+use fossil_mir::{Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp};
 
 /// The anchor these op-list tests resolve their sources against.
 ///
@@ -74,16 +74,31 @@ fn col(source: &str, column: &str) -> Expr<'static> {
     }
 }
 
-/// The `on = left.k == right.k` condition this engine admits — one key name on
-/// both sides,
-/// `USING (k)` — spelled as the lowering will spell it:
-/// `BinOp { Eq, ColRef(left.k), ColRef(right.k) }`.
-fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str) -> Expr<'db> {
+/// `on = left.lk == right.rk`, spelled as the lowering spells it:
+/// `BinOp { Eq, ColRef(left.lk), ColRef(right.rk) }`. The two column names need
+/// not agree — `eq` is what the surface writes and the backend plans.
+fn eq<'db>(db: &'db dyn fossil_base::Db, lhs: Expr<'static>, rhs: Expr<'static>) -> Expr<'db> {
     Expr::BinOp {
         op: BinOp::Eq,
-        lhs: Box::new(col(left, key)),
-        rhs: Box::new(col(right, key)),
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
         ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
+    }
+}
+
+/// The same key name on both sides — the shape the retired `on = .k` sugar
+/// produced, and now just one equality among the many that are legal.
+fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str) -> Expr<'db> {
+    eq(db, col(left, key), col(right, key))
+}
+
+/// One side of a join: the op index it reads and the name its columns are
+/// addressed by, with no `as` alias.
+fn side(input: usize, relation: &str) -> JoinSide {
+    JoinSide {
+        input,
+        relation: SmolStr::from(relation),
+        alias: None,
     }
 }
 
@@ -118,6 +133,27 @@ fn names(batch: &RecordBatch) -> Vec<String> {
 fn one(batches: Vec<RecordBatch>) -> RecordBatch {
     assert_eq!(batches.len(), 1, "the fixture fits in one batch");
     batches.into_iter().next().expect("one batch")
+}
+
+/// The column names of the PLAN's schema.
+///
+/// Not [`names`], which reads them off a batch — **an empty result is zero
+/// batches, not one empty batch**, so a join that matches nothing has no batch
+/// to read a schema from and [`one`] fails on it with `left: 0`. Two of the
+/// tests below match nothing ON PURPOSE (that is what they assert: the join
+/// PLANS), and the schema they are about is the plan's either way.
+fn plan_names(df: &datafusion::prelude::DataFrame) -> Vec<String> {
+    df.schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect()
+}
+
+/// Rows across every batch — `0` for the empty result, which `batches[0]` cannot
+/// ask for.
+fn total_rows(batches: &[RecordBatch]) -> usize {
+    batches.iter().map(RecordBatch::num_rows).sum()
 }
 
 /// `where(.id >= 2)` keeps the two rows it admits and drops the one it does not.
@@ -177,22 +213,26 @@ async fn a_projection_restricts_the_row_to_the_columns_it_names() {
     assert_eq!(strings(&batch, 0), ["Alice", "Bob", "Carol"]);
 }
 
-/// `join(teams, on = users.id == teams.id)` is `USING (id)`: the key is in the
-/// result once, the
-/// two rows compose, and a row with no partner on either side is not there.
+/// `join(teams, on = users.id == teams.id)`: the two rows COMPOSE, whole, and a
+/// row with no partner on either side is not there.
+///
+/// This asserted `["id", "name", "team"]` until 2026-08-19 — the join was
+/// `USING (id)` and identified the key, so the right side's copy was renamed
+/// away and dropped. It does not any more: both sides keep every column, and
+/// `users.id` and `teams.id` are two columns that happen to share a bare name.
+/// The rule that made them one is the same rule that could not plan
+/// `on = a.parent == b.id`, and it went with it.
 #[tokio::test]
-async fn an_inner_join_composes_the_rows_and_names_the_key_once() {
+async fn an_inner_join_composes_both_rows_whole() {
     let db = db();
     let ops = vec![
         source(&db, "users.csv", "users", &["id", "name"]),
         source(&db, "teams.csv", "teams", &["id", "team"]),
         Op::Join {
-            left: 0,
-            right: 1,
+            left: side(0, "users"),
+            right: side(1, "teams"),
             on: on_key(&db, "users", "teams", "id"),
             kind: JoinKind::Inner,
-            left_name: SmolStr::new_static("users"),
-            right_name: SmolStr::new_static("teams"),
         },
     ];
 
@@ -200,19 +240,102 @@ async fn an_inner_join_composes_the_rows_and_names_the_key_once() {
     let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect("the join plans")
-        .sort_by(vec![datafusion::prelude::col("id")])
+        .sort_by(vec![datafusion::prelude::col(
+            datafusion::common::Column::new(
+                Some(datafusion::common::TableReference::bare("users")),
+                "id",
+            ),
+        )])
         .expect("a deterministic order to assert against");
     let batch = one(df.collect().await.expect("the join runs"));
 
     assert_eq!(
         names(&batch),
-        ["id", "name", "team"],
-        "fila(izq) ⊎ fila(der) with `id` identified once — NOT `id, name, id, team`"
+        ["id", "name", "id", "team"],
+        "fila(izq) ++ fila(der): `id` twice, told apart by the relation, not by the name"
     );
     // users has 1,2,3; teams has 1,3,4. Inner → 1 and 3, and nothing else.
     assert_eq!(ints(&batch, 0), [1, 3]);
     assert_eq!(strings(&batch, 1), ["Alice", "Carol"]);
-    assert_eq!(strings(&batch, 2), ["Blue", "Red"]);
+    assert_eq!(ints(&batch, 2), [1, 3]);
+    assert_eq!(strings(&batch, 3), ["Blue", "Red"]);
+}
+
+/// **The defect this whole change is.** `on = users.id == teams.id` was the ONLY
+/// join this engine planned; two differently-named keys were refused with "a
+/// join key is one name on both sides … Two keys with different names are an
+/// extension this engine does not build". They are not an extension — the
+/// backend simply could not see which side a column came from, because the
+/// lowering discarded the binding. It carries it now, and this plans.
+#[tokio::test]
+async fn a_join_whose_two_keys_are_named_differently_plans() {
+    let db = db();
+    let ops = vec![
+        source(&db, "users.csv", "users", &["id", "name"]),
+        source(&db, "teams.csv", "teams", &["id", "team"]),
+        Op::Join {
+            left: side(0, "users"),
+            right: side(1, "teams"),
+            // `users.name == teams.team` — nothing matches, which is the point:
+            // the assertion is that it PLANS, not that it finds rows.
+            on: eq(&db, col("users", "name"), col("teams", "team")),
+            kind: JoinKind::Inner,
+        },
+    ];
+
+    let ctx = SessionContext::new();
+    let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+        .await
+        .expect("two differently-named keys are an ordinary equi-join");
+    // The PLAN's schema, because this join matches nothing by construction and
+    // an empty result is zero batches — there is no row to read a name off.
+    assert_eq!(plan_names(&df), ["id", "name", "id", "team"]);
+    let batches = df.collect().await.expect("the join runs");
+    assert_eq!(
+        total_rows(&batches),
+        0,
+        "no user is named after a team, and finding rows was never the claim"
+    );
+}
+
+/// A compound key — `on = a.k == b.k and a.j == b.j` — is a conjunction of
+/// equalities, and DataFusion plans one hash join on two keys. It costs nothing
+/// beyond splitting the condition on `and`, which is why it is in this change
+/// rather than after it.
+#[tokio::test]
+async fn a_compound_key_joins_on_both_columns() {
+    let db = db();
+    let ops = vec![
+        source(&db, "users.csv", "users", &["id", "name"]),
+        source(&db, "teams.csv", "teams", &["id", "team"]),
+        Op::Join {
+            left: side(0, "users"),
+            right: side(1, "teams"),
+            on: Expr::BinOp {
+                op: BinOp::And,
+                lhs: Box::new(on_key(&db, "users", "teams", "id")),
+                rhs: Box::new(eq(&db, col("users", "name"), col("teams", "team"))),
+                ty: Ty::new(&db, TyKind::Primitive(Primitive::Bool)),
+            },
+            kind: JoinKind::Inner,
+        },
+    ];
+
+    let ctx = SessionContext::new();
+    let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+        .await
+        .expect("a conjunction of equalities plans");
+    assert_eq!(
+        plan_names(&df),
+        ["id", "name", "id", "team"],
+        "the second conjunct narrows the rows, not the schema"
+    );
+    let batches = df.collect().await.expect("the join runs");
+    assert_eq!(
+        total_rows(&batches),
+        0,
+        "no user is named after their team, so the second equality admits nothing"
+    );
 }
 
 /// The three compose: join, then filter on a column that came from the right
@@ -225,17 +348,19 @@ async fn the_three_operators_compose_in_one_chain() {
         source(&db, "users.csv", "users", &["id", "name"]),
         source(&db, "teams.csv", "teams", &["id", "team"]),
         Op::Join {
-            left: 0,
-            right: 1,
+            left: side(0, "users"),
+            right: side(1, "teams"),
             on: on_key(&db, "users", "teams", "id"),
             kind: JoinKind::Inner,
-            left_name: SmolStr::new_static("users"),
-            right_name: SmolStr::new_static("teams"),
         },
         Op::Filter {
             input: 2,
             pred: Expr::BinOp {
                 op: BinOp::Eq,
+                // Deliberately UNQUALIFIED — the retired bare `.team`, which is
+                // still what a `FieldRef` lowers to. It resolves because only
+                // one side has a `team`; a bare `id` here would be ambiguous
+                // and DataFusion would name both candidates.
                 lhs: Box::new(col("", "team")),
                 rhs: Box::new(Expr::LitString(SmolStr::new_static("Red"))),
                 ty: Ty::new(&db, TyKind::Primitive(Primitive::Bool)),
@@ -278,12 +403,10 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
         source(&db, "users.csv", "users", &["id", "name"]),
         source(&db, "teams.csv", "teams", &["id", "team"]),
         Op::Join {
-            left: 0,
-            right: 1,
+            left: side(0, "users"),
+            right: side(1, "teams"),
             on: on_key(&db, "users", "teams", "id"),
             kind: JoinKind::Inner,
-            left_name: SmolStr::new_static("users"),
-            right_name: SmolStr::new_static("teams"),
         },
         Op::EmitVertex {
             input: 2,
@@ -293,20 +416,22 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
                 Box::new(Expr::LitString(SmolStr::new_static(
                     "https://example.org/user/",
                 ))),
-                Box::new(col("", "id")),
+                // `users.id` and not a bare `id`: both sides carry one now, and
+                // the binding is what says which.
+                Box::new(col("users", "id")),
             ),
             dedup: true,
             props: vec![
                 VProp {
                     name: SmolStr::new_static("name"),
-                    value: col("", "name"),
+                    value: col("users", "name"),
                     ty: string_ty,
                     rdf_uri: Some(SmolStr::new_static("https://example.org/name")),
                     single_valued: true,
                 },
                 VProp {
                     name: SmolStr::new_static("team"),
-                    value: col("", "team"),
+                    value: col("teams", "team"),
                     ty: string_ty,
                     rdf_uri: Some(SmolStr::new_static("https://example.org/team")),
                     single_valued: true,
@@ -359,12 +484,10 @@ async fn an_outer_join_is_refused_by_name() {
             source(&db, "users.csv", "users", &["id", "name"]),
             source(&db, "teams.csv", "teams", &["id", "team"]),
             Op::Join {
-                left: 0,
-                right: 1,
+                left: side(0, "users"),
+                right: side(1, "teams"),
                 on: on_key(&db, "users", "teams", "id"),
                 kind,
-                left_name: SmolStr::new_static("users"),
-                right_name: SmolStr::new_static("teams"),
             },
         ];
         let ctx = SessionContext::new();
@@ -379,10 +502,16 @@ async fn an_outer_join_is_refused_by_name() {
     }
 }
 
-/// A condition that is not the admitted equality fails, and the failure says
-/// what arrived — it never becomes a quietly different join.
+/// What still refuses a join, now that the equal-names rule is gone.
+///
+/// The three that survive are the three the qualification never stood in for: a
+/// join is an EQUIJOIN (a theta join or a constant comparison would silently
+/// become a nested loop over the product of two corpora), and a reference has
+/// to name a side that exists and a column that side has. The fourth case this
+/// used to carry — two differently-named keys — is
+/// `a_join_whose_two_keys_are_named_differently_plans` now.
 #[tokio::test]
-async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
+async fn a_condition_that_is_not_an_equijoin_is_refused() {
     let db = db();
     let bool_ty = Ty::new(&db, TyKind::Primitive(Primitive::Bool));
     let two_sources = || {
@@ -400,7 +529,7 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
                 rhs: Box::new(col("teams", "id")),
                 ty: bool_ty,
             },
-            "not `==`",
+            "equality between columns",
         ),
         // Not two column references.
         (
@@ -412,34 +541,45 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
             },
             "integer literal",
         ),
-        // Two different names — the extension that is declared and not built.
-        (
-            Expr::BinOp {
-                op: BinOp::Eq,
-                lhs: Box::new(col("users", "id")),
-                rhs: Box::new(col("teams", "team")),
-                ty: bool_ty,
-            },
-            "`id` and `team`",
-        ),
         // Not a `BinOp` at all.
         (Expr::LitBool(true), "boolean literal"),
+        // A relation that is neither input. This check predates the binding
+        // and could never fire while every source was empty: an empty source
+        // is never unequal to both names.
+        (
+            eq(&db, col("users", "id"), col("nobody", "id")),
+            "neither input",
+        ),
+        // A column the side it names does not have.
+        (
+            eq(&db, col("users", "id"), col("teams", "captain")),
+            "the right side has",
+        ),
+        // One bad conjunct is enough: the split on `and` does not admit a
+        // conjunction by admitting half of it.
+        (
+            Expr::BinOp {
+                op: BinOp::And,
+                lhs: Box::new(on_key(&db, "users", "teams", "id")),
+                rhs: Box::new(Expr::LitBool(true)),
+                ty: bool_ty,
+            },
+            "boolean literal",
+        ),
     ];
 
     for (on, expected) in cases {
         let mut ops = two_sources();
         ops.push(Op::Join {
-            left: 0,
-            right: 1,
+            left: side(0, "users"),
+            right: side(1, "teams"),
             on,
             kind: JoinKind::Inner,
-            left_name: SmolStr::new_static("users"),
-            right_name: SmolStr::new_static("teams"),
         });
         let ctx = SessionContext::new();
         let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
             .await
-            .expect_err("only `on = a.k == b.k` is admitted")
+            .expect_err("only a conjunction of column equalities is admitted")
             .to_string();
         assert!(
             err.contains(expected),
@@ -448,34 +588,68 @@ async fn a_condition_that_is_not_an_equality_by_name_is_refused() {
     }
 }
 
-/// `a.join(a as b, on = a.k == b.k)` collides on every column but the key — a join
-/// identifies the key and nothing else, so any other shared name is an error
-/// rather than a shadowing — and it never reaches a plan. The checker is meant
-/// to catch it; the backend
-/// does not paper over it if it does not.
+/// `Node.join(Node as Other, on = Node.parent == Other.id)` — the self-join, in
+/// the two ways it used to be impossible at once: the two keys are named
+/// differently, and every column collides.
+///
+/// This asserted the collision refusal until 2026-08-19 ("`users` and `again` both
+/// carry [\"name\"]"), on the reasoning that a join identifies the key and
+/// nothing else so any other shared name is an error. `fossil-hir` deleted that
+/// rule on 2026-08-14 (ruling 17) on the promise that qualification would do
+/// the work; this is the backend keeping it. The alias is what re-qualifies the
+/// right side — without it both are `users` and neither `users.name` resolves.
 #[tokio::test]
-async fn a_self_join_collides_and_says_which_column() {
+async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
     let db = db();
     let ops = vec![
         source(&db, "users.csv", "users", &["id", "name"]),
-        source(&db, "users.csv", "again", &["id", "name"]),
+        source(&db, "users.csv", "users", &["id", "name"]),
         Op::Join {
-            left: 0,
-            right: 1,
-            on: on_key(&db, "users", "again", "id"),
+            left: side(0, "users"),
+            right: JoinSide {
+                input: 1,
+                relation: SmolStr::new_static("users"),
+                alias: Some(SmolStr::new_static("again")),
+            },
+            on: eq(&db, col("users", "id"), col("again", "id")),
             kind: JoinKind::Inner,
-            left_name: SmolStr::new_static("users"),
-            right_name: SmolStr::new_static("again"),
+        },
+        Op::Project {
+            input: 2,
+            cols: vec![
+                ProjectedColumn {
+                    source: SmolStr::new_static("users"),
+                    column: SmolStr::new_static("name"),
+                },
+                ProjectedColumn {
+                    source: SmolStr::new_static("again"),
+                    column: SmolStr::new_static("name"),
+                },
+            ],
         },
     ];
     let ctx = SessionContext::new();
-    let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+    let df = fossil_df::plan_relation(&ctx, &ops, 3, anchor())
         .await
-        .expect_err("a shared non-key column is not joinable")
-        .to_string();
-    assert!(
-        err.contains("name") && err.contains("users") && err.contains("again"),
-        "the error names the column and both sources: {err}"
+        .expect("a self-join plans")
+        .sort_by(vec![datafusion::prelude::col(
+            datafusion::common::Column::new(
+                Some(datafusion::common::TableReference::bare("users")),
+                "name",
+            ),
+        )])
+        .expect("a deterministic order");
+    let batch = one(df.collect().await.expect("the self-join runs"));
+
+    assert_eq!(
+        strings(&batch, 0),
+        ["Alice", "Bob", "Carol"],
+        "every row joins itself on `id`"
+    );
+    assert_eq!(
+        strings(&batch, 1),
+        ["Alice", "Bob", "Carol"],
+        "`again.name` is a SECOND column, selected under the alias"
     );
 }
 

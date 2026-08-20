@@ -585,20 +585,24 @@ fn lower_source_chain<'db>(
                 // belongs to and the scope only supplies the default.
                 let on = lower_property_value(db, on, &chain.relation, None);
                 // `Node.join(Node as Other, …)` — the self-join alias is the
-                // second name for the same source. It is the RIGHT side's
-                // relation name, which is exactly the ambiguity it exists to
-                // remove: without it both sides are called `Node` and
-                // `Other.label` has nothing to resolve against.
-                let right_name = alias
-                    .clone()
-                    .unwrap_or_else(|| right_chain.relation.clone());
+                // second name for the same source, and it travels as an alias
+                // rather than as the right side's name because the backend has
+                // to know the difference: an alias is a RE-qualification of that
+                // relation, and no alias means the relation keeps the
+                // qualification its own columns are already addressed by.
                 ops.push(Op::Join {
-                    left: chain.last,
-                    right: right_chain.last,
+                    left: crate::op::JoinSide {
+                        input: chain.last,
+                        relation: chain.relation.clone(),
+                        alias: None,
+                    },
+                    right: crate::op::JoinSide {
+                        input: right_chain.last,
+                        relation: right_chain.relation.clone(),
+                        alias: alias.clone(),
+                    },
                     on,
                     kind: crate::op::JoinKind::Inner,
-                    left_name: chain.relation.clone(),
-                    right_name,
                 });
                 // A join builds a relation neither side was; from here on the
                 // pipeline's own name is what qualifies its columns.
@@ -786,30 +790,6 @@ fn lower_iri_property<'db>(
     ))
 }
 
-/// Lower a property RHS [`HirExpr`] (one of the 4 leaf forms) to a typed
-/// [`Expr`]. `FieldRef` → `ColRef`; `StringLit` → `LitString`;
-/// `Template` → the concat-chain of literals + column refs.
-///
-/// `assert_line` is `Some(N)` when lowering an IRI-template subject context
-/// (the `iri = ...` property), `None` for object positions. When `Some`, each
-/// `${.field}` placeholder `ColRef` in a `Template` is wrapped in
-/// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` (SC#4 —
-/// the un-statically-dischargeable NULL-field check).
-///
-/// # CODEGEN-LOWERING-01 (Phase 8 carry-forward closed in Phase 9-01)
-///
-/// Field-ref [`Expr::ColRef`] values emit `source: SmolStr::default()` (empty)
-/// — NOT the source-binding name. [`fossil_codegen::render_expr`]
-/// (sql.rs:763-773) substitutes its `default_source` argument (the view name
-/// derived from `derive_view_name(uri)` — e.g. `hello` for
-/// `@examples/hello.csv`) for any empty source. Letting the codegen's
-/// view-name substitution be the single source of truth keeps binding names
-/// out of emitted SQL — they are a HIR concern, not a SQL concern. Before the
-/// fix, lowering emitted `source: source_binding` (the binding name `users`),
-/// which `render_expr` honoured verbatim, producing `users.id` even when the
-/// URI was `@examples/hello.csv` (view aliased as `hello`) — DuckDB-WASM
-/// rejected with `Binder Error: Referenced table "users" not found! Candidate
-/// tables: "hello"`.
 /// Replace every [`HirExpr::Edge`] with the target type's identity template,
 /// this row's values in its holes.
 ///
@@ -986,6 +966,41 @@ fn substitute_edges<'db>(
     }
 }
 
+/// Lower a property RHS [`HirExpr`] to a typed [`Expr`]. [`HirExpr::ColumnRef`]
+/// and [`HirExpr::FieldRef`] → [`Expr::ColRef`]; [`HirExpr::StringLit`] →
+/// [`Expr::LitString`]; [`HirExpr::Interpolation`] → the concat-chain of its
+/// literal runs and its holes.
+///
+/// `assert_line` is `Some(N)` when lowering the subject position (the
+/// `@subject` property), `None` for object positions. When `Some`, each per-row
+/// hole — `{User.id}` — is wrapped in
+/// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` (SC#4 —
+/// the un-statically-dischargeable NULL-field check).
+///
+/// # CODEGEN-LOWERING-01
+///
+/// **A qualified column reference keeps its binding.** `User.email` lowers to
+/// `ColRef { source: "User", column: "email" }`, and the backend qualifies the
+/// relation it reads under that same name — which is what makes
+/// `Node.label` and `Other.label` two columns after a self-join instead of one.
+///
+/// The rule used to be the opposite: emit `source: SmolStr::default()` and let
+/// the backend supply the relation from the source URI. It was written against
+/// a SQL backend that pasted the source verbatim, so `users.id` reached `DuckDB`
+/// for a view aliased `hello` and the binder refused it — and the fix was to
+/// stop emitting the binding rather than to stop pasting it. `fossil-df` does
+/// not paste: it resolves a `ColRef` against a `DFSchema`, so the binding is a
+/// name to RESOLVE, not text to emit, and the crash the old rule prevented
+/// cannot happen. What the old rule cost instead was the only thing that says
+/// which side of a join a column came from — `join_key` could not tell, and
+/// refused every join whose two keys were spelled differently.
+///
+/// This is the same discard `HirSourceOp::Select` had (`85bb488`), at the other
+/// site: a `ColumnRef { binding, column }` destructured to check and rebuilt
+/// with the binding dropped.
+///
+/// [`HirExpr::FieldRef`] — the retired bare `.column` — has no binding to carry
+/// and still emits an empty source, which the backend resolves unqualified.
 fn lower_property_value<'db>(
     db: &'db dyn fossil_base::Db,
     value: &HirExpr,
@@ -993,9 +1008,12 @@ fn lower_property_value<'db>(
     assert_line: Option<u32>,
 ) -> Expr<'db> {
     match value {
-        HirExpr::ColumnRef { column: field, .. } | HirExpr::FieldRef(field) => Expr::ColRef {
-            // CODEGEN-LOWERING-01: empty source — codegen's `default_source`
-            // (the view name from `derive_view_name(uri)`) substitutes.
+        // CODEGEN-LOWERING-01.
+        HirExpr::ColumnRef { binding, column } => Expr::ColRef {
+            source: binding.clone(),
+            column: column.clone(),
+        },
+        HirExpr::FieldRef(field) => Expr::ColRef {
             source: SmolStr::default(),
             column: field.clone(),
         },
@@ -1200,6 +1218,11 @@ fn fold_concat_left<'db>(parts: Vec<Expr<'db>>) -> Expr<'db> {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    // Every `@subject` below is an interpolated string, and `{Rows.id}` is
+    // fossil's hole, not a Rust format argument. The lint reads the Rust
+    // literal and cannot know that.
+    #![allow(clippy::literal_string_with_formatting_args)]
+
     use super::*;
     use fossil_hir::def_map::def_map;
     use std::sync::Arc;
@@ -1229,17 +1252,14 @@ mod tests {
     /// predicate excluded is in the corpus. So the assertion is on the wiring,
     /// not on the op list.
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
     fn a_mapping_over_a_pipeline_reads_the_last_op_of_the_chain() {
         let src = "\
-prefix ex: <https://example.org/>
+Users := io.csv(\"u.csv\")
+Adults := Users.where(Users.edad >= 18)
 
-users := io.csv(\"u.csv\")
-adultos := users |> where(.edad >= 18)
-
-User : ex:Person from adultos
-    @subject = `${ex:}user/${.id}`
-    name = .name
+People : Person from Adults
+    @subject = \"https://example.org/user/{Users.id}\"
+    name = Users.name
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -1251,7 +1271,7 @@ User : ex:Person from adultos
 
         assert!(
             matches!(&ops[0], Op::Source { binding, uri, .. }
-                if binding.as_str() == "users" && uri.as_str() == "u.csv"),
+                if binding.as_str() == "Users" && uri.as_str() == "u.csv"),
             "index 0 is the base source, got {:?}",
             ops[0]
         );
@@ -1259,13 +1279,15 @@ User : ex:Person from adultos
             panic!("index 1 is the `where`, got {:?}", ops[1]);
         };
         assert_eq!(*input, 0, "the filter reads the source");
-        // `.edad` reaches MIR as an UNQUALIFIED `ColRef` — CODEGEN-LOWERING-01,
-        // the convention every property in the tree already follows, and which
-        // the backend resolves against the relation the op reads.
+        // `Users.edad` reaches MIR QUALIFIED — CODEGEN-LOWERING-01. The
+        // qualification the surface requires is not spent by the lowering: the
+        // backend qualifies the relation it reads under the same binding, and
+        // after a join it is the only thing that says which side a column is.
         assert!(
             matches!(pred, Expr::BinOp { op: fossil_hir::BinOp::Ge, lhs, .. }
-                if matches!(&**lhs, Expr::ColRef { column, .. } if column.as_str() == "edad")),
-            "the predicate reads `.edad`, got {pred:?}"
+                if matches!(&**lhs, Expr::ColRef { source, column }
+                    if source.as_str() == "Users" && column.as_str() == "edad")),
+            "the predicate reads `Users.edad` under its binding, got {pred:?}"
         );
         assert!(
             matches!(&ops[2], Op::EmitVertex { input, .. } if *input == 1),
@@ -1279,22 +1301,24 @@ User : ex:Person from adultos
     /// boolean, so the class of plan stays an equi-join and the checker keeps
     /// the property that the condition names keys.
     ///
-    /// The fixture below still writes the retired `on = .k` sugar. The
-    /// surviving spelling qualifies both sides — `on = pedidos.persona_id ==
-    /// personas.id` — and there is no short form for keys that share a name.
+    /// The fixture wrote the retired `on = .k` sugar, where the MIR lowering
+    /// SYNTHESISED the equality and put a relation name on each side. The
+    /// author writes the equality now — `on = Orders.persona_id ==
+    /// People.persona_id`, both sides qualified — so there is nothing left to
+    /// synthesise and the condition lowers like any other expression, KEEPING
+    /// the qualification (CODEGEN-LOWERING-01). It used to spend it, and that
+    /// discard is what made `fossil_df::plan` refuse every join whose two keys
+    /// were spelled differently.
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
     fn a_join_lowers_to_an_inner_equi_join_on_one_name() {
         let src = "\
-prefix ex: <https://example.org/>
+Orders := io.csv(\"o.csv\")
+People := io.csv(\"p.csv\")
+Sales := Orders.join(People, on = Orders.persona_id == People.persona_id)
 
-pedidos := io.csv(\"o.csv\")
-personas := io.csv(\"p.csv\")
-ventas := pedidos |> join(personas, on = .persona_id)
-
-Venta : ex:Person from ventas
-    @subject = `${ex:}venta/${.id}`
-    name = .nombre
+Venta : Person from Sales
+    @subject = \"https://example.org/venta/{Orders.id}\"
+    name = People.nombre
 ";
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
@@ -1304,23 +1328,24 @@ Venta : ex:Person from ventas
         let mir = lower_to_mir_pg(&db, mapping);
         let ops = mir.ops(&db);
 
-        assert!(matches!(&ops[0], Op::Source { binding, .. } if binding.as_str() == "pedidos"));
-        assert!(matches!(&ops[1], Op::Source { binding, .. } if binding.as_str() == "personas"));
+        assert!(matches!(&ops[0], Op::Source { binding, .. } if binding.as_str() == "Orders"));
+        assert!(matches!(&ops[1], Op::Source { binding, .. } if binding.as_str() == "People"));
         let Op::Join {
             left,
             right,
             on,
             kind,
-            left_name,
-            right_name,
         } = &ops[2]
         else {
             panic!("index 2 is the join, got {:?}", ops[2]);
         };
-        assert_eq!((*left, *right), (0, 1));
+        assert_eq!((left.input, right.input), (0, 1));
         assert_eq!(*kind, crate::op::JoinKind::Inner);
-        assert_eq!(left_name.as_str(), "pedidos");
-        assert_eq!(right_name.as_str(), "personas");
+        // Each side's index travels WITH the name its columns are addressed by,
+        // and neither side was written `as` anything.
+        assert_eq!(left.name().as_str(), "Orders");
+        assert_eq!(right.name().as_str(), "People");
+        assert_eq!((&left.alias, &right.alias), (&None, &None));
         let Expr::BinOp {
             op: fossil_hir::BinOp::Eq,
             lhs,
@@ -1332,28 +1357,77 @@ Venta : ex:Person from ventas
         };
         assert!(
             matches!(&**lhs, Expr::ColRef { source, column }
-                if source.as_str() == "pedidos" && column.as_str() == "persona_id"),
+                if source.as_str() == "Orders" && column.as_str() == "persona_id"),
             "got {lhs:?}"
         );
         assert!(
             matches!(&**rhs, Expr::ColRef { source, column }
-                if source.as_str() == "personas" && column.as_str() == "persona_id"),
-            "the key is the SAME name on both sides, got {rhs:?}"
+                if source.as_str() == "People" && column.as_str() == "persona_id"),
+            "the two sides are told apart by their bindings, not by their column \
+             names — which here happen to agree, got {rhs:?}"
         );
         assert!(matches!(&ops[3], Op::EmitVertex { input, .. } if *input == 2));
     }
 
+    /// `Node.join(Node as Other, …)` — the alias reaches the MIR as an alias,
+    /// not folded into the right side's name. The backend needs the difference:
+    /// an alias means "re-qualify this relation", and its absence means "leave
+    /// the qualification it already has alone".
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
+    fn a_self_join_carries_its_alias_to_the_right_side() {
+        let src = "\
+Node := io.csv(\"n.csv\")
+Pairs := Node.join(Node as Other, on = Node.parent == Other.id)
+
+Cat : Person from Pairs
+    @subject = \"https://example.org/cat/{Node.id}\"
+    name = Other.label
+";
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db = fossil_base::FossilDb::new(system);
+        let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
+        let dm = def_map(&db, file);
+        let mapping = *dm.mappings(&db).first().expect("one mapping");
+        let mir = lower_to_mir_pg(&db, mapping);
+        let ops = mir.ops(&db);
+
+        let Op::Join {
+            left, right, on, ..
+        } = ops
+            .iter()
+            .find(|o| matches!(o, Op::Join { .. }))
+            .expect("a join")
+        else {
+            unreachable!()
+        };
+        assert_eq!(left.name().as_str(), "Node");
+        assert_eq!(left.alias, None);
+        assert_eq!(right.relation.as_str(), "Node", "both sides read `Node`");
+        assert_eq!(
+            right.alias.as_deref(),
+            Some("Other"),
+            "the alias is what tells them apart"
+        );
+        // Two DIFFERENT column names — the shape `join_key` refused for as long
+        // as the binding was discarded.
+        assert!(
+            matches!(on, Expr::BinOp { lhs, rhs, .. }
+                if matches!(&**lhs, Expr::ColRef { source, column }
+                        if source.as_str() == "Node" && column.as_str() == "parent")
+                    && matches!(&**rhs, Expr::ColRef { source, column }
+                        if source.as_str() == "Other" && column.as_str() == "id")),
+            "got {on:?}"
+        );
+    }
+
+    #[test]
     fn lower_to_mir_resolves_json_source() {
         let src = "\
-prefix ex: <https://example.org/>
+Rows := io.json(\"a.json\")
 
-rows := io.json(\"a.json\")
-
-User : ex:Person from rows
-    @subject = `${ex:}user/${.id}`
-    name = .name
+People : Person from Rows
+    @subject = \"https://example.org/user/{Rows.id}\"
+    name = Rows.name
 ";
         let (uri, format) = lower_source_for(src);
         assert_eq!(uri.as_str(), "a.json");
@@ -1361,16 +1435,13 @@ User : ex:Person from rows
     }
 
     #[test]
-    #[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
     fn lower_to_mir_resolves_parquet_source() {
         let src = "\
-prefix ex: <https://example.org/>
+Rows := io.parquet(\"a.parquet\")
 
-rows := io.parquet(\"a.parquet\")
-
-User : ex:Person from rows
-    @subject = `${ex:}user/${.id}`
-    name = .name
+People : Person from Rows
+    @subject = \"https://example.org/user/{Rows.id}\"
+    name = Rows.name
 ";
         let (uri, format) = lower_source_for(src);
         assert_eq!(uri.as_str(), "a.parquet");
