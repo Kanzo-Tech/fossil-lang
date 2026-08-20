@@ -435,19 +435,18 @@ pub(crate) fn decoded_document(
     let table = db.system().providers();
     let ctor = constructor.ok_or(DocumentError::Unnamed)?;
     let row = provider(table, ctor).ok_or_else(|| {
-        DocumentError::Mismatch(SmolStr::from(format!(
-            "`{ctor}` is not a provider — this host installs {}",
-            installed(table)
+        DocumentError::Mismatch(SmolStr::from(crate::refusals::unknown_constructor(
+            ctor, table,
         )))
     })?;
     if !row.provides(Capability::ReadTypes) {
         return Err(DocumentError::Mismatch(SmolStr::from(
-            row.decline_capability(Capability::ReadTypes, table),
+            crate::refusals::decline_capability(row, Capability::ReadTypes, table),
         )));
     }
     if !row.accepts(path) {
         return Err(DocumentError::Mismatch(SmolStr::from(
-            row.decline_extension(path),
+            crate::refusals::decline_extension(row, path),
         )));
     }
 
@@ -460,15 +459,6 @@ pub(crate) fn decoded_document(
     let shapes =
         fossil_base::shape_document(db, doc, row.name).ok_or(DocumentError::Undecodable)?;
     malformed_cause(&shapes).map_or(Ok(shapes), |cause| Err(DocumentError::Unparseable(cause)))
-}
-
-/// The installed constructors, for a message that names an unknown one.
-fn installed(table: &[&'static fossil_base::Provider]) -> String {
-    table
-        .iter()
-        .map(|p| format!("`{}`", p.constructor()))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// The message of the document's top-level failure, if it has one.

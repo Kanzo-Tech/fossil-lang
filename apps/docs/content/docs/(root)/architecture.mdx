@@ -93,9 +93,24 @@ And two of `base-db`'s own invariants point straight at us: *"base-db knows noth
 operating-system implementation is **a third**.
 
 `fossil-base` today holds the salsa `Db` trait, the filesystem abstraction, the diagnostics, a `Files`
-struct that is empty, and the memory probe. And it knows a concrete type from a concrete provider:
-`crates/fossil-base/src/system.rs:21` imports `InferredDescriptor`, so the crate that exists in order
-to know nothing knows something.
+struct that is empty, and the provider catalogue. And it knows a concrete type from a concrete
+provider: `crates/fossil-base/src/system.rs` imports `InferredDescriptor` for `System::descriptors`,
+so the crate that exists in order to know nothing knows something.
+
+Two things it held and does not any more, both measured against the same rule:
+
+- **The memory probe.** `FOSSIL_MEM_PROBE` shells out to `ps` and reads `Instant::now()` — I/O
+  outside the very abstraction this crate exists to own, and it went around `System` to do it. It is
+  `fossil-mem-probe` now, a leaf with no dependencies. That one `use` was **`fossil-runtime`'s only
+  edge to `fossil-base`**, so a native execution runtime no longer links the compiler substrate in
+  order to time a phase: `cargo tree -p fossil-runtime -e normal` reaches `fossil-base` on no path.
+- **The wording of a provider's refusal.** `Provider::decline_capability` and `decline_extension`
+  composed English Fossil compiler errors, asserted verbatim by `providers.rs`'s own tests, under a
+  module doc that opened *«nothing here decides anything about a program»*. They are
+  `fossil_hir::refusals`, beside the checker that raises them, and the catalogue keeps the
+  predicates — `provides` and `accepts` — that the sentences were built from. The comment that
+  used to make the claim is now `crates/fossil-base/tests/substrate_has_no_prose.rs`, which reads
+  `providers.rs` and fails on a string literal with a space in it.
 
 > **If a crate called `base` contains the substrate *and* the file abstraction, it is two crates that
 > have not been separated yet.**
@@ -106,6 +121,37 @@ opposite pattern for no recorded reason. That example is gone — `b675fe5` dele
 outright, because nothing read what it carried. The asymmetry was resolved by subtraction rather than
 by the input side adopting it, so the tree no longer holds a worked example of the direction that
 would let `base` know nothing.
+
+### The remaining edge stays, and this is what would move it
+
+`fossil-base → fossil-descriptors-input` exists for **one trait method**, `System::descriptors`, and
+it is the edge that closes a cycle:
+
+```text
+descriptors-input → shex        descriptors-output → shex, base        base → descriptors-input
+```
+
+So `fossil-shex` cannot be folded into `fossil-descriptors-output` while it stands. Three ways out
+were costed, and none of them is worth paying for today:
+
+1. **A generic or associated type on `System`.** Impossible, not merely expensive: the trait is used
+   as `Arc<dyn System>` in `FossilDb` and as `&dyn System` on `Db::system`. Either shape is
+   object-safety's own counterexample.
+2. **The types down into `fossil-graph-schema`,** the leaf both sides already see. It costs no new
+   crate — and it puts a `Mutex<HashMap>` of host-owned mutable state inside the crate whose module
+   doc spends a section on why it depends on nothing but `serde`. That is the mistake this page is
+   about, committed in a second place.
+3. **A new leaf holding `DescriptorCache` + `InferredDescriptor`.** It works, and it is the only one
+   that does. It also costs a 26th crate, changes an import path in nine crates, and — the reason it
+   is not done — **removes nothing from `fossil-base`.** The accessor, the `NativeSystem` field and
+   the three tests about a descriptor cache all stay exactly where they are. `fossil-base` would
+   still import a concrete input-descriptor type; only the crate it came from would be spelled
+   differently. Zero lines leave, and the complaint two paragraphs up is unchanged.
+
+**What reverses this:** somebody actually folding `fossil-shex` into `fossil-descriptors-output`.
+That fold removes a crate, so (3) nets zero on the count and the cycle goes with it — the cost
+becomes free at the moment there is a reason to pay it. Until then the edge is one line in a
+manifest, and cutting it buys a property nothing is waiting on.
 
 ## `lsp-types` in exactly one `Cargo.toml`
 

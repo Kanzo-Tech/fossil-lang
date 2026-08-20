@@ -656,28 +656,19 @@ fn handle_notification(
     Ok(())
 }
 
-/// Run `parse → def_map → typecheck_mapping` and drain the Salsa `Diagnostic`
-/// accumulator across every mapping (the same pattern as the `fossil check`
-/// CLI). Returns the structured `fossil_base::Diagnostic`s.
+/// Every diagnostic `file` produces, from the one implementation of that
+/// question — [`fossil_mir::program_diagnostics`], which `fossil-engine` and
+/// `fossil-wasm` also call.
+///
+/// **This used to be a per-mapping loop of its own**, byte-identical to
+/// `fossil-wasm`'s and three drains short of `fossil check`'s. What the editor
+/// did not show, for as long as that was true: a file the parser recovered no
+/// mapping from published NO diagnostics at all (the parse errors were present
+/// and unreachable), a top-level binding's provider errors vanished, two
+/// mappings minting two identities for one type was never checked, and one
+/// top-level mistake was published once per mapping.
 fn diagnostics_for(db: &LspDb, file: SourceFile) -> Vec<Diagnostic> {
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mappings = def_map.mappings(db);
-    let mut out = Vec::new();
-    for mapping in mappings {
-        // Drain from the LOWERING, not the typechecker: Salsa accumulators are
-        // transitive and lowering calls the typechecker, so this yields both
-        // sets without duplicating either. Draining only the typechecker would
-        // show the editor a clean file that `run` then refuses.
-        let _ = fossil_mir::lower_to_mir_pg(db, *mapping);
-        let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(db, *mapping);
-        // Spans are mapping-relative; the editor renders against the file.
-        out.extend(fossil_hir::spans::rebase_to_file(
-            db,
-            *mapping,
-            diags.into_iter().cloned(),
-        ));
-    }
-    out
+    fossil_mir::program_diagnostics(db, file)
 }
 
 /// Publish `textDocument/publishDiagnostics` for `file`: drain the accumulator

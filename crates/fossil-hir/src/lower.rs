@@ -617,10 +617,10 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
 /// The row declares its capabilities; where the binding is written decides which
 /// one is asked for. `User := io.csv(…)` asks for rows; `type { P } := io.shex(…)`
 /// asks for types. Asking a row for a capability it does not declare is an error
-/// that **names both**, and it is worded by the ROW
-/// ([`fossil_base::Provider::decline_capability`]) rather than here: what a
-/// language does and does not carry is the row's to explain, and the core only
-/// carries the sentence.
+/// that **names both**, and it is worded in
+/// [`crate::refusals::decline_capability`] — one sentence, shared with
+/// [`crate::shapes::decoded_document`] and with `fossil-engine`'s run path,
+/// which had each written their own until the three had drifted apart.
 ///
 /// This is reported here and not in [`crate::shapes::resolve_target_shape`] for
 /// two reasons. The span: `node.text_range()` covers the binding the author
@@ -663,27 +663,24 @@ fn check_provider(
             diagnose_item(
                 db,
                 node,
-                format!(
-                    "`{constructor}` is not a provider this host installs — it has {}",
-                    table
-                        .iter()
-                        .map(|p| format!("`{}`", p.constructor()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
+                crate::refusals::unknown_constructor(&constructor, table),
             );
         }
         return;
     };
     if !row.provides(wanted) {
-        diagnose_item(db, node, row.decline_capability(wanted, table));
+        diagnose_item(
+            db,
+            node,
+            crate::refusals::decline_capability(row, wanted, table),
+        );
         return;
     }
     if wanted == fossil_base::Capability::ReadTypes
         && let Some(uri) = uri
         && !row.accepts(&uri)
     {
-        diagnose_item(db, node, row.decline_extension(&uri));
+        diagnose_item(db, node, crate::refusals::decline_extension(row, &uri));
     }
 }
 
@@ -756,14 +753,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
         emit_item(
             db,
             arg.span,
-            format!(
-                "`{constructor}` is not a provider this host installs — it has {}",
-                table
-                    .iter()
-                    .map(|p| format!("`{}`", p.constructor()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            crate::refusals::unknown_constructor(&constructor, table),
         );
         return;
     };
@@ -771,14 +761,18 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
         emit_item(
             db,
             arg.span,
-            row.decline_capability(fossil_base::Capability::ReadTypes, table),
+            crate::refusals::decline_capability(row, fossil_base::Capability::ReadTypes, table),
         );
         return;
     }
     if let Some(document) = arg.document
         && !row.accepts(&document)
     {
-        emit_item(db, arg.span, row.decline_extension(&document));
+        emit_item(
+            db,
+            arg.span,
+            crate::refusals::decline_extension(row, &document),
+        );
     }
 }
 

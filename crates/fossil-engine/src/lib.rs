@@ -1,11 +1,42 @@
-//! `fossil-engine` — the native orchestration surface behind the `fossil`
-//! binaries. It owns the compile→run pipeline (parse → `def_map` → typecheck →
-//! `lower_to_mir` → `decompose_for_writer` → materialise `GraphAr`) plus `check` /
-//! `refs` / `providers`, returning STRUCTURED data. The binary
-//! (`fossil-cli`) is a thin shell: it parses args, reads files/stdin, calls these
-//! functions, and renders the result (rustc-style miette for `check`, JSON/human
-//! for the rest). Mirrors the rust-analyzer `ide`-façade / biome `service`
-//! pattern — the orchestration is a named, testable crate, not a binary monolith.
+//! **`fossil-engine` is fossil's native host.** It supplies the [`System`] the
+//! compiler runs against, does the pre-compile jobs the compiler cannot do for
+//! itself — introspect the sources, register the shape documents a program
+//! names, install the cloud secrets a `@conn` needs — and drives the
+//! compile→run pipeline, returning structured data the binaries render.
+//!
+//! `fossil-wasm` is the same shape for the browser and is worth reading beside
+//! this: a `System` over an in-memory file map, `registerInferredDescriptor`
+//! where this crate has `pre_introspect_and_register`, and the same one-line
+//! projections of `fossil_lineage::{providers, source_refs}`. Where the two
+//! differ is the outside world — a disk, a `DuckDB`, a credential — which is
+//! `/docs/design/three-hosts`' cut, and it is the whole of the difference.
+//!
+//! # What is not a host job, and is still here
+//!
+//! [`census`] is a compiler query behind a native tripwire, reachable only from
+//! `tests/programs.rs`. It reads the CST against the `HirBody` it produced and
+//! belongs in `fossil-hir` or beside the harness; it is here because it started
+//! here. `crates/fossil-engine/src/census.rs` says which, and why the module
+//! doc's own premise is now stale.
+//!
+//! [`run`]'s layout post-pass re-derives `fossil-df`'s on-disk path convention
+//! (`vertex/<T>.parquet`, `vertex/<T>/`, `edge/<s>_<l>_<d>/by_{source,target}`)
+//! in order to find files `fossil-df` wrote, delete them, and repoint the
+//! [`RunStatus`] that names them. That is behavioural coupling with no
+//! compiler-visible signature, and it has already shipped one defect — see
+//! [`enrich_written_layout`].
+//!
+//! # What left, and why
+//!
+//! The `Diagnostic` drain — «what is wrong with this program» — is not here any
+//! more. It was one capability answered three ways (this crate, `fossil-lsp`,
+//! `fossil-wasm`) and the two editor answers were the short one, missing three
+//! classes of diagnostic outright. It is [`fossil_mir::program_diagnostics`],
+//! which all three hosts now call.
+
+#![allow(rustdoc::private_intra_doc_links)] // `enrich_written_layout` is named
+// above because it is where the coupling lives, and a reader who follows the
+// pointer should land on the code rather than on a paraphrase of it.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
@@ -16,7 +47,7 @@ compile_error!(
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use fossil_base::{Db, Diagnostic, Severity, SourceAnchor, Span, System};
+use fossil_base::{Db, Diagnostic, SourceAnchor, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::Primitive;
@@ -79,19 +110,19 @@ pub struct CheckOutcome {
     pub mappings: usize,
 }
 
-/// Parse + type-check + lower `path`, draining the Salsa `Diagnostic`
-/// accumulator across every mapping. Same pre-introspection as [`run`] so
-/// `check` sees the same forward-propagated types the compiler will (no `@conn`
-/// creds on `check`).
+/// The host half of `check`: read the file, stand up the native database, do
+/// the host's pre-compile jobs, and ask
+/// [`fossil_mir::program_diagnostics`] what is wrong with the program.
 ///
-/// Drains from `lower_to_mir_pg` rather than `typecheck_mapping`: Salsa
-/// accumulators are transitive, and lowering calls the typechecker, so this
-/// yields the typecheck diagnostics PLUS the lowering ones without duplicating
-/// either. Draining only the typechecker used to make `check` report `ok` for a
-/// program `run` then refused — e.g. a mapping reading `from` a derived binding,
-/// whose source cannot be resolved. `check` must not pass what `run` rejects.
+/// The pre-introspection is the same one [`run`] does, so `check` sees the same
+/// forward-propagated types the compiler will (no `@conn` creds on `check`).
 ///
-/// A file with NO mappings is drained at the file level instead — see the body.
+/// **The drain itself is not here, and used to be.** It is one capability
+/// answered three ways — this crate, `fossil-lsp` and `fossil-wasm` — and the
+/// two editor copies were the short version, missing the three classes of
+/// diagnostic named in `fossil_mir::diagnostics`. What is left in this function
+/// is the part only a native host can do.
+///
 /// Zero mappings and zero diagnostics is reported as success, not as an error:
 /// `check` answers "is this text a well-formed program", and a program that
 /// declares nothing is vacuously well-formed. `run` refuses it (`no mapping
@@ -117,106 +148,12 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
     let anchor = SourceAnchor::beside(&program_dir);
     pre_introspect_and_register(db.system(), &text, anchor, &HashMap::new());
 
-    let def_map = fossil_hir::def_map::def_map(&db, file);
-    let mappings = def_map.mappings(&db);
-
-    // ── The FILE-level queries, drained once and unconditionally ──────────
-    //
-    // A file that yields no mapping — empty, or broken badly enough that the
-    // parser recovered nothing — used to report `ok`, because the per-mapping
-    // loop was the ONLY thing that read an accumulator and it never ran. The
-    // parse errors were not missing; they were unreachable, because salsa
-    // collects an accumulator over a query's whole dependency subtree and
-    // `parse` is only in the subtree of a mapping.
-    //
-    // These two drains were guarded on `mappings.is_empty()`, which is where
-    // the second half of the bug lived: `lower_to_hir` is where a top-level
-    // BINDING is checked (`check_provider`, `check_schema_arg`), and it is not
-    // in `def_map`'s subtree — so a file with no mapping lost every provider
-    // diagnostic it produced, silently, which is the failure this whole change
-    // is against. Both are file-keyed, so draining them always is correct and
-    // the duplicates it creates are removed below.
-    //
-    // Their spans are file-absolute — the parser and `lower_to_hir` both
-    // measure against the file — which is why nothing is rebased here.
-    let mut diagnostics: Vec<Diagnostic> =
-        fossil_hir::def_map::def_map::accumulated::<Diagnostic>(&db, file)
-            .into_iter()
-            .cloned()
-            .collect();
-    diagnostics.extend(
-        fossil_hir::lower::lower_to_hir::accumulated::<Diagnostic>(&db, file)
-            .into_iter()
-            .cloned(),
-    );
-    // One identity per type: every mapping that produces `T` declares the same
-    // `@subject`, and two that disagree are an ERROR — never a warning —
-    // naming both mappings and both templates, because a warning about
-    // identity gets ignored and the result is two entities where there was one.
-    //
-    // It is a third file-level drain and not a fourth per-mapping one because
-    // uniqueness is a fact about the FILE:
-    // `body::check_identity` is keyed by `MappingLoc` and by construction cannot
-    // see a second mapping. Its own spans are file-absolute — it rebased both of
-    // them itself, being the only party that holds two mappings at once.
-    //
-    // FILTERED to the file-absolute ones, and that is not a nicety. Unlike the
-    // two drains above, this query sits BELOW `body`: salsa accumulates over the
-    // whole dependency subtree, so draining it unfiltered also yields every
-    // mapping-relative diagnostic every body produced — raw, while the loop
-    // below yields the same ones REBASED. Two spans, so `dedup_file_level`
-    // cannot see them as one, and the raw copy points at whatever sits at that
-    // offset from the start of the file. A mapping-relative diagnostic has an
-    // owner and this drain is not it.
-    let _ = fossil_hir::identity::check_identities(&db, file);
-    diagnostics.extend(
-        fossil_hir::identity::check_identities::accumulated::<Diagnostic>(&db, file)
-            .into_iter()
-            .filter(|d| d.frame == fossil_base::SpanFrame::FileAbsolute)
-            .cloned(),
-    );
-
-    for mapping in mappings {
-        let _ = fossil_mir::lower_to_mir_pg(&db, *mapping);
-        let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(&db, *mapping);
-        // Spans come out mapping-relative; the caller renders against the file.
-        diagnostics.extend(fossil_hir::spans::rebase_to_file(
-            &db,
-            *mapping,
-            diags.into_iter().cloned(),
-        ));
-    }
-    dedup_file_level(&mut diagnostics);
+    let mappings = fossil_hir::def_map::def_map(&db, file).mappings(&db).len();
     Ok(CheckOutcome {
         source: text,
-        diagnostics,
-        mappings: mappings.len(),
+        diagnostics: fossil_mir::program_diagnostics(&db, file),
+        mappings,
     })
-}
-
-/// Drop repeats, keeping the first of each.
-///
-/// **Salsa accumulates over a query's whole dependency subtree**, and every
-/// mapping's subtree contains the two FILE-keyed queries above. So a diagnostic
-/// about a top-level binding — `type { P } := io.csv("users.csv")` — comes out
-/// once per mapping, and a program with ten mappings reported one mistake ten
-/// times. It is not a per-mapping fact and there is no mapping to attribute it
-/// to.
-///
-/// The key is `(severity, message, span)`, and each part is load-bearing. Two
-/// diagnostics with one message at two spans are two mistakes and both survive
-/// — which is why this is not a `message`-only dedup. Two with one message at
-/// ONE span are one statement about one range of bytes, and printing it twice
-/// is noise by construction, whichever query emitted it.
-///
-/// It runs over the whole list rather than only the file-level drains because
-/// the per-mapping path is where the duplicates actually arrive: they are the
-/// file-level ones, carried along by `lower_to_mir_pg::accumulated`, and there
-/// is nothing at that point marking which is which.
-fn dedup_file_level(diagnostics: &mut Vec<Diagnostic>) {
-    let mut seen: std::collections::HashSet<(Severity, String, Span)> =
-        std::collections::HashSet::new();
-    diagnostics.retain(|d| seen.insert((d.severity, d.message.clone(), d.span)));
 }
 
 // =============================================================== pre-introspection
@@ -531,16 +468,20 @@ fn read_output_shape(
              `io.shex(\"…\")` or `io.shacl(\"…\")`"
         )
     })?;
-    let row = provider(table, ctor)
-        .ok_or_else(|| miette::miette!("`{ctor}` is not a provider this host installs"))?;
+    let row = provider(table, ctor).ok_or_else(|| {
+        miette::miette!("{}", fossil_hir::refusals::unknown_constructor(ctor, table))
+    })?;
     if !row.provides(Capability::ReadTypes) {
         return Err(miette::miette!(
             "{}",
-            row.decline_capability(Capability::ReadTypes, table)
+            fossil_hir::refusals::decline_capability(row, Capability::ReadTypes, table)
         ));
     }
     if !row.accepts(document) {
-        return Err(miette::miette!("{}", row.decline_extension(document)));
+        return Err(miette::miette!(
+            "{}",
+            fossil_hir::refusals::decline_extension(row, document)
+        ));
     }
     let decode = row
         .reads_types
@@ -759,8 +700,13 @@ fn enrich_written_layout(
     // Every adjacency file, both orientations, cross-type included — the layout
     // renumbers `dense_id`, and a file left out keeps ids that now belong to
     // somebody else. Enumerated here rather than derived there because this is
-    // the side that has the schema: a missed file is a silent corruption, so
-    // naming the set is the caller's job and not a guess.
+    // the side that has the schema.
+    //
+    // A missed file is a silent corruption, and what catches one is not this
+    // comment: `tests/conformance.rs` assertion 4 reads every endpoint of every
+    // adjacency file back with plain SQL and fails on a dense id no vertex
+    // carries. A file this loop skipped keeps ids from before the renumbering
+    // and dangles there.
     let adjacencies: Vec<fossil_runtime::layout::AdjacencyTarget> = graph
         .edges
         .iter()

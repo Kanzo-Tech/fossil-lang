@@ -3,12 +3,13 @@
 //! Measures the full per-keystroke analysis round-trip the LSP runs on every
 //! `didChange` over the canonical 200-line fixture:
 //!
-//!   `set_text` (Salsa Setter, revision bump) → `def_map` → `typecheck_mapping`
-//!   over every mapping → drain the `Diagnostic` accumulator
+//!   `set_text` (Salsa Setter, revision bump) → [`fossil_mir::program_diagnostics`]
 //!
-//! This is the SAME work `fossil-lsp`'s `didChange` handler performs (minus the
-//! JSON-RPC framing, which is negligible). It runs as a plain `#[test]` in
-//! `cargo test`, so it is the CI hard gate.
+//! That is the SAME work `fossil-lsp`'s `didChange` handler performs, and now it
+//! is the same *call* — the handler's body is one line and this is that line.
+//! The claim used to be made about a hand-rolled loop that did strictly less;
+//! see [`round_trip`]. Minus the JSON-RPC framing, which is negligible. It runs
+//! as a plain `#[test]` in `cargo test`, so it is the CI hard gate.
 //!
 //! # Why a MARGINED budget, not a naked `< 100ms`
 //!
@@ -45,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use fossil_base::{Diagnostic, FossilDb, FsError, Provider, SourceFile, System};
+use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use salsa::Setter as _;
 
 /// The margined hard-gate budget. The design goal is < 100ms on dev hardware;
@@ -97,20 +98,27 @@ impl System for EditorSystem {
 }
 
 /// One `didChange` round-trip: bump the revision via `set_text` (the real
-/// cancellation trigger), then re-run the analysis pipeline + drain the
-/// accumulator across every mapping. Returns the diagnostic count (kept so the
-/// optimiser cannot elide the work).
+/// cancellation trigger), then run exactly what the handler runs. Returns the
+/// diagnostic count (kept so the optimiser cannot elide the work).
+///
+/// # This measured a cheaper program than the handler ran, and the docblock
+/// said otherwise
+///
+/// It was a hand-rolled loop over `typecheck_mapping`, and the header above
+/// called it «the SAME work `fossil-lsp`'s `didChange` handler performs». It
+/// was not, in two directions at once. The handler drains **`lower_to_mir_pg`**
+/// — deliberately, because draining the typechecker alone shows the editor a
+/// clean file that `run` refuses — so every lowering the keystroke pays for was
+/// outside the clock. And the handler runs three FILE-level drains the loop had
+/// no equivalent of.
+///
+/// A budget is only a gate on the thing it executes. Calling
+/// [`fossil_mir::program_diagnostics`] is what makes the number a statement
+/// about `didChange` rather than about a loop that resembles it; there is now
+/// one function, so the two cannot drift again.
 fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
     file.set_text(db).to(new_text);
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mappings = def_map.mappings(db).clone();
-    let mut count = 0;
-    for mapping in &mappings {
-        let _ = fossil_hir::check::typecheck_mapping(db, *mapping);
-        let diags = fossil_hir::check::typecheck_mapping::accumulated::<Diagnostic>(db, *mapping);
-        count += diags.len();
-    }
-    count
+    fossil_mir::program_diagnostics(db, file).len()
 }
 
 #[test]

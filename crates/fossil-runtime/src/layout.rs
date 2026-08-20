@@ -184,7 +184,7 @@ use std::fmt::Write as _;
 
 use duckdb::Connection;
 use duckdb::arrow::array::{Array, UInt32Array};
-use fossil_base::probe::Probe;
+use fossil_mem_probe::Probe;
 
 /// One vertex type's layout target: its vertex Parquet URL plus the CSR Parquet
 /// URLs of its **self-edges** (`src_type == dst_type == this type`), whose

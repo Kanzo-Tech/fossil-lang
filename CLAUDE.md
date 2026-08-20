@@ -134,10 +134,15 @@ crates/
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
   fossil-df/               DataFusion backend for the property-graph MIR
-  fossil-engine/           native orchestration behind the binaries — the compile→run
-                           pipeline plus check/refs/providers, returning STRUCTURED
-                           data the binary only renders  [NATIVE-ONLY]
+  fossil-engine/           fossil's native HOST: the `System` the compiler runs against, the
+                           pre-compile jobs it cannot do for itself (introspect sources,
+                           register shape documents, install `@conn` secrets), and the
+                           compile→run pipeline. `fossil-wasm` is the same shape for the
+                           browser  [NATIVE-ONLY]
   fossil-runtime/          DuckDB native execution  [NATIVE-ONLY]
+  fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
+                           write. Depends on NOTHING; both halves of the write path
+                           (fossil-df, fossil-runtime) report through it
   fossil-run-status/       the `fossil run --output-json` wire contract
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
   fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)
@@ -166,10 +171,13 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            and fails on drift. It is a **pnpm** test — editing that Rust turns
                            it red and `cargo test` will not tell you.
 
-apps/                      NOT published, and no recursive CI step reaches them (all are
-                           filtered to `./packages/*` by path — see release.yml)
+apps/                      NOT published, and no RECURSIVE CI step reaches them (all are
+                           filtered to `./packages/*` by path — see release.yml). Each gets its
+                           own path-filtered workflow instead: `docs.yml`, `corpus.yml`.
   docs/                    Next.js + fumadocs. Where fossil is GOING, with what is already
                            true marked as such; `apps/docs/CLAUDE.md` has the editorial rules
+  corpus/                  the artifact: the format's conventions with executable guards, the
+                           conformance corpus, and a reader that shares no code with the guards
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness

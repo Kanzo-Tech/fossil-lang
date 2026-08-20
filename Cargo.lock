@@ -1913,6 +1913,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-mem-probe",
  "fossil-mir",
  "fossil-run-status",
  "fossil-shex",
@@ -2103,6 +2104,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-mem-probe"
+version = "0.1.0"
+
+[[package]]
 name = "fossil-mir"
 version = "0.1.0"
 dependencies = [
@@ -2137,9 +2142,9 @@ name = "fossil-runtime"
 version = "0.1.0"
 dependencies = [
  "duckdb",
- "fossil-base",
  "fossil-graph",
  "fossil-hir",
+ "fossil-mem-probe",
  "fossil-resolver",
  "fossil-sinks",
  "serde",

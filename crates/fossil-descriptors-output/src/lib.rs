@@ -305,11 +305,12 @@ ex:Contact {
             assert!(SHEX.accepts(uri), "the shex row declined `{uri}`");
         }
         assert!(!SHEX.accepts("shapes.ttl"));
-        assert_eq!(
-            SHEX.decline_extension("catalogue.ttl"),
-            "`io.shex` reads `.shex`, `.shexj` or `.shexc` documents, and \
-             `catalogue.ttl` is `.ttl`"
-        );
+        // `catalogue.ttl` is the case ruling 13 leads with, and the row's answer
+        // is a bool. The SENTENCE it turns into is
+        // `fossil_hir::refusals::decline_extension`, tested there and asserted
+        // end-to-end over this very table in
+        // `fossil-engine/tests/provider_registry.rs`.
+        assert!(!SHEX.accepts("catalogue.ttl"));
     }
 
     /// **The pair that behaved identically until now.** `io.shex("x.ttl")` and
@@ -326,18 +327,21 @@ ex:Contact {
         assert!(!shacl.provides(Capability::ReadRows));
     }
 
-    /// A compiling host's table has every `io.*` the language has, and asking a
-    /// data row for types names both sides.
+    /// A compiling host's table has every `io.*` the language has, and the two
+    /// halves are separable by capability alone.
     #[test]
     fn the_installed_table_carries_the_data_rows_too() {
         for name in ["csv", "json", "parquet", "rdf", "shex", "shacl"] {
             assert!(provider(PROVIDERS, name).is_some(), "`io.{name}` missing");
         }
         let csv = provider(PROVIDERS, "io.csv").expect("installed");
-        assert_eq!(
-            csv.decline_capability(Capability::ReadTypes, PROVIDERS),
-            "`io.csv` reads rows, not types — `io.shex`, `io.shacl` read types"
-        );
+        assert!(!csv.provides(Capability::ReadTypes));
+        let readers: Vec<&str> = PROVIDERS
+            .iter()
+            .filter(|p| p.provides(Capability::ReadTypes))
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(readers, ["shex", "shacl"], "the two type readers, in order");
     }
 
     /// `.ttl` is claimed by two rows with two different capabilities, and that

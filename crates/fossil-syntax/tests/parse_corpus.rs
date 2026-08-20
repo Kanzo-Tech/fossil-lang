@@ -370,7 +370,9 @@ fn files_with_extension(root: &std::path::Path, ext: &str) -> Vec<std::path::Pat
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())) {
+        for entry in
+            std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
+        {
             let path = entry.expect("a readable dir entry").path();
             if path.is_dir() {
                 let name = path.file_name().and_then(std::ffi::OsStr::to_str);

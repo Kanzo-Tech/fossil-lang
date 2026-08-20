@@ -645,28 +645,19 @@ pub struct CheckPosition {
     pub character: u32,
 }
 
-/// Drain the Salsa `Diagnostic` accumulator across every mapping in `file`
-/// (the same pattern as `fossil-lsp::diagnostics_for`). Forces
-/// `def_map` + `typecheck_mapping` for each mapping so the accumulator is
-/// populated before we read it.
+/// Every diagnostic `file` produces, from the one implementation of that
+/// question — [`fossil_mir::program_diagnostics`], which `fossil-engine` and
+/// `fossil-lsp` also call.
+///
+/// **This used to be a per-mapping loop of its own**, byte-identical to
+/// `fossil-lsp`'s and three drains short of `fossil check`'s. What the browser
+/// did not show, for as long as that was true: a file the parser recovered no
+/// mapping from produced NO rows at all (the parse errors were present and
+/// unreachable), a top-level binding's provider errors vanished, two mappings
+/// minting two identities for one type was never checked, and one top-level
+/// mistake was reported once per mapping.
 fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
-    let dm = fossil_hir::def_map::def_map(db, file);
-    let mut out = Vec::new();
-    for mapping in dm.mappings(db) {
-        // Drain from the LOWERING, not the typechecker: Salsa accumulators are
-        // transitive and lowering calls the typechecker, so this yields both
-        // sets without duplicating either. Draining only the typechecker would
-        // show the editor a clean file that `run` then refuses.
-        let _ = fossil_mir::lower_to_mir_pg(db, *mapping);
-        let diags = fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(db, *mapping);
-        // Spans are mapping-relative; the editor renders against the file.
-        out.extend(fossil_hir::spans::rebase_to_file(
-            db,
-            *mapping,
-            diags.into_iter().cloned(),
-        ));
-    }
-    out
+    fossil_mir::program_diagnostics(db, file)
 }
 
 /// Convert one `fossil_base::Diagnostic` to the JS-side row shape. UTF-16

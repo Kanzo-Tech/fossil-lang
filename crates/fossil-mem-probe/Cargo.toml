@@ -1,0 +1,23 @@
+# The `FOSSIL_MEM_PROBE` instrument: peak resident set and elapsed seconds
+# around each phase of a long write. A leaf with NO dependencies — not even
+# `fossil-base` — which is the whole point of it being its own crate: it is the
+# one thing `fossil-df` and `fossil-runtime` share, and sharing it through the
+# compiler substrate is what made `fossil-runtime` depend on the language side
+# for a `ps` call.
+[package]
+name = "fossil-mem-probe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Per-phase peak-RSS and elapsed-time reporting, off unless FOSSIL_MEM_PROBE is set"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Deliberately none. Adding one puts it under everything on the write path.

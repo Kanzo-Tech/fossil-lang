@@ -42,7 +42,7 @@ impl GraphArData {
         // every Parquet buffer at once for a list nothing on this path reads.
         // Measured at ten million, it is worth 0.02 GB of peak — noise. The
         // reason it stays is that the list has no reader here, not the number.
-        let mut probe = fossil_base::probe::Probe::new("write_to_dir");
+        let mut probe = fossil_mem_probe::Probe::new("write_to_dir");
         let mut count = 0usize;
         self.try_for_each_file::<SinkError>(|file| {
             let path = dest.join(&file.rel_path);

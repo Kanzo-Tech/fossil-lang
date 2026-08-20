@@ -44,12 +44,17 @@ thiserror = { workspace = true }
 fossil-graph = { path = "../fossil-graph" }
 serde_json = { workspace = true }
 
-# The memory probe (`FOSSIL_MEM_PROBE`) lives in the substrate because both
-# halves of the write path report through it — the DataFusion executor in
-# fossil-df and the DuckDB layout pass here — and neither may depend on the
-# other. Regular dep, not dev: the instrument has to be in the binary that
+# The memory probe (`FOSSIL_MEM_PROBE`) — both halves of the write path report
+# through it (the DataFusion executor in fossil-df and the DuckDB layout pass
+# here) and neither may depend on the other, so it is a dependency-free leaf of
+# its own. Regular dep, not dev: the instrument has to be in the binary that
 # writes ten million vertices, which is the only place the number exists.
-fossil-base = { path = "../fossil-base" }
+#
+# It used to be a module in `fossil-base`, and that single `use` was this
+# crate's ONLY edge to the compiler substrate — a native execution runtime
+# linking the Salsa `Db` trait to time a phase. There is no `fossil-base` line
+# here now, and there should not be one again.
+fossil-mem-probe = { path = "../fossil-mem-probe" }
 
 [dev-dependencies]
 # Graph-verb integration (tests/graph_verbs.rs): deserialise dispatch JSON into the

@@ -67,13 +67,13 @@ use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
 use datafusion::prelude::{
     CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
 };
-use fossil_base::probe::Probe;
 use fossil_base::{SourceAnchor, SourceFile};
 use fossil_graph_schema::{
     Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
 use fossil_hir::shapes::{inner_primitive, primitive_to_graphar};
 use fossil_hir::{MappingLoc, def_map::def_map};
+use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus};
 use fossil_sinks::manifest::{

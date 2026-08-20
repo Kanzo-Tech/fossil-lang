@@ -14,7 +14,6 @@ pub mod diagnostic;
 pub mod error;
 pub mod files;
 pub mod locator;
-pub mod probe;
 pub mod providers;
 pub mod shape_documents;
 pub mod system;

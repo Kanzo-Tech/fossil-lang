@@ -20,9 +20,10 @@
 //! which is how they disagreed in silence.
 //!
 //! Ruling 13 of `SURFACE-PLAN.md` collapses them: **one row, and dispatch is
-//! always by name.** The row checks its own extension and words its own
-//! rejection ([`Provider::decline_extension`]); asking a row for a capability it
-//! does not declare is an error naming both ([`Provider::decline_capability`]).
+//! always by name.** The row checks its own extension ([`Provider::accepts`])
+//! and declares its own capabilities ([`Provider::provides`]). It does not word
+//! the refusal — that is a compiler diagnostic and lives with the checker that
+//! raises it, in `fossil_hir::refusals`.
 //!
 //! # The direction is not one axis, it is two
 //!
@@ -61,7 +62,23 @@
 //! against [`crate::system::System::descriptors`], which is a table of *data* and
 //! therefore has no `fn` in it at all — there is nothing there to dispatch, and a
 //! function pointer returning descriptors would be the indirection without the
-//! reason. It is not compiler logic: nothing here decides anything about a program.
+//! reason.
+//!
+//! # It is data, and it is now only data
+//!
+//! This module used to open by claiming *«nothing here decides anything about a
+//! program»* while carrying `decline_capability` and `decline_extension` — two
+//! functions that composed English Fossil compiler errors, asserted verbatim by
+//! this module's own tests. The claim and the file disagreed, and the file was
+//! wrong. Both moved to `fossil_hir::refusals`, next to the checker that raises
+//! them. What is left is the catalogue: a name, the extensions it accepts, the
+//! capabilities it declares, and two predicates over those.
+//!
+//! That is not left to a comment: `tests/substrate_has_no_prose.rs` reads this
+//! file and fails on a string literal outside `mod tests` with a space in it.
+//! Every literal a catalogue needs — `"csv"`, `"ttl"`, `"io.{}"` — is one token;
+//! a sentence is not. It is a crude rule and it says so, but it is the rule that
+//! would have caught the two functions that just left.
 
 use std::hash::{Hash, Hasher};
 
@@ -121,26 +138,6 @@ pub enum Capability {
     ReadTypes,
 }
 
-impl Capability {
-    /// The verb phrase a diagnostic uses: "reads rows" / "reads types".
-    #[must_use]
-    pub const fn describe(self) -> &'static str {
-        match self {
-            Self::ReadRows => "reads rows",
-            Self::ReadTypes => "reads types",
-        }
-    }
-
-    /// The bare noun, for the second half of "…, not types".
-    #[must_use]
-    pub const fn noun(self) -> &'static str {
-        match self {
-            Self::ReadRows => "rows",
-            Self::ReadTypes => "types",
-        }
-    }
-}
-
 /// One row of the registry — one thing that can be written after `io.`.
 ///
 /// # Identity is the row's own address
@@ -166,8 +163,8 @@ pub struct Provider {
     /// lowercase, namespace-free. **This is what dispatch goes by.**
     pub name: &'static str,
     /// The file extensions this row accepts, lowercase and without the dot. The
-    /// row checks its own ([`Self::accepts`]) and words its own rejection
-    /// ([`Self::decline_extension`]); nothing dispatches on these.
+    /// row checks its own ([`Self::accepts`]); nothing dispatches on these, and
+    /// nothing here words the refusal — `fossil_hir::refusals` does.
     pub extensions: &'static [&'static str],
     /// The `read rows` capability, or `None` when the row does not have it.
     pub reads_rows: Option<RowReader>,
@@ -206,80 +203,12 @@ impl Provider {
 
     /// Does this row accept `uri`'s extension?
     ///
-    /// A URI with no extension is accepted by nobody. The caller decides
-    /// whether that is worth a diagnostic — [`Self::decline_extension`] words
-    /// one either way.
+    /// A URI with no extension is accepted by nobody. The caller decides whether
+    /// that is worth a diagnostic, and words one — `fossil_hir::refusals` has
+    /// the three sentences.
     #[must_use]
     pub fn accepts(&self, uri: &str) -> bool {
         extension_of(uri).is_some_and(|ext| self.extensions.iter().any(|c| *c == ext))
-    }
-
-    /// **The row's own rejection of a capability it does not declare**, naming
-    /// both — the row and what was asked of it.
-    ///
-    /// `type { P } := io.csv("users.csv")` → «`io.csv` reads rows, not types».
-    /// `installed` is the whole table, so the message can end by naming the rows
-    /// that DO have the capability rather than leaving the reader to guess.
-    #[must_use]
-    pub fn decline_capability(&self, wanted: Capability, installed: &[&'static Self]) -> String {
-        let mine: Vec<&str> = self.capabilities().map(Capability::describe).collect();
-        let has = if mine.is_empty() {
-            "does nothing".to_string()
-        } else {
-            mine.join(" and ")
-        };
-        let able: Vec<String> = installed
-            .iter()
-            .filter(|p| p.provides(wanted))
-            .map(|p| format!("`{}`", p.constructor()))
-            .collect();
-        let tail = match able.as_slice() {
-            [] => String::new(),
-            [one] => format!(" — {one} {}", wanted.describe()),
-            many => format!(" — {} read {}", many.join(", "), wanted.noun()),
-        };
-        format!(
-            "`{}` {}, not {}{}",
-            self.constructor(),
-            has,
-            wanted.noun(),
-            tail
-        )
-    }
-
-    /// **The row's own rejection of an extension it does not accept**, naming
-    /// both — the constructor and the extension.
-    ///
-    /// `io.shex("catalogue.ttl")` → «`io.shex` reads `.shex`, `.shexj` or
-    /// `.shexc` documents, and `catalogue.ttl` is `.ttl`».
-    #[must_use]
-    pub fn decline_extension(&self, uri: &str) -> String {
-        let mine = join_or(
-            &self
-                .extensions
-                .iter()
-                .map(|e| format!("`.{e}`"))
-                .collect::<Vec<_>>(),
-        );
-        let found = extension_of(uri).map_or_else(
-            || format!("`{uri}` has no extension"),
-            |ext| format!("`{uri}` is `.{ext}`"),
-        );
-        format!(
-            "`{}` reads {} documents, and {}",
-            self.constructor(),
-            mine,
-            found
-        )
-    }
-}
-
-/// `"a"` / `"a or b"` / `"a, b or c"`.
-fn join_or(items: &[String]) -> String {
-    match items {
-        [] => "no".to_string(),
-        [one] => one.clone(),
-        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
     }
 }
 
@@ -459,43 +388,6 @@ mod tests {
         assert_eq!(
             CSV.capabilities().collect::<Vec<_>>(),
             [Capability::ReadRows]
-        );
-    }
-
-    /// The message names BOTH — the row and what was asked of it — and then
-    /// says who could.
-    #[test]
-    fn asking_for_a_capability_a_row_lacks_names_both() {
-        assert_eq!(
-            CSV.decline_capability(Capability::ReadTypes, TABLE),
-            "`io.csv` reads rows, not types — `io.shex`, `io.shacl` read types"
-        );
-        assert_eq!(
-            SHEX.decline_capability(Capability::ReadRows, TABLE),
-            "`io.shex` reads types, not rows — `io.csv`, `io.json`, `io.parquet`, \
-             `io.rdf` read rows"
-        );
-        // One candidate takes the singular, because a message that reads like a
-        // typo is a message a reader distrusts.
-        assert_eq!(
-            CSV.decline_capability(Capability::ReadTypes, &[&CSV, &SHEX]),
-            "`io.csv` reads rows, not types — `io.shex` reads types"
-        );
-    }
-
-    /// The row words its own extension rejection, naming the constructor and
-    /// the extension — `io.shex("catalogue.ttl")` is the case ruling 13 leads
-    /// with.
-    #[test]
-    fn a_row_declines_an_extension_in_its_own_words() {
-        assert_eq!(
-            SHEX.decline_extension("catalogue.ttl"),
-            "`io.shex` reads `.shex`, `.shexj` or `.shexc` documents, and \
-             `catalogue.ttl` is `.ttl`"
-        );
-        assert_eq!(
-            CSV.decline_extension("users"),
-            "`io.csv` reads `.csv` documents, and `users` has no extension"
         );
     }
 

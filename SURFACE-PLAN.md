@@ -369,17 +369,20 @@ ruta de escritura del lenguaje.
 
 **Y el árbol está mejor de lo que la conversación sugería.** `fossil-lineage`, `fossil-syntax`,
 `fossil-graph-schema`, `fossil-mir` y el corte `fossil-ide`/`fossil-lsp` están todos forzados por algo
-real y verificado. **Dos crates hacen todo el ruido:** `fossil-base` (≈1310 de 2680 líneas no son ni
-el trait ni la db) y `fossil-engine` (cinco verbos sin relación que sólo comparten `open_db` — no es
-hondo, es ancho). Arreglar esos dos es la mayor parte de «está todo un poco liado».
+real y verificado. **Dos crates hacen todo el ruido:** `fossil-base` (≈1090 de 2459 líneas no son ni
+el trait ni la db — eran ≈1310 de 2686 antes de que salieran `Probe` y la prosa de los refusals) y
+`fossil-engine` (cinco verbos sin relación que sólo comparten `open_db` — no es hondo, es ancho).
+Arreglar esos dos es la mayor parte de «está todo un poco liado».
 
 ### Lo que una frontera compra aquí, y quién no paga
 
 Tres cosas, y sólo tres: un **tripwire `cfg`**, un sitio en el **cierre del gate WASM**, y los **tipos
-concretos que Salsa necesita**. Medido: el cierre es exactamente `{base, descriptors-input,
-descriptors-output, df, df-wasm, graph, graph-schema, graph-wasm, hir, ide, lineage, mir, run-status,
-shex, sinks, syntax, wasm}`, y su complemento es exactamente el conjunto de tripwires más
-`fossil-mcp`. **`fossil-run-status` no compra ninguna de las tres**, y su razón declarada —«los hosts
+concretos que Salsa necesita**. Medido: el complemento del cierre es exactamente el conjunto de
+tripwires más `fossil-mcp`. **El cierre en sí no se escribe aquí** — `cargo xtask wasm-check` lo
+deriva del grafo y lo imprime, y `CLAUDE.md` prohíbe anotarlo en ningún sitio por su nombre; la lista
+que estaba en esta línea tenía 17 crates y quedó obsoleta el día que entró `fossil-mem-probe`, que es
+exactamente el fallo que la regla existe para evitar. **`fossil-run-status` no compra ninguna de las
+tres**, y su razón declarada —«los hosts
 dependen de este crate»— es **imposible con `publish = false`**; keasy reescribió la forma a mano, y
 de ahí salió la deriva del campo `version`.
 
@@ -403,14 +406,26 @@ compilador escribe y el corpus lee. Su encabezado dice hoy *«Two contracts, one
 
 **Lo que se resiste, y por qué:**
 
-- **`fossil-runtime` no se puede partir sin sacar `Probe` de `fossil-base`**: es su **única** arista
-  de producción al lado lenguaje, un solo `use`, y encima `Probe` hace I/O fuera de `System` y no
-  está ni re-exportado.
+- ~~**`fossil-runtime` no se puede partir sin sacar `Probe` de `fossil-base`**~~ — **hecho.** `Probe`
+  es `fossil-mem-probe`, una hoja sin dependencias, y ese `use` era en efecto la única arista:
+  `cargo tree -p fossil-runtime -e normal` ya no alcanza `fossil-base` por ningún camino (sólo lo ve
+  como dev-dependency, vía `fossil-hir`). El corte del corpus deja de estar bloqueado por aquí.
 - **`fossil-shex` no puede volver con los descriptores mientras exista `fossil-base →
-  fossil-descriptors-input`**, que es **un solo método de trait** y cierra un ciclo.
-- **`fossil-base` no puede llamarse substrato** mientras tenga dentro el catálogo `io.` **con la
-  prosa de los errores de usuario**, una query `tracked` y la resolución de rutas `@conn`. Son ~1310
-  de sus 2680 líneas, y `CLAUDE.md` prohíbe lógica de compilador ahí por su nombre.
+  fossil-descriptors-input`**, que es **un solo método de trait** y cierra un ciclo. **Costado el
+  2026-08-20 y NO hecho**, con la razón en `/docs/architecture`: las tres salidas son un genérico en
+  `System` (imposible — es `Arc<dyn System>`), los tipos a `fossil-graph-schema` (mete un `Mutex`
+  de estado mutable en el crate cuyo docblock argumenta que no depende de nada) o una hoja nueva
+  (funciona, y **no saca ni una línea de `fossil-base`**: el accessor, el campo de `NativeSystem` y
+  los tres tests se quedan donde están). Lo que lo revierte es que alguien pliegue de verdad
+  `fossil-shex` dentro de `fossil-descriptors-output`: ese pliegue quita un crate, la hoja añade
+  otro, y el coste pasa a ser cero el día que hay motivo para pagarlo.
+- **`fossil-base` no puede llamarse substrato** mientras tenga dentro una query `tracked`
+  (`shape_documents.rs`), la resolución de rutas `@conn` (`locator.rs`) y el catálogo `io.`
+  (`providers.rs`). **La prosa de los errores de usuario ya no está ahí**: `decline_capability` y
+  `decline_extension` son `fossil_hir::refusals`, y `crates/fossil-base/tests/substrate_has_no_prose.rs`
+  lee `providers.rs` y falla ante un literal con un espacio dentro. Con eso y con `Probe` fuera, la
+  cuenta baja de ~1310 sobre 2686 a ~1090 sobre 2459. `CLAUDE.md` prohíbe lógica de compilador ahí
+  por su nombre, y lo que queda son las otras dos.
 - **`fossil-engine` no es un crate, es un saco** — cinco verbos sin relación que sólo comparten
   `open_db`. Cada uno se va con su grupo; lo que quede es la carcasa nativa.
 - **`fossil-run-status` no va a ningún grupo: desaparece.** Sus tres contratos vuelven a quien los
@@ -825,8 +840,11 @@ puede verlo, porque comprueba rutas citadas y un rótulo de nodo mermaid no es u
     **Lo que esto NO decide: la sintaxis de destino.** `grammar.bnf` avisa de que inventarla antes de
     decidirla es como v0.1 se llenó de fantasmas. La tabla deja el hueco preparado y nada más.
 
-    **Aterrizado el 2026-08-13**, en `crates/fossil-base/src/providers.rs`. Tres cosas que sólo se
-    vieron al construirlo:
+    **Aterrizado el 2026-08-13**, en `crates/fossil-base/src/providers.rs` — el **catálogo**. La
+    frase del rechazo se fue de ahí el 2026-08-20 a `fossil_hir::refusals`: la fila sigue decidiendo
+    (`provides`, `accepts`), pero un error de compilador en inglés no vive en el substrato, y las
+    tres redacciones que tenían `lower.rs`, `shapes.rs` y `fossil-engine` de «no es un proveedor que
+    este host instale» son ahora una. Tres cosas que sólo se vieron al construirlo:
 
     - **La identidad de fila era un bug latente.** Era `ptr::eq` sobre la dirección de `decode` — y una
       fila que lee filas **no tiene `decode`**, así que **las cuatro filas de datos habrían comparado

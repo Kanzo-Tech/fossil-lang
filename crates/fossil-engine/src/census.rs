@@ -1,18 +1,37 @@
 //! What the compiler UNDERSTOOD from a program — the reading, not the verdict.
 //!
 //! [`crate::check`] answers «is anything wrong», and a program can be entirely
-//! right about nothing. The measured hole this module exists to close: a
-//! property whose right-hand side the lowering cannot read is dropped in
-//! silence. [`fossil_hir::body::body`] walks the `PROPERTY` children of a
-//! mapping body and keeps the ones `lower_property` returns `Some` for; the
-//! `None` arm is a bare `if let`, with no `else` and no accumulator, so a
-//! mapping that wrote five properties and lowered two produces a graph missing
-//! three columns and a `check` that says `ok`.
+//! right about nothing. The hole this module was built to close: a property
+//! whose right-hand side the lowering cannot read is dropped in silence.
+//! [`fossil_hir::body::body`] walks the `PROPERTY` children of a mapping body
+//! and keeps the ones `lower_property` returns `Some` for; the `None` arm is a
+//! bare `if let`, with no `else`, so a mapping that wrote five properties and
+//! lowered two produces a graph missing three columns.
 //!
-//! Nothing downstream can see that. `check` drains diagnostics and there are
-//! none; `run` writes what it was given and the missing columns were never in
-//! the MIR to be missed. The only place the difference is visible is between
-//! the CST and the `HirBody`, which is where this looks.
+//! # That premise is no longer true, and it matters for where this belongs
+//!
+//! **Every `None` this module was built to catch now carries a diagnostic.**
+//! `lower_property`'s four refusal paths each `diagnose` before returning, and
+//! `lower_expr`'s catch-all — the one that actually caused it, measured on
+//! 2026-08-06 across three programs, two of them silently lossy — was turned
+//! from `_ => None` into a diagnostic then. `body.rs` is still a bare `if let`,
+//! but the `None` arriving there has already been announced. So `check` DOES
+//! now say what this module was written because it could not say, and since the
+//! drain moved to [`fossil_mir::program_diagnostics`] it says it in the editor
+//! and the browser too.
+//!
+//! What is left is not a capability, it is a **cross-check**: proof, per
+//! program, that written == lowered, which would catch a FUTURE silent arm the
+//! way nothing caught the last one. That is conformance-harness machinery, and
+//! its only consumer is `tests/programs.rs`. It sits in a production crate,
+//! behind a native tripwire, reachable from nothing a user can run — 327 lines
+//! of `pub` surface with no caller and no embedding.
+//!
+//! **Where it goes, if it moves.** The counting is a fact about `fossil-hir`'s
+//! own CST↔`HirBody` relation and could live there; [`ProgramCensus::render`]
+//! is the harness's committed-artefact format and could only live beside the
+//! harness. Neither move is blocked by anything here — both destinations are
+//! held by other work in flight.
 //!
 //! So the census is two counts and their difference, per mapping: the
 //! properties the AUTHOR WROTE (`PROPERTY` nodes in the CST) against the

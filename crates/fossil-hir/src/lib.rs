@@ -62,6 +62,11 @@ pub mod infer;
 pub mod item_tree;
 pub mod lower;
 pub mod provenance;
+/// What the compiler says when a program names a provider it cannot use. Three
+/// sentences, shared by every path that raises one — this crate's checker and
+/// `fossil-engine`'s run path. They were methods on `fossil_base::Provider`,
+/// which put English Fossil compiler errors in the trait-and-db substrate.
+pub mod refusals;
 pub mod shapes;
 pub mod spans;
 /// The stdlib catalog: every function the language declares, its signature and

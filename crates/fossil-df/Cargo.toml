@@ -20,6 +20,10 @@ doctest = false
 [dependencies]
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
+# `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a write. A
+# dependency-free leaf, shared with `fossil-runtime`'s DuckDB layout pass;
+# neither half of the write path may depend on the other.
+fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
 # Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name) and the
 # host↔fossil wire contract (RunStatus). Both WASM-clean (arrow-schema / serde

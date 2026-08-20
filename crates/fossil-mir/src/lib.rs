@@ -20,6 +20,7 @@
 //! schema; `/docs/design/algebra` is the page that argues it, and
 //! [`op::Op`]'s own doc comments are the signatures.
 
+pub mod diagnostics;
 pub mod graph;
 pub mod lower;
 pub mod op;
@@ -28,6 +29,7 @@ pub mod schema;
 // Type re-exports follow the rust-analyzer convention used by `fossil-hir`:
 // types at the crate root, query functions stay under their module path
 // (`fossil_mir::lower::lower_to_mir_pg`) to avoid name shadowing with modules.
+pub use diagnostics::program_diagnostics;
 pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
 pub use op::{
