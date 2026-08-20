@@ -45,33 +45,6 @@ pub struct RunCreds {
     pub connections: HashMap<String, ConnectionCreds>,
 }
 
-/// The `fossil catalog` stdin payload: the DCAT-AP catalog data + the dest
-/// cloud secret (the catalog graph's destination is addressed on the CLI).
-#[derive(Debug, Deserialize)]
-pub struct CatalogRequest {
-    /// Governance values + dataset structure the DCAT-AP graph is built from.
-    pub catalog: fossil_run_status::CatalogInput,
-    /// Cloud secret for the `--dest` URL; `None` ⇒ local / public dest.
-    #[serde(default)]
-    pub dest: EndpointCreds,
-}
-
-impl CatalogRequest {
-    /// Read and parse the JSON payload from `stdin`.
-    ///
-    /// # Errors
-    ///
-    /// Returns the stringified `io`/`serde_json` error if stdin is unreadable
-    /// or the payload is not a [`CatalogRequest`].
-    pub fn from_stdin() -> Result<Self, String> {
-        let mut buf = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buf)
-            .map_err(|e| format!("reading catalog stdin: {e}"))?;
-        serde_json::from_str(&buf).map_err(|e| format!("parsing catalog JSON: {e}"))
-    }
-}
-
 /// The cloud secret for an endpoint whose URL is supplied separately (the dest).
 #[derive(Debug, Default, Deserialize)]
 pub struct EndpointCreds {

@@ -22,32 +22,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The version of this wire contract. Bumped on any breaking change to
-/// [`RunStatus`] / [`CatalogInput`] (a removed/renamed field, a changed
-/// meaning). Producers stamp it; consumers check it with [`is_compatible`].
-pub const WIRE_VERSION: u32 = 1;
-
-/// serde default for the `version` field — lets a legacy payload that predates
-/// versioning deserialize as `WIRE_VERSION` (it is, by construction, v1).
-const fn wire_version() -> u32 {
-    WIRE_VERSION
-}
-
-/// Whether a payload stamped with `version` can be read by this build. v0.1
-/// rule: exact match — a host on contract vN refuses a producer on vM≠N rather
-/// than silently misreading it. Widen to a range once the contract is stable.
-#[must_use]
-pub const fn is_compatible(version: u32) -> bool {
-    version == WIRE_VERSION
-}
-
 /// The status object `fossil run --output-json` writes to stdout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RunStatus {
-    /// Wire-contract version this payload was produced with (see [`WIRE_VERSION`]).
-    #[serde(default = "wire_version")]
-    pub version: u32,
     /// Destination URL the `GraphAr` dataset was written under (echoes `--dest`).
     pub dest: String,
     /// One entry per emitted vertex type.
@@ -59,7 +36,6 @@ pub struct RunStatus {
 /// One vertex type — its dataset-relative Parquet, row count, and property
 /// columns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct VertexStatus {
     /// The vertex type / `GraphAr` `type` (e.g. `Person`).
     #[serde(rename = "type")]
@@ -70,7 +46,21 @@ pub struct VertexStatus {
     /// reads it from the manifest instead of re-deriving it from the program.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rdf_type: Option<String>,
-    /// Dataset-relative Parquet path, e.g. `vertex/Person.parquet`.
+    /// **Where this vertex type's rows are**, dataset-relative — and a host
+    /// fetches it, so it names something that exists.
+    ///
+    /// Two spellings, and which one you get says whether the dataset has been
+    /// tiled: a single Parquet (`vertex/Person.parquet`) from a producer that
+    /// wrote one, and the chunk PREFIX (`vertex/Person/`, holding
+    /// `chunk{k}.parquet` — the same string the `GraphAr` `VertexInfo`
+    /// declares) once a layout pass has replaced it with chunks.
+    ///
+    /// It used to be the single Parquet unconditionally, and native
+    /// `fossil run` deletes that file: the layout pass reads it, writes the
+    /// chunks, and removes it as the last thing it does, so the status went out
+    /// naming a path that had just stopped existing. The browser executor runs
+    /// no layout pass, which is why the same field was truthful there and
+    /// nobody noticed.
     pub file: String,
     /// Row count (Parquet footer metadata); `None` if the count query failed.
     pub count: Option<i64>,
@@ -80,7 +70,6 @@ pub struct VertexStatus {
 
 /// A property column of a [`VertexStatus`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ColumnStatus {
     /// Column / predicate local name.
     pub name: String,
@@ -99,7 +88,6 @@ pub struct ColumnStatus {
 
 /// One edge type — its CSR/CSC Parquet pair and endpoints.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct EdgeStatus {
     /// The edge type / predicate local name.
     pub edge_type: String,
@@ -115,89 +103,6 @@ pub struct EdgeStatus {
     pub count: Option<i64>,
 }
 
-// ── Catalog input (host → `fossil catalog`) ──────────────────────────────────
-//
-// The DCAT-AP catalog is "just another output graph": fossil materialises it via
-// the same writer as a run. The host (keasy) owns the governance VALUES and the
-// output structure; it pipes this [`CatalogInput`] to `fossil catalog`, which
-// builds the DCAT-AP vertex/edge graph and writes GraphAr. (Host boundary: the
-// DCAT-AP *shape* lives in fossil, not re-implemented in the host.)
-
-/// The governance values + dataset structure a host supplies to materialise a
-/// DCAT-AP catalog graph.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CatalogInput {
-    /// Wire-contract version this payload was produced with (see [`WIRE_VERSION`]).
-    #[serde(default = "wire_version")]
-    pub version: u32,
-    /// Stable job identifier — the catalog/dataset/distribution URN namespace.
-    pub job_id: String,
-    /// Human title for the catalog (defaults to a generic label when absent).
-    pub job_name: Option<String>,
-    /// ISO-8601 issue timestamp (`dct:issued`).
-    pub completed_at: String,
-    /// Catalog language tag (`dct:language`); defaults to `en`.
-    pub language: Option<String>,
-    /// Publisher display name (`foaf:name`).
-    pub publisher_name: String,
-    /// Publisher homepage / IRI (`foaf:homepage`); also the Agent subject IRI.
-    pub publisher_uri: Option<String>,
-    /// Catalog description (`dct:description`).
-    pub catalog_description: Option<String>,
-    /// License IRI (`dct:license`).
-    pub license_uri: Option<String>,
-    /// Contact email — emits a `vcard:Kind` contact when present.
-    pub contact_email: Option<String>,
-    /// One entry per output dataset (vertex type) in the run.
-    pub datasets: Vec<CatalogDataset>,
-}
-
-/// One DCAT dataset — an output vertex type plus its governance metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CatalogDataset {
-    /// The vertex type / dataset title (e.g. `Person`).
-    pub type_name: String,
-    /// Source binding name (`dct:source`), if known.
-    pub source_name: Option<String>,
-    /// The dataset's RDF type IRI (`dct:conformsTo`), if known.
-    pub rdf_type: Option<String>,
-    /// Free-text keywords (`dcat:keyword`).
-    #[serde(default)]
-    pub keywords: Vec<String>,
-    /// Row count of the executed dataset (from the run manifest), if known.
-    pub entity_count: Option<i64>,
-    /// The dataset's columns (schema metadata).
-    #[serde(default)]
-    pub fields: Vec<CatalogField>,
-    /// The dataset's distributions (one per materialised Parquet location).
-    #[serde(default)]
-    pub distributions: Vec<CatalogDistribution>,
-}
-
-/// A column of a [`CatalogDataset`] — schema metadata, not an RDF property.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CatalogField {
-    /// Column name.
-    pub name: String,
-    /// The column's RDF predicate IRI, if any.
-    pub rdf_uri: Option<String>,
-    /// The column's XSD datatype IRI, if any.
-    pub datatype: Option<String>,
-}
-
-/// A DCAT distribution — an accessible location of a dataset.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CatalogDistribution {
-    /// Access URL (`dcat:accessURL`).
-    pub destination: String,
-    /// Media type (`dcat:mediaType`).
-    pub media_type: String,
-}
-
 // ── `fossil providers` contract ─────────────────────────────────────────
 //
 // The host (keasy) lists the data-source constructors fossil supports so its UI
@@ -207,7 +112,6 @@ pub struct CatalogDistribution {
 
 /// What a provider can appear as in a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     /// Only defines a type (e.g. a schema descriptor).
@@ -221,7 +125,6 @@ pub enum ProviderKind {
 /// One data-source provider fossil exposes: its short name, the file extensions
 /// it reads, and how it can be used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ProviderInfo {
     /// Short provider name (e.g. `csv`, `json`, `parquet`).
     pub name: String,
@@ -238,7 +141,6 @@ pub struct ProviderInfo {
 
 /// The position a reference plays in an `io.*` source constructor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RefRole {
     /// The positional data URI (`io.rdf("…")`).
@@ -254,7 +156,6 @@ pub enum RefRole {
 /// derives a job's connection set from the distinct `connection`s, never from a
 /// regex over the script text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SourceRefInfo {
     /// The `@conn` alias this reference targets, or `None` for a direct URL/path.
     pub connection: Option<String>,

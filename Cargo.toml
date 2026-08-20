@@ -39,24 +39,19 @@ serde_yaml_ng = "0.10"
 # because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
 # JSON Schema draft-07 dialect for openapi-typescript interop.
 schemars = { version = "0.8" }
-# `utoipa` derives OpenAPI schemas. Optional + off by default — only the keasy
-# host enables it (on `fossil-run-status`) so `RunStatus` lands in keasy's
-# openapi.json for openapi-typescript codegen. rmlext's own CLI/WASM builds
-# never enable it, so the crate stays dependency-light + WASM-clean.
-utoipa = { version = "5" }
-# Pure-Rust SHA-256 for the SC#1 cross-engine parity digest (native_baseline.json
+# Pure-Rust SHA-256 for the cross-engine parity digest (native_baseline.json
 # producer in fossil-runtime tests). Already a transitive dep via duckdb/parquet;
 # WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
 sha2 = "0.10"
 
-# === Input descriptors (Phase 5+, declared here for inheritance) ===
+# === Input descriptors (declared here for inheritance) ===
 csv = "1.3"
 jsonschema = { version = "0.42", default-features = false }
 roxmltree = "0.20"
 
 # === Output descriptor (the rudof WASM spike resolved this 2026-05-15) ===
-# Major-pinned; allow patch drift. shex_validation intentionally NOT included — Phase 3 is AST-only
-# (no runtime ShEx validation).
+# Major-pinned; allow patch drift. shex_validation intentionally NOT included — the checker walks
+# the ShEx AST only, and never runs ShEx validation.
 shex_ast = "0.3"
 rudof_iri = "0.3"
 prefixmap = "0.3"
@@ -81,19 +76,20 @@ prefixmap = "0.3"
 oxttl = { version = "0.2", features = ["rdf-12"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 
-# === Did-you-mean diagnostics (Phase 3 CORE-05) ===
+# === Did-you-mean diagnostics ===
 strsim = "0.11"
 
-# === Native CLI pre-introspection (Phase 13 INPUT-01 / plan 13-04a) ===
+# === Native CLI pre-introspection ===
 # Source-binding extraction in fossil-cli scans the .fossil text for
-# io.csv("...") / io.json("...") references via regex (v0.2 placeholder;
-# Phase 14+ replaces with an AST walk). NATIVE-ONLY consumer; never
-# referenced by a WASM-gated crate.
+# io.csv("...") / io.json("...") references via regex. It is a placeholder for
+# an AST walk, and it is wrong on any binding a regex cannot see. NATIVE-ONLY
+# consumer; never referenced by a WASM-gated crate.
 regex = "1"
 
-# === Sinks (Phase 5+) ===
-# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc;
-# SC#5). The `arrow` umbrella + `parquet` stay for native byte-level test deps.
+# === Sinks ===
+# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc,
+# either of which would break the wasm32 gate). The `arrow` umbrella + `parquet` stay
+# for native byte-level test deps.
 # Pinned to 58 — the latest published arrow/parquet line (59 is not on crates.io as of
 # 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
 # is what Cargo.lock already resolves transitively via duckdb's parquet.
@@ -104,17 +100,17 @@ parquet = "58"
 # === Runtime — NATIVE ONLY ===
 # `vscalar` enables the scalar-UDF registration API (VScalar trait + Connection::
 # register_scalar_function) used for the native_udf_only stdlib functions in
-# fossil-runtime (STDL-03/05). Native-only crate (wasm32 cfg-tripwire) so these
+# fossil-runtime. Native-only crate (wasm32 cfg-tripwire) so these
 # never reach the WASM gate.
 duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
 
-# === Native Rust UDF impl crates (Phase 5 STDL-03/05 — NATIVE ONLY) ===
-# Implement the native_udf_only stdlib functions registered on the DuckDB
-# connection in fossil-runtime. NEVER referenced by a WASM-gated crate.
-unicode-normalization = "0.1"           # clean.normalize_unicode (NFC/NFD/NFKC/NFKD)
-slug = "0.1"                            # clean.slug (URL slugification)
-voca_rs = "1"                           # clean.strip_html (strip tags → text)
-hmac = "0.12"                           # anon.hmac (keyed HMAC; digest 0.10 compatible with sha2 0.10)
+# === Reference implementations for stdlib fidelity tests (NATIVE ONLY) ===
+# These were the UDF impl crates behind a `Udf` lowering kind that no longer
+# exists; what survives is `fossil-df`'s dev-dependency on them, which measures
+# the SQL template against the Rust behaviour it is meant to reproduce.
+# NEVER referenced by a WASM-gated crate.
+unicode-normalization = "0.1"           # the NFC/NFD/NFKC/NFKD reference
+slug = "0.1"                            # the URL-slugification reference
 
 # === LSP — NATIVE ONLY ===
 lsp-server = "0.7"
@@ -135,9 +131,9 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
-# === Logging (CLI + LSP — NATIVE ONLY in Phase 1) ===
+# === Logging (CLI + LSP — NATIVE ONLY) ===
 # default-features=false to avoid pulling mio, which breaks the WASM gate.
-# Only the env-filter and fmt features are needed for Phase 1.
+# Only the env-filter and fmt features are needed.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt"] }
 

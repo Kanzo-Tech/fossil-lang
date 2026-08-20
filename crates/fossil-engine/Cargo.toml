@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Native orchestration surface — compile + run + catalog + check + refs + providers. The fossil binaries are thin shells over this."
+description = "Native orchestration surface — compile + run + check + refs + providers. The fossil binaries are thin shells over this."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -42,7 +42,7 @@ fossil-df           = { path = "../fossil-df" }
 fossil-runtime      = { path = "../fossil-runtime" }
 fossil-sinks        = { path = "../fossil-sinks" }
 fossil-resolver     = { path = "../fossil-resolver" }
-# The `RunStatus` / `SourceRefInfo` / `ProviderInfo` / `CatalogInput` wire types
+# The `RunStatus` / `SourceRefInfo` / `ProviderInfo` wire types
 # the engine produces (one source of truth; keasy reuses them).
 fossil-run-status = { path = "../fossil-run-status" }
 

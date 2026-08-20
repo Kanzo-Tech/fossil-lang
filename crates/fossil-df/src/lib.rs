@@ -20,9 +20,7 @@
 //! multi-valued (`single_valued = false`) cardinality, and the wasm-bindgen
 //! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
 
-pub mod catalog;
 pub mod files;
-pub mod literal;
 /// The relational operators executed: the walk from an emit op back to the
 /// sources it reads (`Filter` / `Project` / `Join`).
 pub mod plan;
@@ -77,7 +75,7 @@ use fossil_graph_schema::{
 use fossil_hir::shapes::{inner_primitive, primitive_to_graphar};
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
-use fossil_run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus, WIRE_VERSION};
+use fossil_run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus};
 use fossil_sinks::manifest::{
     AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property, PropertyGroup,
     VertexInfo, data_type_name,
@@ -302,7 +300,10 @@ async fn prepare_vertex<'db>(
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
+    // The program's `@rename`s: they govern the emitted column label, and the
+    // checker resolved the body's property keys against the same table.
+    let renames = def_map(db, mapping.file(db)).renames(db);
+    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema(&renames));
     prepare_vertex_ops(ctx, db, &ops, anchor).await
 }
 
@@ -496,7 +497,8 @@ async fn execute_edges<'db>(
 ) -> datafusion::error::Result<Vec<(EdgeTable, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
+    let renames = def_map(db, mapping.file(db)).renames(db);
+    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema(&renames));
     let ops = ops.as_slice();
 
     let mut out = Vec::new();
@@ -545,8 +547,13 @@ async fn execute_edges<'db>(
 /// `src_iri`/`dst_iri`, joins both against the registered vertex tables to
 /// resolve endpoint IRIs to dense ids (inner join — dangling endpoints drop,
 /// like the writer), then sorts the `(src_dense, dst_dense)` pairs into CSR
-/// (`by_source`) and CSC (`by_target`). Mirrors the writer's edge SQL
-/// (writer.rs:469-492).
+/// (`by_source`) and CSC (`by_target`).
+///
+/// This used to say it mirrored `fossil-sinks`'s `writer.rs`. There is no
+/// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
+/// and nothing else, so THIS is where an edge becomes CSR/CSC. What still reads
+/// the pair afterwards is the layout pass, which re-sorts the tiles in place
+/// (`fossil-runtime/src/layout.rs`).
 #[allow(clippy::too_many_arguments)] // the edge spec is a flat tuple, not worth a struct here
 async fn execute_edge(
     ctx: &SessionContext,
@@ -755,7 +762,7 @@ pub fn provider_bindings(
     let program_dir = fossil_base::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema();
+    let schema = descriptor.to_graph_schema(&def_map(db, file).renames(db));
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
@@ -820,7 +827,7 @@ pub fn program_sources(
     let program_dir = fossil_base::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema();
+    let schema = descriptor.to_graph_schema(&def_map(db, file).renames(db));
     let mut out: Vec<SourceRef> = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
@@ -1039,10 +1046,24 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
     use fossil_hir::{BinOp, UnOp};
     match e {
         Expr::LitString(s) => lit(s.to_string()),
-        // `new_unqualified` (NOT `col()`): a bare `col("hasProject")` folds the
-        // identifier to lowercase, but the source columns (CSV headers, the RDF
-        // pivot's predicate-named columns) preserve case — reference them verbatim.
-        Expr::ColRef { column, .. } => DfExpr::Column(Column::new_unqualified(column.as_str())),
+        // `new_unqualified` / `TableReference::bare` (NOT `col()`): a bare
+        // `col("hasProject")` folds the identifier to lowercase, but the source
+        // columns (CSV headers, the RDF pivot's predicate-named columns)
+        // preserve case — reference them verbatim, and the relation too.
+        //
+        // The source is the binding the author wrote (`User.email`), and
+        // `plan_relation` qualifies each source relation under exactly that
+        // name — which is what makes `Node.label` and `Other.label` two columns
+        // after a self-join. An empty source is the retired bare `.column`; it
+        // resolves against whichever relation carries the name.
+        Expr::ColRef { source, column } => DfExpr::Column(if source.is_empty() {
+            Column::new_unqualified(column.as_str())
+        } else {
+            Column::new(
+                Some(datafusion::common::TableReference::bare(source.as_str())),
+                column.as_str(),
+            )
+        }),
         Expr::Concat(a, b) => binary_expr(render(a), Operator::StringConcat, render(b)),
         Expr::Assert { inner, .. } => render(inner),
         Expr::Call { func, args, .. } => render_call(func.as_str(), args),
@@ -1628,7 +1649,6 @@ impl GraphArData {
             .collect();
 
         RunStatus {
-            version: WIRE_VERSION,
             dest: dest.to_string(),
             vertices,
             edges,
@@ -1717,15 +1737,21 @@ fn edge_info(edge: &GraphEdge) -> EdgeInfo {
             "edge/{}/",
             edge_dir(&edge.source, &edge.label, &edge.destination)
         ),
+        // Both orientations, and each says where its tiles are. `aligned_by`
+        // gives a reader the arithmetic — which endpoint column addresses this
+        // half — and `prefix` gives it the URL, so a hop out of a `dense_id` is
+        // derived from the manifest and never agreed between two repositories.
         adj_lists: vec![
             AdjList {
                 ordered: true,
                 aligned_by: "src".to_string(),
+                prefix: "by_source/".to_string(),
                 file_type: "parquet".to_string(),
             },
             AdjList {
                 ordered: true,
                 aligned_by: "dst".to_string(),
+                prefix: "by_target/".to_string(),
                 file_type: "parquet".to_string(),
             },
         ],

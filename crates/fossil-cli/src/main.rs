@@ -1,5 +1,4 @@
-//! `fossil` — the native CLI binary (`run` / `check` / `catalog` / `providers`
-//! / `refs`).
+//! `fossil` — the native CLI binary (`run` / `check` / `providers` / `refs`).
 //!
 //! A thin shell over [`fossil_engine`]: it parses args, reads files/stdin, calls
 //! the engine, and renders the result — rustc-style miette diagnostics for
@@ -17,13 +16,14 @@ compile_error!(
      do not add it to the WASM CI gate"
 );
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use fossil_base::{Diagnostic, Severity};
-use fossil_engine::{CatalogRequest, RunCreds};
+use fossil_engine::RunCreds;
 use fossil_run_status::RunStatus;
-use miette::{NamedSource, SourceSpan};
+use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource, SourceSpan};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -78,18 +78,6 @@ enum Commands {
         #[arg(long, value_name = "GIB", value_parser = gib_to_bytes)]
         memory_gib: Option<u64>,
     },
-    /// Materialise a DCAT-AP catalog graph (`GraphAr`) from a `CatalogInput`
-    /// piped on stdin. The host supplies governance values + the run's dataset
-    /// structure; fossil owns the DCAT-AP shape and writes it via the `run` writer.
-    Catalog {
-        /// Destination URL for the `GraphAr` catalog output. The dest cloud secret
-        /// (if any) rides the stdin payload.
-        #[arg(long)]
-        dest: String,
-        /// Emit the `RunStatus` JSON on stdout (consumed by the keasy host).
-        #[arg(long)]
-        output_json: bool,
-    },
     /// List the data-source providers fossil supports (the `io.*` source
     /// constructors). The host reads this to populate its connector UI.
     Providers {
@@ -109,7 +97,43 @@ enum Commands {
     },
 }
 
+/// Pin the diagnostic theme so a rendered diagnostic is the same text under a
+/// terminal, under a pipe and under CI.
+///
+/// miette's `GraphicalTheme::default()` decides BOTH halves of the theme from
+/// one question — `!stdout().is_terminal() || !stderr().is_terminal()` — and
+/// answers it with `GraphicalTheme::none()`, which is ASCII box-drawing AND no
+/// colour. So the frame a diagnostic draws changes with how the process was
+/// invoked: `╭─[file:6:12]` interactively and `,-[file:6:12]` through a pipe,
+/// from the same binary on the same input. Any golden over that text is pinned
+/// to the ambient environment rather than to the compiler, and
+/// `check_diagnostics.rs` was: it passed run-to-run and failed under a captured
+/// harness, differing in nothing but the glyphs.
+///
+/// The two halves are separated here, because only one of them is ambient by
+/// right. **Colour** genuinely depends on the terminal, and on `NO_COLOR` —
+/// that stays. **Glyphs** do not: unicode always, so the frame is a constant.
+/// `crates/fossil-engine/tests/programs.rs` reached the same conclusion for the
+/// same reason and pins `unicode_nocolor()` for its committed artefacts; this
+/// is that decision moved to where the CLI actually renders, so the two agree
+/// by construction instead of by coincidence.
+fn install_diagnostic_theme() {
+    let no_color = matches!(std::env::var("NO_COLOR"), Ok(s) if s != "0");
+    let colour = !no_color && std::io::stderr().is_terminal();
+    let theme = if colour {
+        GraphicalTheme::unicode()
+    } else {
+        GraphicalTheme::unicode_nocolor()
+    };
+    // `set_hook` fails only if a report was already rendered or a hook already
+    // installed; this runs first thing in `main`, so neither can have happened.
+    let _ = miette::set_hook(Box::new(move |_| {
+        Box::new(GraphicalReportHandler::new_themed(theme.clone()))
+    }));
+}
+
 fn main() -> miette::Result<()> {
+    install_diagnostic_theme();
     miette::set_panic_hook();
     let cli = Cli::parse();
     init_tracing(cli.verbose);
@@ -123,10 +147,6 @@ fn main() -> miette::Result<()> {
             creds_stdin,
             memory_gib,
         } => cmd_run(&file, &dest, output_json, creds_stdin, memory_gib),
-        Commands::Catalog { dest, output_json } => {
-            let req = CatalogRequest::from_stdin().map_err(|e| miette::miette!(e))?;
-            cmd_catalog(&dest, output_json, &req)
-        }
         Commands::Providers { output_json } => cmd_providers(output_json),
         Commands::Refs { file, output_json } => cmd_refs(&file, output_json),
     }
@@ -168,7 +188,7 @@ fn cmd_providers(output_json: bool) -> miette::Result<()> {
 }
 
 /// `fossil check`: render each accumulated diagnostic rustc-style via miette;
-/// exit non-zero iff any `Severity::Error` was accumulated (CLI-02 / SC#1).
+/// exit non-zero iff any `Severity::Error` was accumulated.
 fn cmd_check(path: &Path) -> miette::Result<()> {
     let outcome = fossil_engine::check(path)?;
     let named = NamedSource::new(path.to_string_lossy(), outcome.source);
@@ -236,13 +256,6 @@ fn cmd_run(
         RunCreds::default()
     };
     let status = fossil_engine::run(path, dest, &creds, memory_bytes)?;
-    report(&status, output_json);
-    Ok(())
-}
-
-/// `fossil catalog`: materialise the DCAT-AP graph, then report.
-fn cmd_catalog(dest: &str, output_json: bool, req: &CatalogRequest) -> miette::Result<()> {
-    let status = fossil_engine::catalog(dest, req)?;
     report(&status, output_json);
     Ok(())
 }
@@ -346,7 +359,7 @@ fn init_tracing(verbose: bool) {
         .with_env_filter(filter)
         .with_target(false)
         // Logs go to STDERR: stdout is the machine-readable channel (`--output-json`
-        // for run/refs/providers/catalog), and a host parsing it as JSON must see
+        // for run/refs/providers), and a host parsing it as JSON must see
         // ONLY the payload. `fmt()` defaults to stdout, which corrupts that contract
         // under `RUST_LOG=debug` (keasy's `POST /v1/refs` choked on the salsa trace).
         .with_writer(std::io::stderr)
