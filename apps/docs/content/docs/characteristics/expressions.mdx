@@ -1,115 +1,92 @@
 ---
 title: What an expression is
-description: The parser builds fifteen kinds of expression node and the HIR has four. Everything else that looks broken in the compiler is downstream of that, and it fails silently.
+description: A pure function of one row — literals, a qualified column reference, a call into the catalogue, arithmetic, comparison, negation, the ternary, and the edge constructor. Twelve forms in the HIR, and every node the parser builds has one.
 direction:
-  summary: An expression is a total function of one row — calls into the value library, comparisons and conditionals, and the pipeline operators — which makes the HIR eight forms, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
+  summary: An expression is a total function of one row — a call into the value library, an operator, a conditional — so it compiles to exactly one SQL expression, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
   arguedIn: /docs/design/generic-functions
 today:
-  summary: All four forms landed on 2026-08-07 — `call`, `comparison` with the integer literal it needed, `conditional`, and `|>` in value position as sugar over `call`. The 56 stdlib functions are reachable and `render` in the backend is total. Arithmetic is the one form still dropped, loudly; the SOURCE-level pipeline is a relation rather than a value and belongs to F5.
+  summary: Every expression node the parser builds has a lowering arm — `HirExpr` carries twelve forms, and the fallback that used to swallow an expression in silence is a diagnostic only the parser's own error node reaches — and of the 35 catalogued functions an expression may call, 23 render on the DataFusion backend and the twelve that do not are pinned in a list a test compares against what actually fails.
   backedBy: crates/fossil-hir/src/lower.rs
 ---
 
-## The cliff
+## An expression is a function of one row
 
-`HirExpr` is this, entire:
-
-```rust
-pub enum HirExpr {
-    Template(SmolStr),          // a backtick template, raw text
-    FieldRef(SmolStr),          // .id
-    StringLit(SmolStr),
-    PrefixedName { iri: SmolStr },
-}
-```
-
-The parser, meanwhile, produced `BINARY_EXPR`, `UNARY_EXPR`, `TERNARY_EXPR`, `PAREN_EXPR`,
-`ARG_LIST`, `ARG`, `RECORD_LITERAL`, `TRIPLE_TERM`, `IMPORT`, `SELECTIVE_IMPORT`, `SHAPE_EXPR`,
-`IN_CLAUSE` and `ALIAS`.
-
-Grepping `crates/fossil-hir/` for any of those node kinds returned **zero**. The lowering read four
-and dropped the rest. That list is the subject of the section at the bottom of this page: most of
-those node kinds no longer exist.
-
-## It used to fail silently. That part is fixed
-
-Measured on the morning of 2026-08-06, with the binary built from the tree, over
-`examples/users.csv`. Three programs identical but for the value of one property:
-
-| the mapping says | `fossil check` | `fossil run` | column in the corpus |
-| --- | --- | --- | --- |
-| `ex:name = .name` | ok | *wrote 1 vertex type* | **`name`** |
-| `ex:slug = clean.slug(.name)` | **ok** | *wrote 1 vertex type* | **none** — until `call` landed on 2026-08-07; now `slug` |
-| `ex:doble = .id * 2` | **ok** | *wrote 1 vertex type* | **none** — arithmetic is still the one form with no MIR operator to carry it |
-
-<Callout type="warn" title="This was the failure mode the whole project exists to prevent">
-The compiler declared success and wrote a corpus with the property missing, emitting no diagnostic
-at any stage. Silent data loss, in the type system's own blind spot — the checker raised nothing
-because the HIR never saw the expression.
-</Callout>
-
-**Fixed the same afternoon.** The fallback arm of the lowering is now a diagnostic that quotes the
-source text and points at it:
-
-```
-× `clean.slug(.name)` is not an expression fossil can lower yet, so this
-│ property will not be written to the corpus. A property value may be a
-│ template, a field reference, a string literal or a prefixed name.
-│ (parsed as POSTFIX_EXPR)
-   ╭─[t.fossil:7:15]
- 7 │     ex:slug = clean.slug(.name)
-   ·               ────────┬────────
-   ·                       ╰── here
-```
-
-<Callout title="Then the first of the four forms landed">
-`call` is in the HIR since 2026-08-07: the property above now type-checks against the
-catalog, lowers to `Expr::Call`, and writes its column — `a_call_produces_its_column` asserts the
-values, not the plan. The diagnostic above still stands for the three forms that remain, and its
-regression test moved with it: `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop` now
-pins `.age >= 18`, and moves again when `comparison` lands. The day there is no form left it is
-deleted, not weakened.
-</Callout>
-
-The pipeline was already the one exception: `adultos := users |> where(.id > 1)` fails with a type
-error rather than a drop.
-
-## Three symptoms, one cause
-
-Until this was measured, these were counted as three separate problems:
-
-- **The 56 stdlib functions cannot be invoked.** Not for want of syntax — for want of an HIR that
-  carries them. **Closed on 2026-08-07:** the catalog moved to `crates/fossil-hir/src/stdlib.rs`
-  (it could not be read from the checker while it was a crate that depended on the checker), and
-  46 of the 56 run on this engine — `crates/fossil-df/src/stdlib.rs` pins which ten do not, and why.
-- **`Expr::{LitBool, Call, BinOp}` are never constructed**, and the backend answered
-  `unimplemented!()` for all three. **Closed on 2026-08-07:** all three are constructed and
-  rendered, and `render` in `crates/fossil-df/src/lib.rs` is total — there is no `unimplemented!()`
-  left to reach, which is what makes a property that type-checks a property that runs.
-- **The lowering emits four of the fourteen MIR operators** — `Source`, `EmitVertex`, `EmitEdge`,
-  `Sink` — so **all ten rewrite rules are unreachable**. `rewrite()` runs in production
-  (`crates/fossil-mir/src/lower.rs:259`) and always returns its input.
-
-One cliff, at one boundary, explains all three. It is also why the operator algebra reads as
-oversized: it was never wrong, it was never reached.
-
-## Where this is going: eight forms, not fourteen
-
-The four that exist, plus:
-
-| form | what it is for |
-| --- | --- |
-| **call** ✅ | `clean.*` and `anon.*` — the value library that makes fossil more than RML. Landed 2026-08-07 |
-| **comparison** ✅ | the pipeline's filter, and the condition of a conditional. Landed 2026-08-07 with the integer literal it needs |
-| **conditional** ✅ | the ternary the parser already builds. Landed 2026-08-07, both branches one type, no coercion |
-| **pipeline operators** ✅ | `\|>` in value position is sugar over `call` (the LHS is the first argument), so there is no pipeline node in the HIR. The relational half is F5 — see [the pipeline](/docs/characteristics/pipeline) |
-
-Each is justified by something the language has to express. Nothing enters because the parser
-already accepts it.
+Everything a property, an identity or a predicate may say is a pure function of the single row in
+scope. That is the whole of the design, and every other property on this page follows from it: an
+expression terminates by construction, it has no state to carry between rows, and it compiles to
+exactly one SQL expression.
 
 <Callout title="Deliberately absent">
-There are no programs. No recursion, no loops, no user-defined functions. An expression is a pure
-function of **one row** and terminates by construction, which is also why every expression compiles
-to exactly one SQL expression.
+There are no programs. No recursion, no loops, no user-defined functions — the last of those is a
+ruling and not an omission (`grammar.bnf, § NOT IN MVP`): polymorphism lives in the library, and the
+user declares no functions.
+</Callout>
+
+## The forms, and the program that spells each
+
+`HirExpr` has twelve variants (`crates/fossil-hir/src/lower.rs:252`) — the nine forms below, which
+between them cover eleven, plus the bare-name column reference the surface is retiring. They are not
+a wish-list: each is spelled by a program in `apps/docs/programs/`, compiled by the production path
+rather than transcribed here.
+
+| form | what it is for | spelled by |
+| --- | --- | --- |
+| interpolated string | the identity slot, and any text composed from a row | `shop`, region `identity` |
+| qualified column reference | `User.email` — a column, named by the row it belongs to | `shop`, region `properties` |
+| string, integer, float and boolean literals | a constant property | `expressions`, region `literals` |
+| call | the value library, reached as `str.trim(x)` or as `x.trim()` | `expressions`, region `two-paths` |
+| edge constructor | `Person(User.email)` — the `Person` whose identity is built from this email | `shop`, region `edge` |
+| arithmetic | `Row.gross - Row.discount`, left-associative | `arithmetic` |
+| comparison, `and`, `or` | a filter's predicate, and the condition of a conditional | `disjunction` |
+| unary minus and `not` | negation in either position | `negation` |
+| ternary | the conditional, both branches one type, no coercion | `ternary` |
+
+The access operator is the dot and there is only one of it (`grammar.bnf, PostfixExpr`): what is on
+the left decides what the members are — a namespace gives its functions, a type its fields, a value
+its type's operations, a relation its verbs.
+
+### One catalogue row, two ways to reach it
+
+`str.lower(str.trim(x))` and `x.trim().lower()` are the same row read twice, not two ideas — the way
+`s.len()` is `str::len(&s)` in Rust. The cost was accepted knowingly when the rule was taken: the
+corpus contains both spellings, on purpose, so that the equivalence is demonstrated rather than
+asserted.
+
+<Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
+
+The catalogue is 51 rows: thirteen relation verbs, three source constructors, and **35 functions an
+expression may call**. Twenty-three of the 35 render on the DataFusion backend. The twelve that do
+not are listed in `crates/fossil-df/src/stdlib.rs:85` with the cause beside each — five because
+DataFusion has no way to raise from an expression, four because an aggregate is not a scalar call at
+all, two because the function lives in an optional package this crate does not register, and one
+because DataFusion ships no JSON extraction. A test renders every row's template and compares what
+fails against that list, so a function becoming reachable — or stopping — is a diff there and not a
+surprise in someone's program.
+
+## The drop is loud, and that is the guarantee
+
+This is the failure mode the whole project exists to prevent: the compiler declaring success and
+writing a corpus with a property missing, no diagnostic at any stage. It happened. The lowering read
+a handful of node kinds and dropped the rest, and the checker raised nothing because the HIR never
+saw the expression.
+
+The fallback arm is a diagnostic now — it quotes the source text, points at it, and names the node
+kind the parser built. And what can still reach it has shrunk to one thing: every `*_EXPR` kind the
+parser produces has an arm, so nothing a **well-formed parse** yields falls through, and what arrives
+at the fallback is the parser's own `ERROR` node. In practice that is a retired spelling, which is
+the commonest way to reach it while the surface is still being replaced.
+
+`an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`
+(`crates/fossil-hir/src/lower.rs:2840`) pins it, and it has outlived two fixtures: it was written
+against `doble = .id * 2`, and both halves of why that was unlowerable have gone. Arithmetic has an
+operator and lowers like every other binary expression
+(`crates/fossil-hir/src/lower.rs:2885`); the leading `.` is not a form the parser reads. The test
+survives because the guarantee it pins is the drop being **loud**, not the fixture being unlowerable.
+
+<Callout title="Two claims a reader should not merge">
+A call type-checks against the catalogue and writes its column —
+`crates/fossil-df/tests/expressions.rs:42` asserts the values, not the plan. That a call *runs* is
+not the same as every catalogued function running: see the twelve above.
 </Callout>
 
 ## What leaves
@@ -124,8 +101,8 @@ can be: the workspace tests, and `fossil run examples/hello.fossil` writing a by
 Seven more went on 2026-08-11, and the list is now short. **`$VAR`** and the **triple term**
 (`<< s p o >>`, the pre-1.2 spelling — see [RDF 1.2](/docs/characteristics/rdf12)) left first.
 Then: the **`in g`** named-graph clause, which the corpus has nowhere to put; the **`&` shape
-intersection**, which was not merely unread but *lossy* — `User : ex:Person & ex:Employee`
-type-checked and emitted `ex:Person` alone, because the lowering took the first IRI and dropped
+intersection**, which was not merely unread but *lossy* — a header declaring two shapes type-checked
+and emitted the first alone, because the lowering took one IRI and dropped
 the rest with no diagnostic; the **annotation block** and the **record
 literal** in value position, which went together because they were the two readings of one `{`;
 `use` with its path, selective import and alias, which stay dead until there is a module system for
@@ -133,23 +110,32 @@ a name to come from; and `T_COLON`, which the grammar
 declared as a terminal and the lexer never emitted — the ternary's `:` is the same `SHAPE_SEP`
 the mapping header takes.
 
-Two of the thirteen were not dead surface but **holes**, and they were fixed rather than deleted.
-`PAREN_EXPR` had no arm in the lowering, so `(.a and .b)` was refused by the fallback diagnostic in
-a language that already lowers `and` and `or` — grouping is not a form, so the arm unwraps to the
-expression inside. `UNARY_EXPR` is the one still open: `not …` parses and there is no `HirExpr`
-variant to lower it to, and adding one is a decision about the HIR, not a missing arm.
+Two of the thirteen were not dead surface but **holes**, and both were fixed rather than deleted.
+`PAREN_EXPR` had no arm, so `(Row.a and Row.b)` was refused by the fallback in a language that
+already lowers `and` and `or` — grouping is not a form, so the arm unwraps to the expression inside.
+`UNARY_EXPR` was the one that stayed open longest, because `not …` parsed with no `HirExpr` variant
+to lower it to; adding one was a decision about the HIR rather than a missing arm, and it was taken.
+`grammar.bnf, UnaryExpr` is the production, and `negation` is the program.
 
-`grammar.bnf` describes the language, not the parser's tolerance. Absorbing it into the reference
-section of the book is where that stops being a footnote and becomes the page's own subject.
-
-**Discarding in silence stopped being acceptable before any of this lands, and it already has.** That
-fix was smaller than the eight forms and independent of them — it converted the table above from
-silent loss into three errors on the day it was measured. Everything else on this page is still
-ahead.
+**`|>` left with them, and it is the one deletion a reader is most likely to have been told
+otherwise.** `a |> f()` was a second spelling of `a.f()`, and with member resolution by receiver
+type the pipeline operator had nothing left the dot could not do. It is not a token, there is no
+pipeline node in the HIR, and the parser refuses the operator by name. The leading dot went the same
+way: `.edad` named a column of an anonymous row, and the row has a name now, so a reference is
+qualified — `User.edad`. Both are tombstones in `grammar.bnf`, which describes the language rather
+than the parser's tolerance.
 
 ## What this does not settle
 
-- **Whether `join` is in the first version of the pipeline** or whether `where` and `select` are
-  enough. That answer comes from a real mapping, not from an argument.
-- **The order of the eight.** Call is the one the value library needs and the one the book is
-  blocked on; comparison and conditional come with the pipeline. Nothing forces all eight at once.
+- **The bare name.** A property may still write `id` where it means `User.id`, and the lowering
+  builds the anonymous-row form for it. That is two spellings for one idea, which this house does
+  not keep; the sequence ends by deleting the variant, and until it does the surface in this tree is
+  mid-move rather than finished.
+- **The twelve functions the DataFusion backend cannot render.** Two of them —
+  `anon.hash` and `str.split` — are one `SessionContext` registration away and nothing else; the
+  other ten each need a decision, and four of them (`math.sum`, `avg`, `min`, `max`) are not scalar
+  calls at all but [a pipeline with a group-by](/docs/characteristics/pipeline).
+- **Where the value library is written down.** The catalogue is Rust today and is meant to become a
+  file the compiler reads, so that adding a row stops touching the compiler at all. Nothing loads a
+  file yet, and that is deliberate: what the catalogue owes a loader is a shape it can fill, not a
+  parser it has to agree with.

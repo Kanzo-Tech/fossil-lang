@@ -1,0 +1,16 @@
+── type bindings ──
+Contact ← disjunction.shex = https://shop.example/voc#Contact
+
+── source bindings ──
+Row := io.csv(data/contacts.csv)
+Reachable := Row.where()
+
+── mappings ──
+Contacts: 3 written, 3 lowered
+    @subject
+    name
+    priority
+
+── run ──
+vertex Contact (https://shop.example/voc#Contact) × 3 — name, priority
+NO EDGE TYPE was written

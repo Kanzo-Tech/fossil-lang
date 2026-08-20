@@ -1,0 +1,37 @@
+  × [Error] `Row.operator.hash(salt = "lab")` calls `hash` on a value, and nothing in the
+  │ catalogue has a member called `hash`.
+    ╭─[expressions.fossil:28:16]
+ 27 │     // #region named-arguments
+ 28 │     operator = Row.operator.hash(salt = "lab")
+    ·                ───────────────┬───────────────
+    ·                               ╰── here
+ 29 │     taken_on = parse.date(Row.taken_on, format = "%Y-%m-%d")
+    ╰────
+
+  × [Error] argument 1 of `parse.date` expects String, but this is Date
+    ╭─[expressions.fossil:29:16]
+ 28 │     operator = Row.operator.hash(salt = "lab")
+ 29 │     taken_on = parse.date(Row.taken_on, format = "%Y-%m-%d")
+    ·                ──────────────────────┬──────────────────────
+    ·                                      ╰── here
+ 30 │     // #endregion named-arguments
+    ╰────
+
+  × [Error] argument 1 of `parse.float` expects String, but this is Float
+    ╭─[expressions.fossil:31:16]
+ 30 │     // #endregion named-arguments
+ 31 │     celsius  = parse.float(Row.celsius)
+    ·                ────────────┬───────────
+    ·                            ╰── here
+    ╰────
+
+  × [Error] this mapping never writes `operator`, and the shape it produces requires it (`https://
+  │ lab.example/voc#operator`). Add `operator = ` to the body.
+    ╭─[expressions.fossil:9:1]
+  8 │     
+  9 │ ╭─▶ Readings : Reading from Valid
+ 10 │ ├─▶     // #region interpolation
+    · ╰──── here
+ 11 │         @subject = "https://lab.example/reading/{Row.id}"
+    ╰────
+

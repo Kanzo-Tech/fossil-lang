@@ -1,0 +1,16 @@
+── type bindings ──
+Sensor ← negation.shex = https://lab.example/voc#Sensor
+
+── source bindings ──
+Row := io.csv(data/sensors.csv)
+Working := Row.where(?)
+
+── mappings ──
+Sensors: 3 written, 3 lowered
+    @subject
+    offset
+    healthy
+
+── run ──
+vertex Sensor (https://lab.example/voc#Sensor) × 3 — offset, healthy
+NO EDGE TYPE was written

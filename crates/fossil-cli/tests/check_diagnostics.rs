@@ -1,8 +1,8 @@
-//! `fossil check` golden-output test (CLI-02 / SC#1).
+//! `fossil check` golden-output test.
 //!
 //! Invokes the `fossil` binary on a deliberately-broken fixture — a
 //! `users.naem` column typo against a source whose header is `id,name,age`,
-//! which triggers the Phase-3 did-you-mean diagnostic — captures stderr, strips
+//! which triggers the did-you-mean diagnostic — captures stderr, strips
 //! ANSI color codes for a stable snapshot, and asserts:
 //!   1. the process exits non-zero (an error diagnostic was accumulated);
 //!   2. the rendered text shows a source-span label (`here`) AND a `help:`

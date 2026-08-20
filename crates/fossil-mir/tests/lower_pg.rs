@@ -5,11 +5,15 @@
 //! TIÑE el grafo en vez de sustituir un valor por defecto.
 
 #![cfg(not(target_arch = "wasm32"))]
+// Every `@subject` below is an interpolated string, and `{User.id}` is fossil's
+// hole, not a Rust format argument. The lint reads the Rust literal and cannot
+// know that.
+#![allow(clippy::literal_string_with_formatting_args)]
 
 use std::sync::Arc;
 
 use fossil_base::test_support::db_with_document_at;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
 use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use fossil_hir::def_map::def_map;
 use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
@@ -42,15 +46,13 @@ prop https://example.org/name - 1 1
 ";
 
 const HELLO: &str = "\
-prefix ex: <https://example.org/>
+type { Person } := io.shex(\"hello.shex\")
 
-type { Person } = io.shex(\"hello.shex\")
+User := io.csv(\"examples/users.csv\")
 
-users := io.csv(\"examples/users.csv\")
-
-User : ex:Person from users
-    @subject = `${ex:}user/${.id}`
-    name = .name
+People : Person from User
+    @subject = \"https://example.org/user/{User.id}\"
+    name = User.name
 ";
 
 #[test]
@@ -90,7 +92,7 @@ fn lower_pg_emits_source_vertex_sink() {
     let name = props
         .iter()
         .find(|p| p.name == "name")
-        .expect("the `name = .name` literal becomes a vertex prop");
+        .expect("the `name = User.name` column reference becomes a vertex prop");
     assert_eq!(
         name.rdf_uri.as_deref(),
         Some("https://example.org/name"),
@@ -101,25 +103,27 @@ fn lower_pg_emits_source_vertex_sink() {
 /// A mapping reading `from` a DERIVED binding must taint, not silently read
 /// some other file.
 ///
-/// `x := Source.where(...)` parses as a source definition (the parser
-/// classifies every top-level `IDENT :=` that way) but carries no `io.*`
-/// constructor and no URI. Lowering used to substitute `examples/users.csv` —
-/// so a mapping over `@upv/aemet.csv` executed against the walking-skeleton
-/// fixture instead, producing a full, plausible, entirely wrong graph. The
-/// substitution is gone: the graph is poisoned and carries no ops.
+/// Lowering used to substitute `examples/users.csv` for a source binding it
+/// could not resolve — so a mapping over a real connection executed against the
+/// walking-skeleton fixture instead, producing a full, plausible, entirely
+/// wrong graph. The substitution is gone: the graph is poisoned and carries no
+/// ops.
+///
+/// What moved is WHERE the unresolvable name sits. `x := Source.where(...)`
+/// was the fixture because it parsed as a source definition carrying no `io.*`
+/// constructor; `where` is a pipeline verb the lowering walks now
+/// (`lower_source_chain`), so a derived binding resolves through to its base
+/// and the unresolvable name is that base. The recursion is the part worth
+/// pinning: an error under a pipeline has one more frame to be swallowed in
+/// than an error at the top, and `lower_source_chain` propagates it.
 #[test]
-#[allow(clippy::literal_string_with_formatting_args)] // `${ex:}` is template syntax, not a Rust format arg
 fn derived_binding_poisons_instead_of_defaulting() {
     let src = "\
-prefix ex: <https://example.org/>
-
-Rows := io.csv(\"@conn/real.csv\")
-
 filtered := Rows.where(Rows.kind == \"https://example.org/wanted\")
 
-Thing : ex:Thing from filtered
-    @subject = `${ex:}thing/${.id}`
-    name = .name
+Thing : Thing from filtered
+    @subject = \"https://example.org/thing/{Rows.id}\"
+    name = Rows.name
 ";
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
@@ -139,35 +143,42 @@ Thing : ex:Thing from filtered
         mir.ops(&db).is_empty(),
         "a poisoned graph carries no ops, so nothing can execute it by accident"
     );
-    // The specific regression: never reach for the fixture path.
-    for op in mir.ops(&db) {
-        if let Op::Source { uri, .. } = op {
-            assert_ne!(
-                uri.as_str(),
-                "examples/users.csv",
-                "the Phase-1 default is gone"
-            );
-        }
-    }
+    // The specific regression, and it is asserted on the DIAGNOSTIC rather
+    // than on the ops. A loop over `ops` looking for `examples/users.csv` is
+    // what stood here, and it ran zero times against the empty vec the
+    // assertion above had just demanded — a guard that reads as a guard and
+    // proves nothing. The message is the only observable that distinguishes
+    // «poisoned because the source did not resolve» from «poisoned because the
+    // body failed to type-check», and the two would both satisfy every
+    // assertion above.
+    let diags = lower_to_mir_pg::accumulated::<Diagnostic>(&db, mapping);
+    let refusal = "`Rows` is not a declared source binding";
+    assert!(
+        diags.iter().any(|d| d.message.contains(refusal)),
+        "the refusal names the binding that did not resolve, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+    );
 }
 
 // `EDGES` + `lower_pg_classifies_edge_vs_prop` lived here, and what they proved
 // is worth writing down because it has to be re-proved against the constructor.
 //
 // Given two mappings over two sources — `Person` keyed
-// `@subject = `${ex:}person/${.id}`` and `Order` keyed
-// `@subject = `${ex:}order/${.order_id}`` — the `Order` body wrote three
-// non-identity properties and the lowering sorted them three ways:
+// `@subject = "https://example.org/person/{User.id}"` and `Order` keyed
+// `@subject = "https://example.org/order/{Purchase.order_id}"` — the `Order`
+// body wrote three non-identity properties and the lowering sorted them three
+// ways:
 //
-//   * `placedBy = `${ex:}person/${.user_id}`` → `Op::EmitEdge { edge_type:
-//     "placedBy", dst_type: "Person" }`. The template's SKELETON
-//     (`https://example.org/person/{}`, every per-row hole replaced by a
-//     marker) equalled the skeleton of `Person`'s subject, so the value was
-//     taken to be a reference to a `Person`.
-//   * `total = .amount` → a vertex prop. `EmitVertex`'s props were exactly
-//     `["total"]`.
-//   * `external = `${ex:}widget/${.wid}`` → NEITHER. A template whose skeleton
-//     matched no mapping's subject was dropped: no edge, and not a prop either.
+//   * `placedBy = "https://example.org/person/{Purchase.user_id}"` →
+//     `Op::EmitEdge { edge_type: "placedBy", dst_type: "Person" }`. The
+//     template's SKELETON (`https://example.org/person/{}`, every per-row hole
+//     replaced by a marker) equalled the skeleton of `Person`'s subject, so the
+//     value was taken to be a reference to a `Person`.
+//   * `total = Purchase.amount` → a vertex prop. `EmitVertex`'s props were
+//     exactly `["total"]`.
+//   * `external = "https://example.org/widget/{Purchase.wid}"` → NEITHER. A
+//     template whose skeleton matched no mapping's subject was dropped: no
+//     edge, and not a prop either.
 //
 // That mechanism is deleted (see the tombstone at `fossil_mir::lower`'s
 // `subject_skeletons`): an edge was GUESSED by comparing strings, and the guess
@@ -187,21 +198,20 @@ Thing : ex:Thing from filtered
 
 // ── Schema-driven refinement (GraphSchema → edges + cardinality) ────────────
 
-// An io.rdf mapping: the reference property `ex:hasProject` is written as a
-// plain `FieldRef` (`.hasProject`), so the agnostic lowering CANNOT tell it from
-// a literal column — only the graph schema knows it's an edge to `Project` (and
-// multi-valued). This is the run_rdf.rs case at the MIR level.
+// An io.rdf mapping: the reference property `hasProject` is written as a plain
+// qualified column reference (`Graph.hasProject`), so the agnostic lowering
+// CANNOT tell it from a literal column — only the graph schema knows it's an
+// edge to `Project` (and multi-valued). This is the run_rdf.rs case at the MIR
+// level.
 const KB_FOSSIL: &str = "\
-prefix ex: <https://ex.org/>
+type { KB } := io.shex(\"kb.shex\")
 
-type { KB } = io.shex(\"kb.shex\")
+Graph := io.rdf(\"graph.ttl\")
 
-kb := io.rdf(\"graph.ttl\")
-
-KB : ex:KB from kb
-    @subject = .subject
-    label = .label
-    hasProject = .hasProject
+Facts : KB from Graph
+    @subject = Graph.subject
+    label = Graph.label
+    hasProject = Graph.hasProject
 ";
 
 /// `KB`'s output contract. It declares the two predicates the body writes, so
@@ -263,7 +273,7 @@ fn apply_output_shape_reclassifies_shape_ref_to_edge() {
     let kb = *def_map(&db, file)
         .mappings(&db)
         .first()
-        .expect("KB is the first mapping");
+        .expect("`Facts` is the first mapping");
 
     // Agnostic: both `label` and `hasProject` look like literal columns.
     let agnostic = lower_to_mir_pg(&db, kb);

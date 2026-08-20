@@ -1,9 +1,10 @@
-//! `fossil-lsp` — the native LSP transport (Phase 6 LSP-01).
+//! `fossil-lsp` — the native LSP transport.
 //!
 //! Wires the LSP server from day 1, so Fossil avoids the parser-and-typecheck
-//! first, integration-last trap that killed the predecessor project. Phase 6 LSP-01 grows the stub
-//! into the full transport: it advertises and serves the complete capability
-//! set, each handler being a thin adapter over a `fossil-ide` free function:
+//! first, integration-last trap that killed the predecessor project. It started
+//! as a transport-only stub and is now the full transport: it advertises and
+//! serves the complete capability set, each handler being a thin adapter over a
+//! `fossil-ide` free function:
 //!
 //! - `initialize` → [`ServerCapabilities`] advertising `TextDocumentSync::FULL`,
 //!   `hover_provider`, `definition_provider`, `completion_provider` (trigger
@@ -287,8 +288,8 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
-/// The full Phase-6 LSP-01 capability set. Each provider is backed by a thin
-/// `fossil-ide` adapter in [`handle_request`].
+/// The full capability set the server advertises. Each provider is backed by a
+/// thin `fossil-ide` adapter in [`handle_request`].
 fn server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
@@ -325,7 +326,7 @@ fn init_tracing() {
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("fossil=info"));
     // `try_init` so a second call (e.g. from a test harness) is a no-op rather
-    // than a panic, mirroring the fossil-cli pattern from plan 01-07.
+    // than a panic, mirroring the fossil-cli pattern.
     let _ = fmt()
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
@@ -657,7 +658,7 @@ fn handle_notification(
 
 /// Run `parse → def_map → typecheck_mapping` and drain the Salsa `Diagnostic`
 /// accumulator across every mapping (the same pattern as the `fossil check`
-/// CLI, plan 06-02). Returns the structured `fossil_base::Diagnostic`s.
+/// CLI). Returns the structured `fossil_base::Diagnostic`s.
 fn diagnostics_for(db: &LspDb, file: SourceFile) -> Vec<Diagnostic> {
     let def_map = fossil_hir::def_map::def_map(db, file);
     let mappings = def_map.mappings(db);

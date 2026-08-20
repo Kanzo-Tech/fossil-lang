@@ -1,13 +1,14 @@
-// Phase 7 plan 07-02 — WASM Workspace lifecycle smoke (WASM-02 / SC#5 first half).
+// WASM Workspace lifecycle smoke.
 //
-// Companion to test-wasm.js (Phase 1) — verifies the ty_wasm-shaped lifecycle
+// Companion to test-wasm.js — verifies the ty_wasm-shaped lifecycle
 // (open_file / update_file / close_file / check / compile_file /
 // diagnostics_for) round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
 // `crates/fossil-wasm/tests/workspace.rs` (catches API regressions on every
 // PR without needing the wasm-bindgen toolchain); this script is the
 // JS-side rehearsal that proves wasm-bindgen serialization actually works
-// in node ≥18 — the requirement SC#5 calls out ("testable from node").
+// in node ≥18: the workspace surface has to be testable from node, not only
+// from a browser.
 //
 // Build precondition:
 //   cargo build --release --target wasm32-unknown-unknown -p fossil-wasm
@@ -17,10 +18,10 @@
 // Run:
 //   node crates/fossil-wasm/test-wasm-workspace.js
 //
-// NOTE: this is the same `--target nodejs` bindgen target as Phase 1
-// `test-wasm.js` (CommonJS-friendly, `require('fs')`-based .wasm loading) —
-// distinct from playground-poc/'s `--target web` artefact. Both come from
-// the same .wasm binary; only the generated JS shim differs.
+// NOTE: this is the same `--target nodejs` bindgen target as `test-wasm.js`
+// (CommonJS-friendly, `require('fs')`-based .wasm loading) — distinct from the
+// `--target web` artefact the browser packages consume. Both come from the same
+// .wasm binary; only the generated JS shim differs.
 
 'use strict';
 

@@ -46,7 +46,7 @@ register before assuming the compiler has arrived there.
 
 ## What runs today
 
-`fossil` has five subcommands — `check`, `run`, `catalog`, `providers`, `refs`
+`fossil` has four subcommands — `check`, `run`, `providers`, `refs`
 (`crates/fossil-cli/src/main.rs`; `--help` on each is authoritative).
 
 The end-to-end one, against the walking-skeleton fixture in `examples/`:
@@ -68,8 +68,11 @@ Five `Person` vertices, subjects `https://example.org/user/1` … `/5`.
 `crates/fossil-cli/tests/walking_skeleton.rs` asserts that content — not merely
 that files appeared — and is the test that goes red if it stops holding.
 
-`examples/hello.fossil` does not yet spell what `grammar.bnf` specifies; the
-conformance programs under `apps/docs/programs/` do.
+`examples/hello.fossil` is a CLI fixture, not a conformance program: it is the
+one thing that drives the *binary* end to end and asserts the GraphAr dataset on
+disk by content. The language itself is proved by the conformance programs under
+`apps/docs/programs/`, which `crates/fossil-engine/tests/programs.rs` compiles
+and the documentation transcludes.
 
 ## Foundations
 

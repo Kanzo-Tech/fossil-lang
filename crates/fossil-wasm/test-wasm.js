@@ -1,4 +1,4 @@
-// Phase 1 WASM smoke test (Plan 01-09 / RESEARCH.md Example 18).
+// WASM smoke test.
 //
 // Run after:
 //   cargo build --release --target wasm32-unknown-unknown -p fossil-wasm
@@ -6,13 +6,13 @@
 //     --out-dir crates/fossil-wasm/pkg --target nodejs
 //
 // Asserts that compile() returns SQL containing COPY and 'output.parquet'
-// and a manifest mentioning graphar_version (Phase 1 success criterion #3).
+// and a manifest mentioning graphar_version.
 //
 // NOTE: this is a DIFFERENT bindgen target (`--target nodejs`, CommonJS-
-// friendly with `require('fs')`-based .wasm loading) than playground-poc/
-// from Phase 0 (`--target web`, which uses the browser fetch+instantiate
-// pattern). Both are produced from the same fossil_wasm.wasm binary; the
-// generated JS shim differs.
+// friendly with `require('fs')`-based .wasm loading) than the `--target web`
+// artefact the browser packages consume, which fetches and instantiates the
+// .wasm itself. Both are produced from the same fossil_wasm.wasm binary; only
+// the generated JS shim differs.
 
 'use strict';
 

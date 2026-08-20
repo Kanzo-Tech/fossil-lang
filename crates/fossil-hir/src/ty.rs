@@ -1,6 +1,6 @@
 //! Type ADT.
 //!
-//! The surface kinds (type-system.md §2) + 1 internal `Unknown(InferenceId)`
+//! The surface kinds + 1 internal `Unknown(InferenceId)`
 //! kind for bidirectional checker state. The
 //! internal kind is never exposed in surface diagnostics; it appears only
 //! during checking-in-flight.
@@ -31,8 +31,9 @@ use smol_str::SmolStr;
 
 /// Type pretty-printing.
 ///
-/// The single source of truth for rendering Fossil types (promoted here from
-/// `fossil-ide::hover` in Phase 3 plan 03-05).
+/// The single source of truth for rendering Fossil types. It lives here and
+/// not in `fossil-ide::hover`, where it was written, because the checker's
+/// diagnostics render types too and the checker is below the IDE.
 pub mod display;
 
 /// Interned type handle. Two equal-shaped types share a single `Ty<'db>` id —
@@ -46,9 +47,10 @@ pub struct Ty<'db> {
 /// Every type kind the compiler can build.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum TyKind<'db> {
-    /// Primitive types per type-system.md §2 line 41-42 (9 variants).
+    /// Primitive types — the lattice [`fossil_graph_schema::Primitive`]
+    /// declares, and the only one in the tree.
     Primitive(Primitive),
-    /// `T*` — sequence / repeated, type-system.md §2.
+    /// `T*` — sequence / repeated.
     Seq(Ty<'db>),
     /// Tabular row type — interned separately for fast equality.
     Record(Record<'db>),

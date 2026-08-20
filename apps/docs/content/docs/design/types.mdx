@@ -89,6 +89,26 @@ the wrong contract, or filling the right one with the wrong values, remains your
 shape the mapping targets. A graph can be type-correct against one shape and violate another, and
 fossil is not the arbiter of which shape a downstream consumer expects.
 
+**And it does not yet promise that the two sides of a `join` have the same type.** This one is a gap
+rather than a boundary, and it is written here rather than left to be discovered. A join's `on`
+condition is checked for the existence of every column it names, under the binding that qualifies it,
+and for nothing else — so `Orders.person_id == People.person_id` with an `Integer` on one side and a
+`String` on the other compiles, and the engine underneath equates them by coercion or refuses at run
+time. The rule that used to cover it — *the key must be the same type on both sides* — was written
+when the condition was a **key named once**, `USING (k)`, where one column compared with itself made
+sameness free. Making the condition an ordinary predicate is what removed the guarantee, and the rule
+was not rewritten for the new shape. The tree records this in the header of
+`crates/fossil-hir/tests/source_pipeline_row.rs` rather than in an assertion, deliberately: a test
+that pinned today's acceptance would make the gap the contract.
+
+It is not part of checking against a shape. It sits on the **source** side, in the row algebra, above
+any shape document and reached by a program that names none — which is why it is a separate change
+with a separate criterion: an equality between two qualified column references is an error unless the
+two column types are compatible under the same subtyping rules a property assignment uses. The
+general form of that rule — typing the whole `on` predicate as `Bool`, the way
+[`Filter`'s premise](/docs/design/algebra) is typed — is [not what to build
+first](/docs/design/discarded).
+
 What is left after those three subtractions is still the whole of the class of errors that a
 mapping language traditionally discovers by producing a bad graph: names that do not resolve, values
 of the wrong kind, and obligations of the contract left unmet.

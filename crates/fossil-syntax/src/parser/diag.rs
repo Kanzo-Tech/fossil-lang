@@ -67,9 +67,10 @@ impl ParseDiagnostic {
         match self {
             // Parse diagnostics carry neither a structured suggestion source
             // nor a did-you-mean candidate (Markdown-only hints today). Those
-            // structured fields are reserved for the OneOf-rejection emitter
-            // (plan 03-05) and the did-you-mean quick-fix (plan 06-08); built
-            // via the `Diagnostic::new` builder so future field additions stay
+            // structured fields belong to the `ShEx` `OneOf`-rejection emitter
+            // and the did-you-mean quick-fix, which have a replacement to
+            // propose; a parse error has only a position. Built via the
+            // `Diagnostic::new` builder so future field additions stay
             // non-breaking here.
             Self::ExpectedToken { want, got, span } => Diagnostic::new(
                 Severity::Error,

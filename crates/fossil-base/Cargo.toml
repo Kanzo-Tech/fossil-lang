@@ -30,11 +30,10 @@ test-support = []
 salsa = { workspace = true }
 thiserror = { workspace = true }
 smol_str = { workspace = true }
-# Phase 13 INPUT-01 — the `System` trait hands out a
+# The `System` trait hands out a
 # `&fossil_descriptors_input::DescriptorCache`, keyed by the source URI the
-# program writes. Verified
-# (plan 13-02 Task 0): fossil-descriptors-input has NO dependency on
-# fossil-base — no cycle. The fossil-base → fossil-descriptors-input
+# program writes. Verified before adding it: fossil-descriptors-input has NO
+# dependency on fossil-base — no cycle. The fossil-base → fossil-descriptors-input
 # direction matches the existing fossil-hir → fossil-descriptors-input
 # direction; descriptors-input remains a leaf data crate.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }

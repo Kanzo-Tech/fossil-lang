@@ -138,7 +138,7 @@ pub struct AstIdEntry {
 /// Build the per-file `AstIdMap` by walking top-level CST children once. Body
 /// content is NOT inspected — that's the invalidation-barrier guarantee.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdMap<'db> {
     let cst = fossil_syntax::parse(db, file);
     let mut entries: Vec<AstIdEntry> = Vec::new();

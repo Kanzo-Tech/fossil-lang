@@ -4,11 +4,11 @@
 //!
 //! - [`tokenize_native`] — pure-Rust `Vec<TokenRow>` mirror. Cargo-test reachable
 //!   without a `JS` runtime (`wasm-bindgen` intrinsics panic on native — see
-//!   lib.rs header for the `*_native` precedent from 07-02).
+//!   the lib.rs header for the `*_native` precedent).
 //! - [`tokenize`] — `#[wasm_bindgen]` `JS`-facing wrapper. Serialises
 //!   `Vec<TokenRow>` to `JsValue` via `serde_wasm_bindgen`. Throws `JsError` on
 //!   serialisation failure (extremely rare — the rows are plain numbers).
-//! - [`semantic_legend`] — re-exports the Phase-6 06-07 semantic-token legend
+//! - [`semantic_legend`] — re-exports `fossil-ide`'s semantic-token legend
 //!   over the `wasm-bindgen` boundary so `CodeMirror` (in
 //!   `@fossil-lang/codemirror-fossil`) can map LSP `semanticTokens` responses
 //!   to highlight categories.
@@ -25,15 +25,17 @@
 //! - REORDERING existing variants is a BREAKING CHANGE for
 //!   `@fossil-lang/codemirror-fossil` consumers (the tag table maps numeric kind
 //!   → `CodeMirror` tag and is keyed on the discriminant). The tag table lives
-//!   in `packages/codemirror-fossil/src/tags.ts` (plan 08-08) and MUST be
-//!   updated in lockstep with any reorder.
+//!   in `packages/codemirror-fossil/src/tags.ts` and MUST be updated in
+//!   lockstep with any reorder.
 //!
 //! ## Salsa boundary
 //!
 //! `tokenize` does NOT enter the Salsa graph. It is a plain function over
-//! `&str` — no `&dyn Db`, no interning, no tracked query. This is intentional
-//! per CONTEXT.md "Architectural invariants": `MAX_PER_MAPPING_FAN_OUT=1`
-//! stays at 1; no new Salsa fan-out lands.
+//! `&str` — no `&dyn Db`, no interning, no tracked query. That is deliberate:
+//! the compiler holds `MAX_PER_MAPPING_FAN_OUT = 1`, meaning at most one
+//! tracked query re-executes per mapping when a file changes, and a tracked
+//! query added here would multiply against every mapping in the file for a
+//! result that is already a pure function of the text the editor just typed.
 
 use fossil_syntax::lexer::raw_lex;
 use serde::Serialize;
@@ -79,7 +81,7 @@ pub fn tokenize_native(text: &str) -> Vec<TokenRow> {
 
 /// `JS`-facing tokenize. Returns the same row stream as [`tokenize_native`],
 /// serialised via `serde_wasm_bindgen`. Consumed by
-/// `@fossil-lang/codemirror-fossil`'s `StreamParser` (plan 08-08).
+/// `@fossil-lang/codemirror-fossil`'s `StreamParser`.
 ///
 /// # Errors
 ///
@@ -93,15 +95,15 @@ pub fn tokenize(text: &str) -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
 }
 
-/// `JS`-facing re-export of the Phase-6 06-07 semantic-token legend.
+/// `JS`-facing re-export of the semantic-token legend.
 ///
 /// Returns `{ tokenTypes: string[], tokenModifiers: string[] }` — the exact
-/// LSP `SemanticTokensLegend` shape. `CodeMirror` (plan 08-08 +
-/// `packages/codemirror-fossil/src/tags.ts`) uses this to translate
+/// LSP `SemanticTokensLegend` shape. `CodeMirror`, via
+/// `packages/codemirror-fossil/src/tags.ts`, uses this to translate
 /// LSP `semanticTokens/full` response indices into highlight tag names.
 ///
-/// Delegates to [`fossil_ide::semantic_legend`] (the 06-07 authoritative
-/// definition) — NO duplicate legend definition lives here.
+/// Delegates to [`fossil_ide::semantic_legend`], the one definition — a second
+/// legend here would desynchronise the indices the native LSP already emits.
 ///
 /// # Errors
 ///

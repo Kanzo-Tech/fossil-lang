@@ -1,11 +1,11 @@
 ---
 title: The relational half
-description: A source rarely arrives shaped the way a mapping needs it. That work lives in the language and gets typed by us — and planned by DataFusion, which is why ten rewrite rules leave.
+description: A source rarely arrives shaped the way a mapping needs it. That work lives in the language and gets typed by us — and planned by DataFusion, which is why this compiler has no optimizer of its own.
 direction:
-  summary: Sources compose with a pipeline operator that our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan — so the fourteen MIR operators are the pipeline's vocabulary and stay, while the ten rewrite rules go because they duplicate an optimizer that is already underneath.
+  summary: Sources compose through the verbs a relation carries — `User.where(User.age >= 18)` — which our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan, so the fourteen MIR operators are the pipeline's vocabulary and this compiler never grows a planner beside the one underneath it.
   arguedIn: /docs/design/algebra
 today:
-  summary: The source pipeline runs. Since 2026-08-07 `users |> where(.edad >= 18)` compiles, types and writes the corpus the program describes — measured through the binary, five rows in and three out — and a `join` brings a column its source does not have. The three verbs are `where`, `select` and `join`; the join is inner and its key is named once. What is NOT there is every other verb, and the ten rewrite rules, which are gone.
+  summary: The source pipeline runs — `Adults := User.where(User.age >= 18)` compiles, types and writes the corpus the program describes, five rows in and three out measured through the binary, and a `join` brings a column its source does not have — with three verbs (`where`, `select`, `join`), an inner join whose `on` is a predicate over qualified columns, and no rewrite rules at all.
   backedBy: crates/fossil-cli/tests/run_source_pipeline.rs
 ---
 
@@ -15,8 +15,11 @@ A source almost never arrives with the shape a mapping needs. Filtering, joining
 work has to live somewhere, and there are three somewheres: outside fossil entirely, borrowed from
 the engine through the source binding, or in the language.
 
-**It lives in the language.** `|>` composes sources, and our checker types the result end to end,
-which is the thing neither of the other two options gives.
+**It lives in the language.** A relation carries verbs, reached through the dot like every other
+member, and our checker types the result end to end — which is the thing neither of the other two
+options gives.
+
+<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
 
 ## But the plan is DataFusion's
 
@@ -44,44 +47,62 @@ type the mapping; what it does better than we will is choose a plan.
 
 **The ten rules are gone.** `rewrite()` ran on every compile and always returned its input, because
 all ten matched operators the lowering never emits; `rewrite.rs` and the `eval.rs` that existed only
-to drive R7–R10 left together, and `fossil run examples/hello.fossil` writes a byte-identical corpus
-before and after. The lowering still emits four of fourteen operators: `Source`, `EmitVertex`,
-`EmitEdge`, `Sink`.
+to drive R7–R10 left together, and `crates/fossil-mir/src/` holds neither today.
 
-**And the source pipeline is the other half, which closed the same day.** `adultos := users |>
-where(.edad >= 18)` is a **relation**, not a value, and it needed three things that did not exist: a
-source binding that is not an `io.*` call, `Op::Filter` reachable from source, and types for
-`where`/`select`/`join`. All three are there. The opening question — whether `join` is in the first
-version — is answered: **it is**, as an inner equi-join whose key is named once.
+**And the source pipeline is the other half.** `Adults := User.where(User.age >= 18)` is a
+**relation**, not a value, and it needed three things that did not exist: a source binding that is
+not an `io.*` call, `Op::Filter` reachable from source, and types for `where`/`select`/`join`. All
+three are there. The opening question — whether `join` is in the first version — is answered: **it
+is**, as an inner join.
 
-The lowering now emits seven of fourteen: `Source`, `Filter`, `Project`, `Join`, `EmitVertex`,
-`EmitEdge`, `Sink`. The checker gained its first two-input rule with them — `fila(izq) ⊎ fila(der)`
-with the key identified and any other shared name refused — because a join is where an operator set
-stops being a list and starts being an algebra.
+The lowering emits seven of the fourteen operators: `Source`, `Filter`, `Project`, `Join`,
+`EmitVertex`, `EmitEdge`, `Sink`. The checker gained its first two-input rule with them — the joined
+row is the two sides' scopes side by side, each column addressed by the binding that owns it — because
+a join is where an operator set stops being a list and starts being an algebra.
 
-There is one more mismatch worth recording because it is the shape of how the enum grew: the module
-header of `crates/fossil-mir/src/op.rs:1` says *"the complete 11-operator typed set"*, the enum has
-fourteen variants, and the list the header itself enumerates has twelve names. Three numbers, none
-of them agreeing, in one file.
+### The join condition is a predicate, not a key
+
+`on` takes a condition relating the two sides by qualified column, and the two columns need not share
+a name:
+
+<Program src="shop/shop.fossil" region="join" title="shop.fossil" />
+
+Three shapes follow from that and each has an executed test in
+`crates/fossil-df/tests/pipeline.rs`: differently-named keys plan as an ordinary equi-join
+(`crates/fossil-df/tests/pipeline.rs:250`), a compound key is a conjunction of equalities joined by
+`and` (`crates/fossil-df/tests/pipeline.rs:278`), and a self-join tells its two halves apart by the
+alias `X as Y` (`crates/fossil-df/tests/pipeline.rs:574`).
+
+<Callout title="This page said the opposite, and the rule it stated was never a design rule">
+It said `on` was `USING (k)` — one column name on both sides — so `Purchase.user_id` against
+`User.id`, the ordinary shape of a foreign key, could not be written. That was a **limitation of the
+backend**, not a decision: while the MIR lowering discarded the binding on a column reference there
+was nothing to say which side a name came from, and equal names were the one case whose plan could
+be guessed. The lowering carries the binding now, and the restriction went with the ignorance that
+forced it. Three of the conformance programs — `shop`, `self-join` and `compound-key` — spell the
+predicate form and were refused by the old rule.
+</Callout>
 
 <Callout title="Deliberately absent">
 **No planner of ours.** No cost model, no statistics, no join reordering. If any of that is ever
 needed it arrives through DataFusion or it does not arrive.
 
-**No operator the pipeline cannot express.** The enum stops growing speculatively; the gap between
-fourteen, twelve and eleven above is what growing speculatively looks like from the inside.
+**No operator the pipeline cannot express.** `Op` has fourteen variants
+(`crates/fossil-mir/src/op.rs:43`) and stops there: an operator enters when a verb needs it, and a
+verb enters when a program spells it.
 </Callout>
 
 ## What this does not settle
 
-- **How two keys with different names are joined.** `on = .k` is `USING (k)`: the column has to be
-  called the same on both sides, so `pedidos.persona_id` against `personas.id` — the ordinary shape
-  of a foreign key — cannot be written in v1. The extension is `on = .a == .b`, and it is declared
-  rather than built because it first has to say which row each `.` names, and that is a qualified
-  reference the language does not have.
-- **The three join flavours that are not `Inner`.** They stay defined and unreachable. An outer join
-  manufactures NULL, and [the shape](/docs/characteristics/types) has no way to declare a nullable
-  property yet, so the one that arrives will arrive with that story and not before.
+- **The ten relation verbs the catalogue declares and the lowering does not implement.** `seq/` has
+  thirteen rows — `map`, `flatten`, `take`, `drop`, `distinct`, `sort`, `union`, `group_by`,
+  `aggregate` and `count` beside the three — and the refusal says so by counting them rather than by
+  listing what it knows. Each one that arrives has to arrive with the operator that carries it and a
+  program that spells it, not as a row.
+- **The three join flavours that are not `Inner`.** They stay defined and unreachable
+  (`crates/fossil-df/tests/pipeline.rs:452` pins the refusal). An outer join manufactures NULL, and
+  [the shape](/docs/characteristics/types) has no way to declare a nullable property yet, so the one
+  that arrives will arrive with that story and not before.
 - **How a pipeline's type is reported in the editor.** A source binding today has a schema from a
   descriptor; a pipeline has a schema derived from one, and hover has to say something useful about
   the derived one.

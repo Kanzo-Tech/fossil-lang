@@ -2,11 +2,20 @@
 //!
 //! Parses a `.fossil` and emits one `SourceRefInfo` per DISTINCT URI-valued
 //! source argument (data + `schema =`), each tagged with the `@conn` alias it
-//! targets (or `null` for a direct URL/path). keasy consumes this to derive a
-//! job's connections WITHOUT regex-matching `@name/` in the script text — and,
-//! unlike the regex, it sees `@conn` refs in EVERY position, not just the data
-//! URI. A destructuring `{ A, B } := io.rdf(...)` reports its shared data +
-//! schema ONCE (not once per member). Parse-only: no `DuckDB`, no credentials.
+//! targets (or `null` for a direct URL/path). It sees `@conn` refs in EVERY
+//! position, not just the data URI, which is the whole reason a typed answer
+//! beats regex-matching `@name/` in the script text. A destructuring
+//! `{ A, B } := io.rdf(...)` reports its shared data + schema ONCE (not once
+//! per member). Parse-only: no `DuckDB`, no credentials.
+//!
+//! **This verb has no production consumer.** The line here used to read «keasy
+//! consumes this», and keasy has migrated to WASM: it spawns no `fossil`
+//! binary at all and reaches the same lineage through `@fossil-lang/wasm`, so
+//! the live path is `fossil-wasm`'s `refs_native` and this one is the CLI
+//! surface with a parity test over it. Kept because the parity is the point —
+//! see `crates/fossil-wasm/tests/refs.rs`, which runs the same program through
+//! the browser core — but nobody downstream shells out to it, and a comment
+//! that says otherwise is naming a caller that no longer exists.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -40,14 +49,35 @@ fn fossil_binary() -> &'static PathBuf {
 // A program mixing `@conn` references (data + schema) in a destructuring io.rdf
 // with a literal local-path csv — exercising both roles and both the aliased and
 // unaliased forms. The two members share one (data, schema) pair.
-const PROGRAM: &str = r#"prefix ex: <https://ex.org/>
+//
+// # What this fixture used to spell, and why it did not go red
+//
+// It opened `prefix ex: <https://ex.org/>` and closed with
+// `KB : ex:KB from KB / iri = .subject / ex:label = .label` — four retired
+// spellings in three lines (`retired::PREFIX_DECL`, `retired::ABSOLUTE_IRI`,
+// `retired::CURIE`, `retired::LEADING_DOT`), and it stayed green through the
+// whole of step 8. The reason is worth writing down rather than fixing
+// quietly: `fossil refs` reads `DefMap::sources` and nothing else, so the only
+// lines it can see are the two `:=` bindings — which were already in the live
+// surface. The retired half was inert scenery. It parsed to errors the command
+// does not consult, `refs` exits 0 regardless, and the assertions below never
+// touched it.
+//
+// So the transcription changes what the program SAYS and not what the test
+// PROVES, which is the point: the mapping is here so the fixture is a whole
+// program, and a whole program written in a language nobody can compile proves
+// less than no mapping at all. `type { … } := io.shex(…)` binds TYPES and takes
+// no `SourceEntry` (`def_map.rs`, the `TYPE_DEF` arm), so adding the binding
+// the bare shape name needs adds no ref — and if that ever changes, the
+// `conns == [data, vocab]` assertion at the foot of each test is what says so.
+const PROGRAM: &str = r#"type { Entry } := io.shex("@vocab/graph.shex")
 
 { KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 plain := io.csv("local.csv")
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
+Entries : Entry from KB
+    @subject = "https://ex.org/kb/{KB.subject}"
+    label = KB.label
 "#;
 
 #[test]

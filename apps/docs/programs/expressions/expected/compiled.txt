@@ -1,0 +1,24 @@
+── type bindings ──
+Reading ← expressions.shex = https://lab.example/voc#Reading
+
+── source bindings ──
+Row := io.csv(data/readings.csv)
+Valid := Row.where()
+
+── mappings ──
+Readings: 12 written, 11 lowered
+    @subject
+    kit
+    revision
+    accuracy
+    verified
+    station
+    slug
+    code
+    label
+    operator  ← DROPPED IN SILENCE
+    taken_on
+    celsius
+
+── run ──
+not attempted: the compile failed

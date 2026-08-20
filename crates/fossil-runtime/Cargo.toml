@@ -27,7 +27,7 @@ duckdb = { workspace = true }
 # the language needs no native crate to run a catalogued function. `sha2`
 # survives as a DEV-dependency below, for the parity digest — a different job.
 
-# W0b/4 — GraphAr materialiser. fossil-sinks emits the WriteSqlPlan +
+# GraphAr materialiser. fossil-sinks emits the WriteSqlPlan +
 # ManifestSet (WASM-clean planning side); this crate (native) runs the
 # COPY against DuckDB and threads the resolver's cloud-config into SET
 # statements. fossil-resolver is itself native-only by intent (cloud
@@ -38,7 +38,7 @@ fossil-sinks = { path = "../fossil-sinks" }
 fossil-resolver = { path = "../fossil-resolver" }
 thiserror = { workspace = true }
 
-# W2-06 — native DuckExecutor: fossil-graph owns the verb→SQL (WASM-clean); this
+# The native DuckExecutor: fossil-graph owns the verb→SQL (WASM-clean); this
 # crate runs that SQL against bundled DuckDB and converts rows to JSON. serde_json
 # is promoted from a dev-dep to a regular dep for the row→Value conversion.
 fossil-graph = { path = "../fossil-graph" }
@@ -52,15 +52,15 @@ serde_json = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 
 [dev-dependencies]
-# W2-06 integration (tests/graph_verbs.rs): deserialise dispatch JSON into the
+# Graph-verb integration (tests/graph_verbs.rs): deserialise dispatch JSON into the
 # verb result structs.
 serde = { workspace = true }
-# SC#1 cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
+# Cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
 # the canonical ordered result-set serialization + JSON writer for
 # native_baseline.json. Both are native-only test deps (the runtime crate is
 # native-only anyway via the wasm32 cfg-tripwire).
 sha2 = { workspace = true }
-# SC#1 native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
+# Native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
 # per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
 # builtin fails CI on native DuckDB. fossil-hir is WASM-clean; it
 # is a dev-dep only here so the native-only runtime's wasm32 tripwire is unaffected.

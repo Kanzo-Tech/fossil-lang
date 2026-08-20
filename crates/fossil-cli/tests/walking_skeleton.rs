@@ -1,6 +1,6 @@
 //! Workspace-level walking-skeleton e2e integration test.
 //!
-//! The canonical gate (ROADMAP.md sequencing rule #6): `fossil run
+//! The canonical gate: `fossil run
 //! examples/hello.fossil --dest <tmp>` produces a valid `GraphAr` dataset
 //! end-to-end through every compiler+runtime crate. The output descriptor is
 //! program-resident (synthesised from the typed mapping — no `--shape`).
@@ -15,7 +15,8 @@
 //! caught here before it can land.
 //!
 //! Once this test passes, every subsequent commit must keep it green per the
-//! walking-skeleton invariant (CLAUDE.md "Hard Rules" + ROADMAP.md rule #6).
+//! walking-skeleton invariant (`CLAUDE.md`, "Hard Rules"): a refactor that
+//! breaks it for more than three days is reverted and broken into smaller steps.
 
 #![cfg(not(target_arch = "wasm32"))]
 

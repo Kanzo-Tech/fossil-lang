@@ -106,9 +106,10 @@ páginas), verificadas en limpio; `grammar.bnf` a 588 líneas; `cargo deny` verd
 - **Nadie compila los 18 programas.** Lo único que se comprueba es que el fichero y su `// #region`
   existan. `grammar.bnf:24` ya los declara conjunto de conformidad y ese conjunto no lo ejecuta
   nadie.
-- **`resolve_target_shape` ya NO se traga los fallos** — cinco variantes nombradas de
-  `TargetShapeError`, arreglo documentado en `shapes.rs:35-41`. Lo que queda es que
-  `completion.rs:181` y `hover.rs:144` colapsan las cinco causas a «nada».
+- **`resolve_target_shape` ya NO se traga los fallos, y ahora tampoco las nombra**: cuatro de las
+  cinco variantes de `TargetShapeError` se borraron el 19 tras probarlas inalcanzables — la ligadura
+  posicional hace que todo falle antes, en el binding. Queda `NoDocument`, igual de muerta, esperando
+  a que se pueda colapsar el `Result` en `fossil-ide`.
 - **`DefMap::lookup_prefix` no existe**: borrada, lápida en `def_map.rs:138-141`.
 
 ### El agujero entre el paso 4 y el paso 7, que este plan no veía
@@ -267,10 +268,10 @@ ya vive en `/docs/architecture`, así que sobrevive al paso 9. **El estado no es
 | **F1** | `Primitive` a un crate hoja | ✅ vive en `fossil-graph-schema`; `InferredColumn.primitive` es `Primitive` |
 | **F2** | call, comparison, conditional, pipeline en el HIR | ✅ `HirExpr` pasó de **4 variantes a 13**; `UNARY_EXPR` desciende (`lower.rs:1663`) |
 | **F3** | la caché existe de verdad | ◐ el `Providers`-de-rustc **ya está** (§4 del F-plan = el registro de proveedores); `freshness_token` real en `fossil-engine`; falta la clave por URI |
-| **F4** | el descriptor real llega al typecheck | ◐ el checker lee el documento; `fossil-engine/src/lib.rs:470` **sigue devolviendo `ACCEPT_ALL_DEFAULT`** |
+| **F4** | el descriptor real llega al typecheck | ✅ **el criterio está verde, medido el 15**; `lib.rs:470` es el camino de `run`, no el del typecheck — ver abajo. Quedan tres restos, ninguno bloquea |
 | **F5** | el pipeline compila y `rewrite.rs` no existe | ◐ `rewrite.rs` borrado; `lower_source_pipe` escrito; los dos e2e rojos por fixture |
 | **F6** | Salsa fuera de `engine` y `df-wasm` | ❌ `fossil-engine/src/system.rs:111` y `fossil-df-wasm/src/lib.rs:210` siguen construyendo un `FossilDb` por llamada |
-| **F7** | `arrow-rs` en vez de `COPY` | ❌ sigue `DuckDB COPY (FORMAT PARQUET)` en `fossil-sinks` |
+| **F7** | `arrow-rs` en vez de `COPY` | ⊘ **revertida el 15, y su premisa era falsa el 16**: el escritor GraphAr **ya era `arrow-rs`** (`fossil-df/src/files.rs`, uno solo, nativo y navegador); `COPY` sólo sobrevive en el post-paso de layout. Y donde sobrevive, medido, `arrow-rs` no compensa — ver abajo |
 | **F8** | los crates | ⛔ bloqueada a propósito, y **redibujada**: ver abajo |
 
 **F1, F2 y media F5 las cerró el trabajo de superficie**, que no sabía que las estaba cerrando. Ésa
@@ -300,6 +301,156 @@ tiene que estar forzado por un documento, no por una taxonomía.** `lsp-types` e
 `fossil-base` pierde su arista y se llama por lo que es. `fossil-run-status` se disuelve en la
 carcasa. `fossil-mcp` está mal colocado y mal llamado — es la cara IA del lado grafo, y con el corte
 en dos árboles eso deja de ser deuda y pasa a ser su sitio.
+
+---
+
+## F8, reescrita el 2026-08-19: el destino primero
+
+**La dirección, en una frase:** *fossil es un compilador que se consume como biblioteca WASM, y el
+corpus es un formato con una API ligera que cualquiera puede leer sin conocer sus tripas; el CLI es
+un cliente más, no la interfaz.*
+
+**El destino son tres grupos, y se nombran en producto, no en crates:**
+
+| grupo | qué es | quién lo lee |
+|---|---|---|
+| **corpus** | el formato y todo lo que lo escribe y lo lee: el modelo de manifiesto, el direccionamiento, la disposición en teselas, los verbos, el ejecutor, la cara MCP | cualquiera con un corpus y una URL |
+| **lenguaje** | el compilador: sintaxis, HIR, MIR, descriptores, el backend que produce el corpus | quien escribe programas fossil |
+| **herramientas** | CLI, LSP, la superficie de editor, y las cáscaras WASM | quien opera fossil |
+
+La prueba de que un crate está en el sitio correcto es una pregunta, no una taxonomía: **¿quién
+tiene que entenderlo?** `fossil-runtime::graph_exec` ejecuta consultas sobre el corpus y vive dentro
+de la ruta de escritura del compilador. Nadie que lea el corpus debería encontrárselo ahí, y nadie
+que escriba un programa fossil debería tropezar con él. Está en el sitio equivocado, y eso basta —
+no hace falta que además desbloquee una arista.
+
+### La API del corpus, que es la pieza que faltaba
+
+`resolveCorpus` **no** es la API de referencia. Es la capa de direccionamiento: devuelve URLs, y deja
+al consumidor sabiendo qué es una tesela, qué contenedor hay, cómo pedir footers y cómo unir CSR con
+CSC. Eso es exactamente lo que el traspaso pedía **no** tener que saber.
+
+La API de referencia es ésta, y el direccionamiento queda debajo de ella, invisible:
+
+```
+const corpus = await openCorpus(url)      // una URL y un fetch, nada más
+
+corpus.types                               // qué hay dentro
+corpus.window({ x, y, w, h })              // → nodos + aristas, y si la respuesta está completa
+corpus.node(id)
+corpus.neighbours(ids, { depth })
+```
+
+Ni teselas, ni `dense_id`, ni Morton, ni `by_source`, ni prefijos, ni footers.
+
+**Y para que sea de referencia y no «la librería de kanzo-ui», dos condiciones que hoy no se cumplen:**
+
+1. **El contrato es el corpus de conformidad, no el TypeScript.** Ya existe (`apps/corpus/conformance/`,
+   con `chunk_size: 64` a propósito para cazar a quien clave el desplazamiento). Falta que sea el
+   contrato de *esta* API y no sólo del direccionamiento.
+2. **Una segunda implementación que no comparta código con la primera.** Hoy `verify.mjs` es una
+   transcripción casi línea a línea de `address.ts`: detecta deriva, que es su trabajo, pero **una
+   idea equivocada compartida pasa las dos**. Y hay un vacío peor — **el escritor no está en el
+   lazo**: el corpus de conformidad lo generó `guards/fixture.mjs`, no `fossil run`, así que hay dos
+   *lectores* que coinciden y ningún lector comparado con el *escritor*.
+
+Además, cinco cosas que un consumidor todavía tiene que aportar de su cosecha y que la API debe
+absorber o declarar: **qué contenedor** (fichero por tesela o row-groups — tres artefactos del árbol
+tienen tres defaults distintos y el ganador medido es el que fossil no sabe escribir), **cuántas
+teselas** (ningún manifiesto lleva el número de vértices), **las cajas** `x`/`y`, **el vocabulario del
+payload**, y **la identidad del corpus** — no hay forma de nombrar un vértice que sobreviva a un
+relayout, que es el hueco 5 del traspaso y sigue sin dueño.
+
+**Lo primero que hay que corregir es la premisa de la sección de arriba: la arista NO es una.** Son
+tres, y las lleva `fossil-mcp` (`→ fossil-graph`, `→ fossil-runtime`, `→ fossil-resolver`), y
+`fossil-runtime → fossil-graph` va en sentido contrario. La causa raíz es que **`fossil-runtime` son
+dos crates**: `graph_exec.rs` es el ejecutor del lado corpus, `layout.rs` + `materialize.rs` son la
+ruta de escritura del lenguaje.
+
+**Y el árbol está mejor de lo que la conversación sugería.** `fossil-lineage`, `fossil-syntax`,
+`fossil-graph-schema`, `fossil-mir` y el corte `fossil-ide`/`fossil-lsp` están todos forzados por algo
+real y verificado. **Dos crates hacen todo el ruido:** `fossil-base` (≈1310 de 2680 líneas no son ni
+el trait ni la db) y `fossil-engine` (cinco verbos sin relación que sólo comparten `open_db` — no es
+hondo, es ancho). Arreglar esos dos es la mayor parte de «está todo un poco liado».
+
+### Lo que una frontera compra aquí, y quién no paga
+
+Tres cosas, y sólo tres: un **tripwire `cfg`**, un sitio en el **cierre del gate WASM**, y los **tipos
+concretos que Salsa necesita**. Medido: el cierre es exactamente `{base, descriptors-input,
+descriptors-output, df, df-wasm, graph, graph-schema, graph-wasm, hir, ide, lineage, mir, run-status,
+shex, sinks, syntax, wasm}`, y su complemento es exactamente el conjunto de tripwires más
+`fossil-mcp`. **`fossil-run-status` no compra ninguna de las tres**, y su razón declarada —«los hosts
+dependen de este crate»— es **imposible con `publish = false`**; keasy reescribió la forma a mano, y
+de ahí salió la deriva del campo `version`.
+
+### Dónde va cada cosa, y qué se resiste
+
+**corpus** — `fossil-sinks` (el modelo de manifiesto **es** el formato), `fossil-graph`,
+`fossil-graph-wasm`, `fossil-mcp`, y **las dos mitades de `fossil-runtime` que hoy no son suyas**:
+`graph_exec.rs` (lee el corpus) y `layout.rs` (lo tesela y lo ordena por Morton). `apps/corpus` y
+`packages/graph` son su documentación y su API.
+
+**lenguaje** — `fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-df`, `fossil-descriptors-{input,output}`,
+`fossil-shex`, `fossil-lineage`, y `fossil-base` una vez esté limpio. `apps/docs` es su documentación.
+
+**herramientas** — `fossil-cli`, `fossil-lsp`, `fossil-ide`, `fossil-wasm`, `fossil-df-wasm`,
+`fossil-engine`, y lo que quede de `fossil-resolver` (un renderizador de `CREATE SECRET`, que es una
+preocupación de host).
+
+**`fossil-graph-schema` es la costura** y se queda entre los dos: es el vocabulario neutro que el
+compilador escribe y el corpus lee. Su encabezado dice hoy *«Two contracts, one crate»*, y eso es lo
+único que hay que arreglarle.
+
+**Lo que se resiste, y por qué:**
+
+- **`fossil-runtime` no se puede partir sin sacar `Probe` de `fossil-base`**: es su **única** arista
+  de producción al lado lenguaje, un solo `use`, y encima `Probe` hace I/O fuera de `System` y no
+  está ni re-exportado.
+- **`fossil-shex` no puede volver con los descriptores mientras exista `fossil-base →
+  fossil-descriptors-input`**, que es **un solo método de trait** y cierra un ciclo.
+- **`fossil-base` no puede llamarse substrato** mientras tenga dentro el catálogo `io.` **con la
+  prosa de los errores de usuario**, una query `tracked` y la resolución de rutas `@conn`. Son ~1310
+  de sus 2680 líneas, y `CLAUDE.md` prohíbe lógica de compilador ahí por su nombre.
+- **`fossil-engine` no es un crate, es un saco** — cinco verbos sin relación que sólo comparten
+  `open_db`. Cada uno se va con su grupo; lo que quede es la carcasa nativa.
+- **`fossil-run-status` no va a ningún grupo: desaparece.** Sus tres contratos vuelven a quien los
+  produce — `RunStatus` a `fossil-df`, `ProviderInfo` y `SourceRefInfo` a `fossil-lineage`, que hoy
+  se los importa de vuelta a sí mismo. Ninguno se convierte en método del LSP: `run` no es una
+  operación de editor, `providers` es una constante y `refs` se llama una vez por lanzamiento.
+- **`fossil-lsp` y `fossil-wasm/src/lsp_worker.rs` son el mismo servidor dos veces** — ~600 líneas
+  cada uno, doce handlers, cuatro derivas probadas bajo un docblock que se declara «the 1:1 model».
+  Uno de los dos deja de existir, o la afirmación sale del comentario.
+
+### El orden
+
+1. **Los defectos vivos.** No es reorganización, pero ensucian cualquier medición posterior:
+   `registry_key` a mano, `@rename` ignorado por cuatro de cinco, el `RunStatus` que anuncia un
+   fichero borrado, `quantize` en f32 contra f64, la llamada viva a `classification()`, el módulo de
+   direccionamiento inimportable, y `apps/corpus` sin correr en CI.
+2. **Limpiar `fossil-base` y vaciar `fossil-engine`.** Son los dos que hacen todo el ruido, y hasta
+   que no se muevan, nada del lado corpus puede salir.
+3. **Sacar el corpus.** `graph_exec` y `layout` fuera de `fossil-runtime`; `fossil-mcp` con ellos.
+4. **La API de referencia**, encima del direccionamiento que ya existe, con el corpus de conformidad
+   como contrato y una segunda implementación que no comparta código.
+5. **Las superficies de host**: disolver `fossil-run-status`, colapsar el LSP duplicado.
+
+### Lo que NO se hace, y consta para que no se cuele
+
+`core/ extensions/ corpus/` **no sale de las aristas.** Cada candidato a `core/` ya está separado por
+algo real, y `fossil-base` —el único cuyo *contenido* está mal— quedaría archivado en vez de
+arreglado. `extensions/` tampoco: `fossil-shex` está fuera por un ciclo, y una carpeta no disuelve un
+ciclo. La única agrupación real que existe hoy es *compila a wasm32 o no*, y ya está enforced por
+siete `compile_error!`.
+
+### Y la conclusión que atraviesa las tres auditorías
+
+**La prosa de este árbol carga peso y no la comprueba nada.** Nueve comentarios `///` afirman
+invariantes que ningún test sostiene, y **cuatro de ellos causaron los defectos de la etapa 0**. Más
+una regla dura invertida en `CLAUDE.md` («no `tokio` fuera de `fossil-lsp`», cuando `fossil-lsp` no
+tiene `tokio`). El remedio está probado y es barato: **derivar el guard del original en vez de
+repetirlo**, como hace `packages/introspect/tests/rust-parity.test.ts`, que lee el Rust como texto,
+saca de él sus tres tablas y falla de seis maneras. Cada vez que abajo se borre un `///` que afirma un
+invariante, lo sustituye un test.
 
 ### `.planning/` — el tercer plan, y por qué la mayoría ya no dice nada
 
@@ -376,12 +527,56 @@ deja de ser un `panic!` por defecto; (4) el registro como `Providers` de rustc �
 registro de proveedores. **Hecho cuando:** cambiar el CSV y re-ejecutar re-introspecciona; no
 cambiarlo, no.
 
-**F4 · la forma es el contrato.** Bloqueada por media hora de investigación que hay que hacer antes
-de escribir una línea: si la comprobación de ShEx a medias decide que esto es SHACL. (1) el
-descriptor de salida real llega al typecheck; (2) propiedad no declarada, cardinalidad rota,
-primitiva incompatible → error; (3) **después**, la sensibilidad como tipo: `anon.hmac` devuelve un
-seudónimo y es lo único asignable a una propiedad marcada. **Hecho cuando:** `edad = User.nombre` es
-un error contra una forma que declara `xsd:integer`.
+**F4 · la forma es el contrato.** ~~Bloqueada por media hora de investigación: si la comprobación de
+ShEx a medias decide que esto es SHACL.~~ **Caducado, comprobado el 14. No hay tal elección, y el
+árbol la cerró hace tiempo.** SHACL es **una fila de proveedor más**, no una alternativa a ShEx:
+`io.shex("x.ttl")` y `io.shacl("x.ttl")` conviven (`fossil-hir/src/stdlib.rs:442`) y
+`fossil-descriptors-output/src/shacl.rs` baja el grafo de formas a `OutputShapes` —**la misma costura**
+donde aterriza ShEx—, con `OutputShapes::to_graph_schema` dando al ejecutor una salida byte a byte
+idéntica. La decisión está grabada en un renombrado: la variante `Shacl` es hoy `Lowered`
+(`fossil-descriptors-output/src/kind.rs:40-50`), porque el nombre *«era una afirmación sobre el
+idioma del documento que el valor no lleva»* —el registro de proveedores hace que un documento ShEx
+llegue también ahí—, y lo que la variante significa es que **la decodificación ya ocurrió**. Por
+debajo de esa línea el idioma es un detalle del proveedor.
+
+~~El bloqueo real es fontanería: `lib.rs:470` devuelve `ACCEPT_ALL_DEFAULT`.~~ **También caducado, y
+estaba mal atribuido.** Esa línea es cierta y pertenece al camino de **`run`**, no al del typecheck.
+Son dos consumidores independientes del mismo documento:
+
+- **run** → `resolve_output_descriptor` (`lib.rs:427`) → `read_output_shape` (`lib.rs:507`) →
+  `Lowered(shapes.to_graph_schema())` (`lib.rs:546`), **uno por programa**, para el ejecutor.
+- **typecheck** → `typecheck_mapping` (`check.rs:117`) → `resolve_target_shape`
+  (`fossil-hir/src/shapes.rs:507`) → `decoded_document`, **uno por mapping**, resuelto por tipo
+  (`def_map.rs:373`), y no pasa jamás por `resolve_output_descriptor`.
+
+**El criterio de «hecho» está verde, medido el 15**: `cargo test -p fossil-engine --lib documents`
+da 4/4, y `editing_the_document_rechecks_the_program_and_the_diagnostic_changes` mete una forma que
+declara `xsd:integer` contra una columna `String` por la ruta de producción y asserta
+``expected `Integer` ``. Y (1) y la mitad de (2) están hechos: propiedad no declarada
+(`check.rs:827`) y primitiva incompatible (`check.rs:436`).
+
+**Las dos trampas que este documento arrastraba están arregladas las dos** — y una de ellas dejó su
+propio registro convertido en la cita falsa: `fossil-graph-schema/src/shapes.rs:155` afirmaba en un
+docblock `pub` que el checker lee `value_ty: None` como `TyKind::Iri`, cuando `check.rs:455` hace
+`expected.is_none_or(|e| subtypes(db, actual, e))` — ausencia acepta cualquier cosa. Corregido.
+
+**(3) nombra una función que no existe.** `anon.hmac` está borrado del lenguaje (`stdlib.rs:894`:
+DuckDB tiene `sha256` y no tiene HMAC), y `book/stdlib.mdx` lo documentaba. Si la sensibilidad como
+tipo sigue queriéndose, necesita primero una primitiva que la produzca.
+
+**Lo que queda, y ninguno bloquea:** ~~borrar las cinco variantes muertas de `TargetShapeError`~~
+**hecho el 19** —cuatro borradas con sus brazos, 85 líneas, y la sonda de alcanzabilidad convertida
+en el test en vez de en un comentario; falta sólo `NoDocument`, bloqueada por tres líneas de
+`fossil-ide`—; dar span de dos ficheros al desajuste, que es lo que los cinco
+`expected/diagnostic.txt` escriben a mano hoy; y **la cota superior de cardinalidad, honestamente
+bloqueada**, porque nada en el lenguaje construye un `Seq` y un `maxCount 1` no tiene qué rechazar.
+
+**El agujero del join NO es de F4**, y esto se decidió mirándolo: vive en el lado *fuente*, aguas
+arriba de cualquier forma, y salta en un programa que no nombra documento (`resolve_source_scope`
+corre en `check.rs:104`, antes de `resolve_target_shape` en el `:117`). `apply_source_op`'s `Join`
+(`infer.rs:589`) llama a `check_refs`, que sólo comprueba que cada referencia resuelva: **ningún tipo
+se lee**. Es su propio cambio, ~15 líneas, y es el gemelo tipado y temprano de la comprobación que
+`fossil-df/src/plan.rs:190` ya hace estructuralmente.
 
 **F5 · el pipeline.** Hay una decisión antes de empezar: **si `join` entra en la primera versión**,
 que es lo que hace difícil el checker; `where` y `select` puede que basten un tiempo. MIR tipa,
@@ -396,12 +591,95 @@ encuentra `fossil-engine` ni `fossil-df-wasm`, `fossil check` da lo mismo, **y s
 después** — la medición cuenta ejecuciones, no milisegundos, así que el −52 % de Apollo es una
 estimación prestada hasta que sea nuestra.
 
-**F7 · el escritor de Parquet.** Bloqueada por una medición que falta: escribir 5M de las dos formas
-y contar footer, peticiones y bytes por ventana — la estimación de 566 kB es aritmética. (1)
-`arrow-rs` en vez de `COPY`, ya en el árbol vía DataFusion, y escribe el índice de páginas por
-defecto, que DuckDB no escribe y no piensa hacerlo; (2) un fichero con row groups de 4.096, no un
-fichero por tesela; (3) el footer como directorio raíz y las cajas `x`/`y` como índice — **medido:
-1,05×–1,21×**. **Hecho cuando:** una ventana cuesta lo que la tabla dice, con el mismo arnés.
+**F7 · el escritor de Parquet. Medida el 15, y la medición la revierte.** El arnés vive en
+`spikes/f7-writer-bench/` (`./run.sh`, más `--inspect` sobre un Parquet ya escrito), fuera del
+workspace, y `crates/fossil-df/examples/tile_layout.rs` reproduce cada cifra por su cuenta: dos
+arneses, los mismos números. 5M filas, las mismas filas en el mismo orden por los dos caminos.
+
+**El titular: `arrow-rs` no compensa. Lo que compensa es el tamaño de row group, y DuckDB lo da con
+una palabra de SQL.**
+
+- ~~(1) `arrow-rs` en vez de `COPY`, porque escribe el índice de páginas y DuckDB no.~~ **Falsa por
+  la razón, no por el hecho.** El índice se escribe (179.419 B) y **salta 0 páginas y 0 bytes**: a
+  4.096 filas por row group hay exactamente **1 página de datos por column chunk**, así que el
+  min/max por página duplica byte a byte la estadística del chunk que el footer ya lleva. Podar por
+  página cuesta 156,4 peticiones donde podar por row group cuesta 5,6, por los mismos bytes (1,21
+  MB). Y DuckDB escribe 1 página por chunk **incluso con su default de 122.880 filas**, luego el
+  índice tampoco valdría nada en un fichero suyo. Coste: **1,263×** bytes con los defaults que la
+  propuesta decía no tocar, **2,861×** en el esquema ancho; la paridad (1,015×) exige apagar el
+  diccionario por columna, que es justo la política explícita que la claim daba por innecesaria.
+- **(2) un fichero con row groups de 4.096, no un fichero por tesela: se sostiene, y es la victoria
+  entera.** 22,3 → **5,6** peticiones por ventana, y el índice que un lector debe adquirir pasa de
+  494,9 kB en **1.221 peticiones** a 330,1 kB en **una**. Pero es un cambio de *disposición*, no de
+  escritor: `COPY (FORMAT PARQUET, ROW_GROUP_SIZE 4096)` le gana a los defaults de `arrow-rs` en
+  todas las columnas (1,09 MB contra 1,38 MB por ventana; 330 kB contra 676 kB de metadatos).
+- **(3) el footer como directorio raíz y las cajas `x`/`y` como índice: se sostiene.** El 1,05×–1,21×
+  reproduce como **1,10×–1,20×, media 1,14×**, y es propiedad del teselado Morton, no del escritor.
+- **La estimación de 566 kB falla por los dos lados**: el footer observado son 496.373 B (−12 %), y
+  footer + índice de páginas 675.792 B (+19 %).
+
+**Qué revertiría esta reversión:** una tesela más grande —a 32.768 o 122.880 el índice empieza a
+saltar (medido: 97,6 % de las páginas, 41,70 MB → 2,98 MB)—, pero el 4.096 lo fijó la medición previa
+de peticiones por ventana, así que reabrir uno reabre el otro; una página de datos más pequeña que la
+tesela; un destino **sin proceso DuckDB** —el camino del navegador ya escribe con `arrow-rs`, y ahí
+el escritor no se elige y sólo queda la pregunta de bytes: diccionario apagado + snappy, 1,015×—; o
+que DuckDB empiece a escribir el índice, que mataría la claim 1 por el otro lado.
+
+**Las aristas, medidas también el 15 (20M y 40M, grados 4 y 8). No cambian la reversión: la
+ensanchan** — pero traen el único argumento medido a favor de `arrow-rs` que existe en los dos
+informes, y un agujero del escritor que no sabíamos que teníamos.
+
+- **La claim 1 muere en las dos formas.** El caso que podía resucitarla se dio —a grado 8 la tesela
+  cruza el límite de página de arrow y hay **2,00 páginas por chunk**, no 1,00— y aun así un lector
+  guiado por `ColumnIndex` salta **cero páginas y cero bytes**, byte a byte idéntico. La razón es
+  estructural: **un row group ES una tesela de origen, y la clave de poda ES la tesela de origen**,
+  así que el índice y la clave son la misma clave. Partir un chunk en dos páginas lo parte en dos
+  páginas que están las dos seleccionadas.
+- **Las aristas son la mayoría de la carga**: 64 % de los bytes a grado 4, 77 % a grado 8, y **la
+  mitad exacta de las peticiones** con el esquema de un fichero por tesela. El total por ventana pasa
+  de **44,7 peticiones a 9,2**. Y la etapa 2 no necesita índice ninguno: **la tesela de aristas `k`
+  es la tesela de vértices `k`**, así que la caja de vértices selecciona las URLs por identidad.
+- **El único argumento medido a favor de `arrow-rs`, y es real:** las teselas de aristas tienen
+  cuentas de filas **variables** (mediana 16.384, mín 11.452, máx 16.731 a grado 4), y
+  `ROW_GROUP_SIZE` es un número fijo, así que los row groups de DuckDB **cruzan fronteras de tesela**:
+  55,8 páginas por ventana contra 44,7, y 2,41 MB contra 1,93 MB. Row groups alineados a tesela son
+  ~20 % menos bytes por ventana y **sólo `ArrowWriter::flush()` sabe cortarlos ahí**. Si esa forma se
+  adopta como objetivo, la claim 2 se vuelve un argumento por el escritor después de todo.
+- **Y los bytes no generalizan**: `arrow-rs` con defaults es 1,176× a grado 4 pero **0,939× a grado
+  8**. El «26 % más gordo» del lado vértice era de columnas anchas; en enteros estrechos con filas
+  suficientes por grupo, el diccionario gana.
+
+~~**El agujero: CSC no está teselado en absoluto.**~~ ~~**Y la deuda del manifiesto queda
+confirmada.**~~ **Las dos CADUCARON entre el 16 y el 19, y las dos las cerró otra sesión mientras se
+medían.** Consta aquí en vez de borrarse porque el modo de fallo es el que este plan persigue: una
+medición correcta el día que se tomó, escrita en presente, y falsa tres días después sin que nada
+avisara. Comprobado contra el árbol el 19:
+
+- **`by_target` SÍ está teselado.** `fossil-runtime/src/layout.rs:690-745` recorre **todas** las
+  adyacencias por `ordered_by` y escribe `by_target/tile{k}.parquet` cortado por `dst_dense` con el
+  desplazamiento del tipo destino. `fossil-engine/tests/conformance.rs:379-410` afirma las dos
+  orientaciones, y los guards de `apps/corpus` comprueban las dos.
+- **El manifiesto SÍ se autodescribe.** `fossil-sinks/src/manifest.rs:163-188` — `AdjList` lleva
+  `prefix` (`by_source/`, `by_target/`), afirmado en `edge_yaml_carries_graphar_v1_field_names`. Un
+  lector tercero **puede** derivar la URL de una tesela de aristas:
+  `<prefix de arista><prefix de adj>tile{dense >> shift(src|dst_chunk_size)}.parquet`.
+- **Lo que sí queda del manifiesto** es otra cosa y más pequeña: **ningún manifiesto lleva el número
+  de vértices**, así que `tile_count = ceil(V / chunk_size)` —que la página de lectura afirmaba— no
+  se puede calcular. La respuesta honesta hoy es la sonda `HEAD` doblando y bisecando.
+
+Lo que **no** ha caducado son las cifras: 19.892 aristas por ventana a grado 4 y 39.849 a grado 8
+tienen destino dibujado y origen fuera de la ventana. Eso ya no es un hueco del escritor —hay tesela
+que pedir— sino el argumento de por qué **una capa incompleta tiene que declararse incompleta**, que
+es lo que `Window.complete` y `gaps[]` hacen ahora en `@fossil-lang/graph`.
+
+**No medido, y consta:** la distribución de grados es estipulada (~uniforme) y una real es de cola
+pesada, lo que mueve filas por tesela → páginas por chunk → el margen de la claim 1; qué costaría una
+consulta de in-edges por range-request sobre ese fichero de 105 MB; una distribución de comunidades
+sesgada como la que daría Leiden; y si la puerta WASM pasa con arrow 59.
+
+**Y `arrow`/`parquet` 59 ya está publicado** (59.2.0, y la línea 58 ganó un 58.4.0). El arnés compiló
+contra 59.2.0 **sin un solo cambio de fuente** y su informe salió **byte a byte idéntico**: nada de
+lo medido se mueve al subir el pin. El pin del repo no se ha tocado.
 
 **Las slices de layout, cosechadas de `W3-LAYOUT-PLAN.md`** — que resultó no ser de keasy:
 `fossil-runtime/src/layout.rs` lo citaba. La primera está construida (comunidades por modularidad,
@@ -421,6 +699,32 @@ puede hacer ya: la dirección base en literales (`rdf:dirLangString`, `@en--ltr`
 realista; y encender la feature `rdf-12` de `oxttl`, cuya medición está en el `Cargo.toml` raíz. El
 triple term como primitiva necesita F2; el almacenamiento con discriminador necesita F7.
 
+### Lo que sobrevive del traspaso de kanzo-ui, mudado aquí el 19
+
+`HANDOFF-FROM-KANZO-UI.md` pedía cinco cosas y se borra con este commit, porque su primera línea lo
+exige y porque `CLAUDE.md` no admite una segunda referencia. Sus peticiones 1, 2 y 3 aterrizaron —el
+direccionamiento salió a `@fossil-lang/graph`, hay corpus de conformidad en `apps/corpus`, y el
+contrato de completitud es `Window.complete` + `gaps[]`. Lo que queda:
+
+- **No hay forma duradera de nombrar un vértice.** Rehacer el layout renumera, no leemos `subject`, y
+  el corpus no publica versión que un cliente pueda comparar. **Es nuestro y no tiene sitio todavía**
+  — un cliente que guarde una selección no puede volver a ella tras un relayout.
+- **Ningún manifiesto lleva el número de vértices**, así que `tile_count = ceil(V / chunk_size)` no se
+  puede calcular y la respuesta honesta es sondear con `HEAD` doblando y bisecando. Escrito como
+  pregunta de diseño en `reading/without-fossil.mdx`, no encodado.
+- **Avisar a kanzo-ui cuando aterrice la disposición de un fichero con row groups de 4.096**: su
+  lector deja de sondear footers y la caché de cajas que tenían pensada se vuelve innecesaria.
+- **Suyos, anotados para no volver a medirlos:** el `fetch` global y no inyectable en su lector —sin
+  auth, sin OPFS, sin doble de test—, y un tipo de vértice por corpus abierto cuando el KG tiene
+  varios, sin estar escrito como límite.
+- **Devuelto medido y no es de nadie de aquí:** el suelo de zoom. Cinco millones no se encuadran —
+  cosmos.gl corta en 1e−3 y hacen falta 1,51e−4, **6,61× corto**. Y el 48,9 % de las aristas cruzan
+  `cluster_id`, la mitad atravesando el lienzo entero: eso es del paso de layout, no de quien dibuja.
+- **Deuda de honestidad, nuestra:** el 1,87× de `subject` está citado más fuerte de lo que la
+  medición sostiene, en tres sitios.
+
+---
+
 **Deuda cosechada que no bloquea a nadie**, y que **no he verificado hoy**: que `fossil-engine`
 rechace destinos cloud pese a que el emisor está escrito para URLs, y que un lector tercero no pueda
 derivar del manifiesto la URL de una tesela de aristas (caen en
@@ -435,8 +739,10 @@ de aquella lista están cerradas: `cargo fmt` (`a0e2700`), `timeout_ms` (`329d7e
   cuando salga. El arnés de paridad es lo que detecta una divergencia nativo↔WASM, así que un pin
   móvil es un arnés que puede cambiar bajo los pies.
 - **`arrow` y `parquet` clavados en 58**, porque la línea 59 no estaba publicada cuando se pinó.
-  Revisar, y al subir volver a pasar la puerta WASM. **Toca a F7**, que quiere `arrow-rs` en vez de
-  `COPY`: no se cambia el escritor sobre un pin que se sabe viejo.
+  **Ya lo está** (59.2.0, comprobado el 15), y **el pin dejó de estar acoplado a F7**: la medición
+  revirtió el cambio de escritor, así que ya no hay ningún «no se cambia el escritor sobre un pin
+  viejo» que esperar. Sube cuando quiera, y lo único que hay que volver a pasar es la puerta WASM —
+  que es la parte **no medida** de aquel informe.
 - **Enviar el correo a Labra Gayo.** Es una acción humana, arrastrada desde la fase 0, y no vive en
   ningún otro sitio del árbol.
 
@@ -725,6 +1031,32 @@ docblock confiesa que comprueba que la línea **exista**, no que **diga** lo que
 
 ---
 
+## Cinco de los 23 programas de conformidad NO SE EJECUTAN (medido el 16)
+
+Los artefactos de `programs.rs` se escribieron el 15 y **cinco salieron con `REFUSED` en su sección
+`── run ──`**. Se bendijeron y hubo que retirarlos: un golden que registra una negativa es
+exactamente lo que el paso 8 existe para impedir —el ejemplo rancio con la luz verde—, y bendecirlo
+convierte «no lo sabíamos» en «es lo esperado», que es peor que cualquiera de los dos. Sus
+`compiled.txt` están borrados, así que el test se queda rojo por artefacto ausente hasta que alguien
+decida. **Nada de esto era visible antes, porque los artefactos no existían.**
+
+Tres causas, y la primera es una **discrepancia entre la superficie y el backend**:
+
+| programa | qué lo tumba |
+|---|---|
+| `self-join`, `shop` | `join_key` (`fossil-df/src/plan.rs:234`) exige **el mismo nombre de columna en los dos lados**. `on = Node.parent == Other.id` y `on = ... user_id == ... id` son legales en la superficie que la documentación publica |
+| `compound-key` | ni llega a esa comprobación: el `on` es `... and ...` y la puerta sólo acepta un `Eq` desnudo |
+| `projection` | `Cast error: Cannot cast string '' to value of Date32` |
+| `sightings` | `Json error: Not valid JSON: EOF while parsing a list` |
+
+**La causa raíz de las tres primeras está aguas arriba y ya tiene nombre:** `lower.rs:1004` vacía
+`ColRef.source`, así que `join_key` no puede saber qué lado es cuál y exigir nombres iguales es lo
+único que *puede* hacer. Arreglar `join_key` sin devolverle el `source` no es posible.
+
+Y ningún test de Rust ejecuta esos programas, así que **ninguno estaba rojo en ninguna parte**.
+
+---
+
 ## Trampas medidas, que cuestan caro si se descubren tarde
 
 - **`name = User.name` ya parsea hoy y se tira en silencio.** `parse_iri_expr` tolera un `IDENT`
@@ -750,13 +1082,45 @@ docblock confiesa que comprueba que la línea **exista**, no que **diga** lo que
 
 ---
 
-## Ya muerto, y el árbol no se ha enterado
+## Ya muerto, y el árbol no se ha enterado — **la sección se ha enterado ella la última**
 
-`Optional` y `Fn` no se construyen en ningún sitio de producción, así que `Checker::check`, el
-atajo de clausura implícita y `synthesize_closure` son **inalcanzables desde `typecheck_mapping`** —
-sólo los llaman cinco tests. ADR-0059 los programa matar; ya están muertos. S-OptCov la afirma un
-comentario y no está implementada. `ShapeBinding.closed` se puebla y no lo lee nadie.
-`DefMap::lookup_prefix` sólo la llama su propio test.
+**Comprobada entera el 19, y tres de sus cinco afirmaciones eran ya falsas.** Es su propio título
+vuelto contra ella, y queda escrito porque el modo de fallo importa más que la lista.
+
+- ~~`Optional`, `Fn`, `Checker::check`, el atajo de clausura y `synthesize_closure`.~~ **Ya borrados**,
+  en `3bda536` («una grafía por idea»), antepasado de HEAD. `TyKind` tiene siete variantes y ninguna
+  es `Optional` ni `Fn`; lo que queda son lápidas (`check.rs:418,448,557,748,1536`, `ty.rs:89`). Los
+  cinco tests se fueron con ellos.
+- ~~`DefMap::lookup_prefix` sólo la llama su propio test.~~ **Borrada, en el mismo commit.** Las tres
+  referencias que quedan son lápidas — y una de ellas es la línea 112 de este documento, que ya decía
+  «no existe: borrada» mientras ésta seguía pidiendo borrarla.
+- ~~S-OptCov la afirma un comentario y no está implementada.~~ **Refutada.** No son 19 menciones sino
+  cuatro, y ninguna es lo que la afirmación describe: dos son lápidas correctas, la tercera es esta
+  frase, y la cuarta es `book/typing.mdx:220`, donde la regla **está definida de verdad**, en un
+  sistema coherente con S-Refl, S-Opt, S-IntFlt y S-SeqCov, en una página cuya cabecera dice que una
+  regla escrita ahí y ausente de `crates/` es *trabajo pendiente, no un error de la página*. Borrar
+  el nombre sería romper la referencia para que encaje con la implementación, que es al revés.
+- `ShapeBinding.closed` — **ya borrado también**, y su lápida en `fossil-graph-schema/src/shapes.rs`
+  explica por qué cablearlo no habría cambiado nada: una clave es un nombre desnudo resuelto contra
+  esa tabla, así que un predicado que no declara ya es un error, incondicionalmente. *«Un flag que
+  sólo puede elegir el comportamiento que ya ocurre no es un flag.»*
+- **`TargetShapeError`: cuatro de cinco borradas el 19**, probadas inalcanzables con catorce
+  programas reales por `resolve_target_shape` — ni un `Err` en los trece que fallan. Queda
+  `NoDocument`, igual de muerta y **bloqueada por propiedad, no por duda**: colapsar
+  `Result<Option<_>, _>` a `Option<_>` toca tres líneas de `fossil-ide`.
+
+**Lo que sí está vivo y no lo había listado nadie**, encontrado por la misma sonda:
+`DefMap::shape_binding_for` busca por **IRI de forma**, así que dos bindings `type` que resuelvan al
+mismo IRI devuelven en silencio el documento del primero. Probado: dos documentos declarando ambos
+`http://example.org/Person`, mapeo sobre el segundo, y vuelven las restricciones del primero. Es
+exactamente el caso que la ligadura posicional presume de distinguir — «dos documentos que declaran
+`Person` se distinguen por sus etiquetas locales» — y el arreglo necesita el nombre local, que se ha
+perdido cuando `resolve_target_shape` corre.
+
+Y estos, con llamantes sólo en sus propios tests, sin borrar todavía: `DefMap::lookup_source`,
+`DefMap::lookup_source_schema`, `provenance::mapping_at` (re-exportada en `lib.rs:90`),
+`ProvenanceKind::SynthesizedClosureRendering`, e `infer::resolve_source_row` — ésta última con cinco
+comentarios que la nombran como parte de la ruta de typecheck, lo cual ya es falso.
 
 ---
 

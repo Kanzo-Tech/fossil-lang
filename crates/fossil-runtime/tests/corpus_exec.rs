@@ -1,17 +1,24 @@
-//! SC#1 native-execution tier + cross-engine baseline producer.
+//! Native-execution tier + cross-engine baseline producer.
+//!
+//! The claim under test: every generated SQL statement executes identically —
+//! the same result-set bytes — on native `DuckDB` 1.10502 AND `DuckDB`-WASM
+//! 1.33.x.
 //!
 //! NATIVE-ONLY (`fossil-runtime` carries a `wasm32` `compile_error!` tripwire).
-//! This is tier 2 of the two-tier parity strategy:
+//! This is tier 1 of the two-tier parity strategy:
 //!
-//! 1. **Snapshot tier** — `fossil-codegen/tests/corpus.rs` locks the 30-mapping
-//!    corpus' generated SQL text.
-//! 2. **Native-execution tier (THIS FILE)** — the executable subset's SQL runs
+//! 1. **Native-execution tier (THIS FILE)** — the executable subset's SQL runs
 //!    on native `duckdb` 1.10502 against on-disk fixture CSVs; the result set is
 //!    asserted byte-for-byte AND a `native_baseline.json` digest is written for
 //!    the WASM tier to reproduce.
-//! 3. **WASM-execution tier** — `tests/wasm_parity/run-parity.mjs` reads the
+//! 2. **WASM-execution tier** — `tests/wasm_parity/run-parity.mjs` reads the
 //!    baseline, re-runs each SQL on `@duckdb/duckdb-wasm` 1.33.x, and diffs the
-//!    reproduced digests (the documented MANUAL phase-close gate).
+//!    reproduced digests. It is MANUAL and on-demand: nothing in CI runs it, so
+//!    a pass only exists if someone ran it and said so.
+//!
+//! A snapshot tier above these used to lock the generated SQL text of a
+//! 30-mapping corpus; `af39ff4` deleted the SQL-codegen path and the crate that
+//! held it, and the `sql_sha256` digest below now carries what it used to.
 //!
 //! # The cross-engine result-set serialization (reproduced byte-for-byte by JS)
 //!
@@ -47,9 +54,9 @@ struct ExecEntry {
     expected_rows: &'static [&'static [&'static str]],
 }
 
-/// The executable subset of the 30-mapping corpus. These mirror the
-/// codegen-snapshot corpus shapes (`fossil-codegen/tests/corpus.rs`) but in a
-/// queryable `SELECT` form (the snapshot tier locks the `COPY` form; executing a
+/// The executable subset of the 30-mapping corpus. These mirror the shapes the
+/// deleted codegen-snapshot tier locked, but in a
+/// queryable `SELECT` form (that tier locked the `COPY` form; executing a
 /// `SELECT` is simpler to assert and is what DuckDB-WASM runs too). Every entry
 /// reads a fixture CSV under `examples/` and ends in `ORDER BY` for a stable
 /// row order. All projected columns are `CAST(... AS VARCHAR)` so the result
@@ -232,7 +239,7 @@ fn corpus_exec_native_and_write_baseline() {
     for entry in EXEC_CORPUS {
         let rows = run_query(&conn, entry.sql);
 
-        // Byte-for-byte result assertion (the SC#1 native-execution contract).
+        // Byte-for-byte result assertion (the native-execution contract).
         let expected: Vec<Vec<String>> = entry
             .expected_rows
             .iter()

@@ -1,9 +1,9 @@
 /*
  * Dónde vive una arista: en la tesela de su origen (CSR) o en la tesela más profunda que contiene
- * ambos extremos (LCA). ADR-0042 §2 dice lo primero y §3 decía lo segundo; esto lo mide en vez de
- * discutirlo, sobre un corpus que ya existe y sin escribir un emisor.
+ * ambos extremos (LCA). El modelo de teselado afirmaba lo primero en un sitio y lo segundo en
+ * otro; esto lo mide en vez de discutirlo, sobre un corpus que ya existe y sin escribir un emisor.
  *
- * Lo hace computable ADR-0045 §8: si una tesela es un rango fijo de 4.096 filas de `dense_id` y
+ * Lo hace computable la definición de tesela: si una tesela es un rango fijo de 4.096 filas de `dense_id` y
  * `dense_id` está renumerado en orden Morton, entonces la tesela de un vértice es `dense_id >> 12`
  * y el antepasado común más bajo de dos vértices es el prefijo común de sus ids — un XOR y un
  * conteo de ceros a la izquierda. Nivel 0 significa «los dos extremos en la misma tesela hoja».

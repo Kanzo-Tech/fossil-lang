@@ -4,16 +4,11 @@
 //! what their static types are (forward type propagation: source → mapping
 //! body → triple terms).
 //!
-//! Phase 1 ships the trait + a [`CsvDescriptor`] stub returning a hardcoded
-//! `{id: String, name: String}` schema (sufficient for the `hello.fossil`
-//! walking-skeleton demo). Phase 3 CORE-05 (plan 03-02) ADDS a real CSVW
-//! thin parser at [`csvw`] over the W3C "Metadata Vocabulary for Tabular
-//! Data" minimum subset — a literal `@context` and nothing that would need
-//! JSON-LD resolution; [`csvw`] lists what is in and what is out. The Phase 1
-//! [`CsvDescriptor`] stub
-//! is preserved for walking-skeleton compatibility.
+//! The crate ships the trait plus a [`CsvDescriptor`] stub returning a
+//! hardcoded `{id: String, name: String}` schema. That stub exists for the
+//! `hello.fossil` walking-skeleton demo and for nothing else.
 //!
-//! Phase 5 STDL-06 may add JSON Schema / XSD / Parquet implementations.
+//! JSON Schema / XSD / Parquet implementations would attach at the same trait.
 //!
 //! ## v0.2: drop user-facing CSVW; introduce `InferredDescriptor`
 //!
@@ -39,9 +34,10 @@
 //!
 //! ## Trait stability
 //!
-//! The Phase 1 trait surface (`name`, `parse`, `type_for_field`) is the
-//! public-API commitment to Phase 3-9. Additive growth (e.g. `parse_async`
-//! for streaming descriptors) is allowed; method removal requires an ADR.
+//! The trait surface (`name`, `parse`, `type_for_field`) is the public-API
+//! commitment. Additive growth (e.g. `parse_async` for streaming descriptors)
+//! is allowed; removing a method is a decision, and gets written down on the
+//! reference page that states the rule before it lands.
 
 pub mod cache;
 pub mod inferred;
@@ -59,13 +55,13 @@ pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 pub trait InputDescriptor: Send + Sync + std::fmt::Debug {
     /// Stable, lowercase, namespace-free identifier (e.g. `"csv"`, `"json"`).
     ///
-    /// Trait signature returns `&str` (not `&'static str`) so Phase 3+
+    /// Trait signature returns `&str` (not `&'static str`) so
     /// implementations can return dynamically-computed names.
     fn name(&self) -> &str;
 
     /// Parse a raw descriptor blob into an [`InputSchema`].
     ///
-    /// Phase 1 stubs ignore `raw` and return a hardcoded schema.
+    /// The [`CsvDescriptor`] stub ignores `raw` and returns a hardcoded schema.
     fn parse(&self, raw: &[u8]) -> Result<InputSchema, DescriptorError>;
 
     /// Lookup the static type of a field by name.
@@ -75,18 +71,18 @@ pub trait InputDescriptor: Send + Sync + std::fmt::Debug {
 
 /// Parsed input schema: ordered map of field name → static type.
 ///
-/// The ordering matters for column-position fallback parsing in CSV (Phase 3
-/// CORE-05) and for stable diagnostic output.
+/// The ordering matters for column-position fallback parsing in CSV and for
+/// stable diagnostic output.
 #[derive(Debug, Clone)]
 pub struct InputSchema {
     /// Ordered field declarations.
     pub fields: indexmap::IndexMap<smol_str::SmolStr, FieldType>,
 }
 
-/// Phase 1 minimal type lattice for input fields.
+/// The minimal type lattice for input fields.
 ///
-/// Phase 3 CORE-05 expands with `Float`, `Boolean`, `Date`, `DateTime`, etc.,
-/// matching CSVW's xsd-derived datatype catalog.
+/// It widens to `Float`, `Boolean`, `Date`, `DateTime` and the rest of the
+/// xsd-derived datatype catalog when a source needs them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldType {
     String,
@@ -95,12 +91,12 @@ pub enum FieldType {
 
 /// Error produced by descriptor parsing.
 ///
-/// Phase 1 shipped only `Invalid`; Phase 3 CORE-05 (plan 03-02) widens with
-/// structured variants used by the CSVW thin parser. Future phases (XSD,
-/// JSON Schema) extend further as needed.
+/// `Invalid` is the original catch-all; the structured variants below are what
+/// new code should return. XSD / JSON Schema descriptors would extend it
+/// further.
 #[derive(Debug, thiserror::Error)]
 pub enum DescriptorError {
-    /// Phase 1: catch-all variant retained for back-compat with the
+    /// Catch-all variant retained for the
     /// [`CsvDescriptor`] stub and any external callers that pattern-matched
     /// on it. New code should prefer the structured variants below.
     #[error("invalid descriptor: {0}")]
@@ -119,15 +115,16 @@ pub enum DescriptorError {
     // about a CSVW sidecar; there is no sidecar.
 
     /// The descriptor parsed successfully but did not declare a
-    /// `tableSchema`, and the consumer (plan 03-05) requires one for forward
+    /// `tableSchema`, and the type-checker requires one for forward
     /// type propagation.
     #[error("CSVW descriptor lacks tableSchema; cannot drive forward type propagation")]
     MissingTableSchema,
 }
 
-/// Phase 1 stub: hardcoded CSV inference returning `{id: String, name: String}`.
+/// Stub: hardcoded CSV inference returning `{id: String, name: String}`.
 ///
-/// Phase 3 CORE-05 replaces this with a real CSVW thin parser (~500 LOC).
+/// The real path is [`InferredDescriptor`], built from the host's own
+/// `DESCRIBE read_csv_auto(…)`.
 /// `parse()` ignores its input — any byte slice yields the same hardcoded schema.
 #[derive(Debug, Default)]
 pub struct CsvDescriptor;

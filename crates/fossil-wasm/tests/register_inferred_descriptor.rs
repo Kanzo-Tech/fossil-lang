@@ -7,8 +7,7 @@
 //! wasm-bindgen integration is exercised browser-side by the vitest suite at
 //! `packages/wasm/tests/registerInferredDescriptor.test.ts`.
 //!
-//! Convention mirrors `crates/fossil-wasm/tests/workspace.rs` (Phase 7) and
-//! `crates/fossil-wasm/tests/classification.rs` (Phase 5).
+//! Convention mirrors `crates/fossil-wasm/tests/workspace.rs`.
 
 use fossil_graph_schema::Primitive;
 use fossil_wasm::FossilPlayground;

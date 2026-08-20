@@ -1,13 +1,12 @@
-//! Native-side smoke of the LSP-over-postMessage dispatch loop (plan
-//! 07-03, WASM-02 / PLAY-01). Exercises the JSON-RPC routing layer
+//! Native-side smoke of the LSP-over-postMessage dispatch loop. Exercises the
+//! JSON-RPC routing layer
 //! WITHOUT a Web Worker — the worker entrypoint (`start_lsp_worker`) is
 //! wasm32-only; this file targets the pure-Rust `dispatch` fn through the
 //! `__dispatch_for_test` hook.
 //!
-//! The full node-driven end-to-end exercise lives in `playground/`
-//! integration tests (07-05 onward); this file is the per-PR cargo-test
-//! mirror that catches dispatch-routing regressions without requiring
-//! wasm-bindgen + node toolchain.
+//! A node-driven end-to-end exercise would need a host that runs the worker;
+//! this file is the per-PR cargo-test mirror that catches dispatch-routing
+//! regressions without requiring the wasm-bindgen + node toolchain.
 
 // Test helpers consume their JSON params (moved into the constructed
 // envelope) — clippy's `needless_pass_by_value` lint flags this even
@@ -132,7 +131,7 @@ fn did_open_emits_per_file_publish_diagnostics() {
                     "uri": "file:///a.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }),
         ),
@@ -183,7 +182,7 @@ fn did_change_invokes_set_text_revision_bump() {
                     "uri": "file:///a.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }),
         ),
@@ -195,7 +194,7 @@ fn did_change_invokes_set_text_revision_bump() {
             serde_json::json!({
                 "textDocument": { "uri": "file:///a.fossil", "version": 2 },
                 "contentChanges": [
-                    { "text": "prefix ex: <https://example.org/>\n// edit\n" }
+                    { "text": "users := io.csv(\"u.csv\")\n// edit\n" }
                 ]
             }),
         ),
@@ -232,7 +231,7 @@ fn did_close_publishes_empty_diagnostics() {
                     "uri": "file:///a.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }),
         ),

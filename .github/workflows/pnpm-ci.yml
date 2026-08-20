@@ -65,9 +65,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Build WASM first — every TS package downstream depends on the wasm-bindgen output
-      # being present in packages/wasm/pkg/. This step is a no-op early in Phase 8
-      # (the @fossil-lang/wasm package doesn't exist yet; its script will be `echo ok`).
-      # Once 08-06 lands, this builds the real artifact.
+      # being present in packages/wasm/pkg/. The `|| echo` fallback keeps the job
+      # green if the package has no build script yet.
       - name: Build wasm
         run: pnpm --filter "@fossil-lang/wasm" run build:wasm || echo "no @fossil-lang/wasm yet"
 

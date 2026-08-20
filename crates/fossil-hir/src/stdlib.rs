@@ -1018,18 +1018,19 @@ impl FunctionRegistry {
 
 /// `str.slug` — replaces the `fossil_slug` UDF.
 ///
-/// **The template this was specified with matches NEITHER Rust implementation,
-/// and measurement is the only reason we know.** The tree had two slug
-/// functions: the `fossil_slug` UDF (`slug::slugify`) and
-/// `crates/fossil-df/src/catalog.rs`'s own `slug`. Against a 16-case hand corpus
-/// the specified `'[^a-z0-9.-]+'` form scored 8/16 against the first and 7/16
+/// **The template this was specified with matched NEITHER Rust implementation,
+/// and measurement is the only reason we know.** The tree once carried two slug
+/// functions: the `fossil_slug` UDF, which was `slug::slugify`, and a
+/// hand-written one that kept `.`, lower-cased, and collapsed every run of
+/// non-`\p{L}\p{N}.-` to a single `-`. Against a 16-case hand corpus the
+/// specified `'[^a-z0-9.-]+'` form scored 8/16 against the first and 7/16
 /// against the second — it is a hybrid of the two, keeping `.` like the one and
 /// collapsing runs like the other. Worse, it maps `ÅÄÖ` and `日本語` to the
 /// EMPTY STRING, which in a slug that ends up in an IRI is an identity
 /// collision and not a formatting difference.
 ///
-/// This form is EXACT against `catalog.rs::slug`: 16/16 by hand and 0 mismatches
-/// over 240,998 fuzzed inputs. `slug::slugify` cannot be reproduced at all —
+/// This form is EXACT against that hand-written one: 16/16 by hand and 0
+/// mismatches over 240,998 fuzzed inputs. `slug::slugify` cannot be reproduced at all —
 /// it TRANSLITERATES (`Straße` → `strasse`, `€100` → `eur100`, `Москва` →
 /// `moskva`) and `DuckDB` ships no transliteration function. The best available
 /// approximation, over `strip_accents`, differs on 55.6% of Latin-accented

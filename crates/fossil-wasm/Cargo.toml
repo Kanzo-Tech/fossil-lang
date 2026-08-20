@@ -28,10 +28,10 @@ fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-# Phase 13 INPUT-01: WasmSystem stores InferredDescriptors registered
+# WasmSystem stores InferredDescriptors registered
 # by the browser-side playground orchestration BEFORE invoking compile() — the
-# Rust forward-propagation path (13-02) reads them through the System trait
-# accessor.
+# Rust forward-propagation path reads them through the System trait accessor,
+# because the browser has no filesystem to introspect a CSV from.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # The `SHEX` decoder row this host installs on its `System`. A table of `fn`
 # so the dependency buys one const and no vtable — and the
@@ -39,34 +39,33 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # calls it.
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 smol_str = { workspace = true }
-# Phase 5 STDL-07: the stdlib classification table the playground reads to
-# disable native_udf_only functions in-browser. fossil-hir is WASM-clean
-# (deps: fossil-hir + salsa + smol_str — all already in the WASM gate); it does
-# NOT pull fossil-runtime or any native UDF crate (the WASM gate).
+# `fossil_lineage::source_refs` is what the test-reachable `refs_native` core
+# calls to report a program's source bindings. WASM-clean: its own deps are
+# fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
+# NEITHER fossil-runtime NOR any native UDF crate.
 fossil-lineage = { path = "../fossil-lineage" }
 # WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
 # surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host
 # (keasy consumes the SAME structs). fossil-ide produces them; we name the
 # return type of the test-reachable `refs_native` core.
 fossil-run-status = { path = "../fossil-run-status" }
-# Plan 07-02 (WASM-02): the `check()` method converts byte-offset spans to
-# UTF-16 LSP ranges via `fossil_ide::LineIndex` (rust-analyzer model from
-# 06-05). fossil-ide is the 7th crate in the 9-crate WASM gate (Phase 6) —
-# wasm32-clean by construction. Wiring this dep lets `check()` return the
-# same range shape the LSP Worker (07-03) republishes verbatim.
+# The `check()` method converts byte-offset spans to UTF-16 LSP ranges via
+# `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
+# WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
+# return the same range shape the LSP Worker republishes verbatim.
 fossil-ide = { path = "../fossil-ide" }
-# Plan 07-02: `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` in
-# 06-09 — production hosts own their own db). Needs the
+# `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` — production hosts
+# own their own db). Needs the
 # `salsa::Storage<Self>` field + the `Database` derive macro at the
 # trait-object level.
 salsa = { workspace = true }
 
-# Plan 07-03 (WASM-02 / PLAY-01): the WASM LSP transport speaks raw LSP
+# The WASM LSP transport speaks raw LSP
 # JSON-RPC over `postMessage` to a Web Worker. lsp-types gives us the typed
-# request / notification params + capability surface (mirrors fossil-lsp 06-09
-# 1:1); web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
+# request / notification params + capability surface (mirrors fossil-lsp 1:1);
+# web-sys gives us the `DedicatedWorkerGlobalScope.onmessage` hook the
 # `start_lsp_worker` entrypoint installs. Both are wasm32-clean (lsp-types
-# proven by the 9-crate gate from Phase 6; web-sys is the canonical
+# proven by the WASM gate; web-sys is the canonical
 # JsCast-able binding crate). No tokio, no mio.
 lsp-types = { workspace = true }
 web-sys = { workspace = true, features = ["MessageEvent", "DedicatedWorkerGlobalScope"] }

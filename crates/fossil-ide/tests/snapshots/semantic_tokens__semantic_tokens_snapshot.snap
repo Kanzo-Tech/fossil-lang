@@ -25,6 +25,7 @@ expression: render(FIXTURE)
  6:38 len=1  operator
  6:39 len=5  variable
  6:45 len=2  property
+ 6:47 len=1  operator
  6:48 len=1  string
  7:4  len=4  variable
  7:9  len=1  operator

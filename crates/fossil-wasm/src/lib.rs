@@ -1,10 +1,11 @@
 //! `fossil-wasm` — WASM host shim exposing [`FossilPlayground`] to JS.
 //!
-//! ## Phase 7 surface (this commit — WASM-02 / plan 07-02)
+//! ## The surface
 //!
-//! Phase 7 grows the surface from the original Phase-1 single
-//! `compile(source: &str)` into the full `ty_wasm`-shaped `Workspace`
-//! lifecycle the playground and the WASM LSP Worker (07-03) consume:
+//! A single `compile(source: &str)` came first; the surface is now the full
+//! `ty_wasm`-shaped `Workspace` lifecycle the playground and the WASM LSP
+//! Worker consume, because an editor edits files and re-checks them, and a
+//! one-shot compile has nowhere to put the file identity that requires:
 //!
 //! | Method                          | Returns                              | Use site            |
 //! |---------------------------------|--------------------------------------|---------------------|
@@ -12,11 +13,11 @@
 //! | [`FossilPlayground::update_file`]| `()`                                 | `textDocument/didChange`   |
 //! | [`FossilPlayground::close_file`]| `()`                                 | `textDocument/didClose`    |
 //! | [`FossilPlayground::check`]     | `Array<{ uri, range, severity, message }>` | LSP `publishDiagnostics` (workspace-wide) |
-//! | [`FossilPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (07-03 drain) |
+//! | [`FossilPlayground::diagnostics_for`] | `Array<{ uri, range, severity, message }>` | per-file `publishDiagnostics` (the worker's drain) |
 //!
-//! The Phase-1 `compile(&str)` + `classification()` methods are RETAINED
-//! verbatim — the Phase-1 smoke test and the STDL-07 classification path
-//! both keep working without change.
+//! The single-shot `compile(&str)` is RETAINED beside it: a playground with one
+//! buffer and no LSP client should not have to open and close a file to
+//! type-check it, and the node smoke test calls exactly that entry point.
 //!
 //! ## Architecture
 //!
@@ -24,20 +25,20 @@
 //! `fossil-lsp` (which has a `compile_error!` cfg-tripwire because
 //! `lsp-server` uses crossbeam + stdio). Both `fossil-lsp` (native, stdio)
 //! and `fossil-wasm` (WASM, postMessage) are thin transport adapters over
-//! the same `fossil-ide` free functions — "one crate, two hosts"
-//! (PROJECT.md EXT-01).
+//! the same `fossil-ide` free functions — "one crate, two hosts".
 //!
 //! ## Why the Workspace lifecycle is fan-out-safe
 //!
 //! `update_file` mutates the SAME [`fossil_base::SourceFile`] input via the
-//! Salsa [`salsa::Setter`] (`set_text`) — the EXACT mechanism Phase 6's LSP
+//! Salsa [`salsa::Setter`] (`set_text`) — the EXACT mechanism the native LSP's
 //! `didChange` path uses (the revision bump is the cancellation
 //! trigger). NO new tracked queries land in the lifecycle path, so
-//! `MAX_PER_MAPPING_FAN_OUT` stays at 1 (verified by
-//! `fossil-hir::tests::invalidation_regression`, 3/3).
+//! `MAX_PER_MAPPING_FAN_OUT` stays at 1, which
+//! `fossil-hir`'s `invalidation_regression` test is what proves.
 //!
-//! The WASM-first architecture was validated by the Phase 0 rudof spike; this
-//! file implements the WASM API contract verbatim.
+//! WASM-first is load-bearing, not a port: everything above `fossil-ide` had to
+//! build for `wasm32` before this shim could exist at all, which is why the
+//! `compile_error!` tripwires live on the native-only crates rather than here.
 
 pub(crate) mod lsp_worker;
 pub mod tokenize;
@@ -64,7 +65,7 @@ use crate::workspace::OpenFiles;
 
 /// The Salsa database the WASM host owns.
 ///
-/// Mirrors `fossil-lsp::LspDb` (06-09): the Salsa runtime + the host
+/// Mirrors `fossil-lsp::LspDb`: the Salsa runtime + the host
 /// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
 /// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
 /// names its output document and the host REGISTERS it (see
@@ -159,7 +160,7 @@ impl FossilPlayground {
     // manifest for the playground to gray out the native-only functions. There
     // are none: see the tombstone below `inferred_descriptor_native`.
 
-    // ----- Phase 7 Workspace lifecycle (ty_wasm pattern — WASM-02) -----
+    // ----- Workspace lifecycle (the ty_wasm pattern) -----
 
     /// Open a file in the workspace. Returns a [`FileHandle`] the JS side
     /// keys subsequent `update_file` / `close_file` / `compile_file` calls
@@ -209,14 +210,14 @@ impl FossilPlayground {
 
     /// Run `parse → def_map → typecheck_mapping` across every open file and
     /// return a flat JS array of `{ uri, range, severity, message }` rows
-    /// keyed by file URI. The LSP Worker (07-03) republishes these grouped
+    /// keyed by file URI. The LSP Worker republishes these grouped
     /// by URI as `textDocument/publishDiagnostics` notifications.
     ///
     /// `range` is the UTF-16 LSP range (via `fossil_ide::LineIndex` — the
-    /// rust-analyzer model from 06-05). `severity` is the LSP integer
+    /// rust-analyzer model). `severity` is the LSP integer
     /// constant (1 = error, 2 = warning, 3 = info). `message` carries any
-    /// `suggestion_source` as a `\nhelp: ...` suffix (mirroring `fossil-lsp`
-    /// `to_lsp_diagnostic` in 06-09).
+    /// `suggestion_source` as a `\nhelp: ...` suffix, mirroring
+    /// `fossil-lsp`'s `to_lsp_diagnostic`.
     ///
     /// # Errors
     ///
@@ -230,10 +231,10 @@ impl FossilPlayground {
         serde_wasm_bindgen::to_value(&self.check_rows()).map_err(JsError::from)
     }
 
-    /// Per-file diagnostic drain — the B3 follow-up accessor the LSP Worker
-    /// (07-03) consumes for its per-file `publishDiagnostics` notifications.
+    /// Per-file diagnostic drain — the accessor the LSP Worker consumes for its
+    /// per-file `publishDiagnostics` notifications.
     /// `check()` returns the workspace-wide flat array; `diagnostics_for`
-    /// returns just one file's rows so 07-03 can dispatch one notification
+    /// returns just one file's rows so the worker can dispatch one notification
     /// per affected URI without partitioning the workspace array on the JS
     /// side.
     ///
@@ -247,13 +248,13 @@ impl FossilPlayground {
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
 
-    // ----- Phase 13 — register a host-introspected descriptor -----
+    // ----- Register a host-introspected descriptor -----
 
     /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
     /// source binding name BEFORE invoking [`Self::compile`] /
     /// [`Self::compile_file`]. The Rust compiler reads from this registration
-    /// during forward type propagation (Phase 3 CORE-05 rewired in plan
-    /// 13-02).
+    /// during forward type propagation — the browser has no filesystem to
+    /// introspect a CSV from, so the column types must arrive from the host.
     ///
     /// `descriptor_json` is the JSON serialisation of `InferredDescriptor`;
     /// the canonical shape is exposed in `packages/wasm/src/index.ts` as
@@ -308,7 +309,7 @@ impl FossilPlayground {
 // natively (the wasm-bindgen attribute layer is a transparent pass-through
 // over these helpers — a passing native test guarantees the wire-side
 // methods compile + dispatch correctly). Mirrors the `classification()` ↔
-// `stdlib_classification()` split that has been the pattern since Phase 5.
+// `stdlib_classification()` split that established the convention.
 
 /// Pure-Rust error returned by the `*_native` / `*_rows` / `*_result`
 /// helpers.
@@ -327,7 +328,7 @@ pub enum WorkspaceError {
     NoMappingInFile,
     /// The `register_inferred_descriptor` JSON payload did not deserialise
     /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
-    /// underlying `serde_json` error message. Phase 13.
+    /// underlying `serde_json` error message.
     MalformedDescriptor(String),
 }
 
@@ -457,12 +458,12 @@ impl FossilPlayground {
         });
     }
 
-    // ----- LSP-worker dispatch helpers (07-03 — pub(crate)) -----
+    // ----- LSP-worker dispatch helpers (pub(crate)) -----
     //
     // These accessors are consumed by `lsp_worker::dispatch` to route LSP
     // requests / notifications onto the existing fossil-ide free functions
     // without leaking the `WasmDb` type or duplicating bookkeeping. They
-    // mirror the analogous `LspState` accessors in `fossil-lsp` 06-09.
+    // mirror the analogous `LspState` accessors in `fossil-lsp`.
 
     /// URI → `FileHandle` lookup used by `textDocument/didChange` /
     /// `didClose` / custom `fossil/compileFile` dispatch.
@@ -493,12 +494,12 @@ impl FossilPlayground {
     /// Drain Salsa `Diagnostic` accumulators for `file` in their structured
     /// form (still carrying `did_you_mean` / `suggestion_source`). Used by
     /// `textDocument/codeAction` to re-derive the carriers the wire form
-    /// drops — mirrors fossil-lsp's `diagnostics_for` in 06-09.
+    /// drops — mirrors fossil-lsp's `diagnostics_for`.
     pub(crate) fn drain_diagnostics_for_file(&self, file: SourceFile) -> Vec<Diagnostic> {
         diagnostics_for_file(&self.db, file)
     }
 
-    // ----- Phase 13 — inferred-descriptor registration -----
+    // ----- Inferred-descriptor registration -----
 
     /// Pure-Rust mirror of [`Self::register_inferred_descriptor`] (the
     /// `#[wasm_bindgen]` wrapper).
@@ -617,7 +618,7 @@ pub fn refs_native(program: &str) -> Vec<fossil_run_status::SourceRefInfo> {
 
 /// One diagnostic row in the [`FossilPlayground::check`] return array.
 ///
-/// Mirrors the LSP `Diagnostic` shape exactly so the LSP Worker (07-03) can
+/// Mirrors the LSP `Diagnostic` shape exactly so the LSP Worker can
 /// republish each row as-is inside a `PublishDiagnosticsParams` payload
 /// without a second translation step. UTF-16 ranges; integer LSP severities.
 ///
@@ -645,7 +646,7 @@ pub struct CheckPosition {
 }
 
 /// Drain the Salsa `Diagnostic` accumulator across every mapping in `file`
-/// (the same pattern as `fossil-lsp::diagnostics_for` in 06-09). Forces
+/// (the same pattern as `fossil-lsp::diagnostics_for`). Forces
 /// `def_map` + `typecheck_mapping` for each mapping so the accumulator is
 /// populated before we read it.
 fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
@@ -671,7 +672,7 @@ fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
 /// Convert one `fossil_base::Diagnostic` to the JS-side row shape. UTF-16
 /// range conversion via [`fossil_ide::LineIndex`]; `suggestion_source` folded
 /// into the message as a `help:` suffix (mirroring `fossil-lsp::
-/// to_lsp_diagnostic` in 06-09 — keep the structured carriers reachable by
+/// to_lsp_diagnostic` — keep the structured carriers reachable by
 /// re-draining the accumulator on the consumer side).
 fn to_check_row(uri: &str, index: &LineIndex, d: &Diagnostic) -> CheckRow {
     let range = span_to_range(index, d.span);
@@ -712,7 +713,7 @@ const fn utf16_to_pos(p: Utf16Position) -> CheckPosition {
     }
 }
 
-// ----- LSP dispatch test hook (07-03 Task 2) -----
+// ----- LSP dispatch test hook -----
 //
 // The LSP-worker `dispatch` function is `pub(crate)`; native integration
 // tests in `crates/fossil-wasm/tests/lsp_worker.rs` reach it through this

@@ -79,9 +79,9 @@ pub fn delay_span_bug(
     message: impl Into<String>,
 ) -> ErrorGuaranteed {
     // `delay_span_bug` is the generic taint emitter — it carries neither a
-    // structured suggestion source nor a did-you-mean candidate (Phase 3 plan
-    // 03-03 / Phase 6 plan 06-08). Suggestion-emitting call sites build their
-    // own `Diagnostic` and attach the structured fields via the builders.
+    // structured suggestion source nor a did-you-mean candidate.
+    // Suggestion-emitting call sites build their own `Diagnostic` and attach
+    // the structured fields via the builders.
     Diagnostic::new(Severity::Error, message, span).accumulate(db);
     ErrorGuaranteed::new()
 }
@@ -89,8 +89,8 @@ pub fn delay_span_bug(
 /// Same as [`delay_span_bug`] but for compiler-internal bugs.
 ///
 /// Severity stays `Error` but the message is prefixed
-/// `"internal compiler error: "`. Phase 3+ uses this for "this code path
-/// should be unreachable" cases.
+/// `"internal compiler error: "`. For "this code path should be unreachable"
+/// cases, where the user has done nothing wrong and the compiler has.
 #[must_use = "ErrorGuaranteed must be propagated to the caller to taint downstream queries"]
 pub fn bug(db: &dyn crate::Db, span: Span, message: impl Into<String>) -> ErrorGuaranteed {
     delay_span_bug(

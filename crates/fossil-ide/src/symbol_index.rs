@@ -3,7 +3,7 @@
 //! Built by walking the top-level items of [`fossil_syntax::parse`]'s CST and
 //! recording, for each definition, its `{ name, kind, range }`. The range is a
 //! byte range (`Range<u32>`) into the file text, so a downstream goto-def
-//! consumer (plan 06-06) can map a hit back to an LSP location.
+//! consumer can map a hit back to an LSP location.
 //!
 //! # Why a fresh CST walk and not `fossil-hir::def_map`?
 //!
@@ -25,7 +25,7 @@ use smol_str::SmolStr;
 
 /// The classification of a [`SymbolEntry`].
 ///
-/// Mirrors the LSP `SymbolKind` axes the outline maps onto (plan 06-06):
+/// Mirrors the LSP `SymbolKind` axes the outline maps onto:
 /// `Mapping → Class/Struct`, `Shape → Interface`. Kept
 /// as a Fossil-native enum so the index itself owes nothing to `lsp-types` —
 /// [`crate::outline`] is where the translation lives.

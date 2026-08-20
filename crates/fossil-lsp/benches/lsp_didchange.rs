@@ -1,4 +1,4 @@
-//! SC#2 — the ADVISORY Criterion benchmark for the `didChange` round-trip.
+//! The ADVISORY Criterion benchmark for the `didChange` round-trip budget.
 //!
 //! Measures the SAME per-keystroke analysis round-trip as the hard-gate
 //! correctness test (`tests/didchange_budget.rs`): `set_text` (Salsa Setter,
@@ -10,7 +10,7 @@
 //! Criterion's committed baseline + 20%-regression detection is reliable only
 //! on a pinned / self-hosted runner (stable CPU, no neighbour noise). On shared
 //! CI it is INFORMATIONAL — run it, record the numbers, but do not BLOCK on the
-//! regression check (that would flake). The blocking SC#2 gate is the margined
+//! regression check (that would flake). The blocking gate is the margined
 //! wall-clock budget test. The design GOAL this benchmark tracks is `< 100ms`
 //! on dev hardware; the benchmark reports the true steady-state cost so a real
 //! perf regression is visible on a controlled runner.

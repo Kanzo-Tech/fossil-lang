@@ -1,12 +1,12 @@
-//! Per-mapping real-span side table — Phase 3 plan 03-04.
+//! Per-mapping real-span side table.
 //!
-//! Replaces Phase 2's zero-width `Span { start: 0, end: 0 }` placeholders for
-//! literal-subset provenance entries (see plan 02-06) with real byte ranges
-//! read from `rowan::TextRange` during lowering.
+//! It is what gives a provenance entry a real byte range instead of a
+//! zero-width placeholder: the ranges are read from `rowan::TextRange` during
+//! lowering.
 //!
 //! # Why a side table (not a field on `HirExpr`)
 //!
-//! Same architectural rationale as the Phase 2 provenance side table
+//! Same architectural rationale as the provenance side table
 //! (`crate::provenance`): adding `span` to every `HirExpr` variant would
 //! change its `PartialEq`/`Hash`, which Salsa uses for `salsa::Update`. Two
 //! source-identical expressions at different source positions would no
@@ -26,11 +26,11 @@
 //! # Salsa invalidation barrier
 //!
 //! The [`spans`] tracked query reads [`crate::body::body`], which reads
-//! [`mapping_cst_node`]. This is REQUIRED so the Phase 2 plan 02-07
+//! [`mapping_cst_node`]. This is REQUIRED so the
 //! `MAX_PER_MAPPING_FAN_OUT = 1` invariant continues to hold. Reading
 //! `parse(db, file)` directly would tie every per-mapping spans query to the
 //! whole-file CST, causing all sibling spans to re-execute on any body edit.
-//! The intermediate per-mapping CST barrier (plan 02-07) prevents
+//! The intermediate per-mapping CST barrier prevents
 //! this — see `crates/fossil-hir/src/body.rs`'s `mapping_cst_node`
 //! documentation.
 //!
@@ -59,8 +59,8 @@
 //! sibling-mapping edits (only the mapping's own content moves spans;
 //! shifts in OTHER mappings don't cause `Spans(M_k)` to re-execute).
 //!
-//! The diagnostic-emission layer (`crate::check::compatible` in plan
-//! 03-05, the LSP host) is responsible for converting mapping-relative
+//! The diagnostic-emission layer (`crate::check::compatible`, the LSP host)
+//! is responsible for converting mapping-relative
 //! offsets to file-absolute when needed. The conversion is a single
 //! lookup of the mapping's start offset in the file CST and an add.
 //!
@@ -80,19 +80,20 @@ use crate::def_map::MappingLoc;
 /// Per-mapping real-span side table.
 ///
 /// Indexed-by-position into `ExprId(u32)` → vector position. The
-/// `crate::check::compatible` two-span blame in plan 03-05 reads this via
+/// `crate::check::compatible` two-span blame reads this via
 /// [`Spans::get`] for both source and destination blame positions.
 #[salsa::tracked(debug)]
 pub struct Spans<'db> {
-    /// Per-expression spans. One entry per Phase 2 property RHS (matches
-    /// the `expr_id = property_index` convention established in plan 02-06).
+    /// Per-expression spans. One entry per lowered property's RHS, at that
+    /// property's own index: `expr_id` is the position in
+    /// [`crate::body::HirBody::properties`].
     #[returns(ref)]
     pub by_expr: Vec<(ExprId, Span)>,
 }
 
 impl<'db> Spans<'db> {
     /// Look up the real byte range for an [`ExprId`]. Returns `None` for
-    /// unknown ids (defensive — Phase 3 callers should always have a valid
+    /// unknown ids (defensive — a caller should always have a valid
     /// id from `body(db, mapping).expr_count(db)`).
     #[must_use]
     pub fn get(self, db: &'db dyn fossil_base::Db, expr_id: ExprId) -> Option<Span> {
@@ -119,10 +120,10 @@ impl<'db> Spans<'db> {
 /// parse and do not lower.
 ///
 /// Reading `body` rather than `mapping_cst_node` also removes a walk: the
-/// per-mapping invalidation barrier is unchanged (plan 02-07),
+/// per-mapping invalidation barrier is unchanged,
 /// because `body` reads the same barrier and this query now reads only `body`.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spans<'db> {
     let by_expr: Vec<(ExprId, Span)> = crate::body::body(db, mapping)
         .expr_spans(db)
@@ -148,8 +149,8 @@ pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spa
 /// mapping, which is a plausible place and the wrong one.
 ///
 /// Plain-Rust, and it costs no fan-out: it reads
-/// [`mapping_cst_node`] — the same per-mapping barrier [`spans`] already reads
-/// (plan 02-07), memoized per mapping — never `parse(db, file)`.
+/// [`mapping_cst_node`] — the same per-mapping barrier [`spans`] already reads,
+/// memoized per mapping — never `parse(db, file)`.
 /// The walk is [`crate::body`]'s, which reads the header for the mapping's own
 /// name.
 ///
@@ -631,7 +632,7 @@ User : Person from users
     }
 
     /// Sanity: `Spans::get` returns `None` for an unknown `ExprId` rather
-    /// than panicking. Phase 3 callers (the bidirectional checker, hover
+    /// than panicking. Its callers (the bidirectional checker, the hover
     /// handler) lean on this for graceful degradation.
     #[test]
     fn spans_get_returns_none_for_unknown_expr_id() {

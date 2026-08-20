@@ -5,28 +5,35 @@
 //! (CLI / LSP / WASM) collects them via
 //! `query::accumulated::<Diagnostic>(db, input)`.
 //!
-//! ## `suggestion_source` field (Phase 3 plan 03-03 — Blocker #3 fix)
+//! ## `suggestion_source` field
 //!
 //! `Diagnostic` carries an optional `suggestion_source: Option<String>` —
 //! a STRUCTURED carrier for code-suggestion source text emitted alongside
-//! the diagnostic. Phase 3's `ShEx` `OneOf`-rejection emitter (plan 03-05)
-//! populates this with `fossil_descriptors_output::generate_split_suggestion`
-//! output; plan 03-08's `shex_one_of_split_suggestion_compiles` second-order
-//! test reads the field directly and feeds it through `parse -> lower ->
-//! typecheck_mapping` to assert "the suggestion compiles".
+//! the diagnostic. The `ShEx` `OneOf`-rejection emitter populates it with
+//! `fossil_hir::render_split_suggestion` output, and the second-order test
+//! that keeps that emitter honest reads the field directly and feeds it back
+//! through `parse -> lower -> typecheck_mapping` to assert "the suggestion
+//! compiles".
+//!
+//! It said `fossil_shex::generate_split_suggestion` here, which is the OTHER
+//! implementation of that idea and the one nothing calls: the checker consumes
+//! the format-neutral `Rejection::Disjunction` that `fossil_shex::rejection_of`
+//! builds, and renders the syntax itself. Naming the uncalled one mattered
+//! because it is the one still written in the retired surface.
 //!
 //! Why structured (not Markdown-message-substring): type-safe, future-proof
 //! for other suggestion-emitting diagnostics, and avoids brittle string
 //! manipulation.
 //!
-//! ## `did_you_mean` field (Phase 6 plan 06-08 — SC#5 code-actions)
+//! ## `did_you_mean` field
 //!
 //! `Diagnostic` also carries an optional `did_you_mean: Option<DidYouMean>` —
 //! the STRUCTURED carrier for the Levenshtein replacement candidate that
-//! `fossil_hir::didyoumean::did_you_mean` (Phase 3) computes. Phase 3 surfaced
-//! the candidate only inside the diagnostic message text (the "did you mean
-//! ..." suffix); Phase 6's `fossil_ide::code_action` did-you-mean quick-fix
-//! needs the `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
+//! `fossil_hir::didyoumean::did_you_mean` computes. The candidate was once
+//! surfaced only inside the diagnostic message text (the "did you mean ..."
+//! suffix), which a quick-fix could only recover by parsing prose;
+//! `fossil_ide::code_action`'s did-you-mean quick-fix needs the
+//! `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
 //! `WorkspaceEdit` without re-parsing the message string. This mirrors the
 //! `suggestion_source` precedent exactly — structured, not string-parsed.
 //! Defaults to `None`; plain data (wasm-clean).
@@ -144,9 +151,9 @@ pub struct Diagnostic {
 /// `wrong_span` with `replacement`.
 ///
 /// Carried by [`Diagnostic::did_you_mean`] so the IDE did-you-mean code action
-/// (Phase 6 SC#5) can build a `WorkspaceEdit` STRUCTURALLY — the `(span,
-/// replacement)` pair is the exact input a single-edit quick-fix needs, with no
-/// message-string parsing. Plain data → wasm-clean.
+/// can build a `WorkspaceEdit` STRUCTURALLY — the `(span, replacement)` pair is
+/// the exact input a single-edit quick-fix needs, with no message-string
+/// parsing. Plain data → wasm-clean.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DidYouMean {
     /// The byte span of the typo'd identifier in the source — what the quick-fix
@@ -238,8 +245,9 @@ pub enum Severity {
 
 /// Byte-offset span into the source text.
 ///
-/// Phase 1 carries `(start, end)` only. Phase 2 may extend with file id
-/// once cross-file spans are needed, via a `FileSpan` newtype layered above.
+/// Carries `(start, end)` only. Cross-file spans, when they are needed, get a
+/// `FileSpan` newtype layered above rather than a file id widened into here —
+/// every span in the compiler is already relative to one text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: u32,
@@ -254,9 +262,12 @@ impl Span {
 }
 
 #[cfg(test)]
-// `literal_string_with_formatting_args` flags the Fossil IRI template syntax
-// (`${ex:}u/${.id}`) in the test fixture as if it were an inline-format-args
-// candidate. It's literal Fossil source — not a Rust format string.
+// `literal_string_with_formatting_args` flags the Fossil identity template
+// (`"https://example.org/u/{users.id}"`) in the test fixture as if it were an
+// inline-format-args candidate. It's literal Fossil source — not a Rust format
+// string. The hole was `${.id}` in a backtick string until the backtick went;
+// it is an ordinary expression in the one quoted spelling now, and clippy reads
+// the braces the same way either way.
 #[allow(clippy::literal_string_with_formatting_args)]
 mod tests {
     use super::*;
@@ -267,10 +278,19 @@ mod tests {
         assert!(d.suggestion_source.is_none());
     }
 
+    /// The field round-trips whatever it is handed; the fixture is a real
+    /// split-mapping snippet because a reader reaches for it as the example of
+    /// what `suggestion_source` carries, and an example in a spelling the parser
+    /// refuses teaches the refused spelling. It held five retired forms in one
+    /// line — a `prefix`-declared CURIE header, a backtick template, `${ex:}`,
+    /// `${.id}` and a leading dot — and is the shape
+    /// `fossil_hir::render_split_suggestion` actually emits now: a bound shape
+    /// NAME, the mapping's own `@subject`, and a QUALIFIED reference.
     #[test]
     fn diagnostic_with_suggestion_source_round_trips() {
-        let snippet =
-            "UserEmail : ex:Person from users\n    iri = `${ex:}u/${.id}`\n    ex:email = .email\n";
+        let snippet = "UserEmail1 : Person from users\n    \
+                       @subject = \"https://example.org/u/{users.id}\"\n    \
+                       email = users.email\n";
         let d = Diagnostic::new(Severity::Error, "ShEx OneOf", Span::new(10, 20))
             .with_suggestion_source(snippet);
         assert_eq!(d.suggestion_source.as_deref(), Some(snippet));
@@ -278,8 +298,8 @@ mod tests {
 
     #[test]
     fn diagnostic_struct_literal_with_explicit_none_still_compiles() {
-        // Phase-2 callers continue to work — they set the field to None
-        // explicitly. This test locks that contract.
+        // A caller that sets the field to `None` explicitly still compiles.
+        // This test locks that contract.
         let d = Diagnostic {
             severity: Severity::Warning,
             message: "ok".into(),

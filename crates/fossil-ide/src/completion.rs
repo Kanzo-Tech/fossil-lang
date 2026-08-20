@@ -34,7 +34,7 @@
 //! no new per-mapping key appears and the `body()` fan-out is unchanged
 //! All type rendering routes through
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
-//! `detail` string (Risk Register).
+//! `detail` string: internal inference state must not reach the user.
 
 use fossil_base::SourceFile;
 use fossil_hir::def_map::def_map;
@@ -47,7 +47,7 @@ use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag};
 
 use crate::position::{node_at_position, token_at_position};
 
-/// Compute completion items at an LSP position, merging the three SC#4 sources.
+/// Compute completion items at an LSP position, merging the three sources.
 ///
 /// `files` is the host's open-file set (for cross-file prefix resolution);
 /// `file` is the file the cursor is in. A program that names no output shape

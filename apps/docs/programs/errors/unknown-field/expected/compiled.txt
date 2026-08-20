@@ -1,0 +1,18 @@
+── type bindings ──
+Person ← shop.shex = https://shop.example/voc#Person
+Order ← shop.shex = https://shop.example/voc#Order
+
+── source bindings ──
+User := io.csv(data/users.csv)
+Purchase := io.csv(data/orders.csv)
+Adults := User.where(?)
+
+── mappings ──
+Users: 3 written, 3 lowered
+    @subject
+    email
+    name
+Orders: 3 written, 3 lowered
+    @subject
+    total
+    buyer

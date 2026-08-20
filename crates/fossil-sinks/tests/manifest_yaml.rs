@@ -1,7 +1,7 @@
-//! Snapshot lock for the `GraphAr` v1.0.0 manifest YAML shape (SINK-02).
+//! Snapshot lock for the `GraphAr` v1.0.0 manifest YAML shape.
 //!
 //! These `insta` snapshots freeze the serialized field names + layout so a future regression
-//! to the Phase-1 `graphar_version:`/`vertex_types:` spelling is caught. The
+//! to the older `graphar_version:`/`vertex_types:` spelling is caught. The
 //! field-name guard assertions in `fossil_sinks::manifest` unit tests complement these.
 
 use arrow_schema::DataType;
@@ -46,11 +46,20 @@ fn knows_edge() -> EdgeInfo {
         dst_chunk_size: DEFAULT_CHUNK_SIZE,
         directed: true,
         prefix: "edge/person_knows_person/".to_string(),
-        adj_lists: vec![AdjList {
-            ordered: true,
-            aligned_by: "src".to_string(),
-            file_type: "parquet".to_string(),
-        }],
+        adj_lists: vec![
+            AdjList {
+                ordered: true,
+                aligned_by: "src".to_string(),
+                prefix: "by_source/".to_string(),
+                file_type: "parquet".to_string(),
+            },
+            AdjList {
+                ordered: true,
+                aligned_by: "dst".to_string(),
+                prefix: "by_target/".to_string(),
+                file_type: "parquet".to_string(),
+            },
+        ],
         property_groups: vec![],
         version: GRAPHAR_VERSION.to_string(),
     }

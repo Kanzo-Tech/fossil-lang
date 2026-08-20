@@ -19,8 +19,14 @@ use fossil_ide::{decode_tokens, legend_type_name, semantic_tokens};
 /// produce: comment, keyword (`from` and the `@subject` sigil), function (a
 /// bare call callee), property (the member-access side of `users.name`), number,
 /// string (including the parts an interpolation carves the literal into),
-/// operators (`:=`, `=`, the interpolation's `{`) and variable (a mapping
-/// subject, a binding, a shape name).
+/// operators (`:=`, `=`, and the interpolation's `{` AND `}`) and variable (a
+/// mapping subject, a binding, a shape name).
+///
+/// The closer is named because it was the one this snapshot recorded missing:
+/// the row at `6:47` did not exist, so the committed table showed a literal
+/// opening as an operator and ending in a gap — string, string, operator,
+/// expression, nothing, string. It is the `RBRACE` arm of `semantic.rs` that
+/// puts it there, and this table is where its absence was legible.
 ///
 /// Two legend entries have no fixture and cannot get one: NAMESPACE and TYPE.
 /// The first was the prefix segment of `ex:Person` plus the `<…>` absolute IRI,

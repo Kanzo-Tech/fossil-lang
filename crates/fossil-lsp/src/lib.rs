@@ -8,7 +8,8 @@
 //!
 //! The transport is `lsp-server`, not `tower-lsp`, and CLAUDE.md "Hard Rules"
 //! (`fossil-lsp` is native-only). Mirrors the dual-tripwire layout of
-//! `fossil-cli` (per `01-07-SUMMARY.md` decisions).
+//! `fossil-cli`: a binary-only crate still carries a `lib.rs`, and its only
+//! content is the tripwire, so neither target can slip into the WASM gate.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(

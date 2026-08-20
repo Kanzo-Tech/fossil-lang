@@ -1,0 +1,14 @@
+── type bindings ──
+Person ← hello.shex = https://shop.example/voc#Person
+
+── source bindings ──
+User := io.csv(data/people.csv)
+
+── mappings ──
+People: 2 written, 2 lowered
+    @subject
+    name
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 3 — name
+NO EDGE TYPE was written

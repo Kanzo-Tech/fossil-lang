@@ -144,7 +144,7 @@ fn lsp_responds_to_initialize_didopen_shutdown() {
                     "uri": "file:///tmp/x.fossil",
                     "languageId": "fossil",
                     "version": 1,
-                    "text": "prefix ex: <https://example.org/>\n"
+                    "text": "users := io.csv(\"u.csv\")\n"
                 }
             }
         });

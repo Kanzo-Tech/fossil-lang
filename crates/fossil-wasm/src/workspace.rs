@@ -9,7 +9,7 @@
 //! The map keys are plain `u32` newtypes — they NEVER enter a Salsa key,
 //! NEVER appear inside `Box<dyn Trait>`. `update_file` mutates the SAME
 //! `SourceFile` Salsa input via the [`salsa::Setter`] (`set_text`); this is
-//! the EXACT mechanism the Phase-6 LSP `didChange` path uses (the revision
+//! the EXACT mechanism the LSP `didChange` path uses (the revision
 //! bump is the cancellation trigger). No new tracked queries land
 //! in the Workspace lifecycle path, so `MAX_PER_MAPPING_FAN_OUT` stays at 1
 //! (verified by `fossil-hir::tests::invalidation_regression`, 3/3).

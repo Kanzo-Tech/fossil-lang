@@ -19,7 +19,7 @@ export interface FossilTheme {
     error: string;
     warning: string;
     info: string;
-    /** NEW (Phase 10 VIS-03). Focus ring colour. Defaults to colors.accent
+    /** Focus ring colour. Defaults to colors.accent
      *  in built-in themes. Hosts override to decouple ring colour from accent
      *  colour (a common pattern — Tailwind shadcn separates `--ring` from
      *  `--primary`). Emits `--fossil-colors-ring`. */
@@ -62,7 +62,7 @@ export interface FossilTheme {
   /**
    * IDE-grade radii — extended from `radius` (v0.1 legacy, kept untouched).
    * Aligned with Tailwind defaults. CSS variable names:
-   * `--fossil-radii-{sm,md,lg,xl,full}`. Phase 10 VIS-03.
+   * `--fossil-radii-{sm,md,lg,xl,full}`.
    */
   radii: {
     /** 4px — small (input borders, badges). */
@@ -81,7 +81,6 @@ export interface FossilTheme {
    * untouched). 7-step scale Tailwind-aligned. Numeric-string keys — the `s`
    * prefix (`s0`, `s1`) would break the 1:1 Tailwind mapping and is forbidden.
    * CSS variable names: `--fossil-spacing-{0,1,2,3,4,6,8}`.
-   * Phase 10 VIS-03.
    */
   spacing: {
     /** 0 — collapse. Emits `--fossil-spacing-0`. */
@@ -105,7 +104,7 @@ export interface FossilTheme {
    * object path verbatim, so `durationFast` would emit
    * `--fossil-motion-durationFast`. CSS variable names:
    * `--fossil-motion-duration-fast`, `--fossil-motion-duration-base`,
-   * `--fossil-motion-easing`. Phase 10 VIS-03.
+   * `--fossil-motion-easing`.
    */
   motion: {
     duration: {
@@ -122,7 +121,7 @@ export interface FossilTheme {
    * shadow expression (NOT color-mix — Safari < 16.2 compat). Hosts override
    * `--fossil-focus-ring` directly to swap the full expression. The colour
    * anchor is `colors.ring`; this slot holds the composed box-shadow value.
-   * CSS variable name: `--fossil-focus-ring`. Phase 10 VIS-03.
+   * CSS variable name: `--fossil-focus-ring`.
    */
   focus: {
     /** Composed focus-ring CSS expression. Example: '0 0 0 3px rgba(59, 130, 246, 0.5)'. */
@@ -134,7 +133,7 @@ export interface FossilTheme {
    * an unsuffixed leaf — the flattener cannot emit both a leaf AND children
    * at the same path). CSS variable names:
    * `--fossil-size-control-base` (DEFAULT — primitives reference this),
-   * `--fossil-size-control-sm`, `--fossil-size-control-lg`. Phase 10 VIS-03.
+   * `--fossil-size-control-sm`, `--fossil-size-control-lg`.
    */
   size: {
     control: {

@@ -2,8 +2,8 @@
 //!
 //! The list is stored in topological order; an `Op::Extend { input: 0, .. }`
 //! refers to `ops[0]`. [`crate::lower::lower_to_mir_pg`] keeps this invariant
-//! trivially because it emits ops in the only valid order; the R1-R10 rewriting
-//! preserves it.
+//! trivially because it emits ops in the only valid order, and nothing else
+//! builds one: there is no rewriting pass to preserve it.
 
 use crate::op::Op;
 

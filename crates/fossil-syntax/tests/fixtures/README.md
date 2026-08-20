@@ -1,8 +1,11 @@
 # `fossil-syntax` parser corpus
 
-18-fixture parser corpus that drives `tests/parse_corpus.rs`. Layout follows
-RESEARCH.md §Q10, minus one bucket (plus a separate 10-mapping invalidation pair
-in `crates/fossil-hir/tests/fixtures/`).
+18-fixture parser corpus that drives `tests/parse_corpus.rs`. Fixtures are
+grouped into buckets by grammatical theme rather than by parser function, so a
+bucket dies with the language feature it covers rather than with a refactor —
+which is what happened to bucket 4. The separate 10-mapping invalidation pair
+lives in `crates/fossil-hir/tests/fixtures/`, because it measures re-execution
+and not shape.
 
 **Every fixture is written in the spelling `grammar.bnf` specifies.** That is a
 guard, not a claim: `no_fixture_spells_a_retired_form` parses all 18 and fails if

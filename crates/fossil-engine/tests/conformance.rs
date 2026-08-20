@@ -376,58 +376,117 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "a vertex is in a tile its dense_id does not name"
     );
 
-    // 9. The edges are tiled too, by their **source's** tile — CSR, which was
-    //    measured against hoisting an edge to the deepest tile
-    //    holding both endpoints (2.29× → 15.86× the over-read, 2.5–3.5× the
-    //    tiles). Non-vacuity first: an empty directory satisfies every check
-    //    after it.
-    let edge_tiles = dest.join("edge/Person_knows_Person/by_source");
-    let edge_glob = edge_tiles.join("*.parquet");
-    let edge_glob = edge_glob.display();
-    let occupied = scalar(
-        &conn,
-        &format!("SELECT count(DISTINCT src_dense >> {shift}) FROM '{by_source}'"),
-    );
-    assert!(
-        occupied >= 3,
-        "non-vacuity: {occupied} occupied edge tile(s)"
-    );
-    assert_eq!(
-        i64::try_from(files_in(&edge_tiles)).expect("a directory listing fits in i64"),
-        occupied,
-        "the edge tiles emitted are not the tiles the sources occupy — either one \
-         is missing, or an empty one was written and every reader pays a request \
-         to learn it holds nothing"
-    );
-    assert_eq!(
-        scalar(&conn, &in_named_tile(&edge_glob.to_string(), "src_dense")),
-        0,
-        "an edge is in a tile its src_dense does not name"
-    );
+    // 9. The edges are tiled too — **both orientations**, each by the tile of
+    //    the endpoint its file is ordered by. Source-ordered is CSR, measured
+    //    against hoisting an edge to the deepest tile holding both endpoints
+    //    (2.29× → 15.86× the over-read, 2.5–3.5× the tiles). Target-ordered is
+    //    the other half of a hop: the in-edges of a vertex are in the
+    //    `by_target` tile its id falls in, and following only the out-edges is a
+    //    wrong answer rather than a partial one. Non-vacuity first: an empty
+    //    directory satisfies every check after it.
+    //
+    //    The pair of (relation, tile directory, addressing column) is walked
+    //    rather than written twice, because a check that only ever ran against
+    //    `by_source` is how the target half went untiled while every assertion
+    //    here passed.
+    let orientations = [
+        ("by_source", &by_source, "src_dense", "dst_dense"),
+        ("by_target", &by_target, "dst_dense", "src_dense"),
+    ];
+    for (name, relation, key, other) in orientations {
+        let tiles_dir = dest.join(format!("edge/Person_knows_Person/{name}"));
+        let glob = tiles_dir.join("*.parquet");
+        let glob = glob.display();
+        let occupied = scalar(
+            &conn,
+            &format!("SELECT count(DISTINCT {key} >> {shift}) FROM '{relation}'"),
+        );
+        assert!(
+            occupied >= 3,
+            "non-vacuity: {occupied} occupied {name} tile(s)"
+        );
+        assert_eq!(
+            i64::try_from(files_in(&tiles_dir)).expect("a directory listing fits in i64"),
+            occupied,
+            "the {name} tiles emitted are not the tiles the {key}s occupy — either one \
+             is missing, or an empty one was written and every reader pays a request \
+             to learn it holds nothing"
+        );
+        assert_eq!(
+            scalar(&conn, &in_named_tile(&glob.to_string(), key)),
+            0,
+            "an edge is in a {name} tile its {key} does not name"
+        );
 
-    // 10. The tiles are the whole edge relation and nothing else. Splitting a
-    //     file is where rows are silently dropped or written twice, and both
-    //     survive every check above.
-    assert_eq!(
-        scalar(&conn, &format!("SELECT count(*) FROM '{edge_glob}'")),
-        edges,
-        "the edge tiles hold a different number of edges than the file they cut"
-    );
+        // 10. The tiles are the whole edge relation and nothing else. Splitting a
+        //     file is where rows are silently dropped or written twice, and both
+        //     survive every check above.
+        assert_eq!(
+            scalar(&conn, &format!("SELECT count(*) FROM '{glob}'")),
+            edges,
+            "the {name} tiles hold a different number of edges than the file they cut"
+        );
+        assert_eq!(
+            scalar(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM ( \
+                       (SELECT src_dense, dst_dense FROM '{relation}' \
+                        EXCEPT SELECT src_dense, dst_dense FROM '{glob}') \
+                       UNION ALL \
+                       (SELECT src_dense, dst_dense FROM '{glob}' \
+                        EXCEPT SELECT src_dense, dst_dense FROM '{relation}'))"
+                )
+            ),
+            0,
+            "the {name} tiles and the file they cut disagree about which edges exist"
+        );
+
+        // And each tile is ordered the way its relation claims to be, secondary
+        // key included — a reader that binary-searches a tile for one vertex's
+        // rows is trusting the same `ordered: true` the whole relation carries,
+        // and a COPY that dropped the ORDER BY would leave every count above
+        // unchanged.
+        assert_eq!(
+            scalar(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM (SELECT {key} AS k, {other} AS v, \
+                     lag({key}) OVER (PARTITION BY filename ORDER BY file_row_number) AS pk, \
+                     lag({other}) OVER (PARTITION BY filename ORDER BY file_row_number) AS pv \
+                     FROM read_parquet('{glob}', filename = true, file_row_number = true)) \
+                     WHERE pk IS NOT NULL AND (k, v) < (pk, pv)"
+                )
+            ),
+            0,
+            "a {name} tile is not ordered by ({key}, {other})"
+        );
+    }
+
+    // And the two tilings are the same relation cut two ways — the check that
+    // catches a target half built from a stale or partial source. A hop reads one
+    // tile from each and would otherwise disagree with itself about the graph.
+    let by_source_glob = dest.join("edge/Person_knows_Person/by_source/*.parquet");
+    let by_source_glob = by_source_glob.display();
+    let by_target_glob = dest.join("edge/Person_knows_Person/by_target/*.parquet");
+    let by_target_glob = by_target_glob.display();
     assert_eq!(
         scalar(
             &conn,
             &format!(
                 "SELECT count(*) FROM ( \
-                   (SELECT src_dense, dst_dense FROM '{by_source}' \
-                    EXCEPT SELECT src_dense, dst_dense FROM '{edge_glob}') \
+                   (SELECT src_dense, dst_dense FROM '{by_source_glob}' \
+                    EXCEPT SELECT src_dense, dst_dense FROM '{by_target_glob}') \
                    UNION ALL \
-                   (SELECT src_dense, dst_dense FROM '{edge_glob}' \
-                    EXCEPT SELECT src_dense, dst_dense FROM '{by_source}'))"
+                   (SELECT src_dense, dst_dense FROM '{by_target_glob}' \
+                    EXCEPT SELECT src_dense, dst_dense FROM '{by_source_glob}'))"
             )
         ),
         0,
-        "the edge tiles and the file they cut disagree about which edges exist"
+        "the source-ordered and target-ordered tilings are not the same relation"
     );
+
+    let edge_glob = by_source_glob;
 
     // 11. And the corpus, read back through its tiles, is the graph that was
     //     asked for. Byte-identity against a previous build is not available —
@@ -473,7 +532,66 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // A corpus with long-range edges would separate CSR from any other placement
     // by orders of magnitude more; this one separates them by the boundaries.
     //
-    // Nor do they see the target-ordered half. `by_target.parquet` is not tiled,
-    // on purpose: it answers "an edge with one endpoint off
-    // screen", which no measurement here has ever asked for.
+    // 12. A hop is addressable, which is what the target half was tiled for. For
+    //     every vertex, the edges the two tiles its `dense_id` names hold *for
+    //     it* are exactly the edges the whole relation holds for it — so the
+    //     neighbourhood of a vertex is two files a reader computes the URL of,
+    //     and never a scan. The alternative was measured in the browser at a
+    //     million vertices: `WITH RECURSIVE` over the edge relation had not
+    //     returned one hop from one seed after 45 seconds and stalled the
+    //     connection behind it.
+    //
+    //     Phrased as a disagreement rather than as a count so it cannot pass by
+    //     both sides being empty: the addressed read is restricted to the named
+    //     tile file, and the answer it gives is compared against the relation.
+    let hop = |direction: &str, glob: &str, key: &str| {
+        format!(
+            "SELECT count(*) FROM ( \
+               (SELECT v.dense_id AS seed, e.src_dense, e.dst_dense \
+                  FROM read_parquet('{vertices}') v \
+                  JOIN read_parquet('{glob}', filename = true) e \
+                    ON e.{key} = v.dense_id \
+                   AND regexp_extract(e.filename, '([0-9]+)\\.parquet$', 1)::BIGINT \
+                     = (v.dense_id >> {shift}) \
+                EXCEPT \
+                SELECT v.dense_id, e.src_dense, e.dst_dense \
+                  FROM read_parquet('{vertices}') v \
+                  JOIN read_parquet('{direction}') e ON e.{key} = v.dense_id) \
+               UNION ALL \
+               (SELECT v.dense_id, e.src_dense, e.dst_dense \
+                  FROM read_parquet('{vertices}') v \
+                  JOIN read_parquet('{direction}') e ON e.{key} = v.dense_id \
+                EXCEPT \
+                SELECT v.dense_id, e.src_dense, e.dst_dense \
+                  FROM read_parquet('{glob}', filename = true) e \
+                  JOIN read_parquet('{vertices}') v \
+                    ON e.{key} = v.dense_id \
+                   AND regexp_extract(e.filename, '([0-9]+)\\.parquet$', 1)::BIGINT \
+                     = (v.dense_id >> {shift})))"
+        )
+    };
+    assert_eq!(
+        scalar(
+            &conn,
+            &hop(&by_source.to_string(), &edge_glob.to_string(), "src_dense")
+        ),
+        0,
+        "the out-edges of a vertex are not all in the by_source tile its dense_id names"
+    );
+    assert_eq!(
+        scalar(
+            &conn,
+            &hop(
+                &by_target.to_string(),
+                &by_target_glob.to_string(),
+                "dst_dense"
+            )
+        ),
+        0,
+        "the in-edges of a vertex are not all in the by_target tile its dense_id names"
+    );
+
+    // What 12 does not prove is that a hop is *cheap*, only that it is correct
+    // from two addresses. The cost is a request count over an HTTP origin and it
+    // is measured on the reader's side, not here.
 }

@@ -1,0 +1,20 @@
+── type bindings ──
+Persona ← es.shex = https://ayto.example/voc#Persona
+Human ← en.shex = https://council.example/voc#Person
+
+── source bindings ──
+Padron := io.csv(data/padron.csv)
+Roll := io.csv(data/roll.csv)
+
+── mappings ──
+Personas: 2 written, 2 lowered
+    @subject
+    nombre
+Humans: 2 written, 2 lowered
+    @subject
+    name
+
+── run ──
+vertex Persona (https://ayto.example/voc#Persona) × 2 — nombre
+vertex Person (https://council.example/voc#Person) × 2 — name
+NO EDGE TYPE was written

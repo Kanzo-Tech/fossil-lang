@@ -1,0 +1,17 @@
+── type bindings ──
+Batch ← scaling.shex = https://lab.example/voc#Batch
+
+── source bindings ──
+Row := io.csv(data/batches.csv)
+
+── mappings ──
+Batches: 5 written, 5 lowered
+    @subject
+    subtotal
+    unit_cost
+    leftover
+    charged
+
+── run ──
+vertex Batch (https://lab.example/voc#Batch) × 3 — subtotal, unit_cost, leftover, charged
+NO EDGE TYPE was written

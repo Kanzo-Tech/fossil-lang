@@ -5,8 +5,8 @@
 //! 1. Every construction path ([`delay_span_bug`] / [`bug`]) returns an
 //!    `ErrorGuaranteed` AND accumulates at least one [`Diagnostic`].
 //! 2. `ErrorGuaranteed` cannot be `Default`-constructed (negative-compile
-//!    assertion documented as a comment — promoted to a `trybuild` test
-//!    in Phase 3 when we have enough emission sites to make a corpus).
+//!    assertion documented as a comment — a `trybuild` test would need a
+//!    corpus of emission sites to be worth its build cost).
 //! 3. `ErrorGuaranteed` is `Send + Sync` (`PhantomData<()>` preserves both;
 //!    `PhantomData<*const ()>` would not — guarding against accidental
 //!    regression of the marker type).
@@ -109,8 +109,9 @@ fn error_guaranteed_cannot_be_default_constructed() {
     //
     //   let _: fossil_base::ErrorGuaranteed = Default::default();
     //
-    // Trybuild-style negative compile tests are deferred to Phase 3 when we
-    // have enough error-emission sites to make a meaningful corpus.
+    // Trybuild-style negative compile tests stay deferred until there are
+    // enough error-emission sites to make a meaningful corpus; one assertion
+    // does not pay for a second compiler invocation per run.
     fn _no_default<T: Default>() {}
     // _no_default::<fossil_base::ErrorGuaranteed>();   // would not compile
 }

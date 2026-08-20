@@ -45,12 +45,13 @@ const GOLDEN_ANGLE: f32 = 2.399_963_2;
 const CLUSTER_SPACING: f32 = 100.0;
 /// How many clusters `cluster_id` may carry.
 ///
-/// Not an aesthetic choice: `viewport`'s aggregate mode answers one super-node
-/// per `(type_idx, cluster_id)` and promises "≤ 10k super-nodes regardless of
-/// total N" (`fossil-graph/src/exec.rs`, `viewport_aggregate`). That promise is
-/// kept by a `LIMIT`, so a partition finer than the budget does not degrade —
-/// it truncates, and the picture silently loses whole communities. A budget of
-/// 2,048 leaves the promise intact for up to four vertex types.
+/// Not an aesthetic choice: a caller that draws the graph aggregates one
+/// super-node per `(type_idx, cluster_id)`, and every read path out of
+/// `fossil-graph` is row-capped — `ExecuteSqlParams::row_cap` defaults to
+/// 10,000 and the executor applies an outer `LIMIT` whatever the SQL says. A
+/// cap truncates, it does not degrade: a partition finer than the cap makes
+/// the picture silently lose whole communities rather than coarsen. A budget
+/// of 2,048 stays under 10,000 for up to four vertex types.
 const CLUSTER_BUDGET: u32 = 2_048;
 /// Intra-cluster packing radius scale (kept well below [`CLUSTER_SPACING`] so
 /// same-cluster nodes stay closer to each other than to other clusters).
@@ -344,20 +345,28 @@ pub enum LayoutError {
 /// mapping, and **re-sorted**, because the manifest declares `ordered: true` and
 /// a CSR sorted on `src_dense` stops being sorted the moment those values change.
 ///
-/// And finally the source-ordered adjacencies are emitted as tiles too, under
-/// `by_source/tile{k}.parquet`, **keyed by the same range as the vertices**: tile
-/// `k` holds every edge whose `src_dense` is in vertex tile `k`. That is CSR, and
-/// it is the placement measured against the alternative of hoisting
-/// an edge to the deepest tile holding both its endpoints — which reads 2.29× to
-/// 15.86× more edges across 200k/1M/5M/10M against CSR's flat 1.95× to 2.89×,
-/// and touches 2.5–3.5× the tiles. The mechanism is that near the root of such a
-/// tree there is no branching left to prune with. CSR needs no second request:
-/// every drawable edge has its source on screen, so the tiles of the window are
-/// an exact superset of what can be drawn.
+/// And finally every adjacency is emitted as tiles too, under
+/// `by_source/tile{k}.parquet` and `by_target/tile{k}.parquet`, **keyed by the
+/// same range as the vertices**: an edge lives in the tile of the endpoint its
+/// file is ordered by, so `by_source` tile `k` holds every edge whose `src_dense`
+/// is in vertex tile `k` of the source type, and `by_target` tile `k` every edge
+/// whose `dst_dense` is in vertex tile `k` of the *destination* type. On a
+/// cross-type edge those are two different `dense_id` spaces.
 ///
-/// The target-ordered adjacency is **not** tiled. It is the half that would
-/// answer "an edge with one endpoint off screen", which is a different question
-/// and doubles the addressing to ask it.
+/// That is CSR/CSC, and it is the placement measured against the alternative of
+/// hoisting an edge to the deepest tile holding both its endpoints — which reads
+/// 2.29× to 15.86× more edges across 200k/1M/5M/10M against CSR's flat 1.95× to
+/// 2.89×, and touches 2.5–3.5× the tiles. The mechanism is that near the root of
+/// such a tree there is no branching left to prune with. CSR needs no second
+/// request for the picture: every drawable edge has its source on screen, so the
+/// tiles of the window are an exact superset of what can be drawn.
+///
+/// The target-ordered half is tiled because **drawing is not the only question**.
+/// A hop is addressable exactly when both directions are: the out-edges of a
+/// vertex are in the `by_source` tile its id falls in and the in-edges in the
+/// `by_target` tile, so a neighbourhood is two reads and a filter and the work
+/// follows the frontier rather than the corpus. Half the addressing gives half
+/// the edges, which in a knowledge graph is a wrong answer and not a partial one.
 ///
 /// # Errors
 ///
@@ -660,8 +669,19 @@ pub fn enrich_layout(
     probe.mark("remap adjacencies");
 
     // The edge half of the tiling, and the last thing written: an edge lives in
-    // its source's tile, so this reads the file the loop above just re-sorted by
-    // `src_dense` and cuts it on the same ranges the vertices were cut on.
+    // the tile of the endpoint its file is ordered by, so this reads the file the
+    // loop above just re-sorted and cuts it on the same ranges the vertices of
+    // that endpoint's type were cut on.
+    //
+    // **Both orientations, and the second one is not symmetry for its own sake.**
+    // A hop is the question the source-ordered half cannot answer: the out-edges
+    // of a vertex are in the `by_source` tile its `dense_id` falls in and its
+    // in-edges in the `by_target` tile, so a neighbourhood is two addressed reads
+    // and a filter. Following only the out-edges is a *wrong* answer rather than
+    // a partial one — "the papers by this author" is an in-edge from the author.
+    // The alternative measured against this was a recursive CTE over the whole
+    // relation, and on 6.9M edges one hop from one seed had not returned after 45
+    // seconds; it took the reader's connection with it.
     //
     // Read back from the Parquet rather than kept in a temp table on the way
     // past. The file is sorted on the very column each tile filters, so Parquet's
@@ -670,19 +690,24 @@ pub fn enrich_layout(
     // — 568 MB at ten million, the very allocation this path was rewritten to
     // remove.
     for adjacency in adjacencies {
-        if adjacency.ordered_by != Endpoint::Src {
-            continue;
-        }
         let aurl = adjacency.parquet.as_str();
         let aname = aurl.to_string();
         let duck = |source: duckdb::Error| LayoutError::Duck {
             target: aname.clone(),
             source,
         };
-        let source = &targets[index_of(&adjacency.src_type, aurl)?];
-        let shift = shift_for(source.chunk_size).ok_or_else(|| LayoutError::TileSize {
-            vertex_type: source.type_name.clone(),
-            rows: source.chunk_size,
+        // Which endpoint addresses this file is which endpoint it is ordered by.
+        // The tile space is that endpoint's type's, and the two are different
+        // spaces on a cross-type edge: `by_target` of `Author authored Paper` is
+        // cut on `Paper`'s ranges, not on `Author`'s.
+        let (key, order, endpoint_type) = match adjacency.ordered_by {
+            Endpoint::Src => ("src_dense", "src_dense, dst_dense", &adjacency.src_type),
+            Endpoint::Dst => ("dst_dense", "dst_dense, src_dense", &adjacency.dst_type),
+        };
+        let endpoint = &targets[index_of(endpoint_type, aurl)?];
+        let shift = shift_for(endpoint.chunk_size).ok_or_else(|| LayoutError::TileSize {
+            vertex_type: endpoint.type_name.clone(),
+            rows: endpoint.chunk_size,
         })?;
         let prefix = tile_prefix(aurl);
         ensure_prefix(&prefix)?;
@@ -694,7 +719,7 @@ pub fn enrich_layout(
         let occupied: Vec<u64> = {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT DISTINCT (src_dense >> {shift})::UBIGINT AS tile \
+                    "SELECT DISTINCT ({key} >> {shift})::UBIGINT AS tile \
                      FROM read_parquet('{}') ORDER BY tile",
                     sql_lit(aurl)
                 ))
@@ -712,8 +737,8 @@ pub fn enrich_layout(
             let _ = write!(
                 emission,
                 "COPY (SELECT * FROM read_parquet('{}') \
-                 WHERE src_dense >= {lo} AND src_dense < {hi} \
-                 ORDER BY src_dense, dst_dense) TO '{}tile{k}.parquet' (FORMAT PARQUET);",
+                 WHERE {key} >= {lo} AND {key} < {hi} \
+                 ORDER BY {order}) TO '{}tile{k}.parquet' (FORMAT PARQUET);",
                 sql_lit(aurl),
                 sql_lit(&prefix),
             );

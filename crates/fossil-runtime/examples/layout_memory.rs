@@ -1,7 +1,7 @@
 //! What the layout core costs in memory, per level, with nothing else in the process.
 //!
 //! Writing a ten-million-vertex corpus peaks at 16.4 GiB for 713 MB of output
-//! (`kanzo-ui/BENCHMARKS.md`). That number is the whole build — the generator, `DuckDB`, the Parquet
+//! (measured 2026-08-04). That number is the whole build — the generator, `DuckDB`, the Parquet
 //! writer and this — so it says where to look and nothing more. Larger-than-RAM is the
 //! architecture's central untested claim, and the risk is here, in a Louvain that runs in memory
 //! over the whole graph. This isolates it: no I/O, no database, one synthetic graph, and

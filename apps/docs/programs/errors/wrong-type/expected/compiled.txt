@@ -1,0 +1,10 @@
+── type bindings ──
+Order ← shape.shex = https://shop.example/voc#Order
+
+── source bindings ──
+Purchase := io.csv(data/orders.csv)
+
+── mappings ──
+Orders: 2 written, 2 lowered
+    @subject
+    total

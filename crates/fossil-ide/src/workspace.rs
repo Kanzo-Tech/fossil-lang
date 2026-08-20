@@ -43,7 +43,7 @@ impl WorkspaceIndex {
 
     /// Resolve a symbol name to ALL matching definitions across the open files.
     ///
-    /// Returns `(file, entry)` pairs so the caller (goto-def, plan 06-06) can
+    /// Returns `(file, entry)` pairs so the caller (goto-def) can
     /// build an LSP location from the owning file + the entry's byte range. A
     /// name declared in file A and referenced in file B resolves via the union.
     #[must_use]

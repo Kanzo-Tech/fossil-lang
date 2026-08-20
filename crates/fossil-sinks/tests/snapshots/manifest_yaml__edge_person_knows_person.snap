@@ -13,6 +13,11 @@ prefix: edge/person_knows_person/
 adj_lists:
 - ordered: true
   aligned_by: src
+  prefix: by_source/
+  file_type: parquet
+- ordered: true
+  aligned_by: dst
+  prefix: by_target/
   file_type: parquet
 property_groups: []
 version: gar/v1

@@ -1,6 +1,6 @@
-//! SC#4 (LSP-01 hover half) — bidirectional hover integration test.
+//! Bidirectional hover integration test.
 //!
-//! Proves the headline Phase-6 LSP feature end-to-end through the PUBLIC
+//! Proves the hover feature end-to-end through the PUBLIC
 //! [`fossil_ide::hover_bidirectional`] entry: hovering on a `users.field`
 //! reference whose property key matches a target `ShEx` shape constraint
 //! surfaces BOTH
@@ -253,7 +253,7 @@ fn hover_shows_source_and_target_type_when_shape_resolves() {
         2,
         "expected two fenced fossil blocks (source + target); got {md:?}",
     );
-    // (3) Risk Register: no internal inference state leaks.
+    // (3) No internal inference state leaks into the hover.
     assert!(
         !md.contains("Unknown") && !md.contains("InferenceId"),
         "hover leaked internal type state; got {md:?}",

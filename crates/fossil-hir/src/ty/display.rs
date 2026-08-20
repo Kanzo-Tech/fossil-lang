@@ -1,14 +1,15 @@
 //! `TyKind` pretty-printing — the single source of truth for rendering Fossil
 //! types as user-facing strings.
 //!
-//! [`render_ty_kind`] was PROMOTED here from `fossil-ide::hover` in Phase 3
-//! plan 03-05 (Serious #7). It is consumed by:
+//! [`render_ty_kind`] lives here, and not in `fossil-ide::hover` where it was
+//! written, because two layers render the same types and one of them is below
+//! the IDE. It is consumed by:
 //!   - [`crate::check::compatible`]'s mismatch diagnostic messages,
 //!   - the LSP hover (which re-exports it from `fossil-ide::hover`).
 //!
 //! # `Unknown(InferenceId)` must never reach the surface
 //!
-//! Per the STATE.md "Do NOT" list, the internal `TyKind::Unknown(InferenceId)`
+//! The internal `TyKind::Unknown(InferenceId)`
 //! synthesis-state placeholder is normalised to `"?"` here — it never appears
 //! verbatim in a surface diagnostic or hover.
 

@@ -68,8 +68,9 @@ Without it, check the rest of the closure directly:
   `refactor`, `test`, `chore`, `ci`, `build`, `style`, `perf`.
 - **Imperative mood**: "add X", "fix Y" — never "added"/"adds"/"adding".
 - **Subject ≤72 chars.** Body wraps at ~72 and explains WHY when non-obvious.
-  Reference the page that states the rule, a measurement, or a pitfall
-  (`Mitigates P-CRIT-2`) — never a record number.
+  Reference the page that states the rule, a measurement, or the failure it
+  avoids, spelled out ("keeps `tokio` out of the wasm32 closure") — never a
+  record number, because there is no register left to resolve one against.
 - **Atomic**: one commit = one logical change. CI must pass on every commit, not just
   the tip of a branch.
 - `Co-Authored-By: Claude <model> <noreply@anthropic.com>` trailer on Claude-authored
@@ -139,7 +140,8 @@ Working on <task / phase / plan>. Last commit: <SHA>.
 - <approach B — moved on to C>
 ```
 
-Read it on return BEFORE any code change. Mitigates P-SOLO-2.
+Read it on return BEFORE any code change. It is the only defence against the
+third break, after which the codebase is opaque to its own author.
 
 ## Pre-commit hooks
 

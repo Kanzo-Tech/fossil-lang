@@ -1,4 +1,4 @@
-//! W2-06 — integration: dispatch every implemented fossil-graph verb against a
+//! Integration: dispatch every implemented fossil-graph verb against a
 //! real bundled `DuckDB`, validating the verb→SQL the unit tests only exercise
 //! with fake executors.
 

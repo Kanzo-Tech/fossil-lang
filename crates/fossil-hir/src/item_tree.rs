@@ -1,6 +1,6 @@
 //! [`ItemTree`] — signatures-only top-level summary of a `.fossil` file.
 //!
-//! This is the upper half of the CORE-02 invalidation-barrier pattern: an
+//! This is the upper half of the invalidation-barrier pattern: an
 //! `ItemTree` carries SIGNATURES ONLY, never body content, so nothing that
 //! depends on it can be invalidated by an edit inside a mapping.
 //! [`crate::body::body`] is the lower half:
@@ -10,14 +10,15 @@
 //! Pattern: rust-analyzer `crates/hir-def/src/item_tree.rs` (lines ~216-224
 //! in the reference revision).
 //!
-//! # CRITICAL INVARIANT (CORE-02 SC#2)
+//! # CRITICAL INVARIANT
 //!
 //! Header extractors in this module MUST NOT inspect property values, body
 //! expression text, or any subtree below the signature-bearing region. They
 //! read header tokens and structural counts (e.g. `body_property_count`)
-//! only. Wave 4 plan 02-07 enforces this mechanically via a Salsa event-
-//! count regression test: editing one character in the body of mapping #3
-//! in a 10-mapping fixture must produce ≤4 `WillExecute` events.
+//! only. `tests/invalidation_regression.rs` enforces this mechanically via a
+//! Salsa event-count regression test: editing one character in the body of
+//! mapping #3 in a 10-mapping fixture must re-execute the per-mapping queries
+//! for that mapping and no sibling's.
 //!
 //! Counting properties IS allowed (and required) — adding or removing a
 //! property is a structural change and SHOULD invalidate `item_tree`.
@@ -60,8 +61,8 @@ pub struct MappingHeader {
     /// `User` in `User : ex:Person from users`.
     pub name: SmolStr,
     /// Source binding name from the `from` clause if it's a simple `IDENT`;
-    /// `None` if the source is a complex `Expression`. Phase 3 handles
-    /// complex sources.
+    /// `None` if the source is a complex `Expression` — a complex source is
+    /// resolved through the body query, never from the signature.
     pub source_binding: Option<SmolStr>,
     /// Number of `PROPERTY` children in `MAPPING_BODY`. Counting only — the
     /// per-property contents live in [`crate::body::HirBody::properties`].
@@ -76,7 +77,7 @@ pub struct MappingHeader {
 /// Build the per-file `ItemTree` by walking top-level CST children once and
 /// extracting each one's signature-only summary.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn item_tree<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> ItemTree<'db> {
     let cst = fossil_syntax::parse(db, file);
     // Co-depend on `ast_id_map` so it ends up cached — the WAVE 4 invalidation
@@ -146,7 +147,7 @@ fn extract_mapping_header(
     // query deliberately does not depend on.
 
     // Source binding: scan tokens after KW_FROM for a single IDENT. Complex
-    // expressions are signalled as `None`; Phase 3 handles them via the body
+    // expressions are signalled as `None` and are resolved through the body
     // query path.
     let mut source_binding = None;
     let mut after_from = false;
@@ -163,9 +164,8 @@ fn extract_mapping_header(
             break;
         }
     }
-    // The Phase 1 hello.fossil parser wraps the from-source in `EXPR >
-    // LITERAL_EXPR > IDENT` — peek into that shape if the direct-token scan
-    // above didn't find one.
+    // The parser wraps the from-source in `EXPR > LITERAL_EXPR > IDENT` —
+    // peek into that shape if the direct-token scan above didn't find one.
     if source_binding.is_none()
         && let Some(expr_node) = header.children().find(|c| c.kind() == SyntaxKind::EXPR)
         && let Some(ident) = expr_node

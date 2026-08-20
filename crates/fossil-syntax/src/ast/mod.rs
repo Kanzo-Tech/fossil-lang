@@ -1,14 +1,14 @@
 //! Typed AST views over the lossless CST.
 //!
-//! Phase 1 ships only the wrappers downstream `fossil-hir` needs to walk
-//! the program: `SourceDef`, `Mapping`, `MappingHeader`,
-//! `MappingBody`, `Property`. Each is a thin newtype around `SyntaxNode`
-//! with `cast` (kind-checking constructor) + `syntax` (back-edge accessor)
-//! and a few convenience accessors for child tokens.
+//! Only the wrappers downstream `fossil-hir` needs to walk the program:
+//! `SourceDef`, `Mapping`, `MappingHeader`, `MappingBody`, `Property`. Each is
+//! a thin newtype around `SyntaxNode` with `cast` (kind-checking constructor) +
+//! `syntax` (back-edge accessor) and a few convenience accessors for child
+//! tokens. A view is added when a consumer needs it, never ahead of one.
 //!
 //! All AST nodes deliberately keep the underlying [`SyntaxNode`] public via
-//! `syntax()` so consumers can drop down to the lossless tree when needed
-//! (offsets, trivia, error recovery in later phases).
+//! `syntax()` so consumers can drop down to the lossless tree when needed —
+//! offsets, trivia and error recovery are only visible there.
 
 pub mod items;
 pub use items::ShapeExpr;
@@ -95,14 +95,14 @@ impl MappingHeader {
     }
 
     /// The header's `ShapeExpr` (`Person` in `Users : Person from Adults`).
-    /// Plan 02-04's `ItemTree` consumes this to build `Mapping.shape_id`.
+    /// `fossil_hir`'s `ItemTree` consumes this to build `Mapping.shape_id`.
     #[must_use]
     pub fn shape_expr(&self) -> Option<items::ShapeExpr> {
         self.0.children().find_map(items::ShapeExpr::cast)
     }
 
     /// The expression on the right of `from` — the source-binding
-    /// reference (`users` in the Phase 1 hello.fossil case). Returned as a
+    /// reference (`users` in `examples/hello.fossil`). Returned as a
     /// raw [`SyntaxNode`] kept at `EXPR` kind because the upstream Pratt
     /// parser already wraps every right-hand side in an EXPR composite.
     #[must_use]

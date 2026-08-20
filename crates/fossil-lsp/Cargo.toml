@@ -17,22 +17,22 @@ workspace = true
 name = "fossil-lsp"
 path = "src/main.rs"
 
-# SC#2 (plan 06-09): the ADVISORY Criterion benchmark for the
-# didChange round-trip. The HARD CI gate is the margined wall-clock correctness
-# test (`tests/didchange_budget.rs`); this benchmark's 20%-regression check is
+# The ADVISORY Criterion benchmark for the didChange round-trip budget. The HARD
+# CI gate is the margined wall-clock correctness test
+# (`tests/didchange_budget.rs`); this benchmark's 20%-regression check is
 # reliable only on a pinned/self-hosted runner.
 [[bench]]
 name = "lsp_didchange"
 harness = false
 
 [dependencies]
-# Phase 1 LSP scope (`lsp-server`, NOT tower-lsp): wired the LSP transport from
-# day 1 (no fase-4 trap) but shipped zero compiler features. Phase 2 plan 02-06
-# adds fossil-base + fossil-ide for the minimum hover delta. Phase 6 LSP-01
-# grows the full provider surface.
-# Phase 6 LSP-01: the full provider surface. fossil-hir supplies the
-# parse→def_map→typecheck diagnostics pipeline. salsa is needed for the `Setter`
-# (`set_text`) cancellation trigger + the custom `#[salsa::db]` LSP db.
+# The transport (`lsp-server`, NOT tower-lsp) was wired from day 1 carrying zero
+# compiler features, so integration was never left until the end. The compiler
+# dependencies arrived as the surface grew: fossil-base + fossil-ide are the
+# minimum hover needs, fossil-hir supplies the parse→def_map→typecheck
+# diagnostics pipeline behind the full provider surface, and salsa is needed for
+# the `Setter` (`set_text`) cancellation trigger + the custom `#[salsa::db]` LSP
+# db.
 fossil-base               = { path = "../fossil-base" }
 fossil-ide                = { path = "../fossil-ide" }
 fossil-hir                = { path = "../fossil-hir" }
@@ -55,20 +55,18 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # The lattice a hover renders.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# Plan 03-07 (SC#3 / CORE-07): the lsp_hover_smoke integration test drives
-# implicit-closure synthesis + CSVW forward propagation IN-PROCESS (via
-# fossil-hir's Checker + fossil-descriptors-input's CSVW descriptor) and
-# asserts on fossil_ide::hover::render_markdown — the exact rendering surface
-# the LSP hover handler invokes. The full JSON-RPC end-to-end SC#3 surface
-# form is deferred to Phase 6 (Phase 3 v0.1 has no seq.filter / pipeline
-# surface syntax to trigger synthesis — plan 03-05 decision: NO seq.filter
-# stub). serde_json is the existing JSON-RPC smoke-test dep (declared above
-# as a normal dependency — also used by the smoke test).
-# fossil-hir is a normal dependency (above) as of Phase 6 LSP-01; the smoke
-# test still uses its `Checker`. fossil-descriptors-input + smol_str remain
-# dev-only (the in-process CSVW forward-propagation smoke test).
+# The lsp_hover_smoke integration test drives implicit-closure synthesis + CSVW
+# forward propagation IN-PROCESS (via fossil-hir's Checker +
+# fossil-descriptors-input's CSVW descriptor) and asserts on
+# fossil_ide::hover::render_markdown — the exact rendering surface the LSP hover
+# handler invokes. It cannot go through JSON-RPC end to end, because the surface
+# syntax that would trigger synthesis does not exist yet: there is no
+# `seq.filter` / pipeline form, and no stub was added to fake one. serde_json and
+# fossil-hir are declared above as normal dependencies and the smoke test reuses
+# both; only fossil-descriptors-input + smol_str are dev-only, for that
+# in-process CSVW forward-propagation test.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str                 = { workspace = true }
-# Criterion for the advisory didChange benchmark (SC#2). No default
+# Criterion for the advisory didChange benchmark. No default
 # features → no rayon/plotters pull-in; native-only (fossil-lsp is native-only).
 criterion                = { version = "0.5", default-features = false }

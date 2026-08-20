@@ -264,11 +264,20 @@ mod tests {
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
             directed: true,
             prefix: format!("edge/{src}_{edge}_{dst}/"),
-            adj_lists: vec![AdjList {
-                ordered: true,
-                aligned_by: "src".into(),
-                file_type: "parquet".into(),
-            }],
+            adj_lists: vec![
+                AdjList {
+                    ordered: true,
+                    aligned_by: "src".into(),
+                    prefix: "by_source/".into(),
+                    file_type: "parquet".into(),
+                },
+                AdjList {
+                    ordered: true,
+                    aligned_by: "dst".into(),
+                    prefix: "by_target/".into(),
+                    file_type: "parquet".into(),
+                },
+            ],
             property_groups: vec![],
             version: "gar/v1".into(),
         }

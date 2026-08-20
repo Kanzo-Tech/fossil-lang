@@ -7,7 +7,7 @@
 //   3. The result of `client.request('textDocument/semanticTokens/full', ...)`
 //      — does the raw request API return the canned 5-int data from the stub server?
 //
-// The verdict feeds ADR-0032.
+// The verdict decides which LSP client library the editor adopts.
 
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
@@ -128,5 +128,5 @@ client.initializing.then(async () => {
     log('client.request threw:', (e as Error).message);
   }
 
-  log('--- Spike complete. Outcome feeds ADR-0032. ---');
+  log('--- Spike complete. ---');
 });

@@ -278,7 +278,7 @@ mod tests {
         raw_lex(input).into_iter().map(|(t, _)| t).collect()
     }
 
-    // ─── Phase 1 invariants (preserved verbatim) ──────────────────────
+    // ─── Retired spellings: what the lexer no longer claims ───────────
 
     #[test]
     fn the_prefix_declaration_is_no_longer_one_token_run() {
@@ -368,7 +368,7 @@ mod tests {
         assert_eq!(kinds, vec![Token::KwFrom, Token::Whitespace, Token::Ident]);
     }
 
-    // ─── Phase 2 per-token coverage ───────────────────────────────────
+    // ─── Per-token coverage ───────────────────────────────────────────
 
     #[test]
     fn pipe_is_not_a_token() {

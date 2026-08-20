@@ -1,0 +1,15 @@
+── type bindings ──
+Product ← catalogue.ttl = https://shop.example/voc#Product
+
+── source bindings ──
+Item := io.csv(data/products.csv)
+
+── mappings ──
+Products: 3 written, 3 lowered
+    @subject
+    label
+    price
+
+── run ──
+vertex Product (https://shop.example/voc#Product) × 3 — label, price
+NO EDGE TYPE was written

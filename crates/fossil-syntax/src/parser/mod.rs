@@ -131,8 +131,8 @@ pub struct Cst<'db> {
 /// Parse `file` into a lossless CST. Salsa-tracked: re-parsing the same file
 /// is a memo hit; mutating `file.text(db)` invalidates and re-parses.
 ///
-/// Phase 2-9 contract: this signature is locked. New diagnostics flow via
-/// the [`fossil_base::Diagnostic`] accumulator (added in Phase 2).
+/// This signature is locked. New diagnostics flow via the
+/// [`fossil_base::Diagnostic`] accumulator, never by widening the return type.
 #[salsa::tracked]
 pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_> {
     let text = file.text(db);
@@ -348,10 +348,10 @@ impl Parser {
     /// the parser's queue. The diagnostic is drained into the public
     /// `Diagnostic` accumulator by the wrapping [`parse`] Salsa query.
     ///
-    /// Phase 1 versions of this helper consumed the offending token without
+    /// An earlier version of this helper consumed the offending token without
     /// emitting a diagnostic, leaving downstream tools (LSP, CLI) blind to the
-    /// parse error. Plan 02-03 fixes this — the ERROR node is no longer the
-    /// only signal. New code should still prefer
+    /// parse error — the ERROR node is no longer the only signal. New code
+    /// should still prefer
     /// [`recover::expect_or_recover`] with an explicit anchor set, because the
     /// recovery cascade is local to the caller; this `expect` consumes the
     /// offending token (which may eat an anchor the caller expected to see).
@@ -523,10 +523,9 @@ impl Parser {
 
     // --- top-level -------------------------------------------------------
     //
-    // Phase 2 plan 02-03 moved every per-item recursive-descent rule out of
-    // this file into `super::items`. `Parser::parse_program` stays as a
-    // thin shim so the unit tests inside this module (and the legacy
-    // `parse_text` helper) keep their original API surface.
+    // Every per-item recursive-descent rule lives in `super::items`, not here.
+    // `Parser::parse_program` stays as a thin shim so the unit tests inside
+    // this module (and the `parse_text` helper) keep one entry point.
 
     fn parse_program(&mut self) {
         items::parse_program(self);
@@ -534,11 +533,11 @@ impl Parser {
 
     // --- expressions -----------------------------------------------------
     //
-    // Phase 2: expression parsing is delegated to the Pratt sub-parser in
+    // Expression parsing is delegated to the Pratt sub-parser in
     // `parser::expr` (Crafting Interpreters Ch. 17).
     // The item parser keeps a thin `parse_expr` wrapper that wraps the
-    // expression in an `EXPR` node for back-compat with Phase 1 callers
-    // (`parse_property`, etc.) that expect the outer node kind.
+    // expression in an `EXPR` node, because callers like `parse_property`
+    // locate the right-hand side by that outer node kind.
 
     pub(crate) fn parse_expr(&mut self) {
         self.start(SyntaxKind::EXPR);

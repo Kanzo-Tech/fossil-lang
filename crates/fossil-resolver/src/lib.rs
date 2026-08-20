@@ -20,10 +20,8 @@
 //!
 //! ## Design notes (vs the angelip2303 predecessor)
 //!
-//! This crate replaces `fossil_lang::traits::resolver` (the angelip2303
-//! fork's resolver — see auto-memory
-//! `project_fossil_graph_reference_architecture.md`). Three deliberate
-//! divergences:
+//! This crate replaces `fossil_lang::traits::resolver`, the angelip2303 fork's
+//! resolver. Three deliberate divergences:
 //!
 //! - **No Polars.** The predecessor exposed `polars::prelude::PlPath` +
 //!   `CloudOptions` because the angelip2303 runtime drove I/O via Polars

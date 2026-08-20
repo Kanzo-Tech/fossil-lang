@@ -16,18 +16,18 @@ the finding, not a failure of the drawing.
 
 ```mermaid
 graph LR
-  L["<b>language</b> · 9 crates<br/>base · syntax · hir · mir · registry<br/>descriptors-input · descriptors-output<br/>shex · graph-schema"]
+  L["<b>language</b> · 9 crates<br/>base · syntax · hir · mir · lineage<br/>descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 7 crates<br/>df · df-wasm · engine · cli<br/>runtime · sinks · resolver"]
   C["<b>corpus</b> · 3 crates<br/>graph · graph-wasm · mcp"]
   X["<b>no home</b> · 2 crates<br/>run-status · xtask"]
 
-  E -->|17| L
-  M -->|15| L
-  M -->|1| E
+  E -->|14| L
+  M -->|19| L
   M -->|1| C
   C -->|3| M
-  E -->|2| X
+  E -->|1| X
+  L -->|1| X
   M -->|4| X
 ```
 
@@ -126,10 +126,9 @@ on the way out.
 `crates/fossil-ide/src/completion.rs:69`. We made Gleam's mistake, which has `use lsp_types::Position`
 inside the crate its own documentation calls *"entirely pure"*, rather than rust-analyzer's choice.
 
-And that relocates one crate rather than renaming it. `fossil-run-status` holds four unrelated wire
-contracts — the output of `run`, of `providers`, of `refs`, and the **input** of `catalog`. They are
-not a crate: **they are the outbound half of a protocol**, and in rust-analyzer they would live in the
-binary. Six crates depend on it and it depends on nothing, which is not being foundational — it is
+And that relocates one crate rather than renaming it. `fossil-run-status` holds three unrelated wire
+contracts — the output of `run`, of `providers`, and of `refs`. They are not a crate: **they are the
+outbound half of a protocol**, and in rust-analyzer they would live in the binary. Six crates depend on it and it depends on nothing, which is not being foundational — it is
 being the place where types that did not fit were left.
 
 ## The verdict, which is not the crate count

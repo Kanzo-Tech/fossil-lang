@@ -6,9 +6,8 @@
 //! response but trigger `textDocument/publishDiagnostics`.
 //!
 //! Architectural seam: `fossil-wasm` IS the LSP worker — NOT a recompiled
-//! `fossil-lsp`, and the cfg-tripwire on `fossil-lsp` stays. The
-//! Phase-6 LSP capabilities + handlers (`fossil-lsp/src/main.rs`) are the
-//! 1:1 model; the only difference is the wire channel (postMessage vs
+//! `fossil-lsp`, and the cfg-tripwire on `fossil-lsp` stays. The LSP
+//! capabilities + handlers in `fossil-lsp/src/main.rs` are the 1:1 model; the only difference is the wire channel (postMessage vs
 //! stdio).
 //!
 //! ## Cancellation
@@ -311,7 +310,7 @@ fn handle_notification(
 fn server_capabilities() -> serde_json::Value {
     // Mirror fossil-lsp/src/main.rs `server_capabilities` 1:1 — construct an
     // `lsp_types::ServerCapabilities` and serialize it, so the shape stays
-    // in sync with the typed Phase-6 surface.
+    // in sync with the typed surface `fossil-lsp` advertises.
     let caps = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),

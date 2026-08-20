@@ -51,7 +51,8 @@ if [[ ! -f "$WASM_INPUT" ]]; then
 fi
 
 # --target web (NOT bundler): the consumer passes the resolved .wasm URL via
-# initFossilExecutor({ wasmUrl }); predictable across every bundler (Pitfall 1).
+# initFossilExecutor({ wasmUrl }); predictable across every bundler, where
+# --target bundler would assume the consumer's bundler resolves .wasm imports.
 PKG_DIR="$REPO_ROOT/packages/executor/pkg"
 mkdir -p "$PKG_DIR"
 echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"

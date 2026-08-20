@@ -1,8 +1,8 @@
-//! `GraphAr` v1.0.0 manifest structs + `serde_yaml_ng` emission (SINK-02).
+//! `GraphAr` v1.0.0 manifest structs + `serde_yaml_ng` emission.
 //!
 //! These structs serialize to the **`GraphAr` v1.0.0** vertex-info / edge-info YAML field
 //! names — `version: gar/v1`, `type`, `chunk_size`, `prefix`, `property_groups`, and edge
-//! `src_type`/`dst_type`/`adj_lists`. This deliberately supersedes the Phase-1 hand-templated
+//! `src_type`/`dst_type`/`adj_lists`. This deliberately supersedes an earlier hand-templated
 //! spelling (`graphar_version: 1.0.0`, `vertex_types:`, `data_type: string`), which conformed
 //! to no `GraphAr` reader.
 //!
@@ -10,10 +10,16 @@
 //! queries (CLAUDE.md hard rule). `data_type` strings are derived from [`arrow_schema::DataType`]
 //! via [`data_type_name`], the single authority for the spec spellings (`int64`, `string`, ...).
 //!
-//! Fossil never byte-writes Parquet from Rust — the runtime materializes tiles via
-//! `DuckDB` `COPY ... (FORMAT PARQUET)` into the manifest-declared `prefix`. The vertex-tile naming
+//! **Fossil byte-writes Parquet from Rust, and this sentence used to deny it.** `fossil-df`'s
+//! `files.rs` is the single Arrow→Parquet encoder, shared by the native sink and the browser
+//! executor; the `DuckDB` `COPY` `GraphAr` writer was retired when both the `run` and `catalog`
+//! paths moved to the `fossil-df` materializer (`fossil-runtime/src/materialize.rs`). What still
+//! goes through `DuckDB` `COPY ... (FORMAT PARQUET)` is the layout post-pass in
+//! `fossil-runtime/src/layout.rs`, which re-tiles into the manifest-declared `prefix`. The
+//! vertex-tile naming
 //! convention is `<prefix>chunk{k}.parquet` and the edge-tile one is
-//! `<prefix>by_source/tile{k}.parquet`. This module declares the tiling; it does not emit bytes,
+//! `<edge prefix><adj_list prefix>tile{k}.parquet` — `by_source/` and `by_target/`, one per
+//! declared [`AdjList`]. This module declares the tiling; it does not emit bytes,
 //! and `fossil-runtime`'s `enrich_layout` is the only thing that does — **what the emitter writes
 //! is what the manifest says**, asserted on the artefact by
 //! `fossil-engine/tests/conformance.rs` rather than agreed by convention. That gap stood open for
@@ -66,19 +72,25 @@ pub struct EdgeInfo {
     pub dst_type: String,
     /// The addressing unit of an edge tile, equal to [`Self::src_chunk_size`].
     ///
-    /// **Not a row count**, and it never was one for edges: an edge lives in its
-    /// source's tile (CSR), so tile `k` under
+    /// **Not a row count**, and it never was one for edges: an edge lives in the
+    /// tile of the endpoint its file is ordered by, so tile `k` under
     /// `<prefix>by_source/` holds every edge whose `src_dense` is in vertex tile
-    /// `k` and its row count is the degree of those 4,096 vertices. The
+    /// `k` and its row count is the total degree of those 4,096 vertices. The
     /// alternative — the deepest tile containing both endpoints — was measured
     /// and is dominated on both curves: 2.29× → 15.86× over-read against CSR's
     /// flat 1.95× → 2.89×, and 2.5–3.5× the tiles.
     pub chunk_size: u64,
-    /// Source-vertex tile size (must equal the source [`VertexInfo::chunk_size`]:
-    /// an edge tile is addressed by the source's tile, so a different number
-    /// here would address nothing).
+    /// Source-vertex tile size, and the shift that addresses the `aligned_by:
+    /// src` tiles. Must equal the source [`VertexInfo::chunk_size`] — an edge
+    /// tile is addressed by a vertex tile, so a different number here would
+    /// address nothing.
     pub src_chunk_size: u64,
-    /// Destination-vertex chunk size (must align with the destination vertex).
+    /// Destination-vertex tile size, and the shift that addresses the
+    /// `aligned_by: dst` tiles. Must equal the destination
+    /// [`VertexInfo::chunk_size`] for the same reason [`Self::src_chunk_size`]
+    /// must equal the source's — the two are separate fields because on a
+    /// cross-type edge they are separate `dense_id` spaces, and only a
+    /// same-type edge makes them look like one number.
     pub dst_chunk_size: u64,
     /// Whether the edge is directed.
     pub directed: bool,
@@ -142,12 +154,35 @@ pub struct Property {
 }
 
 /// An adjacency-list ordering descriptor for an edge.
+///
+/// The two orientations of one edge relation are two of these, and between
+/// [`Self::aligned_by`] and [`Self::prefix`] they are **the whole of a reader's
+/// hop**: `aligned_by` names the endpoint column that addresses the tiles, and
+/// `prefix` says where they are. Nothing else has to be agreed out of band.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdjList {
     /// Whether the adjacency list is sorted.
     pub ordered: bool,
-    /// Which endpoint the list is aligned by, e.g. `"src"` or `"dst"`.
+    /// Which endpoint the list is aligned by, `"src"` or `"dst"`.
+    ///
+    /// Also which endpoint *addresses* it: `"src"` means tile `k` under
+    /// [`Self::prefix`] holds the rows whose `src_dense >> shift` is `k`, with
+    /// the shift taken from [`EdgeInfo::src_chunk_size`]; `"dst"` the same
+    /// against `dst_dense` and [`EdgeInfo::dst_chunk_size`]. On a cross-type edge
+    /// those are two different `dense_id` spaces, which is why the two sizes are
+    /// declared separately rather than being one number that happens to agree.
     pub aligned_by: String,
+    /// Where this orientation's tiles are, relative to [`EdgeInfo::prefix`] and
+    /// with the trailing separator — `"by_source/"`, `"by_target/"`.
+    ///
+    /// Declared rather than conventional because it is the one thing a reader
+    /// cannot compute: `aligned_by` gives it the arithmetic and the tile number,
+    /// and this gives it the URL. `<edge prefix><adj prefix>tile{k}.parquet` is a
+    /// complete address, and a reader that has the manifest has never needed to
+    /// list a directory. A tile with no rows is not written, so a 404 is the
+    /// answer "this vertex has no edges in this direction" and costs nothing to
+    /// give.
+    pub prefix: String,
     /// Storage file type, e.g. `"parquet"`.
     pub file_type: String,
 }
@@ -341,11 +376,20 @@ mod tests {
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
             directed: true,
             prefix: "edge/person_knows_person/".to_string(),
-            adj_lists: vec![AdjList {
-                ordered: true,
-                aligned_by: "src".to_string(),
-                file_type: "parquet".to_string(),
-            }],
+            adj_lists: vec![
+                AdjList {
+                    ordered: true,
+                    aligned_by: "src".to_string(),
+                    prefix: "by_source/".to_string(),
+                    file_type: "parquet".to_string(),
+                },
+                AdjList {
+                    ordered: true,
+                    aligned_by: "dst".to_string(),
+                    prefix: "by_target/".to_string(),
+                    file_type: "parquet".to_string(),
+                },
+            ],
             property_groups: vec![],
             version: GRAPHAR_VERSION.to_string(),
         }
@@ -391,7 +435,7 @@ mod tests {
     #[test]
     fn vertex_yaml_carries_graphar_v1_field_names() {
         let yaml = person_vertex().to_yaml().expect("vertex serialization");
-        // Field-name guard: spec spellings present, NOT the Phase-1 template.
+        // Field-name guard: spec spellings present, NOT the old hand-rolled template.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
         assert!(yaml.contains("type: Person"), "{yaml}");
         // Asserted against the constant, not a literal: the value is a measured trade-off
@@ -404,7 +448,7 @@ mod tests {
         assert!(yaml.contains("property_groups:"), "{yaml}");
         assert!(yaml.contains("data_type: int64"), "{yaml}");
         assert!(yaml.contains("is_primary: true"), "{yaml}");
-        // The Phase-1 spelling must NOT appear.
+        // The old hand-rolled spelling must NOT appear.
         assert!(!yaml.contains("graphar_version"), "{yaml}");
         assert!(!yaml.contains("vertex_types"), "{yaml}");
     }
@@ -443,6 +487,14 @@ mod tests {
         assert!(yaml.contains("dst_type: Person"), "{yaml}");
         assert!(yaml.contains("edge_type: knows"), "{yaml}");
         assert!(yaml.contains("adj_lists:"), "{yaml}");
+        // Both orientations, each saying where its tiles are — the two lines a
+        // reader needs to turn a `dense_id` into the URL of its edges in one
+        // direction. A reader that has only `aligned_by` knows the arithmetic and
+        // not the address.
+        assert!(yaml.contains("aligned_by: src"), "{yaml}");
+        assert!(yaml.contains("prefix: by_source/"), "{yaml}");
+        assert!(yaml.contains("aligned_by: dst"), "{yaml}");
+        assert!(yaml.contains("prefix: by_target/"), "{yaml}");
         assert!(yaml.contains("directed: true"), "{yaml}");
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
     }

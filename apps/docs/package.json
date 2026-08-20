@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "Where fossil is going, written before the code gets there — Next.js App Router + fumadocs. Never published; the pnpm-workspace entry is for resolution, not for npm.",
   "type": "module",
-  "//build": "`pnpm test` runs FIRST and is not a convenience: content.test.ts asserts that every path a page cites still exists, so renaming a test or an ADR out from under a page has to break the build rather than rot in prose.",
+  "//build": "`pnpm test` runs FIRST and is not a convenience: content.test.ts asserts that every path a page cites still exists, so renaming a test out from under a page has to break the build rather than rot in prose.",
   "scripts": {
     "dev": "next dev --port 3200",
     "build": "pnpm run test && next build",

@@ -1,0 +1,15 @@
+── type bindings ──
+Listing ← ternary.shex = https://shop.example/voc#Listing
+
+── source bindings ──
+Item := io.csv(data/items.csv)
+
+── mappings ──
+Listings: 3 written, 3 lowered
+    @subject
+    availability
+    band
+
+── run ──
+vertex Listing (https://shop.example/voc#Listing) × 4 — availability, band
+NO EDGE TYPE was written

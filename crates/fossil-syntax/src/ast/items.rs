@@ -1,15 +1,15 @@
-//! Typed AST views for the Phase 2 composite item nodes added in plan 02-03.
+//! Typed AST views for the composite item nodes.
 //!
 //! Each `ast_node!` here is a thin newtype around a [`SyntaxNode`] with a
 //! kind-checking [`cast`] constructor and a `syntax` back-edge to the
-//! underlying lossless node. Downstream consumers (plan 02-04's
-//! `ItemTree` / `body(mapping)`; the HIR lowering in `fossil-hir::lower`)
+//! underlying lossless node. Downstream consumers — `fossil_hir`'s `ItemTree`
+//! and `body(mapping)` queries, and the HIR lowering in `fossil-hir::lower` —
 //! cast top-level CST children into these views to walk the structural
 //! sub-nodes (`MappingHeader.shape_expr()`, `Mapping.body()`, etc.).
 //!
-//! The `Mapping`, `MappingHeader`, `MappingBody`, `Property`, `PrefixDecl`,
-//! `SourceDef` views live in `super` (`crates/fossil-syntax/src/ast/mod.rs`);
-//! the item views added alongside the full item parser live here.
+//! The `Mapping`, `MappingHeader`, `MappingBody`, `Property` and `SourceDef`
+//! views live in `super` (`crates/fossil-syntax/src/ast/mod.rs`); the item
+//! views added alongside the full item parser live here.
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 

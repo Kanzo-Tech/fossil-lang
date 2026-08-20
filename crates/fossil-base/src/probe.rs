@@ -1,7 +1,7 @@
 //! Per-phase resident-set reporting, off unless asked for.
 //!
-//! Writing a ten-million-vertex corpus peaks at **17.0 GiB** for 713 MB of output
-//! (`kanzo-ui/BENCHMARKS.md`, 2026-08-04), and four hypotheses about where that memory went were
+//! Writing a ten-million-vertex corpus peaks at **17.0 GiB** for 713 MB of output (measured
+//! 2026-08-04), and four hypotheses about where that memory went were
 //! false — each eliminated by measurement rather than argument. This is the instrument
 //! that eliminated them, and it lives here because both halves of the write path need it: the
 //! `DataFusion` executor and Parquet sink in `fossil-df`, and the `DuckDB` layout pass in

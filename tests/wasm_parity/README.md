@@ -1,7 +1,7 @@
-# DuckDB-WASM parity harness (SC#1 manual tier)
+# DuckDB-WASM parity harness (manual tier)
 
 This is the **manual, on-demand** tier of the two-tier cross-engine SQL parity
-strategy that discharges SC#1's claim:
+strategy, and the claim it discharges is:
 
 > each generated SQL statement executes identically (same result-set bytes) on
 > native DuckDB 1.10502 **and** DuckDB-WASM 1.33.x.
@@ -12,7 +12,7 @@ heavy, so the parity is split into tiers:
 | Tier | Where | When | What it proves |
 |------|-------|------|----------------|
 | Native exec | `crates/fossil-runtime/tests/corpus_exec.rs` | every PR (`cargo test`) | the executable corpus runs on native `duckdb` 1.10502, asserts result bytes, and **writes** `native_baseline.json` + `corpus_sql.json` |
-| WASM exec (THIS) | `tests/wasm_parity/run-parity.mjs` | **manual, phase close** | the SAME SQL runs on DuckDB-WASM, reproduces the digests, and diffs them against the native baseline |
+| WASM exec (THIS) | `tests/wasm_parity/run-parity.mjs` | **manual, on demand** | the SAME SQL runs on DuckDB-WASM, reproduces the digests, and diffs them against the native baseline |
 
 There used to be a snapshot tier above these — `fossil-codegen/tests/corpus.rs`,
 locking the generated SQL text of a 30-mapping corpus. `af39ff4` deleted the
@@ -43,7 +43,7 @@ records that.
 on DuckDB-WASM, recomputes the digests with the identical serialization, and
 asserts equality — exiting non-zero on any divergence.
 
-### The SC#2 io tier is dormant
+### The io tier is dormant
 
 `run-parity.mjs` also looks for `io_parity_baseline.json` + `io_parity_sql.json`
 — the `io/csv` + `io/json` + `io/parquet` source tier — and its three fixtures
@@ -67,7 +67,7 @@ Both engines must produce the SAME `result_sha256`. The serialization is:
 `sql_sha256` is the SHA-256 of the exact SQL text — verified FIRST so a digest
 mismatch can never be blamed on the two engines running different SQL.
 
-## Version asymmetry (RESEARCH Pitfall 6)
+## Version asymmetry
 
 Native is `duckdb` 1.10502; WASM is DuckDB-WASM 1.33.x. The versions are
 intentionally different — the baseline + this harness are exactly the mechanism
@@ -80,7 +80,7 @@ that **catches** any divergence between them. The corpus sticks to portable SQL
 > tag is `1.32.0`. `package.json` pins `latest` (a 1.33.x build). Bump to a
 > 1.33.x final tag when one ships.
 
-## How to run (the phase-close gate)
+## How to run
 
 ```bash
 cd tests/wasm_parity
@@ -105,6 +105,6 @@ means the corpus SQL or fixtures changed — review it like any other snapshot.
 
 ## When the run is recorded
 
-`node run-parity.mjs` exiting 0 is the documented **phase-close** evidence. It is
-NOT part of `cargo test` / CI — nothing runs it for you, so a PASS only exists if
-someone ran it and said so in the commit that closed the work.
+`node run-parity.mjs` exiting 0 is the only evidence of cross-engine parity there
+is. It is NOT part of `cargo test` / CI — nothing runs it for you, so a PASS only
+exists if someone ran it and said so in the commit that closed the work.

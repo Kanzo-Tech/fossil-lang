@@ -7,7 +7,7 @@
 //!   incremental tokenizer that might want to replace it
 //!
 //! The JS-side `tokenize` (the `#[wasm_bindgen]` wrapper) is exercised by the
-//! node smoke test that lands in plan 08-06 (`packages/wasm/`). On native
+//! node smoke test under `packages/wasm/`. On native
 //! targets the wrapper cannot be called: `serde_wasm_bindgen::to_value` calls
 //! wasm-bindgen intrinsics that panic on non-wasm32 — exactly the constraint
 //! that motivates the `*_native` split established in 07-02.
@@ -25,13 +25,21 @@ fn tokenize_empty_source_returns_empty_vec() {
     assert_eq!(tokenize_native(""), Vec::<TokenRow>::new());
 }
 
+/// The fixture was `prefix ex: <https://example.org/>` — two retired forms, and
+/// the `<…>` no longer lexes as one token at all, so the test was measuring the
+/// tokenizer over bytes the language has no reading for. A source binding
+/// exercises the same invariants over a line the lexer actually has a grammar
+/// for: IDENT, `:=`, a member call and a string.
 #[test]
-fn tokenize_prefix_decl_returns_expected_rows() {
-    let src = "prefix ex: <https://example.org/>\n";
+fn tokenize_source_binding_returns_expected_rows() {
+    let src = "users := io.csv(\"u.csv\")\n";
     let rows = tokenize_native(src);
 
     // Structural invariants only — no exact numeric `kind` pinning.
-    assert!(!rows.is_empty(), "prefix decl should produce >0 tokens");
+    assert!(
+        !rows.is_empty(),
+        "a source binding should produce >0 tokens"
+    );
 
     // The first token starts at byte 0.
     assert_eq!(rows[0].start, 0);
@@ -71,12 +79,12 @@ fn tokenize_handles_unicode_in_comments() {
     // `//`-to-EOL comments accept arbitrary UTF-8 — see lexer.rs Comment
     // regex). The invariant is that byte offsets never exceed the source
     // length, even when chars are multi-byte.
-    let src = "// comentário ñ\nprefix ex: <https://example.org/>\n";
+    let src = "// comentário ñ\nusers := io.csv(\"u.csv\")\n";
     let rows = tokenize_native(src);
 
     assert!(
         !rows.is_empty(),
-        "source with comment + prefix decl emits tokens"
+        "source with comment + source binding emits tokens"
     );
 
     let max_end = rows.iter().map(|r| r.end).max().expect("non-empty");

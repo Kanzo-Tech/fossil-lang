@@ -1,12 +1,12 @@
-//! `textDocument/documentSymbol` — the document outline (SC#5).
+//! `textDocument/documentSymbol` — the document outline.
 //!
 //! Produces the hierarchical-capable symbol list a client renders in its
-//! outline / breadcrumb panel: one entry per top-level Fossil definition
-//! (prefix decl, mapping, function, shape ref). v0.1 emits a **flat** list (no
+//! outline / breadcrumb panel: one entry per top-level Fossil definition (a
+//! mapping, and the shape its header targets). v0.1 emits a **flat** list (no
 //! nesting) — adequate for the playground outline; per-mapping property children
 //! are a v2 refinement.
 //!
-//! # Source: the 06-03 [`SymbolIndex`], translated to LSP coordinates
+//! # Source: the [`SymbolIndex`], translated to LSP coordinates
 //!
 //! The heavy lifting (the CST walk that finds named definitions + their byte
 //! ranges) already lives in [`crate::SymbolIndex`]
@@ -16,16 +16,15 @@
 //! [`lsp_types::Range`] via the [`LineIndex`] (Monaco
 //! counts UTF-16, so a byte range would mis-highlight after a multi-byte char).
 //!
-//! # Kind mapping (Research §Outline)
+//! # Kind mapping
 //!
 //! | Fossil           | LSP `SymbolKind` | rationale                          |
 //! |------------------|------------------|------------------------------------|
-//! | `Prefix`         | `NAMESPACE`      | a `prefix ex: <iri>` is a namespace |
 //! | `Mapping`        | `CLASS`          | a mapping produces typed subjects   |
 //! | `Shape`          | `INTERFACE`      | a `ShEx` shape is a structural type |
 //!
-//! WASM-clean: returns `lsp_types::DocumentSymbol` directly (06-01 Spike A:
-//! lsp-types is wasm32-clean), so the playground consumes it with no translation.
+//! WASM-clean: returns `lsp_types::DocumentSymbol` directly (`lsp-types` itself
+//! is wasm32-clean), so the playground consumes it with no translation.
 
 use crate::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use fossil_base::SourceFile;
@@ -35,8 +34,7 @@ use crate::line_index::LineIndex;
 use crate::position::line_index;
 
 /// Build the document outline for `file`: a flat `Vec<DocumentSymbol>` in source
-/// order, one entry per top-level definition (prefix / mapping / function /
-/// shape).
+/// order, one entry per top-level definition (mapping / shape).
 ///
 /// Each symbol's `range` and `selection_range` are the (UTF-16) range of the
 /// defining node — v0.1 uses the same range for both (the whole declaration is

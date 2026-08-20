@@ -4,7 +4,7 @@
 //! (`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-codegen`,
 //! `fossil-runtime`, `fossil-cli`, `fossil-lsp`, `fossil-wasm`) consumes.
 //!
-//! **Public-API commitment** to Phase 2-9: the signatures here are stable. The
+//! **Public-API commitment**: the signatures here are stable. The
 //! change this commitment exists to prevent is widening the `Db` trait —
 //! descriptors, registry and host capabilities go behind `System`, never onto
 //! `Db`, and every crate above this one is built on that being true.

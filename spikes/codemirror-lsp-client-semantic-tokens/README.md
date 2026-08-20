@@ -1,23 +1,23 @@
 # Spike — `@codemirror/lsp-client` + LSP `semanticTokens/full`
 
-**Wave-0 spike for Phase 8 plan 08-04.** Throwaway audit material.
+**Throwaway audit material.**
 
 ## Question
 
 Does `@codemirror/lsp-client` v6.2.4 (the official Marijn Haverbeke CodeMirror
 LSP client, announced 2025-07-02) surface the LSP `textDocument/semanticTokens/full`
-flow that Phase 6 plan 06-07 implements server-side?
+flow that `fossil-ide` implements server-side?
 
 ## Why this matters
 
-Plans 08-08 (`@fossil-lang/codemirror-fossil`) and 08-09 (`@fossil-lang/playground`)
-both need an LSP client library. Two candidates:
+An editor package and a playground package would both need an LSP client
+library. Two candidates:
 
 1. **`@codemirror/lsp-client@6.2.4`** — official, new, sparse docs, sponsor-backed (preferred).
 2. **`codemirror-languageserver@1.22.0`** (Mahmud Ridwan, marimo-team uses 1.16.12) — bespoke API, battle-tested.
 
-The deciding factor was assumed to be semantic-tokens support: Phase 6 plan 06-07
-implements `textDocument/semanticTokens/full` server-side, and the editor should
+The deciding factor was assumed to be semantic-tokens support: the server side
+implements `textDocument/semanticTokens/full`, and the editor should
 consume it for type-aware highlighting (the wow vs. syntactic-only).
 
 **Static inspection of both packages (before running the spike) shows that
@@ -30,7 +30,7 @@ escape hatch, so we can write a thin Fossil-specific adapter on top?
 
 `spikes/` is excluded from the `packages/*` + `apps/*` globs in
 `pnpm-workspace.yaml` (verified — only those two globs are declared). The
-directory is committed for reviewer auditability of the ADR-0032 decision; it
+directory is committed so the client-library choice can be re-audited; it
 ships nothing and is not built or tested by CI.
 
 ## Run
@@ -154,7 +154,7 @@ The browser-side spike additionally verifies the full `initialize`-handshake +
 `src/main.ts` for the test sequence; the on-page log box and DevTools console
 show the canned 5-int response data flowing back through `client.request()`
 unmodified). The Node-side runtime check above is sufficient to confirm the
-ADR-0032 decision; the in-browser execution is reproducible by anyone via
+verdict below; the in-browser execution is reproducible by anyone via
 `npm run dev`.
 
 ### Verdict
@@ -167,13 +167,14 @@ ADR-0032 decision; the in-browser execution is reproducible by anyone via
   the canned `semanticTokens/full` response unmodified to the caller.
 - The package's verified `Transport` shape (`send/subscribe/unsubscribe`) matches
   the postMessage adapter exactly — no protocol-translation work needed.
-- Plan 08-08 will need a thin "semantic-tokens → CodeMirror `Decoration` set"
-  adapter (~50-100 lines): call `client.request('textDocument/semanticTokens/full', …)`,
-  decode the 5-int delta stream against the `semantic_legend()` exported by
-  `fossil-wasm` (Phase 8 plan 08-02), and emit a `StateField<DecorationSet>`.
+- Any editor package will need a thin "semantic-tokens → CodeMirror `Decoration`
+  set" adapter (~50-100 lines): call
+  `client.request('textDocument/semanticTokens/full', …)`, decode the 5-int delta
+  stream against the `semantic_legend()` exported by `fossil-wasm`, and emit a
+  `StateField<DecorationSet>`.
 
-**Decision (full rationale in `decisions/0032-lsp-client-choice.md`):
-Option A — adopt `@codemirror/lsp-client@^6.2.4`.**
+**Decision: Option A — adopt `@codemirror/lsp-client@^6.2.4`.** The rationale is
+the paragraph below; there is no record kept elsewhere.
 
 `codemirror-languageserver@1.22.0` was inspected statically and has the same
 gap (no built-in semantic-tokens consumer). With both candidates needing a

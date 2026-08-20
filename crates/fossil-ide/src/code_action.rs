@@ -1,27 +1,27 @@
-//! `textDocument/codeAction` — the three SC#5 quick-fixes.
+//! `textDocument/codeAction` — the quick-fixes.
 //!
 //! [`code_actions`] turns a request's `(file, range, diagnostics)` into a
-//! `Vec<lsp_types::CodeAction>` (the `lsp-types`-direct shape confirmed
-//! WASM-clean by 06-01 Spike A), one `QuickFix` per matching diagnostic. The
-//! three actions Phase 6 SC#5 requires:
+//! `Vec<lsp_types::CodeAction>` (`lsp-types` is itself WASM-clean, so the
+//! structs cross the boundary untranslated), one `QuickFix` per matching
+//! diagnostic. The actions:
 //!
 //! 1. **did-you-mean** — a diagnostic carrying the structured
-//!    [`fossil_base::DidYouMean`] candidate (Phase 3's `strsim` Levenshtein
-//!    nearest, surfaced STRUCTURALLY by plan 06-08 Task 1) yields a `QuickFix`
+//!    [`fossil_base::DidYouMean`] candidate (the `strsim` Levenshtein nearest,
+//!    surfaced STRUCTURALLY rather than in the message text) yields a `QuickFix`
 //!    whose `WorkspaceEdit` replaces the typo's `wrong_span` with the
 //!    `replacement`. Read from the typed field — NOT parsed from the message
-//!    string (Research §code actions).
+//!    string, which is prose and free to change.
 //! 2. **split-mapping** — a target `ShEx` `OneOf` diagnostic ALREADY carries the
 //!    generated split-into-N-mappings snippet in
-//!    [`fossil_base::Diagnostic::suggestion_source`] (Phase 3
-//!    `generate_split_suggestion`, proven to re-compile by plan 03-08). The
-//!    `QuickFix` reads `suggestion_source` DIRECTLY (Research `Don't-Hand-Roll`
-//!    — never regenerate it) and replaces the offending mapping's range with it.
+//!    [`fossil_base::Diagnostic::suggestion_source`], produced by
+//!    `generate_split_suggestion` and proven to re-compile. The
+//!    `QuickFix` reads `suggestion_source` DIRECTLY — never regenerating it —
+//!    and replaces the offending mapping's range with it.
 //!
 //! # Domain + WASM boundary
 //!
 //! Returns `lsp_types::CodeAction` directly — no stdio / JSON-RPC. All edits use
-//! UTF-16 LSP ranges (06-05 [`crate::line_index::LineIndex`]); the byte spans on
+//! UTF-16 LSP ranges (via [`crate::line_index::LineIndex`]); the byte spans on
 //! the incoming diagnostics are converted via the FILE-keyed line index, so no
 //! new per-mapping Salsa query is added. No `Box<dyn>`; no
 //! `TyKind::Unknown` ever reaches a title or edit (the action text is built from
@@ -39,7 +39,7 @@ use lsp_types::{
 use crate::line_index::{LineIndex, Utf16Position};
 use crate::position::line_index;
 
-/// Compute the SC#5 code actions for the diagnostics overlapping `range`.
+/// Compute the code actions for the diagnostics overlapping `range`.
 ///
 /// `diagnostics` is the set the LSP `textDocument/codeAction` request passes in
 /// the request params (the diagnostics the host already published for `file`);
@@ -160,8 +160,8 @@ fn lsp_diagnostic_stub(diag: &Diagnostic) -> LspDiagnostic {
     }
 }
 
-/// Build the `file:` [`Uri`] for a source file from its interned path. The LSP
-/// (06-08 `fossil-lsp`) keys its open-document table by the URI string; the
+/// Build the `file:` [`Uri`] for a source file from its interned path.
+/// `fossil-lsp` keys its open-document table by the URI string; the
 /// path stored on the `SourceFile` is that same string (or a bare filename in
 /// tests), so we round-trip it through `Uri::from_str`, prepending the `file://`
 /// scheme when the path is schemeless.

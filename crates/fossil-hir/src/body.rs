@@ -1,6 +1,6 @@
 //! [`HirBody`] — per-mapping body content + the [`body`] Salsa query.
 //!
-//! Lower half of the CORE-02 invalidation-barrier pattern.
+//! Lower half of the invalidation-barrier pattern.
 //! [`crate::item_tree::ItemTree`] is the SIGNATURE table; this module is the
 //! BODY table. They are deliberately separate `#[salsa::tracked]` queries
 //! with separate input-dependency surfaces.
@@ -22,7 +22,7 @@
 //! wrong node. The regression test
 //! [`tests::body_filters_to_mapping_kind_before_indexing`] enforces this.
 //!
-//! # CORE-02 SC#2 per-mapping invalidation barrier — CRITICAL
+//! # The per-mapping invalidation barrier — CRITICAL
 //!
 //! [`body`] does NOT depend on `fossil_syntax::parse(db, file)` directly.
 //! Doing so would tie every per-mapping body query to the whole file's CST,
@@ -54,18 +54,18 @@ use fossil_syntax::{SyntaxKind, SyntaxNode};
 use rowan::GreenNode;
 
 /// Stable per-mapping expression id. Indexed into the body's expression
-/// arena. Phase 2 plan 02-06 wires the per-mapping provenance side table
-/// keyed by `(MappingLoc, ExprId)`.
+/// arena, and the second half of the key `(MappingLoc, ExprId)` the
+/// provenance and span side tables are both keyed by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
 pub struct ExprId(pub u32);
 
 /// Per-mapping body content.
 ///
-/// Owns the flat `Vec<HirProperty>` that Phase 1's `HirMapping.properties`
-/// previously carried (the field is REMOVED from `HirMapping`: the signature
+/// Owns the flat `Vec<HirProperty>` that `HirMapping.properties`
+/// once carried (the field is REMOVED from `HirMapping`: the signature
 /// table carries names and structural counts and never body content, so a body
-/// edit cannot invalidate it). The [`Self::expr_count`] is a Phase 2
-/// placeholder for plan 02-06's `ExprId` arena bookkeeping.
+/// edit cannot invalidate it). [`Self::expr_count`] is the `ExprId` arena's
+/// bookkeeping.
 ///
 /// # `ExprId` is assigned HERE, and nowhere else
 ///
@@ -109,9 +109,9 @@ pub struct HirBody<'db> {
     /// [`crate::spans::rebase_to_file`] direction is unchanged.
     #[returns(ref)]
     pub expr_spans: Vec<fossil_base::Span>,
-    /// Count of distinct expression nodes lowered for this mapping. Phase 2
-    /// plan 02-06 keys the provenance side table by `(MappingLoc, ExprId)`
-    /// for IDs in `0..expr_count`.
+    /// Count of distinct expression nodes lowered for this mapping. The
+    /// provenance side table is keyed by `(MappingLoc, ExprId)` for the ids
+    /// in `0..expr_count`.
     pub expr_count: u32,
 }
 
@@ -134,7 +134,7 @@ pub struct HirBody<'db> {
 /// queries validate via `DidValidateMemoizedValue` instead of re-executing.
 ///
 /// This is the rust-analyzer per-item Salsa fan-out pattern. The invariant
-/// is enforced by the CORE-02 SC#2 regression test at
+/// is enforced by the invalidation regression test at
 /// `crates/fossil-hir/tests/invalidation_regression.rs`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MappingCstNode {
@@ -187,7 +187,7 @@ impl MappingCstNode {
 /// If the two sides ever disagree this query silently hands back another
 /// mapping's subtree, with no panic anywhere downstream.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn mapping_cst_node<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -221,7 +221,7 @@ pub fn mapping_cst_node<'db>(
 /// (rowan's subtree Arc reuse → structural equality → Salsa
 /// `DidValidateMemoizedValue` instead of re-execution).
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirBody<'db> {
     let mapping_cst = mapping_cst_node(db, mapping);
     // The names a `type { … } := …` binding introduced, for the one decision the

@@ -122,6 +122,110 @@ query*. The entire argument about whether the schema read should happen in the b
 server then dissolves into "what does the host pass in" — and the binding does not care, which was
 the point.
 
+## One implementation, and one wire
+
+The criterion above turns architecture arguments into deletions, and it authorises a larger one than
+it first appears to. If the embedding host is a browser, a capability only a native binary can perform
+is a capability the product cannot reach. So the direction is that **every capability has one
+implementation, in a crate that compiles to `wasm32`, and each host is a transport over it** — the
+command line, the language server, the wasm shim and the machine-facing server are projections, and
+none of them is the API. A verb that exists only behind the binary is not a smaller surface; it is a
+surface with no embedding.
+
+What is true today, measured on 2026-08-16: `cargo xtask wasm-check` derives seventeen crates from the
+cdylib dependency closure and checks them, and the compile→run pipeline is inside that set. `fossil
+run` executes on DataFusion through `fossil_df::run_to_dir`; the browser executes on DataFusion
+through `fossil-df-wasm`; and `crates/fossil-df/src/files.rs` is one Arrow→Parquet encoder shared by
+both, so the native filesystem sink and the browser's signed `PUT` differ in where the bytes go and in
+nothing else.
+
+Sharing the implementation is only half of the promise, and the other half is where the drift got in.
+
+> **Two hosts that share a function still disagree if they serialize it differently.** One
+> implementation guarantees one *answer*. It does not guarantee one *wire*.
+
+Measured, in the pair of exports built precisely to be one capability in two hosts: `fossil refs
+--output-json` writes its result with `serde_json`, and `fossil_wasm::refs` writes the same Rust value
+with `serde_wasm_bindgen::to_value`, whose `serialize_missing_as_null` defaults to `false`. A reference
+with no `@conn` alias is therefore `"connection": null` from the command and an **absent key** from the
+browser, because `undefined` does not survive `JSON.stringify`. The same default drops `count` from a
+`RunStatus` the browser produced and keeps it as `null` on the one the command produced.
+
+Neither test over that capability can see it. `crates/fossil-cli/tests/refs.rs` asserts
+`plain["connection"] == Null` against parsed JSON — after the wire. `crates/fossil-wasm/tests/refs.rs`
+asserts `plain.connection == None` against the Rust value — before it. They are otherwise the same
+test over the same fixture, so between them they prove the shared logic agrees with itself and leave
+the one place the two hosts can differ unexamined.
+
+> **A capability offered to two hosts owes a test that crosses each host's wire, not each host's
+> function.** Where the logic is already shared, a test of the function proves only that the sharing
+> compiled.
+
+## The one-home repair has to be earned
+
+The worked example above — one capability in four places — records a repair: the logic gets one home
+and the host injects the data plane. `packages/introspect` is that home.
+
+A home is not an agreement, and for a while the one was read as the other. Until 2026-08-17 the
+package's comment on `extractSourceRefs` said that it and `fossil-engine`'s `extract_source_refs`
+were "character-for-character the same and must move together", and the two had drifted in **both**
+directions at once: the TypeScript matched `io.(csv|json)` where the Rust matched
+`io.(csv|json|parquet)`, and a second sentence in the same comment recorded a dispatch that read
+every source with `read_csv_auto`, which the Rust had already replaced with `read_csv_auto` /
+`read_json_auto` / `read_parquet`. The DuckDB→primitive table — the part anyone would expect to rot
+first — agreed exactly, in both directions, which is what made the two that drifted hard to see.
+What the drift cost is one sentence long: an `io.parquet` binding got no field completion in the
+editor, because the browser side never recognised it as a source at all.
+
+> **A repair that ends at "the logic has one home" has stopped one step early.** Two hosts that
+> cannot share an implementation have two, and the second one is not watched by the first one's
+> tests. What the home buys is that the disagreement is now between two files instead of four.
+
+What closed it, on 2026-08-17: `packages/introspect/tests/rust-parity.test.ts` reads
+`crates/fossil-engine/src/lib.rs`, derives three tables out of it — the source-binding pattern, the
+reader each `io.` constructor picks, the DuckDB→primitive table — and compares each against what the
+package *does*. It restates no Rust value as a TypeScript literal, because a copy of the answer
+cannot notice the answer changing, and every extraction throws when the shape it expects is gone, so
+a rewritten crate fails the test rather than quietly matching nothing. It was proved red six ways,
+the last of which is the crate being absent altogether: that exits 1, rather than reporting no tests
+and looking like a pass. It runs under `pnpm`, so the Rust it reads carries a comment saying so —
+`cargo test` will not tell you.
+
+The fix that would have looked right is worth naming, because it was measured too. Widening the
+TypeScript pattern **alone** leaves `io.parquet` with no field completion: the `DESCRIBE` goes out as
+`read_csv_auto`, DuckDB's CSV sniffer fails on a Parquet file, and introspection is best-effort, so
+the source is logged and skipped — which is indistinguishable, from the editor, from the source never
+having been recognised. The description would have been satisfied and the behaviour unchanged.
+
+There is a third answer, and no guard above touches it. `ExecutorSystem` in `fossil-df-wasm` leaves
+`System::descriptors` at its trait default, so the browser path that *produces* the dataset introspects
+no source at all and types its columns from defaults, while the browser path that *checks* the program
+types them from the data. Two answers in one host, from one capability, is the same failure as two
+answers in two hosts.
+
+> **A parity claim written in a comment is prose where there was a checkable constraint** — this page's
+> own rule, turned on the repair instead of on the proposal. It survived as long as nothing checked
+> it, and both sentences it was made of were false by the time anyone read them closely. The comment
+> is deleted rather than corrected: the guard makes the claim now, or nothing does.
+
+## An open question this page does not settle
+
+A product embedding fossil is named above as the third destination. Whether the *server* of such a
+product is a host in its own right, or is the browser host wearing a server's clothes, is deliberately
+left open here.
+
+The evidence that it is its own host: it owns credentials, storage, job lifecycle and multi-tenancy,
+which is exactly the list this page assigns to the host layer, and none of that runs in a tab.
+
+The evidence that it is not: as of 2026-08-16 keasy's server spawns no fossil binary, and its images
+declare themselves free of one. Every fossil capability it exposes is computed in the browser and the
+server stores the result. On that reading the server is a data plane — signatures, bytes and rows —
+and the host that fossil is embedded *in* is the tab.
+
+Settling it decides something concrete, which is why it is worth leaving until someone means to decide
+it: if the server is a host, it is owed a surface of its own, and today it links one Rust type and
+consumes the rest as TypeScript.
+
 ## What this document deliberately does not contain
 
 The layers are a design, not an inventory. Which units of code sit in which layer is a fact about the

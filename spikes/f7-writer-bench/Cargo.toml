@@ -1,0 +1,23 @@
+# F7 · what the two Parquet writers cost, measured.
+#
+# Standalone on purpose: `members = ["crates/*"]` does not reach `spikes/`, and
+# the empty `[workspace]` table below stops cargo walking up into the repo
+# workspace. It therefore builds into `spikes/f7-writer-bench/target`, never the
+# repo's `target/` (whose `debug/fossil` six tests hardcode).
+#
+# `arrow`/`parquet` are the workspace pin, 58, restated — the whole measurement
+# is about that version's writer, so a floating dep would measure something else.
+[package]
+name = "f7-writer-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+arrow = "=58.3.0"
+parquet = "=58.3.0"
+
+[profile.release]
+opt-level = 3

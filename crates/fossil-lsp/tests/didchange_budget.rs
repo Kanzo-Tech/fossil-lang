@@ -1,4 +1,4 @@
-//! SC#2 — the HARD CI gate for the `didChange` round-trip budget.
+//! The HARD CI gate for the `didChange` round-trip budget.
 //!
 //! Measures the full per-keystroke analysis round-trip the LSP runs on every
 //! `didChange` over the canonical 200-line fixture:

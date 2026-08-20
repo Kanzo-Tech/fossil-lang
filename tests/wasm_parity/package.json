@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "SC#1 manual cross-engine parity gate (ADR-0014): re-run the corpus SQL on DuckDB-WASM 1.33.x and diff the native_baseline.json digests.",
+  "description": "Manual cross-engine parity gate: re-run the corpus SQL on DuckDB-WASM 1.33.x and diff the native_baseline.json digests against native DuckDB 1.10502.",
   "scripts": {
     "parity": "node run-parity.mjs"
   },
-  "comment": "SC#1 targets DuckDB-WASM 1.33.x. The 1.33.x line is currently published only as the npm `latest` dev pre-release (1.33.1-devN.0); the last fully-stable tag is 1.32.0. We pin the npm `latest` (a 1.33.x build) for the manual parity gate; bump to a 1.33.x final when one ships. The native side is duckdb 1.10502 — the asymmetry is intentional, and this harness is what would catch a native/WASM divergence.",
+  "comment": "This harness targets DuckDB-WASM 1.33.x. The 1.33.x line is currently published only as the npm `latest` dev pre-release (1.33.1-devN.0); the last fully-stable tag is 1.32.0. We pin the npm `latest` (a 1.33.x build) for the manual parity gate; bump to a 1.33.x final when one ships. The native side is duckdb 1.10502 — the asymmetry is intentional, and this harness is what would catch a native/WASM divergence.",
   "dependencies": {
     "@duckdb/duckdb-wasm": "latest",
     "apache-arrow": "^17.0.0"

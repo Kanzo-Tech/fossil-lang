@@ -1,20 +1,21 @@
-// SC#1 manual cross-engine parity gate (ADR-0014).
+// Manual cross-engine parity gate. The claim it discharges: each generated SQL
+// statement executes identically — same result-set bytes — on native DuckDB
+// 1.10502 AND on DuckDB-WASM 1.33.x.
 //
-// Tier 3 of the two-tier-plus-baseline parity strategy:
-//   1. snapshot tier  — fossil-codegen/tests/corpus.rs locks the SQL text.
-//   2. native tier     — fossil-runtime/tests/corpus_exec.rs runs the executable
+// The upper tier of the two-tier strategy:
+//   1. native tier      — fossil-runtime/tests/corpus_exec.rs runs the executable
 //                        corpus subset on native duckdb 1.10502, asserts the
 //                        result bytes, and WRITES the digest baseline
 //                        tests/wasm_parity/native_baseline.json
 //                        plus the single-sourced SQL list corpus_sql.json.
-//   3. WASM tier (THIS) — re-run the SAME SQL on @duckdb/duckdb-wasm 1.33.x,
+//   2. WASM tier (THIS) — re-run the SAME SQL on @duckdb/duckdb-wasm 1.33.x,
 //                        recompute the digests with the SAME serialization, and
 //                        diff against the baseline. Exit non-zero on any
-//                        mismatch. This is the documented MANUAL phase-close
-//                        command (NOT wired into cargo test / CI — the 6.4MB MVP
-//                        bundle is too heavy for per-PR runs).
+//                        mismatch. This is the documented MANUAL command (NOT
+//                        wired into cargo test / CI — the 6.4MB MVP bundle is
+//                        too heavy for per-PR runs).
 //
-// VERSION ASYMMETRY (RESEARCH Pitfall 6): native duckdb is 1.10502; DuckDB-WASM
+// VERSION ASYMMETRY: native duckdb is 1.10502; DuckDB-WASM
 // is 1.33.x. The versions are intentionally different — the baseline + this
 // harness are precisely the mechanism that CATCHES any divergence between them.
 // The corpus sticks to portable SQL (read_csv_auto, CAST AS VARCHAR, ORDER BY,
@@ -44,10 +45,11 @@ const CORPUS_SQL_PATH = resolve(
   "tests/wasm_parity/corpus_sql.json",
 );
 
-// SC#2 (Phase 5): the io/csv + io/json + io/parquet parity tier. Written by
+// The io/csv + io/json + io/parquet parity tier. Written by
 // crates/fossil-runtime/tests/io_parity_corpus.rs (the native side) — a mapping
 // reading all three source formats + clean/parse/seq ops (sources end-to-end;
-// ops via direct MIR/Expr::Call construction, ADR-0009 reachability gap). This
+// the ops are reachable only by direct MIR/Expr::Call construction, since no
+// surface syntax lowers to them). This
 // harness registers the three fixture inputs in the WASM VFS and re-runs the
 // identical SQL, diffing the digests against the io baseline.
 const IO_BASELINE_PATH = resolve(
@@ -69,7 +71,7 @@ const FIXTURES = [
   "examples/b.csv",
 ];
 
-// SC#2 io tier: the three source-format fixtures, registered under their
+// The io tier: the three source-format fixtures, registered under their
 // SQL-referenced relative paths (read_csv_auto('tests/wasm_parity/fixtures/...'),
 // read_json_auto(...), read_parquet(...)) so the SQL text is byte-identical
 // native↔WASM. The Parquet fixture is a committed, deterministic file (generated
@@ -168,9 +170,9 @@ async function main() {
   const corpusBaseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
   const corpusSql = JSON.parse(readFileSync(CORPUS_SQL_PATH, "utf8"));
 
-  // The SC#2 io tier is optional at load time only so the corpus tier still runs
-  // if the io baseline has not been produced yet; in a full phase-close run the
-  // native io_parity_corpus.rs test writes it first.
+  // The io tier is optional at load time only so the corpus tier still runs
+  // if the io baseline has not been produced yet; in a full run the native
+  // io_parity_corpus.rs test writes it first.
   let ioBaseline = [];
   let ioSql = {};
   try {
@@ -178,13 +180,13 @@ async function main() {
     ioSql = JSON.parse(readFileSync(IO_SQL_PATH, "utf8"));
   } catch {
     console.warn(
-      "WARN: io_parity_baseline.json not found — run `cargo test -p fossil-runtime --test io_parity_corpus` first to produce the SC#2 io tier.",
+      "WARN: io_parity_baseline.json not found — run `cargo test -p fossil-runtime --test io_parity_corpus` first to produce the io tier.",
     );
   }
 
   const db = await makeDb();
 
-  // Register the corpus fixture CSVs + the SC#2 io fixtures (csv/json/parquet)
+  // Register the corpus fixture CSVs + the io fixtures (csv/json/parquet)
   // into the WASM VFS under their SQL-referenced relative paths (so the SQL text
   // is byte-identical native↔WASM).
   for (const rel of [...FIXTURES, ...IO_FIXTURES]) {

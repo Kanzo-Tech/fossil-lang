@@ -1,6 +1,6 @@
 //! LSP position → byte offset → [`SyntaxToken`] / [`SyntaxNode`] resolution.
 //!
-//! Phase 2 plan 02-06: the minimum bridge the hover handler needs to walk
+//! The bridge the hover handler needs to walk
 //! from an `(line, character)` LSP position down to the enclosing
 //! `MAPPING` / `PROPERTY` CST node, so it can index into the per-mapping
 //! [`fossil_hir::body::HirBody`] and look up `ty_origin` in the provenance
@@ -12,12 +12,12 @@
 //! boundary) deterministically picks the LEFT token, matching what the LSP
 //! hover semantics expect (the token the cursor "is in" / "just past").
 //!
-//! # UTF-16 positions (Phase 6 LSP-01)
+//! # UTF-16 positions
 //!
-//! LSP positions use UTF-16 code units (Monaco / VS Code). Phase 2 treated the
-//! `character` column as a raw byte offset — correct only for ASCII source.
-//! Phase 6 plumbs proper conversion via [`crate::line_index::LineIndex`]
-//! (the rust-analyzer pattern): [`position_to_offset`] now
+//! LSP positions use UTF-16 code units (Monaco / VS Code). This module treated
+//! the `character` column as a raw byte offset once — correct only for ASCII
+//! source. The conversion goes through [`crate::line_index::LineIndex`]
+//! (the rust-analyzer pattern): [`position_to_offset`]
 //! interprets `character` as a UTF-16 code unit, and [`offset_to_lsp_position`]
 //! converts a byte offset back to a UTF-16 column. Both build the index from
 //! the SAME FILE-keyed [`line_offsets`] table, so no new per-mapping Salsa
@@ -41,7 +41,7 @@ pub struct LineOffsets<'db> {
 
 /// Compute byte-offset-per-line table for `file`.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> LineOffsets<'db> {
     let text = file.text(db);
     let mut offsets: Vec<u32> = vec![0];
@@ -58,8 +58,7 @@ pub fn line_offsets<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> Line
 ///
 /// `character` is interpreted as a UTF-16 code unit (the LSP wire convention),
 /// converted to a UTF-8 byte offset via the [`LineIndex`]. Returns `None` if
-/// `line` is past the end of the file. (Phase 6 LSP-01 — replaces Phase 2's
-/// byte-offset-as-column assumption.)
+/// `line` is past the end of the file.
 #[must_use]
 pub fn position_to_offset(index: &LineIndex, line: u32, character: u32) -> Option<u32> {
     index.offset(Utf16Position { line, character })
@@ -176,8 +175,8 @@ mod tests {
     fn node_at_position_returns_some_for_valid_position() {
         let (db, file) = db_with_text("prefix ex: <https://example.org/>\n");
         let node = node_at_position(&db, file, 0, 7).expect("expected a node at (0, 7)");
-        // We don't fix the exact kind here (parser shape may vary across
-        // Phase 2 plans); just confirm we got somewhere up the tree.
+        // We don't fix the exact kind here (the parser's node shape is free to
+        // change); just confirm we got somewhere up the tree.
         assert!(!node.text().to_string().is_empty());
     }
 }

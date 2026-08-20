@@ -2,10 +2,18 @@ PREFIX ex: <https://example.org/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 
 # The output contract of `examples/hello.fossil`, and therefore of the
-# walking-skeleton invariant. `ex:Person` declares exactly one predicate, so the
-# body writes exactly one property and its bare key is `name` — the last segment
-# of `https://example.org/name`. Cardinality is 1..1: the mapping must write it,
-# and `check_required_properties` says so if it stops.
+# walking-skeleton invariant. This is ShEx, not fossil: a shape document is a
+# separate artefact, and fossil reads it rather than restating it.
+#
+# One shape is declared here, and its name does three jobs in the program next
+# door: `type { Person } := io.shex("hello.shex")` binds it by the LOCAL NAME of
+# `ex:Person`, the mapping header names that binding, and the vertex type written
+# to disk is that same `Person`.
+#
+# `ex:Person` declares exactly one predicate, so the body writes exactly one
+# property and its bare key is `name` — the last segment of
+# `https://example.org/name`. Cardinality is 1..1: the mapping must write it, and
+# `check_required_properties` says so if it stops.
 #
 # Verified against the built binary: `fossil check examples/hello.fossil` exits 0
 # and `fossil run` writes 5 `Person` vertices with a `name` column of `string`,

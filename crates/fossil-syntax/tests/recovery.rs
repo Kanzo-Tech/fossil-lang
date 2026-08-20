@@ -69,7 +69,7 @@ fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<
     })
 }
 
-/// Plan 07-01 happy-path budget: parse-on-bare-`#` finishes well under 100ms.
+/// Happy-path budget: parse-on-bare-`#` finishes well under 100ms.
 /// We pick 100ms as a regression-style soft cap that is huge vs the actual
 /// post-fix cost (~micro-seconds) but still catches a pathological slowdown.
 const HAPPY_PATH_BUDGET: Duration = Duration::from_millis(100);

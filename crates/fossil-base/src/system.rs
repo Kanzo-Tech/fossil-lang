@@ -99,8 +99,8 @@ pub trait System: Send + Sync + std::fmt::Debug {
         DATA
     }
 
-    // Phase 3+ extension points (do not add now — keep the trait surface
-    // tight until a downstream consumer forces it):
+    // Extension points considered and deliberately not added — keep the trait
+    // surface tight until a downstream consumer forces one:
     //   fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, FsError>;
     //   fn input_descriptor(&self, kind: &str) -> Option<&dyn InputDescriptor>;
     //   fn output_descriptor(&self, kind: &str) -> Option<&dyn OutputDescriptor>;

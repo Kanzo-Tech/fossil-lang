@@ -13,8 +13,9 @@ Keep it under 200 lines, rules-not-context.
   `design/prior-art` for every source named); `/docs/book/typing` is the static semantics,
   the grammar's sibling; `/docs/characteristics` is per-feature and carries both registers.
 - `apps/corpus/` — the artifact, with executable guards instead of prose about it.
-- `apps/docs/programs/` — the eighteen conformance programs. Documentation transcludes
-  them; nothing retypes a program into prose.
+- `apps/docs/programs/` — the conformance programs. Documentation transcludes them; nothing
+  retypes a program into prose. No number here: `crates/fossil-engine/tests/programs.rs` walks
+  the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
 - `apps/docs/CLAUDE.md` — the editorial rules for the docs app, including the two-register
@@ -65,7 +66,13 @@ Without any LLVM at all, check the compiler closure directly — it is the small
   `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
   `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
-- **No `tokio` outside `fossil-lsp`.** And `fossil-lsp` is native-only with a `compile_error!` cfg-tripwire.
+- **`tokio` never reaches a wasm build, and that is the whole rule.** It lives in `fossil-df`
+  (native-gated, for `run_to_dir`), `fossil-df-wasm` (native-gated — the browser drives
+  `execute_graph` from JS's own event loop) and `fossil-mcp` (rmcp's runtime). Each carries its
+  justification in its own `Cargo.toml`; adding a fourth means writing one there.
+  **This rule used to read "no `tokio` outside `fossil-lsp`", and it was inverted**: `fossil-lsp`
+  has no `tokio` at all, so a contributor obeying it literally would have rejected three correct
+  manifests and approved the one crate that dropped it.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
 - **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
@@ -78,7 +85,9 @@ Without any LLVM at all, check the compiler closure directly — it is the small
 - **pnpm + cargo coexist at repo root.** Rust contributors don't need pnpm; JS/TS contributors need pnpm 9.x + Node 20+. The Rust workspace (`crates/`) and the pnpm workspace (`packages/` + `apps/`) are independent; CI runs them in parallel matrices.
 - **`RETURNING.md` ritual:** before stepping away from the project for >1 week, write/update
   `RETURNING.md` (gitignored, local-only) describing current state, what's broken, next 3 steps,
-  what NOT to do because tried-it. Read on return before any code change. Mitigates P-SOLO-2.
+  what NOT to do because tried-it. Read on return before any code change. Solo plus an open
+  timeline means breaks are inevitable, and without the ritual the third one leaves the codebase
+  opaque to its own author.
 - **Walking-skeleton invariant:** `fossil run examples/hello.fossil --dest <tmp>` must keep
   producing a valid GraphAr dataset — 5 `Person` vertices, asserted by content, not existence.
   `crates/fossil-cli/tests/walking_skeleton.rs` is the test that goes red. A refactor that
@@ -126,7 +135,7 @@ crates/
   fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
   fossil-df/               DataFusion backend for the property-graph MIR
   fossil-engine/           native orchestration behind the binaries — the compile→run
-                           pipeline plus check/refs/providers/catalog, returning STRUCTURED
+                           pipeline plus check/refs/providers, returning STRUCTURED
                            data the binary only renders  [NATIVE-ONLY]
   fossil-runtime/          DuckDB native execution  [NATIVE-ONLY]
   fossil-run-status/       the `fossil run --output-json` wire contract
@@ -134,7 +143,7 @@ crates/
   fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)
   fossil-mcp/              that same verb surface as a native server-side service
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
-  fossil-cli/              `fossil check/run/catalog/providers/refs`  [NATIVE-ONLY]
+  fossil-cli/              `fossil check/run/providers/refs`  [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
   fossil-df-wasm/          the fossil-df executor exposed to JS
@@ -143,13 +152,19 @@ crates/
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
-  graph/                   in-process TS binding for the fossil-graph verb surface
+  graph/                   two halves over one manifest. The verbs are the root barrel and NEED
+                           the gitignored `pkg/`; the addressing (`resolveCorpus` — no WASM) is
+                           `@fossil-lang/graph/address`, and it has a subpath because a barrel
+                           import is not one. `tests/address-standalone.test.ts` proves it.
   executor/                datafusion-wasm query executor
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
   introspect/              source-binding schema introspection (the one home; `fossil-engine`
-                           is the Rust sibling and the two must stay in parity)
-  examples/                bundled .fossil/.csv/.csvw.json/.shex fixtures
+                           is the Rust sibling). Their agreement is ENFORCED, not asserted:
+                           `packages/introspect/tests/rust-parity.test.ts` derives the regex,
+                           the reader arms and the type table out of `fossil-engine/src/lib.rs`
+                           and fails on drift. It is a **pnpm** test — editing that Rust turns
+                           it red and `cargo test` will not tell you.
 
 apps/                      NOT published, and no recursive CI step reaches them (all are
                            filtered to `./packages/*` by path — see release.yml)
@@ -188,7 +203,7 @@ The `ui/ viewer/ editor/ codemirror-fossil/` React family moved to `@kanzo-tech/
 
 ## Anti-patterns
 
-- Importing `tokio` anywhere outside `fossil-lsp` (and even there, only `tokio = { version, features = ["sync"] }`).
+- Letting `tokio` reach a wasm target, or adding it to a crate without gating it and saying why in that crate's `Cargo.toml`.
 - Using `default-features = true` on rudof crates — be explicit about what you opt into; the
   defaults drag in crates that do not build for wasm32.
 - Putting compiler logic in `fossil-base` — it is the trait + db substrate, no business logic.

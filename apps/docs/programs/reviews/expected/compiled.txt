@@ -1,0 +1,21 @@
+── type bindings ──
+Person ← reviews.shex = https://shop.example/voc#Person
+Review ← reviews.shex = https://shop.example/voc#Review
+
+── source bindings ──
+User := io.csv(data/users.csv)
+Note := io.csv(data/reviews.csv)
+
+── mappings ──
+People: 2 written, 2 lowered
+    @subject
+    name
+Reviews: 3 written, 3 lowered
+    @subject
+    body
+    author
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 2 — name
+vertex Review (https://shop.example/voc#Review) × 3 — body
+edge Review_author_Person × 2

@@ -4,9 +4,9 @@
 //!
 //! LSP positions are **UTF-16 code units** (Monaco / VS Code count columns in
 //! UTF-16), but Fossil source is stored and indexed in **UTF-8 bytes** (rowan
-//! `TextSize`). Phase 2's [`crate::position`] treated the LSP `character`
-//! column as a raw byte offset — correct ONLY for ASCII-only source, and the
-//! module explicitly deferred the conversion to Phase 6. RDF IRIs, prefixed
+//! `TextSize`). [`crate::position`] treated the LSP `character`
+//! column as a raw byte offset once — correct ONLY for ASCII-only source. RDF
+//! IRIs, prefixed
 //! names, and comments routinely contain multi-byte characters (`é`, `—`,
 //! non-Latin scripts), so any position-bearing feature (hover, goto-def,
 //! semantic tokens) points at the wrong column after a multi-byte char without

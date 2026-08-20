@@ -1,10 +1,9 @@
-//! Native-side smoke of the `ty_wasm`-shaped Workspace surface (plan 07-02,
-//! WASM-02 / SC#5 first half).
+//! Native-side smoke of the `ty_wasm`-shaped Workspace surface.
 //!
 //! The full node-driven end-to-end exercise lives in `test-wasm-workspace.js`
 //! (loaded by `wasm-bindgen --target nodejs` + node ≥18); that script is
-//! manual + CI-job-driven, not per-PR `cargo test` (matches the Phase-1
-//! `test-wasm.js` pattern).
+//! manual + CI-job-driven, not per-PR `cargo test` (the same split as
+//! `test-wasm.js`).
 //!
 //! This file is the cargo-test mirror that catches API regressions on every
 //! PR without needing the wasm-bindgen + node toolchain installed. Each test
@@ -14,8 +13,8 @@
 //! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
 //! panics on native targets ("cannot call wasm-bindgen
 //! imported functions on non-wasm targets" — wasm-bindgen 0.2 lib.rs:101).
-//! The split mirrors the Phase-5 `classification()` ↔
-//! `stdlib_classification()` precedent.
+//! The split mirrors the `classification()` ↔ `stdlib_classification()` pair,
+//! which is the same wrapper/native division.
 
 use fossil_wasm::{FossilPlayground, WorkspaceError};
 
@@ -53,7 +52,7 @@ fn workspace_lifecycle_smoke() {
 
     // Workspace-wide drain: we don't assert row count (well-formed
     // hello.fossil under AcceptAll may produce zero or more rows
-    // depending on Phase-2 warnings); what matters is the call returns
+    // depending on which warnings fire); what matters is the call returns
     // and serialization is deferred to the wasm-bindgen wrapper.
     let _rows = pg.check_rows();
 

@@ -1,12 +1,11 @@
-//! `textDocument/semanticTokens/full` — full-document semantic tokens (SC#4).
+//! `textDocument/semanticTokens/full` — full-document semantic tokens.
 //!
 //! # Why this is load-bearing for the playground
 //!
 //! Monaco renders the playground **inert** (no syntax coloring) without LSP
-//! semantic tokens: Fossil ships no `TextMate` grammar to the *playground* (the
-//! `VS Code` extension gets one in Phase 9; the browser editor relies on the
-//! LSP `semanticTokensProvider`). So this module is the *only* source of syntax
-//! highlighting in the v0.1 playground (Research §Semantic Tokens / Monaco).
+//! semantic tokens: Fossil ships no `TextMate` grammar to the *playground* —
+//! the browser editor relies on the LSP `semanticTokensProvider`. So this module
+//! is the *only* source of syntax highlighting in the v0.1 playground.
 //!
 //! # Shape (LSP spec)
 //!
@@ -16,7 +15,7 @@
 //! delta-encoded relative to the previous token (the LSP wire format). The
 //! `tokenType` is an *index* into the legend's `token_types`; `length` and
 //! `deltaStartChar` are **UTF-16 code units** (Monaco counts UTF-16), so we route
-//! every column / length through the 06-05 [`crate::line_index::LineIndex`]
+//! every column / length through the [`crate::line_index::LineIndex`]
 //! — without it any source with a multi-byte character
 //! (non-ASCII IRIs, emoji in comments) colors the wrong span.
 //!
@@ -54,9 +53,8 @@ mod ty {
 }
 
 /// The legend's token *types*, in index order (index == the `tokenType` u32).
-/// The minimal v0.1 set Fossil needs for legible coloring (Research §Semantic
-/// Tokens): keyword, namespace, type, function, property, string, number,
-/// operator, comment, variable.
+/// The minimal v0.1 set Fossil needs for legible coloring: keyword, namespace,
+/// type, function, property, string, number, operator, comment, variable.
 const LEGEND_TYPES: [SemanticTokenType; 10] = [
     SemanticTokenType::KEYWORD,
     SemanticTokenType::NAMESPACE,
@@ -72,9 +70,9 @@ const LEGEND_TYPES: [SemanticTokenType; 10] = [
 
 /// The LSP semantic-tokens legend Fossil's `semanticTokensProvider` declares.
 ///
-/// `fossil-lsp` (06-08) plugs this straight into
+/// `fossil-lsp` plugs this straight into
 /// `SemanticTokensOptions { legend: fossil_ide::semantic_legend(), .. }` when
-/// registering the capability (Research §LSP capability registration). v0.1
+/// registering the capability. v0.1
 /// emits no modifiers (an empty modifier list), so the `tokenModifiers` bitset
 /// of every emitted token is `0`.
 #[must_use]
@@ -106,7 +104,7 @@ struct AbsToken {
 /// `(line, char, length)` through the FILE-keyed [`LineIndex`]. Tokens with no
 /// semantic category (whitespace, structural punctuation, parse-error trivia)
 /// are skipped. The result is exactly what
-/// `textDocument/semanticTokens/full` returns; `fossil-lsp` (06-08) wraps it in
+/// `textDocument/semanticTokens/full` returns; `fossil-lsp` wraps it in
 /// `SemanticTokens { result_id: None, data }`.
 #[must_use]
 pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<u32> {
@@ -190,6 +188,16 @@ fn classify(tok: &SyntaxToken) -> Option<u32> {
         // ── context-sensitive names ───────────────────────────────────
         K::IDENT => Some(ident_type(tok)),
 
+        // The hole's CLOSER, and the reason it needs its own arm: `{` is
+        // `INTERP_OPEN`, a token of its own, but `}` is an ordinary `RBRACE`
+        // shared with `type { Person } := …` and `{ A, B } := …`. Painting
+        // every `RBRACE` would colour those, so the arm asks the parent — the
+        // grammar puts the closer directly under `INTERPOLATION`
+        // (`Interpolation := INTERP_OPEN Expression RBRACE`) and nowhere else.
+        // Without it the literal opened as an operator and closed as nothing:
+        // the run went string, string, operator, expression, *gap*, string.
+        K::RBRACE if is_interpolation_close(tok) => Some(ty::OPERATOR),
+
         _ => None,
     }
 }
@@ -220,6 +228,17 @@ fn ident_type(tok: &SyntaxToken) -> u32 {
         return ty::FUNCTION;
     }
     ty::VARIABLE
+}
+
+/// Whether this `RBRACE` closes an interpolation hole rather than a
+/// destructuring pattern. The parser builds `INTERPOLATION` around
+/// `INTERP_OPEN Expression RBRACE` and bumps the closer as a direct child of
+/// that node, so the parent is the whole test — and it stays true for the
+/// recovery path, where `expect_or_recover` still attaches the brace it found
+/// before `p.finish()`.
+fn is_interpolation_close(tok: &SyntaxToken) -> bool {
+    tok.parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::INTERPOLATION)
 }
 
 /// Whether `tok` names a record field — an IDENT immediately preceded by a
@@ -429,6 +448,34 @@ Users : Person from users
             .expect("a keyword token");
         assert_eq!(kw.0, 2, "`from` is on the mapping header line");
         assert_eq!(kw.2, 4, "len of `from`");
+    }
+
+    /// The hole closes in the colour it opened in.
+    ///
+    /// `{` is `INTERP_OPEN`, a token of its own and never anything else, so it
+    /// was painted from the day the carve landed. `}` is an ordinary `RBRACE`,
+    /// the same token the destructuring on line 0 writes, and it was painted as
+    /// nothing at all — a literal that opened as an operator and ended in a
+    /// gap. Both halves are asserted here, because the fix has to name the
+    /// interpolation and not the brace: line 3 gains the closer, line 0 keeps
+    /// exactly the one operator it always had, its `:=`.
+    #[test]
+    fn the_interpolation_closes_in_the_colour_it_opened() {
+        let (db, file) = db_file(SRC);
+        let decoded = decode_tokens(&semantic_tokens(&db, file));
+        let ops_on = |want: u32| -> Vec<u32> {
+            decoded
+                .iter()
+                .filter(|&&(line, _, _, t)| line == want && t == ty::OPERATOR)
+                .map(|&(_, col, _, _)| col)
+                .collect()
+        };
+        // `    @subject = "https://example.org/u/{users.id}"`
+        //                ^13            the hole ^38    ^47
+        assert_eq!(ops_on(3), vec![13, 38, 47], "all tokens: {decoded:?}");
+        // `type { Person } := io.shex("person.shex")` — the `:=` and NOTHING
+        // else. If the classifier had taken every `RBRACE`, col 14 would be here.
+        assert_eq!(ops_on(0), vec![16], "all tokens: {decoded:?}");
     }
 
     #[test]

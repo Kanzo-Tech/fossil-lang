@@ -42,11 +42,11 @@ impl FossilDb {
     /// every `salsa::Event` emitted during query execution.
     ///
     /// Used by the invalidation regression test
-    /// (`crates/fossil-hir/tests/invalidation_regression.rs`, added in Wave 4
-    /// plan 02-07) to count `EventKind::WillExecute` events across an
-    /// edit-trigger boundary — Phase 2 SC#2 (the
-    /// `≤4 re-executed queries after a body-only edit in 1-of-10 mappings`
-    /// gate).
+    /// (`crates/fossil-hir/tests/invalidation_regression.rs`) to count
+    /// `EventKind::WillExecute` events across an edit-trigger boundary, which
+    /// is how the cap on re-executed queries after a body-only edit in one of
+    /// ten mappings is enforced. That test owns the threshold and the reasoning
+    /// for it; this constructor exists so it can observe the events at all.
     ///
     /// `FossilDb::new` remains the no-callback variant for everyday use.
     #[must_use]
@@ -100,8 +100,8 @@ mod tests {
     /// can prove the registered callback is actually wired into the runtime.
     /// Salsa input creation by itself does not emit a `WillExecute`; only
     /// `#[salsa::tracked]` functions do. This helper is the minimum surface
-    /// that proves end-to-end wiring; Wave 4 (plan 02-07) builds the full
-    /// invalidation regression test atop the same constructor.
+    /// that proves end-to-end wiring; `fossil-hir`'s invalidation regression
+    /// test builds the full count atop the same constructor.
     #[salsa::tracked]
     fn _read_text(db: &dyn Db, file: SourceFile) -> String {
         file.text(db).to_string()

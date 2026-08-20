@@ -1,26 +1,41 @@
-// The walking skeleton: the smallest program that drives every crate, and the
-// one `crates/fossil-cli/tests/walking_skeleton.rs` asserts by content — five
-// `Person` vertices, subjects `https://example.org/user/1`…`/5`, and the five
-// names from `users.csv` on the `name` column.
+// The walking skeleton: five rows of CSV in, five `Person` vertices out, in
+// Apache GraphAr layout. Run it from the repository root —
 //
-// Every path here is relative to THIS FILE and not to wherever you invoked
-// `fossil` from: `users.csv` and `hello.shex` sit beside it in `examples/`. The
-// source read `examples/users.csv`, which only resolved because the engine fell
-// back to the process's working directory when the program-relative path did
-// not exist — so this program meant a different file depending on where you ran
-// it, and meant nothing at all from anywhere but the repository root.
+//     cargo run --bin fossil -- run examples/hello.fossil --dest file:///tmp/hello
+//
+// — and `/tmp/hello/vertex/Person/*.parquet` holds the rows,
+// `/tmp/hello/vertex/Person.vertex.yml` declares their columns. `README.md` has
+// the DuckDB one-liner that reads them back.
+//
+// This is the one program asserted by CONTENT rather than by exit code:
+// `crates/fossil-cli/tests/walking_skeleton.rs` checks the five subjects
+// `https://example.org/user/1`…`/5` and the five names on a `name` column. It
+// may be made clearer; it may not be made to mean something else.
+//
+// Every path it names is resolved against THIS FILE, never against the
+// directory you ran `fossil` from — `users.csv` and `hello.shex` sit beside it.
 
-// The output contract. Since ruling 3 of 2026-08-11 this binding is MANDATORY:
-// a property key is the last segment of a predicate IRI the shape declares, so
-// without the document `name` below resolves to nothing and the mapping writes
-// no properties at all. `hello.shex` declares `ex:name xsd:string` at 1..1.
+// The output contract, and it is MANDATORY (ruling 3, 2026-08-11). A property
+// key is the last segment of a predicate IRI some shape declares, so with no
+// shape document in scope the `name` below resolves against nothing, the mapping
+// writes no properties — and the run still SUCCEEDS, five vertices with the
+// column simply absent. `hello.shex` declares `ex:name xsd:string` at 1..1,
+// which is what makes `name` a key that exists and a key that must be written.
 type { Person } := io.shex("hello.shex")
 
+// The source. Its columns are introspected from the CSV, not declared here, and
+// `User` is the name every reference in the body is qualified by.
 User := io.csv("users.csv")
 
-Users : Person from User
-    // The identity slot (ADR-0058). The hole is an ordinary expression inside
-    // an ordinary quoted string — there is one string spelling, and `prefix` +
-    // the CURIE it fed are gone from every position they held.
+// The header reads: a mapping called `People`, of shape `Person`, over the rows
+// of `User`. The vertex type on disk is `Person` — the local name of the shape's
+// IRI, never the mapping's own name.
+People : Person from User
+    // The identity, and every mapping needs exactly one: it is what turns a row
+    // into a node. An ordinary quoted string whose `{…}` holes are ordinary
+    // expressions, evaluated per row.
     @subject = "https://example.org/user/{User.id}"
+    // A property. Bare key on the left, because the shape document is what says
+    // which keys exist; qualified reference on the right, because the source
+    // binding is what says where the value comes from.
     name     = User.name

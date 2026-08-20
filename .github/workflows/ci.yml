@@ -49,18 +49,19 @@ jobs:
           toolchain: "1.90"
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace
-      # SC#2 (ADR-0021): the HARD didChange-budget gate. A margined wall-clock
+      # The HARD didChange-budget gate. A margined wall-clock
       # correctness test — catches algorithmic blow-up in the per-keystroke
       # analysis round-trip without flaking on CI noise (the design goal is
       # <100ms; the gate budget has margin). Run explicitly so a regression here
       # is attributed, not buried in the workspace test summary.
-      - name: SC#2 didChange budget (hard gate)
+      - name: didChange budget (hard gate)
         run: cargo test -p fossil-lsp --test didchange_budget -- --nocapture
       # ADVISORY: the Criterion didChange benchmark. Informational on shared CI
       # (the 20%-regression comparison is reliable only on a pinned/self-hosted
-      # runner — see ADR-0021); `--no-run` here just proves the harness compiles
+      # runner, because shared-runner noise swamps the signal); `--no-run` here
+      # just proves the harness compiles
       # so the bench cannot rot. Full timing runs on a controlled runner.
-      - name: SC#2 didChange benchmark (advisory — compile only on shared CI)
+      - name: didChange benchmark (advisory — compile only on shared CI)
         run: cargo bench -p fossil-lsp --no-run
         continue-on-error: true
 

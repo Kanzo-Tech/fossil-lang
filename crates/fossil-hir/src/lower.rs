@@ -394,7 +394,7 @@ pub enum HirExpr {
 }
 
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirFile<'db> {
     let cst = fossil_syntax::parse(db, file);
     // The `DefMap` is threaded in for the SHAPE, and that is the whole of the
@@ -1418,17 +1418,31 @@ fn unbound_shape_message(
 
     // Case 1: the name is not in the table at all. Only now is it honest to
     // list what the table does hold.
+    //
+    // **The did-you-mean is inherited, and its candidates changed with it.** It
+    // was `check::surface_target_shape_error`'s `Undeclared` arm, suggesting
+    // over the shape IRIs a DOCUMENT declares; that arm is deleted because a
+    // header can no longer reach the document — it names a bare local name, and
+    // a name nobody bound stops here. So the candidates are the local names the
+    // program binds, which is what a header can misspell. Same threshold, same
+    // function, one layer up.
     let declared: Vec<&str> = dm.types(db).iter().map(|t| t.name.as_str()).collect();
-    let known = if declared.is_empty() {
-        "this program declares no `type { … } := io.shex(…)` binding, so it has no \
-         shape names at all"
-            .to_string()
-    } else {
-        format!("the names it binds are {}", declared.join(", "))
-    };
+    let known = crate::didyoumean::did_you_mean(shape_name.as_str(), declared.iter().copied())
+        .map_or_else(
+            || {
+                if declared.is_empty() {
+                    "this program declares no `type { … } := io.shex(…)` binding, so it has \
+                     no shape names at all."
+                        .to_string()
+                } else {
+                    format!("the names it binds are {}.", declared.join(", "))
+                }
+            },
+            |s| format!("did you mean `{s}`?"),
+        );
     format!(
         "`{shape_name}` is not a shape this program declares, so this mapping is \
-         checked against nothing: {known}."
+         checked against nothing: {known}"
     )
 }
 
@@ -2964,6 +2978,45 @@ User : Person from users
                 && d.message.contains("`slugg`")
                 && d.message.contains("did you mean `str.slug`")),
             "the checker must name the function and suggest one, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
+    }
+
+    /// A misspelt shape name in a header gets a did-you-mean over the names the
+    /// program bound.
+    ///
+    /// **This is the assertion that moved.** It was
+    /// `check::surface_target_shape_error`'s `Undeclared` arm, suggesting over
+    /// the shape IRIs the document declares, and it is deleted with that
+    /// variant: a header names a bare LOCAL name, so `def_map`'s type table is
+    /// the last thing it is resolved against and nothing downstream ever sees
+    /// the misspelling. The candidates are the local names, which is the only
+    /// list a header can misspell — and, unlike an IRI, one an author can act on
+    /// without opening the document.
+    ///
+    /// The binding must SUCCEED for this to be the message under test: a
+    /// `type` line whose document cannot be read reports by cause instead, and
+    /// `check_tests`'s `a_named_document_that_cannot_answer_says_which_way_it_failed`
+    /// owns those.
+    #[test]
+    fn a_misspelt_shape_name_is_told_which_name_it_missed() {
+        const TYPO: &str = "\
+type { Person } := io.shex(\"personas.shex\")
+
+users := io.csv(\"u.csv\")
+
+User : Persn from users
+    @subject = \"https://example.org/user/{users.id}\"
+    name = users.name
+";
+        let (db, file) =
+            fossil_base::test_support::db_with_document(TYPO, "personas.shex", PERSONAS_DOCUMENT);
+        let diags = lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("did you mean `Person`?")),
+            "a name one edit from a bound one must suggest it, got: {:?}",
             diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
         );
     }

@@ -28,6 +28,28 @@ optimise **twice**, in the layer with less information.
 **What would bring it back.** A transformation that depends on something only the type layer knows
 and the engine cannot recover from the SQL it is handed.
 
+### Typing a join's `on` condition by running the body checker over it
+
+**The idea.** The join condition is an expression and the algebra already demands `Bool` of a
+`Filter` predicate, so type the `on` predicate the same way: synthesise it against the joined row and
+require `Bool`. That closes the untyped-join-key gap as a special case of a general rule instead of
+as a special case.
+**Why it is attractive.** It is one rule rather than two, it is the rule the algebra page already
+states, and it catches every malformed condition rather than only the equality.
+**The evidence against it.** An ordering, and it is structural rather than a matter of taste. The row
+algebra runs **before** the body checker and produces its input: the scope a join hands on is what
+every subsequent expression is synthesised against, so the pipeline cannot call the synthesiser
+without the synthesiser's own input being the thing it is trying to compute. Building it means a
+second expression typer over a scope rather than a row, which is a duplicate of the one that exists —
+and duplicating a type checker to close a gap that one comparison closes is the wrong size of change.
+The narrow rule is also the one the backend already needs: the plan builder destructures the
+condition into exactly `equality of two column references` and refuses everything else structurally,
+so the typed check is the earlier, better-worded twin of a refusal that already happens.
+**What would bring it back.** A join condition that is legitimately **not** a single equality — a
+range join, a conjunction of two keys, a condition with a function call on one side. The narrow rule
+has nothing to say about any of them, and the first program that wants one is the program that makes
+the general rule cheaper than the exceptions.
+
 ### Width subtyping on records
 
 **The idea.** Let a record with more fields be accepted where one with fewer is expected — the
@@ -464,6 +486,43 @@ stops being microseconds — a file with hundreds of mappings, or a check called
 long-lived process.* The first of those is measured and points the wrong way. What is **not** measured
 is the cost in bytes of the browser artifact, which would be a different argument from the one about
 time.
+
+### A subprocess as the embedding surface
+
+**The idea.** A product embeds the language by spawning the binary and reading JSON off its stdout.
+Each capability it needs becomes a verb with a machine-readable flag.
+**Why it is attractive.** It is the cheapest possible integration — no linking, no version skew in the
+build, no wasm toolchain — and it works on day one for any host that can start a process.
+**The evidence against it.** It makes the *binary* the API, and the binary is the one host that cannot
+be embedded where the product actually runs. Measured on 2026-08-16: the product that this surface was
+built for spawns no fossil binary anywhere, and both of its images declare that they contain none —
+`run`, `refs`, `providers` and `check` all execute in the browser. The verbs and their wire types
+outlived their only consumer, and while they lived a second implementation of each grew beside them,
+which is how the serializer divergence on this page's parent got in. The subprocess is not wrong as a
+*transport*; it is wrong as the definition of what fossil offers.
+**What would bring it back.** A host that cannot run wasm at all, or a corpus whose run genuinely
+needs facilities `wasm32` does not have — a disk to spill to being the concrete one, since the
+compiler layer's promise of no ceiling is stated on this page's parent as living only where there is a
+disk. Neither is a reason to keep a second copy of a capability the browser already performs; both are
+reasons for the command line to remain a client.
+
+### A linked Rust type as the contract between fossil and a host
+
+**The idea.** The host depends on a small, dependency-light, wasm-clean crate holding the wire structs,
+so both sides deserialize the same Rust definition and the contract cannot skew.
+**Why it is attractive.** It is genuinely one source of truth, it is checked by the compiler on both
+sides, and it costs the host a single lightweight dependency.
+**The evidence against it.** The crate accumulates contracts that have nothing to do with each other —
+the run result, the provider registry and the typed lineage arrived in one crate named for the first
+of them — and it accumulates build machinery belonging to the consumer, which is how an optional
+schema-derive feature whose own comment read "Host-only" came to live in a compiler crate. Measured:
+of the three contracts, only the run result is referenced from the host's Rust at all; the other two
+are consumed from TypeScript through the wasm package, so the linked crate is carrying two contracts
+for a language that never links it. A linked type also pins the host to a tag: dropping that feature
+means the host cannot bump past its pinned tag until it stops asking for it.
+**What would bring it back.** A host in the same workspace, or one that wants the compiler to enforce
+the contract at *its* build time rather than at its deserialize time — which is a real thing to want,
+and is a different argument from the one that put three unrelated contracts in one crate.
 
 ### An unmaintained language-server framework
 

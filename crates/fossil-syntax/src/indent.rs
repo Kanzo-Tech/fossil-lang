@@ -10,7 +10,8 @@
 //!    - If `col > top`: push `col`, emit `INDENT`.
 //!    - If `col == top`: emit nothing.
 //!    - If `col < top`: pop until `top == col`, emitting `DEDENT` per pop.
-//!      If no level matches, emit `ERROR` (parser recovers in Phase 2+).
+//!      If no level matches, emit `ERROR` — the parser recovers from it rather
+//!      than the lexer guessing which level was meant.
 //! 4. Blank lines and comment-only lines do NOT change the stack.
 //! 5. At EOF, emit `DEDENT` for every nonzero stack entry.
 //! 6. A byte logos matched no rule for becomes an `ERROR` token carrying that
@@ -18,8 +19,8 @@
 //!    column 0 closes the block above it exactly as any other token would.
 //!
 //! INDENT/DEDENT lexing is the classic week-eater in an indentation-sensitive
-//! language, and it was named as this phase's highest-overrun risk before a line
-//! of it existed. The 3-fixture corpus at the bottom of this file is the gate.
+//! language, and it was named the highest-overrun risk here before a line of it
+//! existed. The 3-fixture corpus at the bottom of this file is the gate.
 
 use crate::kind::SyntaxKind;
 use crate::lexer::{Token, raw_lex_lossless};

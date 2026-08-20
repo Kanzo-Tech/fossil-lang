@@ -1,0 +1,16 @@
+── type bindings ──
+Person ← contacts.shex = https://shop.example/voc#Person
+
+── source bindings ──
+Contact := io.csv(data/contacts.csv)
+Reachable := Contact.where()
+
+── mappings ──
+Contacts: 3 written, 3 lowered
+    @subject
+    email
+    name
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 2 — email, name
+NO EDGE TYPE was written

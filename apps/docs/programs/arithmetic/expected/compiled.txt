@@ -1,0 +1,15 @@
+── type bindings ──
+Line ← arithmetic.shex = https://shop.example/voc#Line
+
+── source bindings ──
+Row := io.csv(data/lines.csv)
+
+── mappings ──
+Lines: 3 written, 3 lowered
+    @subject
+    net
+    payable
+
+── run ──
+vertex Line (https://shop.example/voc#Line) × 3 — net, payable
+NO EDGE TYPE was written

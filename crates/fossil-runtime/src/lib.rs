@@ -1,22 +1,19 @@
 //! `fossil-runtime`: native `DuckDB` execution for the `fossil compile`/`fossil run` pipeline.
 //!
-//! This crate is **NATIVE-ONLY** by design — `DuckDB`-WASM lives in `fossil-wasm`
-//! (Phase 7 PLAY-02 wires the playground's lazy-load). See the
+//! This crate is **NATIVE-ONLY** by design — `DuckDB`-WASM lives in
+//! `fossil-wasm`, which is what the playground lazy-loads. See the
 //! "Project Layout" section of `CLAUDE.md`. The `compile_error!` cfg-tripwire
 //! below catches accidental inclusion of `fossil-runtime` in the WASM CI gate
 //! at compile time rather than runtime.
 //!
-//! Phase 1 callers feed the output of [`fossil_codegen::codegen_sql`] (the
-//! `sql` field of [`fossil_codegen::SqlPlan`]) directly to [`execute`]. The
-//! crate runs OUTSIDE the Salsa query graph (per `architecture.md` "Runtime
-//! boundary"): Salsa terminates when the SQL plan is emitted; the runtime
-//! takes over from there.
+//! Callers feed a batch of SQL statements straight to [`execute`]. The
+//! crate runs OUTSIDE the Salsa query graph: Salsa terminates when the SQL plan
+//! is emitted; the runtime takes over from there, so nothing here is a tracked
+//! query and nothing here is memoized.
 //!
-//! Phase 5 STDL-05 will register Rust UDFs on the connection before
-//! `execute_batch` is called. Phase 6 CLI-01..03 wraps `duckdb::Error` in
-//! `miette::Diagnostic` for CLI display. Phase 1 deliberately keeps the API
-//! to a single function returning the raw `duckdb::Error` —
-//! §"Phase 1 Recommended Commit Strategy" commit #7.
+//! The API is deliberately one function returning the raw `duckdb::Error`. The
+//! CLI is what wraps that error in a `miette::Diagnostic` for display; putting
+//! the presentation here would make every caller pay for it.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
@@ -42,8 +39,7 @@ pub use materialize::{MaterializeError, install_secret};
 /// Execute a batch of SQL statements (semicolon-delimited) on a fresh
 /// in-memory `DuckDB` connection.
 ///
-/// The expected input is the `sql` field of a
-/// [`fossil_codegen::SqlPlan`](https://docs.rs/fossil-codegen) — a
+/// The expected input is a compiled plan's SQL text — a
 /// `CREATE VIEW … read_csv_auto(…)` followed by a
 /// `COPY (…) TO 'output.parquet' (FORMAT PARQUET)`. Side effects from the
 /// `COPY` statement write to the process's current working directory unless
@@ -151,10 +147,9 @@ mod tests {
         // assertions below mean "this run wrote it".
         let _ = std::fs::remove_file(&out_path);
 
-        // Mirror the snapshot SQL shape from
-        // crates/fossil-codegen/tests/snapshots/compile_hello__hello_sql.snap
-        // — CREATE VIEW + COPY (…) TO '…' (FORMAT PARQUET) — but with absolute
-        // paths so the test does not depend on the working directory.
+        // Mirror the shape a compiled `hello` mapping emits — CREATE VIEW +
+        // COPY (…) TO '…' (FORMAT PARQUET) — but with absolute paths so the
+        // test does not depend on the working directory.
         let sql = format!(
             "CREATE VIEW users AS SELECT * FROM read_csv_auto('{csv}', sample_size=-1);\n\
              COPY (\n\

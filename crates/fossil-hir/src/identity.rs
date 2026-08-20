@@ -211,7 +211,7 @@ impl<'db> SubjectTemplates<'db> {
 
 /// The [`SubjectTemplates`] of one file.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn subject_templates<'db>(
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
@@ -274,7 +274,7 @@ pub fn subject_templates<'db>(
 /// `typecheck_mapping` reads comes back out once per mapping. Hosts drain it
 /// once per FILE, beside `def_map` and `lower_to_hir`.
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
     use salsa::Accumulator as _;
 

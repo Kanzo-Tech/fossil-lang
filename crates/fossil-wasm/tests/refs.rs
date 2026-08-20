@@ -1,5 +1,8 @@
 //! `fossil_wasm::refs_native` — the in-process (no-JS) core behind the WASM
-//! `refs()` export. Proves the BROWSER path (a transient `WasmDb` +
+//! `refs()` export, and **the side with the consumer**: keasy runs this through
+//! `@fossil-lang/wasm` and spawns no `fossil` binary, so the CLI verb its twin
+//! drives is the surface and this is the shipping path. Proves the BROWSER path
+//! (a transient `WasmDb` +
 //! `fossil_lineage::source_refs`) produces the SAME typed lineage as the native
 //! `fossil refs` CLI, over the SAME program shape: `@conn` data + schema refs in
 //! a destructuring `io.rdf` plus an unaliased local csv. Parse-only — no `DuckDB`,
@@ -12,16 +15,25 @@
 use fossil_run_status::RefRole;
 use fossil_wasm::refs_native;
 
-// Mirrors `fossil-cli/tests/refs.rs`: two destructuring members share one
-// (data, schema) pair (must dedup to one each), plus an unaliased local csv.
-const PROGRAM: &str = r#"prefix ex: <https://ex.org/>
+// Mirrors `fossil-cli/tests/refs.rs`, byte for byte, because a parity test whose
+// two sides read different programs proves parity of nothing: two destructuring
+// members share one (data, schema) pair (must dedup to one each), plus an
+// unaliased local csv.
+//
+// It opened `prefix ex: <https://ex.org/>` and closed on a CURIE mapping with
+// leading-dot references, and was green throughout step 8 for the same reason
+// its native twin was — `source_refs` reads `DefMap::sources`, so the only lines
+// it can see are the two `:=` bindings, and those were already in the live
+// surface. The retired half never reached an assertion. See that file's header
+// for the whole of it.
+const PROGRAM: &str = r#"type { Entry } := io.shex("@vocab/graph.shex")
 
 { KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 plain := io.csv("local.csv")
 
-KB : ex:KB from KB
-    iri = .subject
-    ex:label = .label
+Entries : Entry from KB
+    @subject = "https://ex.org/kb/{KB.subject}"
+    label = KB.label
 "#;
 
 #[test]

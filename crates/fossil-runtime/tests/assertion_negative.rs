@@ -1,7 +1,7 @@
-//! SC#4 native negative test — the named runtime assertion must FAIL
+//! Native negative test — the named runtime assertion must FAIL
 //! LOUDLY (never silently) when its guard is tripped at runtime.
 //!
-//! Plan 04-06 emits, where a static check cannot be discharged,
+//! Codegen emits, where a static check cannot be discharged,
 //! `CASE WHEN <guard> THEN <value> ELSE
 //! error('fossil_assertion_<name>:line=<N>') END` into the generated SQL. This
 //! test proves the contract end-to-end against native `DuckDB` 1.10502: feed a
@@ -13,16 +13,16 @@
 //! return `Ok` and this test would fail.
 //!
 //! NATIVE-ONLY: `fossil-runtime` carries a `compile_error!` cfg-tripwire on
-//! `wasm32` (DuckDB-WASM parity for `error()` is exercised by plan 04-07's
-//! harness, not here). The table is built in-memory (`CREATE TABLE` + `INSERT`),
+//! `wasm32`, so the `DuckDB`-WASM side of `error()` is not covered
+//! here. The table is built in-memory (`CREATE TABLE` + `INSERT`),
 //! so the test needs no CSV file on disk.
 
 #![cfg(not(target_arch = "wasm32"))]
 
 /// The exact `CASE WHEN ... error(...)` shape codegen emits for the
-/// `iri_template_unbound` assertion (mirrors
-/// `crates/fossil-codegen/tests/snapshots/codegen_ops__assert_iri_template_unbound.snap`).
-/// The `line=42` matches the codegen snapshot's fixed line.
+/// `iri_template_unbound` assertion, transcribed here so the contract is
+/// asserted against the engine and not against another test's output.
+/// `line=42` is a fixed stand-in for the mapping's source line.
 const ASSERTION_SQL: &str = "\
 CREATE TABLE users(id VARCHAR, name VARCHAR);
 INSERT INTO users VALUES (NULL, 'Alice');
