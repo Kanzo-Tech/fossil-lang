@@ -1,0 +1,299 @@
+{
+  "about": "The addresses a reader must compose from these manifests, and the ones it must refuse to compose. Every path is dataset-relative; a reader prepends wherever the corpus is served from. This file is the deliverable: two implementations execute it, `verify.mjs` here and `packages/graph/tests/conformance.test.ts` next door, and neither one wrote it.",
+  "base_join": {
+    "about": "The base is prepended and nothing else happens to it — no normalisation, no trailing slash, no encoding.",
+    "case": "corpus",
+    "base": "https://example.org/g",
+    "path": "vertex/Person/chunk3.parquet",
+    "url": "https://example.org/g/vertex/Person/chunk3.parquet"
+  },
+  "cases": [
+    {
+      "name": "corpus",
+      "root": "corpus",
+      "on_disk": true,
+      "about": "300 vertices in 5 tiles of 64, both orientations tiled. Passes all fifteen guards — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there.",
+      "types": [
+        {
+          "type": "Person",
+          "prefix": "vertex/Person/",
+          "chunk_size": 64,
+          "shift": 6
+        }
+      ],
+      "edges": [
+        {
+          "edge_type": "knows",
+          "src_type": "Person",
+          "dst_type": "Person",
+          "prefix": "edge/Person_knows_Person/",
+          "directions": ["src", "dst"],
+          "adjacencies": [
+            {
+              "direction": "src",
+              "prefix": "edge/Person_knows_Person/by_source/",
+              "column": "src_dense",
+              "chunk_size": 64,
+              "shift": 6
+            },
+            {
+              "direction": "dst",
+              "prefix": "edge/Person_knows_Person/by_target/",
+              "column": "dst_dense",
+              "chunk_size": 64,
+              "shift": 6
+            }
+          ]
+        }
+      ],
+      "tile_of": [
+        { "type": "Person", "dense_id": "0", "tile": "0" },
+        { "type": "Person", "dense_id": "63", "tile": "0" },
+        { "type": "Person", "dense_id": "64", "tile": "1" },
+        { "type": "Person", "dense_id": "255", "tile": "3" },
+        { "type": "Person", "dense_id": "256", "tile": "4" },
+        { "type": "Person", "dense_id": "299", "tile": "4" }
+      ],
+      "addresses": [
+        { "kind": "vertex", "type": "Person", "tile": 0, "path": "vertex/Person/chunk0.parquet" },
+        { "kind": "vertex", "type": "Person", "tile": 1, "path": "vertex/Person/chunk1.parquet" },
+        { "kind": "vertex", "type": "Person", "tile": 2, "path": "vertex/Person/chunk2.parquet" },
+        { "kind": "vertex", "type": "Person", "tile": 3, "path": "vertex/Person/chunk3.parquet" },
+        { "kind": "vertex", "type": "Person", "tile": 4, "path": "vertex/Person/chunk4.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 0, "path": "edge/Person_knows_Person/by_source/tile0.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 2, "path": "edge/Person_knows_Person/by_source/tile2.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 4, "path": "edge/Person_knows_Person/by_source/tile4.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 0, "path": "edge/Person_knows_Person/by_target/tile0.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 2, "path": "edge/Person_knows_Person/by_target/tile2.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 4, "path": "edge/Person_knows_Person/by_target/tile4.parquet" }
+      ],
+      "windows": [
+        {
+          "about": "The drawing read. Every drawable edge has its source on screen, so CSR alone is an exact superset of what can be drawn — and it is not the incident set, which is what `complete: false` says.",
+          "type": "Person",
+          "tiles": [1, 2],
+          "directions": ["src"],
+          "vertex_urls": ["vertex/Person/chunk1.parquet", "vertex/Person/chunk2.parquet"],
+          "edge_urls": [
+            "edge/Person_knows_Person/by_source/tile1.parquet",
+            "edge/Person_knows_Person/by_source/tile2.parquet"
+          ],
+          "complete": false,
+          "gaps": [{ "edge_type": "knows", "direction": "dst", "reason": "not-requested" }]
+        },
+        {
+          "about": "Both orientations of a self-edge apply to one window, because the two `dense_id` spaces are the same one.",
+          "type": "Person",
+          "tiles": [1, 2],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Person/chunk1.parquet", "vertex/Person/chunk2.parquet"],
+          "edge_urls": [
+            "edge/Person_knows_Person/by_source/tile1.parquet",
+            "edge/Person_knows_Person/by_source/tile2.parquet",
+            "edge/Person_knows_Person/by_target/tile1.parquet",
+            "edge/Person_knows_Person/by_target/tile2.parquet"
+          ],
+          "complete": true,
+          "gaps": []
+        },
+        {
+          "about": "The last tile is partial — 44 of 64 rows — and the address does not care. A short tile is a tile.",
+          "type": "Person",
+          "tiles": [4],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Person/chunk4.parquet"],
+          "edge_urls": [
+            "edge/Person_knows_Person/by_source/tile4.parquet",
+            "edge/Person_knows_Person/by_target/tile4.parquet"
+          ],
+          "complete": true,
+          "gaps": []
+        }
+      ],
+      "throws": [
+        {
+          "about": "A type the index does not name is not a default; it is the question `which graph do you mean` with no answer.",
+          "vertex_type": "Ghost",
+          "message": "no vertex type Ghost"
+        }
+      ]
+    },
+    {
+      "name": "csr-only",
+      "root": "manifests/csr-only",
+      "on_disk": false,
+      "about": "The corpus every fossil release before the target half was tiled produced: one `adj_lists` entry, `aligned_by: src`. A reader that composes `by_target/tile{k}.parquet` from the convention rather than from the manifest gets a 404 in a browser with no type error and no failing test. This case is the one that has to refuse.",
+      "types": [
+        { "type": "Person", "prefix": "vertex/Person/", "chunk_size": 4096, "shift": 12 }
+      ],
+      "edges": [
+        {
+          "edge_type": "knows",
+          "src_type": "Person",
+          "dst_type": "Person",
+          "prefix": "edge/Person_knows_Person/",
+          "directions": ["src"],
+          "adjacencies": [
+            {
+              "direction": "src",
+              "prefix": "edge/Person_knows_Person/by_source/",
+              "column": "src_dense",
+              "chunk_size": 4096,
+              "shift": 12
+            }
+          ]
+        }
+      ],
+      "tile_of": [
+        { "type": "Person", "dense_id": "4095", "tile": "0" },
+        { "type": "Person", "dense_id": "4096", "tile": "1" },
+        { "type": "Person", "dense_id": "2147483648", "tile": "524288" },
+        { "type": "Person", "dense_id": "9007199254740992", "tile": "2199023255552" }
+      ],
+      "addresses": [
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 7, "path": "edge/Person_knows_Person/by_source/tile7.parquet" }
+      ],
+      "refused": [
+        {
+          "about": "There is no address for this direction, so there is no string for it either.",
+          "edge_type": "knows",
+          "direction": "dst"
+        }
+      ],
+      "windows": [
+        {
+          "about": "Asking for the incident set of a corpus that publishes half of it answers with the half, and says which half is missing and why.",
+          "type": "Person",
+          "tiles": [0],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Person/chunk0.parquet"],
+          "edge_urls": ["edge/Person_knows_Person/by_source/tile0.parquet"],
+          "complete": false,
+          "gaps": [{ "edge_type": "knows", "direction": "dst", "reason": "not-declared" }]
+        }
+      ]
+    },
+    {
+      "name": "unaddressable",
+      "root": "manifests/unaddressable",
+      "on_disk": false,
+      "about": "Both orientations declared, and the target one carries no `prefix`. `prefix` is the one part of a tile's URL a reader cannot compute, so an `adj_lists` entry without one declares a capability with no address behind it — which reads exactly like the tiled case to anything that counts entries.",
+      "types": [
+        { "type": "Person", "prefix": "vertex/Person/", "chunk_size": 4096, "shift": 12 }
+      ],
+      "edges": [
+        {
+          "edge_type": "knows",
+          "src_type": "Person",
+          "dst_type": "Person",
+          "prefix": "edge/Person_knows_Person/",
+          "directions": ["src"],
+          "adjacencies": [
+            {
+              "direction": "src",
+              "prefix": "edge/Person_knows_Person/by_source/",
+              "column": "src_dense",
+              "chunk_size": 4096,
+              "shift": 12
+            }
+          ]
+        }
+      ],
+      "tile_of": [],
+      "addresses": [],
+      "refused": [{ "edge_type": "knows", "direction": "dst" }],
+      "windows": [
+        {
+          "type": "Person",
+          "tiles": [2],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Person/chunk2.parquet"],
+          "edge_urls": ["edge/Person_knows_Person/by_source/tile2.parquet"],
+          "complete": false,
+          "gaps": [{ "edge_type": "knows", "direction": "dst", "reason": "not-declared" }]
+        }
+      ]
+    },
+    {
+      "name": "cross-type",
+      "root": "manifests/cross-type",
+      "on_disk": false,
+      "about": "`Author authored Paper`, with the two types on different tile sizes. This is where one shift for both endpoints stops being right and starts being wrong quietly: `by_target` tile 1 of this edge is `Paper`'s tile 1, which has nothing to do with `Author`'s tile 1.",
+      "types": [
+        { "type": "Author", "prefix": "vertex/Author/", "chunk_size": 64, "shift": 6 },
+        { "type": "Paper", "prefix": "vertex/Paper/", "chunk_size": 128, "shift": 7 }
+      ],
+      "edges": [
+        {
+          "edge_type": "authored",
+          "src_type": "Author",
+          "dst_type": "Paper",
+          "prefix": "edge/Author_authored_Paper/",
+          "directions": ["src", "dst"],
+          "adjacencies": [
+            {
+              "direction": "src",
+              "prefix": "edge/Author_authored_Paper/by_source/",
+              "column": "src_dense",
+              "chunk_size": 64,
+              "shift": 6
+            },
+            {
+              "direction": "dst",
+              "prefix": "edge/Author_authored_Paper/by_target/",
+              "column": "dst_dense",
+              "chunk_size": 128,
+              "shift": 7
+            }
+          ]
+        }
+      ],
+      "tile_of": [
+        { "type": "Author", "dense_id": "64", "tile": "1" },
+        { "type": "Paper", "dense_id": "64", "tile": "0" },
+        { "type": "Paper", "dense_id": "128", "tile": "1" }
+      ],
+      "addresses": [],
+      "refused": [],
+      "windows": [
+        {
+          "about": "Nothing has an in-edge into an `Author`, so a window over `Author` is complete with the source half alone — and it must not read `by_target`, which addresses a different type's tiles.",
+          "type": "Author",
+          "tiles": [1],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Author/chunk1.parquet"],
+          "edge_urls": ["edge/Author_authored_Paper/by_source/tile1.parquet"],
+          "complete": true,
+          "gaps": []
+        },
+        {
+          "about": "And the mirror: a window over `Paper` reads only the target half, because no edge leaves a `Paper`.",
+          "type": "Paper",
+          "tiles": [1],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Paper/chunk1.parquet"],
+          "edge_urls": ["edge/Author_authored_Paper/by_target/tile1.parquet"],
+          "complete": true,
+          "gaps": []
+        },
+        {
+          "about": "The drawing read over `Paper` fetches no edges at all and says so, rather than returning an empty set that looks like a graph with no edges.",
+          "type": "Paper",
+          "tiles": [1],
+          "directions": ["src"],
+          "vertex_urls": ["vertex/Paper/chunk1.parquet"],
+          "edge_urls": [],
+          "complete": false,
+          "gaps": [{ "edge_type": "authored", "direction": "dst", "reason": "not-requested" }]
+        }
+      ]
+    },
+    {
+      "name": "mismatched-tiling",
+      "root": "manifests/mismatched-tiling",
+      "on_disk": false,
+      "about": "The edge declares tiles of 8,192 against a vertex type cut at 4,096. Every URL still composes and most of the files it names still exist, which is why this is refused at resolve rather than at the first request. It lived as a comment in a reader — `src_chunk_size equals the source type's chunk_size` — and a comment is not a check.",
+      "resolve_throws": "src_chunk_size 8192 against Person's chunk_size 4096"
+    }
+  ]
+}

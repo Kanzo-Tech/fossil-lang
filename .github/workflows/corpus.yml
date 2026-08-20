@@ -1,0 +1,87 @@
+name: corpus
+
+# The corpus guards and the plain-Node half of the conformance pair, on CI.
+#
+# Both existed and neither ran. `pnpm-ci.yml` filters every recursive step to
+# `./packages/*`, `docs.yml` is filtered to `apps/docs/**`, and there is no git hook
+# in this repo — so `node guards/self-test.mjs` (the fifteen guards fired against a
+# corpus broken in exactly one way, each) and `node conformance/verify.mjs` ran only
+# when somebody typed them. The half of the conformance pair that DID run,
+# `packages/graph/tests/conformance.test.ts`, reads the same `expected.json`, so an
+# addressing change and a table change made together drifted away from the second
+# implementation in silence. That is precisely the failure two implementations of one
+# table exist to prevent.
+#
+# It is a workflow of its own rather than a step in `pnpm-ci.yml` for the reason
+# `docs.yml` gives: that job's ceiling is 60 minutes because a cold run compiles
+# datafusion to wasm, and this one has no business waiting for it.
+#
+# The install list is the point of these guards, not an accident of it: `node` and the
+# `duckdb` binary, no `pnpm install`, no `node_modules`, no Rust, no fossil. If a step
+# below ever needs a third thing, the claim in `guards/README.md` — "take this
+# directory, it is meant to be copied" — has stopped being true and the fix is in the
+# guards, not here.
+#
+# `packages/graph/**` is in the path filter because `apps/corpus/conformance/expected.json`
+# is the contract BOTH implementations execute: an addressing change in the package has
+# to run the reader that shares nothing with it.
+on:
+  pull_request:
+    paths:
+      - 'apps/corpus/**'
+      - 'packages/graph/**'
+      - '.github/workflows/corpus.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/corpus/**'
+      - 'packages/graph/**'
+      - '.github/workflows/corpus.yml'
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    # Minutes. `self-test.mjs` writes a 70,000-vertex fixture in both containers and
+    # then rewrites it once per mutation; everything else is a few hundred rows.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The DuckDB CLI, from the project's own release asset. Pinned: the guards read
+      # Parquet footer statistics and speak `read_parquet`, and a silent CLI major is
+      # exactly the kind of change that should turn a run red on purpose rather than by
+      # surprise. `ubuntu-latest` has no duckdb of its own to shadow it.
+      - name: Install the duckdb binary
+        env:
+          DUCKDB_VERSION: v1.5.3
+        run: |
+          curl -fsSL -o /tmp/duckdb.zip \
+            "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/duckdb_cli-linux-amd64.zip"
+          unzip -q -o /tmp/duckdb.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/duckdb
+          duckdb -version
+
+      # Non-vacuity first, then one mutation per guard: every guard is required to FIRE
+      # against a corpus broken in exactly the way it exists to catch. A guard nobody has
+      # seen fail is a guard nobody has tested, and this is the step that has seen them.
+      - name: Guards self-test
+        working-directory: apps/corpus
+        run: node guards/self-test.mjs
+
+      # The checked-in conformance corpus, through the guards. It has bytes — 300 vertices
+      # in five tiles, both orientations — so the addresses `verify.mjs` composes below name
+      # files that are on disk rather than URLs that compose cleanly and 404 in a browser.
+      - name: Guards against the conformance corpus
+        working-directory: apps/corpus
+        run: node guards/check.mjs conformance/corpus
+
+      # The plain-Node half of the pair. `packages/graph/tests/conformance.test.ts` is the
+      # other, and it runs in `pnpm-ci.yml`; both execute `conformance/expected.json` and
+      # neither wrote it.
+      - name: Conformance
+        working-directory: apps/corpus
+        run: node conformance/verify.mjs

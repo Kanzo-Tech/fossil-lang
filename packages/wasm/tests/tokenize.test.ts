@@ -39,8 +39,8 @@ beforeAll(async () => {
 });
 
 describe('@fossil-lang/wasm — tokenize', () => {
-  it('returns a non-empty TokenRow[] for a prefix decl', () => {
-    const rows: TokenRow[] = tokenize('prefix ex: <https://example.org/>\n');
+  it('returns a non-empty TokenRow[] for a source binding', () => {
+    const rows: TokenRow[] = tokenize('users := io.csv("u.csv")\n');
     expect(rows.length).toBeGreaterThan(0);
     expect(rows[0]).toHaveProperty('kind');
     expect(rows[0]).toHaveProperty('start');
@@ -54,7 +54,7 @@ describe('@fossil-lang/wasm — tokenize', () => {
 
   it('token ranges are monotonic non-overlapping (start ≤ end; next.start ≥ prev.end)', () => {
     const rows = tokenize(
-      'prefix ex: <https://example.org/>\nuser := io.csv("u.csv")',
+      'type { Person } := io.shex("p.shex")\nuser := io.csv("u.csv")',
     );
     for (const r of rows) {
       expect(r.start).toBeLessThanOrEqual(r.end);
@@ -70,7 +70,7 @@ describe('@fossil-lang/wasm — semanticLegend', () => {
     const legend = semanticLegend();
     expect(Array.isArray(legend.tokenTypes)).toBe(true);
     expect(Array.isArray(legend.tokenModifiers)).toBe(true);
-    // Phase-6 06-07 ships 10 tokenTypes (keyword, namespace, type, function,
+    // The server ships 10 tokenTypes (keyword, namespace, type, function,
     // property, string, number, operator, comment, variable). We assert
     // non-emptiness rather than the exact count so additive legend changes
     // don't break this test — appending is compatible, reordering is not.
@@ -85,25 +85,17 @@ describe('@fossil-lang/wasm — FossilPlayground class', () => {
     pg.free();
   });
 
-  it('classification() returns the stdlib WASM manifest', () => {
-    const pg = new FossilPlayground();
-    try {
-      const classes = pg.classification();
-      expect(classes.length).toBeGreaterThan(0);
-      expect(classes[0]).toHaveProperty('name');
-      expect(classes[0]).toHaveProperty('wasm_class');
-      expect(['pure_sql', 'native_udf_only']).toContain(classes[0]!.wasm_class);
-    } finally {
-      pg.free();
-    }
-  });
+  // A `classification()` test sat here. The method is gone on both sides of the
+  // seam — see the tombstone in `src/index.ts`. It passed against a `pkg/` that
+  // had not been rebuilt since the Rust deletion; the first regeneration would
+  // have turned it into a `TypeError`, and a stale build output is not a fixture.
 
   it('openFile + check returns diagnostics array for an opened file', () => {
     const pg = new FossilPlayground();
     try {
       const handle = pg.openFile(
         'file:///test.fossil',
-        'prefix ex: <https://example.org/>\n',
+        'users := io.csv("u.csv")\n',
       );
       // FileHandle is opaque (wasm-bindgen class with private constructor) —
       // we cannot assert typeof handle === 'number'. We DO assert the handle
@@ -112,9 +104,9 @@ describe('@fossil-lang/wasm — FossilPlayground class', () => {
       expect(handle).toBeDefined();
       const diags = pg.check();
       expect(Array.isArray(diags)).toBe(true);
-      // A bare prefix decl on its own is incomplete (no mapping rules) — the
-      // type checker emits at least one diagnostic. We assert structural
-      // shape rather than exact count to stay robust against future
+      // A lone source binding is incomplete (no mapping rules) — the type
+      // checker emits at least one diagnostic. We assert structural shape
+      // rather than exact count to stay robust against future
       // diagnostic-message tweaks.
       if (diags.length > 0) {
         expect(diags[0]).toHaveProperty('uri');

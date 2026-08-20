@@ -124,11 +124,25 @@ export function inspect(root) {
 
   const edges = manifest.edges.map((info) => {
     const prefix = edgePrefix(info);
-    const orientation = (name) => {
+    const adjLists = Array.isArray(info.adj_lists) ? info.adj_lists : [];
+    // Where an orientation's tiles are comes from the `adj_list` that declares
+    // it, never from the convention that names them. `aligned_by` says which
+    // endpoint column addresses the tiles and `prefix` says where they are, and
+    // between them a reader turns a `dense_id` into a URL with nothing agreed out
+    // of band. An orientation the manifest declares without a prefix has tiles
+    // nobody can address, which `declared-tiling` reports; here it is simply an
+    // orientation with none.
+    const orientation = (alignedBy, name, column) => {
+      const declared = adjLists.find((a) => String(a.aligned_by ?? "") === alignedBy) ?? null;
+      const tilePrefix = String(declared?.prefix ?? "").replace(/\/+$/, "");
       const file = join(root, prefix, `${name}.parquet`);
-      const tiles = payload(join(root, prefix, name));
+      const tiles = tilePrefix === "" ? [] : payload(join(root, prefix, tilePrefix));
       return {
         name,
+        alignedBy,
+        column,
+        declared,
+        tilePrefix,
         relation: existsSync(file) ? [{ name: `${name}.parquet`, path: file, tile: null }] : [],
         tiles,
         layout: layoutOf(tiles),
@@ -143,9 +157,9 @@ export function inspect(root) {
       chunkSize: BigInt(info.chunk_size ?? 0),
       srcChunkSize: BigInt(info.src_chunk_size ?? 0),
       dstChunkSize: BigInt(info.dst_chunk_size ?? 0),
-      adjLists: Array.isArray(info.adj_lists) ? info.adj_lists : [],
-      bySource: orientation("by_source"),
-      byTarget: orientation("by_target"),
+      adjLists,
+      bySource: orientation("src", "by_source", "src_dense"),
+      byTarget: orientation("dst", "by_target", "dst_dense"),
     };
   });
 

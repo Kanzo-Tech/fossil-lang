@@ -16,6 +16,62 @@ perform. The tile of a vertex is a shift; the tile of its ancestor at level `L` 
 which is an `XOR` and a count of leading zeros. **A reader computes every URL it wants before it
 emits the first request.**
 
+## Two questions, one arithmetic
+
+The shift answers both things a reader asks for, and the second one is why the corpus carries the
+adjacency twice:
+
+| the question | the address |
+| --- | --- |
+| the vertices of a window | `chunk{k}.parquet` for each `k` in the window's runs of `dense_id` |
+| the edges drawn in it | `by_source/tile{k}.parquet`, the same `k` — every drawable edge has its source on screen |
+| the out-edges of `v` | `by_source/tile{v >> shift}.parquet`, filtered to `src_dense = v` |
+| the in-edges of `v` | `by_target/tile{v >> shift}.parquet`, filtered to `dst_dense = v` |
+
+The last two are a **hop**, and they are the reason both orientations are tiled. The alternative —
+asking the edge relation for a neighbourhood with a recursive query — was measured in a reader at a
+million vertices and **did not return in 45 seconds**, because the adjacency term materialises the
+relation before the recursion starts and no `limit` on the answer bounds the cost of finding it. The
+directions are separate addresses rather than one undirected one for the same reason the camera is
+addressed at all: a union of two relations is a scan, and a pair of URLs is not.
+
+Which prefix carries which direction is [declared per edge type](/docs/conventions/adjacency), never
+conventional — `aligned_by` gives the column and `prefix` gives the URL.
+
+## A set of tiles says what it is complete for
+
+The second row of that table is complete for **drawing** and incomplete for **incidence**, and the
+difference is invisible in the picture. Every drawable edge has its source on screen, so the
+`by_source` tiles of a window are an exact superset of what can be drawn — but an edge whose
+destination is drawn and whose source the window never selected is not in any of them. Measured on
+20M and 40M edges, that is **19,892 edges per window at degree 4 and 39,849 at degree 8**: a layer
+missing them renders identically to a complete one.
+
+So an answer built out of tiles carries **which orientations it read**, and a reader may state
+completeness only for the ones it has:
+
+| the orientations read | the answer is complete for |
+| --- | --- |
+| `aligned_by: src` | every edge whose **source** is in the window — the drawable set |
+| `aligned_by: dst` | every edge whose **destination** is in the window |
+| both | every edge **incident** to the window |
+
+And a missing orientation has two causes that are not the same fact, so they are not reported as
+one. *The caller did not ask* is a choice — a drawing read asks for the source half and pays for
+nothing else. *The corpus does not publish it* is a property of the artefact: an edge type with no
+`adj_lists` entry for a direction, or one declaring the direction with no `prefix`, has tiles nobody
+can address, and the answer that names it says so rather than composing a URL that 404s.
+
+**A vertex answer already works this way**, which is where the shape comes from: it carries how many
+rows matched as well as how many came back, so a truncated read cannot look like a complete one. An
+edge answer that carried neither was the asymmetry.
+
+The orientations that apply to a window are the ones whose **own `dense_id` space is that window's**.
+On a self-edge both apply. On `Author authored Paper`, `by_target` tile `k` addresses `Paper`'s tile
+`k` — a different set of vertices — so a window over `Author` that read it would answer a question
+nobody asked. Guard: `declared-tiling` for the addresses; conformance case `cross-type` for which of
+them a window may use.
+
 ## Why the camera does not ask
 
 Pruning cannot be expressed as a predicate. That is measured, and it is the finding the whole
@@ -110,6 +166,58 @@ tiles coalesce into **5.6 runs**, so the file boundary is the only thing prevent
 The checker classifies rather than judges, and reports which container it found. What it refuses is
 *both at once*: two ways to address the same rows is one way too many, and a reader that globs finds
 both. Guard: `tile-of`, checked in whichever form the corpus uses.
+
+## The address is published, not described
+
+Everything above is arithmetic over four manifest fields — `prefix`, `chunk_size`, `aligned_by` and
+the adjacency's own `prefix` — and a reader that re-derives it from this page has copied a
+convention no compiler compares against the corpus. Change a prefix or a shift and the copy composes
+URLs that 404 at runtime, in a browser, with no type error and nothing red.
+
+So the composition ships as code, in `@fossil-lang/graph`, beside the verbs and sharing nothing with
+them but the manifest:
+
+```ts
+const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
+const { vertexUrls, edgeUrls, complete, gaps } = corpus.window({ tiles, directions: ['src'] });
+```
+
+It is **synchronous, and that is the claim rather than an omission** — no `fetch`, no connection, no
+promise. The camera is addressed, not queried, and a request between the camera moving and a URL
+being computable is the `viewport` verb this format does not have. It is also the whole of what
+moves: bytes, tile caches, debounce, supersede-cancellation and sampling stay in whatever draws.
+
+Three things it refuses to compose, each because the manifest does not say them:
+
+- **an orientation the corpus does not publish** — `adjacency('dst')` is `null`, never a string;
+- **a tile size that disagrees with the vertex type addressing it** — `src_chunk_size` against the
+  source's `chunk_size` is checked once, when the corpus is opened, because every URL still composes
+  and most of the files still exist;
+- **which tiles a rectangle touches** — that comes from the per-tile `x`/`y` boxes in the Parquet
+  footers, and reading a footer is a Parquet reader's job. The reader has one and hands the tile
+  numbers back.
+
+<Callout title="The alternative, and what would bring it back">
+**A schema instead of a module** — publish the manifest's shape as JSON Schema and let every reader
+generate its own composition. It is the smaller artefact and it is language-neutral, which is the
+whole reason the corpus is documented rather than typed.
+
+It is rejected because a schema constrains the *fields* and the failure is in the *arithmetic*: a
+schema that pins `prefix` to a string cannot say that the edge tile under it is
+`<prefix>tile{dense_id >> shift(src_chunk_size)}.parquet`, nor that the destination half is a
+different `dense_id` space, nor that a window over one orientation is incomplete. Those are the four
+things a re-derivation gets wrong.
+
+What brings it back is the same thing that would retire the module: the addresses becoming
+**derivable from the manifest by a rule a schema can carry** — one container, one naming rule, and a
+declared vertex count, so composing a URL stops being arithmetic and becomes substitution. The
+conformance corpus is the measure of the gap: while `expected.json` holds a case a schema cannot
+express, the schema is not the answer.
+</Callout>
+
+The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
+same corpus with only what fossil publishes?** `apps/corpus/conformance/verify.mjs` is that reader —
+plain Node, no npm, no build — and it executes the same table of addresses the module does.
 
 ## The published vectors
 

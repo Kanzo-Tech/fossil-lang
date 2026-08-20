@@ -130,7 +130,9 @@ export const GUARDS = [
     proves:
       "Every other guard is a count of violations, so an empty corpus satisfies all of them at " +
       "once. This one asserts there are vertices, edges and more than two tiles — a boundary is " +
-      "the only thing a tiling can get wrong, and one tile has none.",
+      "the only thing a tiling can get wrong, and one tile has none — and that both orientations " +
+      "of every edge type are on disk *and tiled*, since a hop that has one of them is wrong in " +
+      "one direction rather than slow.",
     cannotProve:
       "That the corpus is complete. A corpus missing half its vertices is non-empty, and the " +
       "manifest carries no vertex count to check it against.",
@@ -146,9 +148,22 @@ export const GUARDS = [
           );
         }
       }
+      // Both orientations, because half a corpus is not a partial answer. The
+      // out-edges of a vertex are in its `by_source` tile and the in-edges in its
+      // `by_target` one, so an emitter that writes only the source half leaves a
+      // reader following half the graph and reporting it as the whole. Every
+      // other guard here skips an orientation with nothing on disk; this is the
+      // one that notices it is not there.
       for (const edge of corpus.edges) {
-        const files = [...edge.bySource.relation, ...edge.bySource.tiles];
-        if (files.length === 0) failures.push(`edge type ${edge.rel} has no by_source payload`);
+        for (const side of [edge.bySource, edge.byTarget]) {
+          const files = [...side.relation, ...side.tiles];
+          if (files.length === 0) failures.push(`edge type ${edge.rel} has no ${side.name} payload`);
+          if (side.relation.length > 0 && side.tiles.length === 0) {
+            failures.push(
+              `edge type ${edge.rel} has a ${side.name} relation and no tiles, so a hop through it is a scan`,
+            );
+          }
+        }
       }
       return result(
         failures,
@@ -249,6 +264,31 @@ export const GUARDS = [
         if (edge.chunkSize !== edge.srcChunkSize) {
           failures.push(`${edge.rel} declares chunk_size ${edge.chunkSize} and src_chunk_size ${edge.srcChunkSize}`);
         }
+        // The destination half is checked because it is a *different* number on a
+        // cross-type edge, and because the target-ordered tiles are addressed
+        // with it. An unchecked `dst_chunk_size` is how the in-edge half comes to
+        // be cut on the wrong ranges while every same-type corpus passes.
+        const destination = corpus.types.find((t) => t.name === edge.dstType);
+        if (!destination) {
+          failures.push(`${edge.rel} names destination type ${edge.dstType}, which the index does not`);
+        } else if (edge.dstChunkSize !== destination.chunkSize) {
+          failures.push(
+            `${edge.rel} declares dst_chunk_size ${edge.dstChunkSize} against ${edge.dstType}'s ${destination.chunkSize}`,
+          );
+        }
+        // And every orientation on disk was declared with somewhere to be. A
+        // prefix is the one part of a tile's URL a reader cannot compute, so an
+        // adjacency list without one is tiles nobody can address.
+        for (const side of [edge.bySource, edge.byTarget]) {
+          if (side.declared === null) {
+            failures.push(`${edge.rel} declares no adj_list aligned_by ${side.alignedBy}`);
+          } else if (side.tilePrefix === "") {
+            failures.push(
+              `${edge.rel} declares an adj_list aligned_by ${side.alignedBy} with no prefix, ` +
+                `so its tiles have no address`,
+            );
+          }
+        }
       }
       return result(
         failures,
@@ -298,8 +338,9 @@ export const GUARDS = [
       "`dense_id >> shift` is the entire index — no table, no listing, no discovery — so a row in " +
       "the wrong container is a row a reader will never fetch and never miss. Checked in whichever " +
       "form the corpus uses: against the number in the filename when a tile is a file, against the " +
-      "row-group ordinal when a tile is a row group. Edges are checked against their **source's** " +
-      "tile, which is what CSR placement means.",
+      "row-group ordinal when a tile is a row group. An edge is checked against the tile of the " +
+      "endpoint its file is ordered by — the source for `by_source`, the destination for " +
+      "`by_target` — which is what CSR and CSC placement mean.",
     cannotProve:
       "That the shift is applied the same way elsewhere. This asks the corpus a question; the " +
       "published border vectors are what ask the *reader* one, and they are the next guard.",
@@ -344,13 +385,22 @@ export const GUARDS = [
         }
       }
 
+      // Both orientations, each against the tile size of the endpoint that
+      // addresses it. On a cross-type edge those are two different `dense_id`
+      // spaces, so checking the target half against `src_chunk_size` would be
+      // checking the wrong arithmetic and passing on a same-type corpus.
       for (const edge of corpus.edges) {
-        const shift = shiftFor(edge.srcChunkSize);
-        if (shift === null || edge.bySource.tiles.length === 0) continue;
-        const label = `${edge.rel} by_source`;
-        if (edge.bySource.layout === "files") checkFiles(edge.bySource.tiles, "src_dense", label, shift);
-        else if (edge.bySource.layout === "rowgroups") {
-          checkRowGroups(edge.bySource.tiles, "src_dense", label, shift, edge.srcChunkSize);
+        for (const [side, chunkSize] of [
+          [edge.bySource, edge.srcChunkSize],
+          [edge.byTarget, edge.dstChunkSize],
+        ]) {
+          const shift = shiftFor(chunkSize);
+          if (shift === null || side.tiles.length === 0) continue;
+          const label = `${edge.rel} ${side.name}`;
+          if (side.layout === "files") checkFiles(side.tiles, side.column, label, shift);
+          else if (side.layout === "rowgroups") {
+            checkRowGroups(side.tiles, side.column, label, shift, chunkSize);
+          }
         }
       }
 
@@ -564,27 +614,31 @@ export const GUARDS = [
         failures.push(...violations(bad, `${type.name}: a dense_id appears in more than one payload file`));
       }
       for (const edge of corpus.edges) {
-        if (edge.bySource.relation.length === 0 || edge.bySource.tiles.length === 0) continue;
-        const relation = fileList(edge.bySource.relation);
-        const tiles = fileList(edge.bySource.tiles);
-        const counts = query(
-          `SELECT (SELECT count(*) FROM read_parquet(${relation})) AS relation,
-                  (SELECT count(*) FROM read_parquet(${tiles})) AS tiles`,
-        )[0];
-        if (Number(counts.relation) !== Number(counts.tiles)) {
+        for (const side of [edge.bySource, edge.byTarget]) {
+          if (side.relation.length === 0 || side.tiles.length === 0) continue;
+          const relation = fileList(side.relation);
+          const tiles = fileList(side.tiles);
+          const counts = query(
+            `SELECT (SELECT count(*) FROM read_parquet(${relation})) AS relation,
+                    (SELECT count(*) FROM read_parquet(${tiles})) AS tiles`,
+          )[0];
+          if (Number(counts.relation) !== Number(counts.tiles)) {
+            failures.push(
+              `${edge.rel} ${side.name}: the tiles hold ${counts.tiles} edges against ${counts.relation} in the file they cut`,
+            );
+          }
+          const bad = scalar(
+            `SELECT count(*) FROM (
+               (SELECT src_dense, dst_dense FROM read_parquet(${relation})
+                EXCEPT SELECT src_dense, dst_dense FROM read_parquet(${tiles}))
+               UNION ALL
+               (SELECT src_dense, dst_dense FROM read_parquet(${tiles})
+                EXCEPT SELECT src_dense, dst_dense FROM read_parquet(${relation})))`,
+          );
           failures.push(
-            `${edge.rel}: the tiles hold ${counts.tiles} edges against ${counts.relation} in the file they cut`,
+            ...violations(bad, `${edge.rel} ${side.name}: the tiles and the file they cut disagree about which edges exist`),
           );
         }
-        const bad = scalar(
-          `SELECT count(*) FROM (
-             (SELECT src_dense, dst_dense FROM read_parquet(${relation})
-              EXCEPT SELECT src_dense, dst_dense FROM read_parquet(${tiles}))
-             UNION ALL
-             (SELECT src_dense, dst_dense FROM read_parquet(${tiles})
-              EXCEPT SELECT src_dense, dst_dense FROM read_parquet(${relation})))`,
-        );
-        failures.push(...violations(bad, `${edge.rel}: the tiles and the file they cut disagree about which edges exist`));
       }
       return result(failures);
     },
@@ -629,7 +683,9 @@ export const GUARDS = [
         notes.push(`${type.name}: ${groups} row group(s) over ${type.files.length} file(s)`);
       }
       for (const edge of corpus.edges) {
-        check(edge.bySource.tiles, `${edge.rel} by_source`, wanted(edge.bySource.columns, ["src_dense"]));
+        for (const side of [edge.bySource, edge.byTarget]) {
+          check(side.tiles, `${edge.rel} ${side.name}`, wanted(side.columns, [side.column]));
+        }
       }
       return result(failures, notes);
     },

@@ -57,12 +57,14 @@
   },
   "quantize": {
     "formula": "q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)",
+    "width": "binary32 — the subtraction, the division, the multiply by 65535 and the rounding are all single-precision, and the width is part of the contract",
     "extent": "the bounding box of one vertex type's own positions",
     "vectors": [
       { "v": 0, "lo": 0, "hi": 100, "q": 0, "why": "the low edge" },
       { "v": 50, "lo": 0, "hi": 100, "q": 32768, "why": "the midpoint rounds up, not down" },
       { "v": 100, "lo": 0, "hi": 100, "q": 65535, "why": "the high edge" },
-      { "v": 5, "lo": 5, "hi": 5, "q": 0, "why": "a degenerate axis maps to 0 rather than dividing by zero" }
+      { "v": 5, "lo": 5, "hi": 5, "q": 0, "why": "a degenerate axis maps to 0 rather than dividing by zero" },
+      { "v": 147, "lo": 0, "hi": 167, "q": 57687, "why": "the width, and the only kind of border the four rows above cannot express: every one of them is exact in both float widths, so a table without this row passes against an implementation that quantises in binary64. Here binary32 rounds up to 57687 and binary64 rounds down to 57686 — one unit, which is a different Morton code, a different rank, a different `dense_id` and a different tile" }
     ]
   }
 }

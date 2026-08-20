@@ -3,8 +3,8 @@
  * host uses to push a `DESCRIBE`-derived input schema into the compiler, which
  * does no IO of its own. Exercises the wasm-bindgen build output directly — these tests
  * are integration-flavoured (real WASM load) but isolated to the
- * registration API (no compile call yet — that comes in plan 13-04b's
- * playground orchestration).
+ * registration API: no compile call, so a failure here is the boundary and not
+ * the compiler behind it.
  *
  * The Rust side is covered by `crates/fossil-wasm/tests/register_inferred_descriptor.rs`
  * (6 tests against the pure-Rust `*_native` helper). This suite covers the

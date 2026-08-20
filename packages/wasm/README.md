@@ -14,8 +14,9 @@ JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Prov
 
 We use `wasm-bindgen --target web` (NOT `--target bundler`). This means consumers
 control the `.wasm` URL resolution — works in Vite, Next.js, Webpack, Rspack, or
-plain `new URL(...)` in a Web Worker context. See `08-RESEARCH.md` Pitfall 1
-(this monorepo's phase-8 research) for why `--target bundler` was rejected.
+plain `new URL(...)` in a Web Worker context. `--target bundler` was rejected
+because its output assumes the consumer's bundler resolves `.wasm` ESM imports,
+which a republished library cannot assume of a host's Vite/Next/Webpack config.
 
 ## Consumer patterns
 

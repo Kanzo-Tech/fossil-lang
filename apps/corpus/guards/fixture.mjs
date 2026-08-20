@@ -15,7 +15,11 @@
  * grid of phyllotactic discs because that is a shape with real clustering and no dependencies, not
  * because a corpus has to look like that. Nothing here is normative. The conventions are.
  *
- *   node guards/fixture.mjs <dir> [--vertices 70000] [--layout rowgroups|files]
+ *   node guards/fixture.mjs <dir> [--vertices 70000] [--layout rowgroups|files] [--chunk-size 4096]
+ *
+ * `--chunk-size` is here because 4,096 is a measured trade-off between requests and bytes on a
+ * corpus of millions and not an invariant — the conventions say a power of two, and a corpus that
+ * has to be small enough to read by hand declares a smaller one and is addressed identically.
  */
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -52,12 +56,16 @@ function positions(count, clusters) {
  * so the ranking is total and the same input always produces the same corpus.
  */
 function renumber(points) {
-  const extent = {
-    minX: Math.min(...points.map((p) => p.x)),
-    maxX: Math.max(...points.map((p) => p.x)),
-    minY: Math.min(...points.map((p) => p.y)),
-    maxY: Math.max(...points.map((p) => p.y)),
-  };
+  // Folded rather than spread: `Math.min(...a)` passes one argument per point,
+  // and a corpus large enough to be worth measuring on overflows the call stack
+  // before it overflows anything else. It did, at a million.
+  const extent = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  for (const p of points) {
+    if (p.x < extent.minX) extent.minX = p.x;
+    if (p.x > extent.maxX) extent.maxX = p.x;
+    if (p.y < extent.minY) extent.minY = p.y;
+    if (p.y > extent.maxY) extent.maxY = p.y;
+  }
   const coded = points.map((p, index) => ({ ...p, index, morton: mortonOf(p.x, p.y, extent) }));
   coded.sort((a, b) => a.morton - b.morton || a.index - b.index);
   const denseOf = new Array(points.length);
@@ -74,10 +82,11 @@ function renumber(points) {
  * chord per vertex inside its own cluster. The ring makes the whole graph statable in one line of
  * arithmetic; the chords make the adjacency non-trivial across tiles.
  */
-export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups" } = {}) {
+export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups", chunkSize } = {}) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "vertex", "Person"), { recursive: true });
   mkdirSync(join(dir, "edge", "Person_knows_Person", "by_source"), { recursive: true });
+  mkdirSync(join(dir, "edge", "Person_knows_Person", "by_target"), { recursive: true });
 
   const points = positions(count, clusters);
   const { ordered, denseOf } = renumber(points);
@@ -98,7 +107,10 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   const edgeCsv = join(dir, "edges.csv");
   writeFileSync(edgeCsv, `src_dense,dst_dense\n${pairs.map((p) => p.join(",")).join("\n")}\n`);
 
-  const tileRows = Number(TILE_ROWS);
+  const tileRows = chunkSize === undefined ? Number(TILE_ROWS) : Number(chunkSize);
+  if (!Number.isInteger(tileRows) || tileRows <= 0 || (tileRows & (tileRows - 1)) !== 0) {
+    throw new Error(`chunk_size ${tileRows} is not a power of two, so no shift addresses it`);
+  }
   const tiles = Math.ceil(count / tileRows);
   const vertexPrefix = join(dir, "vertex", "Person");
   const edgeDir = join(dir, "edge", "Person_knows_Person");
@@ -114,11 +126,20 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       : `COPY (SELECT * FROM v ORDER BY dense_id) TO '${lit(join(vertexPrefix, "tiles.parquet"))}'
            (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
 
-  const edgeTileCopy = Array.from({ length: tiles }, (_, k) => {
-    const target = join(edgeDir, "by_source", `tile${k}.parquet`);
-    return `COPY (SELECT * FROM e WHERE src_dense >= ${k * tileRows} AND src_dense < ${(k + 1) * tileRows}
-                   ORDER BY src_dense, dst_dense) TO '${lit(target)}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
-  }).join("\n");
+  // Both orientations tiled, each on the column it is ordered by: the out-edges
+  // of a vertex are in the `by_source` tile its id names and the in-edges in the
+  // `by_target` one, and a fixture that only wrote the source half would leave
+  // every target-half guard passing on nothing.
+  const edgeTileCopy = ["by_source", "by_target"]
+    .flatMap((orientation) => {
+      const [key, other] = orientation === "by_source" ? ["src_dense", "dst_dense"] : ["dst_dense", "src_dense"];
+      return Array.from({ length: tiles }, (_, k) => {
+        const target = join(edgeDir, orientation, `tile${k}.parquet`);
+        return `COPY (SELECT * FROM e WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
+                       ORDER BY ${key}, ${other}) TO '${lit(target)}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
+      });
+    })
+    .join("\n");
 
   execute(`
     CREATE TEMP TABLE v AS
@@ -182,9 +203,11 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "adj_lists:",
       "- ordered: true",
       "  aligned_by: src",
+      "  prefix: by_source/",
       "  file_type: parquet",
       "- ordered: true",
       "  aligned_by: dst",
+      "  prefix: by_target/",
       "  file_type: parquet",
       "property_groups: []",
       "version: gar/v1",
@@ -192,7 +215,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     ].join("\n"),
   );
 
-  return { dir, count, edges: pairs.length, tiles, layout };
+  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -205,9 +228,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const at = process.argv.indexOf(`--${name}`);
     return at === -1 ? fallback : process.argv[at + 1];
   };
+  const chunkSize = flag("chunk-size", undefined);
   const written = write(dir, {
     count: Number(flag("vertices", 70_000)),
+    clusters: Number(flag("clusters", 256)),
     layout: String(flag("layout", "rowgroups")),
+    chunkSize: chunkSize === undefined ? undefined : Number(chunkSize),
   });
   console.log(
     `${written.count} vertices · ${written.edges} edges · ${written.tiles} tiles · ${written.layout} → ${written.dir}`,

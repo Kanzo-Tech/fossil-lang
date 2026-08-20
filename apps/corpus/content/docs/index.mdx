@@ -34,6 +34,7 @@ reader, and the conventions here are what makes that true rather than merely pos
       by_source.parquet                    CSR — ordered by src_dense
       by_target.parquet                    CSC — ordered by dst_dense
       by_source/                           the CSR, tiled by the source's tile
+      by_target/                           the CSC, tiled by the destination's tile
 ```
 
 A reader over HTTP cannot list a directory, so nothing is discovered by listing. `graph.graph.yml`
@@ -51,7 +52,7 @@ this site, and each one is a guard in `apps/corpus/guards/guards.mjs`.
 | [Identity](/docs/conventions/identity) | `dense_id` is a gapless `0..V−1`; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
 | [Addressing](/docs/conventions/addressing) | a tile is 4,096 rows of `dense_id`; `tile = dense_id >> 12` | no index to fetch, no directory to list |
 | [Order](/docs/conventions/order) | `dense_id` ascends with the Morton code of the position | a rectangle in space is a few contiguous runs of ids |
-| [Adjacency](/docs/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, an edge lives in its source's tile | every drawable edge is in a tile the window already fetched |
+| [Adjacency](/docs/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, both tiled by the endpoint they are ordered by | every drawable edge is in a tile the window already fetched, and a hop is two addressed reads |
 | [Payload](/docs/conventions/payload) | plain Parquet, row-group statistics on the addressing columns | the footer is the index, bought in one request |
 
 ## Why a format rather than a library

@@ -220,7 +220,7 @@ fixture_test!(
 );
 
 // =====================================================================
-// Diagnostic-accumulator coverage for recovery fixtures (plan 02-03 Task 3)
+// Diagnostic-accumulator coverage for recovery fixtures
 // =====================================================================
 //
 // The `fixture_test!`s above verify the SHAPE of the resulting CST
@@ -239,9 +239,9 @@ fixture_test!(
 //     §OPERATOR PRECEDENCE TABLE and L7 in the parser's own table — the
 //     two agree now that `|>` no longer holds L1 in either), so
 //     `- - x` is the valid
-//     `UNARY(MINUS, UNARY(MINUS, x))` tree. The fixture name reflects
-//     a Wave 0 (plan 02-01) over-eager labeling; the parser correctly
-//     does NOT emit an error here.
+//     `UNARY(MINUS, UNARY(MINUS, x))` tree. The name says "recovers"
+//     because it was written before the precedence table did, and it was
+//     never renamed; the parser correctly does NOT emit an error here.
 
 use fossil_base::Diagnostic;
 use salsa::Accumulator;
@@ -306,27 +306,14 @@ fn recovery_fixtures_each_emit_at_least_one_diagnostic() {
 /// renaming the trait surface.
 const fn assert_accumulator_bound<A: Accumulator>() {}
 
-/// NO FIXTURE SPELLS A RETIRED FORM.
-///
-/// The instruction for this corpus was «rewritten, not patched», and a rewrite
-/// is exactly the kind of claim that rots: a `UPDATE_EXPECT=1` run will happily
-/// bake `prefix ex: <…>` into a snapshot as an ERROR node and the suite goes
-/// green with a corpus written in the dead language.
-///
-/// This is the guard for that, and it is the strongest one available here: it
-/// does not grep for spellings, it parses every fixture and asserts that not
-/// one of them produces a `RetiredSpelling` diagnostic. If a rewrite missed a
-/// CURIE, the parser says so and this test reads the parser.
-///
-/// What it CANNOT prove: that a fixture is a form the language HAS. A file that
-/// parses clean may still be nonsense the checker refuses — `@subject = ?` in
-/// bucket 2 is a parse-recovery fixture on purpose. Only step 8's compilation
-/// of `apps/docs/programs/` proves that, and this crate has no checker to ask.
-#[test]
-fn no_fixture_spells_a_retired_form() {
+/// The six retired spellings, read out of the parser rather than written down
+/// again here. `diag::retired` is «the one place they are written down» and this
+/// is the reader that keeps it so: a message that drifts at a call site drifts
+/// out of this list too, and the guard below stops proving anything.
+const fn retired_messages() -> [&'static str; 6] {
     use fossil_syntax::parser::diag::retired;
 
-    let retired_messages = [
+    [
         retired::PREFIX_DECL,
         retired::CURIE,
         retired::ABSOLUTE_IRI,
@@ -336,42 +323,195 @@ fn no_fixture_spells_a_retired_form() {
         // the member call now, so the last spelling this list did not read is
         // read here.
         retired::PIPELINE,
+    ]
+}
+
+/// Parse `src` and assert it produces no `RetiredSpelling` diagnostic. `origin`
+/// names it in the failure — a path, or a path and a line for a fenced block.
+fn assert_no_retired_spelling(src: &str, origin: &str) {
+    let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+    let db = FossilDb::new(system);
+    let file = SourceFile::new(&db, src.to_string(), origin.to_string());
+    let _cst = parse(&db, file);
+    for d in parse::accumulated::<Diagnostic>(&db, file) {
+        assert!(
+            !retired_messages().iter().any(|m| d.message == *m),
+            "{origin}: this still spells a form grammar.bnf retired — \
+             rewrite it, do not snapshot the refusal.\n  {}",
+            d.message,
+        );
+    }
+}
+
+/// The repository root. `CARGO_MANIFEST_DIR` is `crates/fossil-syntax`.
+fn repo_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("CARGO_MANIFEST_DIR has at least two parents")
+        .to_path_buf()
+}
+
+/// Every file under `root` whose extension is `ext`, skipping build outputs and
+/// the scratch trees that are not the repository.
+fn files_with_extension(root: &std::path::Path, ext: &str) -> Vec<std::path::PathBuf> {
+    // `spikes/` carries its own un-ignored `target/`, which is why it is named
+    // here rather than left to the `target` arm below.
+    const SKIP: &[&str] = &[
+        "target",
+        "node_modules",
+        "pkg",
+        "dist",
+        ".next",
+        ".git",
+        "spikes",
     ];
 
-    let root = format!("{}/tests/fixtures", env!("CARGO_MANIFEST_DIR"));
-    let mut checked = 0usize;
-    let mut stack = vec![std::path::PathBuf::from(&root)];
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {dir:?}: {e}")) {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())) {
             let path = entry.expect("a readable dir entry").path();
             if path.is_dir() {
+                let name = path.file_name().and_then(std::ffi::OsStr::to_str);
+                if name.is_some_and(|n| SKIP.contains(&n)) {
+                    continue;
+                }
                 stack.push(path);
-                continue;
+            } else if path.extension().is_some_and(|e| e == ext) {
+                out.push(path);
             }
-            if path.extension().is_none_or(|e| e != "fossil") {
-                continue;
-            }
-            let src =
-                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
-            let system: Arc<dyn System> = Arc::new(NativeSystem::default());
-            let db = FossilDb::new(system);
-            let file = SourceFile::new(&db, src, path.display().to_string());
-            let _cst = parse(&db, file);
-            for d in parse::accumulated::<Diagnostic>(&db, file) {
-                assert!(
-                    !retired_messages.iter().any(|m| d.message == *m),
-                    "{}: this fixture still spells a form grammar.bnf retired — \
-                     rewrite it, do not snapshot the refusal.\n  {}",
-                    path.display(),
-                    d.message,
-                );
-            }
-            checked += 1;
         }
     }
+    out
+}
+
+/// NO FOSSIL SOURCE IN THE TREE SPELLS A RETIRED FORM.
+///
+/// The instruction for the corpus was «rewritten, not patched», and a rewrite
+/// is exactly the kind of claim that rots: a `UPDATE_EXPECT=1` run will happily
+/// bake `prefix ex: <…>` into a snapshot as an ERROR node and the suite goes
+/// green with a corpus written in the dead language.
+///
+/// This is the guard for that, and it is the strongest one available here: it
+/// does not grep for spellings, it PARSES and asserts that not one file
+/// produces a `RetiredSpelling` diagnostic. If a rewrite missed a CURIE, the
+/// parser says so and this test reads the parser.
+///
+/// # Why the whole tree and not this crate's fixtures
+///
+/// It walked `fossil-syntax/tests/fixtures` alone, which is one directory of one
+/// crate — and the corpus it covered was the one corpus nobody was going to get
+/// wrong. Two retired spellings survived inside `fossil-mir/tests/lower_pg.rs`
+/// while that file was being transcribed, and neither this guard nor any other
+/// was looking. The walk is repo-rooted now: every `.fossil` file, wherever it
+/// lives, plus every ` ```fossil ` fenced block in Markdown.
+///
+/// # What it CANNOT prove
+///
+/// - **That a fixture is a form the language HAS.** A file that parses clean may
+///   still be nonsense the checker refuses — `@subject = ?` in bucket 2 is a
+///   parse-recovery fixture on purpose. Only step 8's compilation of
+///   `apps/docs/programs/` proves that, and this crate has no checker to ask.
+/// - **That fossil written inside a Rust or TypeScript string literal is
+///   live.** This is the real hole and it is deliberate, because a guard that
+///   read those literals could not be right. `fossil-ide/src/completion.rs`
+///   holds `"prefix ex: <…>\nUser : ex:Person from u\n    ex:name = .name\n"`
+///   as a LIVE fixture — a defect — and `fossil-syntax/src/lib.rs`'s
+///   `the_retired_spellings_each_report` holds the same five forms in order to
+///   assert that each one reports — correct, and the reason that test exists.
+///   Both are `&str` literals containing fossil; only intent separates them, and
+///   intent is not a thing a regex reads. A text-based guard therefore either
+///   goes permanently red on the deliberate negative fixtures or carries a
+///   hand-maintained allowlist that drifts — which is the disease this guard
+///   was written to treat. **16 files currently hold fossil in a retired
+///   spelling inside a string literal.** The fix is to move those fixtures onto
+///   disk as `.fossil` files, where this walk reads them; it is not a wider
+///   regex.
+#[test]
+fn no_fixture_spells_a_retired_form() {
+    let root = repo_root();
+
+    let mut checked = 0usize;
+    for path in files_with_extension(&root, "fossil") {
+        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        assert_no_retired_spelling(&src, &path.display().to_string());
+        checked += 1;
+    }
+
+    // A FLOOR, not an equality. The failure a count exists to catch here is the
+    // walk finding nothing because the root resolved wrong — and a floor catches
+    // that. An equality would additionally go red every time anyone adds a
+    // conformance program under `apps/docs/programs/`, which is unrelated work
+    // and would train people to bump the number without reading it.
+    assert!(
+        checked >= 50,
+        "expected at least 50 `.fossil` files under {}, walked {checked} — \
+         the walk is finding nothing, which usually means the root resolved wrong",
+        root.display(),
+    );
+
+    // The bucket count stays EXACTLY as narrow as it was, because it proves
+    // something else: that the `fixture_test!` table above still matches the
+    // disk. That is disk-vs-table drift, not retired spellings, and widening the
+    // walk is no reason to loosen it.
+    let bucket_fixtures = files_with_extension(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures"),
+        "fossil",
+    )
+    .len();
     assert_eq!(
-        checked, 18,
+        bucket_fixtures, 18,
         "expected 18 fixtures; a file added or deleted without updating this \
-         count means the `fixture_test!` table below has drifted from the disk",
+         count means the `fixture_test!` table above has drifted from the disk",
+    );
+}
+
+/// The same guard over ` ```fossil ` fenced blocks in Markdown.
+///
+/// Documentation transcludes `apps/docs/programs/` rather than retyping it (see
+/// the repo `CLAUDE.md`), so there is very little of this — but «very little» is
+/// the state a guard preserves, not one it can assume. A page that inlines a
+/// program in the dead spelling is a page teaching it.
+#[test]
+fn no_fenced_fossil_block_spells_a_retired_form() {
+    let root = repo_root();
+    let mut blocks = 0usize;
+
+    for ext in ["md", "mdx"] {
+        for path in files_with_extension(&root, ext) {
+            let text =
+                std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+            let mut block: Option<(usize, String)> = None;
+            for (i, line) in text.lines().enumerate() {
+                match &mut block {
+                    // Any fence closes the block; the opener is matched exactly.
+                    Some((start, src)) if line.trim_start().starts_with("```") => {
+                        assert_no_retired_spelling(
+                            src,
+                            &format!("{}:{}", path.display(), *start + 1),
+                        );
+                        blocks += 1;
+                        block = None;
+                    }
+                    Some((_, src)) => {
+                        src.push_str(line);
+                        src.push('\n');
+                    }
+                    None if line.trim_end() == "```fossil" => block = Some((i, String::new())),
+                    None => {}
+                }
+            }
+        }
+    }
+
+    // A floor again, and a low one: one fenced block is what the tree has, and
+    // zero would mean the fence spelling changed under us and this test went
+    // quietly vacuous.
+    assert!(
+        blocks >= 1,
+        "walked {} and found no ```fossil block at all — the fence spelling has \
+         probably changed, and this guard is now proving nothing",
+        root.display(),
     );
 }

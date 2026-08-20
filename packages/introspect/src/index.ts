@@ -3,19 +3,24 @@
  *
  * "Given a `.fossil` mapping + a way to read its sources, produce an
  * `InferredDescriptor` per source binding" is a single fossil capability. It
- * previously lived duplicated across the native side (Rust), the playground hook
- * (TS), and ad-hoc host copies. This package is the canonical TS home; the host
- * injects only the DATA PLANE (URL resolution + a DuckDB executor), the same
- * shape as `@fossil-lang/graph`'s injected `DuckExecutor`.
+ * was copied across the playground hook and ad-hoc host code; this package is
+ * the canonical TS home, and the host injects only the DATA PLANE (URL
+ * resolution + a DuckDB executor), the same shape as `@fossil-lang/graph`'s
+ * injected `DuckExecutor`.
  *
  * Framework-agnostic + zero @fossil-lang deps (a true leaf). The React glue
  * and the descriptor→LSP-worker push are the HOST's, not ours — fossil ships
  * no UI; the host decides how `resolve`/`query` reach its cloud + DuckDB.
  *
  * The primitive union below is the wire form of `fossil-graph-schema`'s
- * `Primitive`; the DuckDB mapping mirrors the Rust sibling
- * `duckdb_type_to_fossil_primitive` in `fossil-engine`. A value outside the
- * union is rejected when the descriptor is registered.
+ * `Primitive`. A value outside the union is rejected when the descriptor is
+ * registered.
+ *
+ * `fossil-engine` does the same job natively, and where the two must agree
+ * — the source-binding pattern, the reader each constructor picks, the
+ * DuckDB→primitive table — `tests/rust-parity.test.ts` reads that crate's
+ * source and goes red when they diverge. The agreement is checked, so no
+ * comment in this file asserts it.
  */
 
 /**
@@ -60,22 +65,28 @@ export interface InferredDescriptor {
   freshness_token: string;
 }
 
+/**
+ * The `io/` source constructors — the wire form of `fossil-mir`'s
+ * `SourceFormat`, and the alternation `extractSourceRefs` scrapes. `stdlib.rs`
+ * registers exactly these three (`io.csv`, `io.json`, `io.parquet`).
+ */
+export type SourceFormat = "csv" | "json" | "parquet";
+
 /** A source binding scraped from a `.fossil` mapping. */
 export interface SourceRef {
   sourceName: string;
+  /** Which `io.` constructor wrote it — it chooses the DuckDB reader. */
+  format: SourceFormat;
   url: string;
 }
 
-/** A single row from DuckDB's `DESCRIBE SELECT * FROM read_csv_auto(...)`. */
+/** A single row from DuckDB's `DESCRIBE SELECT * FROM <reader>(...)`. */
 export interface DescribeRow {
   column_name?: unknown;
   column_type?: unknown;
 }
 
-/**
- * Map a DuckDB column-type string onto the Fossil lattice. MUST match the Rust
- * sibling `duckdb_type_to_fossil_primitive` in `fossil-engine`.
- */
+/** Map a DuckDB column-type string onto the Fossil lattice. */
 export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
   const upper = t.trim().toUpperCase();
   if (
@@ -94,43 +105,64 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
   if (upper === "DATE") return "date";
   if (upper === "TIMESTAMP" || upper === "DATETIME") return "date_time";
   if (upper === "TIME") return "time";
-  // VARCHAR / TEXT / STRING + any unrecognised type fall back to String
-  // (matching the fossil-hir wildcard arm).
+  // VARCHAR / TEXT / STRING + any unrecognised type fall back to string.
   return "string";
 }
 
 /**
- * Scrape source-binding RHS URLs from a `.fossil` text. Mirrors the Rust
- * sibling `extract_source_refs` (crates/fossil-engine/src/lib.rs) — the two
- * regexes are character-for-character the same and must move together.
+ * The source-binding pattern. Exported because it is the thing the parity
+ * guard compares against `fossil-engine`'s, and because a caller that wants to
+ * ask "does this text bind any source?" should not write a second one.
+ *
+ * Not a shared `RegExp` instance: `g` carries `lastIndex`, so one object
+ * reused across calls skips matches.
+ */
+export const SOURCE_REF_PATTERN =
+  "(\\w[\\w\\d_]*)\\s*:=\\s*io\\.(csv|json|parquet)\\(\\s*['\"]([^'\"]+)['\"]";
+
+/**
+ * Scrape source-binding RHS URLs from a `.fossil` text.
  *
  * LIMITATIONS (regex placeholder; an AST walk supersedes it): no multi-line
  * constructor, no interleaved comments between `:=` and `io.csv(`, no
  * backslash-escaped quotes inside the URL string.
  */
 export function extractSourceRefs(text: string): SourceRef[] {
-  const re = /(\w[\w\d_]*)\s*:=\s*io\.(?:csv|json)\(\s*['"]([^'"]+)['"]/g;
+  const re = new RegExp(SOURCE_REF_PATTERN, "g");
   const out: SourceRef[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m[1] && m[2]) {
-      out.push({ sourceName: m[1], url: m[2] });
+    if (m[1] && m[2] && m[3]) {
+      out.push({ sourceName: m[1], format: m[2] as SourceFormat, url: m[3] });
     }
   }
   return out;
 }
 
 /**
- * The canonical DESCRIBE SQL for a resolved source URL. `read_csv_auto` is
- * single-quote-escaped (a SQL string literal, not a prepared parameter).
+ * The DuckDB table function each constructor reads through.
  *
- * NOTE: matches the `fossil-engine` + playground reference, which uses
- * `read_csv_auto` for both csv and json refs today; a json-aware variant is a
- * cross-home change (must land in all impls at once to preserve parity).
+ * The constructor chooses the reader, and it must: a JSON array read as CSV
+ * introspects to one column named after its first line, so a file opening with
+ * a bare `[` yields a schema whose only column is `[` and every real column
+ * comes back unknown.
  */
-export function describeSql(url: string): string {
+const READERS: Record<SourceFormat, string> = {
+  csv: "read_csv_auto",
+  json: "read_json_auto",
+  parquet: "read_parquet",
+};
+
+/**
+ * The canonical DESCRIBE SQL for a resolved source URL. The URL is
+ * single-quote-escaped (a SQL string literal, not a prepared parameter), and
+ * `format` is the constructor the binding was written with — there is no
+ * default, because a defaulted reader is how a `.parquet` source ends up read
+ * as CSV.
+ */
+export function describeSql(url: string, format: SourceFormat): string {
   const escaped = url.replace(/'/g, "''");
-  return `DESCRIBE SELECT * FROM read_csv_auto('${escaped}')`;
+  return `DESCRIBE SELECT * FROM ${READERS[format]}('${escaped}')`;
 }
 
 /**
@@ -202,7 +234,7 @@ export async function introspect(
   for (const ref of extractSourceRefs(mappingText)) {
     try {
       const url = await io.resolve(ref);
-      const rows = await io.query(describeSql(url));
+      const rows = await io.query(describeSql(url, ref.format));
       out.push(buildDescriptor(ref.url, rows, await io.freshness?.(ref, url)));
     } catch (err) {
       warn(

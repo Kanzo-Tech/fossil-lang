@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # build-wasm.sh — Build packages/graph/pkg/ from crates/fossil-graph-wasm/.
 #
-# Sibling of packages/wasm/scripts/build-wasm.sh (same ADR-0030 / RESEARCH.md
-# Pattern 3 wasm-bindgen `--target web` recipe). The only differences are the
+# Sibling of packages/wasm/scripts/build-wasm.sh (the same wasm-bindgen
+# `--target web` recipe). The only differences are the
 # crate (`fossil-graph-wasm`) and the artefact stem (`fossil_graph_wasm`).
 #
 # Pinned tooling (CLAUDE.md):
@@ -63,7 +63,8 @@ fi
 #
 # --target web (NOT bundler): the consumer passes the resolved .wasm URL via
 # init({ wasmUrl }) — predictable across every bundler model (Vite/Next/Webpack).
-# Same rationale as packages/wasm (RESEARCH.md Pitfall 1).
+# Same rationale as packages/wasm: --target bundler assumes the consumer's
+# bundler resolves .wasm ESM imports, which is fragile in a republished library.
 
 PKG_DIR="$REPO_ROOT/packages/graph/pkg"
 mkdir -p "$PKG_DIR"

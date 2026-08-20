@@ -73,6 +73,10 @@ order.
 The guard reproduces the arithmetic in the same width for the same reason. A writer that quantised
 in binary64 can show inversions here that are ties in its own view of the numbers, and naming the
 width is what turns that from an argument into a bug report.
+
+The `v = 147, hi = 167` row above is the one that says so. The other four are exact in both widths,
+so a table without it passes against a binary64 port; that row is 57687 in binary32 and 57686 in
+binary64, and this guard's own JavaScript failed it until the arithmetic was moved to `Math.fround`.
 </Callout>
 
 ## Redoing the layout renumbers everything

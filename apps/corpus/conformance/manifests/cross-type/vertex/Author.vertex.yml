@@ -1,0 +1,10 @@
+type: Author
+chunk_size: 64
+prefix: vertex/Author/
+property_groups:
+- file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+version: gar/v1

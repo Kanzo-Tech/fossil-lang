@@ -5,15 +5,17 @@
   "description": "The fossil corpus: what the artifact is, the conventions that define it, and the guards that make those conventions a contract. Never published; the pnpm-workspace entry is for resolution, not for npm.",
   "type": "module",
   "//guards": "`guards/` has no npm dependencies and no build step. It needs `node` and the `duckdb` binary, so `pnpm check`, `pnpm self-test` and `pnpm fixture` run in a checkout where nothing has been installed — which is the position the third party this format is for is in.",
+  "//conformance": "`conformance/` is the other half: the guards check that a corpus IS what the conventions say, and the conformance corpus checks that two readers ADDRESS it the same way. `pnpm test` runs the checked-in corpus through the guards and then runs `expected.json` — every address that must compose and every one that must be refused — through the plain-Node implementation here. The published module executes the same table from `packages/graph/tests/conformance.test.ts`, which is a **pnpm** test in another package: moving an address here turns it red and `node guards/self-test.mjs` will not tell you.",
   "//test": "`pnpm test` is the guards' own self-test: a conforming corpus is written in both containers, every guard passes on it, and then every guard is required to FIRE against a corpus broken in exactly one way. There is deliberately no guard over the prose on this site — one existed in `apps/docs`, it checked that a cited line existed rather than that it said what the page claimed, and 159 dead references accumulated under it with CI green throughout. A guard that measures the artifact is worth writing; a guard that measures a page's punctuation buys the appearance of one.",
   "scripts": {
     "dev": "next dev --port 3300",
     "build": "pnpm run test && next build",
     "start": "next start --port 3300",
-    "test": "node guards/self-test.mjs",
+    "test": "node guards/self-test.mjs && node guards/check.mjs conformance/corpus && node conformance/verify.mjs",
     "check": "node guards/check.mjs",
     "self-test": "node guards/self-test.mjs",
     "fixture": "node guards/fixture.mjs",
+    "conformance": "node conformance/verify.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "postinstall": "fumadocs-mdx"

@@ -71,16 +71,15 @@ export interface CheckRow {
   message: string;
 }
 
-/** Stdlib classification entry returned by {@link FossilPlayground.classification}.
- *  `wasm_class` indicates whether a stdlib function can execute in-browser
- *  (`"pure_sql"`) or requires the native runtime (`"native_udf_only"`). The
- *  playground reads this once at startup to render `native_udf_only` functions
- *  as disabled (STDL-07 / SC#1 playground half).
- */
-export interface StdlibClass {
-  name: string;
-  wasm_class: 'pure_sql' | 'native_udf_only';
-}
+// `StdlibClass` and `FossilPlayground.classification()` lived here — one row per
+// stdlib function carrying `"pure_sql"` or `"native_udf_only"`, so a playground
+// could render the native-only functions as disabled. The Rust side deleted the
+// concept (`crates/fossil-wasm/src/lib.rs`, two tombstones, and
+// `crates/fossil-hir/src/stdlib.rs`): every catalogued function is a pure SQL
+// expression template, so there is nothing to disable. This binding kept calling
+// it, and only type-checked because `pkg/fossil_wasm.d.ts` is a gitignored build
+// output that had not been regenerated since — it declared `classification(): any`
+// while the method it described no longer existed.
 
 /**
  * The primitive lattice, as `fossil-graph-schema` serialises it — the same enum
@@ -110,9 +109,15 @@ export interface InferredColumnJson {
 }
 
 /**
- * Host-introspected input schema. Produced by the playground's browser-side
- * `DuckDB-WASM` `DESCRIBE read_csv_auto('<url>')` call — `@fossil-lang/introspect`
- * is the one home for it; consumed by the Rust compiler via
+ * Host-introspected input schema. Produced by a `DESCRIBE SELECT * FROM
+ * <reader>('<url>')` the host runs — `DuckDB-WASM` in a browser — where the
+ * reader is the one the binding's `io.` constructor names: `read_csv_auto`,
+ * `read_json_auto` or `read_parquet`. `@fossil-lang/introspect` is the one home
+ * for that, and picking the reader off the constructor is not a nicety: a
+ * Parquet file read as CSV fails DuckDB's sniffer outright, and a JSON array
+ * read as CSV introspects to a single column named `[`.
+ *
+ * Consumed by the Rust compiler via
  * {@link FossilPlayground.registerInferredDescriptor}. There is no metadata
  * sidecar for the user to write and keep in sync: the host introspects the
  * real file and feeds the compiler ahead of `compile()`.

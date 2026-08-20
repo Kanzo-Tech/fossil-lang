@@ -23,7 +23,6 @@ import {
 import type { TokenRow, SemanticTokensLegend } from '@fossil-lang/types';
 import type {
   CheckRow,
-  StdlibClass,
   InferredDescriptorJson,
   SourceRefInfo,
   ProviderInfo,
@@ -134,14 +133,6 @@ export class FossilPlayground {
    */
   free(): void {
     this._inner.free();
-  }
-
-  /**
-   * Return the stdlib classification manifest (STDL-07). The playground reads
-   * this once at startup to render `native_udf_only` functions as disabled.
-   */
-  classification(): StdlibClass[] {
-    return this._inner.classification() as StdlibClass[];
   }
 
   /**

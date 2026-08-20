@@ -3,23 +3,29 @@
 //! # This parser and `grammar.bnf`
 //!
 //! `grammar.bnf` SPECIFIES the language; this crate implements it. What is left
-//! of the gap, after steps 2, 3 and 5 of `SURFACE-PLAN.md`:
+//! of the gap, after steps 2, 3, 5 and 6 of `SURFACE-PLAN.md`:
 //!
-//! - **Accepted here, not specified there** — the `|>` pipeline. Ruling 7 of
-//!   2026-08-11 killed it (`a |> f()` was a second spelling of `a.f()`) and
-//!   step 6 removes it, together with the verbs becoming a catalogue.
 //! - **Specified there, not implemented here** — `@rename(…)` over a type
 //!   binding and the `IDENT as IDENT` self-join alias, both step 7.
 //!
 //! A reader who finds one of those is looking at work outstanding, not at a
 //! bug. `SURFACE-PLAN.md` is the order it lands in.
 //!
-//! Everything else the grammar retired is REFUSED BY NAME rather than accepted
-//! or dropped: `prefix ex: <…>`, the CURIE `ex:Person`, the `<…>` absolute IRI,
-//! a leading `.`, and the backtick. See [`parser::diag::retired`] — the wording
-//! is written down once because the corpus test of step 8 will read it.
+//! There is nothing in the other direction any more. `|>` was listed here as
+//! **accepted here, not specified there** — «step 6 removes it» — and step 6
+//! landed: the lexer has no rule for it, `parser::diag::retired::PIPELINE` names
+//! it, and `parser::expr`'s
+//! `pipe_is_retired_with_a_message_naming_the_member_call` pins the refusal and
+//! its span. The entry outlived the work it described, which is the failure a
+//! header like this one exists to avoid.
 //!
-//! Public API contract for Phase 2-9:
+//! Everything the grammar retired is REFUSED BY NAME rather than accepted or
+//! dropped, and there are SIX: `prefix ex: <…>`, the CURIE `ex:Person`, the
+//! `<…>` absolute IRI, a leading `.`, the backtick, and `|>`. See
+//! [`parser::diag::retired`] — the wording is written down once because
+//! `tests/parse_corpus.rs` reads it, and it reads all six.
+//!
+//! Public API contract — this signature is locked:
 //!
 //! ```ignore
 //! #[salsa::tracked]

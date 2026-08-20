@@ -250,6 +250,34 @@ const MUTATIONS = [
                 x, y, cluster_id FROM m ORDER BY dense_id`,
       ),
   },
+  // The target half, broken the two ways an emitter breaks it: not written, and
+  // written on the wrong column. Both leave the source half perfect, and a
+  // reader that only ever draws never notices either — which is how the in-edge
+  // direction went untiled while every guard was green.
+  {
+    guard: "not-empty",
+    what: "the `by_target` tiles are not written, so a hop has one direction",
+    layout: "rowgroups",
+    mutate: (dir) => rmSync(join(dir, EDGE_DIR, "by_target"), { recursive: true, force: true }),
+  },
+  {
+    guard: "tile-of",
+    what: "the `by_target` tiles are cut on `src_dense`, which is the source half again",
+    layout: "rowgroups",
+    mutate(dir) {
+      const tileRows = 4096;
+      const relation = join(dir, EDGE_DIR, "by_target.parquet");
+      const tiles = [...Array(Math.ceil(70_000 / tileRows)).keys()]
+        .map(
+          (k) =>
+            `COPY (SELECT * FROM m WHERE src_dense >= ${k * tileRows} AND src_dense < ${(k + 1) * tileRows}
+                    ORDER BY src_dense, dst_dense)
+               TO '${lit(join(dir, EDGE_DIR, "by_target", `tile${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
+        )
+        .join("\n");
+      execute(`CREATE TEMP TABLE m AS SELECT * FROM read_parquet('${lit(relation)}');\n${tiles}`);
+    },
+  },
 ];
 
 console.log("\nEvery guard fires when its convention is broken");
@@ -268,11 +296,20 @@ for (const mutation of MUTATIONS) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-assert(
-  MUTATIONS.length === GUARDS.length,
-  `every one of the ${GUARDS.length} guards has a mutation`,
-  MUTATIONS.length === GUARDS.length ? "" : `${GUARDS.length - MUTATIONS.length} untested`,
-);
+{
+  // Coverage, not a bijection. Every guard owes at least one break it fires on;
+  // a convention with two ways of being broken that a reader would not confuse —
+  // an orientation absent against an orientation cut on the wrong column — owes
+  // one apiece, and requiring exactly one mutation per guard would have made the
+  // second unwritable.
+  const mutated = new Set(MUTATIONS.map((m) => m.guard));
+  const untested = GUARDS.filter((g) => !mutated.has(g.id)).map((g) => g.id);
+  assert(
+    untested.length === 0,
+    `every one of the ${GUARDS.length} guards has a mutation`,
+    untested.length === 0 ? `${MUTATIONS.length} breaks` : `untested: ${untested.join(", ")}`,
+  );
+}
 
 // ── 3. what this cannot do ──────────────────────────────────────────────────────────────────────
 

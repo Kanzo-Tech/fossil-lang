@@ -38,36 +38,47 @@ describe("duckdbTypeToFossilPrimitive", () => {
 });
 
 describe("extractSourceRefs", () => {
-  it("scrapes csv + json source bindings with the @conn/path form", () => {
+  it("scrapes every constructor, with the @conn/path form, keeping the one written", () => {
     const text = [
       'users := io.csv("@warehouse/users.csv")',
       "orders := io.json('@warehouse/orders.json')",
+      'events := io.parquet("@warehouse/events.parquet")',
     ].join("\n");
     expect(extractSourceRefs(text)).toEqual([
-      { sourceName: "users", url: "@warehouse/users.csv" },
-      { sourceName: "orders", url: "@warehouse/orders.json" },
+      { sourceName: "users", format: "csv", url: "@warehouse/users.csv" },
+      { sourceName: "orders", format: "json", url: "@warehouse/orders.json" },
+      { sourceName: "events", format: "parquet", url: "@warehouse/events.parquet" },
     ]);
   });
 
   it("ignores non-source lines and tolerates surrounding whitespace", () => {
     const text = '  people  :=  io.csv( "data.csv" )\nx := 1 + 2\n';
     expect(extractSourceRefs(text)).toEqual([
-      { sourceName: "people", url: "data.csv" },
+      { sourceName: "people", format: "csv", url: "data.csv" },
     ]);
   });
 
   it("returns empty for text with no source bindings", () => {
-    expect(extractSourceRefs("prefix ex: <https://example.org/>")).toEqual([]);
+    expect(extractSourceRefs("User : Person from users")).toEqual([]);
   });
 });
 
 describe("describeSql", () => {
-  it("wraps the url in read_csv_auto and single-quote-escapes it", () => {
-    expect(describeSql("https://x/u.csv")).toBe(
+  it("single-quote-escapes the url", () => {
+    expect(describeSql("o'brien.csv", "csv")).toBe(
+      "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv')",
+    );
+  });
+
+  it("reads through the table function the constructor names", () => {
+    expect(describeSql("https://x/u.csv", "csv")).toBe(
       "DESCRIBE SELECT * FROM read_csv_auto('https://x/u.csv')",
     );
-    expect(describeSql("o'brien.csv")).toBe(
-      "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv')",
+    expect(describeSql("https://x/u.json", "json")).toBe(
+      "DESCRIBE SELECT * FROM read_json_auto('https://x/u.json')",
+    );
+    expect(describeSql("https://x/u.parquet", "parquet")).toBe(
+      "DESCRIBE SELECT * FROM read_parquet('https://x/u.parquet')",
     );
   });
 });
@@ -136,6 +147,27 @@ describe("introspect", () => {
       {
         uri: "@w/orders.csv",
         columns: [{ name: "total", primitive: "float" }],
+        freshness_token: "",
+      },
+    ]);
+  });
+
+  it("introspects a parquet binding, and asks DuckDB for it as parquet", async () => {
+    const seen: string[] = [];
+    const descriptors = await introspect('e := io.parquet("@w/events.parquet")', {
+      resolve: (r) => r.url,
+      query: async (sql) => {
+        seen.push(sql);
+        return [{ column_name: "ts", column_type: "TIMESTAMP" }];
+      },
+    });
+    expect(seen).toEqual([
+      "DESCRIBE SELECT * FROM read_parquet('@w/events.parquet')",
+    ]);
+    expect(descriptors).toEqual([
+      {
+        uri: "@w/events.parquet",
+        columns: [{ name: "ts", primitive: "date_time" }],
         freshness_token: "",
       },
     ]);

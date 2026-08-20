@@ -36,12 +36,27 @@ From `chunk_size` alone:
 ```
 shift       = log2(chunk_size)          # 12
 tile(id)    = id >> shift
-tile_count  = ceil(V / chunk_size)
 tile i       spans dense ids [i·chunk_size, (i+1)·chunk_size)
 ```
 
-No index file, no manifest of tiles, nothing to fetch. A reader knows the whole tile set from one
-number, which is what lets it compute every URL before it emits the first request.
+No index file, no manifest of tiles, nothing to fetch. A reader knows where any id lives from one
+number, which is what lets it compute every URL before it emits the first request. `chunk_size` is a
+power of two so that the address is a shift; it is 4,096 in a corpus fossil writes, and a reader
+takes it from the manifest rather than from that sentence.
+
+**How many tiles there are is the one thing the arithmetic does not give**, because `ceil(V /
+chunk_size)` needs `V` and no manifest carries it. Over a filesystem or a bucket a glob answers it;
+over a plain HTTP origin there is no listing, and the answer is to `HEAD` `chunk{k}.parquet` —
+doubling `k` until one misses, then bisecting — which is about a dozen requests once, for a corpus
+of any size. The last tile's own footer says how short it is.
+
+<Callout title="A design question, and it is open">
+A declared vertex count would delete that probe, and it is one scalar. What holds it back is that
+the count and the tiles then have to agree, and a manifest that declares a number the payload
+contradicts is a new way for a corpus to be wrong — one no reader can check without reading every
+tile, which is the thing addressing exists to avoid. What settles it is a guard that can compare the
+two cheaply.
+</Callout>
 
 ## 3. Ask the footer which tiles intersect the window
 
@@ -95,9 +110,25 @@ SELECT src_dense, dst_dense
   FROM read_parquet('edge/Person_knows_Person/by_source/tile10.parquet');
 ```
 
-`by_source` is ordered by `src_dense` and `by_target` by `dst_dense` — CSR and CSC. A reader that
-wants a neighbourhood scans a run; a reader that wants an incoming neighbourhood scans the other
-file.
+`by_source` is ordered by `src_dense` and `by_target` by `dst_dense` — CSR and CSC — and **both are
+tiled the same way**, each by the endpoint it is ordered by. So a hop out of one vertex is two files
+whose names are arithmetic, and nothing scans:
+
+```sql
+-- everything vertex 41000 touches: 41000 >> 12 = 10, in both directions
+SELECT dst_dense AS far FROM read_parquet('edge/Person_knows_Person/by_source/tile10.parquet')
+ WHERE src_dense = 41000
+UNION ALL
+SELECT src_dense FROM read_parquet('edge/Person_knows_Person/by_target/tile10.parquet')
+ WHERE dst_dense = 41000;
+```
+
+Which prefix is which direction is in the edge type's manifest, as an `adj_lists` entry per
+orientation: `aligned_by` names the column that addresses it, `prefix` names the directory. Do not
+follow only `by_source` — in a knowledge graph "the papers by this author" is an in-edge, and half
+the directions is a wrong answer rather than a partial one. A `WITH RECURSIVE` over the whole edge
+relation is the thing this replaces: measured on 6.9M edges, one hop from one seed had not returned
+after 45 seconds.
 
 ## 6. Name things by the subject IRI
 
@@ -124,3 +155,20 @@ part of this repository beyond the `guards/` directory, which is written to be c
 prints what each guard proves and, more usefully, what it cannot.
 
 [The guards](/docs/guards) has the full list and the honest limits.
+
+## Prove your own reader
+
+The composition on this page — prefix, shift, orientation, and which of them a window may use — is
+also published as code, and the two are checked against one table of addresses rather than against
+each other's prose. `apps/corpus/conformance/` holds it: a corpus small enough to read by hand, four
+manifest sets carrying the cases a whole corpus cannot, and `expected.json` naming every address
+that must compose and every one that must be refused.
+
+```bash
+node apps/corpus/conformance/verify.mjs
+```
+
+That runner is a reader with no npm, no build and no fossil in it — the position this page is
+written for. `resolveCorpus` in `@fossil-lang/graph` is the same table executed by the published
+module, for a reader that would rather take the dependency than copy the arithmetic. Neither is the
+authority; `expected.json` is.

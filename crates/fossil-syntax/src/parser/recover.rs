@@ -13,16 +13,15 @@
 //! - [`recover_to`] — consume tokens into an `ERROR` node until the current
 //!   token is in `anchors` (or EOF). Emits a single `UnexpectedToken`
 //!   diagnostic per call.
-//! - [`expect_or_recover`] — like the Phase 1 `Parser::expect` but DOES NOT
-//!   consume the offending token on mismatch. Instead it emits a zero-width
-//!   `ERROR` marker + an `ExpectedToken` diagnostic, then delegates to
-//!   `recover_to` so the offending token can be re-examined by the caller's
-//!   recovery cascade.
+//! - [`expect_or_recover`] — like `Parser::expect` but DOES NOT consume the
+//!   offending token on mismatch. Instead it emits a zero-width `ERROR` marker
+//!   and an `ExpectedToken` diagnostic, then delegates to `recover_to` so the
+//!   offending token can be re-examined by the caller's recovery cascade.
 //!
-//! The Phase 1 `Parser::expect` was kept as a thin wrapper for back-compat
-//! with the existing prefix-decl / source-def / mapping-header callers — see
-//! `super::Parser::expect`. New code SHOULD prefer `expect_or_recover` with
-//! an explicit anchor set.
+//! `Parser::expect` survives for the callers inside `parser::expr` that are
+//! already bounded by a delimiter and so have no anchor set worth naming — see
+//! `super::Parser::expect`. New code SHOULD prefer `expect_or_recover` with an
+//! explicit anchor set.
 
 use crate::kind::SyntaxKind;
 
@@ -121,9 +120,9 @@ pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
 /// 3. DO NOT consume the offending token — fall through to [`recover_to`]
 ///    which bumps to a known anchor.
 ///
-/// This is the structural fix the Phase 1 [`Parser::expect`] lacks. The Phase
-/// 1 implementation consumed the wrong token on mismatch, which broke the
-/// recovery cascade because the anchor token disappeared into an `ERROR`.
+/// This is the structural fix [`Parser::expect`] lacks: `expect` consumes the
+/// wrong token on mismatch, which breaks the recovery cascade because the
+/// anchor token disappears into an `ERROR`.
 pub(crate) fn expect_or_recover(p: &mut Parser, want: SyntaxKind, anchors: &[SyntaxKind]) {
     p.skip_trivia();
     if p.current() == Some(want) {

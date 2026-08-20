@@ -1,0 +1,8 @@
+name: graph
+prefix: ''
+vertices:
+- vertex/Author.vertex.yml
+- vertex/Paper.vertex.yml
+edges:
+- edge/Author_authored_Paper/Author_authored_Paper.edge.yml
+version: gar/v1

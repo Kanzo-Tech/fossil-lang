@@ -1,6 +1,6 @@
 ---
 title: Adjacency
-description: Both orientations on disk, and an edge lives in its source's tile. CSR is flat in N where the alternative grows to 15.86× the over-read.
+description: Both orientations on disk and both tiled, and an edge lives in the tile of the endpoint its file is ordered by. A hop is two addressed reads; the recursive alternative did not return in 45 seconds.
 ---
 
 Every edge type is stored **twice, in one relation**:
@@ -45,19 +45,123 @@ And every endpoint addresses a vertex that exists, in its own type's dense space
 corruption a renumbering can introduce and that no row count would reveal — the edge counts still
 match, both orientations still agree, and the graph is wrong. Guard: `no-dangling-endpoint`.
 
-## An edge lives in its source's tile
+## An edge lives in the tile of the endpoint its file is ordered by
 
-Tiles of the source-ordered adjacency are keyed by **the same range as the vertices**: tile `k`
-under `by_source/` holds every edge whose `src_dense` is in vertex tile `k`. Its row count is
-therefore the total degree of those 4,096 vertices, not 4,096 — **`chunk_size` on an edge is an
-addressing unit and never a row count.**
+Both orientations are tiled, and each is keyed by **the same range as the vertices** of the endpoint
+it is ordered by: tile `k` under `by_source/` holds every edge whose `src_dense` is in vertex tile
+`k` of the source type, and tile `k` under `by_target/` every edge whose `dst_dense` is in vertex
+tile `k` of the *destination* type. On a cross-type edge those are two different `dense_id` spaces,
+which is why `src_chunk_size` and `dst_chunk_size` are two fields.
 
-The target-ordered orientation is not tiled. It answers "an edge with one endpoint off screen",
-which is a different question and doubles the addressing to ask it.
+A tile's row count is the total degree of those 4,096 vertices, not 4,096 — **`chunk_size` on an
+edge is an addressing unit and never a row count.** A tile with no rows is not written, so a 404 is
+the answer "these 4,096 vertices have no edges in this direction", and it costs nothing to give.
 
-Guards: `tile-of`, which checks the source-ordered tiles against `src_dense >> shift`; and
-`declared-tiling`, which checks that an edge type's `src_chunk_size` equals its source type's
-`chunk_size` — a different number there would address nothing.
+### Given a `dense_id`, where its edges are
+
+This is the whole of what a reader needs, and every part of it comes out of the edge type's
+manifest — nothing is agreed between a writer and a reader out of band:
+
+| you want | read | at | filter |
+| --- | --- | --- | --- |
+| the out-edges of `v` | `<edge prefix>by_source/tile{k}.parquet` | `k = v >> shift(src_chunk_size)` | `src_dense = v` |
+| the in-edges of `v` | `<edge prefix>by_target/tile{k}.parquet` | `k = v >> shift(dst_chunk_size)` | `dst_dense = v` |
+
+The manifest carries it as two `adj_lists` entries, each saying which endpoint column addresses it
+and where its tiles are:
+
+```yaml
+prefix: edge/Person_knows_Person/
+src_chunk_size: 4096
+dst_chunk_size: 4096
+adj_lists:
+- ordered: true
+  aligned_by: src
+  prefix: by_source/
+  file_type: parquet
+- ordered: true
+  aligned_by: dst
+  prefix: by_target/
+  file_type: parquet
+```
+
+`aligned_by` is the arithmetic — `src` means the rows in tile `k` are those whose `src_dense >>
+shift` is `k` — and `prefix` is the URL, which is the one part a reader cannot compute. The shift
+comes from `src_chunk_size` for the source-aligned list and `dst_chunk_size` for the target-aligned
+one. A **hop** is therefore two reads: the tile `v` addresses in each direction, filtered to `v`'s
+rows, far ends collected. The work follows the frontier and never the corpus.
+
+### Why the target half is tiled, when drawing does not need it
+
+It was not, and the reason it was not was sound for the question being asked: an edge with one
+endpoint off screen has a visible segment that CSR does not bring, and that is a different question
+from *drawing a window*, which CSR answers exactly ([below](#csr-not-lca)).
+
+What reopened it is a second question with a measurement behind it. A **neighbourhood** — one hop
+from a seed — was implemented in a reader the obvious way, as an undirected adjacency
+(`src → dst UNION ALL dst → src`) under a `WITH RECURSIVE`. On 6.9M edges it **did not return**: one
+hop from a single seed was still running after 45 seconds, and because that reader funnels every
+query through one connection in FIFO, it took the page with it. The adjacency term materialises
+13.8M rows before the recursion starts, and no `limit` on the answer bounds the cost of *finding*
+it.
+
+The shape is wrong rather than the tuning, and the right shape is the one this page already
+describes — except that it needs both directions. **Following only the out-edges is a wrong answer
+rather than a partial one:** "the papers by this author" is an in-edge from the author, and a
+traversal that skips it reports a smaller graph rather than a slower one.
+
+### What a hop costs, measured
+
+Written by `apps/corpus/guards/fixture.mjs` at three sizes (`--layout files`, one file per tile, a
+ring plus one chord per vertex, so two edges per vertex), and read with the `duckdb` CLI. Twelve
+seeds spread evenly across the id space; the addressed and scanned answers are compared row for row
+at every seed, so the two columns are the same answer arrived at differently.
+
+**Bytes a hop reads** — the number that transfers, because it is what a reader over HTTP pays:
+
+| N | edges | the two tiles the seed's id names | both relation files |
+| --- | --- | --- | --- |
+| 250,000 | 500k | **113.0 kB** | 6.9 MB |
+| 1,000,000 | 2.0M | **113.0 kB** | 27.5 MB |
+| 4,000,000 | 8.0M | **113.0 kB** | 110.2 MB |
+
+**The addressed hop is flat in N and the relation is not**, which is the whole claim: 61× less at a
+quarter million, 975× at four million, and the gap is the corpus growing.
+
+**Wall clock**, medians over the twelve seeds, all queries issued inside **one** `duckdb` process
+because a process start is 10–40 ms on this machine and would otherwise be most of what is timed:
+
+| N | addressed | scan the relation | `WITH RECURSIVE`, one hop |
+| --- | --- | --- | --- |
+| 250,000 | 8 ms | 5 ms | 4 ms |
+| 1,000,000 | 2 ms | 5 ms | 7 ms |
+| 4,000,000 | **1 ms** | 16 ms | 23 ms |
+
+<Callout type="warn" title="What this measurement is not">
+**At a quarter million the addressed hop is the slowest of the three.** There is nothing to win on a
+corpus a native engine reads in five milliseconds, and reporting only the four-million row would
+hide that.
+
+**And native DuckDB is the easy case for the other two.** It has every core of the machine and a
+local file; the reader this was tiled for is single-threaded WASM over HTTP, which is where the same
+recursive shape did not return in 45 seconds on 6.9M edges. So the milliseconds here are the
+*floor* of the difference, and the byte column is the part that carries over.
+
+**The graph is a ring with chords.** Every vertex has degree two, so no seed is a hub, and a
+neighbourhood that fans out to a million rows is not measured at all.
+</Callout>
+
+The second tiling is the edge relation on disk a fourth time. At four million vertices it is
+57.2 MiB against a corpus of 247.1 MiB without it — **+23%** — and it costs a drawing reader
+nothing: a window still asks only `by_source`, and the target tiles are fetched by the traversal
+that wants them.
+
+Guards: `tile-of`, which checks each orientation's tiles against its own column and its own declared
+chunk size; `declared-tiling`, which checks that an edge type's `src_chunk_size` equals its source
+type's `chunk_size` and its `dst_chunk_size` its destination type's — a different number there would
+address nothing — and that every declared `adj_list` carries a prefix; and `not-empty`, which is the
+one that notices an orientation with a relation and no tiles, since every other guard here skips
+what is not on disk.
 
 ### CSR, not LCA
 
@@ -115,8 +219,9 @@ drawn, with 1.1×–1.3× over-read at run granularity and 1.9×–2.9× at tile
 
 <Callout title="What that comparison does not cover">
 **"Drawable" means both endpoints on screen.** An edge with one endpoint outside has a visible
-segment and neither placement brings it. Measuring that needs the CSC half, which the corpus already
-carries, and it doubles the addressing rather than the argument.
+segment and neither placement brings it. Measuring that needs the CSC half, which is now tiled —
+but it was tiled for the traversal and not for this, and nobody has since measured what a window
+costs when it fetches both.
 
 **Six windows per size, not a distribution**, all at one zoom, square and centred on the median
 vertex. **And the comparison is in rows, not bytes on the wire** — a high tile compresses *worse*

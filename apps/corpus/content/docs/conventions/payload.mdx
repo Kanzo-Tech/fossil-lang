@@ -85,9 +85,17 @@ The drawing tile carries geometry. Measured on real tiles at five million: a til
 costs **4 requests and 37.0 kB**, from 68.8 kB stored. The same bytes on the wire, one round trip
 fewer and half the storage.
 
-Columns are laid out so they upload to a GPU without transformation — `x` and `y` as separate
-arrays, never interleaved — which removes the interleave step by construction rather than optimising
-it.
+Columns are laid out as separate arrays — `x` and `y`, never interleaved — which is what Parquet
+stores anyway and what leaves the choice of layout to the reader.
+
+<Callout type="warn" title="It does not remove the interleave, it moves it">
+This paragraph claimed the layout lets a tile "upload to a GPU without transformation". That is
+false for the GPU consumer this documentation cites as its own proof: cosmos.gl's
+`setPointPositions` takes one interleaved `[x0, y0, x1, y1, …]` buffer and accepts nothing else, so
+`kanzo-ui` interleaves on the way in. Separate columns are still right — a reader that wants them
+apart gets them apart, and one that wants them together pays a single pass it would otherwise pay
+twice — but the step is relocated to the reader rather than removed by construction.
+</Callout>
 
 ## The payload format is open
 

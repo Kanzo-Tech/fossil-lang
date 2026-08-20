@@ -1,0 +1,437 @@
+/**
+ * The address of a corpus, resolved from its manifest.
+ *
+ * A tile is a fixed range of `dense_id` and its address is a shift, so a reader computes every URL
+ * it wants before it emits the first request. That arithmetic was published as prose and copied
+ * into a reader by hand, and nothing compared the two: change a prefix or a shift and the reader
+ * composes URLs that 404 at runtime, in a browser, with no type error and no failing test. This
+ * module is the copy nobody has to make.
+ *
+ * **Synchronous, and that is the claim rather than an omission.** It takes no `fetch`, opens no
+ * connection and returns no promise. The camera is addressed, not queried — a request between the
+ * camera moving and a URL being computable is the `viewport` verb this format deleted. Everything
+ * here is a function of the manifest bytes the host already holds.
+ *
+ * **What it does not do**, and each absence is the seam this package is on the far side of:
+ *
+ * - **No bytes.** Nothing here fetches, decodes or reads Parquet. `tileUrl` hands back a string.
+ * - **No boxes.** Which tiles a rectangle touches comes from the per-tile `x`/`y` statistics in the
+ *   Parquet footers, and reading a footer needs a Parquet reader. The host has one; this package
+ *   would have to grow one, and the address is the half that cannot be re-derived from the corpus
+ *   itself. So the host reads its own footers and hands the tile numbers back here.
+ * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
+ *
+ * @see {@link resolveCorpus}
+ */
+
+import {
+  CorpusManifestError,
+  GRAPH_INFO_PATH,
+  join,
+  mappings,
+  paths,
+  required,
+  requiredNumber,
+  scan,
+  type ScannedManifest,
+} from './manifest.js';
+
+export { CorpusManifestError, GRAPH_INFO_PATH } from './manifest.js';
+
+/**
+ * Which endpoint column addresses an adjacency's tiles — the manifest's own `aligned_by`.
+ *
+ * `src` is CSR and `dst` is CSC. They are separate addresses rather than one undirected one for the
+ * same reason the camera is addressed at all: a union of two relations is a scan, and a pair of
+ * URLs is not.
+ */
+export type Direction = 'src' | 'dst';
+
+/** How many bits a `dense_id` is shifted right by, for the default `chunk_size` of 4,096. */
+export const TILE_SHIFT = 12n;
+
+/**
+ * The shift that addresses a tile of `rows` rows, or `null` if no shift does.
+ *
+ * A tile size that is not a power of two forces a division where a shift does, which is why
+ * `chunk_size` is a power of two or the corpus does not have an address.
+ */
+export function shiftFor(rows: number | bigint): bigint | null {
+  const n = BigInt(rows);
+  if (n <= 0n || (n & (n - 1n)) !== 0n) return null;
+  let shift = 0n;
+  for (let r = n; r > 1n; r >>= 1n) shift += 1n;
+  return shift;
+}
+
+/**
+ * The tile a `dense_id` lives in — the whole of the addressing scheme.
+ *
+ * **A `BigInt`, and it refuses a `Number`.** A `dense_id` may carry more than 53 bits, and
+ * JavaScript's `>>` truncates to 32 bits *before* it shifts, so the same three characters mean
+ * something different here than in the Rust that wrote the corpus. The published border vectors
+ * (`apps/corpus/guards/vectors.json`) are 2³¹, where a port that took the shift as signed gives a
+ * negative tile, and 2⁵³, where a port that went through a `Number` stops being exact.
+ */
+export function tileOf(denseId: bigint, shift: bigint = TILE_SHIFT): bigint {
+  if (typeof denseId !== 'bigint') {
+    throw new TypeError(
+      `tileOf takes a BigInt; got ${typeof denseId}. A dense_id carries more bits than a Number ` +
+        `can hold, and JavaScript's >> truncates to 32 before it shifts.`,
+    );
+  }
+  if (denseId < 0n) throw new RangeError(`dense_id is unsigned; got ${denseId}`);
+  return denseId >> shift;
+}
+
+/** One vertex type's address: where its tiles are and which `dense_id` range each holds. */
+export interface VertexAddress {
+  /** The type label, e.g. `Person`. */
+  readonly type: string;
+  /** Where its tiles are, resolved against the corpus base and with a trailing separator. */
+  readonly prefix: string;
+  /** Rows per tile. A power of two, checked at resolve. */
+  readonly chunkSize: number;
+  /** `log2(chunkSize)` — the shift that turns a `dense_id` into a tile number. */
+  readonly shift: bigint;
+  /** The tile holding `denseId`. */
+  tileOf(denseId: bigint): bigint;
+  /**
+   * `<prefix>chunk{k}.parquet`, the file-per-tile container fossil emits.
+   *
+   * The other container — one file, one row group per tile, where the address is the row-group
+   * ordinal — has no per-tile URL to compose, and no field in the manifest distinguishes the two.
+   * That is a live design question on `/docs/conventions/addressing`, not something this resolves.
+   */
+  tileUrl(tile: number | bigint): string;
+}
+
+/** One orientation of one edge type: declared by the manifest, or absent from it. */
+export interface AdjacencyAddress {
+  readonly direction: Direction;
+  /** Where its tiles are, resolved against the corpus base and with a trailing separator. */
+  readonly prefix: string;
+  /** The endpoint column tile `k` filters on: `src_dense` for `src`, `dst_dense` for `dst`. */
+  readonly column: 'src_dense' | 'dst_dense';
+  /** `src_chunk_size` for `src`, `dst_chunk_size` for `dst` — a different space on a cross-type edge. */
+  readonly chunkSize: number;
+  readonly shift: bigint;
+  tileOf(denseId: bigint): bigint;
+  /** `<edge prefix><adj prefix>tile{k}.parquet`. A 404 is "these vertices have no edges here". */
+  tileUrl(tile: number | bigint): string;
+}
+
+/** One edge type's address, with an entry per orientation the manifest declares. */
+export interface EdgeAddress {
+  readonly edgeType: string;
+  readonly srcType: string;
+  readonly dstType: string;
+  /** Where the type lives, resolved against the corpus base and with a trailing separator. */
+  readonly prefix: string;
+  /**
+   * The orientations that resolve to an address — never a direction the manifest does not publish.
+   *
+   * An `adj_lists` entry the manifest omits, or declares without a `prefix`, is not here. A
+   * corpus that tiles only CSR has `['src']`, and asking it for `dst` returns `null` rather than a
+   * string that 404s.
+   */
+  readonly directions: readonly Direction[];
+  /** The declared orientation, or `null` when the corpus does not publish one. */
+  adjacency(direction: Direction): AdjacencyAddress | null;
+}
+
+/** Why an orientation is missing from an answer. Both reasons are honest; they are not the same. */
+export type GapReason =
+  /** The caller did not ask for this direction. */
+  | 'not-requested'
+  /** The manifest does not publish an address for it, so no URL exists to ask for. */
+  | 'not-declared';
+
+/** One orientation of one edge type that a window did not read, and why. */
+export interface Gap {
+  readonly edgeType: string;
+  readonly direction: Direction;
+  readonly reason: GapReason;
+}
+
+/** The URLs one edge type contributes to a window, in the orientation that addresses it. */
+export interface EdgeTiles {
+  readonly edgeType: string;
+  readonly direction: Direction;
+  readonly urls: readonly string[];
+}
+
+/**
+ * The tiles a set of vertex tiles addresses, **and what that set is complete for.**
+ *
+ * A partial answer has to be distinguishable from a complete one. CSR alone is complete for
+ * *drawing* — every drawable edge has its source on screen, therefore in a tile the window already
+ * fetched — and incomplete for *incidence*: an edge whose destination is drawn and whose source the
+ * window never selected is unreachable through `by_source`, and there are measurably many. So
+ * `complete` is about incidence and `gaps` says which orientations are missing from it, separating
+ * the caller not asking from the corpus not publishing.
+ */
+export interface Window {
+  /** The vertex type the tile numbers are in the `dense_id` space of. */
+  readonly type: string;
+  readonly tiles: readonly number[];
+  readonly vertexUrls: readonly string[];
+  readonly edges: readonly EdgeTiles[];
+  /** Every URL in {@link edges}, flattened, in declaration order. */
+  readonly edgeUrls: readonly string[];
+  /** `true` when every edge incident to a vertex in these tiles is in one of these files. */
+  readonly complete: boolean;
+  readonly gaps: readonly Gap[];
+}
+
+/** What {@link resolveCorpus} takes. */
+export interface ResolveCorpusOptions {
+  /**
+   * The manifest YAMLs, keyed by dataset-relative path, pre-fetched by the host — the same shape
+   * `createGraphClient` already takes. They are small: one index plus one file per type.
+   */
+  manifestFiles: Record<string, string>;
+  /**
+   * Where the corpus lives, without a trailing slash — a URL origin and path, a static route, or
+   * `''` for addresses relative to the dataset root. Prepended to every URL and nothing else.
+   */
+  base?: string;
+}
+
+/** A corpus resolved to addresses. Every method is pure and synchronous. */
+export interface ResolvedCorpus {
+  readonly base: string;
+  readonly types: readonly VertexAddress[];
+  readonly edges: readonly EdgeAddress[];
+  /** One vertex type by name, or the first the index names when no name is given. */
+  vertexType(name?: string): VertexAddress;
+  /** The edge types incident to `type` — as source, as destination, or both on a self-edge. */
+  incident(type: string): readonly EdgeAddress[];
+  /**
+   * The URLs a set of vertex tiles addresses.
+   *
+   * `directions` defaults to `['src']`, which is the drawing read: it fetches the out-edges of
+   * every vertex in the window and returns `complete: false` with a `not-requested` gap, because a
+   * window of drawn vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the
+   * incident set.
+   */
+  window(params: {
+    type?: string;
+    tiles: Iterable<number | bigint>;
+    directions?: readonly Direction[];
+  }): Window;
+}
+
+const COLUMN: Record<Direction, 'src_dense' | 'dst_dense'> = {
+  src: 'src_dense',
+  dst: 'dst_dense',
+};
+
+/** A prefix as the manifest writes it: dataset-relative, one trailing separator. */
+function prefixOf(value: string): string {
+  return `${value.replace(/\/+$/, '')}/`;
+}
+
+function vertexAddress(base: string, path: string, yaml: ScannedManifest): VertexAddress {
+  const type = required(yaml, path, 'type');
+  const chunkSize = requiredNumber(yaml, path, 'chunk_size');
+  const shift = shiftFor(chunkSize);
+  if (shift === null) {
+    throw new CorpusManifestError(
+      `${path} declares a tile of ${chunkSize} rows, which no shift addresses`,
+    );
+  }
+  const prefix = prefixOf(join(base, required(yaml, path, 'prefix')));
+  return {
+    type,
+    prefix,
+    chunkSize,
+    shift,
+    tileOf: (denseId) => tileOf(denseId, shift),
+    tileUrl: (tile) => `${prefix}chunk${BigInt(tile)}.parquet`,
+  };
+}
+
+function edgeAddress(
+  base: string,
+  path: string,
+  yaml: ScannedManifest,
+  types: readonly VertexAddress[],
+): EdgeAddress {
+  const srcType = required(yaml, path, 'src_type');
+  const dstType = required(yaml, path, 'dst_type');
+  const edgeType = required(yaml, path, 'edge_type');
+  const prefix = prefixOf(join(base, required(yaml, path, 'prefix')));
+
+  const endpoint = (name: string, role: string): VertexAddress => {
+    const found = types.find((t) => t.type === name);
+    if (!found) {
+      throw new CorpusManifestError(
+        `${path} names ${role} type ${name}, which the index does not declare`,
+      );
+    }
+    return found;
+  };
+  const src = endpoint(srcType, 'source');
+  const dst = endpoint(dstType, 'destination');
+
+  // An edge tile is addressed by a *vertex* tile, so a different number here would address
+  // nothing — and it would address nothing silently, because the URLs still compose and the files
+  // they name mostly exist. Checked once, here, rather than trusted in a comment beside a reader.
+  const sizes: Array<[string, number, VertexAddress]> = [
+    ['src_chunk_size', requiredNumber(yaml, path, 'src_chunk_size'), src],
+    ['dst_chunk_size', requiredNumber(yaml, path, 'dst_chunk_size'), dst],
+  ];
+  for (const [key, declared, vertex] of sizes) {
+    if (declared !== vertex.chunkSize) {
+      throw new CorpusManifestError(
+        `${path} declares ${key} ${declared} against ${vertex.type}'s chunk_size ${vertex.chunkSize}, ` +
+          `so its tiles address nothing`,
+      );
+    }
+  }
+  const chunkSize = requiredNumber(yaml, path, 'chunk_size');
+  if (chunkSize !== sizes[0]![1]) {
+    throw new CorpusManifestError(
+      `${path} declares chunk_size ${chunkSize} and src_chunk_size ${sizes[0]![1]}`,
+    );
+  }
+
+  const declared = new Map<Direction, AdjacencyAddress>();
+  for (const entry of mappings(yaml, 'adj_lists')) {
+    const alignedBy = entry.aligned_by;
+    if (alignedBy !== 'src' && alignedBy !== 'dst') continue;
+    // The one part of a tile's URL a reader cannot compute. An orientation declared without it has
+    // tiles nobody can address, so it is not an address and does not become one here.
+    const adjPrefix = (entry.prefix ?? '').replace(/\/+$/, '');
+    if (adjPrefix === '') continue;
+    const vertex = alignedBy === 'src' ? src : dst;
+    const tilePrefix = prefixOf(join(prefix, adjPrefix));
+    declared.set(alignedBy, {
+      direction: alignedBy,
+      prefix: tilePrefix,
+      column: COLUMN[alignedBy],
+      chunkSize: vertex.chunkSize,
+      shift: vertex.shift,
+      tileOf: (denseId) => tileOf(denseId, vertex.shift),
+      tileUrl: (tile) => `${tilePrefix}tile${BigInt(tile)}.parquet`,
+    });
+  }
+
+  return {
+    edgeType,
+    srcType,
+    dstType,
+    prefix,
+    directions: (['src', 'dst'] as const).filter((d) => declared.has(d)),
+    adjacency: (direction) => declared.get(direction) ?? null,
+  };
+}
+
+/**
+ * Resolve a corpus's manifest set into the addresses a reader composes URLs from.
+ *
+ * ```ts
+ * const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
+ * const person = corpus.vertexType();
+ * const { edgeUrls, complete, gaps } = corpus.window({ tiles: [3, 4], directions: ['src', 'dst'] });
+ * ```
+ *
+ * Throws {@link CorpusManifestError} when the manifest cannot address itself — a missing file, a
+ * `chunk_size` no shift addresses, an endpoint type the index does not declare, or an edge whose
+ * declared tile size disagrees with the vertex type that addresses it. It does **not** throw for an
+ * orientation the corpus does not publish: that is a legitimate corpus, and it is reported as an
+ * address that does not exist rather than one that 404s.
+ */
+export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
+  const { manifestFiles, base = '' } = options;
+
+  const read = (path: string): ScannedManifest => {
+    const text = manifestFiles[path];
+    if (text === undefined) {
+      throw new CorpusManifestError(
+        `the manifest names ${path}, which is not among the ${Object.keys(manifestFiles).length} ` +
+          `file(s) given`,
+      );
+    }
+    return scan(path, text);
+  };
+
+  const index = read(GRAPH_INFO_PATH);
+  // `prefix` on the index is what the per-type paths are relative to; it is `''` in every corpus
+  // fossil writes, and honoured rather than assumed because the field exists to be set.
+  const root = join(base, typeof index['prefix'] === 'string' ? index['prefix'] : '');
+
+  const types = paths(index, 'vertices').map((path) => vertexAddress(root, path, read(path)));
+  if (types.length === 0) {
+    throw new CorpusManifestError(`${GRAPH_INFO_PATH} names no vertex type`);
+  }
+  const edges = paths(index, 'edges').map((path) => edgeAddress(root, path, read(path), types));
+
+  const vertexType = (name?: string): VertexAddress => {
+    if (name === undefined) return types[0]!;
+    const found = types.find((t) => t.type === name);
+    if (!found) {
+      throw new CorpusManifestError(
+        `no vertex type ${name} in ${GRAPH_INFO_PATH}; it names ${types.map((t) => t.type).join(', ')}`,
+      );
+    }
+    return found;
+  };
+
+  const incident = (type: string): readonly EdgeAddress[] =>
+    edges.filter((e) => e.srcType === type || e.dstType === type);
+
+  return {
+    base,
+    types,
+    edges,
+    vertexType,
+    incident,
+
+    window({ type, tiles, directions = ['src'] }) {
+      const vertex = vertexType(type);
+      const wanted = new Set(directions);
+      const numbers = [...tiles].map(Number);
+      const edgeTiles: EdgeTiles[] = [];
+      const gaps: Gap[] = [];
+
+      for (const edge of incident(vertex.type)) {
+        // Only the orientations whose *own* `dense_id` space is this window's. On a cross-type edge
+        // `by_target` tile k addresses tile k of the destination type, which is a different set of
+        // vertices — reading it for a window over the source type would answer a question nobody
+        // asked and call it the neighbourhood.
+        const applicable: Direction[] = [];
+        if (edge.srcType === vertex.type) applicable.push('src');
+        if (edge.dstType === vertex.type) applicable.push('dst');
+
+        for (const direction of applicable) {
+          const adjacency = edge.adjacency(direction);
+          if (adjacency === null) {
+            gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-declared' });
+            continue;
+          }
+          if (!wanted.has(direction)) {
+            gaps.push({ edgeType: edge.edgeType, direction, reason: 'not-requested' });
+            continue;
+          }
+          edgeTiles.push({
+            edgeType: edge.edgeType,
+            direction,
+            urls: numbers.map((k) => adjacency.tileUrl(k)),
+          });
+        }
+      }
+
+      return {
+        type: vertex.type,
+        tiles: numbers,
+        vertexUrls: numbers.map((k) => vertex.tileUrl(k)),
+        edges: edgeTiles,
+        edgeUrls: edgeTiles.flatMap((e) => e.urls),
+        complete: gaps.length === 0,
+        gaps,
+      };
+    },
+  };
+}

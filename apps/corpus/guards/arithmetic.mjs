@@ -104,6 +104,16 @@ export function morton2(x, y) {
  * out and renumbered independently. A degenerate axis — every value equal — maps to 0 rather than
  * dividing by zero.
  *
+ * **Every step is binary32**, which is why each one is wrapped in `Math.fround`. The writer is
+ * `morton_codes` in `crates/fossil-runtime/src/layout.rs`, whose positions, extent and intermediate
+ * ratio are all `f32`; JavaScript's own arithmetic is binary64, so a literal transcription of the
+ * formula is a *different function*. It differs on 8 of the 44,850 integer cases with `lo = 0` and
+ * `hi ∈ 2..299` — `quantize(147, 0, 167)` is 57687 in binary32 and 57686 in binary64 — and one unit
+ * here is a different Morton code, a different rank, a different `dense_id` and a different tile.
+ * `vectors.json` carries that case; the four rows beside it are exact in both widths and cannot.
+ *
+ * The DuckDB half of the guard (`mortonSql` in `guards.mjs`) spells the same thing `::FLOAT`.
+ *
  * @param {number} v
  * @param {number} lo
  * @param {number} hi
@@ -111,8 +121,9 @@ export function morton2(x, y) {
  */
 export function quantize(v, lo, hi) {
   if (hi <= lo) return 0;
-  const t = Math.min(Math.max((v - lo) / (hi - lo), 0), 1);
-  return Math.round(t * 65535);
+  const f = Math.fround;
+  const t = Math.min(Math.max(f(f(f(v) - f(lo)) / f(f(hi) - f(lo))), 0), 1);
+  return Math.round(f(t * 65535));
 }
 
 /**

@@ -37,6 +37,33 @@ It is also the *smallest* of the three at the moment it exists, which is what ma
 the process holds 15.68 GiB when the graph itself holds 1.64. That residency was operator memory,
 and bounding it is the [budget's](/docs/scale/larger-than-ram) job.
 
+**And the obvious fix does not fix it.** "Write each table and drop it" is what a stage boundary
+holding a list of tables invites, and on this corpus it frees nothing, because the corpus is *one*
+vertex type and *one* edge type — the encode phase reports six files, which is one vertex Parquet,
+two edge orientations and three manifests. A boundary holding one of each is not an accumulation
+over the schema; it is one table, and per-table streaming has nothing to stream past.
+
+Where the 1.64 GiB is, from the published row counts and the Arrow width of the columns rather than
+from a probe: 71,024,690 edges in two orientations of two `u32`s is **1.06 GiB**, so the edges are
+roughly 65% of the boundary and the ten million vertices are the rest. That split is arithmetic and
+not a measurement, and it is worth taking as a direction rather than as a number.
+
+Which makes the shape of the real fix specific. **The vertex half cannot be streamed away** — the
+edge phase joins against every vertex type registered as a `MemTable`, and those are the same Arrow
+buffers the boundary holds, not a second copy, so nothing is freed until the context is dropped and
+the edge phase is over by then. **The edge half is not pinned by anything**: it is collected after
+the last join that needs it, and the only reader is the encoder. Streaming it means the sink
+consuming a `RecordBatch` stream where it now consumes a `Vec`, and it is the half with the bytes
+in it.
+
+<Callout type="warn" title="What would say this is right">
+Nothing here has been measured. The last seam on this page was **refuted** by the probe after
+exactly this kind of reasoning, and the one before it went the *wrong way* by seven gigabytes while
+three tests stayed green. A number from `FOSSIL_MEM_PROBE=1` on the ten-million corpus, before and
+after, is the acceptance criterion; this paragraph is a hypothesis with a shape, and it is written
+down so the next attempt starts from a sharper one than "the boundary holds a value".
+</Callout>
+
 ### The one that was refuted
 
 The encoder built the whole corpus into a list of files before the sink wrote a byte. It now builds

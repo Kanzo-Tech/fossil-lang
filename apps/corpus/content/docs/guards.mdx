@@ -62,7 +62,8 @@ containers, one file per tile and one file with row groups, and requires all fif
 on both.
 
 **Mutation.** For each guard, it copies that corpus, breaks exactly one convention, and requires
-that guard to fire. One break each:
+that guard to fire. At least one break each — a convention with two ways of being broken that a
+reader would not confuse owes one apiece:
 
 | guard | the break |
 | --- | --- |
@@ -81,6 +82,8 @@ that guard to fire. One break each:
 | `exactly-once` | the staged single-file vertex Parquet left beside the tiles |
 | `footer-is-the-index` | `x` nested in a struct, so the footer holds a box for `x, v` and none for `x` |
 | `identity-is-the-subject` | two vertices sharing a subject IRI |
+| `not-empty` | the `by_target` tiles are not written, so a hop has one direction |
+| `tile-of` | the `by_target` tiles cut on `src_dense`, which is the source half again |
 
 Collateral — other guards firing on the same break — is **reported rather than forbidden**. Some
 conventions genuinely cannot be violated in isolation: deleting a vertex breaks the id sequence and
@@ -98,6 +101,36 @@ That makes it a second implementation of the arithmetic at fixture scale, which 
 conventions ask of anyone. It is not a benchmark and not a realistic graph: the positions come from
 a grid of phyllotactic discs because that is a shape with real clustering and no dependencies.
 Nothing in it is normative. The conventions are.
+
+## The conformance corpus is a second reader
+
+The guards check a corpus. They do not check that two readers **address** it the same way, and that
+is where the format goes wrong quietly: a URL composed from a stale copy of a convention 404s at
+runtime, in a browser, with no type error and nothing red.
+
+`apps/corpus/conformance/` is the artefact for that half.
+
+```bash
+node apps/corpus/conformance/verify.mjs
+```
+
+- `corpus/` — 300 vertices in five tiles of 64, both orientations tiled, the last tile deliberately
+  partial. Small enough to read by hand and large enough to have boundaries; it satisfies all
+  fifteen guards, so every address below names a file that is there.
+- `manifests/` — four manifest sets with no payload, each holding a case a whole corpus cannot: an
+  edge type that publishes only `aligned_by: src`, one that declares the target half with no
+  `prefix`, a cross-type edge whose two endpoints are on different tile sizes, and one whose
+  declared tile size disagrees with the vertex type addressing it.
+- `expected.json` — every address that must compose, and every one that must be **refused**.
+
+Two implementations execute that table and neither wrote it: `verify.mjs`, in plain Node with no npm
+and no build, and `packages/graph/tests/conformance.test.ts`, which runs the published
+`resolveCorpus`. A change on either side that moves an address moves it away from the other.
+
+**`chunk_size` is 64 there, and that is the point rather than a shortcut.** 4,096 is a measured
+trade-off between requests and bytes on a corpus of millions, not an invariant — the convention is a
+power of two. A corpus that declares another one is addressed by exactly the same arithmetic, and a
+reader that hard-codes the shift passes every test written at 4,096.
 
 ## What no guard here reaches
 

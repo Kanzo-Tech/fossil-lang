@@ -1,0 +1,10 @@
+type: Person
+chunk_size: 4096
+prefix: vertex/Person/
+property_groups:
+- file_type: parquet
+  properties:
+  - name: subject
+    data_type: string
+    is_primary: true
+version: gar/v1
