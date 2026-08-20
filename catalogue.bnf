@@ -1,0 +1,70 @@
+(* ==========================================================================
+   catalogue.bnf — WHAT NAMES EXIST.
+
+   `grammar.bnf` says the SHAPE of a program; this says the NAMES one may
+   write. Ruling 14 of `SURFACE-PLAN.md`: «dos ficheros de datos y un
+   compilador». This is the second file.
+
+   Reference: rust-analyzer's `rust.ungram` — a data file beside the compiler,
+   with a test that fails when the Rust drifts from it. Not invented here.
+
+   # What is data and what is not
+
+   A row has two halves and only one of them can live in a file:
+
+     - DATA      the name written after `io.`, the extensions it accepts, and
+                 which capabilities it declares. All of it is here.
+     - BEHAVIOUR the function that turns bytes into rows or into types. A file
+                 cannot carry code, so the implementing crate supplies it and
+                 the loader matches it BY NAME.
+
+   That split is rustc's `Providers`: the data says what exists, the code
+   registers what it can do. It also buys a diagnostic the tree cannot make
+   today — a host that cannot link SHACL currently just lacks the row, so
+   `io.shacl("x.ttl")` reports «not an installed row», which is what a typo
+   reports too. With the halves separate, "declared but not linked here" and
+   "no such name" are different answers.
+
+   # Status
+
+   The rows below are the source of truth for the DATA half and
+   `crates/fossil-descriptors-output/tests/catalogue_parity.rs` fails when the statics in
+   `crates/fossil-base/src/providers.rs` and
+   `crates/fossil-descriptors-output/src/lib.rs` disagree with them. Generating
+   those statics from this file — so the Rust cannot drift at all rather than
+   being caught drifting — is the step after.
+   ========================================================================== *)
+
+(* ---------------------------------------------------------------- io, data *)
+(* Rows that read ROWS. `reads` names how the bytes become a relation:
+   `native <fn>` is a DuckDB table function, `materialised` means something
+   outside the reader produces the relation and the core only scans it. *)
+
+row csv     = extensions "csv"                    ; reads native read_csv_auto  .
+row json    = extensions "json"                   ; reads native read_json_auto .
+row parquet = extensions "parquet"                ; reads native read_parquet   .
+row rdf     = extensions "ttl" "nt" "n3" "rdf"    ; reads materialised          .
+
+(* --------------------------------------------------------------- io, types *)
+(* Rows that read TYPES. `decodes` names the function the implementing crate
+   registers; there is no `native` here, because a shape language is decoded in
+   Rust and never by the database.
+
+   `rdf` and `shacl` both accept `.ttl` and that is not a conflict: the name
+   decides. `io.rdf("g.ttl")` reads rows out of a graph, `io.shacl("s.ttl")`
+   reads types out of a shapes graph — two capabilities over one syntax, told
+   apart by the name, which is the whole of ruling 13. *)
+
+row shex    = extensions "shex" "shexj" "shexc"   ; decodes decode_shex         .
+row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        .
+
+(* ------------------------------------------------------------- NOT IN HERE *)
+(* The WRITE half of ruling 13's table is deliberately absent, not stubbed:
+   `grammar.bnf` says «`io` names only the INPUT», and where a program writes
+   to has no syntax at all. A row for it here would be a name no program can
+   write.
+
+   The stdlib catalogue — `str.slug`, `parse.date`, the receivers of ADR-0059 —
+   is NOT here yet. It is the larger half of ruling 14 (`stdlib.rs` is 1209
+   lines of Rust dispatching by string) and it wants the same treatment; this
+   file is the shape it will take. *)
