@@ -24,7 +24,7 @@
 //!    a descriptor for the mapping's source **URI** via
 //!    `db.system().descriptors()` (browser-side `DuckDB-WASM` via
 //!    `FossilPlayground::registerInferredDescriptor`; the native engine via
-//!    the `duckdb` crate), `resolve_source_row` consumes that descriptor and
+//!    the `duckdb` crate), `resolve_source_scope` consumes that descriptor and
 //!    builds the [`Record`] directly — no CSVW JSON is read from disk.
 //!
 //!    The lookup key is the URI as the program writes it, not the binding
@@ -71,7 +71,7 @@ use crate::ty::{Record, RecordField, Ty, TyKind};
 /// host-registered [`fossil_descriptors_input::InferredDescriptor`] ONLY.
 ///
 /// Side-effect-free: no diagnostics, no filesystem reads — the
-/// descriptor-branch of [`resolve_source_row`] without the type-check's
+/// descriptor-branch of [`resolve_source_scope`] without the type-check's
 /// `delay_span_bug` emission. For IDE features (completion, hover) that want
 /// the source schema OUTSIDE a tracked query. Returns `None` when no descriptor
 /// is registered for the mapping's source URI — the host did not pre-introspect.
@@ -250,19 +250,6 @@ pub fn resolve_source_scope<'db>(
     let source_name = hir_mapping.source_binding.clone();
 
     resolve_binding_scope(db, file, source_name.as_str(), 0).map(Some)
-}
-
-/// The source-row [`Ty`] a mapping's body resolves a BARE name against — the
-/// flattening of [`resolve_source_scope`].
-///
-/// A qualified reference must not come through here: flattening is what loses
-/// the binding, and after a join it is what makes two columns called `id`
-/// answer as one.
-pub fn resolve_source_row<'db>(
-    db: &'db dyn fossil_base::Db,
-    mapping: MappingLoc<'db>,
-) -> Result<Option<Ty<'db>>, fossil_base::ErrorGuaranteed> {
-    Ok(resolve_source_scope(db, mapping)?.and_then(|scope| scope.flat(db)))
 }
 
 /// A source pipeline that derives from a pipeline that derives from … Thirty-two

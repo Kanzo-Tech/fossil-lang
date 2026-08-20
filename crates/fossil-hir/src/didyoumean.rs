@@ -6,9 +6,9 @@
 //! typo so a short field name (e.g. `id`) does not match an unrelated short
 //! name, while a longer name (`username`) tolerates more edits.
 //!
-//! Used by the bidirectional checker's `lookup_field` (plan 03-05 Task 2) when
-//! a `.field` access misses every column declared by the CSVW source row —
-//! the suggestion is surfaced in the field-not-found diagnostic (SC#1).
+//! Used by the bidirectional checker's `lookup_field` when a `.field` access
+//! misses every column the source row declares — the suggestion is surfaced in
+//! the field-not-found diagnostic.
 
 use strsim::damerau_levenshtein;
 

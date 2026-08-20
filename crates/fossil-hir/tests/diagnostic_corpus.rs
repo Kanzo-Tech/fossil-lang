@@ -1,9 +1,9 @@
-//! Phase 3 diagnostic golden-file corpus (plan 03-08).
+//! Diagnostic golden-file corpus.
 //!
-//! Locks SC#1..SC#5 of the Phase 3 ROADMAP success criteria as regression
-//! tests, and grows toward a negative-test suite for SILENT SEMANTIC ERRORS:
-//! a mapping that compiles and emits wrong RDF, which is the failure class
-//! this whole corpus exists to make impossible.
+//! Locks the checker's diagnostics as regression tests, and grows toward a
+//! negative-test suite for SILENT SEMANTIC ERRORS: a mapping that compiles and
+//! emits wrong RDF, which is the failure class this whole corpus exists to make
+//! impossible.
 //!
 //! # Fixture layout
 //!
@@ -165,7 +165,7 @@ fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
 /// query**. The `mapping.fossil`'s `io.shex("…")` path is resolved relative to
 /// the fixture directory, so the target shape is bound by the real
 /// `resolve_target_shape` path and the source row by the real
-/// `resolve_source_row` one.
+/// `resolve_source_scope` one.
 ///
 /// Returns the rendered diagnostics (the golden output the `.snap` captures).
 fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
@@ -471,13 +471,15 @@ fn disjunction_rejection_three_branches() {
     ));
 }
 
-// ===== Bucket 4: Implicit Closure Synthesis (SC#3 — diagnostic shape) =======
-// Phase 3 v0.1 has NO surface pipeline/closure form (HirExpr is the Phase 2
-// leaf surface — no Call/Pipeline), so implicit closure synthesis is unreachable
-// through a .fossil source + typecheck_mapping. The closure-synthesis algorithm
-// + SC#3 rendering are proven in-crate (crates/fossil-hir/src/check_tests.rs,
-// plan 03-06) and at the LSP hover layer (crates/fossil-lsp/tests/
-// lsp_hover_smoke.rs, plan 03-07). These corpus fixtures lock the reachable
+// ===== Bucket 4: Implicit Closure Synthesis (diagnostic shape) ==============
+// This block was written when `HirExpr` was a leaf surface with no `Call`, and
+// concluded that implicit closure synthesis was unreachable through a .fossil
+// source + typecheck_mapping. `HirExpr::Call` EXISTS now (`lower.rs`), so the
+// premise is stale and the conclusion is unverified — do not read the next
+// sentence as a measurement. The closure-synthesis algorithm and its rendering
+// are proven in-crate (crates/fossil-hir/src/check_tests.rs) and at the LSP
+// hover layer (crates/fossil-lsp/tests/lsp_hover_smoke.rs). These corpus
+// fixtures lock the reachable
 // surface: did-you-mean firing on a body column reference that WILL live inside
 // a synthesised closure once the surface lambda form lands. (It said `FieldRef`
 // — the leading-dot node. There is no `FieldRef`: every reference is qualified,

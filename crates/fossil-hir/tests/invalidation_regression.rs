@@ -46,11 +46,11 @@
 //!     5-14. mapping_cst_node(M_0..M_9)     — re-runs for ALL 10 mappings; output is structurally-equal for 9 siblings (rowan Arc-shared subtrees); only M_3's output differs
 //!
 //!   * STRUCTURAL PASS (what the checker reads file-keyed):
-//!     - lower_to_hir(file)                 — re-runs, returns structurally-equal HirFile (header-only signatures unchanged by a body edit); downstream validates. typecheck_mapping reads it (via resolve_source_row + mapping/source name lookups) so it joins the file-keyed structural pass. File-keyed, NOT a per-mapping fan-out.
+//!     - lower_to_hir(file)                 — re-runs, returns structurally-equal HirFile (header-only signatures unchanged by a body edit); downstream validates. typecheck_mapping reads it (via resolve_source_scope + mapping/source name lookups) so it joins the file-keyed structural pass. File-keyed, NOT a per-mapping fan-out.
 //!
 //!   * PER-MAPPING FAN-OUT (the load-bearing invariant — only M_3 fans out):
 //!     15. body(M_3)                        — output of mapping_cst_node(M_3) changed
-//!     16. typecheck_mapping(M_3)           — reads body(M_3) + spans(M_3) + resolve_source_row + resolve_target_shape; re-runs for the edited mapping ONLY
+//!     16. typecheck_mapping(M_3)           — reads body(M_3) + spans(M_3) + resolve_source_scope + resolve_target_shape; re-runs for the edited mapping ONLY
 //!     17. spans(M_3)                       — per-mapping side table; depends on mapping_cst_node(M_3); re-runs for the edited mapping ONLY (siblings stay cached via the same Arc-shared subtree barrier)
 //!     (expr_types(M_3) is a thin accessor over typecheck_mapping(M_3);
 //!      after the edit its input output is structurally-equal — the
@@ -97,13 +97,13 @@
 //!   (a) `spans(db, mapping)` is a query of its own rather than a field on
 //!       `body`, so it re-executes on its own line; it is per-mapping, so it
 //!       costs one, not ten.
-//!   (b) `typecheck_mapping(M_3)` re-executes, and its `resolve_source_row` /
+//!   (b) `typecheck_mapping(M_3)` re-executes, and its `resolve_source_scope` /
 //!       mapping-name lookups add a file-keyed `lower_to_hir(file)` to the
 //!       structural pass. `expr_types(M_3)` is a THIN ACCESSOR over it, and
 //!       its input is structurally-equal after a body-only edit of a
 //!       schema-less mapping, so it VALIDATES instead of re-executing.
 //!
-//! `resolve_source_row` reads `def_map(file)` + `lower_to_hir(file)`
+//! `resolve_source_scope` reads `def_map(file)` + `lower_to_hir(file)`
 //! (signatures-only, file-keyed, structurally stable across body edits) —
 //! NEVER walks up from `mapping_cst_node` to the FILE CST. The
 //! per-mapping fan-out stays at 1 (verified below).
@@ -436,7 +436,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
          fan-out invariant); got {body_count}. keys: {keys:#?}"
     );
 
-    // typecheck_mapping reads body(M_3) + spans(M_3) + resolve_source_row +
+    // typecheck_mapping reads body(M_3) + spans(M_3) + resolve_source_scope +
     // resolve_target_shape, so it re-executes exactly ONCE for the edited
     // mapping (the load-bearing per-mapping fan-out invariant).
     assert!(
@@ -444,7 +444,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
         "FORBIDDEN per-mapping fan-out: typecheck_mapping re-executed \
          {typecheck_count} times after a single-mapping body edit (cap = \
          {MAX_PER_MAPPING_FAN_OUT}). If typecheck_count == 10, the \
-         resolve_source_row / typecheck_mapping path is depending on \
+         resolve_source_scope / typecheck_mapping path is depending on \
          parse(file) without a barrier — fix the \
          data layout, do NOT relax. keys: {keys:#?}"
     );

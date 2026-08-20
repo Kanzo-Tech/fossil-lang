@@ -10,7 +10,7 @@
 //! node smoke test under `packages/wasm/`. On native
 //! targets the wrapper cannot be called: `serde_wasm_bindgen::to_value` calls
 //! wasm-bindgen intrinsics that panic on non-wasm32 — exactly the constraint
-//! that motivates the `*_native` split established in 07-02.
+//! that motivates the `*_native` split.
 //!
 //! The tests intentionally avoid pinning exact numeric `kind` values. Pinning
 //! would couple this test to `Token` variant declaration order and convert

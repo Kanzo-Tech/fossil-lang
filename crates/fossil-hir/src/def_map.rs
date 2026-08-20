@@ -85,7 +85,7 @@ pub struct SourceEntry<'db> {
     /// provider call: `{ A, B } := io.rdf("g.ttl", schema = io.shex("x.shex"))`
     /// gives `x.shex`.
     ///
-    /// [`crate::infer::resolve_source_row`] reads it to type the source's rows
+    /// [`crate::infer::resolve_source_scope`] reads it to type the source's rows
     /// forward. It is a SIGNATURE-only datum:
     /// it is read from the `SOURCE_DEF` header tokens, NOT from any mapping
     /// body, so it does NOT widen the per-mapping `body()` fan-out. The
@@ -227,7 +227,7 @@ impl<'db> DefMap<'db> {
     /// Look up the resolved shape IRI bound to a destructuring RDF source member
     /// (`{ IfcBeam, ... } := io.rdf(..., schema = io.shex("x.shex"))` → `IfcBeam`'s shape
     /// IRI). `None` for native single-binding sources. Used by the input typing
-    /// ([`crate::infer::resolve_source_row`]) to resolve the member's
+    /// ([`crate::infer::resolve_source_scope`]) to resolve the member's
     /// compile-time row type from the declared shape.
     #[must_use]
     pub fn lookup_source_shape_iri(
@@ -591,8 +591,8 @@ pub(crate) struct SchemaArg {
 ///
 /// This reads ONLY the header tokens (the call expression on the right of
 /// `:=`), never any mapping body — so it stays signatures-only and does not
-/// widen the per-mapping `body()` fan-out (Serious #6 mitigation for
-/// plan 03-05's `resolve_source_row`).
+/// widen the per-mapping `body()` fan-out, which is what keeps
+/// [`crate::infer::resolve_source_scope`] out of `parse(file)`.
 ///
 /// # It used to take a bare string, and that was the last hole in the rule
 ///
@@ -1340,7 +1340,7 @@ b := io.parquet(\"b.parquet\")
         let (db, file) = db_with_hello();
         let dm = def_map(&db, file);
         let src = dm.lookup_source(&db, "User").unwrap();
-        // Plan 02-03: per-kind dense indexing. `users` is the only
+        // Per-kind dense indexing. `users` is the only
         // SOURCE_DEF in hello.fossil, so its dense index is 0.
         assert_eq!(src.index(&db), 0);
         assert_eq!(src.file(&db), file);
@@ -1352,7 +1352,7 @@ b := io.parquet(\"b.parquet\")
         let dm = def_map(&db, file);
         let mappings = dm.mappings(&db);
         assert_eq!(mappings.len(), 1);
-        // Plan 02-03: per-kind dense indexing. `User` is the only MAPPING
+        // Per-kind dense indexing. `User` is the only MAPPING
         // in hello.fossil, so its dense index is 0 (was 2 under the
         // legacy all-children index space).
         assert_eq!(mappings[0].index(&db), 0);

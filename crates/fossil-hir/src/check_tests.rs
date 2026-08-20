@@ -1,10 +1,10 @@
-//! Integration tests for the Phase 3 bidirectional checker (plan 03-05).
+//! Integration tests for the bidirectional checker.
 //!
-//! Covers: literal-subset regression (Phase 2 widening), forward CSVW
-//! propagation (SC#1) + did-you-mean, backward cardinality blame against a
-//! target shape (SC#2), the 5 subtyping rules, value-disjunction rejection
-//! (SC#4), the `expr_types` thin-accessor inversion, and the
-//! `ErrorGuaranteed`-implies-diagnostic contract.
+//! Covers: literal-subset regression under widening, forward propagation into
+//! the source row + did-you-mean, backward cardinality blame against a target
+//! shape, the 5 subtyping rules, value-disjunction rejection, the `expr_types`
+//! thin-accessor inversion, and the `ErrorGuaranteed`-implies-diagnostic
+//! contract.
 
 use super::*;
 use crate::body::ExprId;

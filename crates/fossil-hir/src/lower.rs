@@ -1,12 +1,11 @@
 //! CST → HIR lowering.
 //!
-//! Phase 2 (plan 02-04) splits Phase 1's flat `HirMapping` shape along the
-//! line the item tree draws — a signature is eager, a body is not:
-//! header signature fields (name, shape IRI, source binding) live
-//! here; the per-mapping property list moved into [`crate::body::HirBody`],
-//! reached via the [`crate::body::body`] Salsa query keyed by
-//! [`crate::def_map::MappingLoc`]. The split is the precondition for
-//! CORE-02 SC#2: editing one property's right-hand side invalidates only
+//! `HirMapping` is split along the line the item tree draws — a signature is
+//! eager, a body is not: header signature fields (name, shape IRI, source
+//! binding) live here; the per-mapping property list lives in
+//! [`crate::body::HirBody`], reached via the [`crate::body::body`] Salsa query
+//! keyed by [`crate::def_map::MappingLoc`]. The split is what buys the
+//! invalidation shape: editing one property's right-hand side invalidates only
 //! `body(M_k)` + its downstream queries, never the file-level
 //! `item_tree(file)` or `lower_to_hir(file)` queries' structural inputs.
 //!
@@ -1278,8 +1277,7 @@ fn lower_mapping_node<'db>(
     // a successful header lowering; an empty-bodied mapping is still a valid
     // HirMapping signature.
 
-    // Phase 2 plan 02-03 wraps the header's shape and source in composite
-    // sub-nodes:
+    // The header's shape and source are wrapped in composite sub-nodes:
     //
     //   MAPPING_HEADER
     //     IDENT "Users"                     -- direct token: mapping name

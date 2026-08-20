@@ -11,11 +11,15 @@
 //! `typecheck_mapping` is the source of truth for per-expression types;
 //! `expr_types` is the projection.
 //!
-//! # Forward propagation (CSVW)
+//! # Forward propagation
 //!
-//! When a mapping's source declares a CSVW `schema`,
-//! [`crate::infer::resolve_source_row`] builds a `Record` type for the source
-//! row; `.field` accesses resolve against it, with did-you-mean on a miss.
+//! When the host has registered a descriptor for the mapping's source URI, or
+//! the source names a shape document,
+//! [`crate::infer::resolve_source_scope`] builds the scope whose
+//! [`flat`](crate::infer::RowScope::flat) is a `Record` type for the source
+//! row; `.field` accesses resolve against it, with did-you-mean on a miss. The
+//! `schema = "<path>"` CSVW branch that used to sit between the two is deleted
+//! — see [`crate::infer`]'s module docs for why it was not modelled instead.
 //!
 //! # Backward checking
 //!

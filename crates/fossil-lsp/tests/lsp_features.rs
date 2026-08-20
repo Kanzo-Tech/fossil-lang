@@ -1,7 +1,7 @@
-//! End-to-end LSP feature integration test (Phase 6 plan 06-09, LSP-01).
+//! End-to-end LSP feature integration test.
 //!
 //! Drives the `fossil-lsp` binary over JSON-RPC/stdio (the SAME transport a
-//! real editor uses) and asserts that all six Phase-6 capabilities answer over
+//! real editor uses) and asserts that all six capabilities answer over
 //! the wire, each a thin adapter over the corresponding `fossil-ide` free
 //! function (the feature LOGIC is unit-tested in `fossil-ide`; this test
 //! exercises the transport + translation layer):

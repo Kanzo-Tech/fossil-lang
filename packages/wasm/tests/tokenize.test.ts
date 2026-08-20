@@ -3,7 +3,7 @@
  *
  * Boots the wasm-bindgen --target web module in a Node Vitest run, then
  * exercises the JS-side public surface (tokenize, semanticLegend,
- * FossilPlayground class). The 08-02 cargo-test suite already covers the
+ * FossilPlayground class). The cargo-test suite already covers the
  * Rust side (tokenize_native); this suite covers the JsValue → TS-shape
  * serialization boundary the Rust tests can't reach.
  */

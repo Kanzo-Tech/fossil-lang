@@ -46,7 +46,7 @@ pub struct FileHandle(pub(crate) u32);
 /// queries are invalidated incrementally.
 ///
 /// `by_uri` is a secondary index so `lookup_uri` (used by the LSP Worker
-/// in 07-03 to map `textDocument/...` URIs back to handles) is O(1). It
+/// to map `textDocument/...` URIs back to handles) is O(1). It
 /// stays consistent with `files` because every insert / remove touches
 /// both maps.
 // `pub(crate)` is the deliberate visibility (mirrors `WasmSystem` in
@@ -87,9 +87,9 @@ impl OpenFiles {
         Some(f)
     }
 
-    /// URI → handle lookup. Used by the LSP Worker (07-03) to dispatch
+    /// URI → handle lookup. Used by the LSP Worker to dispatch
     /// `textDocument/...` notifications from the JS side.
-    #[allow(dead_code)] // 07-03 wires the first caller; the accessor is part of the published surface.
+    #[allow(dead_code)] // the LSP Worker wires the first caller; the accessor is part of the published surface.
     pub(crate) fn lookup_uri(&self, uri: &str) -> Option<FileHandle> {
         self.by_uri.get(uri).copied()
     }

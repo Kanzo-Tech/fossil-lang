@@ -673,7 +673,7 @@ fn diagnostics_for(db: &LspDb, file: SourceFile) -> Vec<Diagnostic> {
 
 /// Publish `textDocument/publishDiagnostics` for `file`: drain the accumulator
 /// and convert each `fossil_base::Diagnostic` to an `lsp_types::Diagnostic`
-/// with a UTF-16 range (06-05 `LineIndex`).
+/// with a UTF-16 range (`LineIndex`).
 fn publish_diagnostics(
     connection: &Connection,
     db: &LspDb,
@@ -725,7 +725,7 @@ const fn severity_to_lsp(s: Severity) -> DiagnosticSeverity {
 }
 
 /// Translate a byte-offset range (from a `fossil-ide` feature) to a UTF-16 LSP
-/// `Range` via the 06-05 `LineIndex` (replaces the Phase-2 ASCII-only walk).
+/// `Range` via `LineIndex` (it replaced an ASCII-only walk).
 fn byte_range_to_lsp_range(db: &LspDb, file: SourceFile, range: std::ops::Range<u32>) -> Range {
     let index = fossil_ide::line_index(db, file);
     Range {

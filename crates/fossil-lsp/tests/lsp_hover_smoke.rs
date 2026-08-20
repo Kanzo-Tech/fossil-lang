@@ -1,4 +1,4 @@
-//! End-to-end smoke test for `textDocument/hover` — Phase 2 plan 02-06.
+//! End-to-end smoke test for `textDocument/hover`.
 //!
 //! Spawns the `fossil-lsp` binary, drives it through `initialize` →
 //! `initialized` → `didOpen` (with a `.fossil` source containing an
@@ -308,7 +308,7 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
     assert_eq!(
         hover_cap,
         &serde_json::Value::Bool(true),
-        "Phase 2 plan 02-06 must advertise hoverProvider: true; got {hover_cap}",
+        "the server must advertise hoverProvider: true; got {hover_cap}",
     );
 
     // The shutdown response: id == 3, result == null.
@@ -324,20 +324,17 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
     );
 }
 
-// ── Phase 3 plan 03-07: SC#3 (CORE-07) hover surface ───────────────────────
+// ── The hover surface, and why it is driven in-process ─────────────────────
 //
-// seq.filter decision (plan 03-05-SUMMARY.md, verbatim):
+// No `seq.filter` stub was ever added to `fossil-registry`. Without one, these
+// tests take the DIRECT integration path that BYPASSES the JSON-RPC layer,
+// rather than a full end-to-end through a `seq.filter` surface form.
 //
-//   "Decision: NO `seq.filter` stub was added to `fossil-registry`."
-//
-// Per plan 03-07 Task 2 step 0, NO ⇒ use the DIRECT integration path that
-// BYPASSES the JSON-RPC layer (option (ii)), NOT a full end-to-end through a
-// `seq.filter` surface form. Phase 3 v0.1's `HirExpr` has no `Pipeline` /
-// `Call` variant, so an implicit closure cannot be expressed in surface
-// syntax and the synthesis is unreachable through a `.fossil` document over
-// JSON-RPC. The full JSON-RPC end-to-end SC#3 test is DEFERRED to Phase 6
-// (when the stdlib + Pratt-lowered expression tree land and `seq.filter`
-// gains a real surface form). Plan 03-08's corpus does NOT add this test.
+// The reason recorded at the time was that `HirExpr` had no `Pipeline` / `Call`
+// variant, so an implicit closure could not be expressed in surface syntax at
+// all. `HirExpr::Call` EXISTS now (`fossil-hir/src/lower.rs`), so that reason
+// no longer holds and the JSON-RPC end-to-end is unwritten rather than
+// impossible. Nobody has measured whether it would pass.
 //
 // These two tests exercise `fossil_ide::hover::render_markdown` — the exact
 // rendering function the LSP hover handler (`main.rs::handle_request`) calls
@@ -386,13 +383,12 @@ fn bare_db() -> FossilDb {
     FossilDb::new(system)
 }
 
-/// SC#3 (CORE-07): hovering on `.age` inside an implicitly-synthesised closure
-/// surfaces BOTH the field type `Integer` AND the closure parameter binding
+/// Hovering on `.age` inside an implicitly-synthesised closure surfaces BOTH
+/// the field type `Integer` AND the closure parameter binding
 /// `(row: Record<...>) => row.age >= 18` — the synthesis is NOT hidden.
 ///
-/// Direct integration (plan 03-05 = NO seq.filter): the
-/// `SynthesizedClosureRendering` provenance plan 03-06 records on the closure
-/// body's `ExprId` (pinned shape from 03-06-SUMMARY) is fed to the public
+/// Direct integration, for the reason above: the `SynthesizedClosureRendering`
+/// provenance recorded on the closure body's `ExprId` is fed to the public
 /// `fossil_ide::hover::render_markdown`, asserting the LSP hover Markdown body.
 #[test]
 fn hover_inside_synthesized_closure_via_typecheck_mapping() {
@@ -453,7 +449,7 @@ fn hover_inside_synthesized_closure_via_typecheck_mapping() {
 ///
 /// The `String` type is proven to come from CSVW forward propagation by
 /// resolving the `name` column through `record_from_descriptor` (the same
-/// in-process path `resolve_source_row` uses), then rendering the resulting
+/// in-process path `resolve_source_scope` uses), then rendering the resulting
 /// `InputDescriptor` entry via the LSP's `render_markdown`.
 #[test]
 fn hover_on_introspected_fieldref_outside_closure() {

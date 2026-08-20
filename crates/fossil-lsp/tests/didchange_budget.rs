@@ -153,9 +153,12 @@ fn didchange_round_trip_under_margined_budget() {
     );
 
     // Each "keystroke" appends a comment char to a comment line — a VALID-syntax
-    // edit (never a bare `#`, which would hang the parser per 06-07). This
-    // changes the text (so `set_text` genuinely bumps the revision) without
-    // introducing a parse error or an unlexable byte.
+    // edit. This changes the text (so `set_text` genuinely bumps the revision)
+    // without introducing a parse error or an unlexable byte, which is what
+    // keeps the budget measuring the resolving path rather than the error one.
+    // (A bare `#` used to hang the parser. It does not any more — see
+    // `fossil-syntax/tests/recovery.rs` — but an unlexable byte still measures
+    // the wrong path.)
     let edit = |i: usize| format!("{base}\n// keystroke {i}\n");
 
     // Warm-up: prime Salsa's caches.

@@ -96,7 +96,7 @@ pub(crate) struct LspError {
 /// Result of [`dispatch`]: optional response (None for notifications) plus
 /// any `textDocument/publishDiagnostics` notifications the caller must post
 /// to the Worker scope separately. Per-file drain — one notification per
-/// affected URI (B3 fix per the 07-03 plan revision).
+/// affected URI.
 pub(crate) struct DispatchOutput {
     pub response: Option<LspResponse>,
     pub diagnostics: Vec<serde_json::Value>,
@@ -212,9 +212,7 @@ pub(crate) fn dispatch(pg: &mut FossilPlayground, req: LspRequest) -> DispatchOu
         "textDocument/documentSymbol" => handle_document_symbol(pg, params),
         "textDocument/semanticTokens/full" => handle_semantic_tokens_full(pg, params),
         "textDocument/codeAction" => handle_code_action(pg, params),
-        // Custom fossil/* methods (B2 — wired in 07-06; the dispatch routes
-        // are listed here so the plan-stated method-not-found surface is
-        // accurate. 07-06 fills in the handlers.)
+        // Custom fossil/* methods.
         "fossil/checkAll" => handle_check_all(pg),
         "fossil/registerInferredDescriptor" => handle_register_inferred_descriptor(pg, &params),
         other => Err(LspError {
@@ -273,7 +271,7 @@ fn handle_notification(
                 if let Some(handle) = pg.lookup_handle_by_uri(&uri) {
                     // LSP `TextDocumentSyncKind::FULL` — the last content
                     // change carries the full document text; intermediate
-                    // changes (if any) are dropped (matches fossil-lsp 06-09).
+                    // changes (if any) are dropped (matches `fossil-lsp`).
                     if let Some(change) = p.content_changes.into_iter().next_back() {
                         let _ = pg.update_file_native(handle, change.text);
                     }
@@ -508,7 +506,7 @@ fn handle_code_action(
         return Ok(serde_json::Value::Null);
     };
     // Re-derive the structured `Diagnostic` carriers (the wire form drops
-    // `did_you_mean` / `suggestion_source`). Mirrors fossil-lsp 06-09.
+    // `did_you_mean` / `suggestion_source`). Mirrors `fossil-lsp`.
     let diagnostics = pg.drain_diagnostics_for_file(file);
     let actions = fossil_ide::code_actions(pg.base_db(), file, p.range, &diagnostics);
     let payload: Vec<CodeActionOrCommand> = actions

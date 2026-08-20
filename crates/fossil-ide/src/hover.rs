@@ -407,7 +407,7 @@ User : Person from users
 
     /// Hover on the `ex:name = .name` line returns `None` for the HELLO
     /// fixture — its `users` source declares NO schema, so
-    /// `resolve_source_row` returns `None` and the `FieldRef` synthesises no
+    /// `resolve_source_scope` returns `None` and the `FieldRef` synthesises no
     /// entry. A `FieldRef` hover needs a row to resolve against; given one,
     /// `render_markdown` surfaces the field type (see the
     /// `render_markdown_for_fieldref_with_csvw_propagation` unit test).

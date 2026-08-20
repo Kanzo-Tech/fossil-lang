@@ -86,7 +86,7 @@ fn workspace_multi_file_isolation() {
     let h1 = pg.open_file_native("a.fossil".to_string(), source.clone());
     let h2 = pg.open_file_native("b.fossil".to_string(), source);
 
-    // diagnostics_for_rows(h1) — per-file accessor (07-03 LSP Worker's
+    // diagnostics_for_rows(h1) — per-file accessor (the LSP Worker's
     // drain entry point). Returns Some(_) for an open handle.
     let per_file_a = pg.diagnostics_for_rows(h1);
     assert!(per_file_a.is_some(), "diagnostics_for_rows h1 returns Some");

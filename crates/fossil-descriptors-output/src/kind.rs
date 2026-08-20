@@ -1,12 +1,11 @@
 //! `OutputDescriptorKind` — enum dispatch for inside-Salsa-query descriptor
 //! access.
 //!
-//! Phase 3 introduces this enum because [`crate::OutputDescriptor`] is a trait
-//! and Salsa 0.26 cannot intern or memoize trait objects
-//! (`Box<dyn OutputDescriptor>`) — they lack structural equality. Inside a
-//! `#[salsa::tracked]` query body (plan 03-05's `typecheck_mapping`), dispatch
-//! goes through this enum's variants (concrete types), not through
-//! `&dyn OutputDescriptor`.
+//! This enum exists because [`crate::OutputDescriptor`] is a trait and Salsa
+//! 0.26 cannot intern or memoize trait objects (`Box<dyn OutputDescriptor>`) —
+//! they lack structural equality. Inside a `#[salsa::tracked]` query body
+//! (`fossil_hir`'s `typecheck_mapping`), dispatch goes through this enum's
+//! variants (concrete types), not through `&dyn OutputDescriptor`.
 //!
 //! The trait stays as the OUTSIDE-Salsa surface API (e.g. for the playground
 //! UI listing loaded descriptors).
@@ -79,7 +78,7 @@ impl OutputDescriptorKind {
     }
 
     /// `true` iff the descriptor is `AcceptAll` (no backward-shape
-    /// constraints). Plan 03-05's typecheck reads this to short-circuit
+    /// constraints). `fossil_hir`'s typecheck reads this to short-circuit
     /// backward checking.
     #[must_use]
     pub const fn accepts_anything(&self) -> bool {
@@ -117,7 +116,6 @@ mod tests {
     /// Compile-time test (the assignment itself is the assertion): proves
     /// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`] is const-evaluable. If a
     /// future variant breaks const-constructibility, this fails to compile.
-    /// Mitigates plan 03-03 Serious #8.
     #[test]
     fn accept_all_default_is_const_constructible() {
         const FOO: OutputDescriptorKind = OutputDescriptorKind::ACCEPT_ALL_DEFAULT;

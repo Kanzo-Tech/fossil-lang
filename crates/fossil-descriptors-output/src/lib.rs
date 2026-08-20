@@ -138,9 +138,9 @@ pub trait OutputDescriptor: Send + Sync + std::fmt::Debug {
 /// Phase 1 stub: accept-all output descriptor.
 ///
 /// Returns `true` for [`OutputDescriptor::accepts_anything`] — the type-checker
-/// short-circuits backward shape inference. Phase 3 CORE-06 (plan 03-03)
-/// keeps this type as the `AcceptAll` variant of [`OutputDescriptorKind`] —
-/// it's the fallback when no `ShEx` schema is loaded.
+/// short-circuits backward shape inference. It survives as the `AcceptAll`
+/// variant of [`OutputDescriptorKind`]: the fallback when no `ShEx` schema is
+/// loaded.
 ///
 /// Declared as a unit struct (`pub struct AcceptAllDescriptor;`) so the
 /// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`] inherent const is

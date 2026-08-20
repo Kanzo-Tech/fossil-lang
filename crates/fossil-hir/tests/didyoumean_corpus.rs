@@ -1,8 +1,8 @@
 //! Did-you-mean corpus — fixture-style coverage of the Damerau-Levenshtein
 //! suggestion heuristic over realistic column-name typos.
 //!
-//! These typo/candidate pairs mirror the column names the diagnostic corpus
-//! (plan 03-08) exercises end-to-end. The threshold is `max(2, typo.len()/3)`
+//! These typo/candidate pairs mirror the column names `diagnostic_corpus.rs`
+//! exercises end-to-end. The threshold is `max(2, typo.len()/3)`
 //! (see `crates/fossil-hir/src/didyoumean.rs`).
 
 use fossil_hir::did_you_mean;

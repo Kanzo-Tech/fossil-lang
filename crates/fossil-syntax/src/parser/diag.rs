@@ -6,8 +6,8 @@
 //! `parse(db, file)` Salsa query iterates them after CST construction,
 //! accumulating each via `to_diagnostic().accumulate(db)`.
 //!
-//! Five variants: the three that plans 02-02 (Pratt) and 02-03 (the full item
-//! parser and its recovery) needed, `UnlexableCharacter` for the byte the
+//! Five variants: the three the Pratt expression parser and the full item
+//! parser needed, `UnlexableCharacter` for the byte the
 //! lexer has no rule for, and [`ParseDiagnostic::RetiredSpelling`] for a form
 //! this parser RECOGNISES and refuses. The `to_diagnostic` adapter keeps the
 //! parser decoupled from the public `Diagnostic` shape.
