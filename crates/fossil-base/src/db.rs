@@ -1,19 +1,28 @@
 //! Salsa `Db` trait + `FossilDb` implementation.
 //!
-//! The trait is intentionally **thin**: just `system()` + `files()`.
-//! Descriptors, registry, and host capabilities flow through `&dyn System`
+//! The trait is intentionally **thin**: `system()`, `files()` and
+//! `catalogue()`. Descriptors and host capabilities flow through `&dyn System`
 //! rather than as separate composing traits. This is the verified pattern from
 //! `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it).
+//!
+//! The registry does NOT flow through `System`, and used to. `System::providers`
+//! returned `&'static [&'static Provider]`, which is a table nothing can
+//! invalidate and no file can produce; it is a Salsa input now, reached the same
+//! way [`Files`] is.
 
 use std::sync::Arc;
 
 use crate::files::Files;
+use crate::providers::Catalogue;
 use crate::system::System;
 
 #[salsa::db]
 pub trait Db: salsa::Database {
     fn system(&self) -> &dyn System;
     fn files(&self) -> &Files;
+    /// The provider rows installed in this database — see
+    /// [`crate::providers::installed`], which is how a query reads them.
+    fn catalogue(&self) -> &Catalogue;
 }
 
 #[salsa::db]
@@ -22,6 +31,7 @@ pub struct FossilDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
+    catalogue: Catalogue,
 }
 
 impl std::fmt::Debug for FossilDb {
@@ -58,19 +68,25 @@ impl FossilDb {
     }
 
     /// The one constructor. It exists because the file registry
-    /// ([`crate::files::FileRegistry`]) is a Salsa input, and a Salsa input can
+    /// ([`crate::files::FileRegistry`]) and the provider catalogue
+    /// ([`crate::providers::Registry`]) are Salsa inputs, and a Salsa input can
     /// only be created with a database in hand — so the database is built first
-    /// and the registry forced immediately after, **outside any query**. Salsa
-    /// does not stop a query body from creating an input, but an input a query
-    /// creates is not in that query's dependency list; allocating here means no
-    /// query ever has to.
+    /// and both forced immediately after, **outside any query**. Salsa does not
+    /// stop a query body from creating an input, but an input a query creates is
+    /// not in that query's dependency list; allocating here means no query ever
+    /// has to.
     fn with_storage(storage: salsa::Storage<Self>, system: Arc<dyn System>) -> Self {
         let db = Self {
             storage,
             system,
             files: Files::default(),
+            catalogue: Catalogue::default(),
         };
         let _ = db.files.registry(&db);
+        // The host DECLARES its table through `System::providers`; the
+        // catalogue is what everything READS, and it seeds itself from that
+        // declaration. Forcing it here keeps the allocation outside any query.
+        let _ = db.catalogue.registry(&db);
         db
     }
 }
@@ -86,6 +102,10 @@ impl Db for FossilDb {
 
     fn files(&self) -> &Files {
         &self.files
+    }
+
+    fn catalogue(&self) -> &Catalogue {
+        &self.catalogue
     }
 }
 

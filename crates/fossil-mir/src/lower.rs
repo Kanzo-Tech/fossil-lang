@@ -666,7 +666,7 @@ fn resolve_source<'db>(
         ));
     };
     let format = match constructor.as_deref() {
-        Some(c) => match fossil_base::provider(db.system().providers(), c) {
+        Some(c) => match fossil_base::provider(fossil_base::providers::installed(db), c) {
             Some(row) => match row.reads_rows {
                 Some(fossil_base::RowReader::Native(r)) => native_reader_format(r),
                 // Materialised outside the reader (`io.rdf`), or a row that does

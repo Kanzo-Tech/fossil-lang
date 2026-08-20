@@ -55,7 +55,7 @@ pub use crate::tokenize::{TokenRow, tokenize_native};
 
 use std::sync::Arc;
 
-use fossil_base::{Diagnostic, Files, Severity, SourceFile, Span, System};
+use fossil_base::{Catalogue, Diagnostic, Files, Severity, SourceFile, Span, System};
 use fossil_ide::{LineIndex, Utf16Position};
 use wasm_bindgen::prelude::*;
 
@@ -77,6 +77,7 @@ struct WasmDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
+    catalogue: Catalogue,
 }
 
 impl std::fmt::Debug for WasmDb {
@@ -96,6 +97,10 @@ impl fossil_base::Db for WasmDb {
     fn files(&self) -> &Files {
         &self.files
     }
+
+    fn catalogue(&self) -> &Catalogue {
+        &self.catalogue
+    }
 }
 
 impl WasmDb {
@@ -104,6 +109,7 @@ impl WasmDb {
             storage: salsa::Storage::default(),
             system,
             files: Files::default(),
+            catalogue: Catalogue::default(),
         }
     }
 }

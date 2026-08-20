@@ -432,7 +432,7 @@ pub(crate) fn decoded_document(
 ) -> Result<OutputShapes, DocumentError> {
     use fossil_base::providers::{Capability, provider};
 
-    let table = db.system().providers();
+    let table = fossil_base::providers::installed(db);
     let ctor = constructor.ok_or(DocumentError::Unnamed)?;
     let row = provider(table, ctor).ok_or_else(|| {
         DocumentError::Mismatch(SmolStr::from(crate::refusals::unknown_constructor(

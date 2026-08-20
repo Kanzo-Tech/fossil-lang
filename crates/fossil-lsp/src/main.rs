@@ -44,7 +44,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use fossil_base::{
-    Diagnostic, Files, FsError, Provider, Severity, SourceFile, Span, System, register_file,
+    Catalogue, Diagnostic, Files, FsError, Provider, Severity, SourceFile, Span, System,
+    register_file,
 };
 use fossil_ide::{LineIndex, Utf16Position};
 use lsp_server::{Connection, ErrorCode, ExtractError, Message, Notification, Request, Response};
@@ -132,6 +133,7 @@ struct LspDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
+    catalogue: Catalogue,
 }
 
 impl std::fmt::Debug for LspDb {
@@ -151,6 +153,10 @@ impl fossil_base::Db for LspDb {
     fn files(&self) -> &Files {
         &self.files
     }
+
+    fn catalogue(&self) -> &Catalogue {
+        &self.catalogue
+    }
 }
 
 impl LspDb {
@@ -159,6 +165,7 @@ impl LspDb {
             storage: salsa::Storage::default(),
             system: Arc::new(LspSystem),
             files: Files::default(),
+            catalogue: Catalogue::default(),
         }
     }
 }

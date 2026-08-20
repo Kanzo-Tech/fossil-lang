@@ -57,44 +57,32 @@ pub trait System: Send + Sync + std::fmt::Debug {
         None
     }
 
-    /// **The provider registry** — every row a program may name after `io.`,
-    /// each declaring the extensions it accepts and the capabilities it has.
+    /// **What this host declares it recognises.** It is no longer what anything
+    /// reads: `FossilDb::new` copies it into [`crate::providers::Registry`], a
+    /// Salsa input, and every query goes through
+    /// [`crate::providers::installed`].
     ///
-    /// This used to be `shape_decoders`, half of the registry, holding only the
-    /// rows that read TYPES while the rows that read ROWS lived in a second
-    /// table in `fossil-hir` that dispatched by a different criterion. Ruling 13
-    /// of `SURFACE-PLAN.md` collapses the two; [`crate::providers`] carries the
-    /// argument.
+    /// The old signature *was* the read path, and its `&'static` is what put
+    /// ruling 14 out of reach — a table that has to outlive the program cannot
+    /// be read from a file, and a table that is not an input cannot invalidate
+    /// anything downstream. Both are now possible without this method changing.
     ///
-    /// **Ambient in the context, never part of a query key.** A table of `fn`
-    /// and not a trait object: an extension point that has to be named inside a
-    /// query is a table of functions, because a trait object has no identity a
-    /// query key can hold. That is also what puts a provider on the opposite
-    /// side from [`Self::descriptors`] — a descriptor cache is a table of data,
-    /// a provider is a table of behaviour. [`Provider`] carries the `&'static` +
-    /// `ptr::eq`/`ptr::hash` identity that naming-inside-a-query requires.
+    /// It sat beside [`Self::descriptors`] under the argument that one is a
+    /// table of DATA and the other a table of BEHAVIOUR. That distinction is
+    /// real and survives. What did not survive is the conclusion drawn from it —
+    /// that a table of behaviour must therefore be ambient and untracked. What
+    /// it must be is `&'static`, because a row's identity is its address, and a
+    /// `Vec<&'static Provider>` inside an input is exactly that.
+    ///
+    /// **This method is the seam that ruling 14 deletes.** Twelve of the
+    /// thirteen implementations return the identical
+    /// `fossil_descriptors_output::PROVIDERS`, so "the host chooses what is
+    /// installed" is a choice nobody makes. When the catalogue is loaded from a
+    /// file there is one loader, and these thirteen go with it.
     ///
     /// The default is [`DATA`] — the four rows that read data — and it is a real
     /// answer, not a stub: a host that decodes no shape document still has to
-    /// recognise `io.csv`. Backward checking with no expected types is correct
-    /// rather than degraded, because an undeclared predicate is legal in an open
-    /// world. It is NOT the case that a program naming no shape document simply
-    /// has no output contract — that was the older rule; naming a document is
-    /// mandatory now, a bare property key takes its name from a predicate the
-    /// document declares, and a program with none is refused by the checker.
-    /// A host that COMPILES installs
-    /// `fossil_descriptors_output::PROVIDERS`, which adds the rows carrying a
-    /// `fn` into a schema language the compiler may not link.
-    ///
-    /// Unlike [`Self::descriptors`], the *document* a row decodes IS tracked:
-    /// [`crate::shape_documents::decode_shape_document`] takes a
-    /// [`crate::files::SourceFile`] input, so editing the document re-runs the
-    /// decode and everything downstream. Only the table itself is host-owned and
-    /// untracked, and being `&'static` it cannot change within a session.
-    ///
-    /// See `crates/fossil-base/src/shape_documents.rs` for the rest of the
-    /// argument, including the two records where the extension-trait alternative
-    /// was tried and did not reach.
+    /// recognise `io.csv`.
     fn providers(&self) -> &'static [&'static Provider] {
         DATA
     }

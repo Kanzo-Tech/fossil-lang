@@ -291,7 +291,7 @@ fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use fossil_base::{Files, NativeSystem, System};
+    use fossil_base::{Catalogue, Files, NativeSystem, System};
     use std::sync::Arc;
 
     // A minimal host db stand-in, so these unit tests exercise the stdlib +
@@ -304,6 +304,7 @@ mod tests {
         storage: salsa::Storage<Self>,
         system: Arc<dyn System>,
         files: Files,
+        catalogue: Catalogue,
     }
 
     impl std::fmt::Debug for HostDb {
@@ -323,6 +324,10 @@ mod tests {
         fn files(&self) -> &Files {
             &self.files
         }
+
+        fn catalogue(&self) -> &Catalogue {
+            &self.catalogue
+        }
     }
 
     fn db() -> HostDb {
@@ -330,6 +335,7 @@ mod tests {
             storage: salsa::Storage::default(),
             system: Arc::new(NativeSystem::default()),
             files: Files::default(),
+            catalogue: Catalogue::default(),
         }
     }
 

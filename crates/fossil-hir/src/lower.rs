@@ -650,7 +650,7 @@ fn check_provider(
         // (`Adults := User.where(…)`) that names no provider at all.
         return;
     };
-    let table = db.system().providers();
+    let table = fossil_base::providers::installed(db);
     if !answers_about(table, wanted) {
         return;
     }
@@ -731,7 +731,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
     let Some(arg) = crate::def_map::parse_schema_arg(node) else {
         return;
     };
-    let table = db.system().providers();
+    let table = fossil_base::providers::installed(db);
     if !answers_about(table, fossil_base::Capability::ReadTypes) {
         return;
     }

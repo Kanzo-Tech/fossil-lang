@@ -81,6 +81,7 @@
 //! would have caught the two functions that just left.
 
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
 
 use fossil_graph_schema::{OutputShapes, Rejection};
 
@@ -314,6 +315,75 @@ pub static RDF: Provider = Provider {
 /// (`fossil_descriptors_output::PROVIDERS`), and the rows it adds are the ones
 /// carrying a `fn` into a schema language the compiler may not link.
 pub static DATA: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF];
+
+// ===================================================================== the input
+
+/// The rows installed in this database.
+///
+/// **An input, and that is the whole change.** It was
+/// `System::providers() -> &'static [&'static Provider]`, and a `&'static`
+/// cannot come from a file read at run time and cannot be a Salsa input — so
+/// the catalogue could not be declarative (ruling 14) and nothing invalidated
+/// when it changed. Thirteen `System` implementations wrote the method and
+/// twelve returned the same constant; seven places read it.
+#[salsa::input(debug)]
+pub struct Registry {
+    #[returns(ref)]
+    pub rows: Vec<&'static Provider>,
+}
+
+/// The handle the database holds — the same shape as [`crate::files::Files`],
+/// for the same reason: a Salsa input can only be created with a database in
+/// hand, and `Default` has none.
+#[derive(Debug, Default, Clone)]
+pub struct Catalogue {
+    registry: OnceLock<Registry>,
+}
+
+impl Catalogue {
+    /// The registry input, allocating it on first use **from the database's own
+    /// host** — `db.system().providers()`.
+    ///
+    /// Seeding from the host here rather than at each constructor is not
+    /// convenience. A `Db` implementation that forgot to seed would get [`DATA`]
+    /// and silently lose the rows that read TYPES, so every shape document in
+    /// that session would decode to nothing — a wrong answer, not an error, in
+    /// six implementations that have no test between them. Taking `&dyn Db`
+    /// instead of `&dyn salsa::Database` is what makes forgetting unspellable.
+    ///
+    /// Force it from the database constructor anyway. Salsa 0.26 lets an input
+    /// be created while a query runs and nothing checks, but the created input
+    /// is invisible to that query's dependency list; [`install`] needs `&mut`,
+    /// which no query body can have, so "install before you query" is the only
+    /// expressible order.
+    pub fn registry(&self, db: &dyn crate::db::Db) -> Registry {
+        *self
+            .registry
+            .get_or_init(|| Registry::new(db, db.system().providers().to_vec()))
+    }
+}
+
+/// Every row a program may name after `io.`.
+///
+/// **The read registers a Salsa dependency, and that is the point.** A miss
+/// here is not a cached dead end: it is a dependency on the catalogue's
+/// contents, so [`install`] invalidates the queries that previously refused a
+/// name.
+#[must_use]
+pub fn installed(db: &dyn crate::db::Db) -> &[&'static Provider] {
+    db.catalogue().registry(db).rows(db)
+}
+
+/// Install the rows this host recognises, replacing whatever was there.
+///
+/// Takes `&mut dyn Db` because writing a Salsa input takes the database
+/// exclusively.
+pub fn install(db: &mut dyn crate::db::Db, rows: Vec<&'static Provider>) {
+    use salsa::Setter as _;
+
+    let registry = db.catalogue().registry(&*db);
+    registry.set_rows(db).to(rows);
+}
 
 #[cfg(test)]
 mod tests {

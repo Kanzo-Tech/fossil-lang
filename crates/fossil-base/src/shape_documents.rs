@@ -91,7 +91,7 @@ pub fn decode_shape_document<'db>(
     request: TypeDocument<'db>,
 ) -> Option<OutputShapes> {
     let doc = request.document(db);
-    let row = provider(db.system().providers(), request.provider(db))?;
+    let row = provider(crate::providers::installed(db), request.provider(db))?;
     let decode = row.reads_types?;
     let uri = doc.path(db);
     Some(match decode(uri, doc.text(db)) {
@@ -130,7 +130,7 @@ mod tests {
     /// caller was ever written. These three assertions were its only callers,
     /// so it lives where its callers do.
     fn reads_types(db: &dyn Db, provider_name: &str) -> bool {
-        provider(db.system().providers(), provider_name)
+        provider(crate::providers::installed(db), provider_name)
             .is_some_and(|p| p.provides(Capability::ReadTypes))
     }
 

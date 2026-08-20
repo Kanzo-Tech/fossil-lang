@@ -31,7 +31,10 @@ pub use diagnostic::{Diagnostic, Severity, Span, SpanFrame, SpanLabel};
 pub use error::{ErrorGuaranteed, bug, delay_span_bug};
 pub use files::{FileRegistry, Files, SourceFile, file_at, register_file};
 pub use locator::{SourceAnchor, program_dir};
-pub use providers::{Capability, NativeReader, Provider, RowReader, provider};
+pub use providers::{
+    Capability, Catalogue, NativeReader, Provider, Registry, RowReader, install, installed,
+    provider,
+};
 pub use shape_documents::{TypeDocument, decode_shape_document, shape_document};
 pub use system::{FsError, System};
 

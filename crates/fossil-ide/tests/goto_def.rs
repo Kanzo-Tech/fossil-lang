@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_base::{Files, FsError, Provider, SourceFile, System};
+use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
 use fossil_ide::{NavigationTarget, goto_definition};
 
 /// The test's host `System`: a filesystem plus the `ShEx` decoder row, exactly
@@ -47,6 +47,7 @@ struct HostDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
+    catalogue: Catalogue,
 }
 
 impl std::fmt::Debug for HostDb {
@@ -66,6 +67,10 @@ impl fossil_base::Db for HostDb {
     fn files(&self) -> &Files {
         &self.files
     }
+
+    fn catalogue(&self) -> &Catalogue {
+        &self.catalogue
+    }
 }
 
 impl HostDb {
@@ -74,6 +79,7 @@ impl HostDb {
             storage: salsa::Storage::default(),
             system: Arc::new(HostSystem),
             files: Files::default(),
+            catalogue: Catalogue::default(),
         }
     }
 }
