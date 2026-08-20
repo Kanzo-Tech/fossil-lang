@@ -41,7 +41,7 @@ use fossil_graph_schema::OutputShapes;
 
 use crate::db::Db;
 use crate::files::SourceFile;
-use crate::providers::{Capability, provider};
+use crate::providers::provider;
 
 /// A decode request: **which document, read as which language**.
 ///
@@ -110,16 +110,6 @@ pub fn shape_document(db: &dyn Db, doc: SourceFile, provider_name: &str) -> Opti
     decode_shape_document(db, TypeDocument::new(db, doc, provider_name.to_string()))
 }
 
-/// Does `provider_name` name an installed row that reads types?
-///
-/// The cheap half of the question [`shape_document`] answers expensively, for a
-/// caller that wants to diagnose the name before spending a decode on it.
-#[must_use]
-pub fn reads_types(db: &dyn Db, provider_name: &str) -> bool {
-    provider(db.system().providers(), provider_name)
-        .is_some_and(|p| p.provides(Capability::ReadTypes))
-}
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use std::path::Path;
@@ -129,6 +119,20 @@ mod tests {
 
     use fossil_graph_schema::Rejection;
     use salsa::Setter as _;
+
+    use crate::providers::Capability;
+
+    /// Does `provider_name` name an installed row that reads types?
+    ///
+    /// The cheap half of the question [`shape_document`] answers expensively.
+    /// It was a `pub fn` beside it, for "a caller that wants to diagnose the
+    /// name before spending a decode" — and in the whole workspace no such
+    /// caller was ever written. These three assertions were its only callers,
+    /// so it lives where its callers do.
+    fn reads_types(db: &dyn Db, provider_name: &str) -> bool {
+        provider(db.system().providers(), provider_name)
+            .is_some_and(|p| p.provides(Capability::ReadTypes))
+    }
 
     use super::*;
     use crate::db::FossilDb;

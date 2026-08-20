@@ -32,7 +32,7 @@ pub use error::{ErrorGuaranteed, bug, delay_span_bug};
 pub use files::{FileRegistry, Files, SourceFile, file_at, register_file};
 pub use locator::{SourceAnchor, program_dir};
 pub use providers::{Capability, NativeReader, Provider, RowReader, provider};
-pub use shape_documents::{TypeDocument, decode_shape_document, reads_types, shape_document};
+pub use shape_documents::{TypeDocument, decode_shape_document, shape_document};
 pub use system::{FsError, System};
 
 #[cfg(not(target_arch = "wasm32"))]
