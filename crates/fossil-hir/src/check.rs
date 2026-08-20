@@ -1,22 +1,21 @@
-//! Bidirectional type checker — Phase 3 (CORE-04/05/06) graduates Phase 2's
-//! stub into the real `synth`/`check`/`compatible` algorithm.
+//! Bidirectional type checker — the real `synth`/`check`/`compatible`
+//! algorithm, where a pointer-equality stub used to stand.
 //!
-//! The architectural keystone: [`typecheck_mapping`] is the ONLY new Salsa-tracked
+//! The architectural keystone: [`typecheck_mapping`] is the ONLY Salsa-tracked
 //! entry per mapping. `synth` / `check` / `check_property` / `lookup_field` /
 //! `compatible` are plain-Rust helpers called from inside it — this preserves
-//! Phase 2's `MAX_PER_MAPPING_FAN_OUT = 1` invariant (LOAD-BEARING).
+//! the `MAX_PER_MAPPING_FAN_OUT = 1` invariant (LOAD-BEARING).
 //!
-//! Phase 2's [`crate::provenance::expr_types`] becomes a thin accessor over
-//! [`typecheck_mapping`]'s output — Phase 3 inverts the dependency direction:
-//! `typecheck_mapping` is now the source of truth for per-expression types;
+//! [`crate::provenance::expr_types`] is a thin accessor over
+//! [`typecheck_mapping`]'s output, and not the other way round:
+//! `typecheck_mapping` is the source of truth for per-expression types;
 //! `expr_types` is the projection.
 //!
 //! # Forward propagation (CSVW)
 //!
 //! When a mapping's source declares a CSVW `schema`,
 //! [`crate::infer::resolve_source_row`] builds a `Record` type for the source
-//! row; `.field` accesses resolve against it (SC#1, with did-you-mean on a
-//! miss).
+//! row; `.field` accesses resolve against it, with did-you-mean on a miss.
 //!
 //! # Backward checking
 //!
@@ -49,7 +48,7 @@ use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
 use crate::shapes::{NameCollision, ResolvedShape, TargetShapeError, resolve_target_shape};
 use crate::spans::{Spans, mapping_header_span, spans};
 use crate::ty::display::render_ty_kind;
-use fossil_graph_schema::{Primitive, Rejection, local_name};
+use fossil_graph_schema::{Primitive, Rejection};
 
 use crate::ty::{ShapeId, Ty, TyKind};
 
@@ -58,13 +57,13 @@ use crate::ty::{ShapeId, Ty, TyKind};
 pub enum BlamePos {
     /// Blame a body expression (resolved to a real span via [`Spans`]).
     Expr(ExprId),
-    /// Blame a shape property constraint — Phase 3 v0.1 has no per-constraint
-    /// span source, so the emitter falls back to the mapping-header span.
+    /// Blame a shape property constraint — there is no per-constraint span
+    /// source yet, so the emitter falls back to the mapping-header span.
     ShapeProperty { shape: ShapeId, property: SmolStr },
 }
 
 /// Per-mapping type-check output. The source of truth for per-expression types
-/// (Phase 3 inverts the Phase 2 `expr_types`-is-source-of-truth direction).
+/// — `expr_types` reads it, not the reverse.
 #[salsa::tracked(debug)]
 pub struct TypeckOutput<'db> {
     pub expr_types: ExprTypes<'db>,
@@ -90,7 +89,7 @@ pub struct TypeckOutput<'db> {
 /// Returns `Err(ErrorGuaranteed)` if the body has any type error (every error
 /// also pushes ≥1 [`Diagnostic`] to the accumulator).
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn typecheck_mapping<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -144,6 +143,7 @@ pub fn typecheck_mapping<'db>(
         source_scope,
         resolved_shape,
         predicates: predicates.clone(),
+        renames,
         spans: spans_table,
         entries: Vec::new(),
         next_inference: 0,
@@ -151,7 +151,7 @@ pub fn typecheck_mapping<'db>(
         iri_position: false,
     };
 
-    // Surface what the decoder rejected (SC#4) before checking the body — they are
+    // Surface what the decoder rejected before checking the body — they are
     // informational + suggestive (they do not error the mapping out).
     cx.surface_shape_lowering_errors();
     cx.surface_name_collisions(&collisions);
@@ -182,12 +182,21 @@ pub fn typecheck_mapping<'db>(
 
 /// Report a target shape the program named and the document could not supply.
 ///
-/// Each of these was a silent `None` — the same answer as "the program names no
-/// document", which was a decision then and went unreported. Naming no document
-/// is an error now and has its own variant, so the one these were confused with
-/// is [`TargetShapeError::Undeclared`]: a misspelt shape name turned backward
-/// checking off and said nothing, and the split between the two is the whole
-/// point of the enum.
+/// # Four arms stood here and none of them could fire
+///
+/// One per document failure — `Unregistered`, `Undecodable`, `Unparseable` and
+/// `Undeclared` — written because each had been a silent `None`. A mapping
+/// header names a bare LOCAL name now, `def_map` binds those positionally
+/// against the same decoded document, and every one of the four fails THERE
+/// first, so `resolve_target_shape` never returns them. They are deleted with
+/// the variants; `crate::shapes::TargetShapeError` records what is left and
+/// what it would take to remove it.
+///
+/// **The did-you-mean the `Undeclared` arm carried is not lost** — it moved to
+/// `crate::lower::unbound_shape_message`, which is where a misspelt shape name
+/// is reported now. Its candidates changed with it, and correctly: that arm
+/// suggested over the shape IRIs a DOCUMENT declares, and what a header can
+/// misspell is a local NAME the program bound.
 ///
 /// Informational-with-teeth, like [`crate::infer`]'s treatment of a source
 /// binding that resolved no shape: a `Diagnostic` is accumulated (so the CLI
@@ -212,56 +221,36 @@ fn surface_target_shape_error<'db>(
              write a property: a property key is the last segment of a predicate IRI that a \
              shape declares. Bring one in with `type { … } := io.shex(\"shop.shex\")`."
             .to_string(),
-        TargetShapeError::Unregistered { document } => format!(
-            "the shape document `{document}` is not there, so this mapping's \
-             output contract cannot be checked"
-        ),
-        TargetShapeError::Undecodable { document } => format!(
-            "nothing here reads `{document}` as a shape document, so this \
-             mapping's output contract cannot be checked"
-        ),
-        TargetShapeError::Unparseable { document, cause } => {
-            format!("the shape document `{document}` did not parse: {cause}")
-        }
-        TargetShapeError::Undeclared {
-            document,
-            shape,
-            declared,
-        } => {
-            let candidates = declared.iter().map(smol_str::SmolStr::as_str);
-            let suggestion = did_you_mean(shape, candidates);
-            let tail = suggestion.map_or_else(
-                || {
-                    if declared.is_empty() {
-                        " — it declares no shapes at all".to_string()
-                    } else {
-                        format!(
-                            " — it declares {}",
-                            declared
-                                .iter()
-                                .map(|d| format!("`{d}`"))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                    }
-                },
-                |s| format!(" — did you mean `{s}`?"),
-            );
-            format!("`{document}` declares no shape `{shape}`{tail}")
-        }
     };
     let _eg = delay_span_bug(db, span, message);
 }
 
-/// Render the "split into N mappings" suggestion for a value disjunction
-/// (SC#4): one mapping per branch, named `{base}{n}`, with one property line
-/// per predicate the branch constrains.
+/// Render the "split into N mappings" suggestion for a value disjunction:
+/// one mapping per branch, named `{base}{n}`, with one property line per
+/// predicate the branch constrains.
 ///
 /// This lived in the `ShEx` decoder and walked the `OneOf` AST node, which a
 /// `SuggestionSeed` cloned and carried through the whole compiler so the
 /// emitter could walk it again. [`Rejection::Disjunction`] carries the branch
 /// predicates instead — the only thing the rendering ever read out of that
 /// node — so the suggestion is written where it is emitted, over strings.
+///
+/// # Why the renderer is HERE and not in the decoder
+///
+/// Because three of its four arguments do not exist in a shape document. The
+/// bound shape NAME, the `from` binding and the `@subject` are all read off the
+/// consuming mapping's CST, and a decoder has never seen the program — it has
+/// seen `ShEx`. Only the branch predicates come from the document, and those
+/// cross as plain strings in [`Rejection::Disjunction`], which is why
+/// `fossil-hir` needs no dependency on `fossil-shex` at all.
+///
+/// That was worth writing down because the opposite reasoning had been, and it
+/// produced a second renderer in `fossil-shex` that outlived its own argument:
+/// «re-emitting syntax stays with the decoder, because it is the decoder that
+/// knows the syntax». It knew the `ShEx` syntax. It did not know Fossil's, and
+/// it emitted a CURIE header, `iri =`, a backtick template and a leading `.` —
+/// a quick-fix the parser refuses — while nothing in the compiler called it.
+/// Deleted; this is the one implementation.
 ///
 /// A predicate renders as the BARE NAME a body writes — the last segment of
 /// its IRI. It used to render as `<absolute-iri>`, which was the
@@ -293,6 +282,7 @@ pub fn render_split_suggestion(
     base_from_clause: &str,
     base_iri_template: &str,
     disjuncts: &[Vec<String>],
+    renames: &[(SmolStr, SmolStr)],
 ) -> String {
     use std::fmt::Write as _;
 
@@ -311,7 +301,12 @@ pub fn render_split_suggestion(
             out.push_str("    # TODO: this branch names no predicate — split it by hand\n");
         }
         for predicate in branch {
-            let short = local_name(predicate);
+            // The name a body may actually write — [`fossil_graph_schema::short_name`],
+            // the rename included. It was `local_name`, so a split suggested
+            // for a shape whose colliding predicate the program had already
+            // repaired emitted the name the repair renamed AWAY from: the
+            // compiler's two generated repairs disagreeing with each other.
+            let short = fossil_graph_schema::short_name(predicate, renames);
             // `{base_from_clause}.{short}`, and the qualifier is the whole
             // repair. It was `.{short}` — the retired `FieldRef`, a leading dot
             // naming a column of an anonymous current row. The parser refuses
@@ -347,6 +342,13 @@ pub struct Checker<'db> {
     /// The target shape's predicates by short name — what a bare property key
     /// resolves against.
     pub(crate) predicates: Vec<(SmolStr, SmolStr)>,
+    /// The `@rename`s written above the binding that introduced this mapping's
+    /// shape, as `(predicate IRI, the name to write instead)`. `predicates`
+    /// above is this already applied; the table itself is kept because
+    /// [`Checker::check_required_properties`] walks the shape's constraints and
+    /// not that table, and walking them with [`fossil_graph_schema::local_name`]
+    /// is how a renamed predicate the body HAD written was reported missing.
+    pub(crate) renames: Vec<(SmolStr, SmolStr)>,
     pub(crate) spans: Spans<'db>,
     pub(crate) entries: Vec<ExprTypeEntry<'db>>,
     pub(crate) next_inference: u32,
@@ -402,9 +404,8 @@ impl<'db> Checker<'db> {
         }
     }
 
-    /// Mint a fresh inference id. Phase 3 v0.1 uses this only for the closure
-    /// hook; the checker is otherwise fully directional over the leaf
-    /// `HirExpr` forms.
+    /// Mint a fresh inference id. Only the closure hook uses this; the checker
+    /// is otherwise fully directional over the leaf `HirExpr` forms.
     const fn fresh_inference(&mut self) -> crate::ty::InferenceId {
         let id = crate::ty::InferenceId(self.next_inference);
         self.next_inference += 1;
@@ -412,10 +413,10 @@ impl<'db> Checker<'db> {
     }
 }
 
-/// Compatibility check: is `actual` a subtype of `expected` (per
-/// type-system.md §9), AND does `actual`'s cardinality satisfy the constraint?
+/// Compatibility check: is `actual` a subtype of `expected`, AND does
+/// `actual`'s cardinality satisfy the constraint?
 ///
-/// Phase 3 graduates Phase 2's pointer-equality stub to the subtyping rules
+/// A pointer-equality stub stood here first; what replaced it is `subtypes`
 /// (S-Refl, S-IntFlt, S-TmplIri, S-SeqCov) + two-span blame with real spans
 /// from [`Spans`]. S-Opt and S-OptCov went with `TyKind::Optional`, and the
 /// cardinality check went with them — see the body.
@@ -442,7 +443,7 @@ pub fn compatible<'db>(
 ) -> Result<(), ErrorGuaranteed> {
     let db = cx.db();
 
-    // Subtype check (`type-system.md` §9). A constraint that narrows nothing is
+    // Subtype check (`subtypes`, below). A constraint that narrows nothing is
     // satisfied by anything.
     //
     // There used to be a second check here, and an `occurs: Occurs` parameter
@@ -462,7 +463,7 @@ pub fn compatible<'db>(
     let source_span = cx.span_of(source_expr);
     let dest_span = match dest {
         BlamePos::Expr(eid) => cx.span_of(*eid),
-        // No per-constraint span source in Phase 3 v0.1 — fall back to the
+        // No per-constraint span source yet — fall back to the
         // source expression's span (the mapping-relative location of the RHS).
         BlamePos::ShapeProperty { .. } => source_span,
     };
@@ -520,7 +521,8 @@ const fn op_text(op: BinOp) -> &'static str {
     }
 }
 
-/// Recursive subtyping per `type-system.md` §9 (5 rules + reflexivity).
+/// Recursive subtyping — four rules: S-Refl, S-IntFlt, S-TmplIri, S-SeqCov,
+/// plus an error-taint escape so one mismatch does not cascade.
 /// Direct enum dispatch — NO `Box<dyn>`, NO trait objects.
 fn subtypes<'db>(db: &'db dyn fossil_base::Db, actual: Ty<'db>, expected: Ty<'db>) -> bool {
     // S-Refl: every type subtypes itself (pointer equality after interning).
@@ -905,6 +907,13 @@ impl<'db> Checker<'db> {
     /// `shop:email xsd:string ;` — cardinality exactly one — is a promise the
     /// corpus makes to its readers, and a mapping that does not keep it writes
     /// a node that does not conform to the shape it declares.
+    ///
+    /// **The name compared is [`fossil_graph_schema::short_name`], not
+    /// [`local_name`].** This walked the constraints with `local_name` and so
+    /// did not know about `@rename`: a required predicate the program had
+    /// renamed and then WRITTEN under its new name was reported missing, and
+    /// the only repair the compiler offers for a name collision made the
+    /// program it repaired fail to compile.
     fn check_required_properties(&mut self, properties: &[HirProperty]) {
         let db = self.db;
         let header_span = self.header_span();
@@ -917,7 +926,10 @@ impl<'db> Checker<'db> {
             .filter(|c| c.occurs.demands_one_or_more())
             .map(|c| {
                 (
-                    SmolStr::from(local_name(c.predicate.as_str())),
+                    SmolStr::from(fossil_graph_schema::short_name(
+                        c.predicate.as_str(),
+                        &self.renames,
+                    )),
                     c.predicate.clone(),
                 )
             })
@@ -1555,6 +1567,7 @@ impl<'db> Checker<'db> {
         // Clone the data we need so we don't hold a borrow of `self` across the
         // mutable `record_error` calls.
         let rejections = shape.rejections.clone();
+        let renames = self.renames.clone();
         let base_name = self.mapping_name();
         let source_name = self.source_binding_name();
         // The header names a bound shape NAME, not an IRI. This argument was
@@ -1592,6 +1605,7 @@ impl<'db> Checker<'db> {
                         source_name.as_str(),
                         subject.as_str(),
                         disjuncts,
+                        &renames,
                     );
                     let n = disjuncts.len();
                     let msg = format!(

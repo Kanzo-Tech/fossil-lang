@@ -761,7 +761,15 @@ impl<E: DuckExecutor> Context<'_, E> {
 }
 
 /// Quote a `DuckDB` identifier, doubling embedded quotes.
-fn quote_ident(name: &str) -> String {
+///
+/// `pub` because `fossil-mcp` builds `CREATE VIEW` over the same datasets and
+/// had a byte-identical private copy of this. Two spellings of SQL quoting is
+/// not a cosmetic duplication — the siblings below already disagree on purpose
+/// ([`sql_str_lit`] wraps in quotes, `fossil-mcp`'s `escape_lit` does not), so
+/// a reader with two `quote_ident`s in front of them has no way to tell which
+/// difference is deliberate.
+#[must_use]
+pub fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
@@ -1041,7 +1049,7 @@ mod tests {
 
     /// Canned executor: matches the verb SQL shapes by substring so the verb
     /// wiring is testable without a real `DuckDB` (SQL correctness is covered by
-    /// the fossil-runtime integration test, W2-06).
+    /// the fossil-runtime integration test).
     /// Drive a future to completion synchronously. Our test executors never
     /// suspend (they return ready values), so a noop-waker poll loop returns on
     /// the first poll — no runtime dependency needed.
@@ -1082,7 +1090,7 @@ mod tests {
 
     /// Executor backed by a closure — canned responses keyed on the SQL, so a
     /// verb's wiring (param → SQL → result shaping) is tested without real `DuckDB`
-    /// (SQL correctness is the fossil-runtime integration test's job, W2-06).
+    /// (SQL correctness is the fossil-runtime integration test's job).
     struct FnExec<F: Fn(&str) -> Vec<Value>>(F);
     impl<F: Fn(&str) -> Vec<Value>> DuckExecutor for FnExec<F> {
         async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {

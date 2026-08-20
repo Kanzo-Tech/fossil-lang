@@ -9,7 +9,7 @@
 //!
 //! | what resolved | against what | where |
 //! |---|---|---|
-//! | `io.shex("shop.shex")` | the program's directory | `fossil_engine::documents::registry_key`, mirroring `fossil_hir::def_map::resolve_relative` |
+//! | `io.shex("shop.shex")` | the program's directory | `fossil_engine::documents::registry_key`, mirroring `fossil_hir`'s own resolution (both are `fossil_hir::documents::registry_key` now) |
 //! | provider sources, `@conn` | the program's directory, **falling back to the cwd** | `fossil_engine::resolve_ref` |
 //! | `io.csv("data/items.csv")` under `run` | the process's cwd, and only that | the `DataFusion` executor, which was handed the written path verbatim |
 //!

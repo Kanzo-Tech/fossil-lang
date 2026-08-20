@@ -2,56 +2,55 @@
 //!
 //! This crate collapses what was originally three crates
 //! (`fossil-types + fossil-resolve + fossil-typeck`) into one, matching the
-//! `ty_python_semantic` pattern from the research synthesis.
+//! `ty_python_semantic` pattern.
 //!
-//! # Phase 2 scope (current)
+//! # What lives here
 //!
 //! - The [`Ty`] ADT (`Primitive`, `Seq`, `Record`, `Iri`, `IriTemplate`,
-//!   `Error`, `Unknown`) per CORE-03 + plan 02-05. `Optional` and `Fn` were
+//!   `Error`, `Unknown`). `Optional` and `Fn` were
 //!   two more and neither was ever constructed outside a test.
 //! - [`DefMap`] = prefix table + source bindings + mapping list, populated by
 //!   the [`def_map`] Salsa query.
 //! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (the rust-analyzer
 //!   pattern).
 //! - [`item_tree`] signature-only query + [`body`] per-mapping body query
-//!   (rust-analyzer invalidation-barrier pattern, plan 02-04): the signature
+//!   (rust-analyzer invalidation-barrier pattern): the signature
 //!   query is what everything else depends on, so editing one mapping's body
 //!   re-runs that mapping and nothing else.
 //! - [`lower_to_hir`] for header-only `HirFile` lowering; body content lives
 //!   behind [`body`] (`body(db, MappingLoc) -> HirBody`).
 //! - [`check::typecheck_mapping`], the ONE tracked checker entry per mapping.
-//! - [`check::compatible`] stub demonstrating Phase 3's two-span blame
-//!   pattern (plan 02-06) — pointer-equality only for Phase 2; Phase 3
-//!   wires real subtyping + facets.
-//! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`
-//!   [`provenance::expr_types`] populates the Phase 2
-//!   literal subset (`StringLit` / `Template`); [`provenance::ty_origin`]
-//!   is the user-facing lookup returning `Option<ExprTypeEntry>` (per
-//!   planner checker Blocker 5 — tuples don't auto-impl `salsa::Update`).
+//! - [`check::compatible`], the two-span blame pattern: real subtyping plus
+//!   cardinality facets, blaming the constraint and the expression separately.
+//! - [`provenance`] side table: `(MappingLoc, ExprId) -> ExprTypeEntry`.
+//!   [`provenance::expr_types`] projects [`check::typecheck_mapping`]'s
+//!   per-expression types; [`provenance::ty_origin`]
+//!   is the user-facing lookup returning `Option<ExprTypeEntry>` — a struct
+//!   and not a tuple, because tuples don't auto-impl `salsa::Update`.
 //! - [`spans`] side table: per-mapping real-span lookup
 //!   (`(MappingLoc, ExprId) -> Span`) populated from `rowan::TextRange`s at
-//!   query time. Replaces Phase 2's zero-width `Span { start: 0, end: 0 }`
-//!   placeholders for the literal-subset provenance entries. The
+//!   query time. The
 //!   [`spans::spans`] tracked query reads `mapping_cst_node` (NOT
-//!   `parse(file)`) to preserve the Phase 2 plan 02-07
+//!   `parse(file)`) to preserve the
 //!   `MAX_PER_MAPPING_FAN_OUT = 1` invariant. The spans live in a side table
 //!   rather than in a `span` field on every `HirExpr` so that lowering stays
 //!   span-free and only the layers that emit diagnostics pay for them (same
 //!   rationale as the provenance side table).
 //!
-//! # Phase 2-9 contract (locked)
+//! # The locked surface
 //!
 //! Public Salsa query signatures (`def_map`, `item_tree`, `lower_to_hir`,
 //! `body`, `typecheck_mapping`) and the public types in [`ty`], [`def_map`],
-//! [`item_tree`], [`body`], and [`lower`] are stable for downstream phases.
-//! Phase 3 wires bidirectional checking + [`fossil_base::ErrorGuaranteed`]
-//! propagation (CORE-04..07) atop the Phase 2 surface.
+//! [`item_tree`], [`body`], and [`lower`] are stable for every crate
+//! downstream: bidirectional checking and [`fossil_base::ErrorGuaranteed`]
+//! propagation are built on top of them, not beside them.
 
 pub mod ast_id;
 pub mod body;
 pub mod check;
 pub mod def_map;
 pub mod didyoumean;
+pub mod documents;
 /// The identity of a TYPE: one `@subject` template per shape, file-keyed.
 ///
 /// The identity is unique per type — one `@subject` per shape, declared by the

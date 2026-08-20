@@ -272,7 +272,14 @@ fn datatype_of(store: &Store, property_shape: &str) -> Option<Primitive> {
 
 /// The bare IRI / blank-node label of a triple subject (`as_str`, not the `<>`
 /// `Display` form).
-fn subject_value(subject: &NamedOrBlankNode) -> String {
+///
+/// `pub` and re-exported from the crate root because `fossil-df`'s RDF pivot
+/// carried a byte-identical copy of it under the same name, and `fossil-df`
+/// already depends on this crate. The `<>` distinction is the whole content of
+/// the function and it is the kind that is right in one copy and wrong in the
+/// other: an IRI keyed as `<http://…>` matches nothing keyed as `http://…`.
+#[must_use]
+pub fn subject_value(subject: &NamedOrBlankNode) -> String {
     match subject {
         NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
         NamedOrBlankNode::BlankNode(b) => b.to_string(),
@@ -359,7 +366,7 @@ ex:PersonShape a sh:NodeShape ;
     fn the_graph_schema_is_what_the_direct_walk_used_to_produce() {
         let gs = decode_shacl("shapes.ttl", SHAPES)
             .expect("parses")
-            .to_graph_schema();
+            .to_graph_schema(&fossil_graph_schema::Renames::default());
         assert_eq!(gs.nodes.len(), 1);
         assert_eq!(gs.nodes[0].label, "Person");
         assert_eq!(gs.nodes[0].iri.as_deref(), Some("https://ex.org/Person"));

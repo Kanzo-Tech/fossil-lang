@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 
 use duckdb::Connection;
+use fossil_graph::exec::quote_ident;
 use fossil_graph::manifest::{Manifest, ManifestSource, edge_table_name};
 use fossil_graph::{GraphError, Operation, Result as GraphResult};
 use fossil_resolver::{CloudSecret, ResolvedPath};
@@ -178,10 +179,13 @@ fn register_views_sql(manifest: &Manifest, dest: &str) -> String {
     sql
 }
 
-fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-
+/// A `DuckDB` single-quoted string literal's INNARDS — the quotes are written
+/// by the `format!` around it, which is what makes this different from
+/// `fossil_graph::exec::sql_str_lit` and why it is not that function.
+///
+/// Its sibling `quote_ident` WAS a byte-identical copy of
+/// [`fossil_graph::exec::quote_ident`], and is now a call: `fossil-mcp` already
+/// depends on `fossil-graph`, so nothing but privacy held the copy in place.
 fn escape_lit(s: &str) -> String {
     s.replace('\'', "''")
 }

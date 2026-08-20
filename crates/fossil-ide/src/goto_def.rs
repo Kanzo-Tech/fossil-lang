@@ -49,7 +49,7 @@
 //! into an `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
 //! is one every consumer already understands.
 //!
-//! # Domain boundary (Research §fossil-ide split)
+//! # Domain boundary
 //!
 //! Returns Fossil-domain [`NavigationTarget`]s (`{ file, range: Range<u32> }`),
 //! NEVER `lsp_types::Location` — the byte→UTF-16 range translation happens in
@@ -80,7 +80,7 @@ use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::WorkspaceIndex;
 use crate::position::token_at_position;
-use crate::shape_documents::registry_key;
+use fossil_hir::documents::registry_key;
 
 /// A goto-def navigation target: the owning file + the byte range.
 ///
@@ -236,7 +236,7 @@ fn header_shape_name(mapping: &SyntaxNode) -> Option<String> {
 
 /// The [`MappingLoc`] for a `MAPPING` node.
 ///
-/// Per plan 02-04 Blocker 2: `MappingLoc.index` is the position among
+/// `MappingLoc.index` is the position among
 /// MAPPING-kind top-level children — filter BEFORE indexing. This is the same
 /// walk `def_map` and `body()` contract to, and taking it any other way
 /// resolves to a different mapping in any file with a `type` binding above it,

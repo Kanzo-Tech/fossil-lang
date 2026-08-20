@@ -348,6 +348,7 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
             "users",
             "\"https://example.org/u/{users.id}\"",
             disjuncts,
+            &[],
         );
         let _ = writeln!(out, "  suggestion:");
         for line in suggestion.lines() {
@@ -554,6 +555,7 @@ fn the_generated_split_suggestion_compiles() {
             vec!["http://example.org/email".to_string()],
             vec!["http://example.org/phone".to_string()],
         ],
+        &[],
     );
 
     // 2. The generated split names a shape and reads a source. Prepend the

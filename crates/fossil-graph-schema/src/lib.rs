@@ -48,7 +48,9 @@ use serde::{Deserialize, Serialize};
 
 pub mod shapes;
 
-pub use shapes::{Occurs, OutputShapes, PropertyConstraint, Rejection, Shape, local_name};
+pub use shapes::{
+    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, Shape, local_name, short_name,
+};
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.

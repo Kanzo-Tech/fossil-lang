@@ -43,7 +43,7 @@ pub mod kind;
 pub mod shacl;
 
 pub use kind::OutputDescriptorKind;
-pub use shacl::decode_shacl;
+pub use shacl::{decode_shacl, subject_value};
 
 use fossil_base::Provider;
 use fossil_base::providers::{CSV, JSON, PARQUET, RDF};

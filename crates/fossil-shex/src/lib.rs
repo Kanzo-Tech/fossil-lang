@@ -1,9 +1,9 @@
 //! `ShExDescriptor` — wraps a [`shex_ast::Schema`] for Fossil's static
-//! target-shape checking (backward shape checking, CORE-06).
+//! target-shape checking (backward shape checking).
 //!
 //! ## Design summary
 //!
-//! Fossil's bidirectional checker (Phase 3 plan 03-05) wants to ask "given
+//! Fossil's bidirectional checker wants to ask "given
 //! target shape `ex:Person`, what is the expected type + cardinality of
 //! predicate `p`?". That's a per-shape constraint table. `ShEx` 2.1 lets
 //! shapes share triple-expressions via `TripleExpr::Ref(TripleExprLabel)`
@@ -14,17 +14,17 @@
 //! (`Ref`) left unresolved would be walked as if it denoted nothing:
 //! walking a shape body without resolving refs produces "unknown property"
 //! false positives. Cycle detection during walk (DFS-visited) — only acyclic
-//! shape graphs are supported per `type-system.md` §11.
+//! shape graphs are supported.
 //!
 //! ## `OneOf` rejection at shape-lowering time (NOT per-mapping-check)
 //!
-//! SC#4 requires one deterministic compile error per `OneOf` encounter + a
-//! generated Fossil source split-into-N-mappings code suggestion. Doing this
+//! A `OneOf` encounter must produce exactly one deterministic compile error
+//! plus a generated Fossil source split-into-N-mappings suggestion. Doing this
 //! at per-mapping-check time would duplicate the diagnostic across every
 //! consuming mapping. Instead we collect `ShExLoweringError::OneOfRejection`
-//! during the construction walk; plan 03-05's typecheck emits the diagnostic
-//! once, attaching `Diagnostic.suggestion_source` populated from
-//! [`generate_split_suggestion`].
+//! during the construction walk; the typecheck pass emits the diagnostic
+//! once, attaching `Diagnostic.suggestion_source` populated by
+//! `fossil_hir::render_split_suggestion`.
 //!
 //! ## The way out is the neutral vocabulary
 //!
@@ -39,14 +39,20 @@
 //! there is one lowering and not two. The `ShEx`-typed surface
 //! ([`ShapeBinding`], [`ResolvedConstraint`], [`ConstraintValue`]) stays for the
 //! callers that genuinely want the AST — the INPUT descriptor derives source
-//! column types from it, and [`generate_split_suggestion`] re-emits `ShEx`'s own
-//! syntax, which only a crate that knows the syntax can do.
+//! column types from it.
+//!
+//! Re-emitting Fossil syntax is NOT among them, and the reasoning that it
+//! «only a crate that knows the syntax can do» was wrong: the suggestion needs
+//! the consuming mapping's shape name and its `@subject`, which live in the
+//! program's CST and not in any shape document. The predicate IRIs in
+//! [`fossil_graph_schema::Rejection`] are all a renderer needs from here, so
+//! `fossil-hir` renders — and does not depend on this crate at all.
 //!
 //! ## WASM safety
 //!
 //! We use ONLY `Schema::from_reader` (byte-stream input) — never
 //! `Schema::from_iri` which would pull `reqwest`/`tokio` into the WASM build
-//! path. Verified by the Phase 0 spike and re-verified since.
+//! path. Verified by the original spike and re-verified since.
 
 // `result_large_err`: `ShExLoweringError` carries a `TripleExpr` via
 // `OneOfRejection::suggestion_seed::one_of_node`. The two `pub` constructors
@@ -57,10 +63,9 @@
 #![allow(clippy::result_large_err)]
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
 
 use fossil_graph_schema::{
-    GraphSchema, Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection,
+    GraphSchema, Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Renames,
     Shape as OutputShape, local_name,
 };
 use prefixmap::{IriRef, PrefixMap};
@@ -78,7 +83,7 @@ use shex_ast::TripleExprWrapper;
 // ---------------------------------------------------------------------------
 
 /// A `ShEx` shape resolved to a flat property table for use by the
-/// bidirectional checker (plan 03-05).
+/// bidirectional checker.
 #[derive(Debug, Clone)]
 pub struct ShapeBinding {
     /// The shape's declared IRI (after prefix resolution).
@@ -96,7 +101,7 @@ pub struct ResolvedConstraint {
     /// The predicate IRI (after prefix resolution).
     pub predicate: IriS,
     /// The `valueExpr` clause from the `ShEx` `TripleConstraint`, kept opaque
-    /// for now — plan 03-05 narrows this into a `Ty<'db>` against the
+    /// for now — the bidirectional checker narrows this into a `Ty<'db>` against the
     /// `Primitive` lattice.
     pub value_expr: Option<ShapeExpr>,
     /// How many values the predicate may carry, decoded from `ShEx`'s
@@ -148,7 +153,7 @@ pub fn occurs_from_shex(min: Option<i32>, max: Option<i32>) -> Occurs {
 /// known primitive), an IRI / object reference (→ an edge / IRI-valued column),
 /// or something it cannot narrow yet. This is the single decode of that
 /// question, shared by the INPUT descriptor (deriving source column types,
-/// compile-time) and the OUTPUT bidirectional checker (plan 03-05).
+/// compile-time) and the OUTPUT bidirectional checker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstraintValue {
     /// A literal constrained to this datatype IRI (e.g.
@@ -295,12 +300,10 @@ fn branch_predicates(expr: &TripleExpr, prefixmap: &PrefixMap, out: &mut Vec<Str
 /// Lower one lowering error to the format-neutral [`Rejection`].
 ///
 /// The one thing that does not survive is the `OneOf` AST node itself, which
-/// [`SuggestionSeed`] clones so the emitter can regenerate a
-/// split-into-N-mappings suggestion. [`Rejection::Disjunction`] carries each
-/// branch's predicate IRIs instead — enough to name the split with no `ShEx`
-/// type in hand, not enough to re-emit the document's own syntax. Re-emitting
-/// syntax stays here, with [`generate_split_suggestion`], because it is the
-/// decoder that knows the syntax.
+/// [`SuggestionSeed`] clones. `Rejection::Disjunction` carries each branch's
+/// predicate IRIs instead — enough to name the split with no `ShEx` type in
+/// hand, and enough for `fossil_hir::render_split_suggestion` to write the
+/// replacement mappings without linking `ShEx`.
 fn rejection_of(err: &ShExLoweringError, prefixmap: &PrefixMap) -> Rejection {
     match err {
         ShExLoweringError::OneOfRejection(r) => {
@@ -340,14 +343,14 @@ fn iri_ref_to_string(iri_ref: &IriRef) -> String {
 }
 
 /// Errors discovered while lowering a [`Schema`] into per-shape constraint
-/// tables. Surfaced via [`ShExDescriptor::lowering_errors`]; plan 03-05's
-/// typecheck pass emits matching `Diagnostic`s.
+/// tables. Surfaced via [`ShExDescriptor::lowering_errors`]; the typecheck
+/// pass emits matching `Diagnostic`s.
 #[derive(Debug, Clone)]
 pub enum ShExLoweringError {
-    /// SC#4 — caller emits a `Diagnostic` carrying the generated split
+    /// The caller emits one `Diagnostic` carrying the generated split
     /// suggestion in `suggestion_source`.
     OneOfRejection(OneOfRejection),
-    /// `type-system.md` §11 — only acyclic shape graphs are supported.
+    /// Only acyclic shape graphs are supported.
     /// `path` is the chain of `TripleExprLabel`s visited along the cycle.
     CyclicShapeRef { path: Vec<String> },
     /// `TripleExpr::Ref(label)` pointing at a label never declared in the
@@ -369,16 +372,19 @@ pub struct OneOfRejection {
     /// The leading `TripleConstraint`'s predicate from each disjunct (one per
     /// disjunct). The diagnostic uses this to name what's being split.
     pub disjunct_predicates: Vec<IriS>,
-    /// Re-emit data for the suggestion generator.
+    /// The `OneOf` node, retained so [`rejection_of`] can walk its branches.
     pub suggestion_seed: SuggestionSeed,
 }
 
-/// Input to [`generate_split_suggestion`] retained from the original walk.
+/// The `OneOf` AST node retained from the construction walk.
+///
+/// [`rejection_of`] walks it to collect each branch's predicate IRIs, which is
+/// the only thing that crosses into the format-neutral vocabulary. The name is
+/// a leftover from when this crate rendered the suggestion itself and should be
+/// read as "the node the split is derived from".
 #[derive(Debug, Clone)]
 pub struct SuggestionSeed {
-    /// The `OneOf` node itself (cloned). Plan 03-05's emitter passes it back
-    /// into [`generate_split_suggestion`] along with the consuming mapping's
-    /// header values.
+    /// The `OneOf` node itself (cloned).
     pub one_of_node: TripleExpr,
 }
 
@@ -478,10 +484,12 @@ impl ShExDescriptor {
     ///
     /// One path, not two: this is [`Self::to_output_shapes`] followed by
     /// [`OutputShapes::to_graph_schema`], so a `ShEx` document and a decoded
-    /// document that says the same thing cannot lower differently.
+    /// document that says the same thing cannot lower differently. `renames`
+    /// travels with it for the same reason — it governs the column label, and a
+    /// forwarding method that dropped it would be a third answer.
     #[must_use]
-    pub fn to_graph_schema(&self) -> GraphSchema {
-        self.to_output_shapes().to_graph_schema()
+    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
+        self.to_output_shapes().to_graph_schema(renames)
     }
 
     /// Build the resolved constraint table from an already-parsed schema.
@@ -545,8 +553,8 @@ impl ShExDescriptor {
         self.shapes.iter()
     }
 
-    /// Errors discovered at construction time. Plan 03-05 surfaces these as
-    /// diagnostics keyed to the consuming mapping.
+    /// Errors discovered at construction time. The typecheck pass surfaces
+    /// these as diagnostics keyed to the consuming mapping.
     #[must_use]
     pub fn lowering_errors(&self) -> &[ShExLoweringError] {
         &self.errors
@@ -567,14 +575,13 @@ fn lower_shape_decl(
     let shape_iri = match &decl.id {
         ShapeExprLabel::IriRef { value } => resolve_iri_ref(value, prefixmap)?,
         ShapeExprLabel::BNode { .. } | ShapeExprLabel::Start => {
-            // BNode / Start shape declarations are out of scope per Phase 3
-            // v0.1 (only IRI-identified shapes participate in backward
-            // checking).
+            // BNode / Start shape declarations are out of scope: only
+            // IRI-identified shapes participate in backward checking.
             return None;
         }
     };
 
-    // Phase 3 v0.1 supports `ShapeExpr::Shape(_)` only. Other variants
+    // Only `ShapeExpr::Shape(_)` is supported. Other variants
     // (`ShapeOr` / `ShapeAnd` / `ShapeNot` / `External` / `NodeConstraint` /
     // `Ref`) are deferred.
     let ShapeExpr::Shape(shape) = &decl.shape_expr else {
@@ -699,7 +706,7 @@ fn walk_triple_expr(
                     one_of_node: expr.clone(),
                 },
             }));
-            // Stop descending — Phase 3 v0.1 cannot type-check a OneOf.
+            // Stop descending — a `OneOf` cannot be type-checked.
         }
         TripleExpr::Ref(label) => {
             let key = label_to_string(label);
@@ -770,93 +777,6 @@ fn label_to_string(label: &TripleExprLabel) -> String {
             IriRef::Prefixed { prefix, local } => format!("{prefix}:{local}"),
         },
         TripleExprLabel::BNode { value } => value.to_string(),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Split-into-N-mappings suggestion generator (SC#4)
-// ---------------------------------------------------------------------------
-
-/// Generate a Fossil source snippet that splits a `OneOf` into N separate
-/// mappings — one per disjunct.
-///
-/// The output is a starting template that compiles in Fossil. Inferred CSV
-/// field names follow the predicate's local part. Plan 03-05's diagnostic
-/// emitter may prepend a hint like "this is a starting template — adjust
-/// field names to match your CSVW columns".
-///
-/// # Panics
-///
-/// Panics if `one_of` is not the `TripleExpr::OneOf` variant. Callers always
-/// have this guaranteed by the [`OneOfRejection::suggestion_seed`] path.
-#[must_use]
-pub fn generate_split_suggestion(
-    base_mapping_name: &str,
-    base_iri_template: &str,
-    base_from_clause: &str,
-    base_shape_iri: &str,
-    one_of: &TripleExpr,
-) -> String {
-    let TripleExpr::OneOf { expressions, .. } = one_of else {
-        panic!("generate_split_suggestion: expected TripleExpr::OneOf");
-    };
-
-    let mut out = String::new();
-    for (i, disjunct) in expressions.iter().enumerate() {
-        let idx = i + 1;
-        // `write!` into a `String` is infallible.
-        let _ = write!(
-            out,
-            "{base_mapping_name}{idx} : {base_shape_iri} from {base_from_clause}\n    iri = {base_iri_template}\n",
-        );
-        emit_disjunct_properties(&disjunct.te, &mut out);
-        out.push('\n');
-    }
-    out
-}
-
-fn emit_disjunct_properties(expr: &TripleExpr, out: &mut String) {
-    match expr {
-        TripleExpr::TripleConstraint { predicate, .. } => {
-            let (pred_text, field_name) = predicate_render(predicate);
-            let _ = writeln!(out, "    {pred_text} = .{field_name}");
-        }
-        TripleExpr::EachOf { expressions, .. } => {
-            for w in expressions {
-                emit_disjunct_properties(&w.te, out);
-            }
-        }
-        // Nested `OneOf` inside a `OneOf` disjunct collapses to a TODO line —
-        // user must hand-split further. Phase 3 v0.1 rejects this case anyway
-        // at the outer walk.
-        TripleExpr::OneOf { .. } => {
-            out.push_str("    # TODO: nested OneOf — split further\n");
-        }
-        TripleExpr::Ref(label) => {
-            let _ = writeln!(out, "    # TODO: resolve ref {}", label_to_string(label));
-        }
-    }
-}
-
-/// Pretty-print a predicate `IriRef` for the suggestion text + infer a
-/// reasonable CSV-column field name from its local part.
-fn predicate_render(iri_ref: &IriRef) -> (String, String) {
-    match iri_ref {
-        IriRef::Prefixed { prefix, local } => (format!("{prefix}:{local}"), local.clone()),
-        IriRef::Iri(iri) => {
-            let s = iri.to_string();
-            // Take the trailing path segment as the inferred field name.
-            let inferred = s
-                .rsplit_once(['/', '#', ':'])
-                .map_or(s.as_str(), |(_, tail)| tail)
-                .to_string();
-            let field = if inferred.is_empty() {
-                "field".to_string()
-            } else {
-                inferred
-            };
-            (format!("<{s}>"), field)
-        }
     }
 }
 
@@ -1186,69 +1106,6 @@ mod tests {
             .collect();
         assert!(predicates.iter().any(|p| p.contains("email")));
         assert!(predicates.iter().any(|p| p.contains("phone")));
-
-        // Suggestion-seed round-trip: regenerate the split text and check
-        // both predicates appear in two mapping headers.
-        let suggestion = generate_split_suggestion(
-            "UserContact",
-            "`${ex:}user/${.id}`",
-            "users",
-            "ex:Person",
-            &r.suggestion_seed.one_of_node,
-        );
-        assert!(
-            suggestion.contains("UserContact1"),
-            "first mapping not emitted: {suggestion}"
-        );
-        assert!(
-            suggestion.contains("UserContact2"),
-            "second mapping not emitted: {suggestion}"
-        );
-        assert!(
-            suggestion.contains("email"),
-            "email predicate missing: {suggestion}"
-        );
-        assert!(
-            suggestion.contains("phone"),
-            "phone predicate missing: {suggestion}"
-        );
-    }
-
-    #[test]
-    fn shex_one_of_rejection_suggestion_snapshot() {
-        let desc =
-            ShExDescriptor::from_reader(CONTACT_ONEOF_SCHEMA.as_bytes()).expect("schema parses");
-        let r = desc
-            .lowering_errors()
-            .iter()
-            .find_map(|e| match e {
-                ShExLoweringError::OneOfRejection(r) => Some(r),
-                _ => None,
-            })
-            .expect("OneOf rejection present");
-
-        let suggestion = generate_split_suggestion(
-            "UserContact",
-            "`${ex:}user/${.id}`",
-            "users",
-            "ex:Person",
-            &r.suggestion_seed.one_of_node,
-        );
-
-        // Verbatim snapshot — checked in here, NOT via insta, so the asset
-        // travels with the test file (per plan 03-03 §output requirement
-        // that the SUMMARY can paste it).
-        let expected = "\
-UserContact1 : ex:Person from users\n    \
-iri = `${ex:}user/${.id}`\n    \
-<http://example.org/email> = .email\n\n\
-UserContact2 : ex:Person from users\n    \
-iri = `${ex:}user/${.id}`\n    \
-<http://example.org/phone> = .phone\n\n";
-        assert_eq!(
-            suggestion, expected,
-            "split suggestion did not match snapshot"
-        );
     }
 
     #[test]
@@ -1622,7 +1479,7 @@ iri = `${ex:}user/${.id}`\n    \
 
         let g = ShExDescriptor::from_reader(ORDER_SCHEMA.as_bytes())
             .expect("schema parses")
-            .to_graph_schema();
+            .to_graph_schema(&Renames::default());
 
         let prop = |name: &str, datatype: Primitive, iri: &str, cardinality| Property {
             name: name.into(),

@@ -250,7 +250,13 @@ mod tests {
             .lookup("https://example.org/Person")
             .expect("the shape");
         assert_eq!(p.properties[0].predicate, "https://example.org/name");
-        assert_eq!(shapes.to_graph_schema().nodes[0].label, "Person");
+        assert_eq!(
+            shapes
+                .to_graph_schema(&fossil_graph_schema::Renames::default())
+                .nodes[0]
+                .label,
+            "Person"
+        );
     }
 
     /// A malformed document is `Some(_)` carrying its rejection — never `None`.

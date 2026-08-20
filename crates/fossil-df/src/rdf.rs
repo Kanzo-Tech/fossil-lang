@@ -27,7 +27,8 @@ use datafusion::arrow::array::{ArrayRef, ListBuilder, StringArray, StringBuilder
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use oxrdf::{Literal, NamedOrBlankNode, Term};
+use fossil_descriptors_output::subject_value;
+use oxrdf::{Literal, Term};
 use oxttl::TurtleParser;
 
 /// The `rdf:type` predicate — the sole subject selector (a shape's rows are the
@@ -134,14 +135,10 @@ pub fn rdf_to_batch(
     RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(Into::into)
 }
 
-/// The bare IRI (or blank-node label) of a triple subject — `as_str`, NOT the
-/// `Display` form (which wraps IRIs in `<>`).
-fn subject_value(subject: &NamedOrBlankNode) -> String {
-    match subject {
-        NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
-        NamedOrBlankNode::BlankNode(b) => b.to_string(),
-    }
-}
+// `subject_value` — "the bare IRI (or blank-node label) of a triple subject,
+// `as_str` and NOT the `Display` form that wraps IRIs in `<>`" — lived here as a
+// byte-identical twin of `fossil_descriptors_output::subject_value`, which this
+// crate already depends on. It is that call now, imported above.
 
 /// The lexical value of an RDF object term: a literal's lexical form, or a
 /// node's IRI. Blank nodes render as their `_:id` label.

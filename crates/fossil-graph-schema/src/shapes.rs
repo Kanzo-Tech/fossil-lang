@@ -54,11 +54,75 @@ use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 /// It lives here because this crate is the one both sides of that rule share:
 /// the decoder that produces the IRIs and the schema that carries the names.
 /// There were three independent copies of this three-line function in the tree
-/// (`fossil-mir/src/lower.rs`, `fossil-shex/src/lib.rs`, `fossil-df/src/shacl.rs`);
-/// this is the one they collapse onto.
+/// — in the MIR lowering, in the ShEx descriptor, and in the SHACL decoder
+/// (`fossil-descriptors-output/src/shacl.rs`); this is the one they collapse
+/// onto.
 #[must_use]
 pub fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/']).next().unwrap_or(iri)
+}
+
+/// **The name a predicate is written and emitted under**: the `@rename` a
+/// program addressed to it, or [`local_name`] when it wrote none.
+///
+/// [`local_name`] is the default and this is the rule — every side that turns a
+/// predicate IRI into a name owes the rename the same look-up, because the
+/// rename is what makes a colliding predicate writable at all. Four sides did
+/// not: the checker's required-property pass reported a renamed predicate the
+/// body HAD written as missing, and [`OutputShapes::to_graph_schema`] then
+/// emitted its column under the un-renamed name — so the one program the repair
+/// exists for could neither compile nor round-trip.
+///
+/// Generic over the string type so the checker's `SmolStr` pairs and the
+/// program's owned `String` pairs reach the same function.
+#[must_use]
+pub fn short_name<'a, S: AsRef<str>>(predicate_iri: &'a str, renames: &'a [(S, S)]) -> &'a str {
+    renames
+        .iter()
+        .find(|(iri, _)| iri.as_ref() == predicate_iri)
+        .map_or_else(|| local_name(predicate_iri), |(_, name)| name.as_ref())
+}
+
+/// The `@rename`s a program wrote, addressed by the shape they were written
+/// above: shape IRI → `(predicate IRI, the name to write instead)`.
+///
+/// Addressed to a SHAPE and not to the document, because that is how the
+/// program writes them — `@rename(Person, "…" as foaf_name)` names the binding —
+/// and because two shapes in one document can each declare a colliding
+/// predicate needing a different repair.
+///
+/// [`Renames::default`] is «this program renamed nothing», which is almost
+/// every program and is the only answer a host with no program in hand can
+/// give. It is a parameter and not a default because a caller that silently
+/// dropped the table is exactly the defect this type exists to close.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Renames {
+    by_shape: Vec<(String, Vec<(String, String)>)>,
+}
+
+impl Renames {
+    /// Build from `(shape IRI, renames)` pairs, in the order the program wrote
+    /// them.
+    #[must_use]
+    pub fn new(by_shape: Vec<(String, Vec<(String, String)>)>) -> Self {
+        Self { by_shape }
+    }
+
+    /// `true` when the program renamed nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.by_shape.iter().all(|(_, r)| r.is_empty())
+    }
+
+    /// The renames addressed to `shape_iri` — empty when the program wrote none
+    /// for it, which is the ordinary case.
+    #[must_use]
+    pub fn for_shape(&self, shape_iri: &str) -> &[(String, String)] {
+        self.by_shape
+            .iter()
+            .find(|(iri, _)| iri == shape_iri)
+            .map_or(&[], |(_, renames)| renames.as_slice())
+    }
 }
 
 /// What a shape document says — format-neutral. `ShEx` and SHACL both lower into
@@ -151,22 +215,21 @@ pub struct PropertyConstraint {
     /// wants to *diagnose* an un-narrowed property can still tell the two apart,
     /// which a bare `Primitive::String` cannot.
     ///
-    /// # The checker does something else today, and it is not this
+    /// # The checker agrees, and once did not
     ///
     /// `None` means "the document did not narrow the value type" — that is the
-    /// contract. But the **type checker currently reads the same absence as the
-    /// strictest possible expectation**:
-    /// `crates/fossil-hir/src/check.rs` resolves a missing `value_ty` with
-    /// `unwrap_or_else(|| Ty::new(self.db, TyKind::Iri))`, while
-    /// `crates/fossil-hir/src/shapes.rs`'s own field doc says `None` means "any
-    /// value". Those two cannot both be right: `Iri` is the narrowest type in
-    /// the lattice, "any value" is the widest.
+    /// contract, and the type checker reads it that way. The two disagreed
+    /// once: `check.rs` resolved a missing expectation with
+    /// `unwrap_or_else(|| Ty::new(db, TyKind::Iri))`, the NARROWEST type in the
+    /// lattice, so a constraint the document declined to narrow rejected a
+    /// String. The choice was made in favour of this field's own reading —
+    /// `check.rs`'s `compatible` now short-circuits on
+    /// `expected.is_none_or(|e| subtypes(db, actual, e))`, so an absent
+    /// expectation accepts anything.
     ///
-    /// This is recorded, not fixed — `fossil-hir` is not this crate's to
-    /// change. It is written down so that whoever rewrites `fossil-hir` onto
-    /// this vocabulary makes the choice **deliberately** instead of preserving
-    /// a `TyKind::Iri` default by accident, or deleting it and silently
-    /// widening what the checker accepts.
+    /// Keep the two in step. `Some` narrows and `None` does not, and a default
+    /// reintroduced on the `fossil-hir` side would silently make this field
+    /// mean the opposite of what it says.
     pub datatype: Option<Primitive>,
     /// Destination shape IRIs. Empty means a literal (or opaque-IRI) property
     /// that stays a column on the node type.
@@ -251,7 +314,7 @@ pub enum Rejection {
         shape_iri: String,
         disjuncts: Vec<Vec<String>>,
     },
-    /// Only acyclic shape graphs are supported (`type-system.md` §11). `path` is
+    /// Only acyclic shape graphs are supported. `path` is
     /// the chain of labels visited along the cycle.
     CyclicRef { path: Vec<String> },
     /// A reference to a label the document never declares.
@@ -333,15 +396,26 @@ impl OutputShapes {
     /// understood, and a caller that wants to refuse a partially-understood
     /// document checks [`Self::rejections`] first. That was already true of the
     /// `ShEx` original, which lowered the non-rejected parts of every shape.
+    ///
+    /// `renames` is the program's — [`Renames`], addressed by shape — and it
+    /// governs the property/edge LABEL through [`short_name`], which is the same
+    /// function the checker resolves a bare property key with. It used to be
+    /// [`local_name`] here and rename-aware there, so a program that repaired a
+    /// collision type-checked and then wrote the column under the name it had
+    /// just renamed away from. A host with no program in hand passes
+    /// [`Renames::default`], and the node LABEL is never renamed: `@rename`
+    /// addresses a predicate, and the type's own name is the binding the program
+    /// wrote.
     #[must_use]
-    pub fn to_graph_schema(&self) -> GraphSchema {
+    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
         for shape in self.shapes() {
             let label = local_name(&shape.iri).to_string();
+            let shape_renames = renames.for_shape(&shape.iri);
             let mut properties = Vec::new();
             for c in &shape.properties {
-                let name = local_name(&c.predicate).to_string();
+                let name = short_name(&c.predicate, shape_renames).to_string();
                 let cardinality = c.occurs.collapse();
                 if c.targets.is_empty() {
                     properties.push(Property {
@@ -690,7 +764,7 @@ mod tests {
             vec![],
         );
 
-        let g = doc.to_graph_schema();
+        let g = doc.to_graph_schema(&Renames::default());
 
         assert_eq!(
             g.nodes.len(),
@@ -770,7 +844,7 @@ mod tests {
             )],
             vec![],
         );
-        let g = doc.to_graph_schema();
+        let g = doc.to_graph_schema(&Renames::default());
         assert!(g.edges.is_empty());
         assert_eq!(g.nodes[0].properties[0].datatype, Primitive::AnyUri);
     }

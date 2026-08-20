@@ -37,6 +37,10 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # legal. NOT `fossil-ide`: sharing that crate's twin of this loop is the
 # arrangement `fossil-lineage` exists to prevent.
 fossil-hir = { path = "../fossil-hir" }
+# `Renames` — the `@rename` table the descriptor lowering needs to emit a column
+# under the name the program actually writes. Same crate the schema itself comes
+# from; naming it is what makes the call legal.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The `ShEx` AST behind that descriptor, named directly:
 # `fossil-descriptors-output` stopped re-exporting it. This host is one of the
 # consumers that genuinely wants the parse — it lowers the schema blob the

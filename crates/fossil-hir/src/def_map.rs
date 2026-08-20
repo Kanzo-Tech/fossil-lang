@@ -302,6 +302,35 @@ impl<'db> DefMap<'db> {
             .map_or_else(Vec::new, |e| e.renames.clone())
     }
 
+    /// Every `@rename` the file wrote, addressed by shape — what the WRITER
+    /// needs, where [`Self::renames_for_shape`] is what the checker needs.
+    ///
+    /// The two halves used to be one: the checker read the table and
+    /// `OutputShapes::to_graph_schema` did not, so a repaired collision
+    /// type-checked under its new name and shipped under the old one. This is
+    /// the whole table because a document declares several shapes and the run
+    /// lowers all of them at once.
+    #[must_use]
+    pub fn renames(self, db: &'db dyn fossil_base::Db) -> fossil_graph_schema::Renames {
+        fossil_graph_schema::Renames::new(
+            self.types(db)
+                .iter()
+                .filter(|e| !e.renames.is_empty())
+                .filter_map(|e| {
+                    e.shape_iri.as_ref().map(|iri| {
+                        (
+                            iri.to_string(),
+                            e.renames
+                                .iter()
+                                .map(|(p, n)| (p.to_string(), n.to_string()))
+                                .collect(),
+                        )
+                    })
+                })
+                .collect(),
+        )
+    }
+
     /// Why a type name bound nothing. `None` when it bound a shape.
     #[must_use]
     pub fn lookup_type_error(
@@ -384,7 +413,7 @@ impl<'db> DefMap<'db> {
 }
 
 #[salsa::tracked]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Phase 2-9 contract
+#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'db> {
     let cst = fossil_syntax::parse(db, file);
     let mut sources: Vec<SourceEntry<'db>> = Vec::new();
@@ -929,29 +958,12 @@ fn resolve_member_shape_iris(
 // the bug it carried with it: two shapes from different vocabularies sharing a
 // local name collapsed into one key of the lookup map, and one won in silence.
 
-/// Resolve `schema_path` — a path this program wrote — against the directory
-/// this program lives in.
-///
-/// There were two byte-identical copies of this — here and in
-/// [`crate::infer`] — with a comment on the second conceding the duplication to
-/// avoid a cross-module `pub`. A third reader ([`crate::shapes`], reading the
-/// output shape document) is what made that trade stop paying.
-///
-/// It is now a call and not a fourth copy: [`fossil_base::SourceAnchor`] is the
-/// ONE rule, and the checker, the host that registers documents
-/// (`fossil_engine::documents`) and the executor (`fossil-df`) all go through
-/// it. That matters here specifically — a key this function produces has to
-/// equal the key the host registered the document under, and until they were
-/// the same function the only thing holding them together was a test that reads
-/// a mismatch as a document nobody registered.
-pub(crate) fn resolve_relative(
-    db: &dyn fossil_base::Db,
-    file: fossil_base::SourceFile,
-    schema_path: &str,
-) -> std::path::PathBuf {
-    let dir = fossil_base::program_dir(file.path(db));
-    std::path::PathBuf::from(fossil_base::SourceAnchor::beside(&dir).locator(schema_path))
-}
+// `resolve_relative` lived here — "resolve a path this program wrote against
+// the directory this program lives in" — and had one caller, `crate::shapes`,
+// which immediately rendered the `PathBuf` back to the string `file_at` is
+// keyed by. It is `crate::documents::registry_key` now, beside the loop the
+// HOSTS call to register the same documents: the key and the lookup are one
+// function, which is the only arrangement in which they cannot disagree.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {

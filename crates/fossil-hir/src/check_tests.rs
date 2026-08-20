@@ -116,6 +116,9 @@ fn build_checker<'db>(
         source_scope,
         resolved_shape,
         predicates,
+        // No `@rename` in any fixture here, matching the `short_names(&[])`
+        // above: every short name is the last segment of its predicate IRI.
+        renames: Vec::new(),
         spans: spans(db, mapping),
         entries: Vec::new(),
         next_inference: 0,
@@ -679,6 +682,7 @@ fn the_split_suggestion_is_one_mapping_per_branch() {
             vec!["http://example.org/email".to_string()],
             vec!["http://example.org/phone".to_string()],
         ],
+        &[],
     );
     assert_eq!(
         rendered,
@@ -695,7 +699,8 @@ fn the_split_suggestion_is_one_mapping_per_branch() {
 /// the user has to notice is empty.
 #[test]
 fn a_branch_with_no_named_predicate_says_so() {
-    let rendered = crate::check::render_split_suggestion("C", "C", "users", "\"t\"", &[Vec::new()]);
+    let rendered =
+        crate::check::render_split_suggestion("C", "C", "users", "\"t\"", &[Vec::new()], &[]);
     assert!(rendered.contains("# TODO"), "got {rendered:?}");
 }
 
@@ -946,5 +951,69 @@ fn a_conditional_whose_condition_is_not_bool_is_an_error() {
             .any(|d| d.message.contains("condition of `? :` must be Bool")),
         "got: {:?}",
         diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+    );
+}
+
+// ── `@rename` reaches every side that names a predicate (D2) ───────────────
+
+/// A REQUIRED predicate the program renamed and then WROTE is accepted, and the
+/// column the writer emits carries the same name.
+///
+/// Both halves are the defect, and they are one defect: `short_names` resolved
+/// the body's keys rename-first, while `check_required_properties` walked the
+/// shape's constraints with `local_name` and `OutputShapes::to_graph_schema`
+/// emitted the column with `local_name`. So the program above — the only kind
+/// `@rename` exists for — was told it had never written a property it had just
+/// written, and had the compiler accepted it, the column would have shipped
+/// under the name the rename renamed away from.
+///
+/// Asserting BOTH here is deliberate: either one alone passes with the other
+/// still broken, because the two never meet at run time.
+// The `{users.id}` hole is literal Fossil source, not a Rust format arg.
+#[allow(clippy::literal_string_with_formatting_args)]
+#[test]
+fn a_renamed_required_property_is_written_and_shipped_under_the_rename() {
+    const DOCUMENT: &str = "\
+shape http://example.org/Person
+prop http://example.org/name string 1 1
+";
+    const SRC: &str = "\
+@rename(Person, \"http://example.org/name\" as full_name)
+type { Person } := io.shex(\"person.shex\")
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"http://example.org/u/{users.id}\"
+    full_name = users.name
+";
+
+    let mut db = fossil_base::test_support::new_db();
+    let file = SourceFile::new(&db, SRC.to_string(), "prog.fossil".to_string());
+    fossil_base::test_support::register_document(&mut db, "person.shex", DOCUMENT);
+
+    let mapping = first_mapping(&db, file);
+    let _ = typecheck_mapping(&db, mapping);
+    let messages: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
+        .into_iter()
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        !messages.iter().any(|m| m.contains("never writes")),
+        "the required predicate was written, under the name the program renamed \
+         it to; got {messages:?}"
+    );
+
+    let renames = def_map(&db, file).renames(&db);
+    let document = fossil_base::file_at(&db, "person.shex").expect("registered above");
+    let shapes = fossil_base::shape_document(&db, document, "shex").expect("the `shex` row");
+    let schema = shapes.to_graph_schema(&renames);
+    let columns: Vec<&str> = schema.nodes[0]
+        .properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(
+        columns,
+        ["full_name"],
+        "the writer must emit the column under the name the body wrote"
     );
 }

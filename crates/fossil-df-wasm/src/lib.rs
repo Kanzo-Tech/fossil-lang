@@ -224,27 +224,34 @@ fn build_program(
     program: &str,
     shex: Option<&str>,
 ) -> Result<(FossilDb, SourceFile, OutputDescriptorKind), String> {
-    let descriptor = match shex {
-        Some(text) => build_descriptor(text)?,
-        None => OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-    };
     let system: Arc<dyn System> = Arc::new(ExecutorSystem);
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "program.fossil".to_string());
 
     // The key must be what the reader passes to `file_at` — the path the
-    // program wrote, resolved against the program's own directory. Same
-    // `SourceAnchor` call `fossil-engine`'s `registry_key` makes, so there is
-    // nothing to drift: a key that stops matching reads exactly like a document
-    // nobody registered.
+    // program wrote, resolved against the program's own directory. It is
+    // `fossil_hir::documents::registry_key`, the same function the checker
+    // looks the document up with and the other two hosts register under, so
+    // there is nothing to drift: a key that stops matching reads exactly like a
+    // document nobody registered.
     if let Some(text) = shex
         && let Some(document) = fossil_hir::def_map::def_map(&db, file).output_shape_document(&db)
     {
-        let dir = fossil_base::program_dir(file.path(&db));
-        let key = fossil_base::SourceAnchor::beside(&dir).locator(&document);
+        let key = fossil_hir::documents::registry_key(&db, file, &document);
         let doc = SourceFile::new(&db, text.to_string(), key.clone());
         fossil_base::register_file(&mut db, key, doc);
     }
+
+    // AFTER the registration, not before: a `@rename` is addressed to a `type`
+    // binding's NAME, and that name is bound positionally against the decoded
+    // document — so the shape IRI the rename is keyed by does not exist until
+    // the document is in the database.
+    let descriptor = match shex {
+        Some(text) => {
+            build_descriptor(text, &fossil_hir::def_map::def_map(&db, file).renames(&db))?
+        }
+        None => OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
+    };
 
     Ok((db, file, descriptor))
 }
@@ -255,7 +262,10 @@ fn build_program(
 /// shapes graph (Turtle carrying the SHACL namespace / `sh:NodeShape` /
 /// `sh:property`) is walked into a `GraphSchema`. All three end as the canonical
 /// model the executor consumes via `OutputDescriptorKind::to_graph_schema`.
-fn build_descriptor(text: &str) -> Result<OutputDescriptorKind, String> {
+fn build_descriptor(
+    text: &str,
+    renames: &fossil_graph_schema::Renames,
+) -> Result<OutputDescriptorKind, String> {
     let is_json = text.trim_start().starts_with('{');
     let looks_shacl = !is_json
         && (text.contains("http://www.w3.org/ns/shacl#")
@@ -269,7 +279,7 @@ fn build_descriptor(text: &str) -> Result<OutputDescriptorKind, String> {
         return Ok(OutputDescriptorKind::Lowered(
             fossil_descriptors_output::decode_shacl("", text)
                 .map_err(|e| format!("SHACL parse error: {e:?}"))?
-                .to_graph_schema(),
+                .to_graph_schema(renames),
         ));
     }
     Ok(OutputDescriptorKind::ShEx(

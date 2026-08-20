@@ -27,88 +27,28 @@
 //!
 //! # Why there are two of these
 //!
-//! [`fossil_ide::shape_documents`] is this file's twin, and it is deliberate,
-//! not an oversight: `fossil-lsp` and `fossil-wasm` share it, and the engine
+//! `fossil_ide::shape_documents` is this file's twin, and it is deliberate, not
+//! an oversight: `fossil-lsp` and `fossil-wasm` share it, and the engine
 //! cannot, because `fossil-engine` depending on the editor surface is the
 //! arrangement that was undone deliberately — `fossil-lineage`'s module docs
-//! name it as the mistake that crate exists to prevent. The half that MUST agree is
-//! [`registry_key`], and what holds it to `fossil-hir`'s `resolve_relative` is
-//! not discipline but the tests at the bottom of this file: a key that stops
-//! matching reads exactly like a document nobody registered, and they fail.
-//! The one place that would carry it once is `fossil-hir` itself, next to
-//! `resolve_relative` and `def_map`.
+//! name it as the mistake that crate exists to prevent.
+//!
+//! What the two twins no longer duplicate is the two questions the compiler
+//! answers: WHICH documents a program names and under WHAT key each is looked
+//! up. Both are [`fossil_hir::documents`], and this file's copies of them are
+//! gone. `documents_named` was byte-identical in both; `registry_key` was not,
+//! and the drift was live — the editor's half hand-rolled `parent().join()`,
+//! which anchors a `s3://` URL and a `@conn` alias that the checker leaves
+//! alone. The claim that stood here — «both are now the same call, so there is
+//! nothing left to drift» — was true of this file and false of the pair, which
+//! is exactly the kind of thing a docblock cannot hold. What holds it now is
+//! that there is one function, and `fossil_hir::documents`' tests resolve a
+//! target shape through it.
 
 use std::path::Path;
 
 use fossil_base::{Db, FossilDb, SourceFile, file_at, register_file};
-use smol_str::SmolStr;
-
-/// Every distinct document `file` names, in the order it names them.
-///
-/// Two places name one: [`fossil_hir::def_map::TypeEntry::document`] — the
-/// string inside `type { … } = io.shex("…")` — and
-/// [`fossil_hir::def_map::SourceEntry::schema_arg`], the document inside the
-/// `schema = io.shex("…")` of a
-/// source. Both reach the compiler through `file_at` now (`def_map`'s positional
-/// type binding and `infer`'s RDF member row), so a loop that registered only
-/// the first would leave `{ A, B } := io.rdf(…, schema = io.shex("x.shex"))` resolving
-/// nothing.
-///
-/// What is registered is what the program NAMES. Which of those a decoder
-/// claims is the compiler's business — a `.csvw.json` named here is a file the
-/// compiler may read and no shape decoder will, and that is the correct
-/// division: this loop does not parse anything to decide.
-///
-/// A program that names none returns empty, and this loop passes no judgment on
-/// that: it registers what the program names, and nothing more. The refusal is
-/// [`fossil_hir::shapes::TargetShapeError::NoDocument`], raised where the
-/// mapping is checked. **Naming a shape document is mandatory**: a bare property
-/// key takes its name from the last segment of a predicate IRI that the document
-/// declares, so a program with no document cannot write a single property.
-///
-/// This paragraph used to say the opposite — «a program with no output contract,
-/// and not an error» — and it was the older rule, in force until the ruling of
-/// 2026-08-11 replaced it. Empty here has never meant permitted; it means this
-/// loop found nothing to register.
-fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mut named: Vec<SmolStr> = Vec::new();
-    let mut push = |document: Option<&SmolStr>| {
-        if let Some(document) = document
-            && !named.contains(document)
-        {
-            named.push(document.clone());
-        }
-    };
-    for entry in def_map.types(db) {
-        push(entry.document.as_ref());
-    }
-    for entry in def_map.sources(db) {
-        push(entry.schema_arg.as_ref());
-    }
-    named
-}
-
-/// The key the compiler will look this document up under.
-///
-/// **It must equal what the reader passes to [`fossil_base::file_at`]**, which
-/// is `fossil_hir::def_map::resolve_relative` — the path a program writes,
-/// resolved against the directory of the program that writes it.
-///
-/// It used to be a hand-rolled mirror of that function, and the only thing
-/// holding the two together was the integration test at the bottom of this
-/// file, where a key mismatch reads as a document that never reaches the
-/// checker. Both are now the same call — [`fossil_base::SourceAnchor`], the one
-/// resolution rule — so there is nothing left to drift.
-///
-/// For this host the key is also a locator: `SourceFile::path` is a filesystem
-/// path here, so the same string reads the bytes. That is not true of every
-/// host — the LSP keys by `file://` URI — which is why registration takes the
-/// text and not the path.
-fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
-    let dir = fossil_base::program_dir(file.path(db));
-    fossil_base::SourceAnchor::beside(&dir).locator(document)
-}
+use fossil_hir::documents::{documents_named, registry_key};
 
 /// Read and register every shape document `file` names that the database does
 /// not already hold.
@@ -172,28 +112,30 @@ mod tests {
     /// A program whose one mapping writes `name` from a CSV column, and which
     /// names its output shape document.
     ///
-    /// The property key is the bare name: `name`, the last segment of
+    /// `Person` is a local label bound positionally to the first shape the
+    /// document declares — there is no CURIE and no prefix to expand. The
+    /// property key is the bare name: `name`, the last segment of
     /// `http://example.org/name`, which is the predicate the shape below
     /// declares. The identity is the language slot `@subject`, first line of the
-    /// body, and there is exactly one per type.
+    /// body, and there is exactly one per type; its holes are ordinary
+    /// expressions in a quoted string, and every column reference names the row
+    /// it is drawn `from`.
     const PROGRAM: &str = "\
-prefix ex: <http://example.org/>
-type { Person } = io.shex(\"person.shex\")
+type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"users.csv\")
-User : ex:Person from users
-    @subject = `${ex:}u/${.id}`
-    name = .name
+User : Person from users
+    @subject = \"http://example.org/u/{users.id}\"
+    name = users.name
 ";
 
     /// The same program with one character of one mapping body changed — an
     /// edit the checker must see and the decode must not.
     const PROGRAM_EDITED: &str = "\
-prefix ex: <http://example.org/>
-type { Person } = io.shex(\"person.shex\")
+type { Person } := io.shex(\"person.shex\")
 users := io.csv(\"users.csv\")
-User : ex:Person from users
-    @subject = `${ex:}v/${.id}`
-    name = .name
+User : Person from users
+    @subject = \"http://example.org/v/{users.id}\"
+    name = users.name
 ";
 
     /// `http://example.org/name` constrained to an integer — which the mapping
@@ -319,8 +261,15 @@ User : ex:Person from users
         );
     }
 
-    /// A program that names nothing registers nothing — the empty answer is a
-    /// program with no output contract, not a failure.
+    /// A program that names nothing registers nothing.
+    ///
+    /// This used to read «the empty answer is a program with no output
+    /// contract, not a failure», which is the rule the ruling of 2026-08-11
+    /// replaced: naming a shape document is mandatory, and the refusal is
+    /// [`fossil_hir::shapes::TargetShapeError::NoDocument`], raised where the
+    /// mapping is checked. What is asserted here is unchanged and is this
+    /// loop's whole contract — it registers what the program NAMES, and passes
+    /// no judgment on a program that names none.
     #[test]
     fn a_program_that_names_no_document_registers_nothing() {
         let dir = program_dir(DEMANDS_INTEGER);

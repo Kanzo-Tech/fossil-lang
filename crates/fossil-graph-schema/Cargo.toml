@@ -1,10 +1,10 @@
-# The canonical graph-schema — the shared contract of the universal substrate
-# (`~/.claude/plans/fossil-universal-substrate-architecture.md`, sensitivity
-# point #1). A property graph is a SCHEMA over typed relations (SQL/PGQ: keys +
+# The canonical graph-schema — the shared contract of the universal substrate,
+# and the point the whole design is most sensitive to: change this and every
+# side changes. A property graph is a SCHEMA over typed relations (SQL/PGQ: keys +
 # references); this crate is that schema, format-neutral. Dependency-free except
 # serde so EVERY side (producer fossil-df, materializers, consumer fossil-graph,
 # the wire) can speak it without pulling the ShEx/Arrow machinery — that
-# decoupling is what preserves D2 (modifiability).
+# decoupling is what keeps the substrate modifiable.
 [package]
 name = "fossil-graph-schema"
 version.workspace = true

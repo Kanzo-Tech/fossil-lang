@@ -31,12 +31,11 @@ indexmap = { workspace = true }
 rowan = { workspace = true }
 smol_str = { workspace = true }
 thiserror = { workspace = true }
-# Phase 3 plan 03-05 did-you-mean diagnostics; declared in Wave 0 to avoid
-# re-touching this Cargo.toml mid-wave.
+# Edit distance behind the did-you-mean diagnostics (`src/didyoumean.rs`).
 strsim = { workspace = true }
 
 [dev-dependencies]
-# Plan 03-08 diagnostic golden-file corpus: insta snapshots over the neutral
+# The diagnostic golden-file corpus: insta snapshots over the neutral
 # shape vocabulary, built by hand (see tests/diagnostic_corpus.rs module docs).
 insta = { workspace = true }
 # The host with a shape decoder installed, formerly `src/test_support.rs` here.

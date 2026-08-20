@@ -36,14 +36,36 @@
 //! IRI **the document declares**, so a program with no document cannot write a
 //! single property. [`TargetShapeError::NoDocument`] is that case.
 //!
-//! The other four failures were `.ok()?`/`?` operators collapsing onto the same
-//! silent `None`: a document nothing registered, a document no decoder reads, a
-//! document that did not parse, and a document that does not declare the shape
-//! the mapping targets. Each has its own [`TargetShapeError`] — which is what
-//! made the commonest mistake, a misspelt shape name, produce a message at all.
+//! # Every failure is reported at the BINDING, and none of them here
 //!
-//! The one `Ok(None)` left is a mapping with NO SHAPE CLAUSE: there is nothing
-//! to resolve, and nothing to report.
+//! Four more variants stood beside it — a document nothing registered, one no
+//! decoder reads, one that did not parse, one that does not declare the shape
+//! the mapping targets — each written so the commonest mistake, a misspelt
+//! shape name, would produce a message instead of a silent `None`. They are
+//! gone, and the reason is the ORDER, not the fixtures.
+//!
+//! A mapping header names a bare LOCAL name. [`crate::def_map`] binds those
+//! names POSITIONALLY, against this module's own [`decoded_document`], before
+//! anything asks a mapping for its target shape. So a document that cannot
+//! answer fails THERE: the binding takes a
+//! [`ShapeBindError`](crate::def_map::ShapeBindError), `lookup_type` answers
+//! `None`, [`crate::lower`] reports it by cause (`unbound_shape_message`, which
+//! carries the did-you-mean over the names the program bound) and leaves
+//! `shape_iri` empty — and an empty shape IRI reads here as «no shape clause».
+//! `Undeclared` was doubly unreachable on top of that: a positional binding
+//! hands over the Nth shape the document DECLARES, so the IRI can only be one
+//! the document declares.
+//!
+//! Thirteen programs were driven through [`resolve_target_shape`] to settle it
+//! — a misspelt header name, an unregistered document, an unknown extension, a
+//! malformed document, one that decodes to no shapes, no `type` line at all, a
+//! provider that does not read types, an unknown constructor, an arity
+//! mismatch, a bare-string document — and every one answered `Ok(None)`. Not
+//! one reached a construction site.
+//!
+//! `Ok(None)` therefore means two things that used to be one, and the second is
+//! the residue: a mapping with NO SHAPE CLAUSE, and a mapping whose shape name
+//! bound nothing and has already been told so.
 //!
 //! # Why the failure is returned and not emitted here
 //!
@@ -99,8 +121,8 @@ impl<'db> ResolvedShape<'db> {
     /// Build a [`ResolvedShape`] from a decoded [`Shape`].
     ///
     /// Plain-Rust helper. `shape_id` is supplied by the caller (a stable id is
-    /// minted per-mapping; Phase 3 v0.1 uses the mapping index since each
-    /// mapping targets at most one shape).
+    /// minted per-mapping, from the mapping index, since each mapping targets
+    /// at most one shape).
     #[must_use]
     pub fn from_shape(
         db: &'db dyn fossil_base::Db,
@@ -127,9 +149,11 @@ impl<'db> ResolvedShape<'db> {
     /// The shape's predicates by the SHORT NAME a program writes, and the
     /// collisions that make some of them unwritable.
     ///
-    /// The short name is the last segment of the predicate IRI — computed by
-    /// [`fossil_graph_schema::local_name`], which is the canonical one of the
-    /// several this repo grew, and the only one both `#`/`/` and `:` agree on.
+    /// The short name is [`fossil_graph_schema::short_name`] — the `@rename`
+    /// addressed to the predicate, else the last segment of its IRI. That is
+    /// the same function `OutputShapes::to_graph_schema` emits the column with,
+    /// which is what stops a renamed predicate being written under one name and
+    /// emitted under another.
     ///
     /// **A collision is an error naming both IRIs, and never a numeric suffix.**
     /// The evidence is the authors' own: FSharp.Data's PLDI-2016 paper declares
@@ -159,13 +183,10 @@ impl<'db> ResolvedShape<'db> {
         let mut table: Vec<(SmolStr, SmolStr)> = Vec::with_capacity(self.constraints.len());
         let mut collisions: Vec<NameCollision> = Vec::new();
         for c in &self.constraints {
-            let short = renames
-                .iter()
-                .find(|(iri, _)| iri == &c.predicate)
-                .map_or_else(
-                    || SmolStr::from(fossil_graph_schema::local_name(c.predicate.as_str())),
-                    |(_, name)| name.clone(),
-                );
+            let short = SmolStr::from(fossil_graph_schema::short_name(
+                c.predicate.as_str(),
+                renames,
+            ));
             if let Some((_, first)) = table.iter().find(|(n, _)| *n == short) {
                 collisions.push(NameCollision {
                     name: short,
@@ -179,11 +200,12 @@ impl<'db> ResolvedShape<'db> {
         (table, collisions)
     }
 
-    /// The predicate IRIs this shape declares — what a `@rename` has to name one
-    /// of, and the list a did-you-mean is drawn from when it names none.
-    pub fn predicate_iris(&self) -> impl Iterator<Item = &str> {
-        self.constraints.iter().map(|c| c.predicate.as_str())
-    }
+    // `predicate_iris` lived here — "the list a did-you-mean is drawn from when
+    // a `@rename` names no predicate this shape declares". Nothing in the
+    // workspace ever called it: `crate::lower`'s rename check walks the decoded
+    // `Shape`'s own `properties`, which is upstream of any `ResolvedShape`, so
+    // the list it needs is already in its hand. Two ways to say one thing, and
+    // only one of them was ever said.
 
     /// Find the constraint matching a predicate IRI, if any.
     #[must_use]
@@ -305,12 +327,24 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
 
 /// Why a named shape document produced no shape.
 ///
-/// Every variant used to be the same `None` that "the program names no
-/// document" produces, so the commonest mistake — a misspelt shape name — was
-/// silent. Naming NO document IS in here, at the head of the list:
-/// this doc said the opposite six lines above [`TargetShapeError::NoDocument`],
-/// which was already there. `Ok(None)` means one thing only — the mapping has
-/// no shape clause.
+/// # One variant, and it is the last one — see the module docs
+///
+/// `Unregistered`, `Undecodable`, `Unparseable` and `Undeclared` stood here and
+/// are deleted: positional binding by local name means every one of the four
+/// failures lands at the `type { … } := io.shex(…)` binding first, and by the
+/// time a mapping asks for its target shape there is no shape IRI left to fail
+/// with. Thirteen programs, one per way of getting it wrong, all answered
+/// `Ok(None)`.
+///
+/// **[`Self::NoDocument`] is unreachable by the same argument and is still
+/// here.** `TypeEntry::shape_iri` is `Some` only when `decoded_document`
+/// succeeded, which requires the binding to have named a document, so
+/// `shape_binding_for` cannot answer `None` for a non-empty shape IRI. What
+/// keeps it is not doubt: collapsing this `Result<Option<_>, _>` to a plain
+/// `Option` is three call sites in `fossil-ide` (`completion.rs`,
+/// `goto_def.rs`, `hover.rs`), which another change holds. Delete the enum, the
+/// `Err` arm in [`crate::check::typecheck_mapping`] and
+/// `surface_target_shape_error` together with those three lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetShapeError {
     /// The program names NO shape document at all.
@@ -322,20 +356,6 @@ pub enum TargetShapeError {
     /// document a program cannot write a single property. What was a silent
     /// no-op is a message.
     NoDocument,
-    /// The program names a document and nothing is registered at that path.
-    Unregistered { document: SmolStr },
-    /// The document is there and no installed decoder claims it.
-    Undecodable { document: SmolStr },
-    /// A decoder ran and rejected the document.
-    Unparseable { document: SmolStr, cause: SmolStr },
-    /// The document parsed and does not declare the shape this mapping targets.
-    /// `declared` is what it DOES declare, in declaration order — the list a
-    /// did-you-mean is drawn from.
-    Undeclared {
-        document: SmolStr,
-        shape: SmolStr,
-        declared: Vec<SmolStr>,
-    },
 }
 
 /// Why reading a shape document produced no document.
@@ -431,9 +451,12 @@ pub(crate) fn decoded_document(
         )));
     }
 
-    let resolved = crate::def_map::resolve_relative(db, file, path);
-    let doc =
-        fossil_base::file_at(db, &resolved.to_string_lossy()).ok_or(DocumentError::Unregistered)?;
+    // The key, and the SAME function the hosts register under
+    // (`crate::documents::registry_key`). A second spelling of it here is how
+    // «the document nobody registered» and «the document registered under
+    // another key» became the same message.
+    let key = crate::documents::registry_key(db, file, path);
+    let doc = fossil_base::file_at(db, &key).ok_or(DocumentError::Unregistered)?;
     let shapes =
         fossil_base::shape_document(db, doc, row.name).ok_or(DocumentError::Undecodable)?;
     malformed_cause(&shapes).map_or(Ok(shapes), |cause| Err(DocumentError::Unparseable(cause)))
@@ -499,11 +522,9 @@ pub fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option
 ///
 /// # Errors
 ///
-/// [`TargetShapeError`], and the list grew by one at its head: the program
-/// names NO document ([`TargetShapeError::NoDocument`], ruling 3 of
-/// 2026-08-11), nothing is registered at the path it names, no decoder reads
-/// it, it did not parse, or it does not declare the shape this mapping targets.
-/// Every one of those used to be the same silent `None`.
+/// [`TargetShapeError::NoDocument`], and nothing else — see that type. The four
+/// document failures that had variants here are reported at the binding, by
+/// `crate::lower::unbound_shape_message`, and cannot reach this function.
 pub fn resolve_target_shape<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
@@ -531,40 +552,21 @@ pub fn resolve_target_shape<'db>(
         return Err(TargetShapeError::NoDocument);
     };
 
-    let shapes =
-        decoded_document(db, file, constructor.as_deref(), document.as_str()).map_err(|e| {
-            match e {
-                DocumentError::Unregistered => TargetShapeError::Unregistered {
-                    document: document.clone(),
-                },
-                // A provider mismatch lands here rather than in a variant of its
-                // own, and that is a deliberate limit: the message that names
-                // the constructor and the extension is emitted at the BINDING,
-                // where the `io.shex("…")` node gives it a real span
-                // (`crate::lower::check_type_binding_provider`). Per-mapping,
-                // all that is left to say is that the contract could not be
-                // read.
-                DocumentError::Undecodable
-                | DocumentError::Unnamed
-                | DocumentError::Mismatch(_) => TargetShapeError::Undecodable {
-                    document: document.clone(),
-                },
-                DocumentError::Unparseable(cause) => TargetShapeError::Unparseable {
-                    document: document.clone(),
-                    cause,
-                },
-            }
-        })?;
-
+    // This is the SECOND decode of the same document, and the first one has
+    // already decided everything: `shape_iri` is non-empty only because
+    // `def_map` decoded this document, positionally, and took a shape out of
+    // it. So a failure here would have failed there — where it is reported, by
+    // cause, with the `io.shex("…")` node's own span — and a shape the lookup
+    // misses cannot exist, because the IRI came out of this document's
+    // declaration list.
+    //
+    // `TargetShapeError::{Unregistered, Undecodable, Unparseable, Undeclared}`
+    // were four `map_err` arms over these two lines. Nothing reached them.
+    let Ok(shapes) = decoded_document(db, file, constructor.as_deref(), document.as_str()) else {
+        return Ok(None);
+    };
     let Some(shape) = shapes.lookup(shape_iri.as_str()) else {
-        return Err(TargetShapeError::Undeclared {
-            document,
-            shape: shape_iri,
-            declared: shapes
-                .shapes()
-                .map(|s| SmolStr::from(s.iri.as_str()))
-                .collect(),
-        });
+        return Ok(None);
     };
 
     // Filter the document's rejections to this shape so the consuming mapping
@@ -576,8 +578,8 @@ pub fn resolve_target_shape<'db>(
         .cloned()
         .collect();
 
-    // Phase 3 v0.1 mints a stable per-mapping shape id from the mapping index
-    // (each mapping targets at most one shape).
+    // A stable per-mapping shape id, minted from the mapping index — each
+    // mapping targets at most one shape.
     let shape_id = ShapeId::placeholder(u32::try_from(mapping.index(db)).unwrap_or(u32::MAX));
     Ok(Some(ResolvedShape::from_shape(
         db, shape, shape_id, rejections,
@@ -754,11 +756,12 @@ User : Person from users
 
     /// The registry key is the document path joined onto the PROGRAM's
     /// directory, and a host has to compute the same string or every lookup
-    /// misses. `fossil_ide::shape_documents::registry_key` is the other half of
-    /// this and its module docs name the agreement; this is the half that lives
-    /// where the lookup happens. A key that stops matching reads exactly like a
-    /// document nobody registered, which is the least debuggable failure the
-    /// registry can produce.
+    /// misses. It is [`crate::documents::registry_key`] on both sides now —
+    /// this is the half that lives where the LOOKUP happens, and
+    /// `crate::documents`' own tests cover the two references (a scheme, a
+    /// `@conn` alias) a hand-rolled key got wrong. A key that stops matching
+    /// reads exactly like a document nobody registered, which is the least
+    /// debuggable failure the registry can produce.
     #[test]
     fn the_registry_key_is_the_document_resolved_against_the_program() {
         let mut db = new_db();
@@ -808,11 +811,15 @@ User : Person from users
     // The four CAUSES are still covered, by the tests that own them:
     // `def_map`'s `ShapeBindError` tests, and `lower.rs`'s
     // `unbound_shape_message`, which turns each into a sentence naming the
-    // document and the reason. What is left uncovered is the mapping from a
-    // cause to a `TargetShapeError`, and that is because there is no longer a
-    // path to it — reported as a defect, not repaired here: five of
-    // `TargetShapeError`'s variants and the five arms of
-    // `check::surface_target_shape_error` that render them are dead code.
+    // document and the reason — and, since the `Undeclared` arm was deleted,
+    // carries the did-you-mean that arm used to render.
+    //
+    // The four variants and the four arms of `check::surface_target_shape_error`
+    // that rendered them are now deleted too. This tombstone reported them as a
+    // defect and left them standing; thirteen programs driven through
+    // `resolve_target_shape` (one per way a document can fail, plus the ones
+    // that succeed) answered `Ok(None)` or `Ok(Some(_))` and never an `Err`,
+    // and that is what settled it.
     //
     // The one thing below them that IS live is the collapse itself, and this is
     // the replacement test for it.
@@ -822,53 +829,116 @@ User : Person from users
     /// Written to REPLACE the four above, and it asserts what is true rather
     /// than what they wanted: the failure has already been reported at the
     /// binding by the time a mapping asks for its target shape.
+    ///
+    /// # This is the measurement the deletion rests on, so it is a test
+    ///
+    /// It grew from four rows to nine, one per way a program can fail to bring
+    /// a shape in, because the construction sites the four deleted variants had
+    /// are the kind of dead code `grep` reports as live: the `Err(…)` lines
+    /// still existed in the source right up to the commit that removed them,
+    /// and only running a program through this function could say whether
+    /// control reached them. Nine did not. **Add a row here before concluding
+    /// that some tenth way would have.**
+    ///
+    /// `Ok(None)` exactly, and not `!Ok(Some(_))`: the previous spelling was
+    /// hedging against an `Err` this function can no longer produce, and the
+    /// absence of that `Err` is the whole claim.
     #[test]
     fn a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause() {
-        // (the program, the path registered, the text registered).
-        let cases: [(String, &str, &str); 4] = [
-            // A document nobody registered.
-            (src_naming("missing.shex"), "person.shex", PERSON_DOCUMENT),
-            // A document no decoder claims — here by extension.
+        let good = src_naming("person.shex");
+        // (what is wrong with it, the program, the path registered, its text,
+        //  the substring the diagnostic raised AT THE BINDING must carry).
+        let cases: [(&str, String, &str, &str, &str); 9] = [
             (
+                "a document nobody registered",
+                src_naming("missing.shex"),
+                "person.shex",
+                PERSON_DOCUMENT,
+                "its document `missing.shex` could not be read",
+            ),
+            (
+                "a document no decoder claims — here by extension",
                 src_naming("person.unknown"),
                 "person.unknown",
                 PERSON_DOCUMENT,
+                "could not be read as a shape document",
             ),
-            // A document the decoder rejected.
             (
+                "a document the decoder rejected",
                 src_naming("broken.shex"),
                 "broken.shex",
                 "!malformed expected a shape line\n",
+                "expected a shape line",
             ),
-            // A local name nobody bound — the misspelling that used to reach
-            // the document and come back `Undeclared`.
             (
-                src_naming("person.shex").replace(": Person from", ": Persn from"),
+                "a document that decodes to no shapes at all",
+                src_naming("empty.shex"),
+                "empty.shex",
+                "\n",
+                "the binding names 1 shape(s) and the document declares 0",
+            ),
+            (
+                "a local name nobody bound — the misspelling that used to reach \
+                 the document and come back `Undeclared`",
+                good.replace(": Person from", ": Persn from"),
                 "person.shex",
                 PERSON_DOCUMENT,
+                "`Persn` is not a shape this program declares",
+            ),
+            (
+                "a provider that does not read types",
+                good.replace("io.shex(", "io.csv("),
+                "person.shex",
+                PERSON_DOCUMENT,
+                "could not be read as a shape document",
+            ),
+            (
+                "a constructor this host does not install",
+                good.replace("io.shex(", "io.nope("),
+                "person.shex",
+                PERSON_DOCUMENT,
+                "could not be read as a shape document",
+            ),
+            (
+                "a bare string where a provider call belongs",
+                good.replace("io.shex(\"person.shex\")", "\"person.shex\""),
+                "person.shex",
+                PERSON_DOCUMENT,
+                // Not "names no document": the binding DOES name one, and the
+                // refusal says so and tells you the spelling it wanted. This
+                // row's expectation was written off the reachability probe,
+                // which printed the `Result` and not the diagnostic text — so
+                // it guessed the message of the neighbouring case. The cause
+                // is what has to be pinned, and this is the cause.
+                "could not be read as a shape document",
+            ),
+            (
+                "two names and one declared shape — the second binds nothing",
+                good.replace("type { Person }", "type { Person, City }")
+                    .replace(": Person from", ": City from"),
+                "person.shex",
+                PERSON_DOCUMENT,
+                "the binding names 2 shape(s) and the document declares 1",
             ),
         ];
 
-        for (src, path, text) in cases {
+        for (wrong, src, path, text, expected) in cases {
             let (db, file) = db_with_document(&src, path, text);
-            // `!Ok(Some(_))` rather than the exact variant — see
-            // `a_program_that_names_no_document_is_an_error_now`. Today it is
-            // `Ok(None)`; whether that is right is the open question the
-            // tombstone above raises, and this assertion holds either way.
             assert!(
-                !matches!(
+                matches!(
                     resolve_target_shape(&db, first_mapping(&db, file)),
-                    Ok(Some(_))
+                    Ok(None)
                 ),
-                "the binding failed, so the mapping has no output contract: {src}"
+                "{wrong}: the binding failed, so the mapping has no output \
+                 contract and no error of its own — got an answer that is not \
+                 `Ok(None)` for:\n{src}"
             );
             let diagnostics =
                 crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
             assert!(
-                diagnostics
-                    .iter()
-                    .any(|d| d.message.contains("checked against nothing")),
-                "and the failure is reported where it happened, got: {:?}",
+                diagnostics.iter().any(|d| d.message.contains(expected)),
+                "{wrong}: and the failure is reported where it happened, by \
+                 cause — expected {expected:?}, got: {:?}",
                 diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
             );
         }

@@ -12,7 +12,7 @@
 //! UI listing loaded descriptors).
 
 use crate::AcceptAllDescriptor;
-use fossil_graph_schema::GraphSchema;
+use fossil_graph_schema::{GraphSchema, Renames};
 use fossil_shex::ShExDescriptor;
 
 /// Concrete-type dispatch surface for the bidirectional checker.
@@ -92,10 +92,15 @@ impl OutputDescriptorKind {
     /// resolved table; `Lowered` already is one; `AcceptAll` is empty
     /// (no node/edge typing → every predicate stays a vertex property, the
     /// walking-skeleton behaviour).
+    ///
+    /// `renames` is the program's [`Renames`] and governs the column label.
+    /// [`Self::Lowered`] ignores it on purpose: the decode already happened,
+    /// and the side that did it (`fossil_engine`'s `read_output_shape`) is the
+    /// side that had the program.
     #[must_use]
-    pub fn to_graph_schema(&self) -> GraphSchema {
+    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
         match self {
-            Self::ShEx(d) => d.to_graph_schema(),
+            Self::ShEx(d) => d.to_graph_schema(renames),
             Self::Lowered(gs) => gs.clone(),
             Self::AcceptAll(_) => GraphSchema {
                 nodes: Vec::new(),

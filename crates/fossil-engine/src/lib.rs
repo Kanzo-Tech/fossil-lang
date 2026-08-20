@@ -1,7 +1,7 @@
 //! `fossil-engine` — the native orchestration surface behind the `fossil`
 //! binaries. It owns the compile→run pipeline (parse → `def_map` → typecheck →
 //! `lower_to_mir` → `decompose_for_writer` → materialise `GraphAr`) plus `check` /
-//! `refs` / `providers` / `catalog`, returning STRUCTURED data. The binary
+//! `refs` / `providers`, returning STRUCTURED data. The binary
 //! (`fossil-cli`) is a thin shell: it parses args, reads files/stdin, calls these
 //! functions, and renders the result (rustc-style miette for `check`, JSON/human
 //! for the rest). Mirrors the rust-analyzer `ide`-façade / biome `service`
@@ -28,7 +28,7 @@ pub mod creds;
 mod documents;
 mod system;
 
-pub use creds::{CatalogRequest, RunCreds};
+pub use creds::RunCreds;
 use system::open_db;
 
 // ===================================================================== providers
@@ -239,9 +239,15 @@ fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
     }
 }
 
-/// Scrape source-binding RHS source URLs from a `.fossil` file's text (regex,
-/// v0.2 placeholder — Phase 14+ replaces with an AST walk). Mirrors the TS
-/// `extractSourceRefs` so playground + CLI behave identically.
+/// Scrape source-binding RHS source URLs from a `.fossil` file's text. It is a
+/// regex placeholder for an AST walk, and it is wrong on any binding the regex
+/// cannot see.
+///
+/// `@fossil-lang/introspect` scrapes the same bindings for the browser, and
+/// the regex below plus the reader each constructor picks are read out of THIS
+/// FILE by `packages/introspect/tests/rust-parity.test.ts`. Editing either
+/// here turns that test red until the TypeScript follows; it is a `pnpm` test,
+/// so `cargo test` will not tell you.
 fn extract_source_refs(text: &str) -> Vec<(SmolStr, SmolStr, String)> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
@@ -435,8 +441,14 @@ fn resolve_output_descriptor(
     // CONSTRUCTOR travels with it — ruling 13 — because it is what selects the
     // row that reads it, and reading a document with a row the program did not
     // name is how the run came to use a different parser from the check.
+    // The program's `@rename`s travel with the document, because they decide
+    // the emitted column's name. Read off the same `def_map` — and read HERE
+    // rather than inside the decode, so the one place that has the program is
+    // the one place that supplies them.
+    let renames = def_map.renames(db);
+
     if let Some((constructor, document)) = def_map.output_shape_binding(db) {
-        return read_output_shape(constructor.as_deref(), document.as_str(), anchor);
+        return read_output_shape(constructor.as_deref(), document.as_str(), anchor, &renames);
     }
 
     // The `schema =` argument carries its OWN provider now
@@ -470,7 +482,7 @@ fn resolve_output_descriptor(
         return Ok(OutputDescriptorKind::ACCEPT_ALL_DEFAULT);
     };
 
-    read_output_shape(provider.as_deref(), schema.as_str(), anchor)
+    read_output_shape(provider.as_deref(), schema.as_str(), anchor, &renames)
 }
 
 /// Read and decode one shape document into the run's output descriptor,
@@ -508,6 +520,7 @@ fn read_output_shape(
     constructor: Option<&str>,
     document: &str,
     anchor: SourceAnchor<'_>,
+    renames: &fossil_graph_schema::Renames,
 ) -> miette::Result<OutputDescriptorKind> {
     use fossil_base::providers::{Capability, provider};
 
@@ -543,7 +556,9 @@ fn read_output_shape(
         .map_err(|e| miette::miette!("read output shape document `{locator}`: {e}"))?;
     let shapes = decode(&locator, &text)
         .map_err(|e| miette::miette!("parse output shape document `{locator}`: {e:?}"))?;
-    Ok(OutputDescriptorKind::Lowered(shapes.to_graph_schema()))
+    Ok(OutputDescriptorKind::Lowered(
+        shapes.to_graph_schema(renames),
+    ))
 }
 
 /// The name→base-URL view of the run's connections — what
@@ -669,9 +684,17 @@ pub fn run(
     // W3.1b layout post-pass: replace the placeholder x/y/cluster_id with a real
     // WCC partition + deterministic placement, rewriting each vertex Parquet in
     // place (DuckDB — the one remaining native-runtime use on this path).
-    enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
+    //
+    // The status is built BEFORE the pass and repointed BY it, and that order is
+    // the fix: `run_status` names `vertex/<Type>.parquet`, which is the truth
+    // for `run_to_dir`'s own output and for the wasm host (which runs no layout
+    // pass) — and a file this pass deletes. `fossil run --output-json` was
+    // handing keasy a path to a file that no longer existed, and nothing here
+    // failed, because the deletion is the LAST thing the pass does.
+    let mut status = graph.run_status(dest_url);
+    enrich_written_layout(&graph, &dest_dir, memory_bytes, &mut status)?;
 
-    Ok(graph.run_status(dest_url))
+    Ok(status)
 }
 
 /// Run the W3 layout enrichment over the just-written `GraphAr` tree: for each
@@ -687,6 +710,7 @@ fn enrich_written_layout(
     graph: &fossil_df::GraphArData,
     dest_dir: &Path,
     memory_bytes: Option<u64>,
+    status: &mut RunStatus,
 ) -> miette::Result<()> {
     let conn =
         duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
@@ -763,36 +787,23 @@ fn enrich_written_layout(
     // The single-file vertex Parquet was this pass's input and nothing reads it
     // afterwards: the manifest points at the chunk prefix, and leaving it would
     // be a second copy of every vertex, stale the moment anything is re-run.
+    //
+    // Which is why the status is repointed in the same loop. The wire contract
+    // says where a host fetches a vertex type's rows, and after this pass that
+    // is the chunk prefix the manifest already declares
+    // (`VertexInfo::prefix`) — `vertex/<Type>/`, holding `chunk{k}.parquet`.
+    // The two are written from the same `format!`, one line apart, because the
+    // deletion and the promise are one fact and were two.
     for target in &targets {
         std::fs::remove_file(&target.vertex_parquet)
             .map_err(|e| miette::miette!("remove staged {}: {e}", target.vertex_parquet))?;
+        for vertex in &mut status.vertices {
+            if vertex.vertex_type == target.type_name {
+                vertex.file = format!("vertex/{}/", target.type_name);
+            }
+        }
     }
     Ok(())
-}
-
-/// Materialise a DCAT-AP catalog graph from a [`CatalogRequest`]. The catalog's
-/// shape lives in fossil; the host supplies governance values + dataset
-/// structure. The catalog is "just another graph": built from literal rows and
-/// written by the SAME `GraphAr` path as [`run`] — `fossil_df` (Arrow), no `DuckDB`
-/// executor, no second materialiser.
-///
-/// # Errors
-/// Returns a write error.
-pub fn catalog(dest_url: &str, req: &CatalogRequest) -> miette::Result<RunStatus> {
-    let dest_dir = local_dest_dir(dest_url).ok_or_else(|| {
-        miette::miette!(
-            "the catalog writes a local directory; cloud dest `{dest_url}` is not yet wired"
-        )
-    })?;
-    let graph = fossil_df::catalog::build_catalog_graph(&req.catalog);
-    graph
-        .write_to_dir(&dest_dir)
-        .map_err(|e| miette::miette!("write catalog: {e}"))?;
-    // No budget: a catalog is the governance rows the host just handed over on
-    // stdin, so its size is the payload's and declaring a limit for it would be
-    // a number with nothing to bound.
-    enrich_written_layout(&graph, &dest_dir, None)?;
-    Ok(graph.run_status(dest_url))
 }
 
 #[cfg(test)]

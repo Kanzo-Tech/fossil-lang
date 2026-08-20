@@ -14,36 +14,31 @@ publish = false
 workspace = true
 
 [dependencies]
-# Plan 02-06 (Phase 2 plan-06): hover handler needs Salsa db (fossil-base),
-# CST + SyntaxNode/SyntaxToken (fossil-syntax), Ty + ty_origin Salsa query
+# The hover handler needs the Salsa db (fossil-base), the CST +
+# SyntaxNode/SyntaxToken (fossil-syntax), Ty + the ty_origin Salsa query
 # (fossil-hir), and rowan::TextSize for byte-offset lookups.
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
-# Plan 06-06 (SC#4): goto-def + completion consume the stdlib classification
-# catalog (Phase 5). WASM-clean, so fossil-ide stays WASM-clean. The cross-file
-# symbol / prefix infrastructure (06-03) used to be `fossil-ide-db` and is now
-# the `symbol_index` / `prefix_index` / `workspace` modules here.
+# goto-def + completion consume the stdlib classification catalog, which is
+# WASM-clean, so fossil-ide stays WASM-clean. The cross-file symbol
+# infrastructure used to be `fossil-ide-db` and is now the `symbol_index` /
+# `workspace` modules here.
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
-# Plan 06-01 Spike A (Research Open Question #3): does `lsp-types` compile to
-# wasm32-unknown-unknown? If yes, fossil-ide may return `lsp_types` structs
-# directly (recommended downstream API shape); if no, it must return
-# Fossil-domain byte-range structs translated in fossil-lsp. It does compile
-# there, so this crate returns `lsp_types` structs directly.
+# `lsp-types` compiles to wasm32-unknown-unknown, which is what lets this crate
+# return `lsp_types` structs directly. Had it not, every feature here would have
+# had to return Fossil-domain byte-range structs for fossil-lsp to translate.
 lsp-types = { workspace = true }
 
 [dev-dependencies]
 # Hover tests build `Ty`s over the lattice.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# The code-action test drives `generate_split_suggestion` over a
-# `ShExDescriptor` it builds directly, the same plain-Rust helper the checker
-# calls once it has resolved the document the program names. Named from
-# `fossil-shex`, which owns those types — `fossil-descriptors-output` stopped
-# re-exporting them, and the row it does export (`SHEX`) is a host's business,
-# not this crate's.
-fossil-shex = { path = "../fossil-shex" }
+# The host with a shape decoder installed, so `shape_documents`' own tests can
+# ask the CHECKER whether the document this host registered reached it — the
+# only question that tells a key mismatch apart from a missing document.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # The completion test's host installs the `SHEX` decoder row on its `System`,
 # the way `fossil-lsp` and `fossil-wasm` do — without it a `.shex` the test can
 # read is still a document nothing decodes, and the shape-property completions
@@ -53,7 +48,7 @@ fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # registers it on the test `System`, driving the `.<field>` completion path
 # end-to-end the way the host (browser DuckDB-WASM / native CLI) would.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# Plan 06-07 (SC#4 / SC#5): semantic-tokens + outline snapshot tests render the
-# (decoded) token stream / document-symbol tree into a stable, reviewable
-# golden file (Research test-map). insta is the workspace snapshot dev-dep.
+# The semantic-tokens + outline snapshot tests render the (decoded) token
+# stream / document-symbol tree into a stable, reviewable golden file. insta is
+# the workspace snapshot dev-dep.
 insta = { workspace = true }
