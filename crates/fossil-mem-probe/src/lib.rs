@@ -68,7 +68,7 @@ impl Probe {
     }
 
     /// Close a phase and report it. The delta is against the previous mark, so a phase that frees
-    /// as much as it takes shows zero and its cost lives in [`Self::peak`] instead.
+    /// as much as it takes shows zero and its cost lives in the `peak` field instead.
     pub fn mark(&mut self, phase: &str) {
         if !self.enabled {
             return;

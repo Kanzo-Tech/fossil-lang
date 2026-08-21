@@ -23,7 +23,7 @@
 //! `Params` and `Result` types in its own submodule. The enum is the closed
 //! set of operations every transport binding can dispatch — adding a verb
 //! means adding a variant + a `Params` / `Result` pair + a snapshot test.
-//! Removing one is a breaking change to every binding ([[`feedback_rust_enum_not_trait_registry`]]:
+//! Removing one is a breaking change to every binding (
 //! enum over trait+registry for closed sets — the bindings benefit from
 //! exhaustiveness checks on the match).
 

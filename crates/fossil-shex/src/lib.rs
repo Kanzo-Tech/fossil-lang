@@ -372,13 +372,13 @@ pub struct OneOfRejection {
     /// The leading `TripleConstraint`'s predicate from each disjunct (one per
     /// disjunct). The diagnostic uses this to name what's being split.
     pub disjunct_predicates: Vec<IriS>,
-    /// The `OneOf` node, retained so [`rejection_of`] can walk its branches.
+    /// The `OneOf` node, retained so `rejection_of` can walk its branches.
     pub suggestion_seed: SuggestionSeed,
 }
 
 /// The `OneOf` AST node retained from the construction walk.
 ///
-/// [`rejection_of`] walks it to collect each branch's predicate IRIs, which is
+/// `rejection_of` walks it to collect each branch's predicate IRIs, which is
 /// the only thing that crosses into the format-neutral vocabulary. The name is
 /// a leftover from when this crate rendered the suggestion itself and should be
 /// read as "the node the split is derived from".

@@ -574,7 +574,7 @@ impl Default for FossilPlayground {
 // supported source providers WITHOUT subprocessing the `fossil` binary. Both
 // delegate to the shared, WASM-clean `fossil_registry` implementation — the SAME
 // code `fossil-engine` runs natively — so the browser and the CLI can never
-// diverge ([[feedback_no_duplicate_logic_across_crates]]).
+// diverge.
 //
 // Free functions (not `FossilPlayground` methods): they are stateless and
 // program-text-driven (the job runner has the script string, not the editor's

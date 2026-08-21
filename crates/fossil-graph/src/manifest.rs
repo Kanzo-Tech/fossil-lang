@@ -5,7 +5,7 @@
 //! YAML those structs serialise into and exposes lookup helpers used by every
 //! verb. Same structs round-trip write→read; no parallel "`GraphArReader`"
 //! that drifts from the writer's emission
-//! ([[`feedback_no_duplicate_logic_across_crates`]] at the crate boundary).
+//! (at the crate boundary).
 //!
 //! Entry point is the [`GraphInfo`] aggregate index (`graph.graph.yml`): in a
 //! serverless/httpfs model a reader cannot list a directory, so it fetches the

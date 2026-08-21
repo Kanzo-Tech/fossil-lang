@@ -20,7 +20,7 @@
 //! come BEFORE `.nth(idx)`: without it, `PREFIX_DECL` / `SOURCE_DEF` /
 //! `IMPORT` top-level children inflate the count and `.nth(idx)` returns the
 //! wrong node. The regression test
-//! [`tests::body_filters_to_mapping_kind_before_indexing`] enforces this.
+//! `tests::body_filters_to_mapping_kind_before_indexing` enforces this.
 //!
 //! # The per-mapping invalidation barrier — CRITICAL
 //!

@@ -22,7 +22,7 @@ pub enum MaterializeError {
 /// Install a [`ResolvedPath`]'s scoped `CREATE SECRET` on a `DuckDB` connection
 /// under the given `name`, BEFORE any `read_*`/`COPY` that dereferences a cloud
 /// URL under it. A no-op when the path carries no secret (local / public URLs).
-/// Shared by [`materialize`] (dest writes) and host callers that read cloud
+/// Shared by [`crate::materialize`] (dest writes) and host callers that read cloud
 /// sources (e.g. the CLI's `@conn/path` source resolution), so secret rendering
 /// lives in exactly one place ([`ResolvedPath::create_secret_sql`]).
 ///

@@ -33,7 +33,7 @@
 //! - **`secrecy::SecretString` values.** Cloud config keys
 //!   (`azure_storage_account_key`, `aws_access_key_secret`, …) are
 //!   secrets. The predecessor used raw `String`, leaking into log frames
-//!   any time the map round-tripped through `Debug`. [`SecretString`]
+//!   any time the map round-tripped through `Debug`. `secrecy::SecretString`
 //!   forbids `Debug`/`Display` and zeroes the inner buffer on drop.
 //! - **Typed [`ResolveError`].** The predecessor returned `Result<_, String>`
 //!   so callers couldn't pattern-match on the failure shape. The new error

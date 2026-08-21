@@ -17,7 +17,7 @@
 //!   (rust-analyzer invalidation-barrier pattern): the signature
 //!   query is what everything else depends on, so editing one mapping's body
 //!   re-runs that mapping and nothing else.
-//! - [`lower_to_hir`] for header-only `HirFile` lowering; body content lives
+//! - [`crate::lower::lower_to_hir`] for header-only `HirFile` lowering; body content lives
 //!   behind [`body`] (`body(db, MappingLoc) -> HirBody`).
 //! - [`check::typecheck_mapping`], the ONE tracked checker entry per mapping.
 //! - [`check::compatible`], the two-span blame pattern: real subtyping plus

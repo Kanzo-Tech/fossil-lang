@@ -41,7 +41,7 @@ pub struct VertexInfo {
     pub vertex_type: String,
     /// Full RDF type IRI (empty for non-RDF graphs). Carried into the manifest
     /// so the query side's schema verbs surface it without a separate registry
-    /// ([[`feedback_no_duplicate_logic_across_crates`]]). Omitted from YAML when
+    ///. Omitted from YAML when
     /// empty so non-RDF graphs keep the canonical `GraphAr` shape.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub iri: String,
@@ -112,7 +112,7 @@ pub struct EdgeInfo {
 /// single entry point a binding fetches to discover all types and their
 /// per-type YAML paths. This supersedes keasy's server-built `DataManifest`
 /// (the query side now reads the same artifact the writer emits — single
-/// source, [[`feedback_no_duplicate_logic_across_crates`]]).
+/// source).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphInfo {
     /// Graph label, e.g. `"graph"`. Emitted as the spec key `name`.

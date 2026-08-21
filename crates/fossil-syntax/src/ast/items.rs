@@ -1,7 +1,7 @@
 //! Typed AST views for the composite item nodes.
 //!
 //! Each `ast_node!` here is a thin newtype around a [`SyntaxNode`] with a
-//! kind-checking [`cast`] constructor and a `syntax` back-edge to the
+//! kind-checking `cast` constructor and a `syntax` back-edge to the
 //! underlying lossless node. Downstream consumers — `fossil_hir`'s `ItemTree`
 //! and `body(mapping)` queries, and the HIR lowering in `fossil-hir::lower` —
 //! cast top-level CST children into these views to walk the structural

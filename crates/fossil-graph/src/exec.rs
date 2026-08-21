@@ -4,7 +4,7 @@
 //! binding reuses it: the native impl (`fossil-runtime`, `duckdb` crate) and
 //! the WASM impl (`fossil-wasm`, DuckDB-WASM) differ only in how they satisfy
 //! [`DuckExecutor`] — they never re-derive a verb's SQL
-//! ([[`feedback_no_duplicate_logic_across_crates`]], [[`feedback_one_idiom_per_concern`]]).
+//!.
 //!
 //! [`dispatch`] matches the [`Operation`] enum and returns the verb's `Result`
 //! serialised to JSON — the transport-agnostic wire form every binding ships.
@@ -765,7 +765,7 @@ impl<E: DuckExecutor> Context<'_, E> {
 /// `pub` because `fossil-mcp` builds `CREATE VIEW` over the same datasets and
 /// had a byte-identical private copy of this. Two spellings of SQL quoting is
 /// not a cosmetic duplication — the siblings below already disagree on purpose
-/// ([`sql_str_lit`] wraps in quotes, `fossil-mcp`'s `escape_lit` does not), so
+/// (`sql_str_lit` wraps in quotes, `fossil-mcp`'s `escape_lit` does not), so
 /// a reader with two `quote_ident`s in front of them has no way to tell which
 /// difference is deliberate.
 #[must_use]
@@ -892,7 +892,7 @@ fn value_to_string(v: &Value) -> String {
 
 /// Infer a chart-axis role from a field's name, `GraphAr` `data_type`, and
 /// cardinality. Authoritative port of keasy's former `lib/graph-schema.ts::
-/// inferRole` (this surface is now the single source — [[`feedback_one_idiom_per_concern`]]):
+/// inferRole` (this surface is now the single source):
 /// an id/uri/iri name wins; then numeric→measure; then bool/temporal→dimension;
 /// then a high-cardinality column (distinct > 200 or > 80% unique) is an
 /// identifier; else dimension. Operating on `GraphAr` spellings natively fixes
