@@ -189,8 +189,8 @@ impl LspState {
     }
 
     /// Record a newly-opened file: intern a fresh `SourceFile`. The path is
-    /// kept because the shape and CSVW documents the program names are read
-    /// relative to it.
+    /// kept because the shape documents the program names are read relative to
+    /// it.
     ///
     /// Two registrations, and they are different things. The buffer goes into
     /// the file registry under its own URI, so opening a `.shex` makes the OPEN

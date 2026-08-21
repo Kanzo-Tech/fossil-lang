@@ -43,12 +43,8 @@ fn first_mapping(db: &FossilDb, file: SourceFile) -> MappingLoc<'_> {
 /// The `users` row every checker test below builds on: `id`/`age` integers, a
 /// `name` string.
 ///
-/// It was a CSVW descriptor parsed by `CsvwDescriptor::parse`, and CSVW is
-/// gone — it was deprecated by `D-CSVW-DEPRECATED`, which told the author to
-/// remove the argument because types are inferred from the file directly. What
-/// replaces it is the INFERRED descriptor: the shape a host registers after
-/// introspecting the file, which is the direction the deprecation already
-/// pointed at. Same three columns, same types, one less way to say it.
+/// It is an INFERRED descriptor — what a host registers after introspecting the
+/// file — built here by hand and passed straight to `record_from_inferred`.
 fn users_row(db: &dyn fossil_base::Db) -> Ty<'_> {
     crate::infer::record_from_inferred(
         db,
@@ -160,7 +156,7 @@ fn literal_subset_regression() {
 
 #[test]
 fn fieldref_without_schema_synthesises_no_type_phase_2_compat() {
-    // hello's `users` source has NO CSVW schema arg → source_row = None →
+    // hello's `users` source has NO descriptor registered → source_row = None →
     // the `users.name` reference synthesises no entry (preserving Phase 2's None, keeping
     // the walking-skeleton free of spurious errors).
     let (db, file) = db_with(HELLO);
@@ -173,10 +169,10 @@ fn fieldref_without_schema_synthesises_no_type_phase_2_compat() {
     assert!(typecheck_mapping(&db, m).is_ok());
 }
 
-// ── Forward CSVW propagation (SC#1) ────────────────────────────────────────
+// ── Forward propagation (SC#1) ─────────────────────────────────────────────
 
 #[test]
-fn fieldref_csvw_propagates_string() {
+fn fieldref_propagates_string_from_inferred_descriptor() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<String> {
         let m = *def_map(db, file).mappings(db).first()?;
@@ -188,11 +184,14 @@ fn fieldref_csvw_propagates_string() {
 
     let (db, file) = db_with(HELLO);
     let rendered = shim(&db, file).expect("name lookup");
-    assert_eq!(rendered, "String", ".name resolves to String via CSVW row");
+    assert_eq!(
+        rendered, "String",
+        "`name` resolves to String via the inferred row"
+    );
 }
 
 #[test]
-fn fieldref_csvw_typo_emits_did_you_mean() {
+fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
@@ -708,8 +707,8 @@ fn a_branch_with_no_named_predicate_says_so() {
 
 #[test]
 fn typecheck_mapping_returns_error_guaranteed_on_any_diagnostic() {
-    // A mapping whose source declares a CSVW schema but references a missing
-    // column would error. We use a direct Checker to force the error path and
+    // A mapping whose source has a row but references a missing column would
+    // error. We use a direct Checker to force the error path and
     // assert the ErrorGuaranteed-implies-diagnostic contract.
     #[salsa::tracked]
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {

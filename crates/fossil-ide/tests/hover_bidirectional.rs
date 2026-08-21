@@ -49,9 +49,8 @@ use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
 struct HostSystem(fossil_descriptors_input::DescriptorCache);
 
 impl System for HostSystem {
-    /// The introspected-schema table. It was the trait default `None`, so the
-    /// only way these tests could get a typed source row was the CSVW sidecar —
-    /// which is why deleting CSVW would have silently emptied them.
+    /// The introspected-schema table. The trait default is `None`, and a host
+    /// that keeps it hands these tests no typed source row at all.
     fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
         Some(&self.0)
     }
@@ -116,10 +115,6 @@ impl HostDb {
 /// what `fossil_engine::pre_introspect_and_register` and the browser's
 /// `registerInferredDescriptor` do for real. Its `name` column is
 /// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
-///
-/// It was a `users.csvw` sidecar named by `schema = "users.csvw"`. CSVW is gone:
-/// its own `D-CSVW-DEPRECATED` diagnostic said types are inferred from the file
-/// directly, and this is that.
 fn register_users(db: &dyn fossil_base::Db) {
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
     use fossil_graph_schema::Primitive;

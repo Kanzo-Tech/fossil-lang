@@ -1,7 +1,7 @@
 //! `InferredDescriptor` — input schema produced by host-side runtime introspection
 //! (`DuckDB` `DESCRIBE read_csv_auto` in the playground; `duckdb::Connection` in
-//! the native CLI). A host ships no CSVW sidecar: it introspects the source and
-//! hands over the column list.
+//! the native CLI). A host ships no schema sidecar: it introspects the source
+//! and hands over the column list.
 //!
 //! Salsa-friendly: concrete struct (NOT trait object), Send + Sync + Clone +
 //! Hash + Eq, serde-(de)serialisable. The host passes descriptors in through an

@@ -11,7 +11,7 @@
 # rebinds a name there silently.
 #
 # Un-narrowed predicates are written `.` on purpose. The source bindings carry
-# no CSVW descriptor, so a column's type is not known; a shape that declines to
+# no input descriptor, so a column's type is not known; a shape that declines to
 # narrow the value does not narrow it (fossil-hir `expected_value_ty`, case 3),
 # and the properties that ARE narrowed below are exactly the ones whose value is
 # a catalogue call with a static return type.

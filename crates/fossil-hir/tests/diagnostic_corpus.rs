@@ -14,10 +14,9 @@
 //!     `type { … } := io.shex("…")` line names, in the line format
 //!     `fossil_base::test_support` decodes.
 //!
-//! The third file used to be a `descriptor.csvw.json`, naming the source row
-//! through `schema = "…"`. CSVW is deleted — see the bucket-1 comment below —
-//! and the row arrives the way a host supplies one now: `register_inferred`,
-//! called by the driver before the check.
+//! The source row is not a file on disk here: it arrives the way a host
+//! supplies one, through `register_inferred`, called by the driver before the
+//! check.
 //!
 //! # Driving strategy — "Db-wired" vs "helper-proven"
 //!
@@ -75,8 +74,8 @@
 //! Every snapshot header records which mode the fixture used so the
 //! test-helper-vs-Db-wired status is auditable in the committed `.snap` files.
 
-// `doc_markdown`: the doc comments name bare SC identifiers (SC#1, CSVW,
-// AcceptAll, Db) that read naturally without backticks in this test harness.
+// `doc_markdown`: the doc comments name bare SC identifiers (SC#1, AcceptAll,
+// Db) that read naturally without backticks in this test harness.
 // `literal_string_with_formatting_args`: the Fossil identity template
 // `"https://example.org/u/{users.id}"` is LITERAL Fossil source passed to the
 // suggestion renderer, not a Rust format string — and now that the hole is
@@ -180,13 +179,10 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     let file_path = dir.join("mapping.fossil");
     let file = SourceFile::new(&db, src, file_path.to_string_lossy().to_string());
     register_shape_documents(&mut db, &dir);
-    // **The HOST's job, and the reason these fixtures still have a typed row.**
-    //
-    // Each of them carried a `descriptor.csvw.json` and `schema = "…"`, and the
-    // CSVW sidecar was the ONLY thing building the source row — so it was the
-    // only thing making the `did you mean` possible. Deleting CSVW without this
-    // would not have failed: it would have made the suggestions disappear, and
-    // the snapshots would have recorded the absence as the new truth.
+    // **The HOST's job, and the reason these fixtures have a typed row at all.**
+    // The row is the only thing that makes a `did you mean` possible: without
+    // this loop the suggestions would vanish and the snapshots would record the
+    // absence as the new truth.
     //
     // Introspection cannot run here — `fossil-hir` is WASM-clean and has no
     // `DuckDB`, and these directories have no CSV to introspect anyway. So the
@@ -367,26 +363,6 @@ fn contact_disjunction(predicates: &[&str]) -> Rejection {
 }
 
 // ===== Bucket 1: Forward Propagation (SC#1) — Db-wired ======================
-//
-// The bucket was `csvw_forward_propagation/` and held three fixtures. CSVW is
-// not a thing this crate has any more — `infer.rs` deleted the `schema = "…"`
-// step that read a descriptor through `System::read_file` under
-// `D-CSVW-DEPRECATED`, whose own text told the author to remove the argument
-// because types are inferred from the file directly. Two of the three fixtures
-// were about nothing else, and are gone with it:
-//
-//   - `missing_descriptor` — its whole snapshot was «cannot read CSVW schema
-//     `descriptor.csvw.json`». There is no CSVW schema to fail to read, and no
-//     `descriptor.csvw.json` had been on disk for some time; the fixture named
-//     a file that did not exist to prove a reader that no longer exists would
-//     complain.
-//   - `unknown_datatype` — «CSVW column `duration` has an unknown or missing
-//     datatype; defaulting to String». The defaulting lived in the CSVW parser.
-//     An INFERRED descriptor carries a `Primitive`, not a datatype IRI, so
-//     there is no unknown to fall back from.
-//
-// Forward propagation itself is alive and is what the surviving fixture proves,
-// so the bucket keeps the half of its name that is still true.
 
 #[test]
 fn forward_propagation_typo_with_did_you_mean() {

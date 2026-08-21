@@ -17,9 +17,9 @@
 //! the source names a shape document,
 //! [`crate::infer::resolve_source_scope`] builds the scope whose
 //! [`flat`](crate::infer::RowScope::flat) is a `Record` type for the source
-//! row; `.field` accesses resolve against it, with did-you-mean on a miss. The
-//! `schema = "<path>"` CSVW branch that used to sit between the two is deleted
-//! — see [`crate::infer`]'s module docs for why it was not modelled instead.
+//! row; `.field` accesses resolve against it, with did-you-mean on a miss. A
+//! source that has neither has no row, and `.field` synthesises nothing — see
+//! [`crate::infer`]'s module docs for the priority order.
 //!
 //! # Backward checking
 //!
@@ -88,7 +88,7 @@ pub struct TypeckOutput<'db> {
 
 /// The ONE Salsa-tracked checker entry per mapping.
 ///
-/// Reads `body` + `spans` + the source row (CSVW) + the target shape,
+/// Reads `body` + `spans` + the source row + the target shape,
 /// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`].
 /// Returns `Err(ErrorGuaranteed)` if the body has any type error (every error
 /// also pushes ≥1 [`Diagnostic`] to the accumulator).
@@ -454,7 +454,7 @@ pub fn compatible<'db>(
     // to feed it: an `Optional<X>` value could not satisfy a constraint
     // demanding 1+. `TyKind::Optional` was never CONSTRUCTED anywhere but a
     // test — `expected_value_ty` emits `Primitive` or `Iri`, and
-    // `record_from_descriptor` types every CSVW column bare — so the check
+    // `record_from_inferred` types every descriptor column bare — so the check
     // could not fire, and it is gone with the variant. The cardinality a shape
     // declares is enforced in exactly one place now, and it is the direction
     // that can be observed: [`Checker::check_required_properties`], over the
@@ -565,7 +565,7 @@ fn subtypes<'db>(db: &'db dyn fossil_base::Db, actual: Ty<'db>, expected: Ty<'db
 // the cardinality check asked. All three are gone with `TyKind::Optional`,
 // which nothing outside a test ever constructed: the language has no `T?` (it
 // is not in `grammar.bnf`), `expected_value_ty` emits `Primitive` or `Iri`, and
-// `record_from_descriptor` types every CSVW column bare. A rule over a type
+// `record_from_inferred` types every descriptor column bare. A rule over a type
 // that cannot exist is not a rule.
 
 // `demands_one_or_more` lived here as a five-armed match over a cardinality
@@ -672,7 +672,7 @@ impl<'db> Checker<'db> {
                     },
                 )
             }
-            // T-Field: resolve against the source row (CSVW).
+            // T-Field: resolve against the source row.
             HirExpr::FieldRef(name) => {
                 let ty = self.lookup_field(expr_id, name)?;
                 let source_name = self.source_binding_name();
@@ -959,14 +959,14 @@ impl<'db> Checker<'db> {
     /// Resolve a `.field` access against the source row.
     ///
     /// Returns `None` (synthesising no type, preserving the Phase 2 behaviour)
-    /// when there is no declared source schema — this keeps `hello.fossil`
-    /// (which has a `.name` `FieldRef` and no CSVW schema) free of spurious
-    /// errors (walking-skeleton invariant). When the source row IS declared but
+    /// when there is no source row — this keeps `hello.fossil`
+    /// (which has a `.name` `FieldRef` and no descriptor behind its source) free
+    /// of spurious errors (walking-skeleton invariant). When the row IS known but
     /// the column is missing, emits a did-you-mean diagnostic (SC#1) and
     /// returns an `Error` type.
     pub fn lookup_field(&mut self, expr_id: ExprId, name: &str) -> Option<Ty<'db>> {
         let db = self.db;
-        let row = self.source_row?; // no CSVW schema → no forward propagation
+        let row = self.source_row?; // no source row → no forward propagation
 
         let TyKind::Record(rec) = row.kind(db) else {
             let eg = delay_span_bug(

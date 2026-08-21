@@ -25,7 +25,7 @@
 //!    `db.system().descriptors()` (browser-side `DuckDB-WASM` via
 //!    `FossilPlayground::registerInferredDescriptor`; the native engine via
 //!    the `duckdb` crate), `resolve_source_scope` consumes that descriptor and
-//!    builds the [`Record`] directly — no CSVW JSON is read from disk.
+//!    builds the [`Record`] directly — nothing is read from disk.
 //!
 //!    The lookup key is the URI as the program writes it, not the binding
 //!    name: the descriptor describes a file, and two bindings may
@@ -37,15 +37,6 @@
 //!
 //! 3. **No descriptor**. Returns `None`; forward propagation is disabled for
 //!    the mapping — `.field` accesses synthesise no type.
-//!
-//! There was a step between 1 and 2, and it is gone: a CSVW descriptor named by
-//! `schema = "<path>"`, read through `System::read_file` under a
-//! `D-CSVW-DEPRECATED` diagnostic whose own text told the author to delete the
-//! argument because «types will be inferred from the file directly». It is
-//! deleted rather than modelled — giving CSVW a row in the provider registry
-//! would have resurrected a deprecated feature so the new model could express
-//! it, and the model leaving it nowhere to sit is the model agreeing with the
-//! deprecation.
 //!
 //! ## Salsa-safety of the inferred path
 //!
@@ -427,16 +418,9 @@ fn resolve_leaf_row<'db>(
         return Ok(None);
     }
 
-    // There is no fallback below this, and that is the change. A `schema = "…"`
-    // holding a CSVW descriptor used to build the row here, under a
-    // `D-CSVW-DEPRECATED` diagnostic that told the author to delete the
-    // argument because «types will be inferred from the file directly». Adding
-    // a row for CSVW to the provider registry would have resurrected a
-    // deprecated feature so the new model could express it; the model leaving
-    // it nowhere to sit is the model agreeing with the deprecation.
-    //
-    // So a source with no INFERRED descriptor has no row, and that is not an
-    // error — it is every schemaless program in the tree. The host introspects
+    // There is no fallback below this: a source with no INFERRED descriptor has
+    // no row, and that is not an error — it is every schemaless program in the
+    // tree. The host introspects
     // (`fossil_engine::pre_introspect_and_register`, the browser's
     // `registerInferredDescriptor`), and what it finds arrives above.
     Ok(None)
@@ -869,10 +853,6 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
 
 /// Build a `Record` [`Ty`] from a host-provided [`InferredDescriptor`].
 ///
-/// The CSVW-descriptor twin this was written to mirror is gone, and the
-/// semantic-equivalence invariant (INPUT-03) that the two build the same
-/// `Record` from the same columns went with it: there is one path now.
-///
 /// There is no unknown-datatype branch here any more: a column carries a
 /// [`Primitive`], not the name of one, so a host that sends something outside
 /// the lattice is rejected where its JSON is deserialised — before any of this
@@ -1070,12 +1050,6 @@ mod tests {
              which is why a qualified reference must never go through it"
         );
     }
-
-    // `USERS_CSVW`, `record_from_descriptor_maps_columns_to_primitives` and
-    // `record_from_inferred_matches_csvw_path_on_same_shape` lived here. The
-    // last of the three asserted that the CSVW path and the inferred path build
-    // the same `Record` from the same columns — a real invariant while there
-    // were two paths, and a statement about nothing now that there is one.
 
     /// The unknown-primitive branch that used to live here is gone with the
     /// string: a non-lattice name no longer reaches the checker at all, it fails

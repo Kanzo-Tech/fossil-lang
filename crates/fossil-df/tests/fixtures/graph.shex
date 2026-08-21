@@ -7,7 +7,7 @@
 # string column named `placedBy` and no edge table at all.
 #
 # The values are deliberately un-narrowed (`.`) everywhere else: the columns
-# these tests assert on are typed by the MIR (String, absent a CSVW schema on
+# these tests assert on are typed by the MIR (String, absent an input schema on
 # the source), and a datatype here would only add a second opinion.
 PREFIX ex: <https://example.org/>
 

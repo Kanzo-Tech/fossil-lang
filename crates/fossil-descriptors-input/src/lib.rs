@@ -10,27 +10,14 @@
 //!
 //! JSON Schema / XSD / Parquet implementations would attach at the same trait.
 //!
-//! ## v0.2: drop user-facing CSVW; introduce `InferredDescriptor`
+//! ## The host introspects: `InferredDescriptor`
 //!
 //! A host does not ship a schema sidecar. It runs `DuckDB` `DESCRIBE
 //! read_csv_auto(...)` (browser-side `DuckDB-WASM`, or the native `duckdb`
 //! crate in `fossil-cli`) and passes the introspected column list as an
-//! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`.
-//!
-//! # `CsvwDescriptor` was here, and it is gone
-//!
-//! A CSVW JSON-LD sidecar named by `schema = "<path>"`, kept as
-//! "deprecated-but-functional internal IR" behind a `D-CSVW-DEPRECATED`
-//! diagnostic whose own text read «types will be inferred from the file
-//! directly. Remove the `schema = "..."` argument». The deprecation was right
-//! and it has been carried out: the sidecar has no reader, no error variants
-//! and no module.
-//!
-//! What settled it was the provider registry. `schema =` names a provider now
-//! (`schema = io.shex("…")`), so CSVW would have needed a ROW — and adding one
-//! is resurrecting a deprecated feature so the new model can express it. A
-//! model that leaves a deprecated form nowhere to sit is agreeing with the
-//! deprecation, not exposing a hole in itself.
+//! [`InferredDescriptor`] (see [`inferred`]) ahead of `compile()`. RDF is the
+//! other half: `schema =` names a provider (`schema = io.shex("…")`) and the
+//! declared shape gives the columns (see [`shex`]).
 //!
 //! ## Trait stability
 //!
@@ -49,9 +36,8 @@ pub use shex::{ShExInputError, inferred_descriptor_from_shex};
 
 /// Input-side schema descriptor.
 ///
-/// Implementations parse a raw descriptor blob (CSVW JSON-LD, JSON Schema,
-/// XSD, etc.) into an [`InputSchema`] used by the type-checker for forward
-/// type propagation.
+/// Implementations parse a raw descriptor blob (JSON Schema, XSD, etc.) into
+/// an [`InputSchema`] used by the type-checker for forward type propagation.
 pub trait InputDescriptor: Send + Sync + std::fmt::Debug {
     /// Stable, lowercase, namespace-free identifier (e.g. `"csv"`, `"json"`).
     ///
@@ -109,16 +95,6 @@ pub enum DescriptorError {
     /// trivially cloneable in future).
     #[error("malformed JSON: {0}")]
     MalformedJson(String),
-
-    /// `@context` was anything other than the canonical literal IRI
-    // `JsonLdContextNotSupported` and `UnknownDatatype` lived here. Both were
-    // about a CSVW sidecar; there is no sidecar.
-
-    /// The descriptor parsed successfully but did not declare a
-    /// `tableSchema`, and the type-checker requires one for forward
-    /// type propagation.
-    #[error("CSVW descriptor lacks tableSchema; cannot drive forward type propagation")]
-    MissingTableSchema,
 }
 
 /// Stub: hardcoded CSV inference returning `{id: String, name: String}`.

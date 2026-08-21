@@ -339,8 +339,8 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
 // These two tests exercise `fossil_ide::hover::render_markdown` — the exact
 // rendering function the LSP hover handler (`main.rs::handle_request`) calls
 // on the `ExprTypeEntry` returned by `ty_origin`. The closure synthesis +
-// CSVW forward propagation are driven IN-PROCESS via fossil-hir's public
-// provenance types + fossil-descriptors-input's CSVW descriptor, so the
+// forward propagation are driven IN-PROCESS via fossil-hir's public
+// provenance types + fossil-descriptors-input's `InferredDescriptor`, so the
 // integration boundary tested is hover.rs's Markdown body — identical to what
 // `result.contents.value` would carry over JSON-RPC.
 
@@ -352,10 +352,6 @@ use fossil_hir::ty::{Ty, TyKind};
 use std::sync::Arc;
 
 /// The introspected `users` row — `id`/`age` integers, a `name` string.
-///
-/// It was a `USERS_CSVW` JSON-LD sidecar parsed by `CsvwDescriptor`. CSVW is
-/// gone: its own `D-CSVW-DEPRECATED` diagnostic said types are inferred from
-/// the file directly, and this is that.
 fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
     InferredDescriptor {
@@ -444,11 +440,11 @@ fn hover_inside_synthesized_closure_via_typecheck_mapping() {
 }
 
 /// `FieldRef` hover OUTSIDE a closure (Phase 3 widening of Phase 2's
-/// literal-only path): a `.field` resolved against a CSVW source row surfaces
-/// its type.
+/// literal-only path): a `.field` resolved against an introspected source row
+/// surfaces its type.
 ///
-/// The `String` type is proven to come from CSVW forward propagation by
-/// resolving the `name` column through `record_from_descriptor` (the same
+/// The `String` type is proven to come from forward propagation by
+/// resolving the `name` column through `record_from_inferred` (the same
 /// in-process path `resolve_source_scope` uses), then rendering the resulting
 /// `InputDescriptor` entry via the LSP's `render_markdown`.
 #[test]
@@ -456,10 +452,9 @@ fn hover_on_introspected_fieldref_outside_closure() {
     let db = bare_db();
 
     // Resolve `.name` against a real INTROSPECTED descriptor — proves the
-    // `String` type below comes from the descriptor and is not hard-coded. It
-    // read a CSVW sidecar until CSVW was deleted; the inferred descriptor is
-    // what a host registers after introspecting the file, which is what the
-    // deprecation pointed at.
+    // `String` type below comes from the descriptor and is not hard-coded: the
+    // inferred descriptor is what a host registers after introspecting the
+    // file.
     let name_kind = users_descriptor()
         .columns
         .iter()
@@ -488,7 +483,7 @@ fn hover_on_introspected_fieldref_outside_closure() {
     let md = fossil_ide::hover::render_markdown(&db, &entry);
     assert!(
         md.contains("String"),
-        "hover on a CSVW FieldRef must show the field type `String`; got {md:?}",
+        "hover on an introspected FieldRef must show the field type `String`; got {md:?}",
     );
     // NOT inside a closure → no closure binding rendered.
     assert!(

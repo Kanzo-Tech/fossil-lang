@@ -2,7 +2,7 @@
 
 A typed compiler for RDF graph construction. Surface syntax is a small DSL
 (`.fossil`) with bidirectional type checking — forward from input descriptors
-(CSVW, or introspected from the source itself), backward from target shapes
+(introspected from the source itself), backward from target shapes
 (ShEx). It lowers to a typed operator algebra and executes it, producing typed
 graphs in [Apache GraphAr](https://graphar.apache.org/) layout: DataFusion runs
 the mapping, DuckDB does source introspection and the layout pass.

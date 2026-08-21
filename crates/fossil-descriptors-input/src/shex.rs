@@ -9,8 +9,8 @@
 //! (parse + `EachOf` flatten + `Ref` resolution + the `valueExpr` narrowing)
 //! lives in the neutral [`fossil_shex`] crate, shared with the output
 //! descriptor's backward checker; here we only map the resolved
-//! [`fossil_shex::ConstraintValue`] onto the [`Primitive`] lattice via the same
-//! [`Primitive::from_xsd_iri`] the CSVW path uses.
+//! [`fossil_shex::ConstraintValue`] onto the [`Primitive`] lattice via
+//! [`Primitive::from_xsd_iri`], the one xsd table every descriptor shares.
 
 use fossil_graph_schema::Primitive;
 use fossil_shex::{ConstraintValue, ShExDescriptor};
@@ -73,8 +73,7 @@ pub fn inferred_descriptor_from_shex(
 
 /// Map a narrowed [`ConstraintValue`] onto the lattice. Datatype IRIs go through
 /// the one xsd table; IRI / object references are `AnyUri`; anything
-/// un-narrowable falls back to `String` (mirrors the CSVW unknown-datatype
-/// behaviour).
+/// un-narrowable falls back to `String`.
 fn column_primitive(value: &ConstraintValue) -> Primitive {
     match value {
         ConstraintValue::Datatype(iri) => Primitive::from_xsd_iri(iri).unwrap_or(Primitive::String),

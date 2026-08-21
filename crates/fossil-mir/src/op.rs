@@ -43,8 +43,8 @@ use smol_str::SmolStr;
 pub enum Op<'db> {
     /// `SourceOp(uri, format, row_type)` — origin of all row data.
     ///
-    /// `row_type` is the `Record` row type derived from the descriptor (CSVW)
-    /// or the typed source row (`TypeckOutput.source_row`).
+    /// `row_type` is the `Record` row type derived from the host-registered
+    /// descriptor, or the typed source row (`TypeckOutput.source_row`).
     Source {
         uri: SmolStr,
         format: SourceFormat,

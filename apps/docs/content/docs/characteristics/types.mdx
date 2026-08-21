@@ -145,7 +145,7 @@ which existed only to assert that it agreed with another.
 
 What is left is one function per direction, both on the lattice itself:
 `Primitive::from_xsd_iri` (`crates/fossil-graph-schema/src/lib.rs:141`), which takes the full IRI,
-the `xsd:` prefixed form and the bare CSVW name; and `Primitive::to_xsd_iri`
+the `xsd:` prefixed form and the bare local name; and `Primitive::to_xsd_iri`
 (`crates/fossil-graph-schema/src/lib.rs:165`). Beside them stand two mappings that are not
 duplicates but vocabularies a materializer owns: `primitive_to_graphar`
 (`crates/fossil-hir/src/shapes.rs:141`) and `duckdb_type_to_fossil_primitive`

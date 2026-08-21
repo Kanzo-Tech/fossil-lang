@@ -406,21 +406,21 @@ User : Person from users
     }
 
     /// Hover on the `ex:name = .name` line returns `None` for the HELLO
-    /// fixture — its `users` source declares NO schema, so
+    /// fixture — no descriptor is registered for its `users` source, so
     /// `resolve_source_scope` returns `None` and the `FieldRef` synthesises no
     /// entry. A `FieldRef` hover needs a row to resolve against; given one,
     /// `render_markdown` surfaces the field type (see the
-    /// `render_markdown_for_fieldref_with_csvw_propagation` unit test).
+    /// `render_markdown_for_fieldref_with_forward_propagation` unit test).
     #[test]
-    fn hover_on_field_ref_returns_none_without_csvw_schema() {
+    fn hover_on_field_ref_returns_none_without_a_source_row() {
         let (db, file) = db_with_text(HELLO);
         // Line 4 is `    ex:name = .name`. Cursor inside the property at
         // character 14 (somewhere on the value).
         let info = hover(&db, file, 4, 14);
         assert!(
             info.is_none(),
-            "hover on FieldRef RHS with no CSVW schema must return None \
-             (no source row to resolve against)"
+            "hover on FieldRef RHS with no registered descriptor must return \
+             None (no source row to resolve against)"
         );
     }
 
@@ -475,7 +475,7 @@ User : Person from users
     /// A `FieldRef` resolved against a source row carries `InputDescriptor`
     /// provenance + the field's type, and `render_markdown` surfaces that type.
     #[test]
-    fn render_markdown_for_fieldref_with_csvw_propagation() {
+    fn render_markdown_for_fieldref_with_forward_propagation() {
         let db = bare_db();
         let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
         let entry = ExprTypeEntry {
@@ -492,7 +492,7 @@ User : Person from users
         let md = render_markdown(&db, &entry);
         assert!(
             md.contains("String"),
-            "expected the CSVW field type `String`, got {md:?}",
+            "expected the field type `String`, got {md:?}",
         );
         assert!(
             md.contains("```fossil"),
@@ -528,7 +528,7 @@ User : Person from users
 
         // Target-side resolved (ShEx demands `Integer` for this predicate).
         let md = render_markdown_bidirectional(&db, &entry, Some("Integer"));
-        // Source-side block (CSVW String) present.
+        // Source-side block (`String`, from the input descriptor) present.
         assert!(
             md.contains("String"),
             "source-side type `String` must still appear; got {md:?}",

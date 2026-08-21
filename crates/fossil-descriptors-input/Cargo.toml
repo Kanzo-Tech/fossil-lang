@@ -6,11 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-# CSVW and ShEx are the two that exist. CSV, JSON and Parquet arrive as
-# `Inferred` because the HOST runs `DESCRIBE read_csv_auto(...)` —
-# there is no JSON Schema, Parquet or XSD descriptor here, and the description
-# claimed all three for a long time.
-description = "Input descriptors (CSVW, ShEx, and host-inferred schemas) for forward type propagation"
+# ShEx and the host-inferred schema are the two that exist. CSV, JSON and
+# Parquet arrive as `Inferred` because the HOST runs `DESCRIBE
+# read_csv_auto(...)` — there is no JSON Schema, Parquet or XSD descriptor
+# here, and the description claimed all three for a long time.
+description = "Input descriptors (ShEx and host-inferred schemas) for forward type propagation"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -21,10 +21,10 @@ workspace = true
 # Phase 1: trait + minimal CSV stub. csv / roxmltree / jsonschema stay deferred
 # to Phase 5 STDL-06 (already declared at workspace level for inheritance).
 #
-# Phase 3 plan 03-02 (CORE-05): consumes serde + serde_json for the CSVW thin
-# parser at `src/csvw.rs`. Per the Serious N2 fix to the Wave-1 plan layout,
-# the consumer crate owns its dep declarations; plan 03-01 owns the
-# workspace-level `serde` + `serde_json` entries in the root Cargo.toml.
+# Phase 3 plan 03-02 (CORE-05): consumes serde + serde_json for the
+# `InferredDescriptor` JSON round-trip. Per the Serious N2 fix to the Wave-1
+# plan layout, the consumer crate owns its dep declarations; plan 03-01 owns
+# the workspace-level `serde` + `serde_json` entries in the root Cargo.toml.
 indexmap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

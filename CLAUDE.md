@@ -131,7 +131,7 @@ crates/
                            catalog (`stdlib.rs` — the checker resolves calls against it)
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-shex/             ShExDescriptor over `shex_ast` — backward target-shape checking
-  fossil-descriptors-{input,output}/   trait + impls (CSVW, ShEx)
+  fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
   fossil-resolver/         host-injected cloud path resolution (s3://, az://)  [NATIVE-ONLY]
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)

@@ -199,8 +199,8 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
     // cursor onto whatever happened to be at the old offset.
 
     // hover: inside the identity template of mapping #1. An interpolated string
-    // synthesises an `IriTemplate` without needing a CSVW descriptor, which the
-    // fixture's sources deliberately do not have.
+    // synthesises an `IriTemplate` without needing an input descriptor, which
+    // the fixture's sources deliberately do not have.
     let (hover_l, hover_c) = pos_of(&src_a, "@subject = \"https://example.org/person/", 14);
     // definition: on the SHAPE NAME of mapping #1's header. `Person` is declared
     // in `canonical_200.shex`, so this is the language-boundary jump.

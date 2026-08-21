@@ -15,8 +15,7 @@
 //! - [`ExprTypes`]: per-mapping interned vector of [`ExprTypeEntry`].
 //! - [`expr_types`]: `MappingLoc -> ExprTypes` Salsa query, the projection of
 //!   [`crate::check::typecheck_mapping`]'s per-expression types. A `FieldRef`
-//!   gets an entry only where a CSVW schema gives the source a row type to
-//!   resolve it against.
+//!   gets an entry only where the source has a row type to resolve it against.
 //! - [`ty_origin`]: convenience lookup `(MappingLoc, ExprId) -> Option<ExprTypeEntry>`.
 //!
 //! # Why `Option<ExprTypeEntry<'db>>` and not `Option<(Ty, Provenance)>`
@@ -70,7 +69,7 @@ pub struct Provenance {
 /// descriptor on either side, a literal, an operator, or a closure.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum ProvenanceKind {
-    /// Type came from an input source descriptor (e.g. a CSVW column).
+    /// Type came from an input source descriptor — a source-row column.
     InputDescriptor {
         source_name: SmolStr,
         column: SmolStr,
@@ -141,14 +140,14 @@ pub struct ExprTypeEntry<'db> {
 /// The dependency runs one way only: the bidirectional checker's
 /// [`crate::check::typecheck_mapping`] is the SOURCE OF TRUTH for
 /// per-expression types (over the full `HirExpr` space, including `FieldRef`
-/// resolved against the CSVW source row). `expr_types` is
+/// resolved against the source row). `expr_types` is
 /// the projection — it returns `typecheck_mapping(db, mapping)?.expr_types(db)`,
 /// or an empty table if the mapping had a type error (the error already
 /// emitted ≥1 diagnostic).
 ///
 /// The literal cases are the simple ones and behave as they read: a
 /// `Template` RHS synthesises `IriTemplate`, a `StringLit` synthesises
-/// `String`. A `FieldRef` resolves only where a CSVW schema is declared;
+/// `String`. A `FieldRef` resolves only where the mapping's source has a row;
 /// without one it synthesises no entry at all.
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
@@ -230,9 +229,9 @@ Users : Person from User
     }
 
     /// Property 1 of `hello.fossil` is `name = User.name` — the RHS is a
-    /// qualified reference, where it was the leading-dot `.name`. `User` here
-    /// declares no CSVW schema, so there is no source row to resolve the field
-    /// against and no type is synthesised.
+    /// qualified reference, where it was the leading-dot `.name`. No descriptor
+    /// is registered for `User`'s URI, so there is no source row to resolve the
+    /// field against and no type is synthesised.
     #[test]
     fn ty_origin_returns_none_for_field_ref() {
         let (db, file) = db_with_text(HELLO);

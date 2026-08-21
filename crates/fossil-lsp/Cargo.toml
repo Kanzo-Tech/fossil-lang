@@ -55,16 +55,16 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # The lattice a hover renders.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# The lsp_hover_smoke integration test drives implicit-closure synthesis + CSVW
+# The lsp_hover_smoke integration test drives implicit-closure synthesis +
 # forward propagation IN-PROCESS (via fossil-hir's Checker +
-# fossil-descriptors-input's CSVW descriptor) and asserts on
+# fossil-descriptors-input's `InferredDescriptor`) and asserts on
 # fossil_ide::hover::render_markdown — the exact rendering surface the LSP hover
 # handler invokes. It cannot go through JSON-RPC end to end, because the surface
 # syntax that would trigger synthesis does not exist yet: there is no
 # `seq.filter` / pipeline form, and no stub was added to fake one. serde_json and
 # fossil-hir are declared above as normal dependencies and the smoke test reuses
 # both; only fossil-descriptors-input + smol_str are dev-only, for that
-# in-process CSVW forward-propagation test.
+# in-process forward-propagation test.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str                 = { workspace = true }
 # Criterion for the advisory didChange benchmark. No default

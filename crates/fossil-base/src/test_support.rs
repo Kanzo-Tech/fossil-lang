@@ -148,8 +148,8 @@ pub static SHEX: Provider = Provider {
 pub static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX];
 
 /// The real filesystem for everything except shape documents, plus the provider
-/// table. The CSVW path still reads through [`System::read_file`], so this
-/// delegates rather than stubbing.
+/// table. A shape document is read through [`System::read_file`] like any other
+/// file, so this delegates rather than stubbing.
 ///
 /// [`NativeSystem`] on its own is NOT enough for any test that resolves a
 /// shape: its [`System::providers`] is the trait default (the data rows only),
@@ -173,9 +173,8 @@ impl System for DecodingHost {
     /// from introspection.
     ///
     /// `lookup_inferred` reads `db.system().descriptors()`, so with `None` it
-    /// missed unconditionally and every fixture that wanted a typed row had to
-    /// reach for the deprecated CSVW `schema = "…"` path instead — which is the
-    /// support that has to be replaced before CSVW can be deleted, not after.
+    /// missed unconditionally and no fixture above this crate could take a
+    /// source row from introspection at all.
     /// [`register_inferred`] is the other half: a host puts the descriptor in
     /// before the compile, exactly as `fossil_engine::pre_introspect_and_register`
     /// and the browser's `registerInferredDescriptor` do.
@@ -186,8 +185,8 @@ impl System for DecodingHost {
 
 /// Register an introspected row for `uri` — the HOST's job, done by hand.
 ///
-/// A test that wants a typed source row calls this instead of writing a CSVW
-/// descriptor next to the program. The columns are what an introspection of the
+/// A test that wants a typed source row calls this. The columns are what an
+/// introspection of the
 /// file would have found; nothing here reads a file, because the point of the
 /// inferred path is that the host has already looked.
 pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) {

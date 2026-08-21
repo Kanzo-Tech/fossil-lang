@@ -148,12 +148,12 @@ pub enum Cardinality {
 impl Primitive {
     /// Parse an XSD datatype IRI into the lattice. Accepts all three spellings
     /// the tree carries: the full `http://www.w3.org/2001/XMLSchema#<name>` IRI,
-    /// the `xsd:<name>` prefixed form, and the bare local name a CSVW `datatype`
-    /// field holds. **This is the only xsd → [`Primitive`] table in the tree.**
+    /// the `xsd:<name>` prefixed form, and the bare local name.
+    /// **This is the only xsd → [`Primitive`] table in the tree.**
     ///
     /// `None` for an XSD type outside the lattice — callers decide between a
-    /// diagnostic and a `String` fallback, and the two do differ (CSVW says so,
-    /// `ShEx` narrowing does not).
+    /// diagnostic and a `String` fallback, and they do differ: `ShEx` narrowing
+    /// takes the fallback.
     #[must_use]
     pub fn from_xsd_iri(iri: &str) -> Option<Self> {
         let local = iri.rsplit(['#', '/', ':']).next().unwrap_or(iri);
@@ -313,9 +313,9 @@ mod tests {
     }
 
     /// The three spellings the tree carries reach the same variant. This is the
-    /// test that replaces the reconciliation the seven tables needed: a CSVW
-    /// `datatype` (bare local name), a `ShEx` `valueExpr` (full IRI) and a
-    /// prefixed form are one lookup, so there is no second table to disagree with.
+    /// test that replaces the reconciliation the seven tables needed: a bare
+    /// local name, a `ShEx` `valueExpr` (full IRI) and a prefixed form are one
+    /// lookup, so there is no second table to disagree with.
     #[test]
     fn every_xsd_spelling_reaches_one_lattice() {
         for (iri, prefixed, bare, want) in [
@@ -355,8 +355,7 @@ mod tests {
     }
 
     /// The xsd families collapse, and the collapse is the whole point of a
-    /// lattice: v0.1 does not distinguish width or signedness. Moved here from
-    /// the CSVW parser's own table, which no longer exists.
+    /// lattice: v0.1 does not distinguish width or signedness.
     #[test]
     fn the_xsd_families_collapse() {
         for name in [

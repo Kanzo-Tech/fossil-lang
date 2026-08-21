@@ -23,7 +23,7 @@
 //! # Phase 4 generalisations over the Phase 1 hardcodes
 //!
 //! - **Source row type** comes from [`fossil_hir::check::TypeckOutput`]'s
-//!   `source_row` (CSVW-derived) when type-checking succeeds; otherwise it
+//!   `source_row` when type-checking succeeds; otherwise it
 //!   falls back to the Phase 1 `Record({id, name})` so codegen still produces
 //!   output (walking-skeleton preserved — never panic).
 //! - **Multi-property mappings** emit one shared upstream `Extend(field="iri")`
@@ -115,7 +115,7 @@ pub fn lower_to_mir_pg<'db>(
     let body = body(db, mapping);
     // A typecheck failure taints (it already emitted the diagnostic). A source
     // that simply declares no schema is NOT a failure — `source_row` is `None`
-    // for every program without a CSVW/ShEx schema — so it yields an empty row
+    // for every program whose source declares no schema — so it yields an empty row
     // type, and `field_ty` types those columns `String` as before. What it must
     // never do is invent field names: the old `Record({id, name})` default made
     // unrelated sources look like they had `id` and `name` columns.
@@ -178,7 +178,7 @@ pub fn lower_to_mir_pg<'db>(
     // IRI-template that resolves to another subject → edge; dangling template /
     // constant prefixed-name → neither (v0.1 — mirrors synthesize_sink_plan).
     // (a) Type refinement: a FieldRef prop carries the source field's type
-    // (CSVW-refined when the source declares a `schema`; String otherwise — same
+    // (refined when the source declares a schema; String otherwise — same
     // as the legacy path, which types nothing). The backend derives the
     // GraphAr/xsd spelling from `ty`. Cardinality stays `single_valued = true`
     // here (the ShEx-descriptor refinement that would set multi-valued needs the

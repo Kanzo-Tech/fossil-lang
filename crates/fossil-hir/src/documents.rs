@@ -38,9 +38,9 @@ use smol_str::SmolStr;
 /// leave `{ A, B } := io.rdf(…, schema = io.shex("x.shex"))` resolving nothing.
 ///
 /// What is listed is what the program NAMES. Which of those a decoder claims is
-/// the compiler's business — a `.csvw.json` named here is a file the compiler
-/// may read and no shape decoder will, and that is the correct division: this
-/// function parses nothing to decide.
+/// the compiler's business — a name here is a file the compiler may read, not a
+/// promise that a shape decoder will take it, and that is the correct division:
+/// this function parses nothing to decide.
 ///
 /// A program that names none yields an empty list. That is a program the
 /// checker rejects — naming a shape document is mandatory — but the rejection
