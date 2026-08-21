@@ -56,7 +56,7 @@ use smol_str::SmolStr;
 use fossil_graph_schema::{Primitive, Shape, local_name};
 
 use crate::def_map::{MappingLoc, ShapeBindError, def_map};
-use crate::ty::{Record, RecordField, Ty, TyKind};
+use crate::ty::{Record, RecordField, Rows, Ty, TyKind};
 
 /// The source-row [`Ty`] (a `Record`) for a mapping as known from the
 /// host-registered [`fossil_descriptors_input::InferredDescriptor`] ONLY.
@@ -110,117 +110,15 @@ fn field_from_inferred<'db>(
     }
 }
 
-/// The rows a relation makes addressable, each under the name of the BINDING
-/// that introduced it.
-///
-/// This is the consequence of names `grammar.bnf` spells out under
-/// `SourceDef`: *«a mapping body writes `User.name` and never
-/// `Adults.name`, even when it draws `from Adults`»*. A binding ties the type
-/// and the relation together, so a relation DERIVED from `User` — by `where`, by
-/// `select`, by standing on the left of a `join` — keeps handing back rows that
-/// are addressed as `User`. The derived name (`Adults`, `Reachable`, `Joined`)
-/// names the relation and never a row.
-///
-/// Which is why this is a LIST and not one record. A join brings a second
-/// binding into the same relation, and its columns stay under their own name:
-/// `Purchase.amount` and `User.email` are two rows of one relation, and two
-/// columns called `id` — one per side — are two distinct entries here even
-/// though the flattened [`Self::flat`] record can only find the first. Ruling 17
-/// of `SURFACE-PLAN.md` deleted the collision rule on the promise that
-/// qualification would do that work; this is where it does it.
-///
-/// The row is an `Option` because a binding whose source declares no schema is
-/// still a row a body may name: `hello.fossil` addresses columns of a source
-/// with no descriptor at all. So membership (does this relation have a row
-/// called `Contact`?) and typing (what is `Contact.email`?) are two different
-/// questions, and only the first has an answer for every program.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RowScope<'db> {
-    rows: Vec<(SmolStr, Option<Ty<'db>>)>,
-}
+// `RowScope` lived here — the rows of a relation, beside the type system rather
+// than in it. It is `crate::ty::Rows` now, the payload of `TyKind::Relation`,
+// and this module keeps the ALGEBRA that builds one.
+//
+// Two structures described the shape of data in flight and only one of them was
+// a type, which is why `seq.where` had the signature `p("rows", S::String)` and
+// why a `where` predicate was walked for the columns it names and never typed.
 
-impl<'db> RowScope<'db> {
-    /// The scope of a binding that reads a file: itself, and nothing else.
-    #[must_use]
-    pub fn one(binding: &str, row: Option<Ty<'db>>) -> Self {
-        Self {
-            rows: vec![(SmolStr::from(binding), row)],
-        }
-    }
-
-    /// The binding names this relation makes addressable, left to right.
-    pub fn bindings(&self) -> impl Iterator<Item = &SmolStr> {
-        self.rows.iter().map(|(name, _)| name)
-    }
-
-    /// Is there a row under this name — the question the qualified-reference
-    /// diagnostic asks. TRUE with an untyped row; absence is not "no schema".
-    #[must_use]
-    pub fn has(&self, binding: &str) -> bool {
-        self.rows.iter().any(|(name, _)| name == binding)
-    }
-
-    /// The row a binding contributes. `None` both when the name is not in scope
-    /// and when it is but its source declares no schema — ask [`Self::has`]
-    /// first, because those two are different answers.
-    #[must_use]
-    pub fn row_of(&self, binding: &str) -> Option<Ty<'db>> {
-        self.rows
-            .iter()
-            .find(|(name, _)| name == binding)
-            .and_then(|(_, row)| *row)
-    }
-
-    /// Every column of every row, left to right, as one flat `Record` — what
-    /// the checker resolves a BARE name against and what the row algebra prints
-    /// in its refusals.
-    ///
-    /// `None` when any row in the scope is untyped: a record missing one side's
-    /// columns would answer "unknown column" for a column that exists.
-    #[must_use]
-    pub fn flat(&self, db: &'db dyn fossil_base::Db) -> Option<Ty<'db>> {
-        let fields = self.fields(db)?;
-        Some(Ty::new(db, TyKind::Record(Record::new(db, fields))))
-    }
-
-    /// [`Self::flat`]'s fields, before they are interned.
-    fn fields(&self, db: &'db dyn fossil_base::Db) -> Option<Vec<RecordField<'db>>> {
-        let mut out = Vec::new();
-        for (_, row) in &self.rows {
-            out.extend(record_fields(db, (*row)?)?);
-        }
-        Some(out)
-    }
-
-    /// The columns of ONE row, for a per-binding message.
-    fn fields_of(
-        &self,
-        db: &'db dyn fossil_base::Db,
-        binding: &str,
-    ) -> Option<Vec<RecordField<'db>>> {
-        record_fields(db, self.row_of(binding)?)
-    }
-
-    /// Both sides of a join, in written order.
-    fn concat(mut self, other: Self) -> Self {
-        self.rows.extend(other.rows);
-        self
-    }
-
-    /// `Node as Other` — the right side of a self-join under its second name.
-    ///
-    /// The whole right scope collapses to one row, because the alias is one
-    /// name: joining a multi-binding relation under an alias makes its columns
-    /// reachable through the alias and through nothing else.
-    fn rename_to(self, db: &'db dyn fossil_base::Db, alias: &SmolStr) -> Self {
-        let row = self.flat(db);
-        Self {
-            rows: vec![(alias.clone(), row)],
-        }
-    }
-}
-
-/// The scope a mapping's `from` clause puts in the body — see [`RowScope`].
+/// The scope a mapping's `from` clause puts in the body — see [`Rows`].
 ///
 /// Plain-Rust helper (NOT `#[salsa::tracked]`) — called from within the
 /// `typecheck_mapping` tracked query so its `delay_span_bug` emits are valid.
@@ -230,7 +128,7 @@ impl<'db> RowScope<'db> {
 pub fn resolve_source_scope<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-) -> Result<Option<RowScope<'db>>, fossil_base::ErrorGuaranteed> {
+) -> Result<Option<Rows<'db>>, fossil_base::ErrorGuaranteed> {
     let file = mapping.file(db);
 
     // 1. Find the mapping's source binding name.
@@ -260,7 +158,7 @@ pub fn resolve_binding_row<'db>(
     Ok(resolve_binding_scope(db, file, source_name, depth)?.flat(db))
 }
 
-/// The [`RowScope`] of a source BINDING, by name.
+/// The [`Rows`] of a source BINDING, by name.
 ///
 /// Split out of [`resolve_source_scope`] because a pipeline's row is its base's
 /// row transformed, and the base is a binding, not a mapping. Everything below
@@ -273,7 +171,7 @@ pub fn resolve_binding_scope<'db>(
     file: fossil_base::SourceFile,
     source_name: &str,
     depth: usize,
-) -> Result<RowScope<'db>, fossil_base::ErrorGuaranteed> {
+) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
     let dm = def_map(db, file);
 
     // A binding whose right-hand side is a pipeline: the row is the base's row
@@ -311,7 +209,7 @@ pub fn resolve_binding_scope<'db>(
 
     // Not derived from anything: the binding READS something, and it is the one
     // name its own row answers to.
-    Ok(RowScope::one(
+    Ok(Rows::one(
         source_name,
         resolve_leaf_row(db, file, dm, source_name)?,
     ))
@@ -426,7 +324,7 @@ fn resolve_leaf_row<'db>(
     Ok(None)
 }
 
-/// One verb of a source pipeline applied to the [`RowScope`] it receives.
+/// One verb of a source pipeline applied to the [`Rows`] it receives.
 ///
 /// Every refusal names the pipeline and the columns it actually has: a row
 /// algebra whose errors say "column not found" and stop is a row algebra nobody
@@ -441,9 +339,9 @@ fn apply_source_op<'db>(
     file: fossil_base::SourceFile,
     pipe: &crate::lower::HirSourcePipe,
     op: &crate::lower::HirSourceOp,
-    scope: RowScope<'db>,
+    scope: Rows<'db>,
     depth: usize,
-) -> Result<RowScope<'db>, fossil_base::ErrorGuaranteed> {
+) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
     use crate::lower::HirSourceOp;
 
     // An untyped input is not an error — it is every schemaless program in the
@@ -523,17 +421,14 @@ fn apply_source_op<'db>(
                 };
                 out.push(f);
             }
-            Ok(RowScope {
-                rows: kept
-                    .into_iter()
-                    .map(|(binding, fs)| {
-                        (
-                            binding,
-                            Some(Ty::new(db, TyKind::Record(Record::new(db, fs)))),
-                        )
+            Ok(Rows::of(
+                kept.into_iter()
+                    .map(|(binding, fs)| crate::ty::NamedRow {
+                        binding,
+                        row: Some(Ty::new(db, TyKind::Record(Record::new(db, fs)))),
                     })
                     .collect(),
-            })
+            ))
         }
         // The join. **The flattening died and so did the collision rule**
         // (ruling 17 of `SURFACE-PLAN.md`).
@@ -604,7 +499,7 @@ fn right_scope<'db>(
     right: &SmolStr,
     alias: Option<&SmolStr>,
     depth: usize,
-) -> Result<RowScope<'db>, fossil_base::ErrorGuaranteed> {
+) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
     let scope = resolve_binding_scope(db, file, right.as_str(), depth + 1)?;
     Ok(match alias {
         Some(a) => scope.rename_to(db, a),
@@ -625,7 +520,7 @@ fn check_refs<'db>(
     pipe: &crate::lower::HirSourcePipe,
     verb: &str,
     expr: &crate::lower::HirExpr,
-    scope: &RowScope<'db>,
+    scope: &Rows<'db>,
     flat: &[RecordField<'db>],
 ) -> Result<(), fossil_base::ErrorGuaranteed> {
     let mut named = Vec::new();
@@ -681,19 +576,12 @@ fn check_refs<'db>(
 
 /// The binding names a relation draws on, for a message that has to say which
 /// rows the author could have written instead.
-fn binding_list(scope: &RowScope<'_>) -> String {
+fn binding_list(scope: &Rows<'_>) -> String {
     let names: Vec<String> = scope.bindings().map(|b| format!("`{b}`")).collect();
     if names.is_empty() {
         "no rows at all".to_string()
     } else {
         names.join(", ")
-    }
-}
-
-fn record_fields<'db>(db: &'db dyn fossil_base::Db, row: Ty<'db>) -> Option<Vec<RecordField<'db>>> {
-    match row.kind(db) {
-        TyKind::Record(rec) => Some(rec.fields(db).clone()),
-        _ => None,
     }
 }
 
@@ -885,12 +773,11 @@ mod tests {
     ///
     /// The binding NAMES are what these tests are about, so they are in the
     /// string and not behind an accessor call per assertion.
-    fn render(db: &dyn fossil_base::Db, scope: &RowScope<'_>) -> String {
+    fn render(db: &dyn fossil_base::Db, scope: &Rows<'_>) -> String {
         scope
-            .rows
             .iter()
-            .map(|(binding, row)| {
-                let cols = row.and_then(|r| record_fields(db, r)).map_or_else(
+            .map(|crate::ty::NamedRow { binding, row }| {
+                let cols = row.and_then(|r| crate::ty::record_fields(db, r)).map_or_else(
                     || "?".to_string(),
                     |fs| {
                         fs.iter()
@@ -1014,7 +901,7 @@ mod tests {
             let ty = |binding: &str| {
                 scope
                     .row_of(binding)
-                    .and_then(|r| record_fields(db, r))
+                    .and_then(|r| crate::ty::record_fields(db, r))
                     .and_then(|fs| fs.into_iter().find(|f| f.name == "id"))
                     .map_or_else(|| "missing".to_string(), |f| format!("{:?}", f.ty.kind(db)))
             };
@@ -1025,7 +912,7 @@ mod tests {
                 ty("Right"),
                 scope
                     .flat(db)
-                    .and_then(|r| record_fields(db, r))
+                    .and_then(|r| crate::ty::record_fields(db, r))
                     .map(|fs| fs.iter().map(|f| f.name.to_string()).collect::<Vec<_>>()),
             )
         }

@@ -102,7 +102,7 @@ fn build_checker<'db>(
         (Some(scope), Some(_)) => scope
             .bindings()
             .next()
-            .map(|b| crate::infer::RowScope::one(b, source_row)),
+            .map(|b| crate::ty::Rows::one(b, source_row)),
         (scope, _) => scope,
     };
     Checker {

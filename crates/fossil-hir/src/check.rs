@@ -16,7 +16,7 @@
 //! When the host has registered a descriptor for the mapping's source URI, or
 //! the source names a shape document,
 //! [`crate::infer::resolve_source_scope`] builds the scope whose
-//! [`flat`](crate::infer::RowScope::flat) is a `Record` type for the source
+//! [`flat`](crate::ty::Rows::flat) is a `Record` type for the source
 //! row; `.field` accesses resolve against it, with did-you-mean on a miss. A
 //! source that has neither has no row, and `.field` synthesises nothing — see
 //! [`crate::infer`]'s module docs for the priority order.
@@ -334,10 +334,10 @@ pub struct Checker<'db> {
     pub(crate) mapping: MappingLoc<'db>,
     pub(crate) source_row: Option<Ty<'db>>,
     /// The rows the `from` clause puts in scope, each under the name of the
-    /// binding that introduced it — [`crate::infer::RowScope`]. `source_row` is
+    /// binding that introduced it — [`crate::ty::Rows`]. `source_row` is
     /// this flattened, and a QUALIFIED reference must not use it: flattening is
     /// what loses the binding.
-    pub(crate) source_scope: Option<crate::infer::RowScope<'db>>,
+    pub(crate) source_scope: Option<crate::ty::Rows<'db>>,
     pub(crate) resolved_shape: Option<ResolvedShape<'db>>,
     /// The target shape's predicates by short name — what a bare property key
     /// resolves against.
@@ -997,7 +997,7 @@ impl<'db> Checker<'db> {
     /// Returns `None` — synthesising no type, exactly as [`Self::lookup_field`]
     /// does — when the binding is in scope but its source declares no schema.
     /// The caller has already established the binding IS in scope
-    /// ([`crate::infer::RowScope::has`]); an absent row here means "no
+    /// ([`crate::ty::Rows::has`]); an absent row here means "no
     /// descriptor", which is not an error.
     fn lookup_column(&mut self, expr_id: ExprId, binding: &str, column: &str) -> Option<Ty<'db>> {
         let db = self.db;

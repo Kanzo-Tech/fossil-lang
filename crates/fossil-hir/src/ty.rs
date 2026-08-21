@@ -55,6 +55,19 @@ pub enum TyKind<'db> {
     Seq(Ty<'db>),
     /// Tabular row type — interned separately for fast equality.
     Record(Record<'db>),
+    /// A relation: the named rows a `from` clause or a pipeline puts in scope.
+    ///
+    /// It was not a type at all. `RowScope` lived in `crate::infer`, beside the
+    /// type system, so `seq.where` — a catalogue row on a `Relation` receiver —
+    /// had the signature `p("rows", S::String)` under a comment reading
+    /// «higher-order arguments collapse to scalar placeholders», and the only
+    /// checking a pipeline stage got was a hand-written walk for the column
+    /// NAMES its predicate mentions. `Row.celsius > "abc"` passed clean two
+    /// lines above a call that was refused for the same mismatch.
+    ///
+    /// A list of named rows and not one flat record, because a join keeps both
+    /// sides addressable — see [`Rows`].
+    Relation(Rows<'db>),
     /// A reference to a node of one of the named shapes — `@shop:Person` in a
     /// shape document, `Person(User.email)` in a program.
     ///
@@ -105,6 +118,162 @@ impl<'db> Ty<'db> {
             TyKind::Ref(names) => Some(names),
             _ => None,
         }
+    }
+}
+
+/// The rows a relation makes addressable, each under the name of the BINDING
+/// that introduced it.
+///
+/// This is the consequence of names `grammar.bnf` spells out under
+/// `SourceDef`: *«a mapping body writes `User.name` and never
+/// `Adults.name`, even when it draws `from Adults`»*. A binding ties the type
+/// and the relation together, so a relation DERIVED from `User` — by `where`, by
+/// `select`, by standing on the left of a `join` — keeps handing back rows that
+/// are addressed as `User`. The derived name (`Adults`, `Reachable`, `Joined`)
+/// names the relation and never a row.
+///
+/// Which is why this is a LIST and not one record. A join brings a second
+/// binding into the same relation, and its columns stay under their own name:
+/// `Purchase.amount` and `User.email` are two rows of one relation, and two
+/// columns called `id` — one per side — are two distinct entries here even
+/// though the flattened [`Self::flat`] record can only find the first. Ruling 17
+/// of `SURFACE-PLAN.md` deleted the collision rule on the promise that
+/// qualification would do that work; this is where it does it.
+///
+/// The row is an `Option` because a binding whose source declares no schema is
+/// still a row a body may name: `hello.fossil` addresses columns of a source
+/// with no descriptor at all. So membership (does this relation have a row
+/// called `Contact`?) and typing (what is `Contact.email`?) are two different
+/// questions, and only the first has an answer for every program.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct Rows<'db> {
+    rows: Vec<NamedRow<'db>>,
+}
+
+/// One row of a relation, under the binding name that introduced it.
+///
+/// A named struct and not a `(SmolStr, Option<Ty>)`, for the reason
+/// [`crate::provenance::ExprTypeEntry`] already records: tuples do not
+/// auto-implement `salsa::Update`, and this has to, because it rides inside a
+/// [`TyKind`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
+pub struct NamedRow<'db> {
+    /// The binding a body addresses these columns by — `User`, never `Adults`.
+    pub binding: SmolStr,
+    /// The row itself, or `None` when the source declares no schema.
+    pub row: Option<Ty<'db>>,
+}
+
+impl<'db> Rows<'db> {
+    /// A relation over rows already built — what the row algebra hands back
+    /// after a `select` has narrowed each one.
+    #[must_use]
+    pub(crate) const fn of(rows: Vec<NamedRow<'db>>) -> Self {
+        Self { rows }
+    }
+
+    /// Every row, in written order.
+    pub fn iter(&self) -> impl Iterator<Item = &NamedRow<'db>> {
+        self.rows.iter()
+    }
+
+    /// The scope of a binding that reads a file: itself, and nothing else.
+    #[must_use]
+    pub fn one(binding: &str, row: Option<Ty<'db>>) -> Self {
+        Self {
+            rows: vec![NamedRow {
+                binding: SmolStr::from(binding),
+                row,
+            }],
+        }
+    }
+
+    /// The binding names this relation makes addressable, left to right.
+    pub fn bindings(&self) -> impl Iterator<Item = &SmolStr> {
+        self.rows.iter().map(|r| &r.binding)
+    }
+
+    /// Is there a row under this name — the question the qualified-reference
+    /// diagnostic asks. TRUE with an untyped row; absence is not "no schema".
+    #[must_use]
+    pub fn has(&self, binding: &str) -> bool {
+        self.rows.iter().any(|r| r.binding == binding)
+    }
+
+    /// The row a binding contributes. `None` both when the name is not in scope
+    /// and when it is but its source declares no schema — ask [`Self::has`]
+    /// first, because those two are different answers.
+    #[must_use]
+    pub fn row_of(&self, binding: &str) -> Option<Ty<'db>> {
+        self.rows
+            .iter()
+            .find(|r| r.binding == binding)
+            .and_then(|r| r.row)
+    }
+
+    /// Every column of every row, left to right, as one flat `Record` — what
+    /// the checker resolves a BARE name against and what the row algebra prints
+    /// in its refusals.
+    ///
+    /// `None` when any row in the scope is untyped: a record missing one side's
+    /// columns would answer "unknown column" for a column that exists.
+    #[must_use]
+    pub fn flat(&self, db: &'db dyn salsa::Database) -> Option<Ty<'db>> {
+        let fields = self.fields(db)?;
+        Some(Ty::new(db, TyKind::Record(Record::new(db, fields))))
+    }
+
+    /// [`Self::flat`]'s fields, before they are interned.
+    pub(crate) fn fields(&self, db: &'db dyn salsa::Database) -> Option<Vec<RecordField<'db>>> {
+        let mut out = Vec::new();
+        for r in &self.rows {
+            out.extend(record_fields(db, r.row?)?);
+        }
+        Some(out)
+    }
+
+    /// The columns of ONE row, for a per-binding message.
+    pub(crate) fn fields_of(
+        &self,
+        db: &'db dyn salsa::Database,
+        binding: &str,
+    ) -> Option<Vec<RecordField<'db>>> {
+        record_fields(db, self.row_of(binding)?)
+    }
+
+    /// Both sides of a join, in written order.
+    pub(crate) fn concat(mut self, other: Self) -> Self {
+        self.rows.extend(other.rows);
+        self
+    }
+
+    /// `Node as Other` — the right side of a self-join under its second name.
+    ///
+    /// The whole right scope collapses to one row, because the alias is one
+    /// name: joining a multi-binding relation under an alias makes its columns
+    /// reachable through the alias and through nothing else.
+    pub(crate) fn rename_to(self, db: &'db dyn salsa::Database, alias: &SmolStr) -> Self {
+        let row = self.flat(db);
+        Self {
+            rows: vec![NamedRow {
+                binding: alias.clone(),
+                row,
+            }],
+        }
+    }
+}
+
+/// The columns of one row, or `None` when it is not a record.
+///
+/// The one spelling: `crate::infer` had a copy, and the two answered the same
+/// question about the same type.
+pub(crate) fn record_fields<'db>(
+    db: &'db dyn salsa::Database,
+    row: Ty<'db>,
+) -> Option<Vec<RecordField<'db>>> {
+    match row.kind(db) {
+        TyKind::Record(rec) => Some(rec.fields(db).clone()),
+        _ => None,
     }
 }
 

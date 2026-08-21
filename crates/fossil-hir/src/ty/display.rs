@@ -37,6 +37,12 @@ pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> 
         ),
         TyKind::Seq(inner) => format!("Seq<{}>", render_ty_kind(db, inner.kind(db))),
         TyKind::Record(_) => "Record { ... }".to_string(),
+        // The bindings it makes addressable, which is what a reader needs of a
+        // relation — the columns are one hover away, on the binding.
+        TyKind::Relation(rows) => format!(
+            "Relation<{}>",
+            rows.bindings().cloned().collect::<Vec<_>>().join(", ")
+        ),
         TyKind::Error(_) => "Error".to_string(),
     }
 }
