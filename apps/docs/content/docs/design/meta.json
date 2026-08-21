@@ -12,6 +12,7 @@
     "identity",
     "streaming",
     "larger-than-ram",
+    "one-engine",
     "tooling-for-humans",
     "tooling-for-machines",
     "corpus",

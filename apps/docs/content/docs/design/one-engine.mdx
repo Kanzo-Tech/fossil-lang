@@ -1,0 +1,72 @@
+---
+title: One engine
+description: The language runs on DataFusion, and DuckDB leaves the compiler.
+---
+
+fossil compiles to relational algebra and something has to execute it. Two things
+did: DataFusion in `fossil-df`, and DuckDB — bundled, compiled from C++ — in
+`fossil-runtime`, `fossil-engine`, `fossil-mcp` and `fossil-cli`.
+
+**The language runs on DataFusion. DuckDB leaves the compiler.**
+
+## Why it is not a preference
+
+`fossil-runtime` and `fossil-engine` each carry a `compile_error!` for `wasm32`,
+and the reason named in both is bundled DuckDB. So the sentence this project is
+built on — *fossil is a compiler consumed as a WASM library* — is true of
+`fossil-wasm` and false of the layout pass and the engine. One dependency is
+what makes it half true.
+
+Remove it and the whole compiler is WASM-capable. That is the decision; the rest
+is consequence.
+
+## What it costs, measured
+
+`libduckdb-sys`'s build script is **98.14 s of a 165 s cold build — 59 % of the
+wall clock**, because `features = ["bundled"]` compiles DuckDB from C++. It is
+one shared unit, not one per binary; the sixteen test binaries that link it link
+a static library already built. Removing it removes that unit.
+
+## What has to be rewritten, and it is three things
+
+1. **The layout pass.** Fifteen sites in `fossil-runtime` reach DuckDB, and what
+   they use it for is `COPY`. The GraphAr writer is **already `arrow-rs`**
+   (`fossil-df/src/files.rs`), native and browser both; what is missing is the
+   layout writing through it rather than through a `COPY`.
+2. **The corpus verbs' native executor.** `DuckRuntime` runs the verb SQL
+   `fossil-graph` produces. DataFusion reads Parquet natively.
+3. **The assertions.** `fossil-cli` and `fossil-engine` open an in-memory DuckDB
+   to read the Parquet they just wrote. That is a test convenience, not a
+   dependency of the language.
+
+## The one measured gap
+
+**DataFusion's `read_json` is NDJSON only; DuckDB's reads arrays.** It is the
+`sightings` conformance program, and it fails today for exactly this reason. So
+this is not a detail discovered late: either the program declares NDJSON, or
+something supplies an array-shaped JSON reader. It is named here so the choice is
+made deliberately rather than by whichever error appears first.
+
+## What is NOT affected, and it is the half that looks like it should be
+
+The corpus **read** side keeps DuckDB, and it is not our dependency there. In
+the browser `@fossil-lang/graph` delegates execution to a host-provided
+DuckDB-WASM callback: the host brings the engine, the binding brings the SQL.
+Native, `fossil-mcp` is the same shape. Nothing about this decision asks a
+consumer to stop using DuckDB to read a corpus — it asks the *compiler* to stop
+containing one.
+
+## The measurement that does not decide this, and why
+
+F7 measured `arrow-rs` against `COPY` in the layout post-pass and reverted: it
+did not pay. That was a **performance** measurement of a writer, taken when the
+goal was a faster writer. The goal here is one engine and a compiler that builds
+for `wasm32`, and a throughput number does not answer it. If the rewrite turns
+out to cost real time on a real corpus, that is a number worth having beside
+this page — it is not a reason not to try.
+
+## What it buys the catalogue
+
+One dialect. A function's lowering is one SQL template rather than one per
+engine, which is most of what makes a multi-dialect function catalogue (Malloy's,
+for instance) expensive to build and to keep honest.
