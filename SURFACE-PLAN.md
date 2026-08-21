@@ -1,5 +1,30 @@
 # El plan de construcción
 
+> ## ⚠ DEPRECADO PARCIALMENTE — medido contra el árbol el 2026-08-21
+>
+> Este documento es un plan, y un plan se convierte en segunda referencia el día que el trabajo
+> aterriza y el plan sigue describiéndolo. Ha pasado. **Lo que sigue gobernando son los DICTÁMENES
+> (9–17) y el destino de F8; el resto está caducado en varios sitios y hay que contrastarlo contra
+> el árbol antes de creérselo.** Lo verificado falso hoy, para que nadie repita el trabajo:
+>
+> - **«104 tests rojos» del paso 8 (§ El árbol).** Hoy son **720 verdes y UN rojo**, y ese rojo es
+>   el artefacto del paso 8: `programs.rs` imprime que **11 de 23 programas** no son lo que dicen
+>   ser. Ése es el mapa real, y está medido — tres son la clave del join, uno el `read_json` de
+>   DataFusion, uno un fallo del optimizador y cinco son diagnósticos aspiracionales.
+> - **§ El orden, punto 2 («limpiar `fossil-base`»): la premisa estructural es falsa.** Medí los
+>   consumidores reales de los tres módulos que pide sacar y los comparten de 3 a 9 crates de
+>   encima, así que por esa prueba son substrato. La regla que SÍ corta es otra, del dueño: **en
+>   `base` sólo traits**. Por ésa sobran las cuatro filas concretas, los dos enums que nombran
+>   funciones de DuckDB, `shape_documents` (serialización) y `NativeSystem`.
+> - **§ «phases/, research/ … el código los cita 88 veces».** Eran **41**, y están hechas. Esas
+>   carpetas no existen y `git log --diff-filter=D` no las encuentra: nunca estuvieron en git.
+> - **§ Housekeeping: `crates/fossil-codegen/`** no existe. `HANDOFF-FROM-KANZO-UI.md` tampoco.
+> - **El dictamen 9 NO está abierto.** Son 18 programas limpios + 5 bajo `errors/` = 23, y
+>   `EXPECTED_TOTAL` ya lo asserta.
+>
+> Sigue siendo cierto y no lo he tocado: los dictámenes, el destino de F8 (corpus / lenguaje /
+> herramientas), y la regla que lo gobierna — *¿quién tiene que entenderlo?*.
+
 **Reescrito 2026-08-11**, después de auditar el corpus entero. **Ampliado 2026-08-14**: absorbe las
 fases F1–F8, que vivían en un segundo documento fuera del repo. **Esto es el orden de construirlo**,
 y es el único sitio donde está.
