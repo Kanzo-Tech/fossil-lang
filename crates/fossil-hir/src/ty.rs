@@ -319,6 +319,9 @@ pub struct Record<'db> {
 // arm that matches the variant with `{ .. }`.
 //
 // What identifies a shape is its IRI, and that is what `TyKind::Ref` carries.
+// `BlamePos` itself is gone now (see `crate::check`), and the `property` name
+// came back as a parameter — it had a reader the moment the message stopped
+// debug-printing a span at the author. The `ShapeId` did not.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {

@@ -135,7 +135,7 @@ fn messages_for(pg: &FossilPlayground, uri: &str) -> Vec<String> {
 }
 
 fn mentions_integer(messages: &[String]) -> bool {
-    messages.iter().any(|m| m.contains("expected `Integer`"))
+    messages.iter().any(|m| m.contains("expects Integer"))
 }
 
 #[test]

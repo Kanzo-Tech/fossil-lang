@@ -37,7 +37,9 @@
 //! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
 //! body has even one type error.
 
-use fossil_base::{Diagnostic, ErrorGuaranteed, Severity, SourceFile, Span, delay_span_bug};
+use fossil_base::{
+    Diagnostic, ErrorGuaranteed, Severity, SourceFile, Span, SpanFrame, delay_span_bug,
+};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -57,21 +59,21 @@ use fossil_graph_schema::{Primitive, Rejection};
 
 use crate::ty::{Rows, Ty, TyKind};
 
-/// Which side of a two-span blame a position refers to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BlamePos {
-    /// Blame a body expression (resolved to a real span via [`Spans`]).
-    Expr(ExprId),
-    /// Blame a shape property constraint — there is no per-constraint span
-    /// source yet, so the emitter falls back to the source expression's span.
-    ///
-    /// It carried a `ShapeId` and the predicate's short name, and the one arm
-    /// that matches this variant reads neither (`{ .. }`). A payload with no
-    /// reader is a field that drifts, so it carries nothing until something
-    /// needs it — a per-constraint span source, most likely, which is what the
-    /// fallback above is waiting for.
-    ShapeProperty,
-}
+// `BlamePos` stood here — a two-variant enum naming which side of a two-span
+// blame a position referred to. Both variants are gone, for opposite reasons.
+//
+// `Expr(ExprId)` had no constructor outside two subtyping tests, which passed
+// it as «some destination» while asserting something about the lattice. A
+// destination nothing designates is not a destination.
+//
+// `ShapeProperty` had one constructor and no payload, so [`compatible`] fell
+// back to the SOURCE expression's span and printed it into the message with
+// `{:?}`: a `Span { start: 102, end: 120 }` in front of an author, naming the
+// place the caret was already under. What the blame actually needs is the
+// property's name — the message says which slot refused the value — and that
+// is a `&str` parameter, not an enum. The second SPAN is in the `.shex`, and
+// `SpanLabel` cannot yet name another file; when it can, this grows a span
+// parameter rather than a variant.
 
 /// Per-mapping type-check output. The source of truth for per-expression types
 /// — `expr_types` reads it, not the reverse.
@@ -406,7 +408,11 @@ impl Checker<'_> {
                     // predicate the document declined to narrow demanded the
                     // narrowest type in the lattice and rejected every string
                     // in the corpus.
-                    Some((constraint.value_ty, BlamePos::ShapeProperty))
+                    // The blamed name is the one the BODY wrote, not the
+                    // predicate IRI `resolve_predicate` returned: the message
+                    // reads back the line the author is looking at, and a
+                    // rename means those two are different words.
+                    Some((constraint.value_ty, name.clone()))
                 })
             }
             PropertyKey::Name(_) => None,
@@ -437,13 +443,20 @@ impl Checker<'_> {
         let actual = self.expr.synth(expr_id, &prop.value);
         self.expr.expected_ref = None;
 
-        if let (Some(actual), Some((expected, dest))) = (actual, expectation) {
+        if let (Some(actual), Some((expected, property))) = (actual, expectation) {
             // `constraint.occurs` is deliberately NOT read here. The count a
             // shape declares is checked in `check_required_properties`, over the
             // predicates the body never wrote — the only direction that can be
             // observed, now that no value type can carry «zero or one» in
             // itself.
-            let _ = compatible(&mut self.expr, actual, expected, expr_id, &dest);
+            let _ = compatible(
+                &mut self.expr,
+                actual,
+                expected,
+                expr_id,
+                &prop.value,
+                &property,
+            );
         }
     }
 
@@ -780,14 +793,30 @@ mod tests;
 /// [`typecheck_mapping`] frame (and from tests' tracked shims) so its
 /// diagnostic emissions are valid.
 ///
-/// On mismatch, returns `Err(ErrorGuaranteed)` and pushes a two-span
-/// diagnostic naming BOTH the source expression's span and the destination's.
+/// `property` is the name the BODY wrote for the slot that refused the value,
+/// and `source_value` the lowered right-hand side — the message names the slot,
+/// the label under the caret reads the expression back and says what it is.
+/// Neither used to be here: the message was `expected `Float`, got `String`
+/// (expected because of the constraint at Span { start: 102, end: 120 })`, a
+/// debug-printed span standing in for a second location, and that span was the
+/// SOURCE's, so it pointed at the caret the reader was already looking at. A
+/// location belongs in a label; a name is what a message has to carry, because
+/// a body writes several properties and the caret alone does not say which
+/// constraint spoke.
+///
+/// **The second location is still missing, and it is in the `.shex`.** What
+/// this cannot say yet is `shop:Order declares shop:total as xsd:float`,
+/// underlining the shape document: [`fossil_base::SpanLabel`] carries a span
+/// and a frame but no FILE, so every label it renders lands in the program.
+/// `apps/docs/programs/errors/wrong-type/expected/diagnostic.txt` is the
+/// target, and it stays hand-written until that exists.
 pub fn compatible<'db>(
     cx: &mut Expr<'db>,
     actual: Ty<'db>,
     expected: Option<Ty<'db>>,
     source_expr: ExprId,
-    dest: &BlamePos,
+    source_value: &HirExpr,
+    property: &str,
 ) -> Result<(), ErrorGuaranteed> {
     let db = cx.db();
 
@@ -807,14 +836,8 @@ pub fn compatible<'db>(
         return Ok(());
     }
 
-    // Mismatch → two-span blame.
+    // Mismatch → blame the slot by name, underline the value.
     let source_span = cx.span_of(source_expr);
-    let dest_span = match dest {
-        BlamePos::Expr(eid) => cx.span_of(*eid),
-        // No per-constraint span source yet — fall back to the
-        // source expression's span (the mapping-relative location of the RHS).
-        BlamePos::ShapeProperty => source_span,
-    };
 
     let actual_display = render_ty_kind(db, actual.kind(db));
     // Only reachable with `Some(_)`: a constraint that narrows nothing cannot
@@ -823,12 +846,26 @@ pub fn compatible<'db>(
         || "any value".to_string(),
         |e| render_ty_kind(db, e.kind(db)),
     );
-    let msg = format!(
-        "expected `{expected_display}`, got `{actual_display}` \
-         (expected because of the constraint at {dest_span:?})"
+
+    let frame = cx.frame();
+    let d = Diagnostic::new(
+        Severity::Error,
+        format!("`{property}` expects {expected_display}, and this is {actual_display}"),
+        source_span,
+    )
+    // The expression said back rather than quoted from the file: `expr_text`
+    // renders the HIR, so the label states what the compiler READ. See
+    // [`crate::display`].
+    .with_label(
+        source_span,
+        format!(
+            "`{}` is {actual_display}",
+            crate::display::expr_text(source_value)
+        ),
+        frame,
     );
 
-    Err(cx.error(source_span, msg))
+    Err(cx.raise(d))
 }
 
 // `expr_contains_free_field_refs`, `rewrite_field_refs_to_row_dot` and
@@ -991,20 +1028,44 @@ impl<'db> Expr<'db> {
         }
     }
 
-    /// Raise a type error, in the frame this checker's spans are in.
+    /// What this checker's spans are measured against — see [`SpanSource`].
+    ///
+    /// A pipeline's span is file-absolute and a body's is mapping-relative, and
+    /// a [`SpanLabel`] carries its own frame, so an emitter that attaches one
+    /// has to spell out the same answer [`Self::raise`] applies to the
+    /// diagnostic. Both read it here rather than each deciding again.
+    const fn frame(&self) -> SpanFrame {
+        match self.spans {
+            SpanSource::At(_) => SpanFrame::FileAbsolute,
+            SpanSource::Table(_) => SpanFrame::MappingRelative,
+        }
+    }
+
+    /// Raise a built [`Diagnostic`], in the frame this checker's spans are in.
     ///
     /// THE emission point, and it is one so that the frame is decided once. It
     /// was `delay_span_bug` at twenty-seven call sites, each defaulting to
     /// `SpanFrame::MappingRelative` — correct for a body and silently wrong for
     /// a pipeline, whose span is already file-absolute.
-    fn error(&mut self, span: Span, message: impl Into<String>) -> ErrorGuaranteed {
-        let mut d = Diagnostic::new(Severity::Error, message, span);
-        if matches!(self.spans, SpanSource::At(_)) {
-            d = d.file_absolute();
-        }
+    ///
+    /// [`Self::error`] is this over a bare message. The split is for the
+    /// emitters that attach a label or a `help:` — they need the builder, and
+    /// routing them around this would put the frame decision back at the call
+    /// site, which is the bug the paragraph above records.
+    fn raise(&mut self, d: Diagnostic) -> ErrorGuaranteed {
+        let d = if matches!(self.frame(), SpanFrame::FileAbsolute) {
+            d.file_absolute()
+        } else {
+            d
+        };
         let eg = fossil_base::raise(self.db, d);
         self.record_error(eg);
         eg
+    }
+
+    /// [`Self::raise`] over a message and a span, with no label.
+    fn error(&mut self, span: Span, message: impl Into<String>) -> ErrorGuaranteed {
+        self.raise(Diagnostic::new(Severity::Error, message, span))
     }
 
     /// [`Self::error`] at the span of an expression.

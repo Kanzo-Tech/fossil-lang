@@ -106,9 +106,7 @@ pub use provenance::{
 // (the module path is intentional — the bare `spans` name would shadow the
 // module). Mirrors the rust-analyzer convention of keeping Salsa query
 // functions under their module paths.
-pub use check::{
-    BlamePos, Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping,
-};
+pub use check::{Checker, TypeckOutput, compatible, render_split_suggestion, typecheck_mapping};
 pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;

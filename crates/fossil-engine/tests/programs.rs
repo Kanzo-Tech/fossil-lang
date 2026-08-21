@@ -74,17 +74,36 @@
 //!   the program. The predicate is the only thing that is not.
 //!
 //! `FOSSIL_BLESS=1 cargo test -p fossil-engine --test programs` regenerates them.
-//! Nothing here is hand-written any more: a diagnostic text nobody produces is a
-//! promise the compiler does not make.
+//! A diagnostic text nobody produces is a promise the compiler does not make.
 //!
-//! **Do not bless while the invariants below are red.** The five
-//! `expected/diagnostic.txt` on disk today are the hand-written prose this file
-//! exists to replace, and they describe the diagnostics the language is MEANT to
-//! produce — two-file reports citing the `.shex` beside the program, which the
-//! single-span `fossil_base::Diagnostic` cannot express yet. Blessing now would
-//! overwrite an accurate description of the target with an accurate description
-//! of today, and the difference between them is the specification. Bless the day
-//! the invariants pass.
+//! # Four `expected/diagnostic.txt` are still hand-written, and it was five
+//!
+//! They describe the diagnostics the language is MEANT to produce, and blessing
+//! one before the compiler can produce it overwrites an accurate description of
+//! the target with an accurate description of today. The difference between them
+//! is the specification. **Bless a program the day it says what it means, and
+//! `git checkout --` the rest**: `FOSSIL_BLESS=1` writes all five.
+//!
+//! This header used to say all five needed a two-file report — a label inside
+//! the `.shex` beside the program, which [`fossil_base::SpanLabel`] cannot
+//! express because it carries a span and a frame and no FILE. Checked one by
+//! one, that was false for two of them:
+//!
+//! - **`two-identities` needed nothing**, and is blessed. Message, both spans,
+//!   both labels and the `help` were already identical; what differed was a
+//!   `[{severity:?}]` prefix this file's own renderer added and `fossil check`
+//!   does not (see [`render_diagnostics`]), and the context lines around the
+//!   snippet. Both are how the report is DRAWN, and the hand-written file was
+//!   drawn by a hand.
+//! - **`unknown-field` wants a second label in the SAME file** — the line that
+//!   bound the row, saying which fields it has. `two-identities` proves that is
+//!   expressible; what is missing is an emitter that does it.
+//! - **`wrong-type`, `colliding-name` and `missing-property`** are the real
+//!   ones. `wrong-type`'s message and its program-side label match already; the
+//!   label it cannot draw is `shop:Order declares shop:total as xsd:float`,
+//!   under a line of `shape.shex`. miette renders that as `related()`, one
+//!   `Rendered` per file — and the LSP publishes per URI, so the host surface
+//!   is part of the same capability and not a detail of this harness.
 //!
 //! # Three causes of failure, and only one of them is the parser
 //!
@@ -357,6 +376,20 @@ impl miette::Diagnostic for Rendered {
 /// committed, so it may not depend on a terminal. The `NamedSource` carries the
 /// program's FILE NAME and not its path — an artefact with an absolute path in
 /// it is an artefact that only holds on one machine.
+///
+/// # The severity is not in the artefact, and that is not an omission
+///
+/// The message used to be prefixed `[{severity:?}]`, which made the sentence
+/// above false: `fossil-cli`'s `to_check_error` copies the message across
+/// verbatim, so no user has ever seen `[Error]`. It went, and nothing replaced
+/// it, because `Severity::Warning` and `Severity::Info` have no constructor in
+/// the workspace outside `fossil-base`'s own tests — every diagnostic a program
+/// can produce is an error, and miette draws `×` for one.
+///
+/// The day an emitter raises a warning, this is where it has to become visible:
+/// [`Rendered`] would implement `miette::Diagnostic::severity`, and
+/// `to_check_error` with it, or the artefact will call a warning an error and
+/// say nothing.
 fn render_diagnostics(
     source: &str,
     file_name: &str,
@@ -392,7 +425,7 @@ fn render_diagnostics(
             d.labels.iter().map(|l| at(l.span, &l.text)).collect()
         };
         let rendered = Rendered {
-            message: format!("[{:?}] {}", d.severity, d.message),
+            message: d.message.clone(),
             src: named.clone(),
             labels,
             help,

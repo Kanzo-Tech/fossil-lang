@@ -380,7 +380,8 @@ fn compatible_integer_widens_to_float() {
             int,
             Some(flt),
             ExprId(0),
-            &BlamePos::Expr(ExprId(0)),
+            &HirExpr::IntLit(1),
+            "age",
         )
         .is_ok()
     }
@@ -399,14 +400,11 @@ fn compatible_string_to_integer_fails() {
         let s = Ty::new(db, TyKind::Primitive(Primitive::String));
         let i = Ty::new(db, TyKind::Primitive(Primitive::Integer));
         let mut cx = build_checker(db, m, None, None);
-        compatible(
-            &mut cx.expr,
-            s,
-            Some(i),
-            ExprId(0),
-            &BlamePos::Expr(ExprId(0)),
-        )
-        .is_err()
+        let value = HirExpr::ColumnRef {
+            binding: smol_str::SmolStr::from("users"),
+            column: smol_str::SmolStr::from("name"),
+        };
+        compatible(&mut cx.expr, s, Some(i), ExprId(0), &value, "age").is_err()
     }
 
     let (db, file) = db_with(HELLO);
@@ -492,6 +490,99 @@ Contact : Person from users
         noise.is_empty(),
         "and it must do so silently, got {noise:?}"
     );
+}
+
+/// A refused value names the SLOT in the message and underlines ITSELF in a
+/// label — and nothing anywhere prints a `Span` at the author.
+///
+/// It went through `check_property` rather than calling `compatible` directly,
+/// because half of what is asserted is that the name survives the trip: the
+/// key the body wrote reaches the message, and the lowered right-hand side
+/// reaches the label.
+///
+/// # What it was, and why the old shape passed every test there was
+///
+/// `expected `Float`, got `String` (expected because of the constraint at Span
+/// { start: 102, end: 120 })` — with `labels` empty, so miette drew the generic
+/// `here` under the value. The debug-printed span was the SOURCE's, because
+/// `BlamePos::ShapeProperty` carried no location and the emitter fell back;
+/// `compatible`'s own docblock called this «the two-span blame pattern». Both
+/// halves were invisible to the suite: the two tests that reached `compatible`
+/// asserted `msg.contains("String")`, which is true of either spelling.
+#[test]
+fn a_refused_value_names_the_slot_and_underlines_itself() {
+    const SRC: &str = "\
+type { Order } := io.shex(\"shape.shex\")
+Purchase := io.csv(\"orders.csv\")
+Orders : Order from Purchase
+    @subject = \"https://shop.example/order/{Purchase.id}\"
+    total = Purchase.reference
+";
+    #[salsa::tracked]
+    fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return false;
+        };
+        let mut cx = build_checker(
+            db,
+            m,
+            Some(row_record(db, &[("reference", Primitive::String)])),
+            Some(ResolvedShape {
+                constraints: vec![crate::shapes::ShapeConstraint {
+                    predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
+                    value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
+                    occurs: Occurs::ONE,
+                }],
+                rejections: Vec::new(),
+            }),
+        );
+        cx.check_property(
+            ExprId(0),
+            &HirProperty {
+                key: PropertyKey::Name(smol_str::SmolStr::from("total")),
+                value: HirExpr::ColumnRef {
+                    binding: smol_str::SmolStr::from("Purchase"),
+                    column: smol_str::SmolStr::from("reference"),
+                },
+            },
+        );
+        cx.expr.first_error.is_some()
+    }
+
+    let (db, file) = db_with(SRC);
+    assert!(refuse(&db, file), "String does not satisfy Float");
+
+    let raised = refuse::accumulated::<Diagnostic>(&db, file);
+    let blame: Vec<&&Diagnostic> = raised
+        .iter()
+        .filter(|d| !d.message.contains("is declared and bound nothing"))
+        .collect();
+    assert_eq!(blame.len(), 1, "one refusal, got {blame:#?}");
+    let d = blame[0];
+
+    assert_eq!(
+        d.message, "`total` expects Float, and this is String",
+        "the message names the slot that refused the value"
+    );
+    let texts: Vec<&str> = d.labels.iter().map(|l| l.text.as_str()).collect();
+    assert_eq!(
+        texts,
+        ["`Purchase.reference` is String"],
+        "exactly one label, and it reads the value back with its type"
+    );
+    assert_eq!(
+        d.labels[0].span, d.span,
+        "the label underlines the value the diagnostic points at"
+    );
+    // The defect this replaces, stated as the thing that must not come back:
+    // a `Span` reaching an author through `{:?}`. Checked over the message AND
+    // the labels because either could carry one.
+    for text in std::iter::once(d.message.as_str()).chain(texts) {
+        assert!(
+            !text.contains("Span {"),
+            "a debug-printed span reached the author: {text:?}"
+        );
+    }
 }
 
 // ── The four ways a named document fails to produce a shape ────────────────

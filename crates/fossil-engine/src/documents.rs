@@ -300,7 +300,7 @@ User : Person from users
 
         let before = diagnostics(&db, file);
         assert!(
-            before.iter().any(|m| m.contains("expected `Integer`")),
+            before.iter().any(|m| m.contains("expects Integer")),
             "the shape demands an integer and the mapping writes a string, so \
              the backward check must say so; got {before:?}"
         );
@@ -316,7 +316,7 @@ User : Person from users
             "editing the document must re-execute the decode"
         );
         assert!(
-            !after.iter().any(|m| m.contains("expected `Integer`")),
+            !after.iter().any(|m| m.contains("expects Integer")),
             "and the checker must have re-run against the edited document; \
              got {after:?}"
         );
