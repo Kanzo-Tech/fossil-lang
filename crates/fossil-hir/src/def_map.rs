@@ -598,20 +598,42 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
 /// here is already absolute — unlike the per-mapping subtrees rowan resets to
 /// zero (`crate::spans`'s «offset semantics» section).
 ///
-/// The trim is not cosmetic. A node's range carries the trailing newline and
-/// the blank line after it, so an untrimmed span ends on the NEXT line and
-/// miette draws the label as a multi-line block — `╭─▶` down the gutter, with
-/// the caret under an empty line. Measured against `fossil-cli`'s
-/// `broken_field` fixture, whose golden render showed exactly that.
-fn item_span(node: &fossil_syntax::SyntaxNode) -> Span {
-    let range = node.text_range();
-    let text = node.text().to_string();
-    let lead = u32::try_from(text.len() - text.trim_start().len()).unwrap_or(0);
-    let trail = u32::try_from(text.len() - text.trim_end().len()).unwrap_or(0);
-    Span::new(
-        u32::from(range.start()).saturating_add(lead),
-        u32::from(range.end()).saturating_sub(trail),
-    )
+/// The trim is not cosmetic. A node's range carries the trailing newline, the
+/// blank line after it and any comment in between, so an untrimmed span ends on
+/// a LATER line and miette draws the label as a multi-line block — `╭─▶` down
+/// the gutter, with the caret under an empty line. Measured twice: on
+/// `fossil-cli`'s `broken_field` golden, and on `compound-key` with its join
+/// condition broken, where the `// #endregion on` comment and the blank line
+/// after it both ended up underlined.
+///
+/// Shared with [`crate::lower::lower_pipe_expr`] for that second one:
+/// `HirSourcePipe::span` is «the whole `name := …` item» by the same
+/// definition, and two implementations of one trim are two answers.
+pub(crate) fn item_span(node: &fossil_syntax::SyntaxNode) -> Span {
+    use fossil_syntax::SyntaxKind;
+
+    // By TOKEN and not by trimming the text, because a comment is trivia and is
+    // not whitespace. `Joined := LineRow.join(…)` followed by `// #endregion on`
+    // carries that comment inside its own range, so trimming characters left it
+    // underlined — `compound-key`, measured.
+    let mut tokens = node
+        .descendants_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+            )
+        })
+        .map(|t| t.text_range());
+    let Some(first) = tokens.next() else {
+        // Nothing but trivia. The node's own range is the only answer left, and
+        // a caller that underlines it is no worse off than before.
+        let range = node.text_range();
+        return Span::new(u32::from(range.start()), u32::from(range.end()));
+    };
+    let last = tokens.last().unwrap_or(first);
+    Span::new(u32::from(first.start()), u32::from(last.end()))
 }
 
 fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
@@ -1070,6 +1092,41 @@ Users : Person from User
             .expect("`User` is bound");
         let text = &HELLO_FOSSIL[span.start as usize..span.end as usize];
         assert_eq!(text, "User := io.csv(\"examples/users.csv\")");
+    }
+
+    /// And a COMMENT is trivia too, which trimming characters cannot see.
+    ///
+    /// The corpus writes these: `// #region` / `// #endregion` mark the runs
+    /// `apps/docs` transcludes, so the binding a documentation page shows is
+    /// exactly the binding with a comment glued to its range. Measured on
+    /// `compound-key` with its join condition broken — the report underlined
+    /// `// #endregion on` and the blank line after it, as a multi-line block.
+    #[test]
+    fn a_trailing_comment_is_trivia_and_stays_out_of_the_span() {
+        const COMMENTED: &str = "\
+type { Person } := io.shex(\"personas.shex\")
+
+// #region binding
+User := io.csv(\"examples/users.csv\")
+// #endregion binding
+
+Users : Person from User
+    @subject = \"https://example.org/user/{User.id}\"
+    name = User.name
+";
+        let db = new_db();
+        let file = fossil_base::SourceFile::new(
+            &db,
+            COMMENTED.to_string(),
+            "examples/commented.fossil".to_string(),
+        );
+        let span = def_map(&db, file)
+            .lookup_source_span(&db, "User")
+            .expect("`User` is bound");
+        assert_eq!(
+            &COMMENTED[span.start as usize..span.end as usize],
+            "User := io.csv(\"examples/users.csv\")"
+        );
     }
 
     #[test]

@@ -545,7 +545,7 @@ fn typecheck_stage<'db>(
     condition: &crate::lower::HirExpr,
     scope: &Rows<'db>,
 ) -> Result<(), fossil_base::ErrorGuaranteed> {
-    let at = Span::new(pipe.span.0, pipe.span.1);
+    let at = pipe.span;
     let mut cx = crate::check::Expr::over_relation(db, file, pipe.base.clone(), scope.clone(), at);
     let ty = cx.synth(crate::body::ExprId(0), condition);
 
@@ -596,7 +596,7 @@ fn pipe_error(
     pipe: &crate::lower::HirSourcePipe,
     message: String,
 ) -> fossil_base::ErrorGuaranteed {
-    delay_span_bug(db, Span::new(pipe.span.0, pipe.span.1), message)
+    delay_span_bug(db, pipe.span, message)
 }
 
 /// Build a `Record` [`Ty`] from a decoded [`Shape`] — the COMPILE-TIME source

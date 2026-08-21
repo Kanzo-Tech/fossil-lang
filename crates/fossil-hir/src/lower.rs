@@ -60,12 +60,17 @@ pub struct HirSourcePipe {
     pub name: SmolStr,
     pub base: SmolStr,
     pub ops: Vec<HirSourceOp>,
-    /// Start and end of the whole `name := ...` item, so the checker's row
-    /// algebra has somewhere to point. One span for the pipeline and not one per
-    /// stage: a wrong column is a fact about the pipeline, and a per-expression
-    /// span belongs in the `Spans<'db>` side table keyed by
-    /// `(MappingLoc, ExprId)`, never in a field of the HIR node itself.
-    pub span: (u32, u32),
+    /// The whole `name := ...` item, file-absolute and trivia-TRIMMED
+    /// ([`crate::def_map::item_span`]), so the checker's row algebra has
+    /// somewhere to point. One span for the pipeline and not one per stage: a
+    /// wrong column is a fact about the pipeline, and a per-expression span
+    /// belongs in the `Spans<'db>` side table keyed by `(MappingLoc, ExprId)`,
+    /// never in a field of the HIR node itself.
+    ///
+    /// It was a `(u32, u32)`, and both of its readers opened with
+    /// `Span::new(pipe.span.0, pipe.span.1)` — a second spelling of
+    /// [`fossil_base::Span`] with a conversion at every use.
+    pub span: Span,
 }
 
 /// The three verbs of the first version.
@@ -838,14 +843,7 @@ fn lower_source_pipe(
         .children()
         .next()?;
 
-    let range = source_def.text_range();
-    lower_pipe_expr(
-        db,
-        &rhs,
-        name,
-        (range.start().into(), range.end().into()),
-        types,
-    )
+    lower_pipe_expr(db, &rhs, name, crate::def_map::item_span(source_def), types)
 }
 
 /// The `from` clause of a mapping header, when it derives a relation rather than
@@ -873,12 +871,11 @@ fn lower_from_pipe(
         .find(|c| c.kind() == SyntaxKind::EXPR)?
         .children()
         .next()?;
-    let range = header.text_range();
     lower_pipe_expr(
         db,
         &rhs,
         mapping_name.clone(),
-        (range.start().into(), range.end().into()),
+        crate::def_map::item_span(&header),
         types,
     )
 }
@@ -892,7 +889,7 @@ fn lower_pipe_expr(
     db: &dyn fossil_base::Db,
     rhs: &fossil_syntax::SyntaxNode,
     name: SmolStr,
-    span: (u32, u32),
+    span: Span,
     types: &[SmolStr],
 ) -> Option<HirSourcePipe> {
     let rhs = rhs.clone();

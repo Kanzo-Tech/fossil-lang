@@ -301,7 +301,7 @@ ya vive en `/docs/architecture`, así que sobrevive al paso 9. **El estado no es
 | **F2** | call, comparison, conditional, pipeline en el HIR | ✅ `HirExpr` pasó de **4 variantes a 13**; `UNARY_EXPR` desciende (`lower.rs:1663`) |
 | **F3** | la caché existe de verdad | ◐ el `Providers`-de-rustc **ya está** (§4 del F-plan = el registro de proveedores); `freshness_token` real en `fossil-engine`; falta la clave por URI |
 | **F4** | el descriptor real llega al typecheck | ✅ **el criterio está verde, medido el 15**; `lib.rs:470` es el camino de `run`, no el del typecheck — ver abajo. Quedan tres restos, ninguno bloquea |
-| **F5** | el pipeline compila y `rewrite.rs` no existe | ◐ `rewrite.rs` borrado; `lower_source_pipe` escrito; los dos e2e rojos por fixture |
+| **F5** | el pipeline compila y `rewrite.rs` no existe | ✅ **verde, medido el 21** — ver abajo; los dos e2e rojos ya no existen y `\|>` no queda en ningún `.fossil` |
 | **F6** | Salsa fuera de `engine` y `df-wasm` | ❌ `fossil-engine/src/system.rs:111` y `fossil-df-wasm/src/lib.rs:210` siguen construyendo un `FossilDb` por llamada |
 | **F7** | `arrow-rs` en vez de `COPY` | ⊘ **revertida el 15, y su premisa era falsa el 16**: el escritor GraphAr **ya era `arrow-rs`** (`fossil-df/src/files.rs`, uno solo, nativo y navegador); `COPY` sólo sobrevive en el post-paso de layout. Y donde sobrevive, medido, `arrow-rs` no compensa — ver abajo |
 | **F8** | los crates | ⛔ bloqueada a propósito, y **redibujada**: ver abajo |
@@ -316,6 +316,25 @@ es la evidencia de que eran un plan y no dos.
   dos grafías, y ganó el punto»*. **El criterio nuevo:** `users.where(User.edad >= 18)` compila, tipa
   y produce el corpus correcto, y `rewrite.rs` no existe. Los dos tests e2e rojos escriben `|>`, que
   es la misma causa y se arregla en el paso 8.
+
+  **Medido el 21, y el criterio nuevo está cumplido entero.** `rewrite.rs` no existe; `|>` no
+  aparece en ningún `.fossil` del árbol, sólo en tumbas y en prosa; diez programas del conjunto de
+  conformidad derivan una relación y los diez pasan. `projection` es el criterio literal y algo
+  más — `Active := Employee.where(Employee.left_on == null)` seguido de
+  `Minimal := Active.select(Employee.id, Employee.name)` compila, tipa, corre y escribe **2
+  vértices**, y el artefacto graba el predicado, no sólo la cuenta.
+
+  **Y el agujero del join que este documento describe abajo está cerrado.** Decía que
+  `apply_source_op`'s `Join` llama a `check_refs` y que *«ningún tipo se lee»*. `check_refs` se
+  borró el 20 con el sistema de tipos; medido hoy sobre `compound-key` con la condición rota a
+  propósito (`LineRow.tenant == OrderRow.id`, String contra Integer), `fossil check` responde
+  **`cannot compare String with Integer using ==`** y sale con 1. La comprobación temprana y tipada
+  que el documento pedía como *«su propio cambio, ~15 líneas»* llegó por otra puerta.
+
+  Lo que la medición SÍ encontró: el span del pipeline arrastraba la trivia posterior, así que ese
+  informe subrayaba el `// #endregion on` y la línea en blanco de después como un bloque
+  multilínea. Arreglado — y las marcas `#region` son precisamente las que `apps/docs` transcluye,
+  así que el defecto vivía sobre los programas documentados.
 - **F6 y F7 no se movieron, pero sus citas sí.** ADR-0046 citaba `system.rs:60-65`; hoy es la 111. El
   problema intacto, la referencia rota — que es exactamente el modo de fallo que el paso 9 ataca.
 
@@ -599,7 +618,8 @@ Son dos consumidores independientes del mismo documento:
 **El criterio de «hecho» está verde, medido el 15**: `cargo test -p fossil-engine --lib documents`
 da 4/4, y `editing_the_document_rechecks_the_program_and_the_diagnostic_changes` mete una forma que
 declara `xsd:integer` contra una columna `String` por la ruta de producción y asserta
-``expected `Integer` ``. Y (1) y la mitad de (2) están hechos: propiedad no declarada
+``expects Integer`` (era ``expected `Integer` ``: el mensaje nombra la ranura desde el 21). Y (1) y
+la mitad de (2) están hechos: propiedad no declarada
 (`check.rs:827`) y primitiva incompatible (`check.rs:436`).
 
 **Las dos trampas que este documento arrastraba están arregladas las dos** — y una de ellas dejó su
@@ -617,6 +637,10 @@ en el test en vez de en un comentario; falta sólo `NoDocument`, bloqueada por t
 `fossil-ide`—; dar span de dos ficheros al desajuste, que es lo que los cinco
 `expected/diagnostic.txt` escriben a mano hoy; y **la cota superior de cardinalidad, honestamente
 bloqueada**, porque nada en el lenguaje construye un `Seq` y un `maxCount 1` no tiene qué rechazar.
+
+**CERRADO el 2026-08-21** — medido, ver la corrección de F5 arriba. El párrafo se queda porque su
+razonamiento sobre DÓNDE vive el agujero era correcto y es lo que hace legible el arreglo; lo que ya
+no es cierto es la última frase, «ningún tipo se lee».
 
 **El agujero del join NO es de F4**, y esto se decidió mirándolo: vive en el lado *fuente*, aguas
 arriba de cualquier forma, y salta en un programa que no nombra documento (`resolve_source_scope`
