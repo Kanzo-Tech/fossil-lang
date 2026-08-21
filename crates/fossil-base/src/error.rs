@@ -82,7 +82,24 @@ pub fn delay_span_bug(
     // structured suggestion source nor a did-you-mean candidate.
     // Suggestion-emitting call sites build their own `Diagnostic` and attach
     // the structured fields via the builders.
-    Diagnostic::new(Severity::Error, message, span).accumulate(db);
+    raise(db, Diagnostic::new(Severity::Error, message, span))
+}
+
+/// Emit a diagnostic the caller has already BUILT, and return the taint.
+///
+/// The one taint maker; [`delay_span_bug`] is this with the diagnostic built
+/// for you. It exists because a caller that has something to say about the
+/// diagnostic — a `SpanFrame`, a did-you-mean, a suggestion source — had to
+/// choose between the builders and the taint, and the two are not alternatives:
+/// `ErrorGuaranteed::new` is private, so building your own diagnostic meant
+/// emitting it and then calling `delay_span_bug` for the taint, which pushes a
+/// SECOND diagnostic. The invariant below is what that would have broken.
+///
+/// **Invariant:** exactly one [`Diagnostic`] per call, and a fresh
+/// [`ErrorGuaranteed`].
+#[must_use = "ErrorGuaranteed must be propagated to the caller to taint downstream queries"]
+pub fn raise(db: &dyn crate::Db, diagnostic: Diagnostic) -> ErrorGuaranteed {
+    diagnostic.accumulate(db);
     ErrorGuaranteed::new()
 }
 

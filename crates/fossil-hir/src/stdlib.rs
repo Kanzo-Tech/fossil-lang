@@ -205,8 +205,8 @@ pub struct RegistryEntry {
 pub struct SigSpec {
     /// Each parameter's NAME and scalar type, in order.
     pub params: Vec<ParamSpec>,
-    /// Scalar return type.
-    pub ret: ScalarTy,
+    /// What the row gives back.
+    pub ret: SigTy,
 }
 
 /// One parameter of a catalogue row: what it is called, and what it takes.
@@ -233,14 +233,63 @@ pub struct SigSpec {
 pub struct ParamSpec {
     /// What a named argument writes to reach this position.
     pub name: SmolStr,
-    /// Its scalar type.
-    pub ty: ScalarTy,
+    /// What it takes.
+    pub ty: SigTy,
+}
+
+/// What a catalogue row's parameter takes, or what it gives back.
+///
+/// It was [`ScalarTy`] alone, and the `seq/` rows were written
+/// `p("rows", S::String)` under a comment reading «higher-order arguments
+/// collapse to scalar placeholders in v0.1». They did not collapse; there was
+/// nothing to collapse INTO, because a relation was not a type. It is
+/// [`crate::ty::TyKind::Relation`] now, and these two variants are the rest of
+/// the notation:
+///
+/// - [`Self::Rows`] is the relation a verb is a verb OF, and every `seq/` row's
+///   parameter 0;
+/// - [`Self::Predicate`] is an expression over that relation's row, yielding
+///   `Bool` — what `where` takes and what a `join`'s `on` condition is
+///   (ruling 17).
+///
+/// It is the shape five reference systems arrive at from different directions:
+/// `pg_proc`'s argument types over a catalogue, GHC's `primops.txt.pp`, Trino's
+/// and `DuckDB`'s function tables, and PRQL's `{arg:N}`. What none of them needed
+/// and this does is a parameter whose type depends on the RECEIVER's, which is
+/// why `Rows` and `Predicate` are variants and not two more scalars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SigTy {
+    /// A value of a scalar type.
+    Scalar(ScalarTy),
+    /// The receiver relation, with whatever rows it carries.
+    Rows,
+    /// A condition over the receiver's rows.
+    Predicate,
+}
+
+impl SigTy {
+    /// The scalar this position takes, or `None` when it takes a relation or a
+    /// condition — neither of which a `'static` tag can describe, because both
+    /// depend on the receiver.
+    #[must_use]
+    pub const fn scalar(self) -> Option<ScalarTy> {
+        match self {
+            Self::Scalar(s) => Some(s),
+            Self::Rows | Self::Predicate => None,
+        }
+    }
+}
+
+impl From<ScalarTy> for SigTy {
+    fn from(s: ScalarTy) -> Self {
+        Self::Scalar(s)
+    }
 }
 
 impl SigSpec {
     /// Convenience constructor.
     #[must_use]
-    pub const fn new(params: Vec<ParamSpec>, ret: ScalarTy) -> Self {
+    pub const fn new(params: Vec<ParamSpec>, ret: SigTy) -> Self {
         Self { params, ret }
     }
 
@@ -463,7 +512,17 @@ impl FunctionRegistry {
         // would be a rule with no reason.
         let p = |name: &str, ty: ScalarTy| ParamSpec {
             name: SmolStr::new(name),
-            ty,
+            ty: SigTy::Scalar(ty),
+        };
+        // The relation a verb is a verb of, and a condition over its rows —
+        // see [`SigTy`]. Every `seq/` row's parameter 0 is `rows`.
+        let rows = |name: &str| ParamSpec {
+            name: SmolStr::new(name),
+            ty: SigTy::Rows,
+        };
+        let pred = |name: &str| ParamSpec {
+            name: SmolStr::new(name),
+            ty: SigTy::Predicate,
         };
 
         // Local insertion helper. `recv` and `member` come from
@@ -481,7 +540,27 @@ impl FunctionRegistry {
                     name: SmolStr::new(name),
                     recv,
                     member,
-                    sig: SigSpec::new(params, ret),
+                    sig: SigSpec::new(params, SigTy::Scalar(ret)),
+                    lowering,
+                },
+            );
+        };
+        // A verb of the algebra: it takes a relation and gives one back. A
+        // separate helper from `add` and not a flag on it, because the two say
+        // different things — the split `LoweringKind` already draws between a
+        // scalar expression and a `PlanOp`.
+        let add_verb = |entries: &mut HashMap<SmolStr, RegistryEntry>,
+                        name: &str,
+                        params: Vec<ParamSpec>,
+                        lowering: LoweringKind| {
+            let (recv, member) = split_receiver(name);
+            entries.insert(
+                SmolStr::new(name),
+                RegistryEntry {
+                    name: SmolStr::new(name),
+                    recv,
+                    member,
+                    sig: SigSpec::new(params, SigTy::Rows),
                     lowering,
                 },
             );
@@ -521,97 +600,58 @@ impl FunctionRegistry {
         // spells — `members_of(Relation)` is what an IDE offers, and offering
         // `User.filter(…)` for a language whose word is `where` is a completion
         // that is confidently wrong.
-        add(
+        // The three the surface reaches — `where`, `select`, `join` — carry the
+        // signature they always had and could not write down. The other ten are
+        // rows with no lowering in `crate::lower::lower_source_stage`, and they
+        // say so by their `PlanOp`; what they gain here is that the day one is
+        // implemented, its arguments are checked by the same code that checks
+        // `str.trim`'s.
+        add_verb(
             e,
             "seq.where",
-            vec![p("rows", S::String)],
-            S::String,
+            vec![rows("rows"), pred("keep")],
             L(P::Where),
         );
-        add(
-            e,
-            "seq.map",
-            vec![p("rows", S::String)],
-            S::String,
-            L(P::Map),
-        );
-        add(
-            e,
-            "seq.flatten",
-            vec![p("rows", S::SeqString)],
-            S::String,
-            L(P::Flatten),
-        );
-        add(
+        add_verb(e, "seq.map", vec![rows("rows")], L(P::Map));
+        add_verb(e, "seq.flatten", vec![rows("rows")], L(P::Flatten));
+        add_verb(
             e,
             "seq.take",
-            vec![p("rows", S::String), p("n", S::Integer)],
-            S::String,
+            vec![rows("rows"), p("n", S::Integer)],
             L(P::Take),
         );
-        add(
+        add_verb(
             e,
             "seq.drop",
-            vec![p("rows", S::String), p("n", S::Integer)],
-            S::String,
+            vec![rows("rows"), p("n", S::Integer)],
             L(P::Drop),
         );
-        add(
-            e,
-            "seq.distinct",
-            vec![p("rows", S::String)],
-            S::String,
-            L(P::Distinct),
-        );
-        add(
-            e,
-            "seq.sort",
-            vec![p("rows", S::String)],
-            S::String,
-            L(P::Sort),
-        );
-        add(
-            e,
-            "seq.select",
-            vec![p("rows", S::String)],
-            S::String,
-            L(P::Select),
-        );
-        add(
+        add_verb(e, "seq.distinct", vec![rows("rows")], L(P::Distinct));
+        add_verb(e, "seq.sort", vec![rows("rows")], L(P::Sort));
+        // `select`'s columns are NAMES and not values, so they are not
+        // parameters: `crate::lower` reads them off the CST as
+        // `SelectedColumn`s. The signature says what the verb takes of the
+        // ALGEBRA, which is the relation.
+        add_verb(e, "seq.select", vec![rows("rows")], L(P::Select));
+        // A join's condition is a predicate over BOTH sides (ruling 17), which
+        // is the relation this row hands the checker once the right side is in.
+        add_verb(
             e,
             "seq.join",
-            vec![p("rows", S::String), p("other", S::String)],
-            S::String,
+            vec![rows("rows"), rows("other"), pred("on")],
             L(P::Join),
         );
-        add(
+        add_verb(
             e,
             "seq.union",
-            vec![p("rows", S::String), p("other", S::String)],
-            S::String,
+            vec![rows("rows"), rows("other")],
             L(P::Union),
         );
-        add(
-            e,
-            "seq.group_by",
-            vec![p("rows", S::String)],
-            S::String,
-            L(P::GroupBy),
-        );
-        add(
-            e,
-            "seq.aggregate",
-            vec![p("rows", S::String)],
-            S::String,
-            L(P::Aggregate),
-        );
-        add(
-            e,
-            "seq.count",
-            vec![p("rows", S::String)],
-            S::Integer,
-            L(P::Count),
-        );
+        add_verb(e, "seq.group_by", vec![rows("rows")], L(P::GroupBy));
+        add_verb(e, "seq.aggregate", vec![rows("rows")], L(P::Aggregate));
+        // The one `seq/` row that is not a verb of the algebra: it takes a
+        // relation and gives back a NUMBER.
+        add(e, "seq.count", vec![rows("rows")], S::Integer, L(P::Count));
 
         // ── str/ (13) — every operation on a string. Receiver::Scalar(String)
         //

@@ -28,7 +28,7 @@ pub mod test_support;
 
 pub use db::{Db, FossilDb};
 pub use diagnostic::{Diagnostic, Severity, Span, SpanFrame, SpanLabel};
-pub use error::{ErrorGuaranteed, bug, delay_span_bug};
+pub use error::{ErrorGuaranteed, bug, delay_span_bug, raise};
 pub use files::{FileRegistry, Files, SourceFile, file_at, register_file};
 pub use locator::{SourceAnchor, program_dir};
 pub use providers::{

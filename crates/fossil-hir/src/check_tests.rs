@@ -106,19 +106,23 @@ fn build_checker<'db>(
         (scope, _) => scope,
     };
     Checker {
-        db,
+        expr: crate::check::Expr {
+            db,
+            file: mapping.file(db),
+            flat: source_row,
+            rows: source_scope,
+            relation: crate::check::source_binding_name(db, mapping),
+            spans: crate::check::SpanSource::Table(spans(db, mapping)),
+            entries: Vec::new(),
+            first_error: None,
+            expected_ref: None,
+        },
         mapping,
-        source_row,
-        source_scope,
         resolved_shape,
         predicates,
         // No `@rename` in any fixture here, matching the `short_names(&[])`
         // above: every short name is the last segment of its predicate IRI.
         renames: Vec::new(),
-        spans: spans(db, mapping),
-        entries: Vec::new(),
-        first_error: None,
-        expected_ref: None,
     }
 }
 
@@ -181,7 +185,7 @@ fn fieldref_propagates_string_from_inferred_descriptor() {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
-        let ty = cx.lookup_field(ExprId(0), "name")?;
+        let ty = cx.expr.lookup_field(ExprId(0), "name")?;
         Some(render_ty_kind(db, ty.kind(db)))
     }
 
@@ -200,7 +204,7 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
         let m = *def_map(db, file).mappings(db).first()?;
         let row = users_row(db);
         let mut cx = build_checker(db, m, Some(row), None);
-        let _ = cx.lookup_field(ExprId(0), "naem"); // typo for `name`
+        let _ = cx.expr.lookup_field(ExprId(0), "naem"); // typo for `name`
         Some(())
     }
 
@@ -276,7 +280,7 @@ fn a_column_ref_naming_a_foreign_row_is_rejected() {
             },
         };
         cx.check_property(ExprId(0), &prop);
-        cx.first_error.is_some()
+        cx.expr.first_error.is_some()
     }
 
     let (db, file) = db_with(DERIVED);
@@ -321,7 +325,7 @@ fn a_column_ref_naming_a_row_the_relation_derives_from_is_accepted() {
             },
         };
         cx.check_property(ExprId(0), &prop);
-        cx.first_error.is_some()
+        cx.expr.first_error.is_some()
     }
 
     let (db, file) = db_with(DERIVED);
@@ -350,7 +354,7 @@ fn a_column_ref_naming_the_relations_own_name_is_rejected() {
             },
         };
         cx.check_property(ExprId(0), &prop);
-        cx.first_error.is_some()
+        cx.expr.first_error.is_some()
     }
 
     let (db, file) = db_with(DERIVED);
@@ -372,7 +376,7 @@ fn compatible_integer_widens_to_float() {
         let flt = Ty::new(db, TyKind::Primitive(Primitive::Float));
         let mut cx = build_checker(db, m, None, None);
         compatible(
-            &mut cx,
+            &mut cx.expr,
             int,
             Some(flt),
             ExprId(0),
@@ -395,7 +399,14 @@ fn compatible_string_to_integer_fails() {
         let s = Ty::new(db, TyKind::Primitive(Primitive::String));
         let i = Ty::new(db, TyKind::Primitive(Primitive::Integer));
         let mut cx = build_checker(db, m, None, None);
-        compatible(&mut cx, s, Some(i), ExprId(0), &BlamePos::Expr(ExprId(0))).is_err()
+        compatible(
+            &mut cx.expr,
+            s,
+            Some(i),
+            ExprId(0),
+            &BlamePos::Expr(ExprId(0)),
+        )
+        .is_err()
     }
 
     let (db, file) = db_with(HELLO);
@@ -465,7 +476,7 @@ Contact : Person from users
                 value: HirExpr::FieldRef(smol_str::SmolStr::from("name")),
             },
         );
-        cx.first_error.is_none()
+        cx.expr.first_error.is_none()
     }
 
     let (db, file) = db_with(SRC);
@@ -723,7 +734,7 @@ fn typecheck_mapping_returns_error_guaranteed_on_any_diagnostic() {
             value: HirExpr::FieldRef(smol_str::SmolStr::from("nonexistent")),
         };
         cx.check_property(ExprId(0), &prop);
-        cx.first_error.is_some()
+        cx.expr.first_error.is_some()
     }
 
     let (db, file) = db_with(HELLO);
@@ -799,7 +810,7 @@ fn comparing_a_string_column_with_an_integer_is_an_error() {
             lhs: Box::new(crate::lower::HirExpr::FieldRef("name".into())),
             rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
         };
-        let ty = cx.synth(ExprId(0), &e)?;
+        let ty = cx.expr.synth(ExprId(0), &e)?;
         Some(render_ty_kind(db, ty.kind(db)))
     }
 
@@ -830,7 +841,7 @@ fn comparing_an_integer_column_with_an_integer_is_bool() {
             lhs: Box::new(crate::lower::HirExpr::FieldRef("age".into())),
             rhs: Box::new(crate::lower::HirExpr::IntLit(18)),
         };
-        let ty = cx.synth(ExprId(0), &e)?;
+        let ty = cx.expr.synth(ExprId(0), &e)?;
         Some(render_ty_kind(db, ty.kind(db)))
     }
 
@@ -852,13 +863,13 @@ fn a_call_takes_its_return_type_and_checks_its_argument() {
             func: "str.trim".into(),
             args: vec![crate::lower::HirExpr::FieldRef("name".into())],
         };
-        let ok_ty = cx.synth(ExprId(0), &ok)?;
+        let ok_ty = cx.expr.synth(ExprId(0), &ok)?;
         // The same function applied to the Integer column: refused.
         let bad = crate::lower::HirExpr::Call {
             func: "str.trim".into(),
             args: vec![crate::lower::HirExpr::FieldRef("age".into())],
         };
-        let bad_ty = cx.synth(ExprId(0), &bad)?;
+        let bad_ty = cx.expr.synth(ExprId(0), &bad)?;
         Some((
             render_ty_kind(db, ok_ty.kind(db)),
             render_ty_kind(db, bad_ty.kind(db)),
@@ -906,7 +917,7 @@ fn a_conditional_with_mismatched_branches_is_an_error() {
             then: Box::new(crate::lower::HirExpr::StringLit("adult".into())),
             otherwise: Box::new(crate::lower::HirExpr::IntLit(0)),
         };
-        let ty = cx.synth(ExprId(0), &e)?;
+        let ty = cx.expr.synth(ExprId(0), &e)?;
         Some(render_ty_kind(db, ty.kind(db)))
     }
 
@@ -938,7 +949,7 @@ fn a_conditional_whose_condition_is_not_bool_is_an_error() {
             then: Box::new(crate::lower::HirExpr::StringLit("a".into())),
             otherwise: Box::new(crate::lower::HirExpr::StringLit("b".into())),
         };
-        let ty = cx.synth(ExprId(0), &e)?;
+        let ty = cx.expr.synth(ExprId(0), &e)?;
         Some(render_ty_kind(db, ty.kind(db)))
     }
 
@@ -1122,4 +1133,79 @@ fn a_reference_to_one_shape_satisfies_a_slot_that_accepts_two() {
 
     // The set is the type: the order a document wrote it in is not part of it.
     assert_eq!(two, Ty::reference(&db, [b, a]), "canonicalised");
+}
+
+// ── The condition of a stage ───────────────────────────────────────────────
+
+/// The defect this whole seam was built for, stated as the asymmetry it was.
+///
+/// `Row.celsius > "abc"` in a `where` and `parse.float(Row.celsius)` in a body
+/// are the same mismatch on the same column. One was refused and the other
+/// passed clean, because a stage's condition was walked for the column NAMES it
+/// mentions (`infer::check_refs`) and never typed.
+///
+/// Both halves, because a rule that refuses everything would pass the first:
+/// the well-typed comparison is accepted, the ill-typed one is refused, and the
+/// unknown COLUMN is still refused — that is the question `check_refs` used to
+/// answer, and `synth` of a `ColumnRef` answers it now.
+#[test]
+fn a_stage_condition_is_typed_and_not_only_resolved() {
+    use fossil_base::test_support::{DecodingHost, register_inferred};
+    use fossil_graph_schema::Primitive;
+    use std::sync::Arc;
+
+    fn diagnostics(condition: &str) -> Vec<String> {
+        let system: Arc<dyn fossil_base::System> = Arc::new(DecodingHost::default());
+        let db = FossilDb::new(system);
+        register_inferred(
+            &db,
+            "r.csv",
+            &[
+                ("celsius", Primitive::Float),
+                ("station", Primitive::String),
+            ],
+        );
+        let src = format!("Row := io.csv(\"r.csv\")\nValid := Row.where({condition})\n");
+        let file = SourceFile::new(&db, src, "stage.fossil".to_string());
+        // `resolve_binding_scope` is a plain-Rust helper called from inside a
+        // tracked frame, so the accumulator needs one — the same shim the row
+        // algebra's own tests use.
+        #[salsa::tracked]
+        fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+            crate::infer::resolve_binding_scope(db, file, "Valid", 0).is_ok()
+        }
+        let _ = shim(&db, file);
+        shim::accumulated::<Diagnostic>(&db, file)
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    let ok = diagnostics("Row.celsius > 10.0");
+    assert!(ok.is_empty(), "a well-typed condition must pass: {ok:#?}");
+
+    let mistyped = diagnostics("Row.celsius > \"abc\"");
+    assert!(
+        mistyped
+            .iter()
+            .any(|m| m.contains("Float") && m.contains("String")),
+        "comparing a Float with a String must be refused, naming both: {mistyped:#?}"
+    );
+
+    let unknown = diagnostics("Row.nosuch > 10.0");
+    assert!(
+        unknown.iter().any(|m| m.contains("nosuch")),
+        "an unknown column is still refused: {unknown:#?}"
+    );
+
+    // A condition that is not a condition. The catalogue is what says so —
+    // `seq.where` is `(Rows, Predicate) -> Rows` — where it used to say
+    // `p("rows", S::String)`.
+    let not_a_condition = diagnostics("Row.station");
+    assert!(
+        not_a_condition
+            .iter()
+            .any(|m| m.contains("needs a condition")),
+        "a `where` over a String is not a filter: {not_a_condition:#?}"
+    );
 }

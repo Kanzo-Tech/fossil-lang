@@ -348,7 +348,10 @@ fn apply_source_op<'db>(
     // tree — and nothing below can check a column against a row nobody
     // declared. The NAMES still flow, so the scope is returned rather than
     // dropped.
-    let Some(fields) = scope.fields(db) else {
+    // The COLUMNS are no longer read here — `typecheck_stage` asks the scope.
+    // What this still is, is the question «does this relation have a schema at
+    // all», and the answer decides whether there is anything to check.
+    let Some(_) = scope.fields(db) else {
         return match op {
             // A join still has to bring the right-hand names in, or a body that
             // writes `User.email` next to an untyped `Purchase` would be told
@@ -365,7 +368,7 @@ fn apply_source_op<'db>(
         // columns the predicate names still have to exist — a filter on a column
         // that is not there is a program that would run and keep everything.
         HirSourceOp::Where(pred) => {
-            check_refs(db, pipe, "where", pred, &scope, &fields)?;
+            typecheck_stage(db, file, pipe, "seq.where", pred, &scope)?;
             Ok(scope)
         }
         // `select` restricts, and it restricts EACH ROW: `Employee.id` stays a
@@ -454,7 +457,7 @@ fn apply_source_op<'db>(
         // for) still flattens into finding the first.
         HirSourceOp::Join { right, alias, on } => {
             let right = right_scope(db, file, right, alias.as_ref(), depth)?;
-            let Some(right_fields) = right.fields(db) else {
+            let Some(_) = right.fields(db) else {
                 return Err(pipe_error(
                     db,
                     pipe,
@@ -478,10 +481,12 @@ fn apply_source_op<'db>(
             // side, under any name" is not the right one either — that is what
             // let `on = Purchase.user_id == Nobody.id` through while `Nobody`
             // named nothing at all.
+            // The two sides' columns were concatenated into one flat list here
+            // and handed to `check_refs`, which resolved a name against it. The
+            // scope IS that answer and keeps the sides apart, so the flat list
+            // went with the walk.
             let joined = scope.concat(right);
-            let mut all = fields;
-            all.extend(right_fields);
-            check_refs(db, pipe, "the `on` condition of `join`", on, &joined, &all)?;
+            typecheck_stage(db, file, pipe, "seq.join", on, &joined)?;
             Ok(joined)
         }
     }
@@ -507,82 +512,72 @@ fn right_scope<'db>(
     })
 }
 
-/// Every reference a verb's expression makes, checked against the scope that
-/// verb receives — the row-algebra half of the rule
-/// [`crate::check::Checker::synth_ty`] applies to a mapping body.
+// `check_refs`, `collect_refs`, `Reference` and `binding_list` stood here — a
+// hand-written walk that collected the `ColumnRef`s a condition mentions and
+// asked, per name, whether the scope had it. Every one of those questions is a
+// question `synth` of a `ColumnRef` already asks, against the same scope. What
+// the walk could NOT ask is the other one, and that is the whole finding: it
+// answered «is there a column called `celsius`» and never «and is
+// `Row.celsius > "abc"` a condition».
+
+/// Type one stage's condition, against the rows the pipeline has AT that stage.
 ///
-/// One function for `where` and for `join`'s `on` because "the columns this
-/// predicate names must exist" is one rule, and it has three ways to fail: a
-/// binding the relation does not carry, a column that binding does not have,
-/// and a bare name nothing has.
-fn check_refs<'db>(
+/// The catalogue row says what the verb takes — `seq.where` is
+/// `(Rows, Predicate) -> Rows` — and a [`crate::check::Expr`] over `scope`
+/// answers what the condition IS. That is the whole of it: an expression is
+/// typed the same way wherever it is written.
+///
+/// It replaces `check_refs`, a hand-written walk that collected the
+/// `ColumnRef`s a condition mentions and asked whether each name existed. Every
+/// one of those questions is one `synth` of a `ColumnRef` already asks, with
+/// the same scope — and the walk could not ask the other one, so
+/// `Row.celsius > "abc"` passed clean two lines above a
+/// `parse.float(Row.celsius)` refused for the same mismatch.
+///
+/// The scope AT THIS STAGE and not the pipeline's final one: a `select` after a
+/// `where` narrows the row, and checking the predicate against what the
+/// pipeline ends up with would check it against a row it never saw.
+fn typecheck_stage<'db>(
     db: &'db dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
     pipe: &crate::lower::HirSourcePipe,
     verb: &str,
-    expr: &crate::lower::HirExpr,
+    condition: &crate::lower::HirExpr,
     scope: &Rows<'db>,
-    flat: &[RecordField<'db>],
 ) -> Result<(), fossil_base::ErrorGuaranteed> {
-    let mut named = Vec::new();
-    collect_refs(expr, &mut named);
-    for reference in named {
-        match reference {
-            Reference::Qualified { binding, column } => {
-                let Some(row) = scope.fields_of(db, binding.as_str()) else {
-                    return Err(pipe_error(
-                        db,
-                        pipe,
-                        format!(
-                            "`{verb}` in `{}` reads `{binding}.{column}`, and `{}` carries no row \
-                             called `{binding}`. It draws on: {}",
-                            pipe.name,
-                            pipe.name,
-                            binding_list(scope),
-                        ),
-                    ));
-                };
-                if !row.iter().any(|f| f.name == column) {
-                    return Err(pipe_error(
-                        db,
-                        pipe,
-                        format!(
-                            "`{verb}` in `{}` reads `{binding}.{column}`, which `{binding}` does \
-                             not have. It has: {}",
-                            pipe.name,
-                            column_list(&row),
-                        ),
-                    ));
-                }
-            }
-            Reference::Bare(column) => {
-                if !flat.iter().any(|f| f.name == column) {
-                    return Err(pipe_error(
-                        db,
-                        pipe,
-                        format!(
-                            "`{verb}` in `{}` reads `.{column}`, which `{}` does not have. \
-                             It has: {}",
-                            pipe.name,
-                            pipe.base,
-                            column_list(flat),
-                        ),
-                    ));
-                }
-            }
-        }
-    }
-    Ok(())
-}
+    let at = Span::new(pipe.span.0, pipe.span.1);
+    let mut cx = crate::check::Expr::over_relation(db, file, pipe.base.clone(), scope.clone(), at);
+    let ty = cx.synth(crate::body::ExprId(0), condition);
 
-/// The binding names a relation draws on, for a message that has to say which
-/// rows the author could have written instead.
-fn binding_list(scope: &Rows<'_>) -> String {
-    let names: Vec<String> = scope.bindings().map(|b| format!("`{b}`")).collect();
-    if names.is_empty() {
-        "no rows at all".to_string()
-    } else {
-        names.join(", ")
+    // The signature is what says a condition is wanted here, so it is what the
+    // refusal rests on. A `seq/` row that lost its `Predicate` parameter is a
+    // catalogue bug, and `crate::stdlib::tests` is where that is caught.
+    let wants_predicate = crate::stdlib::stdlib().lookup(verb).is_some_and(|e| {
+        e.sig
+            .params
+            .iter()
+            .any(|p| p.ty == crate::stdlib::SigTy::Predicate)
+    });
+    if let Some(ty) = ty
+        && wants_predicate
+        && !matches!(ty.kind(db), TyKind::Error(_))
+        && !crate::check::subtypes(db, ty, Ty::new(db, TyKind::Primitive(Primitive::Bool)))
+    {
+        let d = fossil_base::Diagnostic::new(
+            fossil_base::Severity::Error,
+            format!(
+                "`{}` in `{}` needs a condition, and this is {}",
+                crate::stdlib::split_receiver(verb).1,
+                pipe.name,
+                crate::ty::display::render_ty_kind(db, ty.kind(db)),
+            ),
+            at,
+        )
+        .file_absolute();
+        return Err(fossil_base::raise(db, d));
     }
+
+    cx.first_error.map_or(Ok(()), Err)
 }
 
 fn column_list(fields: &[RecordField<'_>]) -> String {
@@ -594,65 +589,6 @@ fn column_list(fields: &[RecordField<'_>]) -> String {
         .map(|f| format!("`{}`", f.name))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// A reference an expression makes to a column of a row.
-///
-/// Two variants because the surface has one spelling and the HIR still has two:
-/// `HirExpr::ColumnRef` is what `grammar.bnf` writes today, and
-/// `HirExpr::FieldRef` is the anonymous form it replaced. They are checked
-/// differently — a qualified reference names its row and can be wrong about it;
-/// a bare one can only be wrong about the column.
-enum Reference {
-    Qualified { binding: SmolStr, column: SmolStr },
-    Bare(SmolStr),
-}
-
-/// Every column an expression names, in order, duplicates included.
-fn collect_refs(expr: &crate::lower::HirExpr, out: &mut Vec<Reference>) {
-    use crate::lower::HirExpr;
-    match expr {
-        HirExpr::FieldRef(name) => out.push(Reference::Bare(name.clone())),
-        HirExpr::ColumnRef { binding, column } => out.push(Reference::Qualified {
-            binding: binding.clone(),
-            column: column.clone(),
-        }),
-        HirExpr::BinOp { lhs, rhs, .. } => {
-            collect_refs(lhs, out);
-            collect_refs(rhs, out);
-        }
-        HirExpr::UnaryOp { operand, .. } => collect_refs(operand, out),
-        HirExpr::Ternary {
-            cond,
-            then,
-            otherwise,
-        } => {
-            collect_refs(cond, out);
-            collect_refs(then, out);
-            collect_refs(otherwise, out);
-        }
-        // An edge constructor reads columns through its ARGUMENTS and through
-        // nothing else. The target type's template is written in the DEFINING
-        // mapping's scope and its holes are replaced wholesale, so none of its
-        // column references belongs to the row this walker is checking — see
-        // `identity::SubjectTemplate::fill`.
-        HirExpr::Call { args, .. } | HirExpr::Edge { args, .. } => {
-            for a in args {
-                collect_refs(a, out);
-            }
-        }
-        // A subject IRI reads columns, and until the holes were parsed this
-        // walker could not see a single one of them.
-        HirExpr::Interpolation(parts) => {
-            for p in parts {
-                if let crate::lower::InterpolationPart::Hole(e) = p {
-                    collect_refs(e, out);
-                }
-            }
-        }
-        HirExpr::StringLit(_) | HirExpr::IntLit(_) | HirExpr::FloatLit(_) | HirExpr::BoolLit(_) => {
-        }
-    }
 }
 
 fn pipe_error(
@@ -777,15 +713,17 @@ mod tests {
         scope
             .iter()
             .map(|crate::ty::NamedRow { binding, row }| {
-                let cols = row.and_then(|r| crate::ty::record_fields(db, r)).map_or_else(
-                    || "?".to_string(),
-                    |fs| {
-                        fs.iter()
-                            .map(|f| f.name.to_string())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    },
-                );
+                let cols = row
+                    .and_then(|r| crate::ty::record_fields(db, r))
+                    .map_or_else(
+                        || "?".to_string(),
+                        |fs| {
+                            fs.iter()
+                                .map(|f| f.name.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        },
+                    );
                 format!("{binding}{{{cols}}}")
             })
             .collect::<Vec<_>>()
@@ -920,20 +858,33 @@ mod tests {
         let system: Arc<dyn fossil_base::System> =
             Arc::new(fossil_base::test_support::DecodingHost::default());
         let db = fossil_base::FossilDb::new(system);
-        fossil_base::test_support::register_inferred(&db, "l.csv", &[("id", Primitive::Integer)]);
-        fossil_base::test_support::register_inferred(&db, "r.csv", &[("id", Primitive::String)]);
+        // The two `id`s differ in TYPE, which is the whole point — and that is
+        // why the join is on `k` and not on them. `on = Left.id == Right.id`
+        // compares an Integer with a String, and since the condition is typed
+        // (`typecheck_stage`) that is a refusal, not a fixture. It was legal
+        // here for as long as a stage's condition was walked for names only.
+        fossil_base::test_support::register_inferred(
+            &db,
+            "l.csv",
+            &[("id", Primitive::Integer), ("k", Primitive::String)],
+        );
+        fossil_base::test_support::register_inferred(
+            &db,
+            "r.csv",
+            &[("id", Primitive::String), ("k", Primitive::String)],
+        );
         let file = fossil_base::SourceFile::new(
             &db,
             "Left := io.csv(\"l.csv\")\n\
              Right := io.csv(\"r.csv\")\n\
-             Both := Left.join(Right, on = Left.id == Right.id)\n"
+             Both := Left.join(Right, on = Left.k == Right.k)\n"
                 .to_string(),
             "join.fossil".to_string(),
         );
         assert_eq!(
             shim(&db, file),
-            "Left{id} + Right{id} | Left.id=Primitive(Integer) Right.id=Primitive(String) \
-             flat=Some([\"id\", \"id\"])",
+            "Left{id,k} + Right{id,k} | Left.id=Primitive(Integer) Right.id=Primitive(String) \
+             flat=Some([\"id\", \"k\", \"id\", \"k\"])",
             "each side answers with its OWN `id`; the flat row still holds both, \
              which is why a qualified reference must never go through it"
         );

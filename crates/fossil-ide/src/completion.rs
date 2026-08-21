@@ -253,22 +253,35 @@ fn enclosing_mapping_loc<'db>(
 }
 
 /// Render a stdlib entry's signature as a `detail` string from its `'db`-free
-/// [`fossil_hir::stdlib::SigSpec`] — never touches `TyKind::Unknown` (the catalog
-/// carries only concrete scalar types).
+/// [`fossil_hir::stdlib::SigSpec`].
 fn render_sig(namespace: &str, entry: &fossil_hir::stdlib::RegistryEntry) -> String {
     let params = entry
         .sig
         .params
         .iter()
-        .map(|p| scalar_name(p.ty))
+        .map(|p| sig_name(p.ty))
         .collect::<Vec<_>>()
         .join(", ");
-    let ret = scalar_name(entry.sig.ret);
+    let ret = sig_name(entry.sig.ret);
     format!("{}({params}) -> {ret}  [{namespace}]", entry.name)
 }
 
-/// Human-readable name for a `'db`-free [`fossil_hir::stdlib::ScalarTy`]. Mirrors
-/// `render_ty_kind`'s surface names; never emits `Unknown`.
+/// Human-readable name for a signature position. Mirrors `render_ty_kind`'s
+/// surface names.
+///
+/// A verb of the algebra shows `Rows` and `Predicate` — what completion offers
+/// for `User.` is `where(Rows, Predicate) -> Rows`, and until the catalogue
+/// could say that it offered `where(String) -> String`.
+fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
+    use fossil_hir::stdlib::SigTy;
+    match t {
+        SigTy::Scalar(s) => scalar_name(s),
+        SigTy::Rows => "Rows".to_string(),
+        SigTy::Predicate => "Predicate".to_string(),
+    }
+}
+
+/// Human-readable name for a `'db`-free [`fossil_hir::stdlib::ScalarTy`].
 fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
     use fossil_hir::stdlib::ScalarTy as S;
     match s {

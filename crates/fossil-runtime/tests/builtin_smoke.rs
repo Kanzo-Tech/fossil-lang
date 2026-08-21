@@ -80,7 +80,16 @@ fn every_expr_template_binds_on_a_real_duckdb() {
             // expression. There is nothing to SELECT.
             continue;
         };
-        let args: Vec<String> = entry.sig.params.iter().map(|p| dummy(p.ty)).collect();
+        // Every parameter of an `Expr` row is a scalar: a relation and a
+        // condition belong to the verbs, and those are `Op` rows, skipped
+        // above. `expect` rather than a filter, because a scalar template whose
+        // parameter is not a scalar is a catalogue bug this test should fail on.
+        let args: Vec<String> = entry
+            .sig
+            .params
+            .iter()
+            .map(|p| dummy(p.ty.scalar().expect("an `Expr` row takes scalars")))
+            .collect();
         let sql = format!("SELECT {}", render_template(template.as_str(), &args));
 
         checked += 1;

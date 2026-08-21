@@ -869,9 +869,15 @@ fn operator_ty<'db>(
         HirExpr::FloatLit(_) => prim(Primitive::Float),
         HirExpr::IntLit(_) => prim(Primitive::Integer),
         HirExpr::BoolLit(_) => prim(Primitive::Bool),
+        // A row whose return is not a scalar is a VERB of the algebra, and no
+        // verb reaches here: a pipeline is lifted out of `Call` by
+        // `crate::lower`, so what is left in an expression position is a scalar
+        // function. `String` is this walk's answer for anything it cannot type,
+        // which is what an uncatalogued name already gets.
         HirExpr::Call { func, .. } => fossil_hir::stdlib::stdlib()
             .lookup(func.as_str())
-            .map_or_else(|| prim(Primitive::String), |entry| entry.sig.ret.to_ty(db)),
+            .and_then(|entry| entry.sig.ret.scalar())
+            .map_or_else(|| prim(Primitive::String), |s| s.to_ty(db)),
         // A conditional's branches agree by construction, so either answers.
         HirExpr::Ternary { then, .. } => operator_ty(db, then, field_ty),
         HirExpr::StringLit(_) | HirExpr::Interpolation(_) | HirExpr::Edge { .. } => {
@@ -1113,9 +1119,10 @@ fn lower_property_value<'db>(
 fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> {
     fossil_hir::stdlib::stdlib()
         .lookup(func.as_str())
+        .and_then(|e| e.sig.ret.scalar())
         .map_or_else(
             || Ty::new(db, TyKind::Primitive(Primitive::String)),
-            |e| e.sig.ret.to_ty(db),
+            |s| s.to_ty(db),
         )
 }
 

@@ -37,7 +37,7 @@
 //! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
 //! body has even one type error.
 
-use fossil_base::{Diagnostic, ErrorGuaranteed, Severity, Span, delay_span_bug};
+use fossil_base::{Diagnostic, ErrorGuaranteed, Severity, SourceFile, Span, delay_span_bug};
 use salsa::Accumulator;
 use smol_str::SmolStr;
 
@@ -55,7 +55,7 @@ use crate::spans::{Spans, mapping_header_span, spans};
 use crate::ty::display::render_ty_kind;
 use fossil_graph_schema::{Primitive, Rejection};
 
-use crate::ty::{Ty, TyKind};
+use crate::ty::{Rows, Ty, TyKind};
 
 /// Which side of a two-span blame a position refers to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,17 +146,25 @@ pub fn typecheck_mapping<'db>(
         .as_ref()
         .map_or_else(|| (Vec::new(), Vec::new()), |s| s.short_names(&renames));
     let mut cx = Checker {
-        db,
+        expr: Expr {
+            db,
+            file: mapping.file(db),
+            flat: source_row,
+            rows: source_scope,
+            // A body addresses its columns by the BINDING that introduced them,
+            // and `from` names the relation; the two coincide only when the
+            // relation is a binding that reads a file. This is provenance, so
+            // it is the `from` name.
+            relation: source_binding_name(db, mapping),
+            spans: SpanSource::Table(spans_table),
+            entries: Vec::new(),
+            first_error: None,
+            expected_ref: None,
+        },
         mapping,
-        source_row,
-        source_scope,
         resolved_shape,
         predicates: predicates.clone(),
         renames,
-        spans: spans_table,
-        entries: Vec::new(),
-        first_error: None,
-        expected_ref: None,
     };
 
     // Surface what the decoder rejected before checking the body — they are
@@ -172,8 +180,8 @@ pub fn typecheck_mapping<'db>(
     }
     cx.check_required_properties(properties);
 
-    let first_error = cx.first_error;
-    let expr_types = ExprTypes::new(db, cx.entries);
+    let first_error = cx.expr.first_error;
+    let expr_types = ExprTypes::new(db, cx.expr.entries);
     first_error.map_or_else(
         || Ok(TypeckOutput::new(db, expr_types, source_row, predicates)),
         Err,
@@ -330,14 +338,10 @@ pub fn render_split_suggestion(
 // value (the struct is a short-lived checker scratchpad, never logged).
 #[allow(missing_debug_implementations)]
 pub struct Checker<'db> {
-    pub(crate) db: &'db dyn fossil_base::Db,
+    /// Everything an expression needs. A body is an expression checker plus a
+    /// target shape — see [`Expr`].
+    pub(crate) expr: Expr<'db>,
     pub(crate) mapping: MappingLoc<'db>,
-    pub(crate) source_row: Option<Ty<'db>>,
-    /// The rows the `from` clause puts in scope, each under the name of the
-    /// binding that introduced it — [`crate::ty::Rows`]. `source_row` is
-    /// this flattened, and a QUALIFIED reference must not use it: flattening is
-    /// what loses the binding.
-    pub(crate) source_scope: Option<crate::ty::Rows<'db>>,
     pub(crate) resolved_shape: Option<ResolvedShape<'db>>,
     /// The target shape's predicates by short name — what a bare property key
     /// resolves against.
@@ -349,67 +353,414 @@ pub struct Checker<'db> {
     /// not that table, and walking them with [`fossil_graph_schema::local_name`]
     /// is how a renamed predicate the body HAD written was reported missing.
     pub(crate) renames: Vec<(SmolStr, SmolStr)>,
-    pub(crate) spans: Spans<'db>,
-    pub(crate) entries: Vec<ExprTypeEntry<'db>>,
-    /// First type error encountered (if any) — propagated as the mapping's
-    /// `ErrorGuaranteed`. Every error also pushes a diagnostic, so any
-    /// `Some(eg)` here implies ≥1 emitted `Diagnostic`.
-    pub(crate) first_error: Option<ErrorGuaranteed>,
-    /// Whether the expression being synthesised sits where an IRI is wanted.
-    ///
-    /// It exists because an interpolation's type is not a property of the
-    /// expression: `"…{u.id}"` yields an IRI where an IRI is wanted and a string
-    /// anywhere else. That is the rule read literally — "there is no IRI
-    /// template: there is interpolation" — and the alternative
-    /// is a value position typed `IriTemplate`, which would fail against any
-    /// shape that declares its predicate a string.
-    ///
-    /// **It was called `subject_position` and was set from `@subject` alone**,
-    /// which made it exactly one position wide — so an interpolation in VALUE
-    /// position was `String` unconditionally, and a predicate whose range is a
-    /// shape (which [`crate::shapes::expected_value_ty`] types `Iri`) could not
-    /// be satisfied by anything the language could write. The flag is now set
-    /// from two places, both in [`Checker::check_property`]: the identity's
-    /// key, and the EXPECTATION the resolved predicate carries. The second one
-    /// is what makes this checker bidirectional in the position where it
-    /// matters — «where it sits» is a question the expected type answers, not
-    /// just the key.
-    pub(crate) expected_ref: Option<Vec<SmolStr>>,
 }
 
-impl<'db> Checker<'db> {
-    const fn db(&self) -> &'db dyn fossil_base::Db {
-        self.db
-    }
-
-    fn span_of(&self, expr_id: ExprId) -> Span {
-        self.spans
-            .get(self.db, expr_id)
-            .unwrap_or(Span { start: 0, end: 0 })
-    }
-
-    /// The mapping's header span — where a diagnostic about the mapping AS A
-    /// WHOLE belongs, as opposed to one about an expression in its body.
-    ///
-    /// Three emitters used `Span { start: 0, end: 0 }` for this and it is not
-    /// «no span»: see [`mapping_header_span`].
+impl Checker<'_> {
     fn header_span(&self) -> Span {
-        mapping_header_span(self.db, self.mapping)
+        mapping_header_span(self.expr.db, self.mapping)
     }
 
     /// The IRI of the shape this mapping targets — what `@subject` mints a
     /// reference to.
     fn mapping_shape_iri(&self) -> Option<SmolStr> {
-        shape_iri_of(self.db, self.mapping)
+        shape_iri_of(self.expr.db, self.mapping)
     }
 
-    const fn record_error(&mut self, eg: ErrorGuaranteed) {
-        if self.first_error.is_none() {
-            self.first_error = Some(eg);
+    /// Check one property: synth its RHS and, if the shape declares the
+    /// predicate its key names, check against that constraint.
+    ///
+    /// The key is a bare name, so there is a resolution step in front of the
+    /// check: `name` means the predicate of this shape whose IRI ends in
+    /// `name`, and a name no predicate ends in is an error with a did-you-mean
+    /// over the ones that do. That is not a lookup failure to swallow — under a
+    /// mandatory shape document (ruling 3 of 2026-08-11) a key the shape does
+    /// not declare is a property that would be written into a corpus nothing
+    /// describes.
+    pub fn check_property(&mut self, expr_id: ExprId, prop: &HirProperty) {
+        // The identity is not a shape predicate: a `.shex` describes the
+        // predicates of a node, and in RDF the subject IS the node. A key the
+        // shape does not declare, and a mapping with no resolved shape at all,
+        // both yield no expectation — each has already said so, or says so in
+        // `resolve_predicate` below.
+        //
+        // This resolution happens BEFORE the synth, and that ordering is the
+        // whole of the bidirectionality: an interpolation's type depends on
+        // what is expected of it, so the expectation cannot be looked up after
+        // the fact. It used to be, and the consequence was measurable — an
+        // interpolated IRI in value position was `String`, unsatisfiable
+        // against every predicate whose range is a shape.
+        // `Subject` and the unguarded `Name(_)` both answer `None` and cannot be
+        // merged: the guarded `Name(name) if self.resolved_shape.is_some()` arm
+        // sits between them, and match arms are tried in order. One combined arm
+        // would have to go first, and it would shadow the guard.
+        #[allow(clippy::match_same_arms)]
+        let expectation = match &prop.key {
+            PropertyKey::Subject => None,
+            PropertyKey::Name(name) if self.resolved_shape.is_some() => {
+                self.resolve_predicate(expr_id, name).and_then(|pred| {
+                    let shape = self.resolved_shape.as_ref()?;
+                    let constraint = shape.constraint_for(pred.as_str())?;
+                    // `value_ty` is passed through as an `Option`, and that IS
+                    // the fix: it used to be
+                    // `unwrap_or_else(|| Ty::new(db, TyKind::Iri))`, so a
+                    // predicate the document declined to narrow demanded the
+                    // narrowest type in the lattice and rejected every string
+                    // in the corpus.
+                    Some((constraint.value_ty, BlamePos::ShapeProperty))
+                })
+            }
+            PropertyKey::Name(_) => None,
+        };
+
+        // Always synth the RHS so its type is recorded in `entries` (provenance
+        // / hover consume this even when there is no backward constraint).
+        let db = self.expr.db;
+        // `@subject` mints the identity of the node THIS mapping produces, so
+        // what it is expected to be is a reference to this mapping's own shape.
+        // Everywhere else the expectation comes off the resolved predicate.
+        self.expr.expected_ref = if matches!(prop.key, PropertyKey::Subject) {
+            // An identity is ALWAYS a reference — to the shape this mapping
+            // targets, or, when the program named a document that bound
+            // nothing, to the empty set. That is the same answer `synth_edge`
+            // gives an unresolvable target: something already said why, and a
+            // reference to no shape satisfies every slot rather than blaming
+            // the identity a second time.
+            Some(self.mapping_shape_iri().into_iter().collect())
+        } else {
+            expectation.as_ref().and_then(|(ty, _)| {
+                ty.and_then(|t| match t.kind(db) {
+                    TyKind::Ref(names) => Some(names.clone()),
+                    _ => None,
+                })
+            })
+        };
+        let actual = self.expr.synth(expr_id, &prop.value);
+        self.expr.expected_ref = None;
+
+        if let (Some(actual), Some((expected, dest))) = (actual, expectation) {
+            // `constraint.occurs` is deliberately NOT read here. The count a
+            // shape declares is checked in `check_required_properties`, over the
+            // predicates the body never wrote — the only direction that can be
+            // observed, now that no value type can carry «zero or one» in
+            // itself.
+            let _ = compatible(&mut self.expr, actual, expected, expr_id, &dest);
         }
+    }
+
+    /// The predicate IRI a bare key names, or a diagnostic saying it names none.
+    fn resolve_predicate(&mut self, expr_id: ExprId, name: &SmolStr) -> Option<SmolStr> {
+        if let Some((_, iri)) = self.predicates.iter().find(|(n, _)| n == name) {
+            return Some(iri.clone());
+        }
+        let db = self.expr.db;
+        let candidates: Vec<&str> = self.predicates.iter().map(|(n, _)| n.as_str()).collect();
+        let suggestion = did_you_mean(name.as_str(), candidates.iter().copied());
+        let msg = suggestion.map_or_else(
+            || {
+                if candidates.is_empty() {
+                    format!("the target shape declares no predicate, so there is no `{name}`")
+                } else {
+                    format!(
+                        "the target shape declares no `{name}` — it declares {}",
+                        candidates
+                            .iter()
+                            .map(|c| format!("`{c}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            },
+            |s| format!("the target shape declares no `{name}` — did you mean `{s}`?"),
+        );
+        let eg = delay_span_bug(db, self.expr.span_of(expr_id), msg);
+        self.expr.record_error(eg);
+        None
+    }
+
+    /// Two predicates of the shape with the same short name make BOTH of them
+    /// unwritable, and that is reported once per mapping rather than once per
+    /// property that trips on it.
+    fn surface_name_collisions(&mut self, collisions: &[NameCollision]) {
+        let db = self.expr.db;
+        let header_span = self.header_span();
+        // **The recommendation is code, and both placeholders had to go.**
+        //
+        // This line said `@rename(<Type>, "…" as <another_name>)` and neither
+        // half was writable: `<Type>` and `<another_name>` are not identifiers,
+        // and `@rename` had no production at all — `AT_ATTR` at top level fell
+        // through to `bump_as_error`. So the one repair the compiler names for
+        // the one error it refuses to fix itself could not be pasted, in three
+        // independent ways.
+        //
+        // Now the type is the bound name this mapping targets, the alias comes
+        // from the vocabulary that brought the predicate in (see
+        // `shapes::suggested_alias` for why a SUGGESTION is not the banned
+        // derivation), and the production exists.
+        // `the_recommended_rename_parses_and_repairs_the_collision` feeds this
+        // exact text back through the compiler and checks that the collision
+        // goes away and the renamed key resolves.
+        let type_name = self.target_type_name();
+        for c in collisions {
+            let NameCollision {
+                name,
+                first,
+                second,
+            } = c;
+            let alias = crate::shapes::suggested_alias(second);
+            let eg = delay_span_bug(
+                db,
+                header_span,
+                format!(
+                    "two predicates of the target shape are both called `{name}`: `{first}` and \
+                     `{second}`. A short name is the last segment of the predicate IRI, and \
+                     fossil never picks between two. Give one of them another name above the \
+                     binding: @rename({type_name}, \"{second}\" as {alias})"
+                ),
+            );
+            self.expr.record_error(eg);
+        }
+    }
+
+    /// Every predicate the shape requires and the body never wrote.
+    ///
+    /// The other direction of the backward check, and the one that was missing:
+    /// `check_property` walks what the body HAS, so a body that simply omits a
+    /// required predicate passed every check there is. A shape that says
+    /// `shop:email xsd:string ;` — cardinality exactly one — is a promise the
+    /// corpus makes to its readers, and a mapping that does not keep it writes
+    /// a node that does not conform to the shape it declares.
+    ///
+    /// **The name compared is [`fossil_graph_schema::short_name`], not
+    /// [`local_name`].** This walked the constraints with `local_name` and so
+    /// did not know about `@rename`: a required predicate the program had
+    /// renamed and then WRITTEN under its new name was reported missing, and
+    /// the only repair the compiler offers for a name collision made the
+    /// program it repaired fail to compile.
+    fn check_required_properties(&mut self, properties: &[HirProperty]) {
+        let db = self.expr.db;
+        let header_span = self.header_span();
+        let Some(shape) = self.resolved_shape.as_ref() else {
+            return;
+        };
+        let missing: Vec<(SmolStr, SmolStr)> = shape
+            .constraints
+            .iter()
+            .filter(|c| c.occurs.demands_one_or_more())
+            .map(|c| {
+                (
+                    SmolStr::from(fossil_graph_schema::short_name(
+                        c.predicate.as_str(),
+                        &self.renames,
+                    )),
+                    c.predicate.clone(),
+                )
+            })
+            .filter(|(short, _)| {
+                !properties
+                    .iter()
+                    .any(|p| matches!(&p.key, PropertyKey::Name(n) if n == short))
+            })
+            .collect();
+        for (short, iri) in missing {
+            let eg = delay_span_bug(
+                db,
+                header_span,
+                format!(
+                    "this mapping never writes `{short}`, and the shape it produces requires it \
+                     (`{iri}`). Add `{short} = ` to the body."
+                ),
+            );
+            self.expr.record_error(eg);
+        }
+    }
+
+    fn surface_shape_lowering_errors(&mut self) {
+        let Some(shape) = self.resolved_shape.as_ref() else {
+            return;
+        };
+        let db = self.expr.db;
+        let header_span = self.header_span();
+        // Clone the data we need so we don't hold a borrow of `self` across the
+        // mutable `record_error` calls.
+        let rejections = shape.rejections.clone();
+        let renames = self.renames.clone();
+        let base_name = self.mapping_name();
+        let source_name = source_binding_name(self.expr.db, self.mapping);
+        // The header names a bound shape NAME, not an IRI. This argument was
+        // the `Rejection`'s `shape_iri`, so the suggestion emitted
+        // `Contact1 : http://example.org/Contact from users` — a header the
+        // parser refuses outright.
+        let shape_name = self.target_type_name();
+        // …and the identity is the one this mapping already declares. It was
+        // the placeholder `` `${ex:}item/${.id}` ``: a backtick template with
+        // `${…}` holes and a leading-dot reference, three retired spellings in
+        // one argument, none of which parse. A split is a rewrite of ONE
+        // mapping into N, so every branch keeps that mapping's identity — the
+        // placeholder was never the right answer either, only a less visible
+        // wrong one.
+        let subject = self.subject_source_text();
+        for rejection in &rejections {
+            match rejection {
+                Rejection::Disjunction {
+                    shape_iri,
+                    disjuncts,
+                } => {
+                    let suggestion = render_split_suggestion(
+                        base_name.as_str(),
+                        shape_name.as_str(),
+                        // The `from` clause is the SOURCE BINDING, not the
+                        // mapping. This argument was `base_name` — the mapping's
+                        // own name — so the suggestion emitted
+                        // `Contact1 : ex:Contact from Contact`, a `from` that
+                        // points at the mapping being split. The docblock on
+                        // `render_split_suggestion` warns about exactly this
+                        // swap because it had already happened once; the
+                        // parameter reorder it describes made the two arguments
+                        // adjacent and did not stop them being the same string.
+                        // No test saw it: the corpus passed `"users"` by hand.
+                        source_name.as_str(),
+                        subject.as_str(),
+                        disjuncts,
+                        &renames,
+                    );
+                    let n = disjuncts.len();
+                    let msg = format!(
+                        "a value disjunction is not supported in v0.1 ({n} \
+                         branches in shape `{shape_iri}`); help: split into {n} \
+                         separate mappings (one per branch). The \
+                         split-into-mappings suggestion is provided \
+                         programmatically (see `Diagnostic.suggestion_source`)."
+                    );
+                    // Structured suggestion carrier (Blocker #3) — NOT a
+                    // Markdown delimiter. Accumulate directly (informational;
+                    // no ErrorGuaranteed).
+                    Diagnostic::new(Severity::Error, msg, header_span)
+                        .with_suggestion_source(suggestion)
+                        .accumulate(db);
+                }
+                Rejection::CyclicRef { path } => {
+                    let eg = delay_span_bug(
+                        db,
+                        header_span,
+                        format!("cyclic shape graph not supported: {}", path.join(" -> ")),
+                    );
+                    self.expr.record_error(eg);
+                }
+                Rejection::UnresolvedRef { label, in_shape } => {
+                    let eg = delay_span_bug(
+                        db,
+                        header_span,
+                        format!("unresolved shape ref `{label}` in shape `{in_shape}`"),
+                    );
+                    self.expr.record_error(eg);
+                }
+                Rejection::Malformed(m) => {
+                    let eg =
+                        delay_span_bug(db, header_span, format!("malformed shape document: {m}"));
+                    self.expr.record_error(eg);
+                }
+            }
+        }
+    }
+
+    /// The mapping's name text (for diagnostics + suggestion generation).
+    fn mapping_name(&self) -> SmolStr {
+        let file = self.mapping.file(self.expr.db);
+        lower_to_hir(self.expr.db, file)
+            .mappings(self.expr.db)
+            .get(self.mapping.index(self.expr.db))
+            .map_or_else(|| SmolStr::from("Mapping"), |m| m.name.clone())
+    }
+
+    /// This mapping's `@subject` right-hand side, VERBATIM — the source text a
+    /// generated rewrite of this mapping has to carry through.
+    ///
+    /// Read off the CST and not off [`crate::body::HirBody`], because the HIR
+    /// is not printable: `HirExpr::Interpolation` holds lowered parts and
+    /// rendering them back would be a second, unproven spelling of the surface.
+    /// The text is the surface.
+    ///
+    /// It reads [`mapping_cst_node`] — the per-mapping invalidation barrier this
+    /// file already goes through for [`mapping_header_span`] — and NEVER
+    /// `parse(db, file)`, which is the whole-file read the barrier exists to
+    /// keep out of the compile path.
+    ///
+    /// A mapping with no `@subject` cannot reach here: the identity is required,
+    /// exactly one, and first (`crate::body::check_identity`). The fallback is a
+    /// constant IRI, which is a legal identity — a suggestion is worth nothing
+    /// if it cannot be pasted, and a missing right-hand side would emit
+    /// `@subject = ` and take the parser down with it.
+    fn subject_source_text(&self) -> String {
+        use fossil_syntax::SyntaxKind;
+
+        crate::body::mapping_cst_node(self.expr.db, self.mapping)
+            .syntax()
+            .and_then(|node| {
+                node.children()
+                    .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::PROPERTY)
+                    .find(|p| {
+                        p.descendants_with_tokens()
+                            .filter_map(fossil_syntax::SyntaxElement::into_token)
+                            .any(|t| t.kind() == SyntaxKind::AT_ATTR && t.text() == "@subject")
+                    })?
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::EXPR)
+                    .map(|e| e.text().to_string().trim().to_string())
+            })
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "\"https://example.org/item\"".to_string())
+    }
+
+    /// The LOCAL name of the type this mapping targets — `Person`, the word a
+    /// `type { Person } := …` binding introduced and the header repeats.
+    ///
+    /// Not the shape IRI: it is what a `@rename`'s first argument has to be, and
+    /// a suggestion that quoted the IRI there would not compile.
+    fn target_type_name(&self) -> SmolStr {
+        let db = self.expr.db;
+        let file = self.mapping.file(db);
+        let Some(iri) = shape_iri_of(db, self.mapping) else {
+            return SmolStr::new_static("Type");
+        };
+        crate::def_map::def_map(db, file)
+            .types(db)
+            .iter()
+            .find(|t| t.shape_iri.as_deref() == Some(iri.as_str()))
+            .map_or_else(|| SmolStr::new_static("Type"), |t| t.name.clone())
     }
 }
 
+/// The name of the relation a mapping draws `from` — for provenance.
+pub(crate) fn source_binding_name<'db>(
+    db: &'db dyn fossil_base::Db,
+    mapping: MappingLoc<'db>,
+) -> SmolStr {
+    lower_to_hir(db, mapping.file(db))
+        .mappings(db)
+        .get(mapping.index(db))
+        .map_or_else(SmolStr::default, |m| m.source_binding.clone())
+}
+
+/// The fully-resolved shape IRI a mapping targets, or `None` when its header
+/// did not lower.
+///
+/// A free function rather than a `Checker` method because `typecheck_mapping`
+/// needs it BEFORE the `Checker` exists — the rename table is an input to the
+/// short-name table, which is an input to the `Checker`.
+fn shape_iri_of<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Option<SmolStr> {
+    let file = mapping.file(db);
+    lower_to_hir(db, file)
+        .mappings(db)
+        .get(mapping.index(db))
+        .map(|m| m.shape_iri.clone())
+        .filter(|iri| !iri.is_empty())
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "check_tests.rs"]
+mod tests;
 /// Compatibility check: is `actual` a subtype of `expected`, AND does
 /// `actual`'s cardinality satisfy the constraint?
 ///
@@ -427,12 +778,12 @@ impl<'db> Checker<'db> {
 ///
 /// Plain-Rust (NOT `#[salsa::tracked]`). Called from within the tracked
 /// [`typecheck_mapping`] frame (and from tests' tracked shims) so its
-/// `delay_span_bug` emits are valid.
+/// diagnostic emissions are valid.
 ///
 /// On mismatch, returns `Err(ErrorGuaranteed)` and pushes a two-span
 /// diagnostic naming BOTH the source expression's span and the destination's.
 pub fn compatible<'db>(
-    cx: &mut Checker<'db>,
+    cx: &mut Expr<'db>,
     actual: Ty<'db>,
     expected: Option<Ty<'db>>,
     source_expr: ExprId,
@@ -477,9 +828,7 @@ pub fn compatible<'db>(
          (expected because of the constraint at {dest_span:?})"
     );
 
-    let eg = delay_span_bug(db, source_span, msg);
-    cx.record_error(eg);
-    Err(eg)
+    Err(cx.error(source_span, msg))
 }
 
 // `expr_contains_free_field_refs`, `rewrite_field_refs_to_row_dot` and
@@ -538,6 +887,138 @@ pub(crate) fn subtypes<'db>(
     }
 }
 
+/// Where a diagnostic about an expression points, and in which frame.
+///
+/// A mapping body has one span per expression, mapping-relative, and a host
+/// rebases them. A pipeline has ONE span for the whole `name := …` item —
+/// [`crate::lower::HirSourcePipe::span`] says why — and it is file-absolute
+/// already, because it is read off the `SOURCE_DEF` node.
+///
+/// The distinction is not cosmetic. Every pipeline diagnostic in the tree was
+/// emitted from inside `typecheck_mapping`, which means
+/// [`crate::spans::rebase_to_file`] shifted it by the mapping's start offset —
+/// so a message about a `where` on line 5 underlined the mapping body on line 9.
+/// `SpanFrame` exists for exactly this and nothing was using it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SpanSource<'db> {
+    /// Per-expression spans, mapping-relative.
+    Table(Spans<'db>),
+    /// One span for every expression, already file-absolute.
+    At(Span),
+}
+
+/// Everything typing an EXPRESSION needs, and nothing a mapping body needs.
+///
+/// The split is the fix for a class of defect rather than one instance. The
+/// checker was mapping-shaped — it held a `MappingLoc` and the per-mapping span
+/// table — so the only way to type an expression was to be inside a mapping.
+/// A source pipeline's predicate is not, and so it was walked for the column
+/// NAMES it mentions (`crate::infer`'s hand-written `check_refs`) and never
+/// typed: `Row.celsius > "abc"` passed clean two lines above a
+/// `parse.float(Row.celsius)` refused for the same mismatch.
+///
+/// What an expression actually needs is the file whose declarations it names,
+/// the rows in scope, somewhere to point, and somewhere to put errors. What a
+/// BODY adds is the target shape and its predicate table. Those are two
+/// different things and they are two structs.
+// `missing_debug_implementations`: holds `&dyn fossil_base::Db`, which is not
+// `Debug`.
+#[allow(missing_debug_implementations)]
+pub struct Expr<'db> {
+    pub(crate) db: &'db dyn fossil_base::Db,
+    /// The file whose bindings and type declarations this expression names —
+    /// what `synth_edge` resolves a target against. It was reached through the
+    /// mapping, and it is a FILE-level question: `lookup_type` and
+    /// `subject_templates` are both keyed by file.
+    pub(crate) file: SourceFile,
+    /// The rows in scope, each under the binding that introduced it.
+    pub(crate) rows: Option<Rows<'db>>,
+    /// [`Self::rows`] flattened — what a BARE name resolves against. A
+    /// qualified reference must not use it: flattening is what loses the
+    /// binding.
+    pub(crate) flat: Option<Ty<'db>>,
+    /// The name of the relation these rows came from, for provenance: a
+    /// mapping's `from` binding, or the binding at the head of a pipe.
+    pub(crate) relation: SmolStr,
+    pub(crate) spans: SpanSource<'db>,
+    pub(crate) entries: Vec<ExprTypeEntry<'db>>,
+    /// First type error encountered (if any). Every error also pushes a
+    /// diagnostic, so any `Some(eg)` here implies >= 1 emitted `Diagnostic`.
+    pub(crate) first_error: Option<ErrorGuaranteed>,
+    /// The shapes something above is expecting a reference to, if any.
+    ///
+    /// It exists because an interpolation's type is not a property of the
+    /// expression: `"…{u.id}"` is the identity of a node where a node is
+    /// wanted and a string anywhere else. That is the rule read literally, and
+    /// it is what `TyKind::IriTemplate` and a subtyping rule were standing in
+    /// for.
+    pub(crate) expected_ref: Option<Vec<SmolStr>>,
+}
+
+impl<'db> Expr<'db> {
+    /// An expression checker over `rows`, pointing everything at one span.
+    ///
+    /// The pipeline constructor. `at` is file-absolute, and
+    /// [`Self::error`] marks every diagnostic accordingly — see [`SpanSource`].
+    pub(crate) fn over_relation(
+        db: &'db dyn fossil_base::Db,
+        file: SourceFile,
+        relation: SmolStr,
+        rows: Rows<'db>,
+        at: Span,
+    ) -> Self {
+        Self {
+            db,
+            file,
+            flat: rows.flat(db),
+            rows: Some(rows),
+            relation,
+            spans: SpanSource::At(at),
+            entries: Vec::new(),
+            first_error: None,
+            expected_ref: None,
+        }
+    }
+
+    const fn db(&self) -> &'db dyn fossil_base::Db {
+        self.db
+    }
+
+    fn span_of(&self, expr_id: ExprId) -> Span {
+        match self.spans {
+            SpanSource::Table(t) => t.get(self.db, expr_id).unwrap_or(Span { start: 0, end: 0 }),
+            SpanSource::At(span) => span,
+        }
+    }
+
+    /// Raise a type error, in the frame this checker's spans are in.
+    ///
+    /// THE emission point, and it is one so that the frame is decided once. It
+    /// was `delay_span_bug` at twenty-seven call sites, each defaulting to
+    /// `SpanFrame::MappingRelative` — correct for a body and silently wrong for
+    /// a pipeline, whose span is already file-absolute.
+    fn error(&mut self, span: Span, message: impl Into<String>) -> ErrorGuaranteed {
+        let mut d = Diagnostic::new(Severity::Error, message, span);
+        if matches!(self.spans, SpanSource::At(_)) {
+            d = d.file_absolute();
+        }
+        let eg = fossil_base::raise(self.db, d);
+        self.record_error(eg);
+        eg
+    }
+
+    /// [`Self::error`] at the span of an expression.
+    fn error_at(&mut self, expr_id: ExprId, message: impl Into<String>) -> ErrorGuaranteed {
+        self.error(self.span_of(expr_id), message)
+    }
+
+    const fn record_error(&mut self, eg: ErrorGuaranteed) {
+        if self.first_error.is_none() {
+            self.first_error = Some(eg);
+        }
+    }
+}
+
 // S-Opt and S-OptCov were two arms here, and `is_optional` was the predicate
 // the cardinality check asked. All three are gone with `TyKind::Optional`,
 // which nothing outside a test ever constructed: the language has no `T?` (it
@@ -550,7 +1031,7 @@ pub(crate) fn subtypes<'db>(
 // where `Range { min: 3, max: Some(3) }` answered `false`). `Occurs` is a
 // `(min, max)` pair and carries the answer as `Occurs::demands_one_or_more`.
 
-impl<'db> Checker<'db> {
+impl<'db> Expr<'db> {
     /// Inference-mode descent over a leaf [`HirExpr`].
     ///
     /// `HirExpr` is recursive now (`Call` / `Ternary` / `BinOp` /
@@ -558,7 +1039,7 @@ impl<'db> Checker<'db> {
     /// the arms below. It had one mode transition — the `synthesize_closure`
     /// hook — and that hook is deleted: there is no checking-mode entry left in
     /// this impl, because the only caller with an expectation to give is
-    /// [`Self::check_property`], which applies it itself.
+    /// [`Checker::check_property`], which applies it itself.
     pub fn synth(&mut self, expr_id: ExprId, e: &HirExpr) -> Option<Ty<'db>> {
         let (ty, kind) = self.synth_ty(expr_id, e)?;
         let span = self.span_of(expr_id);
@@ -620,24 +1101,22 @@ impl<'db> Checker<'db> {
             // two rows in: `Purchase.amount` and `User.email` land on different
             // entries, so two columns called `id` are two columns and not one.
             HirExpr::ColumnRef { binding, column } => {
-                let Some(row_scope) = self.source_scope.as_ref() else {
+                let Some(row_scope) = self.rows.as_ref() else {
                     // No `from` clause resolved at all — the header did not
                     // lower. Whatever refused it has already spoken; a second
                     // message per column would bury it.
                     return None;
                 };
                 if !row_scope.has(binding) {
-                    let source_name = self.source_binding_name();
-                    let eg = delay_span_bug(
-                        db,
-                        self.span_of(expr_id),
+                    let source_name = self.relation.clone();
+                    self.error_at(
+                        expr_id,
                         format!(
                             "`{binding}.{column}` reads a row this mapping does not \
                              have; it maps `{source_name}`. Name that row, or bring \
                              `{binding}` in."
                         ),
                     );
-                    self.record_error(eg);
                     return None;
                 }
                 let ty = self.lookup_column(expr_id, binding, column)?;
@@ -656,7 +1135,7 @@ impl<'db> Checker<'db> {
             // T-Field: resolve against the source row.
             HirExpr::FieldRef(name) => {
                 let ty = self.lookup_field(expr_id, name)?;
-                let source_name = self.source_binding_name();
+                let source_name = self.relation.clone();
                 (
                     ty,
                     ProvenanceKind::InputDescriptor {
@@ -738,214 +1217,6 @@ impl<'db> Checker<'db> {
     // `expr_contains_free_field_refs`, which asked which
     // sub-expressions read the anonymous row the language no longer has.
 
-    /// Check one property: synth its RHS and, if the shape declares the
-    /// predicate its key names, check against that constraint.
-    ///
-    /// The key is a bare name now, so there is a resolution step in front of the
-    /// check that did not exist: `name` means the predicate of this shape whose
-    /// IRI ends in `name`, and a name no predicate ends in is an error with a
-    /// did-you-mean over the ones that do. That is not a lookup failure to
-    /// swallow — under a mandatory shape document (ruling 3 of 2026-08-11) a
-    /// key the shape does not declare is a property that would be written into
-    /// a corpus nothing describes.
-    pub fn check_property(&mut self, expr_id: ExprId, prop: &HirProperty) {
-        // The identity is not a shape predicate: a `.shex` describes the
-        // predicates of a node, and in RDF the subject IS the node. A key the
-        // shape does not declare, and a mapping with no resolved shape at all,
-        // both yield no expectation — each has already said so, or says so in
-        // `resolve_predicate` below.
-        //
-        // This resolution happens BEFORE the synth, and that ordering is the
-        // whole of the bidirectionality: an interpolation's type depends on
-        // what is expected of it, so the expectation cannot be looked up after
-        // the fact. It used to be, and the consequence was measurable — an
-        // interpolated IRI in value position was `String`, unsatisfiable
-        // against every predicate whose range is a shape.
-        // `Subject` and the unguarded `Name(_)` both answer `None` and cannot be
-        // merged: the guarded `Name(name) if self.resolved_shape.is_some()` arm
-        // sits between them, and match arms are tried in order. One combined arm
-        // would have to go first, and it would shadow the guard.
-        #[allow(clippy::match_same_arms)]
-        let expectation = match &prop.key {
-            PropertyKey::Subject => None,
-            PropertyKey::Name(name) if self.resolved_shape.is_some() => {
-                self.resolve_predicate(expr_id, name).and_then(|pred| {
-                    let shape = self.resolved_shape.as_ref()?;
-                    let constraint = shape.constraint_for(pred.as_str())?;
-                    // `value_ty` is passed through as an `Option`, and that IS
-                    // the fix: it used to be
-                    // `unwrap_or_else(|| Ty::new(db, TyKind::Iri))`, so a
-                    // predicate the document declined to narrow demanded the
-                    // narrowest type in the lattice and rejected every string
-                    // in the corpus.
-                    Some((constraint.value_ty, BlamePos::ShapeProperty))
-                })
-            }
-            PropertyKey::Name(_) => None,
-        };
-
-        // Always synth the RHS so its type is recorded in `entries` (provenance
-        // / hover consume this even when there is no backward constraint).
-        let db = self.db;
-        // `@subject` mints the identity of the node THIS mapping produces, so
-        // what it is expected to be is a reference to this mapping's own shape.
-        // Everywhere else the expectation comes off the resolved predicate.
-        self.expected_ref = if matches!(prop.key, PropertyKey::Subject) {
-            // An identity is ALWAYS a reference — to the shape this mapping
-            // targets, or, when the program named a document that bound
-            // nothing, to the empty set. That is the same answer `synth_edge`
-            // gives an unresolvable target: something already said why, and a
-            // reference to no shape satisfies every slot rather than blaming
-            // the identity a second time.
-            Some(self.mapping_shape_iri().into_iter().collect())
-        } else {
-            expectation.as_ref().and_then(|(ty, _)| {
-                ty.and_then(|t| match t.kind(db) {
-                    TyKind::Ref(names) => Some(names.clone()),
-                    _ => None,
-                })
-            })
-        };
-        let actual = self.synth(expr_id, &prop.value);
-        self.expected_ref = None;
-
-        if let (Some(actual), Some((expected, dest))) = (actual, expectation) {
-            // `constraint.occurs` is deliberately NOT read here. The count a
-            // shape declares is checked in `check_required_properties`, over the
-            // predicates the body never wrote — the only direction that can be
-            // observed, now that no value type can carry «zero or one» in
-            // itself.
-            let _ = compatible(self, actual, expected, expr_id, &dest);
-        }
-    }
-
-    /// The predicate IRI a bare key names, or a diagnostic saying it names none.
-    fn resolve_predicate(&mut self, expr_id: ExprId, name: &SmolStr) -> Option<SmolStr> {
-        if let Some((_, iri)) = self.predicates.iter().find(|(n, _)| n == name) {
-            return Some(iri.clone());
-        }
-        let db = self.db;
-        let candidates: Vec<&str> = self.predicates.iter().map(|(n, _)| n.as_str()).collect();
-        let suggestion = did_you_mean(name.as_str(), candidates.iter().copied());
-        let msg = suggestion.map_or_else(
-            || {
-                if candidates.is_empty() {
-                    format!("the target shape declares no predicate, so there is no `{name}`")
-                } else {
-                    format!(
-                        "the target shape declares no `{name}` — it declares {}",
-                        candidates
-                            .iter()
-                            .map(|c| format!("`{c}`"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                }
-            },
-            |s| format!("the target shape declares no `{name}` — did you mean `{s}`?"),
-        );
-        let eg = delay_span_bug(db, self.span_of(expr_id), msg);
-        self.record_error(eg);
-        None
-    }
-
-    /// Two predicates of the shape with the same short name make BOTH of them
-    /// unwritable, and that is reported once per mapping rather than once per
-    /// property that trips on it.
-    fn surface_name_collisions(&mut self, collisions: &[NameCollision]) {
-        let db = self.db;
-        let header_span = self.header_span();
-        // **The recommendation is code, and both placeholders had to go.**
-        //
-        // This line said `@rename(<Type>, "…" as <another_name>)` and neither
-        // half was writable: `<Type>` and `<another_name>` are not identifiers,
-        // and `@rename` had no production at all — `AT_ATTR` at top level fell
-        // through to `bump_as_error`. So the one repair the compiler names for
-        // the one error it refuses to fix itself could not be pasted, in three
-        // independent ways.
-        //
-        // Now the type is the bound name this mapping targets, the alias comes
-        // from the vocabulary that brought the predicate in (see
-        // `shapes::suggested_alias` for why a SUGGESTION is not the banned
-        // derivation), and the production exists.
-        // `the_recommended_rename_parses_and_repairs_the_collision` feeds this
-        // exact text back through the compiler and checks that the collision
-        // goes away and the renamed key resolves.
-        let type_name = self.target_type_name();
-        for c in collisions {
-            let NameCollision {
-                name,
-                first,
-                second,
-            } = c;
-            let alias = crate::shapes::suggested_alias(second);
-            let eg = delay_span_bug(
-                db,
-                header_span,
-                format!(
-                    "two predicates of the target shape are both called `{name}`: `{first}` and \
-                     `{second}`. A short name is the last segment of the predicate IRI, and \
-                     fossil never picks between two. Give one of them another name above the \
-                     binding: @rename({type_name}, \"{second}\" as {alias})"
-                ),
-            );
-            self.record_error(eg);
-        }
-    }
-
-    /// Every predicate the shape requires and the body never wrote.
-    ///
-    /// The other direction of the backward check, and the one that was missing:
-    /// `check_property` walks what the body HAS, so a body that simply omits a
-    /// required predicate passed every check there is. A shape that says
-    /// `shop:email xsd:string ;` — cardinality exactly one — is a promise the
-    /// corpus makes to its readers, and a mapping that does not keep it writes
-    /// a node that does not conform to the shape it declares.
-    ///
-    /// **The name compared is [`fossil_graph_schema::short_name`], not
-    /// [`local_name`].** This walked the constraints with `local_name` and so
-    /// did not know about `@rename`: a required predicate the program had
-    /// renamed and then WRITTEN under its new name was reported missing, and
-    /// the only repair the compiler offers for a name collision made the
-    /// program it repaired fail to compile.
-    fn check_required_properties(&mut self, properties: &[HirProperty]) {
-        let db = self.db;
-        let header_span = self.header_span();
-        let Some(shape) = self.resolved_shape.as_ref() else {
-            return;
-        };
-        let missing: Vec<(SmolStr, SmolStr)> = shape
-            .constraints
-            .iter()
-            .filter(|c| c.occurs.demands_one_or_more())
-            .map(|c| {
-                (
-                    SmolStr::from(fossil_graph_schema::short_name(
-                        c.predicate.as_str(),
-                        &self.renames,
-                    )),
-                    c.predicate.clone(),
-                )
-            })
-            .filter(|(short, _)| {
-                !properties
-                    .iter()
-                    .any(|p| matches!(&p.key, PropertyKey::Name(n) if n == short))
-            })
-            .collect();
-        for (short, iri) in missing {
-            let eg = delay_span_bug(
-                db,
-                header_span,
-                format!(
-                    "this mapping never writes `{short}`, and the shape it produces requires it \
-                     (`{iri}`). Add `{short} = ` to the body."
-                ),
-            );
-            self.record_error(eg);
-        }
-    }
-
     /// Resolve a `.field` access against the source row.
     ///
     /// Returns `None` (synthesising no type, preserving the Phase 2 behaviour)
@@ -956,15 +1227,13 @@ impl<'db> Checker<'db> {
     /// returns an `Error` type.
     pub fn lookup_field(&mut self, expr_id: ExprId, name: &str) -> Option<Ty<'db>> {
         let db = self.db;
-        let row = self.source_row?; // no source row → no forward propagation
+        let row = self.flat?; // no source row → no forward propagation
 
         let TyKind::Record(rec) = row.kind(db) else {
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            let eg = self.error_at(
+                expr_id,
                 format!("internal: source row is not a Record for field `{name}`"),
             );
-            self.record_error(eg);
             return Some(Ty::new(db, TyKind::Error(eg)));
         };
 
@@ -979,8 +1248,7 @@ impl<'db> Checker<'db> {
             || format!("unknown column `{name}`"),
             |s| format!("unknown column `{name}` — did you mean `{s}`?"),
         );
-        let eg = delay_span_bug(db, self.span_of(expr_id), msg);
-        self.record_error(eg);
+        let eg = self.error_at(expr_id, msg);
         Some(Ty::new(db, TyKind::Error(eg)))
     }
 
@@ -1001,15 +1269,13 @@ impl<'db> Checker<'db> {
     /// descriptor", which is not an error.
     fn lookup_column(&mut self, expr_id: ExprId, binding: &str, column: &str) -> Option<Ty<'db>> {
         let db = self.db;
-        let row = self.source_scope.as_ref()?.row_of(binding)?;
+        let row = self.rows.as_ref()?.row_of(binding)?;
 
         let TyKind::Record(rec) = row.kind(db) else {
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            let eg = self.error_at(
+                expr_id,
                 format!("internal: the row `{binding}` contributes is not a Record"),
             );
-            self.record_error(eg);
             return Some(Ty::new(db, TyKind::Error(eg)));
         };
 
@@ -1026,8 +1292,7 @@ impl<'db> Checker<'db> {
             || format!("unknown column `{column}` on `{binding}`"),
             |s| format!("unknown column `{column}` on `{binding}` — did you mean `{s}`?"),
         );
-        let eg = delay_span_bug(db, self.span_of(expr_id), msg);
-        self.record_error(eg);
+        let eg = self.error_at(expr_id, msg);
         Some(Ty::new(db, TyKind::Error(eg)))
     }
 
@@ -1077,19 +1342,17 @@ impl<'db> Checker<'db> {
             self.synth_ty(expr_id, a);
         }
 
-        let file = self.mapping.file(db);
+        let file = self.file;
         let Some(shape_iri) = crate::def_map::def_map(db, file).lookup_type(db, target.as_str())
         else {
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            self.error_at(
+                expr_id,
                 format!(
                     "`{target}` names no shape, so there is no identity to build. A `type {{ … }} \
                      := io.shex(…)` binding introduces the name, and the Nth name takes the Nth \
                      shape the document declares."
                 ),
             );
-            self.record_error(eg);
             return unresolved();
         };
 
@@ -1099,9 +1362,8 @@ impl<'db> Checker<'db> {
         let Some(template) =
             crate::identity::subject_templates(db, file).for_shape(db, shape_iri.as_str())
         else {
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            self.error_at(
+                expr_id,
                 format!(
                     "no mapping in this program writes a `{target}`, so `{target}(…)` has no \
                      identity template to build from. An edge may POINT at a type nothing here \
@@ -1109,16 +1371,14 @@ impl<'db> Checker<'db> {
                      mapping that does emit it."
                 ),
             );
-            self.record_error(eg);
             return unresolved();
         };
 
         let arity = template.arity();
         if args.len() != arity {
             let declared = template.mapping_name;
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            self.error_at(
+                expr_id,
                 format!(
                     "`{target}` is built from {arity} value(s) and this passes {}. Its identity \
                      is declared by `{declared}`, whose `@subject` has {arity} hole(s); the Nth \
@@ -1126,7 +1386,6 @@ impl<'db> Checker<'db> {
                     args.len()
                 ),
             );
-            self.record_error(eg);
         }
         Ty::reference(db, std::iter::once(SmolStr::from(shape_iri.as_str())))
     }
@@ -1186,16 +1445,14 @@ impl<'db> Checker<'db> {
                 }
                 None => format!("unknown function `{func}`"),
             };
-            let eg = delay_span_bug(db, self.span_of(expr_id), msg);
-            self.record_error(eg);
+            let eg = self.error_at(expr_id, msg);
             return Ty::new(db, TyKind::Error(eg));
         };
 
         let params = &entry.sig.params;
         if args.len() != params.len() {
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            let eg = self.error_at(
+                expr_id,
                 format!(
                     "`{func}` takes {} argument{}, but {} {} given",
                     params.len(),
@@ -1204,12 +1461,21 @@ impl<'db> Checker<'db> {
                     if args.len() == 1 { "was" } else { "were" },
                 ),
             );
-            self.record_error(eg);
             return Ty::new(db, TyKind::Error(eg));
         }
 
         for (i, (arg, param)) in args.iter().zip(params.iter()).enumerate() {
-            let expected = param.ty.to_ty(db);
+            // A relation and a condition are not scalars, and neither is
+            // written as a value in the surface: a `seq/` row is reached by
+            // `Row.where(…)`, whose receiver and predicate `crate::lower`
+            // lifts into a `HirSourcePipe` rather than into `Call` arguments.
+            // They are checked where the pipeline is — `crate::infer` — with
+            // the rows of THAT stage in scope, which is a thing this frame does
+            // not have.
+            let Some(scalar) = param.ty.scalar() else {
+                continue;
+            };
+            let expected = scalar.to_ty(db);
             // An argument with no type is not an error: without a source
             // descriptor a `.field` synthesises nothing, and the rest of the
             // checker lets that through rather than inventing one. An argument
@@ -1246,13 +1512,23 @@ impl<'db> Checker<'db> {
                         render_ty_kind(db, actual.kind(db)),
                     )
                 };
-                let eg = delay_span_bug(db, self.span_of(expr_id), msg);
-                self.record_error(eg);
+                let eg = self.error_at(expr_id, msg);
                 return Ty::new(db, TyKind::Error(eg));
             }
         }
 
-        entry.sig.ret.to_ty(db)
+        entry.sig.ret.scalar().map_or_else(
+            // A verb of the algebra gives back the relation it was given. The
+            // surface cannot write one in a value position, so nothing reaches
+            // here with a `Rows` return today; when `crate::lower` stops
+            // lifting pipelines out of `Call`, this is where the answer is.
+            || {
+                Ty::new(db, TyKind::Error(self.error_at(expr_id, format!(
+                "`{func}` is a verb of the algebra and gives back a relation, which is not a value"
+            ))))
+            },
+            |s| s.to_ty(db),
+        )
     }
 
     /// T-Comp (`type-system.md` §4.7): `Γ ⊢ a : τ`, `Γ ⊢ b : τ`, τ comparable
@@ -1306,16 +1582,14 @@ impl<'db> Checker<'db> {
                 for (side, ty) in [("left", l), ("right", r)] {
                     let Some(ty) = ty else { continue };
                     if !subtypes(db, ty, bool_ty) {
-                        let eg = delay_span_bug(
-                            db,
-                            self.span_of(expr_id),
+                        let eg = self.error_at(
+                            expr_id,
                             format!(
                                 "the {side} side of `{}` must be Bool, but it is {}",
                                 op_text(op),
                                 render_ty_kind(db, ty.kind(db)),
                             ),
                         );
-                        self.record_error(eg);
                         return Some(Ty::new(db, TyKind::Error(eg)));
                     }
                 }
@@ -1329,9 +1603,8 @@ impl<'db> Checker<'db> {
                     && !subtypes(db, l, r)
                     && !subtypes(db, r, l)
                 {
-                    let eg = delay_span_bug(
-                        db,
-                        self.span_of(expr_id),
+                    let eg = self.error_at(
+                        expr_id,
                         format!(
                             "cannot compare {} with {} using `{}`",
                             render_ty_kind(db, l.kind(db)),
@@ -1339,7 +1612,6 @@ impl<'db> Checker<'db> {
                             op_text(op),
                         ),
                     );
-                    self.record_error(eg);
                     return Some(Ty::new(db, TyKind::Error(eg)));
                 }
             }
@@ -1396,16 +1668,14 @@ impl<'db> Checker<'db> {
                     } else {
                         ""
                     };
-                    let eg = delay_span_bug(
-                        db,
-                        self.span_of(expr_id),
+                    let eg = self.error_at(
+                        expr_id,
                         format!(
                             "the {side} side of `{}` must be a number, but it is {}{hint}",
                             op_text(op),
                             render_ty_kind(db, kind),
                         ),
                     );
-                    self.record_error(eg);
                     poisoned = Some(eg);
                 }
             }
@@ -1466,16 +1736,14 @@ impl<'db> Checker<'db> {
                 UnOp::Not => "Bool",
                 UnOp::Neg => "a number",
             };
-            let eg = delay_span_bug(
-                db,
-                self.span_of(expr_id),
+            let eg = self.error_at(
+                expr_id,
                 format!(
                     "`{}` needs {wanted}, but it is given {}",
                     un_op_text(op),
                     render_ty_kind(db, ty.kind(db)),
                 ),
             );
-            self.record_error(eg);
             return Some(Ty::new(db, TyKind::Error(eg)));
         }
         Some(ty)
@@ -1505,15 +1773,13 @@ impl<'db> Checker<'db> {
                 return Some(c);
             }
             if !subtypes(db, c, bool_ty) {
-                let eg = delay_span_bug(
-                    db,
-                    self.span_of(expr_id),
+                let eg = self.error_at(
+                    expr_id,
                     format!(
                         "the condition of `? :` must be Bool, but it is {}",
                         render_ty_kind(db, c.kind(db)),
                     ),
                 );
-                self.record_error(eg);
                 return Some(Ty::new(db, TyKind::Error(eg)));
             }
         }
@@ -1535,16 +1801,11 @@ impl<'db> Checker<'db> {
                 } else if subtypes(db, o, t) {
                     Some(t)
                 } else {
-                    let eg = delay_span_bug(
-                        db,
-                        self.span_of(expr_id),
-                        format!(
+                    let eg = self.error_at(expr_id, format!(
                             "the branches of `? :` have different types: {} and {}.                              Both branches must have the same type — fossil does not coerce.",
                             render_ty_kind(db, t.kind(db)),
                             render_ty_kind(db, o.kind(db)),
-                        ),
-                    );
-                    self.record_error(eg);
+                        ));
                     Some(Ty::new(db, TyKind::Error(eg)))
                 }
             }
@@ -1562,193 +1823,4 @@ impl<'db> Checker<'db> {
     // there is nothing left to bind. Its one caller was `Checker::check`, above,
     // and `ProvenanceKind::SynthesizedClosureRendering` is what remains of it —
     // nothing in the workspace constructs that variant any more.
-
-    /// Surface what the decoder could not lower (a value disjunction → the SC#4
-    /// split suggestion) as diagnostics on this mapping. The disjunction one is
-    /// informational — it does NOT error the mapping out, because the body may
-    /// still check the parts that DID lower.
-    fn surface_shape_lowering_errors(&mut self) {
-        let Some(shape) = self.resolved_shape.as_ref() else {
-            return;
-        };
-        let db = self.db;
-        let header_span = self.header_span();
-        // Clone the data we need so we don't hold a borrow of `self` across the
-        // mutable `record_error` calls.
-        let rejections = shape.rejections.clone();
-        let renames = self.renames.clone();
-        let base_name = self.mapping_name();
-        let source_name = self.source_binding_name();
-        // The header names a bound shape NAME, not an IRI. This argument was
-        // the `Rejection`'s `shape_iri`, so the suggestion emitted
-        // `Contact1 : http://example.org/Contact from users` — a header the
-        // parser refuses outright.
-        let shape_name = self.target_type_name();
-        // …and the identity is the one this mapping already declares. It was
-        // the placeholder `` `${ex:}item/${.id}` ``: a backtick template with
-        // `${…}` holes and a leading-dot reference, three retired spellings in
-        // one argument, none of which parse. A split is a rewrite of ONE
-        // mapping into N, so every branch keeps that mapping's identity — the
-        // placeholder was never the right answer either, only a less visible
-        // wrong one.
-        let subject = self.subject_source_text();
-        for rejection in &rejections {
-            match rejection {
-                Rejection::Disjunction {
-                    shape_iri,
-                    disjuncts,
-                } => {
-                    let suggestion = render_split_suggestion(
-                        base_name.as_str(),
-                        shape_name.as_str(),
-                        // The `from` clause is the SOURCE BINDING, not the
-                        // mapping. This argument was `base_name` — the mapping's
-                        // own name — so the suggestion emitted
-                        // `Contact1 : ex:Contact from Contact`, a `from` that
-                        // points at the mapping being split. The docblock on
-                        // `render_split_suggestion` warns about exactly this
-                        // swap because it had already happened once; the
-                        // parameter reorder it describes made the two arguments
-                        // adjacent and did not stop them being the same string.
-                        // No test saw it: the corpus passed `"users"` by hand.
-                        source_name.as_str(),
-                        subject.as_str(),
-                        disjuncts,
-                        &renames,
-                    );
-                    let n = disjuncts.len();
-                    let msg = format!(
-                        "a value disjunction is not supported in v0.1 ({n} \
-                         branches in shape `{shape_iri}`); help: split into {n} \
-                         separate mappings (one per branch). The \
-                         split-into-mappings suggestion is provided \
-                         programmatically (see `Diagnostic.suggestion_source`)."
-                    );
-                    // Structured suggestion carrier (Blocker #3) — NOT a
-                    // Markdown delimiter. Accumulate directly (informational;
-                    // no ErrorGuaranteed).
-                    Diagnostic::new(Severity::Error, msg, header_span)
-                        .with_suggestion_source(suggestion)
-                        .accumulate(db);
-                }
-                Rejection::CyclicRef { path } => {
-                    let eg = delay_span_bug(
-                        db,
-                        header_span,
-                        format!("cyclic shape graph not supported: {}", path.join(" -> ")),
-                    );
-                    self.record_error(eg);
-                }
-                Rejection::UnresolvedRef { label, in_shape } => {
-                    let eg = delay_span_bug(
-                        db,
-                        header_span,
-                        format!("unresolved shape ref `{label}` in shape `{in_shape}`"),
-                    );
-                    self.record_error(eg);
-                }
-                Rejection::Malformed(m) => {
-                    let eg =
-                        delay_span_bug(db, header_span, format!("malformed shape document: {m}"));
-                    self.record_error(eg);
-                }
-            }
-        }
-    }
-
-    /// The mapping's name text (for diagnostics + suggestion generation).
-    fn mapping_name(&self) -> SmolStr {
-        let file = self.mapping.file(self.db);
-        lower_to_hir(self.db, file)
-            .mappings(self.db)
-            .get(self.mapping.index(self.db))
-            .map_or_else(|| SmolStr::from("Mapping"), |m| m.name.clone())
-    }
-
-    /// The mapping's source binding name (for provenance).
-    fn source_binding_name(&self) -> SmolStr {
-        let file = self.mapping.file(self.db);
-        lower_to_hir(self.db, file)
-            .mappings(self.db)
-            .get(self.mapping.index(self.db))
-            .map_or_else(|| SmolStr::from(""), |m| m.source_binding.clone())
-    }
-
-    /// This mapping's `@subject` right-hand side, VERBATIM — the source text a
-    /// generated rewrite of this mapping has to carry through.
-    ///
-    /// Read off the CST and not off [`crate::body::HirBody`], because the HIR
-    /// is not printable: `HirExpr::Interpolation` holds lowered parts and
-    /// rendering them back would be a second, unproven spelling of the surface.
-    /// The text is the surface.
-    ///
-    /// It reads [`mapping_cst_node`] — the per-mapping invalidation barrier this
-    /// file already goes through for [`mapping_header_span`] — and NEVER
-    /// `parse(db, file)`, which is the whole-file read the barrier exists to
-    /// keep out of the compile path.
-    ///
-    /// A mapping with no `@subject` cannot reach here: the identity is required,
-    /// exactly one, and first (`crate::body::check_identity`). The fallback is a
-    /// constant IRI, which is a legal identity — a suggestion is worth nothing
-    /// if it cannot be pasted, and a missing right-hand side would emit
-    /// `@subject = ` and take the parser down with it.
-    fn subject_source_text(&self) -> String {
-        use fossil_syntax::SyntaxKind;
-
-        crate::body::mapping_cst_node(self.db, self.mapping)
-            .syntax()
-            .and_then(|node| {
-                node.children()
-                    .find(|c| c.kind() == SyntaxKind::MAPPING_BODY)?
-                    .children()
-                    .filter(|c| c.kind() == SyntaxKind::PROPERTY)
-                    .find(|p| {
-                        p.descendants_with_tokens()
-                            .filter_map(fossil_syntax::SyntaxElement::into_token)
-                            .any(|t| t.kind() == SyntaxKind::AT_ATTR && t.text() == "@subject")
-                    })?
-                    .children()
-                    .find(|c| c.kind() == SyntaxKind::EXPR)
-                    .map(|e| e.text().to_string().trim().to_string())
-            })
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| "\"https://example.org/item\"".to_string())
-    }
-
-    /// The LOCAL name of the type this mapping targets — `Person`, the word a
-    /// `type { Person } := …` binding introduced and the header repeats.
-    ///
-    /// Not the shape IRI: it is what a `@rename`'s first argument has to be, and
-    /// a suggestion that quoted the IRI there would not compile.
-    fn target_type_name(&self) -> SmolStr {
-        let db = self.db;
-        let file = self.mapping.file(db);
-        let Some(iri) = shape_iri_of(db, self.mapping) else {
-            return SmolStr::new_static("Type");
-        };
-        crate::def_map::def_map(db, file)
-            .types(db)
-            .iter()
-            .find(|t| t.shape_iri.as_deref() == Some(iri.as_str()))
-            .map_or_else(|| SmolStr::new_static("Type"), |t| t.name.clone())
-    }
 }
-
-/// The fully-resolved shape IRI a mapping targets, or `None` when its header
-/// did not lower.
-///
-/// A free function rather than a `Checker` method because `typecheck_mapping`
-/// needs it BEFORE the `Checker` exists — the rename table is an input to the
-/// short-name table, which is an input to the `Checker`.
-fn shape_iri_of<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Option<SmolStr> {
-    let file = mapping.file(db);
-    lower_to_hir(db, file)
-        .mappings(db)
-        .get(mapping.index(db))
-        .map(|m| m.shape_iri.clone())
-        .filter(|iri| !iri.is_empty())
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-#[path = "check_tests.rs"]
-mod tests;
