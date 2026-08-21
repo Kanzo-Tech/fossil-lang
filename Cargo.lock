@@ -2142,7 +2142,6 @@ name = "fossil-runtime"
 version = "0.1.0"
 dependencies = [
  "duckdb",
- "fossil-graph",
  "fossil-hir",
  "fossil-mem-probe",
  "fossil-resolver",
