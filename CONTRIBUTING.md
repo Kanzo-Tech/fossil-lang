@@ -28,15 +28,29 @@ brew install binaryen   # macOS — for wasm-opt size optimization
 ## Build & test commands
 
 ```bash
-cargo check --workspace                                      # native, all crates
-cargo test --workspace                                       # native tests
+cargo check --workspace --all-targets                        # native, all crates AND their tests
+cargo test --workspace --no-fail-fast                        # native tests
 cargo fmt --all -- --check                                   # format check
 cargo clippy --workspace --all-targets -- -D warnings        # lint check
+RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" \
+  cargo doc --workspace --no-deps                            # citations rustdoc can check
 cargo deny check                                             # advisories + licenses + bans
 cargo xtask wasm-check                                       # WASM gate (highest-leverage)
 ```
 
 CI runs all of these on every PR. See `.github/workflows/ci.yml`.
+
+**The two flags on the first two lines are load-bearing.** Without `--all-targets`,
+`check` does not compile `tests/`, and a signature change that breaks four test
+files reads as green — it did, on 2026-08-13. Without `--no-fail-fast`, `test`
+stops at the first failing suite and reports the tests it happened to reach as if
+they were the workspace. (CI omits `--no-fail-fast` deliberately: it wants the
+first failure fast. You want the whole picture.)
+
+Do not run the whole chain for every edit — it is six gates over a 1373-second CPU
+build. Run the narrowest thing that could catch what you just did: one crate, one
+test. If a build starts hurting, sweep first: `cargo sweep --time 1` reclaimed
+205 GiB here, and the full test suite went back to ~6 minutes.
 
 The WASM gate takes no crate list. `crates/xtask` derives it from the resolved
 dependency graph — the closure of the workspace's cdylib crates — and prints
@@ -46,9 +60,18 @@ apart; the comment at the top of `crates/xtask/src/main.rs` records that. Do not
 reintroduce a list, here or anywhere else.
 
 The gate needs a wasm-capable `clang` for `fossil-df-wasm`'s `zstd-sys` (Apple
-clang is not one; CI installs LLVM and sets `CC_wasm32_unknown_unknown`).
-Without it, check the rest of the closure directly:
-`cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
+clang is not one; CI installs LLVM and sets `CC_wasm32_unknown_unknown`). The
+failure without one is `unknown target triple 'wasm32-unknown-unknown'` from
+`cc-rs`. Homebrew LLVM is wasm-capable, and the full gate runs with it:
+
+```bash
+CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang \
+AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar \
+cargo xtask wasm-check
+```
+
+Without any LLVM at all, check the compiler closure directly — it is the smaller
+claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
 
 ## Development cycle
 

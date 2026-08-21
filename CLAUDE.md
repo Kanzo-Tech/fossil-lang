@@ -25,38 +25,20 @@ Keep it under 200 lines, rules-not-context.
 and the document is wrong and gets fixed — not annotated, not superseded by a record kept
 somewhere else.
 
-## Build & Test Commands
+## Checks
 
-```bash
-cargo check --workspace --all-targets                            # native, all crates AND their tests
-cargo test --workspace --no-fail-fast                            # native tests, every crate
-cargo fmt --all -- --check                                       # format check
-cargo clippy --workspace --all-targets -- -D warnings            # lint check
-RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" \
-  cargo doc --workspace --no-deps                                # citations rustdoc can check
-cargo deny check                                                 # advisories + licenses + bans
-cargo xtask wasm-check                                           # WASM gate; xtask derives the crate set
-```
+**CI runs them. Do not run the whole chain locally for every edit** — it is six gates over a
+1373-second CPU build, and running it after each comment change is how an afternoon
+disappears. Run the narrowest thing that could catch what you just did: one crate, one test.
 
-**Both flags on the first two lines are load-bearing.** Without `--all-targets`, `check` does
-not compile `tests/`, and a signature change that breaks four test files reads as green — it
-did, on 2026-08-13. Without `--no-fail-fast`, `test` stops at the first failing suite and
-reports the tests it happened to reach as if they were the workspace.
+The full chain and its flags are in `CONTRIBUTING.md`, and the two that are not obvious live
+there with their reasons: `--all-targets` (without it `check` skips `tests/`) and
+`--no-fail-fast` (without it `test` stops at the first failing suite and reports what it
+happened to reach as if it were the workspace).
 
-CI runs all of the above on every PR. Locally, the WASM gate is the highest-leverage
-check — run it before any commit that touches a compiler-core crate. It needs a
-wasm-capable `clang` for `fossil-df-wasm`'s `zstd-sys`; Apple clang is not one, and the
-failure is `unknown target triple 'wasm32-unknown-unknown'` from `cc-rs`. On this machine
-Homebrew LLVM is, and the full gate runs with it:
-
-```bash
-CC_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/clang \
-AR_wasm32_unknown_unknown=/opt/homebrew/opt/llvm/bin/llvm-ar \
-cargo xtask wasm-check
-```
-
-Without any LLVM at all, check the compiler closure directly — it is the smaller claim:
-`cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
+The WASM gate is the exception worth running by hand before a commit that touches a
+compiler-core crate, because it is the one CI failure that is expensive to discover late. It
+needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invocation.
 
 ## Hard Rules
 
