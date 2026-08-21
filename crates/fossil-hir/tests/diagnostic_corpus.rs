@@ -92,7 +92,6 @@ use fossil_graph_schema::{Occurs, Primitive, PropertyConstraint, Rejection, Shap
 use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
 use fossil_hir::shapes::ResolvedShape;
-use fossil_hir::ty::ShapeId;
 use fossil_hir::{render_split_suggestion, render_ty_kind, typecheck_mapping};
 use insta::assert_snapshot;
 
@@ -276,8 +275,7 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
     out.push('\n');
 
     // Resolved constraint table (the SC#2 backward-check input surface).
-    let resolved =
-        ResolvedShape::from_shape(&db, document, ShapeId::placeholder(0), rejections.to_vec());
+    let resolved = ResolvedShape::from_shape(&db, document, rejections.to_vec());
     if resolved.constraints.is_empty() {
         let _ = writeln!(
             out,

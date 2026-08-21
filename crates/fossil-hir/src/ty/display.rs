@@ -14,6 +14,7 @@
 //! verbatim in a surface diagnostic or hover.
 
 use crate::ty::TyKind;
+use fossil_graph_schema::local_name;
 
 /// Render a [`TyKind`] as a Fossil-style type string.
 ///
@@ -23,8 +24,17 @@ use crate::ty::TyKind;
 pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> String {
     match kind {
         TyKind::Primitive(p) => format!("{p:?}"),
-        TyKind::Iri => "Iri".to_string(),
-        TyKind::IriTemplate => "IriTemplate".to_string(),
+        // The shapes, not the word «Iri»: what a reader needs to know about a
+        // reference is what it reaches.
+        TyKind::Ref(shapes) if shapes.is_empty() => "Ref<?>".to_string(),
+        TyKind::Ref(shapes) => format!(
+            "Ref<{}>",
+            shapes
+                .iter()
+                .map(|s| local_name(s).to_string())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ),
         TyKind::Seq(inner) => format!("Seq<{}>", render_ty_kind(db, inner.kind(db))),
         TyKind::Record(_) => "Record { ... }".to_string(),
         TyKind::Error(_) => "Error".to_string(),

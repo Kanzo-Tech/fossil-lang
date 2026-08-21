@@ -268,8 +268,10 @@ pub enum ScalarTy {
     Date,
     /// `xsd:dateTime`.
     DateTime,
-    /// An IRI value.
-    Iri,
+    // An `Iri` variant stood here and no row in the catalogue used it — a
+    // signature can neither take nor return a reference, because a reference is
+    // to a SHAPE and the catalogue names no shapes. When one does, it will need
+    // to say WHICH, which is not a scalar tag.
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -285,7 +287,6 @@ impl ScalarTy {
             Self::Bool => TyKind::Primitive(Primitive::Bool),
             Self::Date => TyKind::Primitive(Primitive::Date),
             Self::DateTime => TyKind::Primitive(Primitive::DateTime),
-            Self::Iri => TyKind::Iri,
             Self::SeqString => {
                 let s = Ty::new(db, TyKind::Primitive(Primitive::String));
                 TyKind::Seq(s)

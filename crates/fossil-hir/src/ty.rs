@@ -55,13 +55,57 @@ pub enum TyKind<'db> {
     Seq(Ty<'db>),
     /// Tabular row type — interned separately for fast equality.
     Record(Record<'db>),
-    /// An IRI value (RDF resource).
-    Iri,
-    /// An IRI template — backtick string with `${...}` placeholders.
-    IriTemplate,
+    /// A reference to a node of one of the named shapes — `@shop:Person` in a
+    /// shape document, `Person(User.email)` in a program.
+    ///
+    /// **It was `Iri`, and being RDF vocabulary is what left it untyped.** An
+    /// IRI is an IRI, so every reference had one type and the check a graph
+    /// language exists to make did not happen: `shop.shex` declares
+    /// `shop:buyer @shop:Person`, a program wrote `buyer = Order(Purchase.id)`,
+    /// and the compiler said `ok — no errors`. Both producers held the answer
+    /// and dropped it — `expected_value_ty` knows the constraint's `targets`,
+    /// `synth_edge` knows the shape it is minting an identity for.
+    ///
+    /// That an identity is SPELLED as an IRI is the shape decoder's business
+    /// and the materialiser's. The core concept is the reference.
+    ///
+    /// A SET and not one name, because `targets` is a `Vec`: `@<A> OR @<B>`
+    /// (`ShEx`) and `sh:or` (SHACL) are legal and emit one edge type per
+    /// destination. Subtyping is set inclusion — a reference to `A` satisfies a
+    /// slot that accepts `A` or `B`, which is how a member type is assignable
+    /// to a union in `GraphQL` and how `sh:or` reads. Canonicalised by
+    /// [`Ty::reference`] so two spellings of one set intern to one `Ty`.
+    Ref(Vec<SmolStr>),
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
     /// promotion of a local taint-wrapper newtype).
     Error(ErrorGuaranteed),
+}
+
+impl<'db> Ty<'db> {
+    /// A reference to a node of any of `shapes`, canonicalised.
+    ///
+    /// Sorted and deduplicated so that `@<A> OR @<B>` and `@<B> OR @<A>` are one
+    /// interned `Ty` — the set is the type, and the order a document happened to
+    /// write it in is not part of it.
+    #[must_use]
+    pub fn reference(
+        db: &'db dyn salsa::Database,
+        shapes: impl IntoIterator<Item = SmolStr>,
+    ) -> Self {
+        let mut names: Vec<SmolStr> = shapes.into_iter().collect();
+        names.sort_unstable();
+        names.dedup();
+        Self::new(db, TyKind::Ref(names))
+    }
+
+    /// The shapes this type references, or `None` when it is not a reference.
+    #[must_use]
+    pub fn referenced_shapes(self, db: &'db dyn salsa::Database) -> Option<&'db [SmolStr]> {
+        match self.kind(db) {
+            TyKind::Ref(names) => Some(names),
+            _ => None,
+        }
+    }
 }
 
 /// One named field of a [`Record`].
@@ -89,21 +133,14 @@ pub struct Record<'db> {
 // A language with no `FunctionDecl` and no `LambdaExpr` cannot write a
 // function-typed VALUE down, so nothing downstream can need one.
 
-/// Shape identifier — newtype around a raw `u32`. Minted per-mapping by
-/// [`crate::shapes::resolve_target_shape`] from the mapping's index, since a
-/// mapping targets at most one shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub struct ShapeId(pub u32);
-
-impl ShapeId {
-    /// The per-mapping id, and the one tests construct directly. It is called
-    /// `placeholder` because it is not yet an interning of the shape's IRI —
-    /// two mappings targeting one shape have two ids.
-    #[must_use]
-    pub const fn placeholder(raw: u32) -> Self {
-        Self(raw)
-    }
-}
+// `ShapeId` stood here — a `u32` minted from a mapping's INDEX, so two mappings
+// targeting one shape had two ids, which its own docblock recorded as the thing
+// to fix. It is deleted rather than fixed: nothing read it. `TypeckOutput`
+// carried a `target_shape` field with no reader in the workspace, and
+// `BlamePos::ShapeProperty` carried it beside a `property` name into the one
+// arm that matches the variant with `{ .. }`.
+//
+// What identifies a shape is its IRI, and that is what `TyKind::Ref` carries.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -133,8 +170,7 @@ mod tests {
         let _: TyKind<'_> = TyKind::Seq(int_ty);
         let rec = Record::new(&db, vec![]);
         let _: TyKind<'_> = TyKind::Record(rec);
-        let _: TyKind<'_> = TyKind::Iri;
-        let _: TyKind<'_> = TyKind::IriTemplate;
+        let _: TyKind<'_> = TyKind::Ref(vec![SmolStr::new_static("https://example.org/Person")]);
         // Reference the helper so the dead-code lint doesn't flag it.
         let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
     }

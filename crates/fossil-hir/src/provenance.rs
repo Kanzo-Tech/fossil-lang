@@ -48,9 +48,6 @@ use crate::body::ExprId;
 use crate::def_map::{MappingLoc, def_map};
 use crate::ty::Ty;
 
-#[cfg(test)]
-use crate::ty::TyKind;
-
 /// Where a synthesised [`Ty`] came from. Carries a source [`Span`] (where the
 /// type was synthesised) + a categorical [`ProvenanceKind`] (semantic reason).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
@@ -215,15 +212,16 @@ Users : Person from User
     }
 
     /// Property 0 of `hello.fossil` is the `@subject = "…{…}…"` identity — an
-    /// interpolated-string RHS, where it was `iri = ` and a backtick template.
-    /// It synthesises `IriTemplate` with `Literal` provenance.
+    /// interpolated-string RHS. It synthesises a REFERENCE to the shape the
+    /// mapping targets, with `Literal` provenance: the expression is a literal
+    /// with holes, and what it is FOR is the expectation it is checked against.
     #[test]
-    fn expr_types_returns_iri_template_for_iri_property() {
+    fn expr_types_returns_a_reference_for_the_identity() {
         let (db, file) = db_with_text(HELLO);
         let m = mapping_at(&db, file, 0).expect("hello has one mapping");
         let entry =
             ty_origin(&db, m, ExprId(0)).expect("property 0 (the identity) must have an entry");
-        assert_eq!(entry.ty.kind(&db), &TyKind::IriTemplate);
+        assert_eq!(entry.ty, crate::ty::Ty::reference(&db, std::iter::empty()));
         assert_eq!(entry.provenance.kind, ProvenanceKind::Literal);
         assert_eq!(entry.expr_id, ExprId(0));
     }

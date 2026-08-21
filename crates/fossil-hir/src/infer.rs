@@ -823,11 +823,12 @@ fn pipe_error(
 /// copy of it.
 #[must_use]
 pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape) -> Ty<'db> {
-    let iri_ty = Ty::new(db, TyKind::Iri);
-    // Every pivoted RDF row carries its entity IRI in `subject`.
+    // Every pivoted RDF row carries its entity IRI in `subject`, and that IRI
+    // identifies a node of THIS shape — so the column is a reference to it,
+    // where it used to be the untyped `TyKind::Iri` every reference shared.
     let mut fields: Vec<RecordField<'db>> = vec![RecordField {
         name: SmolStr::new_static("subject"),
-        ty: iri_ty,
+        ty: Ty::reference(db, std::iter::once(SmolStr::from(shape.iri.as_str()))),
     }];
     for c in &shape.properties {
         let ty = if c.targets.is_empty() {
@@ -836,7 +837,7 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
                 TyKind::Primitive(c.datatype.unwrap_or(Primitive::String)),
             )
         } else {
-            iri_ty
+            Ty::reference(db, c.targets.iter().map(SmolStr::from))
         };
         fields.push(RecordField {
             name: SmolStr::from(local_name(&c.predicate)),
@@ -1140,15 +1141,23 @@ mod tests {
             got,
             vec![
                 // Every pivoted RDF row carries its entity IRI here, so
-                // `@subject = User.subject` types.
-                ("subject", &TyKind::Iri),
+                // `@subject = User.subject` types — and it identifies a node of
+                // THIS shape, which is what the type now says.
+                (
+                    "subject",
+                    &TyKind::Ref(vec![SmolStr::new_static("https://example.org/Beam")]),
+                ),
                 ("len", &TyKind::Primitive(Primitive::Integer)),
                 // The document narrowed nothing: the permissive column.
                 ("note", &TyKind::Primitive(Primitive::String)),
-                // An edge's source-side value is the referenced subject's IRI,
-                // and now says so — `expected_value_ty` demands `Iri` of the
-                // same predicate on the way out.
-                ("in", &TyKind::Iri),
+                // An edge's source-side value is the referenced subject, and it
+                // names WHICH shape — the same set `expected_value_ty` builds
+                // for the same predicate on the way out, so the two agree by
+                // construction rather than by both saying «an IRI».
+                (
+                    "in",
+                    &TyKind::Ref(vec![SmolStr::new_static("https://example.org/Storey")]),
+                ),
                 // The one row that differs from the ShEx-typed predecessor.
                 ("seeAlso", &TyKind::Primitive(Primitive::AnyUri)),
             ],

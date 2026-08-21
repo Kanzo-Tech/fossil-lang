@@ -112,4 +112,4 @@ pub use check::{
 pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;
-pub use ty::{Record, RecordField, ShapeId, Ty, TyKind};
+pub use ty::{Record, RecordField, Ty, TyKind};

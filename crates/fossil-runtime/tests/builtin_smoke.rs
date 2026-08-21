@@ -44,7 +44,7 @@ use fossil_hir::stdlib::{FunctionRegistry, LoweringKind, ScalarTy, render_templa
 /// is the only thing the catalogue promises about them.
 fn dummy(ty: ScalarTy) -> String {
     match ty {
-        ScalarTy::String | ScalarTy::Iri => "'abc'".to_string(),
+        ScalarTy::String => "'abc'".to_string(),
         ScalarTy::Integer => "2".to_string(),
         ScalarTy::Float => "1.5".to_string(),
         ScalarTy::Bool => "true".to_string(),

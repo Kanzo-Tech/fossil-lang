@@ -55,7 +55,7 @@ use crate::spans::{Spans, mapping_header_span, spans};
 use crate::ty::display::render_ty_kind;
 use fossil_graph_schema::{Primitive, Rejection};
 
-use crate::ty::{ShapeId, Ty, TyKind};
+use crate::ty::{Ty, TyKind};
 
 /// Which side of a two-span blame a position refers to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,8 +63,14 @@ pub enum BlamePos {
     /// Blame a body expression (resolved to a real span via [`Spans`]).
     Expr(ExprId),
     /// Blame a shape property constraint — there is no per-constraint span
-    /// source yet, so the emitter falls back to the mapping-header span.
-    ShapeProperty { shape: ShapeId, property: SmolStr },
+    /// source yet, so the emitter falls back to the source expression's span.
+    ///
+    /// It carried a `ShapeId` and the predicate's short name, and the one arm
+    /// that matches this variant reads neither (`{ .. }`). A payload with no
+    /// reader is a field that drifts, so it carries nothing until something
+    /// needs it — a per-constraint span source, most likely, which is what the
+    /// fallback above is waiting for.
+    ShapeProperty,
 }
 
 /// Per-mapping type-check output. The source of truth for per-expression types
@@ -73,7 +79,6 @@ pub enum BlamePos {
 pub struct TypeckOutput<'db> {
     pub expr_types: ExprTypes<'db>,
     pub source_row: Option<Ty<'db>>,
-    pub target_shape: Option<ShapeId>,
     /// The target shape's predicates by the short name a body writes —
     /// `("name", "http://xmlns.com/foaf/0.1/name")` — in declaration order.
     ///
@@ -125,7 +130,6 @@ pub fn typecheck_mapping<'db>(
             None
         }
     };
-    let target_shape_id = resolved_shape.as_ref().map(|r| r.shape_id);
 
     // The short-name table, and the collisions that make some names unwritable.
     // Built once per mapping: the body resolves every key against it, and a
@@ -152,7 +156,7 @@ pub fn typecheck_mapping<'db>(
         spans: spans_table,
         entries: Vec::new(),
         first_error: None,
-        iri_position: false,
+        expected_ref: None,
     };
 
     // Surface what the decoder rejected before checking the body — they are
@@ -171,15 +175,7 @@ pub fn typecheck_mapping<'db>(
     let first_error = cx.first_error;
     let expr_types = ExprTypes::new(db, cx.entries);
     first_error.map_or_else(
-        || {
-            Ok(TypeckOutput::new(
-                db,
-                expr_types,
-                source_row,
-                target_shape_id,
-                predicates,
-            ))
-        },
+        || Ok(TypeckOutput::new(db, expr_types, source_row, predicates)),
         Err,
     )
 }
@@ -378,7 +374,7 @@ pub struct Checker<'db> {
     /// is what makes this checker bidirectional in the position where it
     /// matters — «where it sits» is a question the expected type answers, not
     /// just the key.
-    pub(crate) iri_position: bool,
+    pub(crate) expected_ref: Option<Vec<SmolStr>>,
 }
 
 impl<'db> Checker<'db> {
@@ -399,6 +395,12 @@ impl<'db> Checker<'db> {
     /// «no span»: see [`mapping_header_span`].
     fn header_span(&self) -> Span {
         mapping_header_span(self.db, self.mapping)
+    }
+
+    /// The IRI of the shape this mapping targets — what `@subject` mints a
+    /// reference to.
+    fn mapping_shape_iri(&self) -> Option<SmolStr> {
+        shape_iri_of(self.db, self.mapping)
     }
 
     const fn record_error(&mut self, eg: ErrorGuaranteed) {
@@ -460,7 +462,7 @@ pub fn compatible<'db>(
         BlamePos::Expr(eid) => cx.span_of(*eid),
         // No per-constraint span source yet — fall back to the
         // source expression's span (the mapping-relative location of the RHS).
-        BlamePos::ShapeProperty { .. } => source_span,
+        BlamePos::ShapeProperty => source_span,
     };
 
     let actual_display = render_ty_kind(db, actual.kind(db));
@@ -498,7 +500,11 @@ pub fn compatible<'db>(
 /// Recursive subtyping — four rules: S-Refl, S-IntFlt, S-TmplIri, S-SeqCov,
 /// plus an error-taint escape so one mismatch does not cascade.
 /// Direct enum dispatch — NO `Box<dyn>`, NO trait objects.
-fn subtypes<'db>(db: &'db dyn fossil_base::Db, actual: Ty<'db>, expected: Ty<'db>) -> bool {
+pub(crate) fn subtypes<'db>(
+    db: &'db dyn fossil_base::Db,
+    actual: Ty<'db>,
+    expected: Ty<'db>,
+) -> bool {
     // S-Refl: every type subtypes itself (pointer equality after interning).
     if actual == expected {
         return true;
@@ -517,14 +523,15 @@ fn subtypes<'db>(db: &'db dyn fossil_base::Db, actual: Ty<'db>, expected: Ty<'db
     match (actual.kind(db), expected.kind(db)) {
         // S-IntFlt: Integer <: Float.
         (TyKind::Primitive(Primitive::Integer), TyKind::Primitive(Primitive::Float)) => true,
-        // S-TmplIri: IriTemplate <: Iri. An IRI template is an IRI with holes
-        // in it, and the holes are filled per row before anything sees the
-        // value — which is precisely what the identity slot does with one, and
-        // `TyKind::IriTemplate` exists for no other reason. Without this rule
-        // the type is a dead end: nothing consumes an `IriTemplate`, so the
-        // only expression the language has for building an IRI per row could
-        // satisfy no constraint that wants an IRI.
-        (TyKind::IriTemplate, TyKind::Iri) => true,
+        // S-RefSub: a reference to a narrower SET of shapes satisfies a slot
+        // that accepts a wider one. `@<A>` where the shape declares
+        // `@<A> OR @<B>` — a member type is assignable to the union, as in
+        // `GraphQL`, and `sh:or` reads the same way.
+        //
+        // It replaces S-TmplIri, whose whole content was undoing the
+        // distinction between `IriTemplate` and `Iri` — a rule that existed
+        // because the type did.
+        (TyKind::Ref(a), TyKind::Ref(e)) => a.iter().all(|s| e.contains(s)),
         // S-SeqCov: Seq<τ> <: Seq<τ'> when τ <: τ'.
         (TyKind::Seq(a_inner), TyKind::Seq(e_inner)) => subtypes(db, *a_inner, *e_inner),
         _ => false,
@@ -584,12 +591,16 @@ impl<'db> Checker<'db> {
                         self.synth_ty(expr_id, e);
                     }
                 }
-                let kind = if self.iri_position {
-                    TyKind::IriTemplate
-                } else {
-                    TyKind::Primitive(Primitive::String)
-                };
-                (Ty::new(db, kind), ProvenanceKind::Literal)
+                // An interpolation is a string unless something is expecting a
+                // reference, in which case it IS that reference: the holes are
+                // filled per row and the result is the identity of a node. That
+                // is bidirectional checking doing what a `TyKind::IriTemplate`
+                // and a subtyping rule were standing in for.
+                let ty = self.expected_ref.clone().map_or_else(
+                    || Ty::new(db, TyKind::Primitive(Primitive::String)),
+                    |shapes| Ty::reference(db, shapes),
+                );
+                (ty, ProvenanceKind::Literal)
             }
             // T-Column: the qualified spelling. Same resolution as T-Field,
             // plus the check the anonymous form could never make — that the
@@ -767,13 +778,7 @@ impl<'db> Checker<'db> {
                     // predicate the document declined to narrow demanded the
                     // narrowest type in the lattice and rejected every string
                     // in the corpus.
-                    Some((
-                        constraint.value_ty,
-                        BlamePos::ShapeProperty {
-                            shape: shape.shape_id,
-                            property: pred.clone(),
-                        },
-                    ))
+                    Some((constraint.value_ty, BlamePos::ShapeProperty))
                 })
             }
             PropertyKey::Name(_) => None,
@@ -782,12 +787,27 @@ impl<'db> Checker<'db> {
         // Always synth the RHS so its type is recorded in `entries` (provenance
         // / hover consume this even when there is no backward constraint).
         let db = self.db;
-        let expects_iri = expectation
-            .as_ref()
-            .is_some_and(|(ty, _)| ty.is_some_and(|t| matches!(t.kind(db), TyKind::Iri)));
-        self.iri_position = matches!(prop.key, PropertyKey::Subject) || expects_iri;
+        // `@subject` mints the identity of the node THIS mapping produces, so
+        // what it is expected to be is a reference to this mapping's own shape.
+        // Everywhere else the expectation comes off the resolved predicate.
+        self.expected_ref = if matches!(prop.key, PropertyKey::Subject) {
+            // An identity is ALWAYS a reference — to the shape this mapping
+            // targets, or, when the program named a document that bound
+            // nothing, to the empty set. That is the same answer `synth_edge`
+            // gives an unresolvable target: something already said why, and a
+            // reference to no shape satisfies every slot rather than blaming
+            // the identity a second time.
+            Some(self.mapping_shape_iri().into_iter().collect())
+        } else {
+            expectation.as_ref().and_then(|(ty, _)| {
+                ty.and_then(|t| match t.kind(db) {
+                    TyKind::Ref(names) => Some(names.clone()),
+                    _ => None,
+                })
+            })
+        };
         let actual = self.synth(expr_id, &prop.value);
-        self.iri_position = false;
+        self.expected_ref = None;
 
         if let (Some(actual), Some((expected, dest))) = (actual, expectation) {
             // `constraint.occurs` is deliberately NOT read here. The count a
@@ -1035,7 +1055,20 @@ impl<'db> Checker<'db> {
     ///    they are constructing.
     fn synth_edge(&mut self, expr_id: ExprId, target: &SmolStr, args: &[HirExpr]) -> Ty<'db> {
         let db = self.db;
-        let iri_ty = Ty::new(db, TyKind::Iri);
+        // The type of an edge is the SHAPE it reaches, not «an IRI». It was
+        // `TyKind::Iri` with `shape_iri` sitting resolved two statements below,
+        // and that is why `buyer = Order(…)` against `shop:buyer @shop:Person`
+        // compiled clean.
+        //
+        // The fallbacks below are the paths where the target resolved to
+        // nothing, and each has already emitted its own diagnostic. The EMPTY
+        // set is deliberate and it is not «no shapes»: `all()` over nothing is
+        // vacuously true, so a reference to no shape satisfies every slot, and
+        // the property is not blamed a second time for a target the author was
+        // already told about. It is the role `TyKind::Error` plays for the rest
+        // of the checker, minus the taint — an unresolvable target is the
+        // program's mistake and it has been reported.
+        let unresolved = || Ty::reference(db, std::iter::empty());
         // The arguments are ordinary expressions in THIS mapping's scope and are
         // typed as such — that is the whole content of «the argument is the
         // hole's finished value». They share the call's `expr_id` for the same
@@ -1057,7 +1090,7 @@ impl<'db> Checker<'db> {
                 ),
             );
             self.record_error(eg);
-            return iri_ty;
+            return unresolved();
         };
 
         // Read lazily, and that is load-bearing: `subject_templates` is
@@ -1077,7 +1110,7 @@ impl<'db> Checker<'db> {
                 ),
             );
             self.record_error(eg);
-            return iri_ty;
+            return unresolved();
         };
 
         let arity = template.arity();
@@ -1095,7 +1128,7 @@ impl<'db> Checker<'db> {
             );
             self.record_error(eg);
         }
-        iri_ty
+        Ty::reference(db, std::iter::once(SmolStr::from(shape_iri.as_str())))
     }
 
     /// T-App: type a `clean.slug(.name)` against the stdlib catalog.

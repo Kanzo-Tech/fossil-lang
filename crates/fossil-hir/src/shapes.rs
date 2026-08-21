@@ -83,7 +83,7 @@ use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, R
 use smol_str::SmolStr;
 
 use crate::def_map::MappingLoc;
-use crate::ty::{ShapeId, Ty, TyKind};
+use crate::ty::{Ty, TyKind};
 
 /// One predicate constraint converted from a format-neutral
 /// [`PropertyConstraint`] into Fossil type space.
@@ -107,8 +107,6 @@ pub struct ShapeConstraint<'db> {
 /// A mapping's resolved target shape — Phase-3-internal.
 #[derive(Debug, Clone)]
 pub struct ResolvedShape<'db> {
-    /// Interned shape id (a stable handle for `TyKind::Shape`).
-    pub shape_id: ShapeId,
     /// Per-predicate constraint table.
     pub constraints: Vec<ShapeConstraint<'db>>,
     /// What the decoder could not lower, filtered to this shape;
@@ -120,14 +118,13 @@ pub struct ResolvedShape<'db> {
 impl<'db> ResolvedShape<'db> {
     /// Build a [`ResolvedShape`] from a decoded [`Shape`].
     ///
-    /// Plain-Rust helper. `shape_id` is supplied by the caller (a stable id is
-    /// minted per-mapping, from the mapping index, since each mapping targets
-    /// at most one shape).
+    /// Plain-Rust helper. What identifies the shape is its IRI, and the checker
+    /// reads that off the mapping; this table is the CONSTRAINTS, which is what
+    /// it reads a resolved shape for.
     #[must_use]
     pub fn from_shape(
         db: &'db dyn fossil_base::Db,
         shape: &Shape,
-        shape_id: ShapeId,
         rejections: Vec<Rejection>,
     ) -> Self {
         let constraints = shape
@@ -140,7 +137,6 @@ impl<'db> ResolvedShape<'db> {
             })
             .collect();
         Self {
-            shape_id,
             constraints,
             rejections,
         }
@@ -247,7 +243,10 @@ fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) 
     if c.targets.is_empty() {
         None
     } else {
-        Some(Ty::new(db, TyKind::Iri))
+        // The constraint's destinations ARE the type. This used to answer
+        // `TyKind::Iri` — «some IRI» — which made every reference in the
+        // language one type, so an edge to the wrong shape type-checked.
+        Some(Ty::reference(db, c.targets.iter().map(SmolStr::from)))
     }
 }
 
@@ -568,12 +567,7 @@ pub fn resolve_target_shape<'db>(
         .cloned()
         .collect();
 
-    // A stable per-mapping shape id, minted from the mapping index — each
-    // mapping targets at most one shape.
-    let shape_id = ShapeId::placeholder(u32::try_from(mapping.index(db)).unwrap_or(u32::MAX));
-    Ok(Some(ResolvedShape::from_shape(
-        db, shape, shape_id, rejections,
-    )))
+    Ok(Some(ResolvedShape::from_shape(db, shape, rejections)))
 }
 
 /// `true` iff a rejection belongs to the shape identified by `shape_iri`.
@@ -649,9 +643,14 @@ mod tests {
         let edge =
             expected_value_ty(&db, &prop(None, &["https://example.org/City"])).expect("an edge");
         assert_eq!(
-            edge.kind(&db),
-            &TyKind::Iri,
-            "an edge's value is the referenced subject's IRI"
+            edge,
+            Ty::reference(
+                &db,
+                std::iter::once(SmolStr::new_static("https://example.org/City"))
+            ),
+            "an edge's value is a reference to the shape the constraint names, \
+             and naming it is the whole point: `@<City>` and `@<Person>` were \
+             one type while this said `Iri`"
         );
     }
 

@@ -373,11 +373,14 @@ User : Person from users
         (db, file)
     }
 
-    /// Hover on the iri template property line (line 3) returns Markdown
-    /// containing `IriTemplate` (the rendered ty kind) AND `Literal` (the
-    /// provenance kind).
+    /// Hover on the identity line (line 3) returns Markdown naming the type —
+    /// a REFERENCE — and the `Literal` provenance.
+    ///
+    /// It read `IriTemplate`, and that type is gone: an identity is a reference
+    /// to the shape the mapping produces. This fixture registers no document,
+    /// so the shape resolves to nothing and the rendering is `Ref<?>`.
     #[test]
-    fn hover_on_iri_template_returns_iri_template_markdown() {
+    fn hover_on_the_identity_names_a_reference() {
         let (db, file) = db_with_text(HELLO);
         // Lines in HELLO are 0-indexed:
         //   0: type { Person } := io.shex(...)
@@ -389,8 +392,8 @@ User : Person from users
         // inside the property.
         let info = hover(&db, file, 3, 20).expect("hover at (3, 20) must return Some");
         assert!(
-            info.markdown.contains("IriTemplate"),
-            "expected hover markdown to mention IriTemplate, got {:?}",
+            info.markdown.contains("Ref<"),
+            "expected hover markdown to name a reference, got {:?}",
             info.markdown,
         );
         assert!(
@@ -584,8 +587,9 @@ User : Person from users
             TyKind::Primitive(Primitive::String),
             TyKind::Seq(int_ty),
             TyKind::Record(rec),
-            TyKind::Iri,
-            TyKind::IriTemplate,
+            TyKind::Ref(vec![smol_str::SmolStr::new_static(
+                "https://example.org/Person",
+            )]),
         ];
         // Every variant a caller can construct. There is no count to quote and
         // there used to be («10 surface-constructible + Error = 11»): three of

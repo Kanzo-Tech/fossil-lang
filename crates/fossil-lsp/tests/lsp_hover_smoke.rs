@@ -6,7 +6,7 @@
 //! template) → `shutdown` → `exit`. Asserts:
 //!
 //! 1. The hover response is a JSON-RPC Response (matched on `id`).
-//! 2. `result.contents.value` contains the rendered ty (`"IriTemplate"`).
+//! 2. `result.contents.value` contains the rendered ty (a `Ref<…>`).
 //! 3. `result.contents.value` contains the fenced fossil code block
 //!    opener (```` ```fossil ````).
 //! 4. `result.contents.kind` is `"markdown"`.
@@ -104,7 +104,8 @@ fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
 ///   4:     name = Users.name
 ///
 /// The hover request targets line 3, character 10 — inside the identity
-/// property, whose interpolated string synthesises `IriTemplate`.
+/// property, whose interpolated string synthesises a REFERENCE to the shape the
+/// mapping targets — `Ref<?>` here, since the fixture registers no document.
 const FOSSIL_SRC: &str = "\
 type { Person } := io.shex(\"hover.shex\")
 Users := io.csv(\"x.csv\")
@@ -135,7 +136,7 @@ fn write_program() -> String {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
+fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
     let bin = fossil_lsp_binary();
     let uri = write_program();
 
@@ -285,8 +286,8 @@ fn lsp_hover_on_iri_template_returns_markdown_with_iri_template_label() {
         .and_then(serde_json::Value::as_str)
         .expect("hover contents missing value");
     assert!(
-        value.contains("IriTemplate"),
-        "expected hover markdown to contain 'IriTemplate' (the rendered Ty); got {value:?}",
+        value.contains("Ref<"),
+        "expected hover markdown to name a reference (the rendered Ty); got {value:?}",
     );
     assert!(
         value.contains("```fossil"),

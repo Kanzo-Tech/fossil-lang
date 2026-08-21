@@ -12,7 +12,7 @@ use crate::def_map::{MappingLoc, def_map};
 use crate::lower::{HirExpr, HirProperty, PropertyKey};
 use crate::provenance::{expr_types, ty_origin};
 use crate::shapes::ResolvedShape;
-use crate::ty::{ShapeId, TyKind};
+use crate::ty::{Ty, TyKind};
 use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::{Occurs, Primitive};
@@ -118,7 +118,7 @@ fn build_checker<'db>(
         spans: spans(db, mapping),
         entries: Vec::new(),
         first_error: None,
-        iri_position: false,
+        expected_ref: None,
     }
 }
 
@@ -143,14 +143,18 @@ fn about_the_body(diags: &[&Diagnostic]) -> Vec<String> {
 
 #[test]
 fn literal_subset_regression() {
-    // Property 0 of hello is `@subject = "…{…}…"` → IriTemplate, where it was
-    // `iri = ` and a backtick template. typecheck_mapping records it;
-    // expr_types projects it (same as Phase 2's
-    // expr_types_returns_iri_template_for_iri_property).
+    // Property 0 of hello is `@subject = "…{…}…"`. It used to synthesise
+    // `IriTemplate` — «a string with holes» — and what it means is the identity
+    // of the node this mapping produces, so it is a REFERENCE to the shape the
+    // mapping targets. The interpolation is unchanged; the type says what it
+    // is for.
     let (db, file) = db_with(HELLO);
     let m = first_mapping(&db, file);
-    let entry = ty_origin(&db, m, ExprId(0)).expect("property 0 (iri template) must have a type");
-    assert_eq!(entry.ty.kind(&db), &TyKind::IriTemplate);
+    let entry = ty_origin(&db, m, ExprId(0)).expect("property 0 (the identity) must have a type");
+    // `personas.shex` is not registered in this fixture, so `Person` binds
+    // nothing — and an identity whose shape did not resolve is a reference to
+    // the empty set, the same answer an edge to an unresolvable target gets.
+    assert_eq!(entry.ty, Ty::reference(&db, std::iter::empty()));
 }
 
 #[test]
@@ -446,7 +450,6 @@ Contact : Person from users
             m,
             Some(row_record(db, &[("name", Primitive::String)])),
             Some(ResolvedShape {
-                shape_id: ShapeId::placeholder(0),
                 constraints: vec![crate::shapes::ShapeConstraint {
                     predicate: smol_str::SmolStr::from("https://example.org/name"),
                     value_ty: None,
@@ -583,7 +586,6 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
     fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
         let m = *def_map(db, file).mappings(db).first()?;
         let shape = ResolvedShape {
-            shape_id: ShapeId::placeholder(0),
             constraints: Vec::new(),
             rejections: vec![disjunction_rejection()],
         };
@@ -1014,4 +1016,110 @@ User : Person from users
         ["full_name"],
         "the writer must emit the column under the name the body wrote"
     );
+}
+
+// ── The reference type ─────────────────────────────────────────────────────
+
+/// Two shapes and an edge between them, so the checker has something to be
+/// wrong about.
+///
+/// `Order` declares `buyer @Person`, and both shapes mint an identity, which is
+/// what an edge needs: a target whose `@subject` says how many holes to fill.
+const TWO_SHAPES: &str = "\
+shape https://example.org/Person
+prop https://example.org/email string 1 1
+shape https://example.org/Order
+prop https://example.org/total float 1 1
+prop https://example.org/buyer @https://example.org/Person 1 1
+";
+
+fn two_shape_program(edge_rhs: &str) -> String {
+    format!(
+        "type {{ Person, Order }} := io.shex(\"two.shex\")\n\
+         U := io.csv(\"u.csv\")\n\
+         P : Person from U\n    \
+         @subject = \"https://example.org/p/{{U.email}}\"\n    \
+         email    = U.email\n\
+         O : Order from U\n    \
+         @subject = \"https://example.org/o/{{U.email}}\"\n    \
+         total    = 1.5\n    \
+         buyer    = {edge_rhs}\n"
+    )
+}
+
+/// Every diagnostic the CHECKER raises, over every mapping.
+///
+/// Gathered from `typecheck_mapping` and not from `lower_to_hir`: a Salsa
+/// accumulator collects what a query and its dependencies pushed, and the
+/// lowering does not depend on the checker. Reading the lowering's accumulator
+/// for a type error yields an empty list, which reads exactly like «it
+/// type-checked».
+fn diagnostics_of(src: &str) -> Vec<String> {
+    use fossil_base::test_support::db_with_document;
+    let (db, file) = db_with_document(src, "two.shex", TWO_SHAPES);
+    def_map(&db, file)
+        .mappings(&db)
+        .clone()
+        .into_iter()
+        .flat_map(|m| {
+            typecheck_mapping::accumulated::<Diagnostic>(&db, m)
+                .into_iter()
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The check the language exists to make, and it did not happen.
+///
+/// `ex:buyer @ex:Person` says where the edge lands. While a reference was
+/// `TyKind::Iri` every reference had ONE type, so `buyer = Order(…)` — an edge
+/// to the wrong shape — type-checked clean, measured against
+/// `apps/docs/programs/shop` on 2026-08-21.
+///
+/// Both halves are asserted, because a rule that refuses everything would pass
+/// the first: the right edge is accepted and the wrong one is refused, naming
+/// both shapes.
+#[test]
+fn an_edge_is_typed_by_the_shape_it_reaches() {
+    let right = diagnostics_of(&two_shape_program("Person(U.email)"));
+    assert!(
+        right.is_empty(),
+        "the edge the shape declares must type: {right:#?}"
+    );
+
+    let wrong = diagnostics_of(&two_shape_program("Order(U.email)"));
+    assert!(
+        wrong
+            .iter()
+            .any(|m| m.contains("Person") && m.contains("Order")),
+        "an edge to the wrong shape must be refused, naming both: {wrong:#?}"
+    );
+}
+
+/// A reference is a set, because `@<A> OR @<B>` is legal, and the subtyping is
+/// set inclusion: a member type satisfies the union, as in `GraphQL`.
+///
+/// Asserted on the types directly. The surface has no spelling for a
+/// disjunction-valued predicate that a program can write today — the decoder
+/// rejects `OR` bodies — so a program-level version of this test would be
+/// asserting on the rejection instead of on the rule.
+#[test]
+fn a_reference_to_one_shape_satisfies_a_slot_that_accepts_two() {
+    use crate::ty::Ty;
+    let (db, _) = db_with("");
+    let a = SmolStr::new_static("https://example.org/A");
+    let b = SmolStr::new_static("https://example.org/B");
+
+    let one = Ty::reference(&db, [a.clone()]);
+    let two = Ty::reference(&db, [a.clone(), b.clone()]);
+    let other = Ty::reference(&db, [b.clone()]);
+
+    assert!(crate::check::subtypes(&db, one, two), "A <: A|B");
+    assert!(crate::check::subtypes(&db, other, two), "B <: A|B");
+    assert!(!crate::check::subtypes(&db, two, one), "A|B is not <: A");
+    assert!(!crate::check::subtypes(&db, one, other), "A is not <: B");
+
+    // The set is the type: the order a document wrote it in is not part of it.
+    assert_eq!(two, Ty::reference(&db, [b, a]), "canonicalised");
 }

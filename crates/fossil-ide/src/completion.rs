@@ -278,7 +278,6 @@ fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
         S::Bool => "Bool",
         S::Date => "Date",
         S::DateTime => "DateTime",
-        S::Iri => "Iri",
         S::SeqString => "Seq<String>",
     }
     .to_string()
