@@ -1922,6 +1922,7 @@ dependencies = [
  "oxrdf",
  "oxttl",
  "parquet",
+ "serde_json",
  "serde_yaml_ng",
  "slug",
  "smol_str",
