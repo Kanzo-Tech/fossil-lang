@@ -210,20 +210,38 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
 
     let (db, file) = db_with(HELLO);
     let _ = shim(&db, file);
-    let diags = about_the_body(&shim::accumulated::<Diagnostic>(&db, file));
+    let raised = shim::accumulated::<Diagnostic>(&db, file);
+    let blame: Vec<&&Diagnostic> = raised
+        .iter()
+        .filter(|d| !d.message.contains("is declared and bound nothing"))
+        .collect();
     assert_eq!(
-        diags.len(),
+        blame.len(),
         1,
-        "exactly one field-not-found diagnostic, got {diags:?}"
+        "exactly one field-not-found diagnostic, got {blame:#?}"
     );
-    let msg = &diags[0];
-    assert!(
-        msg.contains("unknown column `naem`"),
-        "diagnostic must name the unknown column, got {msg:?}"
+    let d = blame[0];
+    // The relation is named even though the SPELLING did not name it: `naem` is
+    // a bare reference resolved against the flat row, and `refuse_column` reads
+    // the relation the rows came from. One sentence for both spellings — the
+    // qualified path said `unknown column `x` on `Y`` and this one said
+    // `unknown column `x``, which is two statements of one fact.
+    assert_eq!(
+        d.message, "`naem` is not a field of `users`",
+        "the refusal names the column and the relation"
+    );
+    // The repair is a FIELD. It used to be a clause of the message, and the two
+    // readers that wanted it (`fossil-cli`, the conformance harness) each
+    // searched the message text for `did you mean` to get it back out.
+    assert_eq!(
+        d.help.as_deref(),
+        Some("did you mean `name`?"),
+        "the near miss is the `help:`, not part of the sentence"
     );
     assert!(
-        msg.contains("did you mean `name`"),
-        "diagnostic must suggest `name`, got {msg:?}"
+        !d.message.contains("did you mean"),
+        "and it is not in both places: {:?}",
+        d.message
     );
 }
 

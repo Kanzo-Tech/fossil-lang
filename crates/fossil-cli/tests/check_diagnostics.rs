@@ -105,8 +105,13 @@ fn check_broken_field_renders_span_and_help_and_exits_nonzero() {
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
     // 2. The render must visibly show a span label + the did-you-mean help.
+    //    The did-you-mean is `Diagnostic::help` now, not a clause of the
+    //    headline — so this is the assertion that proves `to_check_error`'s
+    //    first `or_else` fires. It used to be satisfied by
+    //    `extract_did_you_mean` pulling the clause back out of the message,
+    //    which is why it could not tell the two apart.
     assert!(
-        stderr.contains("unknown column `naem`"),
+        stderr.contains("`naem` is not a field of"),
         "diagnostic headline missing; got:\n{stderr}"
     );
     assert!(

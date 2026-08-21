@@ -44,7 +44,7 @@ use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use crate::body::{ExprId, body};
-use crate::def_map::MappingLoc;
+use crate::def_map::{MappingLoc, def_map};
 use crate::didyoumean::did_you_mean;
 use crate::display::{op_text, un_op_text};
 use crate::infer::resolve_source_scope;
@@ -1305,15 +1305,69 @@ impl<'db> Expr<'db> {
             return Some(field.ty);
         }
 
-        // Miss → did-you-mean over the declared columns.
+        // Miss → did-you-mean over the declared columns. The relation is named
+        // even though the spelling did not: `name` resolved against the flat
+        // row, and the flat row came from somewhere.
         let candidates: Vec<&str> = rec.fields(db).iter().map(|f| f.name.as_str()).collect();
-        let suggestion = did_you_mean(name, candidates.iter().copied());
-        let msg = suggestion.map_or_else(
-            || format!("unknown column `{name}`"),
-            |s| format!("unknown column `{name}` — did you mean `{s}`?"),
-        );
-        let eg = self.error_at(expr_id, msg);
+        let relation = self.relation.clone();
+        let eg = self.refuse_column(expr_id, &relation, name, &candidates);
         Some(Ty::new(db, TyKind::Error(eg)))
+    }
+
+    /// «`nmae` is not a field of `User`», with the fields it DOES have in a
+    /// label at the binding that answers for them, and the near miss as `help:`.
+    ///
+    /// One emitter for the bare spelling and the qualified one. They had a
+    /// sentence each — `unknown column `x`` and `unknown column `x` on `Y`` —
+    /// which is two statements of one fact, and the qualified one was about to
+    /// grow a label the other did not have.
+    ///
+    /// # The repair is a field, not a clause
+    ///
+    /// It used to be appended to the message (`— did you mean `name`?`) and
+    /// then pulled back OUT of it by a `find("did you mean")` over the message
+    /// text: `fossil-cli`'s `extract_did_you_mean` and this crate's conformance
+    /// harness each did their own. Both still run, and neither has anything to
+    /// find now, because [`fossil_base::Diagnostic::help`] carries it.
+    ///
+    /// **What is still not carried is `did_you_mean`**, the structured
+    /// `(wrong_span, replacement)` pair `fossil_ide::code_action` builds its
+    /// quick-fix from. Nothing in the workspace populates it — the only callers
+    /// of `with_did_you_mean` are tests — so the editor's did-you-mean action
+    /// cannot fire on a real diagnostic. It needs the span of `nmae` ALONE, and
+    /// [`crate::spans`] records one span per property; see the note there.
+    fn refuse_column(
+        &mut self,
+        expr_id: ExprId,
+        binding: &str,
+        column: &str,
+        candidates: &[&str],
+    ) -> ErrorGuaranteed {
+        let db = self.db;
+        let span = self.span_of(expr_id);
+        let frame = self.frame();
+        let mut d = Diagnostic::new(
+            Severity::Error,
+            format!("`{column}` is not a field of `{binding}`"),
+            span,
+        )
+        .with_label(span, "here", frame);
+        // The binding that introduced the row is where the list of fields is
+        // answerable, and it is usually not the line being blamed — `from
+        // Adults` puts `User` in scope through a pipeline written elsewhere.
+        // Its span is FILE-absolute while this diagnostic is mapping-relative,
+        // which is the case `SpanLabel`'s own frame exists for.
+        if let Some(at) = def_map(db, self.file).lookup_source_span(db, binding) {
+            d = d.with_label(
+                at,
+                format!("`{binding}` has the fields {}", candidates.join(", ")),
+                SpanFrame::FileAbsolute,
+            );
+        }
+        if let Some(s) = did_you_mean(column, candidates.iter().copied()) {
+            d = d.with_help(format!("did you mean `{s}`?"));
+        }
+        self.raise(d)
     }
 
     /// Resolve `Contact.email` against the ROW `Contact` contributes, and never
@@ -1351,12 +1405,7 @@ impl<'db> Expr<'db> {
         // it would suggest a column of the other side of a join, which is a
         // suggestion that does not compile.
         let candidates: Vec<&str> = rec.fields(db).iter().map(|f| f.name.as_str()).collect();
-        let suggestion = did_you_mean(column, candidates.iter().copied());
-        let msg = suggestion.map_or_else(
-            || format!("unknown column `{column}` on `{binding}`"),
-            |s| format!("unknown column `{column}` on `{binding}` — did you mean `{s}`?"),
-        );
-        let eg = self.error_at(expr_id, msg);
+        let eg = self.refuse_column(expr_id, binding, column, &candidates);
         Some(Ty::new(db, TyKind::Error(eg)))
     }
 

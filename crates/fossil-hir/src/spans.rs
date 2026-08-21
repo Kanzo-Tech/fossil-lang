@@ -42,8 +42,25 @@
 //! `ExprId(i)` is the i'th LOWERED property's RHS expression — the index into
 //! `crate::body::HirBody::properties`, and nothing else. It is not the position
 //! among the CST's `PROPERTY` children, and this module used to assume it was.
-//! Subexpression-level arena allocation (for nested function calls, ternaries,
-//! etc.) lands when the Pratt-lowered expression tree extends `HirExpr`.
+//!
+//! # Subexpression spans, and the two readers already waiting for them
+//!
+//! This paragraph used to say they land «when the Pratt-lowered expression tree
+//! extends `HirExpr`». That condition is met — `HirExpr` carries `Call`,
+//! `Ternary`, `BinOp` and `Interpolation` with sub-expressions in them — and
+//! the table did not follow, so the finest span the compiler can point at is
+//! still a whole right-hand side. Two things want one:
+//!
+//! - **The caret on a typo.** `name = User.nmae` underlines `User.nmae`, and
+//!   `apps/docs/programs/errors/unknown-field/expected/diagnostic.txt` — the
+//!   hand-written target — underlines `nmae`. That is the last difference
+//!   between the two; the message and both labels agree already.
+//! - **`fossil_ide::code_action`'s did-you-mean quick-fix**, which builds a
+//!   `WorkspaceEdit` from `Diagnostic::did_you_mean`'s `(wrong_span,
+//!   replacement)`. Nothing populates that field: every caller of
+//!   `with_did_you_mean` in the workspace is a test, because `wrong_span` is
+//!   the span of `nmae` alone and there is none. The action cannot fire on a
+//!   real diagnostic, and it compiles and passes its own tests.
 //!
 //! # Offset semantics: mapping-relative
 //!

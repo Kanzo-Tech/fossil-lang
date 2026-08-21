@@ -5,7 +5,14 @@ expression: normalised
 Error:   × type-checking failed: 1 error(s)
 
 Error: 
-  × unknown column `naem` on `users` — did you mean `name`?
+  × `naem` is not a field of `users`
+   ╭─[<FIXTURE>/mapping.fossil:2:1]
+ 1 │ type { Person } := io.shex("person.shex")
+ 2 │ users := io.csv("users.csv")
+   · ──────────────┬─────────────
+   ·               ╰── `users` has the fields id, name, age
+ 3 │ 
+   ╰────
    ╭─[<FIXTURE>/mapping.fossil:6:12]
  5 │     @subject = "https://example.org/u/{users.id}"
  6 │     name = users.naem

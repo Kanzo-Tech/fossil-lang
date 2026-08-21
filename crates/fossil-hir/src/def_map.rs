@@ -39,7 +39,7 @@
 //! `HashMap` at the call site (or use the [`DefMap::lookup_source`] helper
 //! added below).
 
-use fossil_base::SourceFile;
+use fossil_base::{SourceFile, Span};
 use smol_str::SmolStr;
 
 #[salsa::interned(debug)]
@@ -121,6 +121,24 @@ pub struct SourceEntry<'db> {
     /// `fossil-mir::lower` into `Op::Source.uri`, replacing the Phase-1
     /// hardcoded `examples/users.csv`. Signature-only (Phase 5 STDL-06).
     pub uri: Option<SmolStr>,
+    /// The whole `User := io.csv("users.csv")` item, FILE-ABSOLUTE — where to
+    /// point when a diagnostic is about the row this binding introduced rather
+    /// than about the line that read it.
+    ///
+    /// `User.nmae` is blamed at the property, and the second half of the
+    /// sentence — which fields `User` actually has — belongs at the binding
+    /// that answers it. That is a label with its own `SpanFrame`
+    /// ([`fossil_base::SpanLabel`]), riding inside a mapping-relative
+    /// diagnostic.
+    ///
+    /// **It is recorded HERE, and not looked up when the diagnostic is
+    /// emitted.** A per-mapping query that reached for `parse(db, file)` to
+    /// find it would tie every mapping's type-check to the whole-file CST and
+    /// break the fan-out barrier `crate::body::mapping_cst_node` exists to
+    /// keep (`tests/invalidation_regression.rs`). `def_map` is file-keyed,
+    /// already walking these nodes, and structurally stable across body-only
+    /// edits — the same argument [`Self::schema_arg`] makes.
+    pub span: Span,
 }
 
 /// One name bound by a type binding (`type { Person, City } := io.shex("s.shex")`).
@@ -192,6 +210,15 @@ impl<'db> DefMap<'db> {
             .iter()
             .find(|e| e.name.as_str() == name)
             .map(|e| e.loc)
+    }
+
+    /// Where a source name was bound — [`SourceEntry::span`], file-absolute.
+    #[must_use]
+    pub fn lookup_source_span(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<Span> {
+        self.sources(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .map(|e| e.span)
     }
 
     /// The document named by the `schema =` argument of a source, if it named
@@ -462,6 +489,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         shape_error: None,
                         constructor,
                         uri,
+                        span: item_span(&item),
                     });
                     source_idx += 1;
                 }
@@ -537,6 +565,11 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         shape_error,
                         constructor: constructor.clone(),
                         uri: uri.clone(),
+                        // Every member of `{ A, B } := io.rdf(…)` shares the
+                        // binding's span, because they share the binding. A
+                        // per-member range would need the brace list's tokens
+                        // and nothing asks for one.
+                        span: item_span(&item),
                     });
                     source_idx += 1;
                 }
@@ -559,6 +592,28 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
 /// Extract the bound name from a `SOURCE_DEF` node (the `users` in
 /// `users := io.csv("...")`). The first IDENT child token is the binding name;
 /// IDENTs nested inside the call expression belong to the callee.
+/// The file-absolute [`Span`] of a top-level item, **trivia trimmed**.
+///
+/// `def_map` walks `cst.root(db)`, which is the whole file, so `text_range()`
+/// here is already absolute — unlike the per-mapping subtrees rowan resets to
+/// zero (`crate::spans`'s «offset semantics» section).
+///
+/// The trim is not cosmetic. A node's range carries the trailing newline and
+/// the blank line after it, so an untrimmed span ends on the NEXT line and
+/// miette draws the label as a multi-line block — `╭─▶` down the gutter, with
+/// the caret under an empty line. Measured against `fossil-cli`'s
+/// `broken_field` fixture, whose golden render showed exactly that.
+fn item_span(node: &fossil_syntax::SyntaxNode) -> Span {
+    let range = node.text_range();
+    let text = node.text().to_string();
+    let lead = u32::try_from(text.len() - text.trim_start().len()).unwrap_or(0);
+    let trail = u32::try_from(text.len() - text.trim_end().len()).unwrap_or(0);
+    Span::new(
+        u32::from(range.start()).saturating_add(lead),
+        u32::from(range.end()).saturating_sub(trail),
+    )
+}
+
 fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
     use fossil_syntax::SyntaxKind;
     let ident = node
@@ -997,6 +1052,24 @@ Users : Person from User
             "examples/hello.fossil".to_string(),
         );
         (db, file)
+    }
+
+    /// A binding's span is the binding, and stops at its last character.
+    ///
+    /// Sliced out of the source rather than compared to two numbers, because
+    /// the numbers are the thing under test. `HELLO_FOSSIL` puts a blank line
+    /// after this binding on purpose: rowan's `text_range()` carries the
+    /// trailing trivia, so an untrimmed span ends on line 4 and miette renders
+    /// the label as a multi-line block down the gutter, with the caret under
+    /// nothing. `fossil-cli`'s `broken_field` golden showed exactly that.
+    #[test]
+    fn a_source_binding_span_is_the_binding_and_no_trivia() {
+        let (db, file) = db_with_hello();
+        let span = def_map(&db, file)
+            .lookup_source_span(&db, "User")
+            .expect("`User` is bound");
+        let text = &HELLO_FOSSIL[span.start as usize..span.end as usize];
+        assert_eq!(text, "User := io.csv(\"examples/users.csv\")");
     }
 
     #[test]

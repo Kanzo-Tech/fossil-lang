@@ -143,10 +143,34 @@ fn redact_paths(msg: &str) -> String {
 /// Render a single [`Diagnostic`] to deterministic plain text. The
 /// `suggestion_source` (if present) is emitted as an indented multi-line block,
 /// preserved verbatim per Minor #6 (NOT truncated at the first newline).
+///
+/// # The `help:` and the labels are here because they used to be in the message
+///
+/// A did-you-mean was a clause of the sentence (`… — did you mean `name`?`) and
+/// a diagnostic pointed at one place, so a renderer that took the message and
+/// the span took everything. Both moved into fields, and this file's own
+/// `run_db_wired_fixture` says what that costs if the renderer does not follow:
+/// «the suggestions would vanish and the snapshots would record the absence as
+/// the new truth». `did_you_mean_short_name_one_char` and
+/// `did_you_mean_unrelated_no_suggestion` are a PAIR — one suggests and one
+/// declines to — and without the `help:` line the two snapshots are identical.
 fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
     use std::fmt::Write as _;
     let _ = writeln!(out, "{:?}: {}", diag.severity, redact_paths(&diag.message));
     let _ = writeln!(out, "  at {}..{}", diag.span.start, diag.span.end);
+    for label in &diag.labels {
+        let _ = writeln!(
+            out,
+            "  label {}..{} ({:?}): {}",
+            label.span.start,
+            label.span.end,
+            label.frame,
+            redact_paths(&label.text)
+        );
+    }
+    if let Some(help) = &diag.help {
+        let _ = writeln!(out, "  help: {}", redact_paths(help));
+    }
     if let Some(sugg) = &diag.suggestion_source {
         let _ = writeln!(out, "  suggestion:");
         for line in sugg.lines() {
