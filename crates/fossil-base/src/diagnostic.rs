@@ -83,6 +83,22 @@ pub enum SpanFrame {
 /// frame is what stops that from being an unwritten rule — the rebasing layer
 /// shifts each part by ITS OWN frame, so a file-absolute label survives inside
 /// a mapping-relative diagnostic and vice versa.
+/// # It can point at ANOTHER FILE, and that is [`Self::document`]
+///
+/// A type error is about two texts: the program writes `total =
+/// Purchase.reference` and a shape document says `shop:total xsd:float`, and
+/// naming only one of them leaves the reader to find the other. So a label
+/// carries which text its range is in — `None` for the program being checked,
+/// which is nearly every label, and `Some(path)` for the shape document the
+/// program named.
+///
+/// **A renderer owes one snippet per text.** miette resolves a range against
+/// ONE `SourceCode`, so a report that underlines two files is two `Rendered`s
+/// under one message (its `related()`); `fossil-cli`'s `cmd_check` and the
+/// conformance harness both group by this field before rendering. A renderer
+/// that ignored it would resolve a `.shex` offset against the program's text
+/// and underline whatever happens to sit at that byte — silently, and inside
+/// the right file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SpanLabel {
     /// The range to underline.
@@ -92,16 +108,42 @@ pub struct SpanLabel {
     /// What [`Self::span`] was measured against — independently of the
     /// diagnostic's own [`Diagnostic::frame`].
     pub frame: SpanFrame,
+    /// The document this range is in, as the PROGRAM named it
+    /// (`io.shex("shape.shex")` → `shape.shex`). `None` is the program itself.
+    ///
+    /// The program's spelling and not the registry key, because it is rendered:
+    /// a reader is looking at the line they wrote, and an absolute path resolved
+    /// against a machine is not a thing a golden artefact can hold.
+    pub document: Option<smol_str::SmolStr>,
 }
 
 impl SpanLabel {
-    /// A label at `span`, measured against `frame`, saying `text`.
+    /// A label at `span`, measured against `frame`, saying `text` — in the
+    /// program being checked.
     #[must_use]
     pub fn new(span: Span, text: impl Into<String>, frame: SpanFrame) -> Self {
         Self {
             span,
             text: text.into(),
             frame,
+            document: None,
+        }
+    }
+
+    /// The same, in the shape document the program named. Always
+    /// [`SpanFrame::FileAbsolute`]: a document has no mappings, so there is no
+    /// other frame its offsets could be in.
+    #[must_use]
+    pub fn in_document(
+        span: Span,
+        text: impl Into<String>,
+        document: impl Into<smol_str::SmolStr>,
+    ) -> Self {
+        Self {
+            span,
+            text: text.into(),
+            frame: SpanFrame::FileAbsolute,
+            document: Some(document.into()),
         }
     }
 }
@@ -202,6 +244,20 @@ impl Diagnostic {
     #[must_use]
     pub fn with_label(mut self, span: Span, text: impl Into<String>, frame: SpanFrame) -> Self {
         self.labels.push(SpanLabel::new(span, text, frame));
+        self
+    }
+
+    /// Point at a place in the shape document the program named — see
+    /// [`SpanLabel::in_document`].
+    #[must_use]
+    pub fn with_document_label(
+        mut self,
+        span: Span,
+        text: impl Into<String>,
+        document: impl Into<smol_str::SmolStr>,
+    ) -> Self {
+        self.labels
+            .push(SpanLabel::in_document(span, text, document));
         self
     }
 

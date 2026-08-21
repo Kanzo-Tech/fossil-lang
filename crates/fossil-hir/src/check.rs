@@ -55,7 +55,7 @@ use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
 use crate::shapes::{NameCollision, ResolvedShape, TargetShapeError, resolve_target_shape};
 use crate::spans::{Spans, mapping_header_span, spans};
 use crate::ty::display::render_ty_kind;
-use fossil_graph_schema::{Primitive, Rejection};
+use fossil_graph_schema::{Occurs, Primitive, Rejection};
 
 use crate::ty::{Rows, Ty, TyKind};
 
@@ -412,7 +412,11 @@ impl Checker<'_> {
                     // predicate IRI `resolve_predicate` returned: the message
                     // reads back the line the author is looking at, and a
                     // rename means those two are different words.
-                    Some((constraint.value_ty, name.clone()))
+                    Some((
+                        constraint.value_ty,
+                        name.clone(),
+                        constraint.span.map(|span| (span, shape.document.clone())),
+                    ))
                 })
             }
             PropertyKey::Name(_) => None,
@@ -433,7 +437,7 @@ impl Checker<'_> {
             // the identity a second time.
             Some(self.mapping_shape_iri().into_iter().collect())
         } else {
-            expectation.as_ref().and_then(|(ty, _)| {
+            expectation.as_ref().and_then(|(ty, _, _)| {
                 ty.and_then(|t| match t.kind(db) {
                     TyKind::Ref(names) => Some(names.clone()),
                     _ => None,
@@ -443,12 +447,13 @@ impl Checker<'_> {
         let actual = self.expr.synth(expr_id, &prop.value);
         self.expr.expected_ref = None;
 
-        if let (Some(actual), Some((expected, property))) = (actual, expectation) {
+        if let (Some(actual), Some((expected, property, declared_at))) = (actual, expectation) {
             // `constraint.occurs` is deliberately NOT read here. The count a
             // shape declares is checked in `check_required_properties`, over the
             // predicates the body never wrote — the only direction that can be
             // observed, now that no value type can carry «zero or one» in
             // itself.
+            let type_name = self.target_type_name();
             let _ = compatible(
                 &mut self.expr,
                 actual,
@@ -456,6 +461,11 @@ impl Checker<'_> {
                 expr_id,
                 &prop.value,
                 &property,
+                declared_at.map(|(span, document)| Declared {
+                    span,
+                    document,
+                    shape: type_name,
+                }),
             );
         }
     }
@@ -513,6 +523,20 @@ impl Checker<'_> {
         // exact text back through the compiler and checks that the collision
         // goes away and the renamed key resolves.
         let type_name = self.target_type_name();
+        // The BINDING, not the mapping header: the collision is a fact about
+        // the shape this program brought in, the reader chose it on that line,
+        // and the `@rename` the help proposes goes above it. The header span is
+        // the fallback for a mapping whose type name bound nothing, which has
+        // already been told so.
+        let bound_at = def_map(db, self.expr.file).lookup_type_span(db, type_name.as_str());
+        let document = self.resolved_shape.as_ref().map(|s| s.document.clone());
+        let declared_at = |iri: &SmolStr| {
+            let shape = self.resolved_shape.as_ref()?;
+            Some((
+                shape.constraint_for(iri.as_str())?.span?,
+                shape.document.clone(),
+            ))
+        };
         for c in collisions {
             let NameCollision {
                 name,
@@ -520,16 +544,39 @@ impl Checker<'_> {
                 second,
             } = c;
             let alias = crate::shapes::suggested_alias(second);
-            let eg = delay_span_bug(
-                db,
-                header_span,
-                format!(
-                    "two predicates of the target shape are both called `{name}`: `{first}` and \
-                     `{second}`. A short name is the last segment of the predicate IRI, and \
-                     fossil never picks between two. Give one of them another name above the \
-                     binding: @rename({type_name}, \"{second}\" as {alias})"
-                ),
+            let mut d = Diagnostic::new(
+                Severity::Error,
+                format!("two predicates of {type_name} are both called `{name}`"),
+                bound_at.unwrap_or(header_span),
             );
+            if bound_at.is_some() {
+                d = d.file_absolute();
+            }
+            d = d.with_label(
+                bound_at.unwrap_or(header_span),
+                format!("{type_name} is bound here"),
+                if bound_at.is_some() {
+                    SpanFrame::FileAbsolute
+                } else {
+                    SpanFrame::MappingRelative
+                },
+            );
+            // **The two IRIs move out of the message and onto the lines that
+            // declare them.** They were the only way to tell the reader which
+            // two predicates collided, and a full IRI in the middle of a
+            // sentence is the thing a caret exists to replace.
+            for iri in [first, second] {
+                if let Some((span, doc)) = declared_at(iri) {
+                    d = d.with_document_label(span, iri.to_string(), doc);
+                }
+            }
+            let _ = &document;
+            d = d.with_help(format!(
+                "a short name is the last segment of the predicate IRI, and fossil never picks \
+                 between two. Give one of them another name above the binding: \
+                 @rename({type_name}, \"{second}\" as {alias})"
+            ));
+            let eg = fossil_base::raise(db, d);
             self.expr.record_error(eg);
         }
     }
@@ -550,6 +597,8 @@ impl Checker<'_> {
     /// the only repair the compiler offers for a name collision made the
     /// program it repaired fail to compile.
     fn check_required_properties(&mut self, properties: &[HirProperty]) {
+        use std::fmt::Write as _;
+
         let db = self.expr.db;
         let header_span = self.header_span();
         let Some(shape) = self.resolved_shape.as_ref() else {
@@ -574,15 +623,66 @@ impl Checker<'_> {
                     .any(|p| matches!(&p.key, PropertyKey::Name(n) if n == short))
             })
             .collect();
-        for (short, iri) in missing {
-            let eg = delay_span_bug(
-                db,
+        // The predicates the shape declares and does NOT require — what the
+        // author may legitimately leave out, which is the other half of «add
+        // this one». Without it the reader has to open the document to find out
+        // whether the rest of their omissions are also about to be reported.
+        let optional: Vec<SmolStr> = shape
+            .constraints
+            .iter()
+            .filter(|c| !c.occurs.demands_one_or_more())
+            .map(|c| {
+                SmolStr::from(fossil_graph_schema::short_name(
+                    c.predicate.as_str(),
+                    &self.renames,
+                ))
+            })
+            .collect();
+        let declared_at: Vec<(SmolStr, Option<(Span, SmolStr)>)> = missing
+            .iter()
+            .map(|(_, iri)| {
+                (
+                    iri.clone(),
+                    shape
+                        .constraint_for(iri.as_str())
+                        .and_then(|c| c.span)
+                        .map(|span| (span, shape.document.clone())),
+                )
+            })
+            .collect();
+        let mapping_name = self.mapping_name();
+        let type_name = self.target_type_name();
+        for ((short, iri), (_, at)) in missing.iter().zip(declared_at) {
+            let mut d = Diagnostic::new(
+                Severity::Error,
+                format!("`{mapping_name}` never writes `{short}`, and {type_name} requires it"),
                 header_span,
-                format!(
-                    "this mapping never writes `{short}`, and the shape it produces requires it \
-                     (`{iri}`). Add `{short} = ` to the body."
-                ),
+            )
+            .with_label(
+                header_span,
+                format!("this mapping produces {type_name}"),
+                SpanFrame::MappingRelative,
             );
+            // The IRI is not in the message any more: it was there because
+            // there was nowhere else to put it, and where it belongs is under
+            // the line of the document that requires it.
+            if let Some((span, doc)) = at {
+                d = d.with_document_label(
+                    span,
+                    format!("required here: {}", render_occurs(shape_occurs(shape, iri))),
+                    doc,
+                );
+            }
+            let mut help = format!("add `{short} = ` to the body.");
+            if !optional.is_empty() {
+                let names: Vec<String> = optional.iter().map(|o| format!("`{o}`")).collect();
+                let (list, verb) = (
+                    names.join(", "),
+                    if names.len() == 1 { "is" } else { "are" },
+                );
+                let _ = write!(help, " {list} {verb} optional and may stay out.");
+            }
+            let eg = fossil_base::raise(db, d.with_help(help));
             self.expr.record_error(eg);
         }
     }
@@ -804,12 +904,10 @@ mod tests;
 /// a body writes several properties and the caret alone does not say which
 /// constraint spoke.
 ///
-/// **The second location is still missing, and it is in the `.shex`.** What
-/// this cannot say yet is `shop:Order declares shop:total as xsd:float`,
-/// underlining the shape document: [`fossil_base::SpanLabel`] carries a span
-/// and a frame but no FILE, so every label it renders lands in the program.
-/// `apps/docs/programs/errors/wrong-type/expected/diagnostic.txt` is the
-/// target, and it stays hand-written until that exists.
+/// `declared_at` is the OTHER file — the line of the shape document that
+/// declares the constraint being violated, which makes this the two-span blame
+/// its name has always claimed. `None` when the document did not say where
+/// (`ShExJ`, SHACL, a hand-built table), and then the report is what it was.
 pub fn compatible<'db>(
     cx: &mut Expr<'db>,
     actual: Ty<'db>,
@@ -817,6 +915,7 @@ pub fn compatible<'db>(
     source_expr: ExprId,
     source_value: &HirExpr,
     property: &str,
+    declared_at: Option<Declared>,
 ) -> Result<(), ErrorGuaranteed> {
     let db = cx.db();
 
@@ -848,7 +947,7 @@ pub fn compatible<'db>(
     );
 
     let frame = cx.frame();
-    let d = Diagnostic::new(
+    let mut d = Diagnostic::new(
         Severity::Error,
         format!("`{property}` expects {expected_display}, and this is {actual_display}"),
         source_span,
@@ -865,7 +964,62 @@ pub fn compatible<'db>(
         frame,
     );
 
+    // The half a reader had to go and find. It names the shape and the property
+    // in the vocabulary the PROGRAM writes — bare names — and not in the
+    // document's CURIEs (`shop:Order declares shop:total`, which the
+    // hand-written target used): a resolved IRI is all that reaches here, and
+    // the bare name is the word the author typed on the line above anyway.
+    if let Some(at) = declared_at {
+        d = d.with_document_label(
+            at.span,
+            format!("`{}` declares `{property}` as {expected_display}", at.shape),
+            at.document,
+        );
+    }
+
     Err(cx.raise(d))
+}
+
+/// The cardinality a shape declares, in the words the `help:` uses.
+///
+/// `Occurs` is a `(min, max)` pair and every diagnostic that reads it wants a
+/// phrase; rendering it at each site is how two of them come to disagree about
+/// what `(1, None)` is called.
+fn render_occurs(o: Occurs) -> String {
+    match (o.min, o.max) {
+        (1, Some(1)) => "exactly one".to_string(),
+        (0, Some(1)) => "at most one".to_string(),
+        (n, None) => format!("{n} or more"),
+        (lo, Some(hi)) if lo == hi => format!("exactly {lo}"),
+        (lo, Some(hi)) => format!("between {lo} and {hi}"),
+    }
+}
+
+/// The cardinality `shape` declares for `iri` — [`Occurs::ONE`] when the shape
+/// does not declare it, which is the default a document that says nothing means
+/// and the only value a MISSING required predicate can have reached this by.
+fn shape_occurs(shape: &ResolvedShape<'_>, iri: &SmolStr) -> Occurs {
+    shape
+        .constraint_for(iri.as_str())
+        .map_or(Occurs::ONE, |c| c.occurs)
+}
+
+/// Where a shape document declares the constraint a value failed.
+///
+/// The three fields are the three things a label needs and they come from three
+/// places — the range from the decoder ([`crate::shapes::ShapeConstraint::span`]),
+/// the document from the binding that brought the shape in
+/// ([`crate::shapes::ResolvedShape::document`]), and the shape's name from the
+/// mapping header. Bundled because a function taking them loose can be handed
+/// them in the wrong order and still compile.
+#[derive(Debug, Clone)]
+pub struct Declared {
+    /// The range in the DOCUMENT, file-absolute in that document's text.
+    pub span: Span,
+    /// The document, as the program named it.
+    pub document: SmolStr,
+    /// The shape's name as the PROGRAM bound it — `Order`, not `shop:Order`.
+    pub shape: SmolStr,
 }
 
 // `expr_contains_free_field_refs`, `rewrite_field_refs_to_row_dot` and

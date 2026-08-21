@@ -1,12 +1,18 @@
-× `People` never writes `email`, and Person requires it
+  × `People` never writes `email`, and Person requires it
    ╭─[program.fossil:5:1]
+ 4 │ 
  5 │ People : Person from User
    · ────────────┬────────────
    ·             ╰── this mapping produces Person
+ 6 │     @subject = "https://shop.example/user/{User.email}"
    ╰────
+  help: add `email = ` to the body. `phone` is optional and may stay out.
+  × `People` never writes `email`, and Person requires it
    ╭─[shape.shex:5:3]
+ 4 │ shop:Person {
  5 │   shop:email xsd:string ;
-   ·   ──────────┬──────────
-   ·             ╰── required here: exactly one shop:email
+   ·   ─────┬────
+   ·        ╰── required here: exactly one
+ 6 │   shop:name  xsd:string ;
    ╰────
-  help: add `email = ` to the body. `shop:phone` is optional and may stay out.
+

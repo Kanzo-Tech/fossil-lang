@@ -79,7 +79,9 @@
 
 use std::fmt;
 
-use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape};
+use fossil_graph_schema::{
+    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Span,
+};
 use smol_str::SmolStr;
 
 use crate::def_map::MappingLoc;
@@ -102,6 +104,10 @@ pub struct ShapeConstraint<'db> {
     pub value_ty: Option<Ty<'db>>,
     /// How many values the property may carry.
     pub occurs: Occurs,
+    /// Where the DOCUMENT declares this predicate — see
+    /// [`fossil_graph_schema::PropertyConstraint::span`]. Paired with
+    /// [`ResolvedShape::document`], it is a label in the `.shex`.
+    pub span: Option<Span>,
 }
 
 /// A mapping's resolved target shape — Phase-3-internal.
@@ -109,6 +115,15 @@ pub struct ShapeConstraint<'db> {
 pub struct ResolvedShape<'db> {
     /// Per-predicate constraint table.
     pub constraints: Vec<ShapeConstraint<'db>>,
+    /// The document that declared this shape, as the PROGRAM named it
+    /// (`io.shex("shape.shex")` → `shape.shex`).
+    ///
+    /// One per shape and not one per constraint: a shape is declared in exactly
+    /// one document — `shape_binding_for` resolves which, and getting that
+    /// wrong is what `apps/docs/programs/multi-document` exists to catch — so a
+    /// copy per predicate would be the same string N times with N chances to
+    /// disagree.
+    pub document: SmolStr,
     /// What the decoder could not lower, filtered to this shape;
     /// [`crate::check::Checker::surface_shape_lowering_errors`] surfaces these
     /// as diagnostics on the consuming mapping.
@@ -126,6 +141,7 @@ impl<'db> ResolvedShape<'db> {
         db: &'db dyn fossil_base::Db,
         shape: &Shape,
         rejections: Vec<Rejection>,
+        document: SmolStr,
     ) -> Self {
         let constraints = shape
             .properties
@@ -134,10 +150,12 @@ impl<'db> ResolvedShape<'db> {
                 predicate: SmolStr::from(c.predicate.as_str()),
                 value_ty: expected_value_ty(db, c),
                 occurs: c.occurs,
+                span: c.span,
             })
             .collect();
         Self {
             constraints,
+            document,
             rejections,
         }
     }
@@ -567,7 +585,9 @@ pub fn resolve_target_shape<'db>(
         .cloned()
         .collect();
 
-    Ok(Some(ResolvedShape::from_shape(db, shape, rejections)))
+    Ok(Some(ResolvedShape::from_shape(
+        db, shape, rejections, document,
+    )))
 }
 
 /// `true` iff a rejection belongs to the shape identified by `shape_iri`.

@@ -99,6 +99,36 @@ pub(crate) fn register_shape_documents(db: &mut FossilDb, file: SourceFile) {
     }
 }
 
+/// Every shape document the program names, **under the program's spelling**,
+/// with its text.
+///
+/// What a renderer needs and nothing more. A diagnostic can now underline a
+/// line of `shape.shex` (`fossil_base::SpanLabel::document`), and miette
+/// resolves a range against ONE source, so a host that draws such a report has
+/// to hold the document's text as well as the program's. It is keyed by the
+/// spelling the program wrote — `io.shex("shape.shex")` → `shape.shex` — which
+/// is what the label carries and what a reader is looking at; the registry key
+/// is an absolute path resolved against a machine, and no golden artefact can
+/// hold one.
+///
+/// Reads what [`register_shape_documents`] registered, so a document that could
+/// not be read is simply absent, exactly as it is for the checker.
+// `pub(crate)` for the reason its neighbour above carries: a private module can
+// satisfy `redundant_pub_crate` or `unreachable_pub` and not both, and this
+// workspace opted into the rustc one by name.
+#[allow(clippy::redundant_pub_crate)]
+#[must_use]
+pub(crate) fn named_document_texts(db: &FossilDb, file: SourceFile) -> Vec<(String, String)> {
+    documents_named(db, file)
+        .into_iter()
+        .filter_map(|document| {
+            let key = registry_key(db, file, &document);
+            let text = file_at(db, &key)?.text(db).clone();
+            Some((document.to_string(), text))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

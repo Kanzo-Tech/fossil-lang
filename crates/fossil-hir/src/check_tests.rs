@@ -522,6 +522,7 @@ fn compatible_integer_widens_to_float() {
             ExprId(0),
             &HirExpr::IntLit(1),
             "age",
+            None,
         )
         .is_ok()
     }
@@ -544,7 +545,7 @@ fn compatible_string_to_integer_fails() {
             binding: smol_str::SmolStr::from("users"),
             column: smol_str::SmolStr::from("name"),
         };
-        compatible(&mut cx.expr, s, Some(i), ExprId(0), &value, "age").is_err()
+        compatible(&mut cx.expr, s, Some(i), ExprId(0), &value, "age", None).is_err()
     }
 
     let (db, file) = db_with(HELLO);
@@ -603,8 +604,12 @@ Contact : Person from users
                     predicate: smol_str::SmolStr::from("https://example.org/name"),
                     value_ty: None,
                     occurs: Occurs::ONE,
+                    // A hand-built table, not a decoded document: there is no
+                    // `.shex` for a range to point into.
+                    span: None,
                 }],
                 rejections: Vec::new(),
+                document: smol_str::SmolStr::from("personas.shex"),
             }),
         );
         cx.check_property(
@@ -672,8 +677,12 @@ Orders : Order from Purchase
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
                     occurs: Occurs::ONE,
+                    // A hand-built table, not a decoded document: there is no
+                    // `.shex` for a range to point into.
+                    span: None,
                 }],
                 rejections: Vec::new(),
+                document: smol_str::SmolStr::from("personas.shex"),
             }),
         );
         cx.check_property(
@@ -723,6 +732,97 @@ Orders : Order from Purchase
             "a debug-printed span reached the author: {text:?}"
         );
     }
+}
+
+/// A refused value points at the SHAPE DOCUMENT as well as at the program.
+///
+/// The two halves of one sentence — `` `total` expects Float, and this is
+/// String `` on the program's line, and where `Float` was required on the
+/// document's — and until `PropertyConstraint::span` existed the second half
+/// could not be pointed at, so it travelled as prose or not at all.
+///
+/// The document is named by the PROGRAM's spelling, which is what a renderer
+/// resolves against `CheckOutcome::documents` and what a reader is looking at.
+/// A registry key would be an absolute path resolved against this machine.
+#[test]
+fn a_refused_value_points_into_the_shape_document_too() {
+    const SRC: &str = "\
+type { Order } := io.shex(\"shape.shex\")
+Purchase := io.csv(\"orders.csv\")
+Orders : Order from Purchase
+    @subject = \"https://shop.example/order/{Purchase.id}\"
+    total = Purchase.reference
+";
+    #[salsa::tracked]
+    fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return false;
+        };
+        let mut cx = build_checker(
+            db,
+            m,
+            Some(row_record(db, &[("reference", Primitive::String)])),
+            Some(ResolvedShape {
+                constraints: vec![crate::shapes::ShapeConstraint {
+                    predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
+                    value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
+                    occurs: Occurs::ONE,
+                    // What the decoder found — see `fossil_shex::spans`.
+                    span: Some(fossil_base::Span::new(60, 70)),
+                }],
+                rejections: Vec::new(),
+                document: smol_str::SmolStr::from("shape.shex"),
+            }),
+        );
+        cx.check_property(
+            ExprId(0),
+            &HirProperty {
+                key: PropertyKey::Name(smol_str::SmolStr::from("total")),
+                value: HirExpr::ColumnRef {
+                    binding: smol_str::SmolStr::from("Purchase"),
+                    column: smol_str::SmolStr::from("reference"),
+                },
+            },
+        );
+        cx.expr.first_error.is_some()
+    }
+
+    // The document is REGISTERED, and it has to be: `target_type_name`
+    // resolves the header's shape IRI back to the name a `type { … }` line
+    // bound, and with no document there is no IRI and the label would read
+    // «`Type` declares», which is the documented fallback and not the sentence
+    // under test.
+    const DOCUMENT: &str =
+        "shape https://shop.example/voc#Order\nprop https://shop.example/voc#total float 1 1\n";
+    let (db, file) = fossil_base::test_support::db_with_document(SRC, "shape.shex", DOCUMENT);
+    assert!(refuse(&db, file), "String does not satisfy Float");
+    let raised = refuse::accumulated::<Diagnostic>(&db, file);
+    let d = raised
+        .iter()
+        .find(|d| d.message.contains("expects Float"))
+        .expect("the value is refused");
+
+    let in_document: Vec<&fossil_base::SpanLabel> =
+        d.labels.iter().filter(|l| l.document.is_some()).collect();
+    assert_eq!(
+        in_document.len(),
+        1,
+        "one label in the document, got {:#?}",
+        d.labels
+    );
+    let label = in_document[0];
+    assert_eq!(label.document.as_deref(), Some("shape.shex"));
+    assert_eq!(label.span, fossil_base::Span::new(60, 70));
+    assert_eq!(label.text, "`Order` declares `total` as Float");
+    // A document has no mappings, so there is no other frame its offsets could
+    // be in — and a label rebased by a mapping's start would land nowhere.
+    assert_eq!(label.frame, fossil_base::SpanFrame::FileAbsolute);
+    // And the program's own label is still there, still in the program.
+    assert!(
+        d.labels.iter().any(|l| l.document.is_none()),
+        "the half that was already right did not move: {:#?}",
+        d.labels
+    );
 }
 
 // ── The four ways a named document fails to produce a shape ────────────────
@@ -830,6 +930,7 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
         let shape = ResolvedShape {
             constraints: Vec::new(),
             rejections: vec![disjunction_rejection()],
+            document: smol_str::SmolStr::from("personas.shex"),
         };
         let mut cx = build_checker(db, m, None, Some(shape));
         cx.surface_shape_lowering_errors();

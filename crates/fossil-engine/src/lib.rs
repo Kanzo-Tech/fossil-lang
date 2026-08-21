@@ -104,6 +104,15 @@ pub fn refs(path: &Path) -> miette::Result<Vec<SourceRefInfo>> {
 pub struct CheckOutcome {
     pub source: String,
     pub diagnostics: Vec<Diagnostic>,
+    /// The shape documents the program names, under the program's spelling,
+    /// with their text — see [`crate::documents::named_document_texts`].
+    ///
+    /// A renderer needs them because a diagnostic can point INTO one
+    /// (`fossil_base::SpanLabel::document`) and miette resolves a range against
+    /// one source at a time. Empty for a program that names none, and for one
+    /// whose documents could not be read — which is the same thing the checker
+    /// saw.
+    pub documents: Vec<(String, String)>,
     /// How many mappings the file defines. Zero with no diagnostics is a
     /// program that parses and builds nothing — the caller renders that
     /// differently from a clean program, because it is not the same answer.
@@ -153,6 +162,7 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
         source: text,
         diagnostics: fossil_mir::program_diagnostics(&db, file),
         mappings,
+        documents: crate::documents::named_document_texts(&db, file),
     })
 }
 

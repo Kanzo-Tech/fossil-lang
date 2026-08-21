@@ -200,6 +200,10 @@ fn cmd_check(path: &Path) -> miette::Result<()> {
             had_error = true;
         }
         errors.push(to_check_error(d, &named));
+        // The other half of a two-file report, right after the half it belongs
+        // to — `related()` renders in order, so a reader meets the program's
+        // line and then the shape's.
+        errors.extend(document_errors(d, &outcome.documents));
     }
 
     if had_error {
@@ -324,22 +328,74 @@ fn to_check_error(d: &Diagnostic, src: &NamedSource<String>) -> CheckError {
     }
 }
 
-/// The spans to underline: the diagnostic's own labels when it has them, else
-/// its single span under the generic «here».
+/// The spans to underline IN THE PROGRAM: the diagnostic's own labels when it
+/// has them, else its single span under the generic «here».
+///
+/// Labels that name a document are not here — see [`document_errors`]. miette
+/// resolves every range against the one `SourceCode` its report carries, so a
+/// `.shex` offset rendered against the program's text would underline whatever
+/// happens to sit at that byte, inside the right file and silently.
 fn labels_of(d: &Diagnostic) -> Vec<miette::LabeledSpan> {
-    let at = |span: fossil_base::Span, text: &str| {
-        miette::LabeledSpan::new_with_span(
-            Some(text.to_string()),
-            SourceSpan::new(
-                (span.start as usize).into(),
-                span.end.saturating_sub(span.start) as usize,
-            ),
-        )
-    };
     if d.labels.is_empty() {
         return vec![at(d.span, "here")];
     }
-    d.labels.iter().map(|l| at(l.span, &l.text)).collect()
+    d.labels
+        .iter()
+        .filter(|l| l.document.is_none())
+        .map(|l| at(l.span, &l.text))
+        .collect()
+}
+
+fn at(span: fossil_base::Span, text: &str) -> miette::LabeledSpan {
+    miette::LabeledSpan::new_with_span(
+        Some(text.to_string()),
+        SourceSpan::new(
+            (span.start as usize).into(),
+            span.end.saturating_sub(span.start) as usize,
+        ),
+    )
+}
+
+/// One extra [`CheckError`] per shape document a diagnostic points into.
+///
+/// A type error is about two texts — `total = Purchase.reference` in the
+/// program, `shop:total xsd:float` in the shape — and one miette report has one
+/// source, so the second text is a second report under the same `related()`
+/// list. Its message is the same sentence: what a reader is following is one
+/// complaint, and repeating it above the second snippet is what makes the two
+/// legible as halves of it.
+///
+/// A label whose document `outcome.documents` does not carry is DROPPED. That
+/// happens when the document could not be read, which is the same thing the
+/// checker saw, and one missing label beats a range resolved against the wrong
+/// text.
+fn document_errors(d: &Diagnostic, documents: &[(String, String)]) -> Vec<CheckError> {
+    let mut out: Vec<CheckError> = Vec::new();
+    for label in &d.labels {
+        let Some(name) = label.document.as_deref() else {
+            continue;
+        };
+        let Some((_, text)) = documents.iter().find(|(n, _)| n == name) else {
+            continue;
+        };
+        let span = at(label.span, &label.text);
+        // Several labels in ONE document share a snippet — `colliding-name`
+        // underlines two lines of the same `.shex` — so they are collected onto
+        // the report that already names it rather than opening a second.
+        if let Some(existing) = out.iter_mut().find(|e| e.src.name() == name) {
+            existing.labels.push(span);
+        } else {
+            out.push(CheckError {
+                message: d.message.clone(),
+                src: NamedSource::new(name, text.clone()),
+                labels: vec![span],
+                // The `help:` belongs to the program's report; repeating it
+                // under every snippet would say one repair three times.
+                help: None,
+            });
+        }
+    }
+    out
 }
 
 /// If `message` contains an inline `did you mean …?` clause, lift it to a

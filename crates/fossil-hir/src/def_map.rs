@@ -184,6 +184,15 @@ pub struct TypeEntry {
     /// one document can each have a colliding `name` needing different repairs.
     /// [`crate::shapes::ResolvedShape::short_names`] applies them.
     pub renames: Vec<(SmolStr, SmolStr)>,
+    /// The whole `type { Person } := io.shex("shape.shex")` item, file-absolute
+    /// and trivia-trimmed — [`SourceEntry::span`]'s twin, and the same
+    /// [`item_span`].
+    ///
+    /// A diagnostic about the SHAPE rather than about one property belongs
+    /// here: two predicates that collide make the shape unwritable, and the
+    /// binding is where the reader chose it and where the `@rename` repair
+    /// goes.
+    pub span: Span,
 }
 
 #[salsa::tracked(debug)]
@@ -216,6 +225,15 @@ impl<'db> DefMap<'db> {
     #[must_use]
     pub fn lookup_source_span(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<Span> {
         self.sources(db)
+            .iter()
+            .find(|e| e.name.as_str() == name)
+            .map(|e| e.span)
+    }
+
+    /// Where a TYPE name was bound — [`TypeEntry::span`], file-absolute.
+    #[must_use]
+    pub fn lookup_type_span(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<Span> {
+        self.types(db)
             .iter()
             .find(|e| e.name.as_str() == name)
             .map(|e| e.span)
@@ -529,6 +547,10 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         document: document.clone(),
                         constructor: ctor.clone(),
                         renames: mine,
+                        // Every name a `type { A, B }` line binds shares the
+                        // line's span, because they share the binding — the
+                        // same answer the destructuring source gives.
+                        span: item_span(&item),
                     });
                 }
             }

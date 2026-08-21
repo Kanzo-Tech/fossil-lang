@@ -313,7 +313,12 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
     out.push('\n');
 
     // Resolved constraint table (the SC#2 backward-check input surface).
-    let resolved = ResolvedShape::from_shape(&db, document, rejections.to_vec());
+    let resolved = ResolvedShape::from_shape(
+        &db,
+        document,
+        rejections.to_vec(),
+        smol_str::SmolStr::from("person.shex"),
+    );
     if resolved.constraints.is_empty() {
         let _ = writeln!(
             out,
@@ -761,16 +766,21 @@ People : Person from User
     name = User.name
 ";
 
-/// The `@rename(…)` clause out of a diagnostic's message, verbatim.
+/// The `@rename(…)` clause out of a diagnostic's `help:`, verbatim.
 ///
 /// Extracted by scanning rather than by re-rendering, and that is the point of
 /// the test: what is fed back to the parser is the exact text a reader would
 /// copy off their terminal.
-fn rename_clause(messages: &[String]) -> String {
-    let m = messages
+///
+/// It read the MESSAGE until the collision report grew labels. The repair is
+/// prose about what to do, which is what `Diagnostic::help` is; the message is
+/// now the one sentence naming the shape and the colliding name, and the two
+/// IRIs it used to carry are under the lines of the document that declare them.
+fn rename_clause(helps: &[String]) -> String {
+    let m = helps
         .iter()
         .find(|m| m.contains("@rename("))
-        .unwrap_or_else(|| panic!("no message recommended a `@rename`; got {messages:#?}"));
+        .unwrap_or_else(|| panic!("no `help:` recommended a `@rename`; got {helps:#?}"));
     let start = m.find("@rename(").expect("just matched");
     let end = start + m[start..].find(')').expect("the clause is parenthesised") + 1;
     m[start..end].to_string()
@@ -809,8 +819,12 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
         "the two predicates must collide to begin with; got {before:#?}"
     );
 
-    // 2. The repair, taken from the message and put where the message says.
-    let clause = rename_clause(&before);
+    // 2. The repair, taken from the `help:` and put where it says.
+    let helps: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
+        .into_iter()
+        .filter_map(|d| d.help.clone())
+        .collect();
+    let clause = rename_clause(&helps);
     assert!(
         clause.contains("Person"),
         "the clause names the bound TYPE, not a `<Type>` placeholder: {clause}"

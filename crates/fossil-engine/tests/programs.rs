@@ -76,40 +76,59 @@
 //! `FOSSIL_BLESS=1 cargo test -p fossil-engine --test programs` regenerates them.
 //! A diagnostic text nobody produces is a promise the compiler does not make.
 //!
-//! # Four `expected/diagnostic.txt` are still hand-written, and it was five
+//! # Every `expected/diagnostic.txt` is blessed, and five were hand-written
 //!
-//! They describe the diagnostics the language is MEANT to produce, and blessing
-//! one before the compiler can produce it overwrites an accurate description of
-//! the target with an accurate description of today. The difference between them
-//! is the specification. **Bless a program the day it says what it means, and
-//! `git checkout --` the rest**: `FOSSIL_BLESS=1` writes all five.
+//! They described the diagnostics the language was MEANT to produce, and
+//! blessing one before the compiler could produce it would have overwritten an
+//! accurate description of the target with an accurate description of today —
+//! the difference between them being the specification. **The routine, when the
+//! next one is written: bless a program the day it says what it means, and
+//! `git checkout --` the rest**, because `FOSSIL_BLESS=1` writes all of them.
 //!
-//! This header used to say all five needed a two-file report — a label inside
-//! the `.shex` beside the program, which [`fossil_base::SpanLabel`] cannot
-//! express because it carries a span and a frame and no FILE. Checked one by
-//! one, that was false for two of them:
+//! What the five needed, in the order they were closed:
 //!
-//! - **`two-identities` needed nothing**, and is blessed. Message, both spans,
-//!   both labels and the `help` were already identical; what differed was a
-//!   `[{severity:?}]` prefix this file's own renderer added and `fossil check`
-//!   does not (see [`render_diagnostics`]), and the context lines around the
-//!   snippet. Both are how the report is DRAWN, and the hand-written file was
-//!   drawn by a hand.
-//! - **`unknown-field` needed a second label in the SAME file and a narrower
-//!   caret**, and is blessed. The label is the line that bound the row, saying
-//!   which fields it has; the caret is on `nmae` rather than on `User.nmae`,
-//!   which took a span per REFERENCE where the compiler recorded one per
-//!   property (`fossil_hir::body::HirBody::ref_spans`). One difference from the
-//!   hand-written target survives on purpose: it underlined
-//!   `io.csv("data/users.csv")` and this underlines the whole
-//!   `User := io.csv("data/users.csv")`, because the label says what `User` has
-//!   and the name is part of the sentence. The block layout is miette's.
-//! - **`wrong-type`, `colliding-name` and `missing-property`** are the real
-//!   ones. `wrong-type`'s message and its program-side label match already; the
-//!   label it cannot draw is `shop:Order declares shop:total as xsd:float`,
-//!   under a line of `shape.shex`. miette renders that as `related()`, one
-//!   `Rendered` per file — and the LSP publishes per URI, so the host surface
-//!   is part of the same capability and not a detail of this harness.
+//! - **`two-identities` needed nothing.** Message, both spans, both labels and
+//!   the `help` were already identical; what differed was a `[{severity:?}]`
+//!   prefix this file's own renderer added and `fossil check` does not (see
+//!   [`render_diagnostics`]), and the context lines around the snippet. Both
+//!   are how the report is DRAWN, and the hand-written file was drawn by hand.
+//! - **`unknown-field` needed a second label in the same file and a narrower
+//!   caret.** The label is the line that bound the row, saying which fields it
+//!   has; the caret is on `nmae` rather than on `User.nmae`, which took a span
+//!   per REFERENCE where the compiler recorded one per property
+//!   (`fossil_hir::body::HirBody::ref_spans`).
+//! - **`wrong-type`, `colliding-name` and `missing-property` needed the report
+//!   to cite TWO FILES** — a label under a line of the `.shex`, which
+//!   [`fossil_base::SpanLabel`] could not express because it carried a span and
+//!   a frame and no file. It carries a `document` now; the range comes from
+//!   `fossil_shex::spans`, a lookup over the document's text; and a renderer
+//!   groups labels by file, one `Rendered` per file under one message. The LSP
+//!   publishes per URI and so is part of the same capability — `fossil-lsp` and
+//!   `fossil-wasm` do not route these yet, which is the next thing.
+//!
+//! # Three differences from the hand-written targets are DELIBERATE
+//!
+//! - **The document's vocabulary is not the program's.** The targets wrote
+//!   `shop:Order declares shop:total as xsd:float` and
+//!   `` `shop:phone` is optional ``; the compiler writes `` `Order` declares
+//!   `total` as Float `` and `` `phone` is optional ``. Only a resolved IRI
+//!   reaches `fossil-hir` — the CURIE is the document's prefix map, which stops
+//!   at the decoder — and the bare name is the word the author typed on the
+//!   line above anyway.
+//! - **A binding label underlines the whole binding**, not just the
+//!   constructor call: `type { Person } := io.shex("shape.shex")` and
+//!   `User := io.csv("data/users.csv")` entire, because the label says what
+//!   `Person`/`User` IS and the name is part of that sentence.
+//! - **Block layout is miette's**, including which snippet comes first.
+//!
+//! # And one thing the blessing DELETED, which is owed
+//!
+//! `wrong-type`'s target carried a `help:` the compiler does not produce:
+//! *«`Purchase.amount` is Float. If `reference` really holds the number,
+//! `parse.float(Purchase.reference)` converts it.»* Two suggestions, neither
+//! built — a column of the EXPECTED type on the same row, and the stdlib
+//! conversion that would bridge the two types. Nothing else in the corpus
+//! describes them, so they are written here rather than nowhere.
 //!
 //! # Three causes of failure, and only one of them is the parser
 //!
@@ -400,6 +419,7 @@ fn render_diagnostics(
     source: &str,
     file_name: &str,
     diagnostics: &[fossil_base::Diagnostic],
+    documents: &[(String, String)],
 ) -> String {
     let handler = GraphicalReportHandler::new_themed(GraphicalTheme::unicode_nocolor())
         .with_width(100)
@@ -428,7 +448,11 @@ fn render_diagnostics(
         let labels = if d.labels.is_empty() {
             vec![at(d.span, "here")]
         } else {
-            d.labels.iter().map(|l| at(l.span, &l.text)).collect()
+            d.labels
+                .iter()
+                .filter(|l| l.document.is_none())
+                .map(|l| at(l.span, &l.text))
+                .collect()
         };
         let rendered = Rendered {
             message: d.message.clone(),
@@ -437,6 +461,37 @@ fn render_diagnostics(
             help,
         };
         let _ = handler.render_report(&mut out, &rendered);
+        // **The other half of a two-file report.** miette resolves every range
+        // against the one `SourceCode` its report carries, so a label in
+        // `shape.shex` is a SECOND report over that document's text — the same
+        // arrangement `fossil-cli`'s `document_errors` makes with `related()`.
+        // Rendering it against the program's text instead would underline
+        // whatever sits at that byte: inside the right file, and silently.
+        //
+        // A label naming a document `documents` does not carry is dropped. That
+        // is a document the host could not read, which is what the checker saw
+        // too, and one missing label beats a range resolved against the wrong
+        // text.
+        for (name, text) in documents {
+            let in_this: Vec<LabeledSpan> = d
+                .labels
+                .iter()
+                .filter(|l| l.document.as_deref() == Some(name.as_str()))
+                .map(|l| at(l.span, &l.text))
+                .collect();
+            if in_this.is_empty() {
+                continue;
+            }
+            let rendered = Rendered {
+                message: d.message.clone(),
+                src: NamedSource::new(name, text.clone()),
+                labels: in_this,
+                // The `help:` rode on the program's snippet; one repair said
+                // twice is not two repairs.
+                help: None,
+            };
+            let _ = handler.render_report(&mut out, &rendered);
+        }
         out.push('\n');
     }
     out
@@ -660,7 +715,12 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
         }
 
         // ── stage 3: the artefacts ────────────────────────────────────────────
-        let diagnostic = render_diagnostics(&outcome.source, &file_name, &outcome.diagnostics);
+        let diagnostic = render_diagnostics(
+            &outcome.source,
+            &file_name,
+            &outcome.diagnostics,
+            &outcome.documents,
+        );
         let mut compiled = census.render();
 
         // ── stage 4: run, for the thirteen that are meant to produce a graph ──

@@ -1,13 +1,16 @@
-× `total` expects Float, and this is String
+  × `total` expects Float, and this is String
    ╭─[program.fossil:7:16]
+ 6 │     @subject = "https://shop.example/order/{Purchase.id}"
  7 │     total    = Purchase.reference
    ·                ─────────┬────────
    ·                         ╰── `Purchase.reference` is String
    ╰────
+  × `total` expects Float, and this is String
    ╭─[shape.shex:5:3]
+ 4 │ shop:Order {
  5 │   shop:total xsd:float
-   ·   ──────────┬─────────
-   ·             ╰── shop:Order declares shop:total as xsd:float
+   ·   ─────┬────
+   ·        ╰── `Order` declares `total` as Float
+ 6 │ }
    ╰────
-  help: `Purchase.amount` is Float. If `reference` really holds the number,
-        parse.float(Purchase.reference) converts it.
+
