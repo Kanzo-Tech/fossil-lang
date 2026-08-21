@@ -43,24 +43,33 @@
 //! `crate::body::HirBody::properties`, and nothing else. It is not the position
 //! among the CST's `PROPERTY` children, and this module used to assume it was.
 //!
-//! # Subexpression spans, and the two readers already waiting for them
+//! # A span per REFERENCE, and it is not an expression arena
 //!
-//! This paragraph used to say they land «when the Pratt-lowered expression tree
-//! extends `HirExpr`». That condition is met — `HirExpr` carries `Call`,
-//! `Ternary`, `BinOp` and `Interpolation` with sub-expressions in them — and
-//! the table did not follow, so the finest span the compiler can point at is
-//! still a whole right-hand side. Two things want one:
+//! This paragraph used to defer subexpression spans to «when the Pratt-lowered
+//! expression tree extends `HirExpr`». That condition had been met for some
+//! time — `HirExpr` carries `Call`, `Ternary`, `BinOp` and `Interpolation` with
+//! sub-expressions in them — and the table had not followed, so the finest
+//! range the compiler could point at was a whole right-hand side. Two things
+//! wanted one, and both were about a NAME rather than about an arbitrary node:
 //!
-//! - **The caret on a typo.** `name = User.nmae` underlines `User.nmae`, and
-//!   `apps/docs/programs/errors/unknown-field/expected/diagnostic.txt` — the
-//!   hand-written target — underlines `nmae`. That is the last difference
-//!   between the two; the message and both labels agree already.
+//! - **The caret on a typo.** `name = User.nmae` underlined `User.nmae`.
 //! - **`fossil_ide::code_action`'s did-you-mean quick-fix**, which builds a
 //!   `WorkspaceEdit` from `Diagnostic::did_you_mean`'s `(wrong_span,
-//!   replacement)`. Nothing populates that field: every caller of
-//!   `with_did_you_mean` in the workspace is a test, because `wrong_span` is
-//!   the span of `nmae` alone and there is none. The action cannot fire on a
-//!   real diagnostic, and it compiles and passes its own tests.
+//!   replacement)`. NOTHING populated that field — every caller of
+//!   `with_did_you_mean` in the workspace was a test — so the action could not
+//!   fire on a real diagnostic, and it compiled and passed its own tests
+//!   throughout.
+//!
+//! So what landed is [`crate::body::HirBody::ref_spans`] and [`Spans::ref_span`]
+//! — the range of each reference's name token, per property, keyed by
+//! `(binding, name)` — and NOT an id per HIR node. The arena is the general
+//! mechanism and it is not proportionate to two carets: `HirExpr` is a
+//! `Box`-recursive tree walked by `fossil-mir`, `crate::display`,
+//! `crate::check` and hover, and giving it ids rewrites all four. What forces
+//! that decision open is a diagnostic that must blame a node with no name — an
+//! operand of an arithmetic expression, a branch of a ternary. There is none
+//! today, and the fallback is honest when there is: a lookup that finds nothing
+//! yields the right-hand side, which is where every caret was.
 //!
 //! # Offset semantics: mapping-relative
 //!
@@ -91,7 +100,7 @@
 
 use fossil_base::Span;
 
-use crate::body::{ExprId, mapping_cst_node};
+use crate::body::{ExprId, RefSpan, mapping_cst_node};
 use crate::def_map::MappingLoc;
 
 /// Per-mapping real-span side table.
@@ -106,6 +115,10 @@ pub struct Spans<'db> {
     /// [`crate::body::HirBody::properties`].
     #[returns(ref)]
     pub by_expr: Vec<(ExprId, Span)>,
+    /// The references inside each expression, at the same index — an accessor
+    /// over [`crate::body::HirBody::ref_spans`], which carries the reasoning.
+    #[returns(ref)]
+    pub by_ref: Vec<Vec<RefSpan>>,
 }
 
 impl<'db> Spans<'db> {
@@ -118,6 +131,31 @@ impl<'db> Spans<'db> {
             .iter()
             .find(|(id, _)| *id == expr_id)
             .map(|(_, s)| *s)
+    }
+
+    /// The range of the NAME token of a reference written inside `expr_id`.
+    ///
+    /// `binding` is `Some("User")` for `User.nmae` and `None` for a bare name,
+    /// and it is matched: after `Purchase.join(User, …)` one property can write
+    /// both `Purchase.id` and `User.id`, and blaming the wrong one puts the
+    /// caret on the reference that is CORRECT.
+    ///
+    /// `None` when the reference is not there — a caller falls back to
+    /// [`Self::get`], which is the whole right-hand side and is where every
+    /// caret was before this existed.
+    #[must_use]
+    pub fn ref_span(
+        self,
+        db: &'db dyn fossil_base::Db,
+        expr_id: ExprId,
+        binding: Option<&str>,
+        name: &str,
+    ) -> Option<Span> {
+        self.by_ref(db)
+            .get(expr_id.0 as usize)?
+            .iter()
+            .find(|r| r.name == name && r.binding.as_deref() == binding)
+            .map(|r| r.span)
     }
 }
 
@@ -142,13 +180,14 @@ impl<'db> Spans<'db> {
 #[salsa::tracked]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spans<'db> {
-    let by_expr: Vec<(ExprId, Span)> = crate::body::body(db, mapping)
+    let body = crate::body::body(db, mapping);
+    let by_expr: Vec<(ExprId, Span)> = body
         .expr_spans(db)
         .iter()
         .enumerate()
         .map(|(i, span)| (ExprId(u32::try_from(i).unwrap_or(u32::MAX)), *span))
         .collect();
-    Spans::new(db, by_expr)
+    Spans::new(db, by_expr, body.ref_spans(db).clone())
 }
 
 /// The mapping-relative [`Span`] of a mapping's HEADER — `User : ex:Person

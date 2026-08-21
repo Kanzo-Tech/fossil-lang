@@ -5,7 +5,8 @@ expression: "run_db_wired_fixture(\"forward_propagation\", \"typo_with_did_you_m
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: forward_propagation
 Error: `naem` is not a field of `users`
-  at 86..96
-  label 86..96 (MappingRelative): here
+  at 92..96
+  label 92..96 (MappingRelative): here
   label 42..70 (FileAbsolute): `users` has the fields id, name, age
   help: did you mean `name`?
+  quick-fix: replace 92..96 with `name`

@@ -171,6 +171,18 @@ fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
     if let Some(help) = &diag.help {
         let _ = writeln!(out, "  help: {}", redact_paths(help));
     }
+    // The structured pair `fossil_ide::code_action` turns into a one-edit
+    // `WorkspaceEdit`. Recorded separately from the `help:` because they can
+    // disagree and the disagreement is the bug: the prose can name a
+    // replacement while `wrong_span` covers `User.nmae`, and applying THAT
+    // quick-fix deletes the qualifier.
+    if let Some(dym) = &diag.did_you_mean {
+        let _ = writeln!(
+            out,
+            "  quick-fix: replace {}..{} with `{}`",
+            dym.wrong_span.start, dym.wrong_span.end, dym.replacement
+        );
+    }
     if let Some(sugg) = &diag.suggestion_source {
         let _ = writeln!(out, "  suggestion:");
         for line in sugg.lines() {

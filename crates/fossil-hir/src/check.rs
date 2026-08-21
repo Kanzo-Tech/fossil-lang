@@ -1305,12 +1305,12 @@ impl<'db> Expr<'db> {
             return Some(field.ty);
         }
 
-        // Miss → did-you-mean over the declared columns. The relation is named
-        // even though the spelling did not: `name` resolved against the flat
-        // row, and the flat row came from somewhere.
+        // Miss → did-you-mean over the declared columns. `None` for the
+        // binding is the spelling and not the absence of one: a bare name
+        // resolved against the flat row, and `refuse_column` names the
+        // relation anyway.
         let candidates: Vec<&str> = rec.fields(db).iter().map(|f| f.name.as_str()).collect();
-        let relation = self.relation.clone();
-        let eg = self.refuse_column(expr_id, &relation, name, &candidates);
+        let eg = self.refuse_column(expr_id, None, name, &candidates);
         Some(Ty::new(db, TyKind::Error(eg)))
     }
 
@@ -1330,25 +1330,38 @@ impl<'db> Expr<'db> {
     /// harness each did their own. Both still run, and neither has anything to
     /// find now, because [`fossil_base::Diagnostic::help`] carries it.
     ///
-    /// **What is still not carried is `did_you_mean`**, the structured
-    /// `(wrong_span, replacement)` pair `fossil_ide::code_action` builds its
-    /// quick-fix from. Nothing in the workspace populates it — the only callers
-    /// of `with_did_you_mean` are tests — so the editor's did-you-mean action
-    /// cannot fire on a real diagnostic. It needs the span of `nmae` ALONE, and
-    /// [`crate::spans`] records one span per property; see the note there.
+    /// # The caret is on the NAME, and so is the quick-fix
+    ///
+    /// `name = User.nmae` underlines `nmae`, not `User.nmae`, and the same
+    /// range goes into [`fossil_base::Diagnostic::did_you_mean`] — the
+    /// structured `(wrong_span, replacement)` pair `fossil_ide::code_action`
+    /// turns into a one-edit `WorkspaceEdit`. **This is that field's first
+    /// producer.** Every caller of `with_did_you_mean` in the workspace was a
+    /// test, so the editor's did-you-mean action could not fire on a real
+    /// diagnostic, and it passed its own tests throughout.
+    ///
+    /// Both wanted the same thing and neither could have it: the finest span
+    /// the compiler recorded was a whole right-hand side. See
+    /// [`crate::body::HirBody::ref_spans`], and note the fallback — a reference
+    /// the walk did not record leaves the caret where it has always been.
     fn refuse_column(
         &mut self,
         expr_id: ExprId,
-        binding: &str,
+        binding: Option<&str>,
         column: &str,
         candidates: &[&str],
     ) -> ErrorGuaranteed {
         let db = self.db;
-        let span = self.span_of(expr_id);
+        let rhs = self.span_of(expr_id);
+        let span = self.ref_span(expr_id, binding, column).unwrap_or(rhs);
         let frame = self.frame();
+        // The relation is named whether or not the SPELLING named it: a bare
+        // `nmae` resolves against the flat row, and the flat row came from
+        // somewhere.
+        let relation = binding.unwrap_or(self.relation.as_str()).to_string();
         let mut d = Diagnostic::new(
             Severity::Error,
-            format!("`{column}` is not a field of `{binding}`"),
+            format!("`{column}` is not a field of `{relation}`"),
             span,
         )
         .with_label(span, "here", frame);
@@ -1357,17 +1370,36 @@ impl<'db> Expr<'db> {
         // Adults` puts `User` in scope through a pipeline written elsewhere.
         // Its span is FILE-absolute while this diagnostic is mapping-relative,
         // which is the case `SpanLabel`'s own frame exists for.
-        if let Some(at) = def_map(db, self.file).lookup_source_span(db, binding) {
+        if let Some(at) = def_map(db, self.file).lookup_source_span(db, &relation) {
             d = d.with_label(
                 at,
-                format!("`{binding}` has the fields {}", candidates.join(", ")),
+                format!("`{relation}` has the fields {}", candidates.join(", ")),
                 SpanFrame::FileAbsolute,
             );
         }
         if let Some(s) = did_you_mean(column, candidates.iter().copied()) {
             d = d.with_help(format!("did you mean `{s}`?"));
+            // The quick-fix replaces `span` with `s`, so it is only offered
+            // when `span` IS the name. Falling back to the right-hand side
+            // would generate an edit that deletes `User.` along with the typo.
+            if span != rhs {
+                d = d.with_did_you_mean(span, s);
+            }
         }
         self.raise(d)
+    }
+
+    /// [`crate::spans::Spans::ref_span`], for the checker's own frame.
+    ///
+    /// `None` for a pipeline: [`SpanSource::At`] is one span for the whole
+    /// expression by construction — `crate::infer` checks a `where(…)` against
+    /// a span it was handed, not against a per-mapping table — so there is no
+    /// finer range to find and the caller keeps the one it has.
+    fn ref_span(&self, expr_id: ExprId, binding: Option<&str>, name: &str) -> Option<Span> {
+        match self.spans {
+            SpanSource::Table(t) => t.ref_span(self.db, expr_id, binding, name),
+            SpanSource::At(_) => None,
+        }
     }
 
     /// Resolve `Contact.email` against the ROW `Contact` contributes, and never
@@ -1405,7 +1437,7 @@ impl<'db> Expr<'db> {
         // it would suggest a column of the other side of a join, which is a
         // suggestion that does not compile.
         let candidates: Vec<&str> = rec.fields(db).iter().map(|f| f.name.as_str()).collect();
-        let eg = self.refuse_column(expr_id, binding, column, &candidates);
+        let eg = self.refuse_column(expr_id, Some(binding), column, &candidates);
         Some(Ty::new(db, TyKind::Error(eg)))
     }
 

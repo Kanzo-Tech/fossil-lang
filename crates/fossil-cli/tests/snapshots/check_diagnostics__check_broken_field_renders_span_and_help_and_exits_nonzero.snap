@@ -13,10 +13,10 @@ Error:
    ·               ╰── `users` has the fields id, name, age
  3 │ 
    ╰────
-   ╭─[<FIXTURE>/mapping.fossil:6:12]
+   ╭─[<FIXTURE>/mapping.fossil:6:18]
  5 │     @subject = "https://example.org/u/{users.id}"
  6 │     name = users.naem
-   ·            ─────┬────
-   ·                 ╰── here
+   ·                  ──┬─
+   ·                    ╰── here
    ╰────
   help: did you mean `name`?

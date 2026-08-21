@@ -245,6 +245,128 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
     );
 }
 
+/// The caret is the NAME, and the quick-fix replaces exactly it.
+///
+/// The fixture WRITES the typo, and it has to: the table is read off the CST
+/// and keyed by name, so a lookup for a name the source does not contain finds
+/// nothing and falls back to the right-hand side. That fallback is the designed
+/// behaviour and it is what the first draft of this test measured by accident.
+///
+/// Sliced out of the source rather than compared to two numbers — the numbers
+/// are what is under test, and `86..96` versus `92..96` is not a difference
+/// anyone reads.
+///
+/// **Both halves were unreachable before `ref_spans`.** The finest range the
+/// compiler recorded was a whole right-hand side, so the caret covered
+/// `users.name` and `Diagnostic::did_you_mean` — the structured
+/// `(wrong_span, replacement)` pair `fossil_ide::code_action` builds a
+/// `WorkspaceEdit` from — was never populated by anything but a test. A
+/// quick-fix over the wider span would have deleted `users.` along with the
+/// typo, which is why `refuse_column` offers it only when the span IS the name.
+#[test]
+fn the_caret_and_the_quick_fix_cover_the_name_and_nothing_else() {
+    const TYPO: &str = "\
+type { Person } := io.shex(\"personas.shex\")
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{users.id}\"
+    name = users.naem
+";
+    #[salsa::tracked]
+    fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> Option<()> {
+        let m = *def_map(db, file).mappings(db).first()?;
+        let row = users_row(db);
+        let mut cx = build_checker(db, m, Some(row), None);
+        // Property 1 is `name = users.naem`, so `ExprId(1)` is the right-hand
+        // side this reference is written in.
+        let _ = cx.expr.lookup_column(ExprId(1), "users", "naem");
+        Some(())
+    }
+
+    let (db, file) = db_with(TYPO);
+    let _ = shim(&db, file);
+    let raised = shim::accumulated::<Diagnostic>(&db, file);
+    let d = raised
+        .iter()
+        .find(|d| d.message.contains("is not a field of"))
+        .expect("the column is refused");
+
+    // Mapping-relative, so rebase before slicing: `HELLO`'s mapping starts at
+    // the `User :` line.
+    let base = crate::spans::mapping_start_offset(&db, first_mapping(&db, file));
+    let slice = |s: fossil_base::Span| {
+        let start = (base + s.start) as usize;
+        let end = (base + s.end) as usize;
+        &TYPO[start..end]
+    };
+
+    assert_eq!(
+        slice(d.span),
+        "naem",
+        "the caret is on the column, not on `users.naem`"
+    );
+    let dym = d
+        .did_you_mean
+        .as_ref()
+        .expect("a near miss carries a quick-fix");
+    assert_eq!(
+        slice(dym.wrong_span),
+        "naem",
+        "and the edit replaces exactly the typo — a wider span deletes `users.`"
+    );
+    assert_eq!(dym.replacement, "name");
+}
+
+/// One property writing two rows blames the RIGHT one.
+///
+/// `ref_span` matches the BINDING as well as the name, and this is why: after a
+/// join, `"{Purchase.id}-{User.id}"` writes `id` twice, and a table keyed by
+/// name alone answers with the first. Both are spelled `id`, both are real
+/// columns of their own row, and only one of them is the reference being
+/// refused — so the caret would land on the reference that is CORRECT and the
+/// quick-fix would rewrite it.
+///
+/// The `.expect` is the assertion that matters: the fallback to the whole
+/// right-hand side is silent by design, so a lookup that finds the wrong entry
+/// and a lookup that finds none are both invisible from the outside.
+#[test]
+fn two_rows_writing_one_column_name_blame_the_one_that_is_wrong() {
+    const JOINED: &str = "\
+type { Person } := io.shex(\"personas.shex\")
+Purchase := io.csv(\"o.csv\")
+users := io.csv(\"x.csv\")
+User : Person from users
+    @subject = \"https://example.org/u/{Purchase.id}-{users.id}\"
+    name = users.name
+";
+    let (db, file) = db_with(JOINED);
+    let m = first_mapping(&db, file);
+    let table = spans(&db, m);
+    let base = crate::spans::mapping_start_offset(&db, m);
+    let slice = |s: fossil_base::Span| {
+        let start = (base + s.start) as usize;
+        &JOINED[start..(base + s.end) as usize]
+    };
+
+    // Property 0 is the identity, and both `id`s are written inside it.
+    let purchase = table
+        .ref_span(&db, ExprId(0), Some("Purchase"), "id")
+        .expect("`Purchase.id` is written in the identity");
+    let user = table
+        .ref_span(&db, ExprId(0), Some("users"), "id")
+        .expect("and so is `users.id`");
+    assert_ne!(
+        purchase, user,
+        "two references spelled `id` are two spans, not one"
+    );
+    assert_eq!(slice(purchase), "id");
+    assert_eq!(slice(user), "id");
+    assert!(
+        purchase.start < user.start,
+        "and they are in source order: {purchase:?} then {user:?}"
+    );
+}
+
 // ── Qualified column references ────────────────────────────────────────────
 
 /// A relation derived from `User`, so that the two tests below can ask the

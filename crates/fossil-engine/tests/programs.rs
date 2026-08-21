@@ -95,12 +95,15 @@
 //!   does not (see [`render_diagnostics`]), and the context lines around the
 //!   snippet. Both are how the report is DRAWN, and the hand-written file was
 //!   drawn by a hand.
-//! - **`unknown-field` wanted a second label in the SAME file** — the line that
-//!   bound the row, saying which fields it has — and has it. What is left is
-//!   one caret: it underlines `User.nmae` where the target underlines `nmae`,
-//!   and `fossil_hir::spans` records one span per property. That is a second
-//!   capability, smaller than the two-file one and with a second reader already
-//!   waiting on it; the note there names both.
+//! - **`unknown-field` needed a second label in the SAME file and a narrower
+//!   caret**, and is blessed. The label is the line that bound the row, saying
+//!   which fields it has; the caret is on `nmae` rather than on `User.nmae`,
+//!   which took a span per REFERENCE where the compiler recorded one per
+//!   property (`fossil_hir::body::HirBody::ref_spans`). One difference from the
+//!   hand-written target survives on purpose: it underlined
+//!   `io.csv("data/users.csv")` and this underlines the whole
+//!   `User := io.csv("data/users.csv")`, because the label says what `User` has
+//!   and the name is part of the sentence. The block layout is miette's.
 //! - **`wrong-type`, `colliding-name` and `missing-property`** are the real
 //!   ones. `wrong-type`'s message and its program-side label match already; the
 //!   label it cannot draw is `shop:Order declares shop:total as xsd:float`,

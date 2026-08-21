@@ -113,6 +113,58 @@ pub struct HirBody<'db> {
     /// provenance side table is keyed by `(MappingLoc, ExprId)` for the ids
     /// in `0..expr_count`.
     pub expr_count: u32,
+    /// Where each REFERENCE inside a property's right-hand side was written —
+    /// `ref_spans[i]` belongs to `properties[i]`, same index as
+    /// [`Self::expr_spans`].
+    ///
+    /// [`Self::expr_spans`] is the whole right-hand side, and that is the
+    /// coarsest a caret can be: `name = User.nmae` underlines `User.nmae` when
+    /// the mistake is four characters of it. Two things want the narrower
+    /// range and neither could have it — the caret, and
+    /// `fossil_base::Diagnostic::did_you_mean`'s `wrong_span`, which is what
+    /// `fossil_ide::code_action` builds a one-edit quick-fix from.
+    ///
+    /// # It is read off the CST here, not threaded through the lowering
+    ///
+    /// The alternative was an id per HIR node — rust-analyzer's expression
+    /// arena — and it is not proportionate to two carets: `HirExpr` is a
+    /// `Box`-recursive tree walked by `fossil-mir`, `crate::display`,
+    /// `crate::check` and hover, and giving it ids re-writes all four. A
+    /// second walk of the same `PROPERTY` node costs one pass and no
+    /// signatures.
+    ///
+    /// **What that buys is that the two walks do not have to agree
+    /// structurally.** The lookup is by NAME
+    /// ([`crate::spans::Spans::ref_span`]), so a reference this walk records
+    /// and the lowering dropped is an entry nobody asks for, and a reference
+    /// the lowering built and this walk missed degrades to the right-hand
+    /// side's span — which is where every caret was before. Neither is a
+    /// wrong answer; the failure mode of an arena that drifts is a caret on
+    /// the wrong token.
+    ///
+    /// The cost is that a name written TWICE in one property resolves to its
+    /// first occurrence. `total = User.amt + User.amt` blames the same four
+    /// characters twice, and both diagnostics are about the same misspelling,
+    /// so the second caret is redundant rather than wrong.
+    #[returns(ref)]
+    pub ref_spans: Vec<Vec<RefSpan>>,
+}
+
+/// One reference, and where its NAME is written.
+///
+/// The span is the name TOKEN and not the whole reference: `User.nmae` records
+/// `nmae`, because the mistake is the column and `User` is what makes the
+/// message able to name a row. Mapping-relative, like everything read off
+/// [`mapping_cst_node`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct RefSpan {
+    /// `User` in `User.nmae`. `None` for a bare name, which reaches the
+    /// checker as a column of the one row in scope.
+    pub binding: Option<smol_str::SmolStr>,
+    /// `nmae` — what a did-you-mean replaces.
+    pub name: smol_str::SmolStr,
+    /// The name token's range, mapping-relative.
+    pub span: fossil_base::Span,
 }
 
 /// Salsa-storable handle to a per-mapping CST subtree.
@@ -238,6 +290,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
 
     let mut properties: Vec<HirProperty> = Vec::new();
     let mut expr_spans: Vec<fossil_base::Span> = Vec::new();
+    let mut ref_spans: Vec<Vec<RefSpan>> = Vec::new();
     let mut expr_count: u32 = 0;
     // Where the identity was written, among the properties that lowered. Its
     // three obligations — required, exactly one, first — are checked here and
@@ -263,6 +316,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
                         ));
                     }
                     expr_spans.push(rhs_span(&prop_node));
+                    ref_spans.push(reference_spans(&prop_node));
                     properties.push(prop);
                     expr_count = expr_count.saturating_add(1);
                 }
@@ -270,7 +324,78 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
             check_identity(db, &name, &subjects, &body_node);
         }
     }
-    HirBody::new(db, properties, expr_spans, expr_count)
+    HirBody::new(db, properties, expr_spans, expr_count, ref_spans)
+}
+
+/// Every reference written inside one property's right-hand side, with the
+/// range of its NAME token. See [`HirBody::ref_spans`].
+///
+/// A qualified reference is a `POSTFIX_EXPR` with no `(` in it, and the two
+/// halves are NOT siblings: `User.nmae` is a `POSTFIX_EXPR` whose own `IDENT`
+/// is `nmae` and whose child node holds `User`. That is the shape
+/// `crate::lower::dotted_name` walks, and the parenthesis is the same test
+/// `crate::lower::lower_postfix` applies to decide the node is a `ColumnRef` at
+/// all rather than a call's callee — the CST cannot tell them apart otherwise.
+///
+/// So `str.slug(User.name)` records `name` and not `slug`: the outer node has
+/// the `(`, and the argument is a `POSTFIX_EXPR` of its own.
+///
+/// A bare name is a `LITERAL_EXPR` with one `IDENT` and no `POSTFIX_EXPR`
+/// parent — the parent is what makes it the BASE of a member access
+/// (`User` in `User.nmae`) or a callee, and neither is a reference in its own
+/// right.
+fn reference_spans(prop_node: &SyntaxNode) -> Vec<RefSpan> {
+    let own_ident = |n: &SyntaxNode| {
+        n.children_with_tokens()
+            .filter_map(fossil_syntax::SyntaxElement::into_token)
+            .find(|t| t.kind() == SyntaxKind::IDENT)
+    };
+    let at = |t: &fossil_syntax::SyntaxToken| {
+        let range = t.text_range();
+        fossil_base::Span::new(range.start().into(), range.end().into())
+    };
+
+    prop_node
+        .descendants()
+        .filter_map(|n| match n.kind() {
+            SyntaxKind::POSTFIX_EXPR => {
+                if n.children_with_tokens()
+                    .filter_map(fossil_syntax::SyntaxElement::into_token)
+                    .any(|t| t.kind() == SyntaxKind::LPAREN)
+                {
+                    return None;
+                }
+                let name = own_ident(&n)?;
+                let base = own_ident(&n.children().next()?)?;
+                Some(RefSpan {
+                    binding: Some(smol_str::SmolStr::from(base.text())),
+                    name: smol_str::SmolStr::from(name.text()),
+                    span: at(&name),
+                })
+            }
+            SyntaxKind::LITERAL_EXPR => {
+                if n.parent()
+                    .is_some_and(|p| p.kind() == SyntaxKind::POSTFIX_EXPR)
+                {
+                    return None;
+                }
+                let idents: Vec<_> = n
+                    .children_with_tokens()
+                    .filter_map(fossil_syntax::SyntaxElement::into_token)
+                    .filter(|t| t.kind() == SyntaxKind::IDENT)
+                    .collect();
+                let [only] = idents.as_slice() else {
+                    return None;
+                };
+                Some(RefSpan {
+                    binding: None,
+                    name: smol_str::SmolStr::from(only.text()),
+                    span: at(only),
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The span a diagnostic about this property's VALUE should underline.

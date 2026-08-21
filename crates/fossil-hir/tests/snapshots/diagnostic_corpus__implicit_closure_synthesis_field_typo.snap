@@ -5,7 +5,8 @@ expression: "run_db_wired_fixture(\"implicit_closure_synthesis\", \"field_typo\"
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: implicit_closure_synthesis
 Error: `aeg` is not a field of `users`
-  at 85..94
-  label 85..94 (MappingRelative): here
+  at 91..94
+  label 91..94 (MappingRelative): here
   label 42..70 (FileAbsolute): `users` has the fields id, name, age
   help: did you mean `age`?
+  quick-fix: replace 91..94 with `age`

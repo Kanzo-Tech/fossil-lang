@@ -5,6 +5,6 @@ expression: "run_db_wired_fixture(\"did_you_mean\", \"unrelated_no_suggestion\")
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: did_you_mean
 Error: `zzqwxyv` is not a field of `users`
-  at 86..99
-  label 86..99 (MappingRelative): here
+  at 92..99
+  label 92..99 (MappingRelative): here
   label 42..70 (FileAbsolute): `users` has the fields id, name, age
