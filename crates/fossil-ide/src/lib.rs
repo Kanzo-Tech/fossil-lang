@@ -10,7 +10,7 @@
 //! - [`position`]: LSP `(line, character)` → byte offset → `SyntaxToken` /
 //!   `SyntaxNode`. Memoised line-offset table via Salsa-tracked
 //!   [`position::line_offsets`].
-//! - [`hover`]: walks position → enclosing PROPERTY → enclosing MAPPING →
+//! - [`hover()`]: walks position → enclosing PROPERTY → enclosing MAPPING →
 //!   `MappingLoc` (filter-then-nth) → `ExprId` →
 //!   [`fossil_hir::provenance::ty_origin`] → Markdown. Destructures
 //!   `ExprTypeEntry`, which is a named struct and not a tuple.

@@ -38,10 +38,6 @@ fossil-sinks = { path = "../fossil-sinks" }
 fossil-resolver = { path = "../fossil-resolver" }
 thiserror = { workspace = true }
 
-# The native DuckExecutor: fossil-graph owns the verb→SQL (WASM-clean); this
-# crate runs that SQL against bundled DuckDB and converts rows to JSON. serde_json
-# is promoted from a dev-dep to a regular dep for the row→Value conversion.
-fossil-graph = { path = "../fossil-graph" }
 serde_json = { workspace = true }
 
 # The memory probe (`FOSSIL_MEM_PROBE`) — both halves of the write path report

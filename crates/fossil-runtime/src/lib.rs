@@ -22,7 +22,12 @@ compile_error!(
 
 use duckdb::Connection;
 
-pub mod graph_exec;
+// `pub mod graph_exec;` lived here — `DuckRuntime`, the native side of the
+// corpus verbs. It reads a corpus; this crate WRITES one, and the two only
+// shared a `Connection`. It was also the single `fossil-runtime -> fossil-graph`
+// edge, and that edge ran backwards: the write path of the language depending
+// on the read path of the format. It is `fossil-mcp`'s now, which was its only
+// caller and already depended on `fossil-graph`.
 pub mod layout;
 pub mod materialize;
 // `pub mod udf;` lived here — eight native Rust UDF trampolines
@@ -33,7 +38,6 @@ pub mod materialize;
 // The module went with them, and so did the `WasmClass` concept it was the
 // whole reason for.
 
-pub use graph_exec::DuckRuntime;
 pub use materialize::{MaterializeError, install_secret};
 
 /// Execute a batch of SQL statements (semicolon-delimited) on a fresh

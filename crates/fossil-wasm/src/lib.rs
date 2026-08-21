@@ -671,7 +671,7 @@ pub struct CheckPosition {
 /// shape document is to open it, so a `.shex` is parsed as fossil and its
 /// errors are attributed to it — twenty-one rows of `expected DEFINE, found
 /// DEDENT` for a file that is not wrong. In an editor those are squiggles down
-/// the length of the user's ShEx.
+/// the length of the user's `ShEx`.
 ///
 /// It is not fixed here, deliberately. The fix needs a notion of *which open
 /// files are programs*, and `fossil-wasm` does not have one — a handle is a

@@ -12,7 +12,7 @@ use fossil_graph::operations::discovery::{
 };
 use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, Result, dispatch};
-use fossil_runtime::DuckRuntime;
+use fossil_mcp::DuckRuntime;
 use fossil_sinks::manifest::{
     DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
 };
