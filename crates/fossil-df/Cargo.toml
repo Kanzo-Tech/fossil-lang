@@ -68,6 +68,11 @@ datafusion = { version = "54", default-features = false, features = ["parquet"] 
 # in-memory `Vec<u8>` writer in `files.rs` is target-agnostic. Only the *fs*
 # write (`sink.rs`) is native-gated.
 parquet = { version = "58", default-features = false, features = ["arrow"] }
+
+# The JSON array reader (`read_json_source`). `arrow-json` decodes a slice of
+# `serde_json::Value`, so the parse and the decode speak the same type; both are
+# pure Rust, so neither costs the wasm build anything.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 # The stdlib UDFs no engine ships. Pure Rust, no C, wasm-clean — the logic is
 # the function's, not the database's, which is why it can live in the compiler

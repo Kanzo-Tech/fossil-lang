@@ -689,13 +689,7 @@ pub(crate) async fn read_source(
 ) -> datafusion::error::Result<DataFrame> {
     match format {
         SourceFormat::Csv => ctx.read_csv(uri, csv_options()).await,
-        SourceFormat::Json => {
-            ctx.read_json(
-                uri,
-                JsonReadOptions::default().schema_infer_max_records(usize::MAX),
-            )
-            .await
-        }
+        SourceFormat::Json => read_json_source(ctx, uri).await,
         SourceFormat::Parquet => ctx.read_parquet(uri, ParquetReadOptions::default()).await,
         SourceFormat::Provider { name } => {
             let table = provider_table_name(binding);
@@ -707,6 +701,88 @@ pub(crate) async fn read_source(
             })
         }
     }
+}
+
+/// Read `io.json`, whichever of the two JSON shapes the file is.
+///
+/// **DataFusion's `read_json` is newline-delimited only**, and `sightings`
+/// failed on it with `Json error: Not valid JSON: EOF while parsing a list` —
+/// the fixture is an array, which is what a `.json` file ordinarily holds.
+/// Letting the engine's reader decide what `io.json` MEANS would be the
+/// accident redefining the design, so the constructor reads both and the first
+/// non-whitespace byte says which.
+///
+/// **An array is not a streaming format, and that is the format's property and
+/// not this reader's.** You cannot know where record N ends without parsing
+/// from the start, so any array reader is bounded by the file. The docblock on
+/// [`read_source`] says object-store formats are never pre-materialised; this
+/// is the exception and it is forced. NDJSON is the streaming spelling of the
+/// same data and takes the streaming path below, unchanged.
+async fn read_json_source(ctx: &SessionContext, uri: &str) -> datafusion::error::Result<DataFrame> {
+    use datafusion::arrow::json::ReaderBuilder;
+    use datafusion::arrow::json::reader::infer_json_schema_from_iterator;
+
+    let bytes = fetch_bytes(ctx, uri).await?;
+    // The sniff, and it is one byte. A JSON array starts with `[`; NDJSON's
+    // first record is an object, a number or a string.
+    if bytes.iter().find(|b| !b.is_ascii_whitespace()) != Some(&b'[') {
+        return ctx
+            .read_json(
+                uri,
+                JsonReadOptions::default().schema_infer_max_records(usize::MAX),
+            )
+            .await;
+    }
+
+    let values: Vec<serde_json::Value> = serde_json::from_slice(&bytes).map_err(|e| {
+        DataFusionError::Execution(format!("io.json source `{uri}` is not valid JSON: {e}"))
+    })?;
+    if values.is_empty() {
+        return Err(DataFusionError::Execution(format!(
+            "io.json source `{uri}` is an empty array, so there is no schema to infer"
+        )));
+    }
+    // Every record, like the CSV path's `schema_infer_max_records(usize::MAX)`:
+    // a column whose early values look numeric and later turn stringy is
+    // mis-typed by a sample, and the file is already in memory.
+    let schema = Arc::new(
+        infer_json_schema_from_iterator(values.iter().map(|v| Ok(v.clone())))
+            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+    );
+    let mut decoder = ReaderBuilder::new(Arc::clone(&schema))
+        .build_decoder()
+        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+    decoder
+        .serialize(&values)
+        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+    let batch = decoder
+        .flush()
+        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
+        .ok_or_else(|| {
+            DataFusionError::Execution(format!("io.json source `{uri}` decoded to no rows"))
+        })?;
+    ctx.read_batch(batch)
+}
+
+/// The bytes of `uri`, through the `ObjectStore` the host registered.
+///
+/// No new seam: this is the same store [`read_source`]'s streaming paths go
+/// through, so a remote `uri` a host signed is reachable here for the same
+/// reason it is there.
+async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Result<Vec<u8>> {
+    let url = datafusion::datasource::listing::ListingTableUrl::parse(uri)?;
+    let store = ctx.runtime_env().object_store(&url)?;
+    let data = store
+        .get_opts(
+            url.prefix(),
+            datafusion::object_store::GetOptions::default(),
+        )
+        .await
+        .map_err(|e| DataFusionError::Execution(format!("read `{uri}`: {e}")))?
+        .bytes()
+        .await
+        .map_err(|e| DataFusionError::Execution(format!("read `{uri}`: {e}")))?;
+    Ok(data.to_vec())
 }
 
 /// CSV read options matching the writer's whole-file schema inference (DuckDB

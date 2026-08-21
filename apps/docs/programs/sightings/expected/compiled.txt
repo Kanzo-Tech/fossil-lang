@@ -1,0 +1,22 @@
+── type bindings ──
+Station ← sightings.shex = https://birds.example/voc#Station
+Sighting ← sightings.shex = https://birds.example/voc#Sighting
+
+── source bindings ──
+Site := io.csv(data/stations.csv)
+Reading := io.json(data/sightings.json)
+
+── mappings ──
+Stations: 3 written, 3 lowered
+    @subject
+    name
+    elevation
+Sightings: 3 written, 3 lowered
+    @subject
+    species
+    count
+
+── run ──
+vertex Station (https://birds.example/voc#Station) × 3 — name, elevation
+vertex Sighting (https://birds.example/voc#Sighting) × 4 — species, count
+NO EDGE TYPE was written

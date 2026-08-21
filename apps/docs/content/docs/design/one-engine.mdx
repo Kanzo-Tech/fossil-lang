@@ -55,13 +55,25 @@ piece is called good. The budget still reaches the DataFusion half of the run
 (`bounded_context`), which is where the joins and the aggregation are; what is
 uncapped is the post-pass.
 
-## The one measured gap
+## The one measured gap, and it is closed
 
-**DataFusion's `read_json` is NDJSON only; DuckDB's reads arrays.** It is the
-`sightings` conformance program, and it fails today for exactly this reason. So
-this is not a detail discovered late: either the program declares NDJSON, or
-something supplies an array-shaped JSON reader. It is named here so the choice is
-made deliberately rather than by whichever error appears first.
+**DataFusion's `read_json` is NDJSON only; DuckDB's reads arrays.** It was the
+`sightings` conformance program, failing with `Json error: Not valid JSON: EOF
+while parsing a list`, and the choice it forced was named here before it was
+made: either the program declares NDJSON, or something supplies an array reader.
+
+The program does not declare NDJSON. Letting the engine's reader decide what
+`io.json` MEANS is the accident redefining the design — a `.json` file
+ordinarily holds an array, and DuckDB, which still reads the corpus on the other
+side, reads one. So `read_json_source` sniffs the first non-whitespace byte and
+reads both shapes, and `a_json_array_and_ndjson_read_the_same` holds the two
+against each other.
+
+**An array materialises, and that is the format's property and not the
+reader's.** You cannot find the end of record N without parsing from the start,
+so any array reader is bounded by the file — which is why NDJSON exists and why
+it keeps the streaming path untouched. It is the one exception to
+`read_source`'s «never pre-materialised», and it is forced rather than chosen.
 
 ## What is NOT affected, and it is the half that looks like it should be
 
