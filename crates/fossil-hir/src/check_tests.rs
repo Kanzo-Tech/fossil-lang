@@ -117,7 +117,6 @@ fn build_checker<'db>(
         renames: Vec::new(),
         spans: spans(db, mapping),
         entries: Vec::new(),
-        next_inference: 0,
         first_error: None,
         iri_position: false,
     }

@@ -7,8 +7,8 @@
 //! # What lives here
 //!
 //! - The [`Ty`] ADT (`Primitive`, `Seq`, `Record`, `Iri`, `IriTemplate`,
-//!   `Error`, `Unknown`). `Optional` and `Fn` were
-//!   two more and neither was ever constructed outside a test.
+//!   `Error`). `Optional`, `Fn` and `Unknown` were three more, and none of them
+//!   was ever constructed by anything a program could reach.
 //! - [`DefMap`] = prefix table + source bindings + mapping list, populated by
 //!   the [`def_map`] Salsa query.
 //! - Interned [`MappingLoc`]/[`SourceLoc`] location IDs (the rust-analyzer
@@ -112,4 +112,4 @@ pub use check::{
 pub use didyoumean::did_you_mean;
 pub use spans::Spans;
 pub use ty::display::render_ty_kind;
-pub use ty::{FnSig, InferenceId, Record, RecordField, ShapeId, Ty, TyKind};
+pub use ty::{Record, RecordField, ShapeId, Ty, TyKind};

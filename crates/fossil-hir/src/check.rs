@@ -151,7 +151,6 @@ pub fn typecheck_mapping<'db>(
         renames,
         spans: spans_table,
         entries: Vec::new(),
-        next_inference: 0,
         first_error: None,
         iri_position: false,
     };
@@ -356,7 +355,6 @@ pub struct Checker<'db> {
     pub(crate) renames: Vec<(SmolStr, SmolStr)>,
     pub(crate) spans: Spans<'db>,
     pub(crate) entries: Vec<ExprTypeEntry<'db>>,
-    pub(crate) next_inference: u32,
     /// First type error encountered (if any) — propagated as the mapping's
     /// `ErrorGuaranteed`. Every error also pushes a diagnostic, so any
     /// `Some(eg)` here implies ≥1 emitted `Diagnostic`.
@@ -407,14 +405,6 @@ impl<'db> Checker<'db> {
         if self.first_error.is_none() {
             self.first_error = Some(eg);
         }
-    }
-
-    /// Mint a fresh inference id. Only the closure hook uses this; the checker
-    /// is otherwise fully directional over the leaf `HirExpr` forms.
-    const fn fresh_inference(&mut self) -> crate::ty::InferenceId {
-        let id = crate::ty::InferenceId(self.next_inference);
-        self.next_inference += 1;
-        id
     }
 }
 
@@ -699,7 +689,7 @@ impl<'db> Checker<'db> {
             // T-Unary: `-` keeps the operand's numeric type, `not` is Bool to
             // Bool. Neither widens — see [`Self::synth_unary`].
             HirExpr::UnaryOp { op, operand } => (
-                self.synth_unary(expr_id, *op, operand),
+                self.synth_unary(expr_id, *op, operand)?,
                 ProvenanceKind::BinaryOp {
                     op: SmolStr::new_static(un_op_text(*op)),
                 },
@@ -707,7 +697,7 @@ impl<'db> Checker<'db> {
             // T-Comp / T-And: both sides must agree, and the result is Bool
             // whether or not the operands could be typed.
             HirExpr::BinOp { op, lhs, rhs } => (
-                self.synth_binop(expr_id, *op, lhs, rhs),
+                self.synth_binop(expr_id, *op, lhs, rhs)?,
                 ProvenanceKind::BinaryOp {
                     op: SmolStr::new_static(op_text(*op)),
                 },
@@ -717,7 +707,7 @@ impl<'db> Checker<'db> {
                 then,
                 otherwise,
             } => (
-                self.synth_ternary(expr_id, cond, then, otherwise),
+                self.synth_ternary(expr_id, cond, then, otherwise)?,
                 ProvenanceKind::BinaryOp {
                     op: SmolStr::new_static("?:"),
                 },
@@ -1259,7 +1249,13 @@ impl<'db> Checker<'db> {
     /// `3.5` there. Typing it `Float` picks the answer that loses nothing, and
     /// `fossil_df::render` casts the left operand so the engine agrees with the
     /// type instead of the type flattering the engine.
-    fn synth_binop(&mut self, expr_id: ExprId, op: BinOp, lhs: &HirExpr, rhs: &HirExpr) -> Ty<'db> {
+    fn synth_binop(
+        &mut self,
+        expr_id: ExprId,
+        op: BinOp,
+        lhs: &HirExpr,
+        rhs: &HirExpr,
+    ) -> Option<Ty<'db>> {
         let db = self.db;
         let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
         let l = self.synth_ty(expr_id, lhs).map(|(t, _)| t);
@@ -1267,7 +1263,7 @@ impl<'db> Checker<'db> {
 
         for t in [l, r].into_iter().flatten() {
             if let TyKind::Error(_) = t.kind(db) {
-                return t;
+                return Some(t);
             }
         }
 
@@ -1287,7 +1283,7 @@ impl<'db> Checker<'db> {
                             ),
                         );
                         self.record_error(eg);
-                        return Ty::new(db, TyKind::Error(eg));
+                        return Some(Ty::new(db, TyKind::Error(eg)));
                     }
                 }
             }
@@ -1311,7 +1307,7 @@ impl<'db> Checker<'db> {
                         ),
                     );
                     self.record_error(eg);
-                    return Ty::new(db, TyKind::Error(eg));
+                    return Some(Ty::new(db, TyKind::Error(eg)));
                 }
             }
             // T-Arith. Unlike the two above, the RESULT is the operands' and not
@@ -1321,7 +1317,7 @@ impl<'db> Checker<'db> {
                 return self.synth_arith(expr_id, op, l, r);
             }
         }
-        bool_ty
+        Some(bool_ty)
     }
 
     /// The numeric half of [`Self::synth_binop`]. See its docs for the two
@@ -1332,7 +1328,7 @@ impl<'db> Checker<'db> {
         op: BinOp,
         l: Option<Ty<'db>>,
         r: Option<Ty<'db>>,
-    ) -> Ty<'db> {
+    ) -> Option<Ty<'db>> {
         let db = self.db;
         let float_ty = Ty::new(db, TyKind::Primitive(Primitive::Float));
 
@@ -1382,28 +1378,27 @@ impl<'db> Checker<'db> {
             }
         }
         if let Some(eg) = poisoned {
-            return Ty::new(db, TyKind::Error(eg));
+            return Some(Ty::new(db, TyKind::Error(eg)));
         }
 
         // `/` is Float whatever it is given — the one rule that is the
         // operator's rather than the operands'. See `synth_binop`.
         if matches!(op, BinOp::Div) {
-            return float_ty;
+            return Some(float_ty);
         }
         match widest {
             // Both operands typed: the wider of the two, which is S-IntFlt
             // applied to a result.
-            Some(true) => float_ty,
-            Some(false) => Ty::new(db, TyKind::Primitive(Primitive::Integer)),
-            // One side has no type at all, so neither has the result. `Unknown`
-            // and not an invented `Integer`: a guess here becomes an
-            // `xsd:integer` column in the corpus, and being wrong about that is
-            // worse than saying nothing — which the shape check catches on its
-            // own, against the shape, which is the thing that actually knows.
-            None => {
-                let id = self.fresh_inference();
-                Ty::new(db, TyKind::Unknown(id))
-            }
+            Some(true) => Some(float_ty),
+            Some(false) => Some(Ty::new(db, TyKind::Primitive(Primitive::Integer))),
+            // One side has no type at all, so neither has the result — and
+            // «no type» is `None`, which is what every caller of `synth_ty`
+            // already reads. It was `TyKind::Unknown(fresh_inference())`, and
+            // that variant was the OPPOSITE of what this comment asked for:
+            // `subtypes` has no arm for it, so it fell to `_ => false` and
+            // refused every check it reached instead of standing aside for the
+            // shape to answer.
+            None => None,
         }
     }
 
@@ -1412,22 +1407,19 @@ impl<'db> Checker<'db> {
     /// Neither widens. `-` on an `Integer` is an `Integer` — the negation of a
     /// whole number is a whole number — and promoting it to `Float` would make
     /// `-Row.n` a different type from `Row.n` for no reason the author could see.
-    fn synth_unary(&mut self, expr_id: ExprId, op: UnOp, operand: &HirExpr) -> Ty<'db> {
+    fn synth_unary(&mut self, expr_id: ExprId, op: UnOp, operand: &HirExpr) -> Option<Ty<'db>> {
         let db = self.db;
         let Some(ty) = self.synth_ty(expr_id, operand).map(|(t, _)| t) else {
             // Untypeable operand: the operator still fixes what it CAN. `not`
             // says Bool whatever it is given; `-` cannot, because its result is
             // its operand's type.
             return match op {
-                UnOp::Not => Ty::new(db, TyKind::Primitive(Primitive::Bool)),
-                UnOp::Neg => {
-                    let id = self.fresh_inference();
-                    Ty::new(db, TyKind::Unknown(id))
-                }
+                UnOp::Not => Some(Ty::new(db, TyKind::Primitive(Primitive::Bool))),
+                UnOp::Neg => None,
             };
         };
         if let TyKind::Error(_) = ty.kind(db) {
-            return ty;
+            return Some(ty);
         }
         let ok = match op {
             UnOp::Not => matches!(ty.kind(db), TyKind::Primitive(Primitive::Bool)),
@@ -1451,9 +1443,9 @@ impl<'db> Checker<'db> {
                 ),
             );
             self.record_error(eg);
-            return Ty::new(db, TyKind::Error(eg));
+            return Some(Ty::new(db, TyKind::Error(eg)));
         }
-        ty
+        Some(ty)
     }
 
     /// T-Tern (`type-system.md` §4.8): the condition is `Bool`, both branches
@@ -1471,13 +1463,13 @@ impl<'db> Checker<'db> {
         cond: &HirExpr,
         then: &HirExpr,
         otherwise: &HirExpr,
-    ) -> Ty<'db> {
+    ) -> Option<Ty<'db>> {
         let db = self.db;
         let bool_ty = Ty::new(db, TyKind::Primitive(Primitive::Bool));
 
         if let Some((c, _)) = self.synth_ty(expr_id, cond) {
             if let TyKind::Error(_) = c.kind(db) {
-                return c;
+                return Some(c);
             }
             if !subtypes(db, c, bool_ty) {
                 let eg = delay_span_bug(
@@ -1489,7 +1481,7 @@ impl<'db> Checker<'db> {
                     ),
                 );
                 self.record_error(eg);
-                return Ty::new(db, TyKind::Error(eg));
+                return Some(Ty::new(db, TyKind::Error(eg)));
             }
         }
 
@@ -1497,7 +1489,7 @@ impl<'db> Checker<'db> {
         let o = self.synth_ty(expr_id, otherwise).map(|(t, _)| t);
         for ty in [t, o].into_iter().flatten() {
             if let TyKind::Error(_) = ty.kind(db) {
-                return ty;
+                return Some(ty);
             }
         }
 
@@ -1506,9 +1498,9 @@ impl<'db> Checker<'db> {
                 // Same type, or one is a subtype of the other (Integer widens
                 // into Float; an interpolation widens into an IRI).
                 if subtypes(db, t, o) {
-                    o
+                    Some(o)
                 } else if subtypes(db, o, t) {
-                    t
+                    Some(t)
                 } else {
                     let eg = delay_span_bug(
                         db,
@@ -1520,13 +1512,13 @@ impl<'db> Checker<'db> {
                         ),
                     );
                     self.record_error(eg);
-                    Ty::new(db, TyKind::Error(eg))
+                    Some(Ty::new(db, TyKind::Error(eg)))
                 }
             }
             // One branch typed and the other not: the typed one is the best
             // evidence available, and it is evidence, not a guess.
-            (Some(t), None) | (None, Some(t)) => t,
-            (None, None) => Ty::new(db, TyKind::Unknown(self.fresh_inference())),
+            (Some(t), None) | (None, Some(t)) => Some(t),
+            (None, None) => None,
         }
     }
 

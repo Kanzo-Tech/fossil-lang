@@ -17,8 +17,8 @@ use crate::ty::TyKind;
 
 /// Render a [`TyKind`] as a Fossil-style type string.
 ///
-/// `Unknown(InferenceId)` renders as `"?"` (internal inference state must never
-/// reach the surface). `Error` renders as `"Error"`.
+/// `Error` renders as `"Error"`. There is no checker-state kind to hide: «no
+/// type» is `None` before it ever reaches a renderer.
 #[must_use]
 pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> String {
     match kind {
@@ -28,7 +28,6 @@ pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> 
         TyKind::Seq(inner) => format!("Seq<{}>", render_ty_kind(db, inner.kind(db))),
         TyKind::Record(_) => "Record { ... }".to_string(),
         TyKind::Error(_) => "Error".to_string(),
-        TyKind::Unknown(_) => "?".to_string(),
     }
 }
 
@@ -58,12 +57,5 @@ mod tests {
         let seq = Ty::new(&db, TyKind::Seq(int));
         let seq_seq = Ty::new(&db, TyKind::Seq(seq));
         assert_eq!(render_ty_kind(&db, seq_seq.kind(&db)), "Seq<Seq<Integer>>");
-    }
-
-    #[test]
-    fn unknown_never_leaks_to_surface() {
-        let db = db();
-        let s = render_ty_kind(&db, &TyKind::Unknown(crate::ty::InferenceId(7)));
-        assert_eq!(s, "?", "internal inference state must render as ?");
     }
 }

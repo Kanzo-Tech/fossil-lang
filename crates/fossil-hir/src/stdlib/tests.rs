@@ -1,12 +1,10 @@
 //! The catalogue's own guards: the row set, the receiver, and the templates.
 
 use super::*;
-use std::sync::Arc;
 
-fn db() -> fossil_base::FossilDb {
-    let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
-    fossil_base::FossilDb::new(system)
-}
+// A `db()` helper stood here, and its only user was the test that materialised
+// an interned `FnSig`. The catalogue's own guards need no database: a row is a
+// `'static` description, which is the whole point of `SigSpec` being `'db`-free.
 
 /// The registry answers, and says no when it should.
 #[test]
@@ -14,22 +12,6 @@ fn the_registry_answers_and_refuses() {
     let r = FunctionRegistry::stdlib_default();
     assert!(r.lookup("io.csv").is_some());
     assert!(r.lookup("nonexistent").is_none());
-}
-
-#[test]
-fn signature_materializes_real_fn_sig() {
-    let db = db();
-    let r = FunctionRegistry::stdlib_default();
-    let trim = r.lookup("str.trim").expect("str.trim present");
-    let sig = trim.signature(&db);
-    // str.trim :: String -> String.
-    assert_eq!(sig.params(&db).len(), 1);
-    let want = crate::ty::Ty::new(
-        &db,
-        crate::ty::TyKind::Primitive(fossil_graph_schema::Primitive::String),
-    );
-    assert_eq!(sig.return_ty(&db), want);
-    assert_eq!(sig.params(&db)[0], want);
 }
 
 // ── The receiver ───────────────────────────────────────────────────────────

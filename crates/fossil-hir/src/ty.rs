@@ -1,21 +1,22 @@
 //! Type ADT.
 //!
-//! The surface kinds + 1 internal `Unknown(InferenceId)`
-//! kind for bidirectional checker state. The
-//! internal kind is never exposed in surface diagnostics; it appears only
-//! during checking-in-flight.
+//! Every kind here is a kind a PROGRAM can have. There is no
+//! checker-state kind: `Unknown(InferenceId)` was one, and «no type» has a
+//! spelling already — `synth_ty` returns `Option<Ty>` and every caller reads
+//! it. Worse, `Unknown` did the opposite of what it was for: `subtypes` has no
+//! arm for it, so it fell through to `_ => false` and REFUSED every check it
+//! reached, where its own comment asked it to stand aside and let the shape
+//! answer.
 //!
 //! There is no count to quote here, and there used to be: this said «all 11
-//! kinds», and two of them — `Optional` and `Fn` — were constructed by nothing
-//! but the test that enumerated them. Both are gone. `grammar.bnf` has no `T?`
+//! kinds», and three of them — `Optional`, `Fn` and `Unknown` — were
+//! constructed by nothing that a program could reach. `grammar.bnf` has no `T?`
 //! and declares `FunctionDecl` absent (the user declares no functions), so
-//! neither had a way into the language.
+//! neither of the first two had a way into the language.
 //!
 //! Interning strategy:
 //! - `Ty<'db>` itself is `#[salsa::interned]` so structural equality → pointer eq.
 //! - `Record<'db>` is separately interned (many distinct field sets).
-//! - `FnSig<'db>` is separately interned. It is the STDLIB's signature type
-//!   (`crate::stdlib::SigSpec::to_fn_sig`), not a `TyKind` any more.
 //! - All other kinds inline in `TyKind` directly.
 //!
 //! `'db` lifetime per Salsa 0.20+.
@@ -61,11 +62,6 @@ pub enum TyKind<'db> {
     /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
     /// promotion of a local taint-wrapper newtype).
     Error(ErrorGuaranteed),
-    /// Internal inference-state placeholder. Used by bidirectional checker
-    /// during synthesis-mode descent; never exposed in surface diagnostics.
-    /// Phase 3 fills this in with real inference logic. Phase 2 ships the
-    /// variant + cheap newtype.
-    Unknown(InferenceId),
 }
 
 /// One named field of a [`Record`].
@@ -83,19 +79,15 @@ pub struct Record<'db> {
     pub fields: Vec<RecordField<'db>>,
 }
 
-/// Function signature — `(τ₁, ..., τₙ) → τ_r`. Interned so many distinct
-/// signatures (from the stdlib catalog) share storage.
-///
-/// NOT a [`TyKind`]. `TyKind::Fn(FnSig)` existed and nothing constructed it:
-/// the checker reads `crate::stdlib`'s `SigSpec` directly in `synth_call` and
-/// never needs a function-typed VALUE, because the language has no way to write
-/// one down (`grammar.bnf`: no `FunctionDecl`, no `LambdaExpr`).
-#[salsa::interned(debug)]
-pub struct FnSig<'db> {
-    #[returns(ref)]
-    pub params: Vec<Ty<'db>>,
-    pub return_ty: Ty<'db>,
-}
+// `FnSig` stood here, interned, and it was the SECOND half of the same finding
+// that removed `TyKind::Fn`. The checker reads `crate::stdlib::SigSpec`
+// directly — `param.ty.to_ty(db)` in `synth_call` — so a materialised signature
+// was a bridge with nobody on it: `RegistryEntry::signature` and
+// `SigSpec::to_fn_sig` had one caller between them in the whole tree, and it
+// was the test asserting that the bridge worked.
+//
+// A language with no `FunctionDecl` and no `LambdaExpr` cannot write a
+// function-typed VALUE down, so nothing downstream can need one.
 
 /// Shape identifier — newtype around a raw `u32`. Minted per-mapping by
 /// [`crate::shapes::resolve_target_shape`] from the mapping's index, since a
@@ -112,12 +104,6 @@ impl ShapeId {
         Self(raw)
     }
 }
-
-/// Inference variable id — used internally by the bidirectional checker for
-/// not-yet-resolved synthesis positions. Fresh per check run; never stable
-/// across query invocations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub struct InferenceId(pub u32);
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -151,7 +137,6 @@ mod tests {
         let _: TyKind<'_> = TyKind::IriTemplate;
         // Reference the helper so the dead-code lint doesn't flag it.
         let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
-        let _: TyKind<'_> = TyKind::Unknown(InferenceId(0));
     }
 
     #[test]
@@ -205,14 +190,5 @@ mod tests {
             ],
         );
         assert_eq!(r1, r2); // structural eq → same interned id
-    }
-
-    #[test]
-    fn fnsig_interning_dedupes_equal_signatures() {
-        let db = db();
-        let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-        let sig_a = FnSig::new(&db, vec![int_ty, int_ty], int_ty);
-        let sig_b = FnSig::new(&db, vec![int_ty, int_ty], int_ty);
-        assert_eq!(sig_a, sig_b);
     }
 }

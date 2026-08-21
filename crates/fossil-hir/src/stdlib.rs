@@ -69,7 +69,6 @@ use std::sync::LazyLock;
 use fossil_graph_schema::Primitive;
 use smol_str::SmolStr;
 
-use crate::FnSig;
 use crate::ty::{Ty, TyKind};
 
 /// The process-wide catalog.
@@ -185,32 +184,18 @@ pub struct RegistryEntry {
     /// on, and it is why the type path `str.lower(x)` and the value path
     /// `x.lower()` reach one row.
     pub member: SmolStr,
-    /// `'db`-free signature description. Materialize the real interned
-    /// `FnSig<'db>` with [`Self::signature`].
+    /// `'db`-free signature description. The checker reads it directly —
+    /// `param.ty.to_ty(db)` — and there is no interned form of it.
     pub sig: SigSpec,
     /// How this row compiles: a scalar SQL expression, or an operator.
     pub lowering: LoweringKind,
-}
-
-impl RegistryEntry {
-    /// Materialize the interned `fossil_hir::FnSig<'db>` for this entry against
-    /// the caller's database.
-    ///
-    /// This is the bridge between the `'static`-friendly [`SigSpec`] held in the
-    /// catalog and the `#[salsa::interned]` `FnSig<'db>` the type checker and
-    /// codegen consume. It constructs each [`Ty<'db>`] directly via the
-    /// fossil-hir constructor (no string-signature parser).
-    #[must_use]
-    pub fn signature<'db>(&self, db: &'db dyn salsa::Database) -> FnSig<'db> {
-        self.sig.to_fn_sig(db)
-    }
 }
 
 /// A `'db`-free description of a function signature: the param scalar types and
 /// the return scalar type.
 ///
 /// Stored in the static registry so a [`RegistryEntry`] needs no `'db` lifetime.
-/// [`Self::to_fn_sig`] interns it into a real `FnSig<'db>` on demand.
+/// A parameter's type is resolved one at a time, where it is checked.
 ///
 /// v0.1 limitation: the surface syntax for schema-directed parsing (`parse.json`
 /// and the `seq/` higher-order arguments) does not exist yet, so signatures here
@@ -264,14 +249,6 @@ impl SigSpec {
     #[must_use]
     pub fn position_of(&self, name: &str) -> Option<usize> {
         self.params.iter().position(|p| p.name == name)
-    }
-
-    /// Intern this spec into a real `fossil_hir::FnSig<'db>`.
-    #[must_use]
-    pub fn to_fn_sig<'db>(&self, db: &'db dyn salsa::Database) -> FnSig<'db> {
-        let params: Vec<Ty<'db>> = self.params.iter().map(|p| p.ty.to_ty(db)).collect();
-        let ret = self.ret.to_ty(db);
-        FnSig::new(db, params, ret)
     }
 }
 

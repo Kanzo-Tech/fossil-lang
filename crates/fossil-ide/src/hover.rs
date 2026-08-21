@@ -426,7 +426,7 @@ User : Person from users
 
     use fossil_graph_schema::Primitive;
     use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};
-    use fossil_hir::ty::{InferenceId, Record, RecordField, Ty, TyKind};
+    use fossil_hir::ty::{Record, RecordField, Ty, TyKind};
 
     fn bare_db() -> fossil_base::FossilDb {
         let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
@@ -586,12 +586,14 @@ User : Person from users
             TyKind::Record(rec),
             TyKind::Iri,
             TyKind::IriTemplate,
-            TyKind::Unknown(InferenceId(7)),
         ];
         // Every variant a caller can construct. There is no count to quote and
-        // there used to be («10 surface-constructible + Error = 11»): two of
-        // the eleven, `Optional` and `Fn`, were built by this list and by
-        // nothing else in the workspace, and both are gone.
+        // there used to be («10 surface-constructible + Error = 11»): three of
+        // the eleven — `Optional`, `Fn` and `Unknown` — were built by this list
+        // and by nothing else in the workspace, and all three are gone. The
+        // third is why this assertion is still worth making: it was CHECKER
+        // state given a type, and this test existed to keep it off the screen.
+        // A kind that cannot be constructed cannot leak.
         for kind in &variants {
             let s = render_ty_kind(&db, kind);
             assert!(
@@ -599,7 +601,5 @@ User : Person from users
                 "render_ty_kind leaked internal state for {kind:?}: {s:?}",
             );
         }
-        // The Unknown variant specifically normalises to "?".
-        assert_eq!(render_ty_kind(&db, &TyKind::Unknown(InferenceId(7))), "?");
     }
 }
