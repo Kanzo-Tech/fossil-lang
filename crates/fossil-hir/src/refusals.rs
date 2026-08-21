@@ -22,7 +22,7 @@
 //!
 //! # One sentence per refusal, not three
 //!
-//! [`unknown_constructor`] replaces three spellings of one message that had
+//! `unknown_constructor` replaces three spellings of one message that had
 //! drifted apart in three crates:
 //!
 //! ```text

@@ -6,7 +6,7 @@
 //! diagnostic. The actions:
 //!
 //! 1. **did-you-mean** — a diagnostic carrying the structured
-//!    [`fossil_base::DidYouMean`] candidate (the `strsim` Levenshtein nearest,
+//!    `fossil_base::DidYouMean` candidate (the `strsim` Levenshtein nearest,
 //!    surfaced STRUCTURALLY rather than in the message text) yields a `QuickFix`
 //!    whose `WorkspaceEdit` replaces the typo's `wrong_span` with the
 //!    `replacement`. Read from the typed field — NOT parsed from the message
@@ -77,7 +77,7 @@ pub fn code_actions(
 }
 
 /// Action 1: did-you-mean rename quick-fix. Reads the structured
-/// [`fossil_base::DidYouMean`] candidate and replaces its `wrong_span` with the
+/// `fossil_base::DidYouMean` candidate and replaces its `wrong_span` with the
 /// `replacement` — no message parsing.
 fn did_you_mean_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Option<CodeAction> {
     let dym = diag.did_you_mean.as_ref()?;

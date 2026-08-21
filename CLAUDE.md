@@ -32,6 +32,8 @@ cargo check --workspace --all-targets                            # native, all c
 cargo test --workspace --no-fail-fast                            # native tests, every crate
 cargo fmt --all -- --check                                       # format check
 cargo clippy --workspace --all-targets -- -D warnings            # lint check
+RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" \
+  cargo doc --workspace --no-deps                                # citations rustdoc can check
 cargo deny check                                                 # advisories + licenses + bans
 cargo xtask wasm-check                                           # WASM gate; xtask derives the crate set
 ```

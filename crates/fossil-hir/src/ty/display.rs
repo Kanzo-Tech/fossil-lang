@@ -1,7 +1,7 @@
 //! `TyKind` pretty-printing — the single source of truth for rendering Fossil
 //! types as user-facing strings.
 //!
-//! [`render_ty_kind`] lives here, and not in `fossil-ide::hover` where it was
+//! `render_ty_kind` lives here, and not in `fossil-ide::hover` where it was
 //! written, because two layers render the same types and one of them is below
 //! the IDE. It is consumed by:
 //!   - [`crate::check::compatible`]'s mismatch diagnostic messages,

@@ -23,36 +23,36 @@
 //!
 //! ## The receiver is the field that ends dispatch-by-string
 //!
-//! [`RegistryEntry::name`] used to be the whole of the key — the string
+//! `RegistryEntry::name` used to be the whole of the key — the string
 //! `"clean.trim"` — and dispatch by RECEIVER TYPE exists to replace exactly
 //! that. A row now says what it hangs off
-//! ([`Receiver`]) and what it is called after the dot
-//! ([`RegistryEntry::member`]), and both are derived in ONE place,
-//! [`split_receiver`], from the dotted name. They are not constructor
+//! (`Receiver`) and what it is called after the dot
+//! (`RegistryEntry::member`), and both are derived in ONE place,
+//! `split_receiver`, from the dotted name. They are not constructor
 //! arguments: a field a call site fills by hand is a field that ends up
 //! disagreeing with the name beside it.
 //!
 //! Three ways in, and each is a different question:
 //!
-//! - [`FunctionRegistry::lookup`] — the TYPE path, `str.trim(x)`. By dotted
+//! - `FunctionRegistry::lookup` — the TYPE path, `str.trim(x)`. By dotted
 //!   name, which is what a `HirExpr::Call` carries.
-//! - [`FunctionRegistry::lookup_member`] — the VALUE path, `x.trim()`. By
+//! - `FunctionRegistry::lookup_member` — the VALUE path, `x.trim()`. By
 //!   receiver and member, which is what a postfix call knows.
-//! - [`FunctionRegistry::members_of`] — every member of a receiver. This is
+//! - `FunctionRegistry::members_of` — every member of a receiver. This is
 //!   what makes completion stop being approximate: the IDE can ask what a
 //!   value HAS instead of offering the whole catalogue.
 //!
 //! ## Two lowerings, and no third
 //!
-//! Ruling 15. [`LoweringKind`] had four variants and `InlineForm` another nine,
+//! Ruling 15. `LoweringKind` had four variants and `InlineForm` another nine,
 //! and the nine were SQL templates whose text was already written in their own
 //! doc-comments — the datum existed, in a comment, where nothing could execute
 //! it. Two of them (`SplitPart`, `JsonExtract`) were literally what `Builtin`
 //! was: a call by name. The `Builtin`/`Inline` border was not semantic.
 //!
-//! What is left is the one border that is: [`LoweringKind::Expr`] is a scalar
-//! SQL expression and [`LoweringKind::Op`] names an operator of the algebra, a
-//! closed set of 14. `Udf` is gone — see [`LoweringKind::Expr`] for what
+//! What is left is the one border that is: `LoweringKind::Expr` is a scalar
+//! SQL expression and `LoweringKind::Op` names an operator of the algebra, a
+//! closed set of 14. `Udf` is gone — see `LoweringKind::Expr` for what
 //! that cost and bought.
 //!
 //! ## `WasmClass` is gone as a CONCEPT
@@ -167,9 +167,9 @@ pub fn split_receiver(dotted: &str) -> (Receiver, SmolStr) {
 
 /// A single stdlib function entry — one ROW of the catalogue.
 ///
-/// Four fields, all data: the [`Receiver`] it hangs off, its name, a `'db`-free
-/// [`SigSpec`], and its [`LoweringKind`]. `recv` and `member` are derived from
-/// `name` by [`split_receiver`] at construction and are never passed in.
+/// Four fields, all data: the `Receiver` it hangs off, its name, a `'db`-free
+/// [`SigSpec`], and its `LoweringKind`. `recv` and `member` are derived from
+/// `name` by `split_receiver` at construction and are never passed in.
 #[derive(Debug, Clone)]
 pub struct RegistryEntry {
     /// Fully-qualified dotted name (e.g. `"str.trim"`, `"io.csv"`).
@@ -178,7 +178,7 @@ pub struct RegistryEntry {
     /// For a [`Receiver::Scalar`] or [`Receiver::Relation`] row it is the
     /// TYPE-PATH spelling: the left half names a type, not a namespace.
     pub name: SmolStr,
-    /// What this entry hangs off. See [`Receiver`].
+    /// What this entry hangs off. See `Receiver`.
     pub recv: Receiver,
     /// The name after the dot — the member. `"lower"` for `str.lower`, `"where"`
     /// for the relation verb. This is what a value-path call `x.lower()` matches
@@ -340,7 +340,7 @@ impl ScalarTy {
 ///
 /// So a template does NOT determine arity, and must not: [`SigSpec`] does, and
 /// the checker reads it. A hole index outside the signature is a catalogue bug
-/// that [`crate::stdlib::tests`] catches, not a runtime one.
+/// that `crate::stdlib::tests` catches, not a runtime one.
 ///
 /// **The one shape this notation does not have is the variadic**, and that is a
 /// deliberate hole rather than an oversight. `Concat` was the only variadic

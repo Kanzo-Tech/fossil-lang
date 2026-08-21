@@ -208,7 +208,7 @@ pub fn mapping_start_offset<'db>(db: &'db dyn fossil_base::Db, mapping: MappingL
 /// EVERY diagnostic-emission layer must call this. Skipping it does not fail
 /// loudly — it silently points the squiggle at whatever happens to sit at that
 /// offset from the start of the FILE, which for any mapping but the first is
-/// another mapping entirely. It rebases [`Diagnostic::did_you_mean`]'s
+/// another mapping entirely. It rebases `Diagnostic::did_you_mean`'s
 /// `wrong_span` too: that one drives a quick-fix `WorkspaceEdit`, so a stale
 /// offset there does not just mislead, it edits the wrong range.
 #[must_use]

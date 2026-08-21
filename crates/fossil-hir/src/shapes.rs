@@ -474,7 +474,7 @@ fn malformed_cause(shapes: &OutputShapes) -> Option<SmolStr> {
 }
 
 /// Map a Fossil [`Primitive`] to its `GraphAr` data-type spelling — the same
-/// vocabulary [`fossil_sinks::manifest::data_type_name`] emits. A materializer
+/// vocabulary `fossil_sinks::manifest::data_type_name` emits. A materializer
 /// spelling, so it lives with the compiler and not on the lattice; the xsd
 /// direction is [`Primitive::to_xsd_iri`], which does.
 #[must_use]

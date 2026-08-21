@@ -39,6 +39,22 @@ jobs:
           components: clippy
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # A citation written as an intra-doc link is a citation no grep of this tree
+  # can check, and eight of them named a `feedback_*` document that is not in
+  # the repository at all. rustdoc already knows how to find them; nothing was
+  # running it.
+  rustdoc:
+    name: rustdoc (intra-doc links)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.90"
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
+
   native:
     name: native (cargo check + test)
     runs-on: ubuntu-latest

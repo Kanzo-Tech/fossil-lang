@@ -17,7 +17,7 @@
 //!
 //! # Two queries, and the split is about accumulators
 //!
-//! [`subject_templates`] holds the table and emits NOTHING. [`check_identities`]
+//! `subject_templates` holds the table and emits NOTHING. `check_identities`
 //! reads that table and emits the disagreement diagnostics. They are separate
 //! because salsa collects an accumulator over a query's whole dependency
 //! subtree: `subject_templates` is read from inside `typecheck_mapping` and
@@ -54,7 +54,7 @@
 //! The sibling bodies they read do not re-execute: `mapping_cst_node` is the
 //! barrier and their green subtrees are structurally equal. And
 //! neither query reads `parse(db, file)`, which is what keeps their OUTPUT
-//! stable across an edit that shifts byte offsets — see [`SubjectTemplate::span`]
+//! stable across an edit that shifts byte offsets — see `SubjectTemplate::span`
 //! for the trap that decides it.
 
 use fossil_base::{SourceFile, Span};
@@ -174,7 +174,7 @@ impl SubjectTemplate {
 /// the second one differs, because it never read it. Deduplication moved to
 /// [`SubjectTemplates::for_shape`], where it belongs — that is the question
 /// «what is THE identity of this type», and it has one answer precisely because
-/// [`check_identities`] refuses the files where it would not.
+/// `check_identities` refuses the files where it would not.
 #[salsa::tracked(debug)]
 pub struct SubjectTemplates<'db> {
     #[returns(ref)]
@@ -193,7 +193,7 @@ impl<'db> SubjectTemplates<'db> {
     /// cannot be used; the caller says that, with the span of the call.
     ///
     /// When several mappings produce the shape it answers with the FIRST, which
-    /// is exactly right when they agree and is the reason [`check_identities`]
+    /// is exactly right when they agree and is the reason `check_identities`
     /// exists for when they do not: an edge built from the first while the
     /// second mints something else reaches a node the second never wrote.
     #[must_use]

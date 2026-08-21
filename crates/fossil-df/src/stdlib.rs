@@ -12,7 +12,7 @@
 //! A `LoweringKind::Expr` template is written in `DuckDB` SQL, because `DuckDB`
 //! is the engine every one of them was MEASURED against. Most of those names
 //! are also `DataFusion`'s; the ones that are not are listed in
-//! [`datafusion_name`], the only place the two vocabularies are reconciled.
+//! `datafusion_name`, the only place the two vocabularies are reconciled.
 //!
 //! # There are no UDFs any more
 //!

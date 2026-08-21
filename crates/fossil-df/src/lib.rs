@@ -646,7 +646,7 @@ async fn execute_edge(
 /// only the first would run the program against half its inputs.
 ///
 /// The raw `@conn` alias is resolved through `connections`
-/// ([`resolve_source_uri`]) before use. The `binding` is the table name a
+/// (`resolve_source_uri`) before use. The `binding` is the table name a
 /// `Provider` source is registered under (the host pre-registers it;
 /// [`read_source`] scans it); object-store formats ignore it.
 fn sources_of<'db>(
@@ -973,7 +973,7 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
 /// (e.g. the layout enrichment).
 ///
 /// `connections` is the name→base-URL ref-map: `@conn/path` source aliases
-/// resolve through it ([`resolve_source_uri`]) for BOTH object-store reads
+/// resolve through it (`resolve_source_uri`) for BOTH object-store reads
 /// (csv/json/parquet → the resolved URL feeds `read_csv`) and provider (RDF)
 /// bindings. `read_uri` is the host's byte seam for RDF only: given a (resolved)
 /// source URI, return its text — the host owns credentials + transport (fs /

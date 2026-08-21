@@ -257,8 +257,8 @@ impl FossilPlayground {
     // ----- Register a host-introspected descriptor -----
 
     /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
-    /// source binding name BEFORE invoking [`Self::compile`] /
-    /// [`Self::compile_file`]. The Rust compiler reads from this registration
+    /// source binding name BEFORE invoking `Self::compile` /
+    /// `Self::compile_file`. The Rust compiler reads from this registration
     /// during forward type propagation — the browser has no filesystem to
     /// introspect a CSV from, so the column types must arrive from the host.
     ///
