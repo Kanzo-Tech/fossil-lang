@@ -913,12 +913,22 @@ impl FunctionRegistry {
         // key schedule; `DuckDB` has `sha256` and no HMAC, so the only honest
         // renderings were a native UDF (gone with `Udf`) or a thing called
         // `hmac` that is not one.
+        // `salt` is a parameter and not a convenience. A hash of an email with
+        // no salt is a rainbow-table lookup, so a row called `anon.hash` that
+        // takes only the value does not anonymise — and the docs already
+        // described the salted form («`salt` and `format` are named because the
+        // call would be a puzzle otherwise»), which is the rule read
+        // literally: the design was right and the row was short.
+        //
+        // No native level needed. Concatenation is a template, so the whole
+        // thing lowers to one expression, and the `vscalar` door
+        // `Cargo.toml` still holds open stays shut for this one.
         add(
             e,
             "anon.hash",
-            vec![p("value", S::String)],
+            vec![p("value", S::String), p("salt", S::String)],
             S::String,
-            expr("sha256(%0)"),
+            expr("sha256(%0 || %1)"),
         );
         add(
             e,

@@ -3,7 +3,7 @@ type { Reading } := io.shex("expressions.shex")
 Row := io.csv("data/readings.csv")
 
 // #region comparison
-Valid := Row.where(Row.celsius != "" and Row.station.trim() != "")
+Valid := Row.where(Row.station.trim() != "" and Row.celsius > -273.15)
 // #endregion comparison
 
 Readings : Reading from Valid
@@ -25,7 +25,7 @@ Readings : Reading from Valid
     label    = str.lower(str.trim(Row.label))
     // #endregion two-paths
     // #region named-arguments
-    operator = Row.operator.hash(salt = "lab")
-    taken_on = parse.date(Row.taken_on, format = "%Y-%m-%d")
+    operator = anon.hash(Row.operator, salt = "lab")
+    taken_on = parse.date(Row.taken_on, format = "%d %b %Y")
     // #endregion named-arguments
-    celsius  = parse.float(Row.celsius)
+    celsius  = Row.celsius

@@ -3,10 +3,10 @@ Reading ← expressions.shex = https://lab.example/voc#Reading
 
 ── source bindings ──
 Row := io.csv(data/readings.csv)
-Valid := Row.where((Row.celsius != "") and (str.trim(Row.station) != ""))
+Valid := Row.where((str.trim(Row.station) != "") and (Row.celsius > (-273.15)))
 
 ── mappings ──
-Readings: 12 written, 11 lowered
+Readings: 12 written, 12 lowered
     @subject
     kit
     revision
@@ -16,9 +16,10 @@ Readings: 12 written, 11 lowered
     slug
     code
     label
-    operator  ← DROPPED IN SILENCE
+    operator
     taken_on
     celsius
 
 ── run ──
-not attempted: the compile failed
+vertex Reading (https://lab.example/voc#Reading) × 2 — kit, revision, accuracy, verified, station, slug, code, label, operator, taken_on, celsius
+NO EDGE TYPE was written

@@ -150,11 +150,12 @@ Each one returns its input unchanged when the input is well formed.
 
 | | signature |
 | --- | --- |
-| `anon.hash` | `(String, salt: String, algo: String) -> String` |
-| `anon.redact` | `(String, mask: String) -> String` |
+| `anon.hash` | `(value: String, salt: String) -> String` |
+| `anon.redact` | `(value: String) -> String` |
 
-`algo` is `"sha256"`, `"sha512"` or `"blake3"`, and `"sha256"` is the default. `anon.hash` with a
-salt is the usual way to build an identity out of something you must not put in an IRI.
+`anon.hash` with a salt is the usual way to build an identity out of something you must not put in
+an IRI. There is no `algo` argument and this page claimed one: the row lowers to `sha256`, and a
+choice of digest is a thing to add when something needs it, not a parameter to describe first.
 
 ## `core` — the two that belong nowhere else
 
