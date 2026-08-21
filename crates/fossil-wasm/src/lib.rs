@@ -662,6 +662,30 @@ pub struct CheckPosition {
 /// unreachable), a top-level binding's provider errors vanished, two mappings
 /// minting two identities for one type was never checked, and one top-level
 /// mistake was reported once per mapping.
+///
+/// # Live defect: every open file is drained as if it were a program
+///
+/// [`FossilPlayground::check_rows`] loops over the whole workspace and calls
+/// this for each handle, and nothing here asks whether the handle holds a
+/// **fossil program**. In the playground the only way to hand the compiler a
+/// shape document is to open it, so a `.shex` is parsed as fossil and its
+/// errors are attributed to it — twenty-one rows of `expected DEFINE, found
+/// DEDENT` for a file that is not wrong. In an editor those are squiggles down
+/// the length of the user's ShEx.
+///
+/// It is not fixed here, deliberately. The fix needs a notion of *which open
+/// files are programs*, and `fossil-wasm` does not have one — a handle is a
+/// path and a text, and inventing the answer in the drain would put a language
+/// question in the host.
+///
+/// It was invisible while the browser's drain was the per-mapping loop, because
+/// a `.shex` produces no mappings. Reading the file-level accumulators, which
+/// is where `parse` lives, is what surfaced it.
+///
+/// **And whether those rows appear at all depends on which Salsa revision last
+/// touched the document**, so a workspace-wide list is not stable under an edit
+/// to a file the caller did not ask about. The test that used to cover this
+/// compared that list against itself.
 fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
     fossil_mir::program_diagnostics(db, file)
 }
