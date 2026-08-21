@@ -17,3 +17,8 @@ Orders: 3 written, 3 lowered
     @subject
     total
     buyer
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 2 — email, name
+vertex Order (https://shop.example/voc#Order) × 3 — total
+edge Order_buyer_Person × 3

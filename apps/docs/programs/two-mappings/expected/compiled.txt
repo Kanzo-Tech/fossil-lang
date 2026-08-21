@@ -3,6 +3,8 @@ Person ← two-mappings.shex = https://shop.example/voc#Person
 
 ── source bindings ──
 User := io.csv(data/users.csv)
+Adults from User.where(User.age >= 18)
+Minors from User.where(User.age < 18)
 
 ── mappings ──
 Adults: 3 written, 3 lowered

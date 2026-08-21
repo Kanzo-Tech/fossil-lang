@@ -1,0 +1,17 @@
+── type bindings ──
+Line ← compound-key.shex = https://shop.example/voc#Line
+
+── source bindings ──
+OrderRow := io.csv(data/orders.csv)
+LineRow := io.csv(data/lines.csv)
+Joined := LineRow.join(OrderRow, on = (LineRow.order_id == OrderRow.id) and (LineRow.tenant == OrderRow.tenant))
+
+── mappings ──
+Lines: 3 written, 3 lowered
+    @subject
+    quantity
+    placed_on
+
+── run ──
+vertex Line (https://shop.example/voc#Line) × 4 — quantity, placed_on
+NO EDGE TYPE was written

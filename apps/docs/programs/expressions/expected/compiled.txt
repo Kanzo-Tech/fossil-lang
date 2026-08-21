@@ -3,7 +3,7 @@ Reading ← expressions.shex = https://lab.example/voc#Reading
 
 ── source bindings ──
 Row := io.csv(data/readings.csv)
-Valid := Row.where()
+Valid := Row.where((Row.celsius != "") and (str.trim(Row.station) != ""))
 
 ── mappings ──
 Readings: 12 written, 11 lowered

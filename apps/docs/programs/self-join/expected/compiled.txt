@@ -1,0 +1,16 @@
+── type bindings ──
+Category ← self-join.shex = https://shop.example/voc#Category
+
+── source bindings ──
+Node := io.csv(data/categories.csv)
+Pairs := Node.join(Node as Other, on = Node.parent == Other.id)
+
+── mappings ──
+Categories: 3 written, 3 lowered
+    @subject
+    label
+    parent_label
+
+── run ──
+vertex Category (https://shop.example/voc#Category) × 3 — label, parent_label
+NO EDGE TYPE was written

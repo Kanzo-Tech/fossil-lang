@@ -7,10 +7,17 @@
 > (9–17) y el destino de F8; el resto está caducado en varios sitios y hay que contrastarlo contra
 > el árbol antes de creérselo.** Lo verificado falso hoy, para que nadie repita el trabajo:
 >
-> - **«104 tests rojos» del paso 8 (§ El árbol).** Hoy son **720 verdes y UN rojo**, y ese rojo es
->   el artefacto del paso 8: `programs.rs` imprime que **11 de 23 programas** no son lo que dicen
->   ser. Ése es el mapa real, y está medido — tres son la clave del join, uno el `read_json` de
->   DataFusion, uno un fallo del optimizador y cinco son diagnósticos aspiracionales.
+> - **«104 tests rojos» del paso 8 (§ El árbol).** El único rojo del workspace es el artefacto del
+>   paso 8, `programs.rs`, y hoy imprime **8 de 23**: cinco diagnósticos aspiracionales bajo
+>   `errors/` que **no se bendicen** hasta que el informe de dos ficheros exista, `sightings`
+>   (el `read_json` de DataFusion es NDJSON), `projection` (`simplify_expressions` falla) y
+>   `expressions` (`operator` se cae sin diagnóstico).
+> - **La clave del join NO es uno de ellos, y el dictamen 17 está entero.** `on = .k` no existe:
+>   `fossil-mir/src/lower.rs` baja la condición como predicado. `compound-key`, `self-join` y `shop`
+>   fallaban por no tener `compiled.txt`, y `shop` **sí** escribe su arista. Lo que faltaba era que
+>   el artefacto pudiera enseñar la clave — el censo imprimía `LineRow.join(?)` — y sin eso
+>   bendecir no probaba nada: quitarle el conjunto `tenant` a `compound-key` lleva el join de
+>   cuatro filas a siete y las siete acuñan los mismos cuatro sujetos.
 > - **§ El orden, punto 2 («limpiar `fossil-base`»): la premisa estructural es falsa.** Medí los
 >   consumidores reales de los tres módulos que pide sacar y los comparten de 3 a 9 crates de
 >   encima, así que por esa prueba son substrato. La regla que SÍ corta es otra, del dueño: **en

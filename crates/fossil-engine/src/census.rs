@@ -49,7 +49,8 @@ use std::path::Path;
 
 use fossil_hir::body::{body, mapping_cst_node};
 use fossil_hir::def_map::{ShapeBindError, def_map};
-use fossil_hir::lower::PropertyKey;
+use fossil_hir::display::pipe_text;
+use fossil_hir::lower::{PropertyKey, lower_to_hir};
 use fossil_syntax::SyntaxKind;
 
 use crate::system::open_db;
@@ -66,14 +67,49 @@ pub struct TypeBinding {
     pub document: Option<String>,
 }
 
-/// One `Name := io.csv("…")` binding, and what the signature reading made of it.
+/// One `Name := …` binding, and what the reading made of its right-hand side.
 #[derive(Debug, Clone)]
 pub struct SourceBinding {
     pub name: String,
-    /// `io.csv` / `io.json` / … — `None` when the RHS is not a recognisable call.
-    pub constructor: Option<String>,
-    /// The first positional string argument.
-    pub uri: Option<String>,
+    pub rhs: SourceRhs,
+}
+
+/// The two shapes a source binding's right-hand side has.
+///
+/// They were one — a constructor and a URI, read by the same token scan — and a
+/// pipeline has no URI, so every derived binding rendered as `LineRow.join(?)`.
+/// That is what kept `compound-key` from being blessed: its whole claim is the
+/// two-column key, and the artefact could not say what the key was. Dropping the
+/// `tenant` conjunct takes the join from four rows to seven and the seven mint
+/// the same four subjects, so the vertex count is equal either way.
+#[derive(Debug, Clone)]
+pub enum SourceRhs {
+    /// `io.csv("data/orders.csv")` — a file to read. Both halves are the
+    /// signature-only reading `def_map` performs, and `None` is the reading
+    /// failing rather than the program omitting something.
+    Read {
+        /// `io.csv` / `io.json` / … — `None` when the RHS is not a recognisable call.
+        constructor: Option<String>,
+        /// The first positional string argument.
+        uri: Option<String>,
+    },
+    /// `LineRow.join(OrderRow, on = …)` — a relation derived from another
+    /// binding, rendered from the HIR by [`fossil_hir::display::pipe_text`].
+    /// Rendering it from the source text would compare the artefact against its
+    /// own input.
+    Derive {
+        /// The pipeline: the base binding and every stage, in written order.
+        pipe: String,
+        /// Written in a mapping header (`Orders : Order from Purchase.join(…)`)
+        /// rather than bound to a name of its own.
+        ///
+        /// The relation is anonymous there and `lower_to_hir` registers it under
+        /// the MAPPING's name, which is why it is in `source_pipes` and not in
+        /// `def_map`'s bindings. The census listed the bindings alone, so the
+        /// join of `shop` — the one conformance program with an edge — was
+        /// absent from its own artefact.
+        inline: bool,
+    },
 }
 
 /// One mapping's reading: what its body said, and what survived saying it.
@@ -195,13 +231,24 @@ impl ProgramCensus {
             out.push_str("(none)\n");
         }
         for s in &self.sources {
-            let _ = writeln!(
-                out,
-                "{} := {}({})",
-                s.name,
-                s.constructor.as_deref().unwrap_or("?"),
-                s.uri.as_deref().unwrap_or("?"),
-            );
+            match &s.rhs {
+                SourceRhs::Read { constructor, uri } => {
+                    let _ = writeln!(
+                        out,
+                        "{} := {}({})",
+                        s.name,
+                        constructor.as_deref().unwrap_or("?"),
+                        uri.as_deref().unwrap_or("?"),
+                    );
+                }
+                // `from` and not `:=` for an inline one, because that is the
+                // binder the program wrote. Spelling it `:=` would put a
+                // binding in the artefact that the author never made.
+                SourceRhs::Derive { pipe, inline } => {
+                    let binder = if *inline { "from" } else { ":=" };
+                    let _ = writeln!(out, "{} {binder} {pipe}", s.name);
+                }
+            }
         }
 
         out.push_str("\n── mappings ──\n");
@@ -254,15 +301,47 @@ pub fn census(path: &Path) -> miette::Result<ProgramCensus> {
         })
         .collect();
 
-    let sources = dm
+    // A binding that derives a relation is a PIPELINE, and pipelines are lowered
+    // in `fossil-hir`'s `lower`, not read off the `SOURCE_DEF` header the way a
+    // constructor and a URI are. So the census asks both and the name is what
+    // joins them: `def_map` holds every binding in written order, `source_pipes`
+    // holds the derived ones, and a binding in both is a derived one.
+    let hir = lower_to_hir(&db, file);
+    let pipes = hir.source_pipes(&db);
+    let mut sources: Vec<SourceBinding> = dm
         .sources(&db)
         .iter()
         .map(|s| SourceBinding {
             name: s.name.to_string(),
-            constructor: s.constructor.as_ref().map(ToString::to_string),
-            uri: s.uri.as_ref().map(ToString::to_string),
+            rhs: pipes.iter().find(|p| p.name == s.name).map_or_else(
+                || SourceRhs::Read {
+                    constructor: s.constructor.as_ref().map(ToString::to_string),
+                    uri: s.uri.as_ref().map(ToString::to_string),
+                },
+                |p| SourceRhs::Derive {
+                    pipe: pipe_text(p),
+                    inline: false,
+                },
+            ),
         })
         .collect();
+
+    // Then the pipelines that are in the HIR and NOT among the bindings: the
+    // ones written in a mapping header, which `lower_to_hir` registers under the
+    // mapping's name. In written order after the bindings, because that is where
+    // a mapping is — no program can write one before its sources exist.
+    sources.extend(
+        pipes
+            .iter()
+            .filter(|p| !dm.sources(&db).iter().any(|s| s.name == p.name))
+            .map(|p| SourceBinding {
+                name: p.name.to_string(),
+                rhs: SourceRhs::Derive {
+                    pipe: pipe_text(p),
+                    inline: true,
+                },
+            }),
+    );
 
     let mappings = dm
         .mappings(&db)

@@ -3,7 +3,7 @@ Sensor ← negation.shex = https://lab.example/voc#Sensor
 
 ── source bindings ──
 Row := io.csv(data/sensors.csv)
-Working := Row.where(?)
+Working := Row.where(not Row.faulty)
 
 ── mappings ──
 Sensors: 3 written, 3 lowered

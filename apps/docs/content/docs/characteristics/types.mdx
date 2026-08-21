@@ -58,11 +58,11 @@ true.
 **Three of those four are checked today, and what closed them was the document becoming an input.**
 `resolve_target_shape` (`crates/fossil-hir/src/shapes.rs:507`) reads the document the program names
 through the file registry and the tracked `shape_document`, and `typecheck_mapping` calls it
-(`crates/fossil-hir/src/check.rs:117`). A key the shape does not declare is refused with a
-did-you-mean over the ones it does (`crates/fossil-hir/src/check.rs:827`); a value whose type the
-constraint will not admit is refused by `compatible` (`crates/fossil-hir/src/check.rs:436`); and a
+(`crates/fossil-hir/src/check.rs:121`). A key the shape does not declare is refused with a
+did-you-mean over the ones it does (`crates/fossil-hir/src/check.rs:819`); a value whose type the
+constraint will not admit is refused by `compatible` (`crates/fossil-hir/src/check.rs:442`); and a
 predicate the shape requires that the body never writes is refused by `check_required_properties`
-(`crates/fossil-hir/src/check.rs:908`).
+(`crates/fossil-hir/src/check.rs:901`).
 `apps/docs/programs/errors/wrong-type` is the third of the four spelled as a program, and
 `editing_the_document_rechecks_the_program_and_the_diagnostic_changes`
 (`crates/fossil-engine/src/documents.rs`) drives it through the production path: the shape declares
@@ -81,7 +81,7 @@ is gone, and the exception with it.
 </Callout>
 
 **What is not checked is the upper bound.** `compatible` took an `occurs` parameter and lost it
-(`crates/fossil-hir/src/check.rs:448`), so the only cardinality the checker observes is a required
+(`crates/fossil-hir/src/check.rs:454`), so the only cardinality the checker observes is a required
 property that is absent. Nothing in the language constructs a multi-valued expression, so a
 `maxCount 1` property has nothing to reject yet — the gap is real and is not currently reachable from
 a program.

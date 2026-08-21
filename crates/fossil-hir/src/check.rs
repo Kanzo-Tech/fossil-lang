@@ -44,6 +44,7 @@ use smol_str::SmolStr;
 use crate::body::{ExprId, body};
 use crate::def_map::MappingLoc;
 use crate::didyoumean::did_you_mean;
+use crate::display::{op_text, un_op_text};
 use crate::infer::resolve_source_scope;
 use crate::lower::{
     BinOp, HirExpr, HirProperty, InterpolationPart, PropertyKey, UnOp, lower_to_hir,
@@ -498,32 +499,11 @@ pub fn compatible<'db>(
 // anonymous current row. Every reference is qualified now (`User.name`), so a
 // closure has nothing to capture implicitly.
 
-/// The source spelling of a unary operator, for diagnostics.
-const fn un_op_text(op: UnOp) -> &'static str {
-    match op {
-        UnOp::Neg => "-",
-        UnOp::Not => "not",
-    }
-}
-
-/// The source spelling of an operator, for diagnostics.
-const fn op_text(op: BinOp) -> &'static str {
-    match op {
-        BinOp::Eq => "==",
-        BinOp::Ne => "!=",
-        BinOp::Lt => "<",
-        BinOp::Le => "<=",
-        BinOp::Gt => ">",
-        BinOp::Ge => ">=",
-        BinOp::And => "and",
-        BinOp::Or => "or",
-        BinOp::Add => "+",
-        BinOp::Sub => "-",
-        BinOp::Mul => "*",
-        BinOp::Div => "/",
-        BinOp::Rem => "%",
-    }
-}
+// `op_text` and `un_op_text` were here, spelling an operator for a diagnostic.
+// They are a fact about the operator and not about the checker, and the census
+// needs the same spelling for the same reason — so they live beside the enums,
+// in `crate::display`, and there is one table rather than two that agree until
+// one of them moves.
 
 /// Recursive subtyping — four rules: S-Refl, S-IntFlt, S-TmplIri, S-SeqCov,
 /// plus an error-taint escape so one mismatch does not cascade.

@@ -65,6 +65,14 @@
 //!   written against the properties lowered. Then the run's `RunStatus`, for the
 //!   thirteen that are meant to produce one.
 //!
+//!   A source binding that DERIVES a relation carries its pipeline, rendered from
+//!   the HIR by `fossil_hir::display` — the join key, the filter predicate, the
+//!   self-join's alias. It used to carry `LineRow.join(?)`, and the counts alone
+//!   cannot stand in for it: drop the `tenant` conjunct from `compound-key` and
+//!   the join goes from four rows to seven, and the seven mint the same four
+//!   subjects. Every number in the artefact is equal across a change that breaks
+//!   the program. The predicate is the only thing that is not.
+//!
 //! `FOSSIL_BLESS=1 cargo test -p fossil-engine --test programs` regenerates them.
 //! Nothing here is hand-written any more: a diagnostic text nobody produces is a
 //! promise the compiler does not make.
