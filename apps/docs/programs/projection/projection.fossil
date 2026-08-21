@@ -3,7 +3,7 @@ type { Person } := io.shex("projection.shex")
 Employee := io.csv("data/employees.csv")
 
 // #region chain
-Active  := Employee.where(Employee.left_on == "")
+Active  := Employee.where(Employee.left_on == null)
 Minimal := Active.select(Employee.id, Employee.name)
 // #endregion chain
 

@@ -209,6 +209,12 @@ pub enum SyntaxKind {
     ERROR,
     EOF,
 
+    /// `null` — the absence of a value, `NULL := 'null'` (grammar.bnf).
+    ///
+    /// Declared here, after `EOF`, because the raw values below are positional
+    /// and a kind inserted in the middle renumbers every one after it.
+    NULL,
+
     /// Sentinel — must be the last variant. Used for round-trip bounds checks.
     #[doc(hidden)]
     __LAST,
@@ -299,6 +305,7 @@ impl SyntaxKind {
             64 => Self::ALIAS_ARG,
             65 => Self::ERROR,
             66 => Self::EOF,
+            67 => Self::NULL,
             _ => panic!("invalid SyntaxKind raw value: {v}"),
         }
     }

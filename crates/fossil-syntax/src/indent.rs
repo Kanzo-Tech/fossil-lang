@@ -359,6 +359,7 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
         // Two lexer tokens, ONE kind: the value is the token's text, and the
         // parser wants «a boolean literal is here», not «which one».
         Token::True | Token::False => SyntaxKind::BOOL,
+        Token::Null => SyntaxKind::NULL,
         Token::String => SyntaxKind::STRING,
         Token::AtAttr => SyntaxKind::AT_ATTR,
         // Multi-char operators

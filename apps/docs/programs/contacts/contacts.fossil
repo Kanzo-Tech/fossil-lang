@@ -3,7 +3,7 @@ type { Person } := io.shex("contacts.shex")
 Contact := io.csv("data/contacts.csv")
 
 // #region derived
-Reachable := Contact.where(Contact.email.trim() != "")
+Reachable := Contact.where(Contact.email != null)
 // #endregion derived
 
 Contacts : Person from Reachable

@@ -3,7 +3,7 @@ Person ← contacts.shex = https://shop.example/voc#Person
 
 ── source bindings ──
 Contact := io.csv(data/contacts.csv)
-Reachable := Contact.where(str.trim(Contact.email) != "")
+Reachable := Contact.where(Contact.email != null)
 
 ── mappings ──
 Contacts: 3 written, 3 lowered

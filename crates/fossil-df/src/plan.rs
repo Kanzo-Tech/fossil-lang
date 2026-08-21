@@ -399,6 +399,7 @@ fn expr_name(e: &Expr<'_>) -> &'static str {
     match e {
         Expr::LitString(_) => "a string literal",
         Expr::LitBool(_) => "a boolean literal",
+        Expr::IsNull { .. } => "a null test",
         Expr::LitInt(_) => "an integer literal",
         Expr::LitFloat(_) => "a float literal",
         Expr::UnaryOp { .. } => "a unary operator",

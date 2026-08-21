@@ -344,7 +344,13 @@ fn parse_primary(p: &mut Parser) {
     match p.current() {
         // Literal-like primary tokens: numeric literals and strings. Both
         // wrap as LITERAL_EXPR with a single token payload.
-        Some(SyntaxKind::INTEGER | SyntaxKind::FLOAT | SyntaxKind::BOOL | SyntaxKind::STRING) => {
+        Some(
+            SyntaxKind::INTEGER
+            | SyntaxKind::FLOAT
+            | SyntaxKind::BOOL
+            | SyntaxKind::NULL
+            | SyntaxKind::STRING,
+        ) => {
             p.start(SyntaxKind::LITERAL_EXPR);
             p.bump();
             p.finish();

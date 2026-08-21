@@ -1209,3 +1209,94 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
         "a `where` over a String is not a filter: {not_a_condition:#?}"
     );
 }
+
+// ── `null` ─────────────────────────────────────────────────────────────────
+
+/// Comparable with everything, assignable to nothing.
+///
+/// The rule lives in `synth_binop`'s `Eq`/`Ne` arm and NOT in `subtypes`, and
+/// that placement is the whole of it. A bottom type that subtyped everything
+/// would make `name = null` check against `xsd:string` — which is
+/// `TyKind::Optional` coming back through the door it left by — and asking
+/// whether a column has a value is not the same question as writing a property
+/// from nothing.
+#[test]
+fn null_compares_with_anything_and_assigns_to_nothing() {
+    use fossil_base::test_support::{DecodingHost, register_inferred};
+    use fossil_graph_schema::Primitive;
+    use std::sync::Arc;
+
+    fn stage_diagnostics(condition: &str) -> Vec<String> {
+        let system: Arc<dyn fossil_base::System> = Arc::new(DecodingHost::default());
+        let db = FossilDb::new(system);
+        register_inferred(
+            &db,
+            "r.csv",
+            &[("when", Primitive::Date), ("n", Primitive::Float)],
+        );
+        let src = format!("Row := io.csv(\"r.csv\")\nValid := Row.where({condition})\n");
+        let file = SourceFile::new(&db, src, "null.fossil".to_string());
+        #[salsa::tracked]
+        fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+            crate::infer::resolve_binding_scope(db, file, "Valid", 0).is_ok()
+        }
+        let _ = shim(&db, file);
+        shim::accumulated::<Diagnostic>(&db, file)
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    // Against a Date and against a Float — the two the `!= ""` idiom could not
+    // reach, which is why it was only ever a test for STRINGS.
+    for condition in [
+        "Row.when == null",
+        "Row.when != null",
+        "Row.n != null",
+        "null == Row.n",
+    ] {
+        let d = stage_diagnostics(condition);
+        assert!(d.is_empty(), "`{condition}` must type: {d:#?}");
+    }
+
+    // And it is still a comparison: two things that do not compare, do not.
+    let mistyped = stage_diagnostics("Row.when == Row.n");
+    assert!(
+        !mistyped.is_empty(),
+        "`null` must not make every comparison legal"
+    );
+}
+
+/// The other half, on the assignment side: a property written from `null`.
+#[test]
+fn a_property_written_from_null_is_refused() {
+    let src = "\
+type { T } := io.shex(\"person.shex\")
+users := io.csv(\"x.csv\")
+User : T from users
+    @subject = \"http://example.org/u/{users.id}\"
+    name = null
+";
+    // A shape that NARROWS. `PERSON_DOCUMENT` declares its predicate `-`, and
+    // a shape that declines to narrow the value does not narrow it — so with
+    // that one there is no expectation for `null` to fail, and the test would
+    // be asserting the absence of a check rather than the presence of one.
+    let (db, file) = fossil_base::test_support::db_with_document(
+        src,
+        "person.shex",
+        "shape http://example.org/Person\nprop http://example.org/name string 1 1\n",
+    );
+    let m = *def_map(&db, file)
+        .mappings(&db)
+        .first()
+        .expect("one mapping");
+    let _ = typecheck_mapping(&db, m);
+    let diags: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, m)
+        .into_iter()
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        diags.iter().any(|d| d.contains("Null")),
+        "writing a property from `null` must be refused, naming the type: {diags:#?}"
+    );
+}

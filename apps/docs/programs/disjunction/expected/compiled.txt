@@ -3,7 +3,7 @@ Contact ← disjunction.shex = https://shop.example/voc#Contact
 
 ── source bindings ──
 Row := io.csv(data/contacts.csv)
-Reachable := Row.where((Row.email != "") or (Row.phone != ""))
+Reachable := Row.where((Row.email != null) or (Row.phone != null))
 
 ── mappings ──
 Contacts: 3 written, 3 lowered

@@ -97,6 +97,18 @@ KEYWORD        := 'from' | 'and' | 'or' | 'not'
    reference. *)
 BOOL           := 'true' | 'false'
 
+(* The absence of a value. A token for the same reason BOOL is: as IDENT it
+   looks like an unresolved reference.
+
+   Its type is comparable with everything and assignable to nothing, so
+   `Employee.left_on == null` is a program and `name = null` is an error. The
+   two questions are different and only the first has an answer.
+
+   `x != null` does NOT compile to `x != NULL`: in SQL that is NULL and not
+   true, so the filter would keep no rows. `fossil-mir` lowers the two
+   comparisons against this literal to IS NULL and IS NOT NULL. *)
+NULL           := 'null'
+
 (* Numeric literals — decimal only, optional underscores as separators *)
 INTEGER        := DIGIT (DIGIT | '_')*
 FLOAT          := INTEGER '.' INTEGER
@@ -463,7 +475,7 @@ PrimaryExpr         := Literal
 
 (* ─── Literals ─── *)
 
-Literal             := INTEGER | FLOAT | STRING | BOOL
+Literal             := INTEGER | FLOAT | STRING | BOOL | NULL
                      | InterpolatedString
 
 (* A string with at least one hole. One spelling, one node. *)

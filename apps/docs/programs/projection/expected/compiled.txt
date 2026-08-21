@@ -1,0 +1,16 @@
+── type bindings ──
+Person ← projection.shex = https://shop.example/voc#Person
+
+── source bindings ──
+Employee := io.csv(data/employees.csv)
+Active := Employee.where(Employee.left_on == null)
+Minimal := Active.select(Employee.id, Employee.name)
+
+── mappings ──
+Staff: 2 written, 2 lowered
+    @subject
+    name
+
+── run ──
+vertex Person (https://shop.example/voc#Person) × 2 — name
+NO EDGE TYPE was written

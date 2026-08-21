@@ -3,7 +3,7 @@ type { Reading } := io.shex("expressions.shex")
 Row := io.csv("data/readings.csv")
 
 // #region comparison
-Valid := Row.where(Row.station.trim() != "" and Row.celsius > -273.15)
+Valid := Row.where(Row.station.trim() != "" and Row.celsius != null)
 // #endregion comparison
 
 Readings : Reading from Valid

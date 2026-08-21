@@ -43,6 +43,7 @@ pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> 
             "Relation<{}>",
             rows.bindings().cloned().collect::<Vec<_>>().join(", ")
         ),
+        TyKind::Null => "Null".to_string(),
         TyKind::Error(_) => "Error".to_string(),
     }
 }

@@ -1172,6 +1172,9 @@ impl<'db> Expr<'db> {
                 Ty::new(db, TyKind::Primitive(Primitive::Float)),
                 ProvenanceKind::Literal,
             ),
+            // `null` is a value of no type but its own — see
+            // [`crate::ty::TyKind::Null`].
+            HirExpr::NullLit => (Ty::new(db, TyKind::Null), ProvenanceKind::Literal),
             HirExpr::BoolLit(_) => (
                 Ty::new(db, TyKind::Primitive(Primitive::Bool)),
                 ProvenanceKind::Literal,
@@ -1599,7 +1602,19 @@ impl<'db> Expr<'db> {
             // a string against a number does not, and that is the mistake
             // worth catching — it is the one a mapping actually makes.
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                // `null` compares with anything. The rule is HERE and not in
+                // `subtypes`, and that placement is the whole of it: a bottom
+                // type that subtyped everything would make `name = null` check
+                // against `xsd:string`, which is `TyKind::Optional` returning
+                // by the door it left by. Asking whether a column has a value
+                // and writing a property from nothing are different questions,
+                // and only the first has an answer.
+                let against_null = [l, r]
+                    .into_iter()
+                    .flatten()
+                    .any(|t| matches!(t.kind(db), TyKind::Null));
                 if let (Some(l), Some(r)) = (l, r)
+                    && !against_null
                     && !subtypes(db, l, r)
                     && !subtypes(db, r, l)
                 {

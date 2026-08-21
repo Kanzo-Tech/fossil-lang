@@ -111,6 +111,12 @@ pub enum Token {
     #[token("false")]
     False,
 
+    // `null` is a literal for the same reason `true` is: without a token it
+    // arrives as `Ident`, and a literal that looks like an unresolved reference
+    // is the diagnostic `expressions` used to get for `true`.
+    #[token("null")]
+    Null,
+
     // ───────────────────────────────────────────────────────────────────
     // Numeric literals. `Float` MUST come before `Integer` so logos
     // longest-match selects `Float` for `1.0` (otherwise `1` is `Integer`

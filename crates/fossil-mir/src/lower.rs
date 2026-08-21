@@ -218,6 +218,10 @@ pub fn lower_to_mir_pg<'db>(
             value,
         };
         match &prop.value {
+            // `null` is refused as a property value by the checker (its type is
+            // comparable with everything and assignable to nothing), so this is
+            // an invariant written down rather than a case.
+            HirExpr::NullLit => {}
             // The qualified spelling lowers identically: the checker has
             // already established that the binding IS this mapping's source,
             // so only the column reaches MIR. (`orders.user_id` is the form
@@ -880,9 +884,10 @@ fn operator_ty<'db>(
             .map_or_else(|| prim(Primitive::String), |s| s.to_ty(db)),
         // A conditional's branches agree by construction, so either answers.
         HirExpr::Ternary { then, .. } => operator_ty(db, then, field_ty),
-        HirExpr::StringLit(_) | HirExpr::Interpolation(_) | HirExpr::Edge { .. } => {
-            prim(Primitive::String)
-        }
+        HirExpr::NullLit
+        | HirExpr::StringLit(_)
+        | HirExpr::Interpolation(_)
+        | HirExpr::Edge { .. } => prim(Primitive::String),
     }
 }
 
@@ -905,7 +910,8 @@ fn contains_edge(e: &HirExpr) -> bool {
             InterpolationPart::Hole(h) => contains_edge(h),
             InterpolationPart::Text(_) => false,
         }),
-        HirExpr::StringLit(_)
+        HirExpr::NullLit
+        | HirExpr::StringLit(_)
         | HirExpr::IntLit(_)
         | HirExpr::FloatLit(_)
         | HirExpr::BoolLit(_)
@@ -1049,6 +1055,31 @@ fn lower_property_value<'db>(
             // what every other untyped property gets.
             ty: Ty::new(db, TyKind::Primitive(Primitive::String)),
         },
+        // A comparison against `null` is `IS NULL`, and it is decided HERE
+        // rather than in a backend because it is a fact about the algebra: in
+        // SQL `x != NULL` is NULL and not true, so lowering the surface's one
+        // spelling as an ordinary comparison produces a filter that keeps no
+        // rows. Both sides are checked because `null == x` is the same
+        // question.
+        HirExpr::BinOp { op, lhs, rhs }
+            if matches!(op, fossil_hir::BinOp::Eq | fossil_hir::BinOp::Ne)
+                && matches!(**lhs, HirExpr::NullLit) != matches!(**rhs, HirExpr::NullLit) =>
+        {
+            let operand = if matches!(**lhs, HirExpr::NullLit) {
+                rhs
+            } else {
+                lhs
+            };
+            Expr::IsNull {
+                operand: Box::new(lower_property_value(
+                    db,
+                    operand,
+                    source_binding,
+                    assert_line,
+                )),
+                negated: matches!(op, fossil_hir::BinOp::Ne),
+            }
+        }
         HirExpr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
             lhs: Box::new(lower_property_value(db, lhs, source_binding, assert_line)),
@@ -1057,6 +1088,12 @@ fn lower_property_value<'db>(
         },
         HirExpr::FloatLit(v) => Expr::LitFloat(*v),
         HirExpr::BoolLit(b) => Expr::LitBool(*b),
+        // `null` as a VALUE cannot reach here: the checker's `Eq`/`Ne` arm is
+        // the only place its type is comparable with anything, so a property
+        // written from it is refused with «expected …, got Null». The arm is
+        // that invariant written down, and it answers with the string literal
+        // the rest of this walk uses for a form it cannot read.
+        HirExpr::NullLit => Expr::LitString(SmolStr::default()),
         // The operand's type is the unary's for `-` and Bool for `not`; both
         // are what `operator_ty` computes, and it is reused rather than
         // re-derived so the two cannot drift.
@@ -1190,9 +1227,12 @@ fn is_per_row(e: &HirExpr) -> bool {
             InterpolationPart::Text(_) => false,
             InterpolationPart::Hole(e) => is_per_row(e),
         }),
-        HirExpr::StringLit(_) | HirExpr::IntLit(_) | HirExpr::FloatLit(_) | HirExpr::BoolLit(_) => {
-            false
-        }
+        // A literal is the same for every row, and `null` is a literal.
+        HirExpr::NullLit
+        | HirExpr::StringLit(_)
+        | HirExpr::IntLit(_)
+        | HirExpr::FloatLit(_)
+        | HirExpr::BoolLit(_) => false,
     }
 }
 
@@ -1547,5 +1587,70 @@ People : Person from Rows
             }
             other => panic!("expected Concat, got {other:?}"),
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod null_lowering_tests {
+    #![allow(clippy::literal_string_with_formatting_args)]
+
+    use super::*;
+    use fossil_hir::def_map::def_map;
+    use std::sync::Arc;
+
+    /// The one comparison whose SQL is not its spelling.
+    ///
+    /// `x != NULL` is NULL in SQL, not true, so lowering the surface's
+    /// `x != null` as an ordinary `BinOp` gives a filter that keeps NO ROWS —
+    /// and a filter that keeps nothing looks exactly like a filter that works
+    /// when the fixture is small. The operator is decided in MIR because it is
+    /// a fact about the algebra, not about a backend.
+    fn filter_of(condition: &str) -> Expr<'static> {
+        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let db: &'static fossil_base::FossilDb =
+            Box::leak(Box::new(fossil_base::FossilDb::new(system)));
+        let src = format!(
+            "Row := io.csv(\"r.csv\")\nValid := Row.where({condition})\nM : T from Valid\n    @subject = \"http://example.org/{{Row.id}}\"\n"
+        );
+        let file = fossil_base::SourceFile::new(db, src, "n.fossil".to_string());
+        let dm = def_map(db, file);
+        let mapping = *dm.mappings(db).first().expect("one mapping");
+        let mir = lower_to_mir_pg(db, mapping);
+        mir.ops(db)
+            .iter()
+            .find_map(|op| match op {
+                Op::Filter { pred, .. } => Some(pred.clone()),
+                _ => None,
+            })
+            .expect("the `where` lowered to a Filter")
+    }
+
+    #[test]
+    fn a_comparison_against_null_lowers_to_is_null() {
+        assert!(
+            matches!(
+                filter_of("Row.k == null"),
+                Expr::IsNull { negated: false, .. }
+            ),
+            "`== null` is `IS NULL`"
+        );
+        assert!(
+            matches!(
+                filter_of("Row.k != null"),
+                Expr::IsNull { negated: true, .. }
+            ),
+            "`!= null` is `IS NOT NULL`, and NOT `!= NULL`, which is NULL"
+        );
+        assert!(
+            matches!(
+                filter_of("null == Row.k"),
+                Expr::IsNull { negated: false, .. }
+            ),
+            "`null == x` is the same question written the other way round"
+        );
+        assert!(
+            matches!(filter_of("Row.k == \"a\""), Expr::BinOp { .. }),
+            "a comparison against a value stays a comparison"
+        );
     }
 }

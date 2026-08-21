@@ -317,6 +317,19 @@ pub enum Expr<'db> {
     /// has a finite size; `salsa::Update` lifts through `Box<T>` when
     /// `T: Update`.
     Concat(Box<Expr<'db>>, Box<Expr<'db>>),
+    /// `x IS NULL` / `x IS NOT NULL` — what `x == null` and `x != null` lower
+    /// to, and the reason there is no null VALUE in this algebra.
+    ///
+    /// **`x != NULL` is not true in SQL, it is NULL**, so a filter written as
+    /// an ordinary comparison against a null literal keeps no rows at all. The
+    /// surface has one spelling and the algebra has the operator that means it;
+    /// `null` never survives as a value, which is the same statement the
+    /// checker makes by refusing `name = null`.
+    IsNull {
+        operand: Box<Expr<'db>>,
+        /// `true` for `!=` — the `NOT` of `IS NOT NULL`.
+        negated: bool,
+    },
     /// Function application: `func(args...)`, result typed `ty`.
     Call {
         func: SmolStr,

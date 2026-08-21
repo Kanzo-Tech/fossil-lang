@@ -1070,6 +1070,17 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
         Expr::LitInt(v) => lit(*v),
         Expr::LitFloat(v) => lit(v.get()),
         Expr::LitBool(b) => lit(*b),
+        // The one comparison whose SQL is not its spelling — `x != NULL` is
+        // NULL and not true, so this is where the surface's `x != null` gets
+        // the operator it means.
+        Expr::IsNull { operand, negated } => {
+            let inner = render(operand);
+            if *negated {
+                DfExpr::IsNotNull(Box::new(inner))
+            } else {
+                DfExpr::IsNull(Box::new(inner))
+            }
+        }
         // `/` is the one operator whose SQL is not its spelling. fossil types
         // `a / b` as Float (see `synth_binop`), and DataFusion's `Divide` on two
         // `Int64`s is INTEGER division — `7 / 2` would be `3` while DuckDB, the

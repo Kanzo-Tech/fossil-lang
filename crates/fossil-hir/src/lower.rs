@@ -285,6 +285,18 @@ pub enum HirExpr {
     ColumnRef { binding: SmolStr, column: SmolStr },
     /// `"hello"` → literal text without surrounding quotes.
     StringLit(SmolStr),
+    /// `null` — the absence of a value.
+    ///
+    /// Its type is [`crate::ty::TyKind::Null`], which is comparable with
+    /// everything and assignable to nothing: `Row.left_on == null` is the
+    /// question a program has to be able to ask, and `name = null` is a
+    /// property written from nothing, which is a different thing and stays an
+    /// error.
+    ///
+    /// **`x != null` does not lower to `x != NULL`.** In SQL that is NULL, not
+    /// true, so the filter would keep no rows at all; `fossil-mir` lowers the
+    /// two comparisons against this literal to `IS NULL` and `IS NOT NULL`.
+    NullLit,
     /// `str.slug(User.name)` — a stdlib function applied to positional arguments.
     ///
     /// `func` is the fully-qualified dotted name exactly as
@@ -1778,6 +1790,9 @@ fn lower_expr_inner(
                         None
                     }
                 };
+            }
+            if toks.iter().any(|t| t.kind() == SyntaxKind::NULL) {
+                return Some(HirExpr::NullLit);
             }
             if let Some(b) = toks.iter().find(|t| t.kind() == SyntaxKind::BOOL) {
                 // The token's text is the value: the lexer has one rule per

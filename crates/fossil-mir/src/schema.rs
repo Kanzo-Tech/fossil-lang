@@ -141,6 +141,9 @@ fn collect_free_cols(expr: &Expr<'_>, acc: &mut BTreeSet<SmolStr>) {
             collect_free_cols(lhs, acc);
             collect_free_cols(rhs, acc);
         }
+        // The column being tested is read, exactly as it would be by any other
+        // comparison — `IS NULL` is not a way of not reading it.
+        Expr::IsNull { operand, .. } => collect_free_cols(operand, acc),
         Expr::Call { args, .. } => {
             for arg in args {
                 collect_free_cols(arg, acc);

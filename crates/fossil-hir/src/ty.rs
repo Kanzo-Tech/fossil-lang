@@ -55,6 +55,15 @@ pub enum TyKind<'db> {
     Seq(Ty<'db>),
     /// Tabular row type — interned separately for fast equality.
     Record(Record<'db>),
+    /// The type of `null`, and of nothing else.
+    ///
+    /// **Comparable with everything, assignable to nothing.** The rule lives in
+    /// `check`'s `Eq`/`Ne` arm and NOT in `subtypes`, which is what keeps this
+    /// from being `Optional` coming back through the door it left by: a bottom
+    /// type that subtypes everything would make `name = null` type against
+    /// `xsd:string`, and a property written from nothing is not the question
+    /// `Employee.left_on == null` asks.
+    Null,
     /// A relation: the named rows a `from` clause or a pipeline puts in scope.
     ///
     /// It was not a type at all. `RowScope` lived in `crate::infer`, beside the

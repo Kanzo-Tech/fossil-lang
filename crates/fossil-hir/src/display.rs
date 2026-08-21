@@ -86,6 +86,7 @@ fn write_expr(out: &mut String, expr: &HirExpr) {
             }
             out.push('"');
         }
+        HirExpr::NullLit => out.push_str("null"),
         HirExpr::FieldRef(name) => out.push_str(name),
         HirExpr::ColumnRef { binding, column } => {
             let _ = write!(out, "{binding}.{column}");

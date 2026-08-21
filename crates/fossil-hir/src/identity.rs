@@ -384,6 +384,7 @@ fn identity_form(e: &HirExpr) -> String {
         HirExpr::ColumnRef { column, .. } => format!(".{column}"),
         HirExpr::FieldRef(name) => format!(".{name}"),
         HirExpr::StringLit(s) => format!("{s:?}"),
+        HirExpr::NullLit => "null".to_string(),
         HirExpr::Interpolation(parts) => {
             let body: String = parts
                 .iter()

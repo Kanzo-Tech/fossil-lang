@@ -3,7 +3,7 @@ type { Contact } := io.shex("disjunction.shex")
 Row := io.csv("data/contacts.csv")
 
 // #region filter
-Reachable := Row.where(Row.email != "" or Row.phone != "")
+Reachable := Row.where(Row.email != null or Row.phone != null)
 // #endregion filter
 
 Contacts : Contact from Reachable

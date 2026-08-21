@@ -75,6 +75,14 @@ appear in an IRI at all.
 the results. Arithmetic is `+` `-` `*` `/` `%`, with the precedence you expect, and parentheses where
 you want to be explicit.
 
+`null` is the one thing that compares with anything: a source is allowed to have no value for a
+column, and `Row.celsius != null` is how you ask. It compares and it does not assign — `celsius =
+null` is an error, because a column with no value and a property written from nothing are different
+things and only the first is a question.
+
+Do not reach for `!= ""` to mean this. It is a comparison against the empty string, it is only a
+test for absence on a text column, and it happened to work for as long as nothing typed it.
+
 ## Named arguments
 
 Some arguments read as a puzzle without a name, so they carry one:
