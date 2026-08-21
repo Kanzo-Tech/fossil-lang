@@ -47,10 +47,12 @@
 use serde::{Deserialize, Serialize};
 
 pub mod shapes;
+pub mod span;
 
 pub use shapes::{
     Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, Shape, local_name, short_name,
 };
+pub use span::Span;
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.

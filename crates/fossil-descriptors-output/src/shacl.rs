@@ -199,6 +199,16 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
                 datatype: datatype_of(&store, &psh.value),
                 targets: edge_targets(&store, &psh.value),
                 occurs: occurs_of(&store, &psh.value),
+                // **SHACL declares no position yet.** A report against a
+                // `.ttl` shapes graph says everything it says about the
+                // program and nothing about the document, where a `.shex` one
+                // underlines the constraint it violated — `fossil_shex::spans`
+                // is the lookup that does it, and it reads `ShExC`. Closing
+                // this needs the same thing there: the range of `sh:path`'s
+                // object within `psh.value`'s property shape, which the store
+                // here does not keep. Until then `None`, which every consumer
+                // already handles because `ShExJ` gives it too.
+                span: None,
             });
         }
         shapes.push(Shape { iri, properties });

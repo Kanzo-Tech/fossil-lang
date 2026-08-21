@@ -122,6 +122,11 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                     datatype,
                     targets,
                     occurs: Occurs { min, max },
+                    // This toy `line`-per-predicate syntax is not `ShExC`, so
+                    // there is no document a range would point into. `None` is
+                    // the same answer a `ShExJ` document gives, and consumers
+                    // are required to handle it.
+                    span: None,
                 });
             }
             _ => return Err(Rejection::Malformed(format!("unknown line `{line}`"))),

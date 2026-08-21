@@ -38,7 +38,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
+use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, Span};
 
 /// The local name of an IRI — the substring after the last `#` or `/`.
 ///
@@ -241,6 +241,23 @@ pub struct PropertyConstraint {
     pub targets: Vec<String>,
     /// How many values the property may carry.
     pub occurs: Occurs,
+    /// Where the DOCUMENT declares this predicate, as a byte range into that
+    /// document's text.
+    ///
+    /// It is what lets a type error underline both halves of what it is
+    /// saying: the program's line, and `shop:total xsd:float` in `shape.shex`.
+    /// A checker knows the constraint was violated and, without this, has no
+    /// way to point at the sentence it was violating — so the shape's answer
+    /// travelled as prose in the message, or not at all.
+    ///
+    /// `None` is the honest default and there are three ways to get it: a
+    /// `ShExJ` document (offsets in JSON are not what a reader is looking at),
+    /// a SHACL one (a separate decoder over Turtle, with no lookup of its own
+    /// yet), and a compact document where the lookup did not find the
+    /// predicate. A consumer drops one label; nothing else changes. See
+    /// `fossil_shex::spans`, which is a lookup over text and explains at length
+    /// why that is not a second parser.
+    pub span: Option<Span>,
 }
 
 /// How many values a property may carry — the rich form. [`Cardinality`] is its
@@ -460,6 +477,7 @@ mod tests {
             datatype,
             targets: Vec::new(),
             occurs,
+            span: None,
         }
     }
 
@@ -469,6 +487,7 @@ mod tests {
             datatype: None,
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs,
+            span: None,
         }
     }
 

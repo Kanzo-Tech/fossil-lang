@@ -62,6 +62,8 @@
 // would hurt every other consumer.
 #![allow(clippy::result_large_err)]
 
+pub mod spans;
+
 use std::collections::{HashMap, HashSet};
 
 use fossil_graph_schema::{
@@ -411,6 +413,17 @@ pub struct ShExDescriptor {
     /// Resolved IRI → index into `shapes`. Lookup only; never iterated.
     index: HashMap<String, usize>,
     errors: Vec<ShExLoweringError>,
+    /// The `ShExC` text this was parsed from, when it was parsed from one.
+    ///
+    /// The AST carries no offsets — `shex_ast`'s own `Span` is `nom_locate` and
+    /// lives in its parse errors — so the only way a decoded shape can say
+    /// WHERE it declares a predicate is to look in the text. [`crate::spans`]
+    /// does that looking and says why it is safe.
+    ///
+    /// `None` for [`Self::from_reader`], which is the `ShExJ` path: a JSON
+    /// document's offsets are offsets in JSON, and nobody reading a report
+    /// about a shape is looking at that.
+    source: Option<String>,
 }
 
 impl ShExDescriptor {
@@ -440,7 +453,10 @@ impl ShExDescriptor {
         let base = IriS::new_unchecked("http://fossil.invalid/schema");
         let schema = ShExParser::parse(src, None, &base)
             .map_err(|e| ShExLoweringError::MalformedSchema(e.to_string()))?;
-        Self::from_schema(schema)
+        let mut descriptor = Self::from_schema(schema)?;
+        // Kept for [`crate::spans`], and only on this path — see the field.
+        descriptor.source = Some(src.to_string());
+        Ok(descriptor)
     }
 
     /// Lower this `ShEx` schema into the format-neutral vocabulary — the
@@ -466,6 +482,17 @@ impl ShExDescriptor {
                         datatype: datatype_of(c.value_expr.as_ref()),
                         targets: edge_targets(c.value_expr.as_ref()),
                         occurs: c.cardinality,
+                        // The spellings are rudof's, via `qualify`, so nothing
+                        // here reads a `PREFIX` declaration a second time —
+                        // which is the one way looking in the text could give a
+                        // wrong answer rather than no answer.
+                        span: self.source.as_deref().and_then(|src| {
+                            crate::spans::predicate_span(
+                                src,
+                                &prefixmap.qualify(&binding.iri),
+                                &prefixmap.qualify(&c.predicate),
+                            )
+                        }),
                     })
                     .collect(),
             })
@@ -519,6 +546,9 @@ impl ShExDescriptor {
         }
 
         Ok(Self {
+            // `from_shex_source` fills this on the compact path; a schema that
+            // arrived as an already-parsed AST has no text to point into.
+            source: None,
             schema,
             shapes,
             index,
@@ -791,6 +821,49 @@ fn label_to_string(label: &TripleExprLabel) -> String {
 #[allow(clippy::literal_string_with_formatting_args)]
 mod tests {
     use super::*;
+
+    /// The range survives the whole decode, and it is the range of the
+    /// PREDICATE — not of the line, not of the shape.
+    ///
+    /// `crate::spans` proves the lookup over strings; this proves the wiring:
+    /// that `from_shex_source` keeps the text, that `to_output_shapes` asks
+    /// with rudof's own qualified spellings, and that what comes out the
+    /// neutral end still points at the document. Sliced out of the source,
+    /// because the numbers are the thing under test.
+    #[test]
+    fn a_compact_document_carries_where_it_declares_each_predicate() {
+        const SRC: &str = "\
+PREFIX shop: <https://shop.example/voc#>
+PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+
+shop:Order {
+  shop:total xsd:float
+}
+";
+        let shapes = ShExDescriptor::from_shex_source(SRC)
+            .expect("the document parses")
+            .to_output_shapes();
+        let first = shapes.shapes().next().expect("one shape");
+        let property = &first.properties[0];
+        assert_eq!(property.predicate, "https://shop.example/voc#total");
+        assert_eq!(
+            property.span.and_then(|s| s.slice(SRC)),
+            Some("shop:total"),
+            "the range is the predicate as the document spells it"
+        );
+    }
+
+    /// And `ShExJ` carries none. The offsets would be offsets in JSON, which is
+    /// not the document anybody is reading a report about — so `None`, which is
+    /// the same answer SHACL gives and which every consumer already handles.
+    #[test]
+    fn a_json_document_carries_no_range() {
+        let shapes = ShExDescriptor::from_shex_source(PERSON_NAME_SCHEMA)
+            .expect("the document parses")
+            .to_output_shapes();
+        let first = shapes.shapes().next().expect("one shape");
+        assert!(first.properties[0].span.is_none());
+    }
 
     /// Minimal `ShEx` schema in JSON form — `ex:Person` with one
     /// `ex:name xsd:string` constraint.

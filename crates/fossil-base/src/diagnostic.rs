@@ -53,6 +53,8 @@
 /// nearly every diagnostic comes from a per-mapping query.
 // `Hash` because `SpanLabel` derives it and carries one. NOT MINE — one word,
 // added because the whole workspace failed to compile without it.
+pub use fossil_graph_schema::Span;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SpanFrame {
     /// Offsets from the start of the enclosing mapping. Must be rebased.
@@ -243,23 +245,14 @@ pub enum Severity {
     Info,
 }
 
-/// Byte-offset span into the source text.
-///
-/// Carries `(start, end)` only. Cross-file spans, when they are needed, get a
-/// `FileSpan` newtype layered above rather than a file id widened into here —
-/// every span in the compiler is already relative to one text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Span {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl Span {
-    #[must_use]
-    pub const fn new(start: u32, end: u32) -> Self {
-        Self { start, end }
-    }
-}
+// `Span` was defined here and is `fossil_graph_schema::Span` now — re-exported
+// from this crate's root, so no consumer's `use fossil_base::Span` changed.
+//
+// It moved DOWN because `fossil-shex` needed it and cannot have it: this crate
+// carries salsa and that one is deliberately WASM-clean, so a shape document
+// that wants to say where it declares a predicate had no span type to say it
+// in. The leaf crate is where the shared vocabulary goes — the same move F1
+// made for `Primitive`. See `fossil_graph_schema::span` for the rest.
 
 #[cfg(test)]
 // `literal_string_with_formatting_args` flags the Fossil identity template

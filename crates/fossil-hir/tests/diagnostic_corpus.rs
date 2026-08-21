@@ -284,6 +284,8 @@ fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> P
         datatype,
         targets: Vec::new(),
         occurs,
+        // A test fixture, not a document: no text to point into.
+        span: None,
     }
 }
 

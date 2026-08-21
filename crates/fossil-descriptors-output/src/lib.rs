@@ -55,7 +55,14 @@ use fossil_shex::{ShExDescriptor, ShExLoweringError};
 /// Accepts **both** surface syntaxes: `ShExC` (compact, human-authored) and
 /// `ShExJ` (JSON interchange), auto-detected by the first non-whitespace byte.
 /// Both lower through the same constraint table, so the two forms of one schema
-/// produce equal [`OutputShapes`].
+/// say the same thing.
+///
+/// They no longer produce EQUAL [`OutputShapes`], and the difference is
+/// positions: [`fossil_graph_schema::PropertyConstraint::span`] says where the
+/// document declares a predicate, and only the compact form has an answer —
+/// offsets in JSON are not the document anyone is reading a report about.
+/// `shexc_and_shexj_of_one_schema_decode_equal` compares modulo that, and
+/// asserts the difference is real rather than both sides being empty.
 ///
 /// The `uri` is unread. `ShEx`'s relative-reference base is a fixed sentinel
 /// inside [`ShExDescriptor::from_shex_source`], which is what the compiler
@@ -164,6 +171,7 @@ impl OutputDescriptor for AcceptAllDescriptor {
 #[cfg(test)]
 mod tests {
     use fossil_base::{Capability, provider};
+    use fossil_graph_schema::PropertyConstraint;
 
     use super::*;
 
@@ -177,8 +185,43 @@ mod tests {
     /// One schema, both surface syntaxes. `ShExC` is what a person writes and
     /// `ShExJ` is what a tool emits; if they did not decode to the same value,
     /// the choice of syntax would be a semantic choice.
+    ///
+    /// # The claim narrowed, and the narrowing is the point
+    ///
+    /// It compared the two whole values, and cannot any more:
+    /// [`fossil_graph_schema::PropertyConstraint::span`] says WHERE the document
+    /// declares a predicate, and a compact document has an answer where a JSON
+    /// one has `None`. The two still say the same thing; they are no longer
+    /// written in the same place, which is what a position is.
+    ///
+    /// So the comparison is modulo the position, spelled out rather than
+    /// derived — clearing the field before comparing would make this test pass
+    /// for a value the compiler never sees. The `assert!` below is the other
+    /// half: the compact document does carry one, so the equality is not being
+    /// bought by both sides being empty.
     #[test]
     fn shexc_and_shexj_of_one_schema_decode_equal() {
+        /// The two documents modulo POSITION — the one thing they legitimately
+        /// disagree about. Spelled out rather than derived: clearing the field
+        /// before comparing would make this pass for a value the compiler never
+        /// sees.
+        fn said(shapes: &OutputShapes) -> Vec<(String, Vec<PropertyConstraint>)> {
+            shapes
+                .shapes()
+                .map(|s| {
+                    let properties = s
+                        .properties
+                        .iter()
+                        .map(|p| PropertyConstraint {
+                            span: None,
+                            ..p.clone()
+                        })
+                        .collect();
+                    (s.iri.clone(), properties)
+                })
+                .collect()
+        }
+
         const SHEXC: &str = "\
 PREFIX ex: <http://example.org/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
@@ -235,9 +278,16 @@ ex:Person {
 
         let compact = decode_shex("person.shexc", SHEXC).expect("ShExC decodes");
         let json = decode_shex("person.shexj", SHEXJ).expect("ShExJ decodes");
+
         assert_eq!(
-            compact, json,
+            said(&compact),
+            said(&json),
             "the syntax is not part of what a schema says"
+        );
+        assert_eq!(
+            compact.rejections(),
+            json.rejections(),
+            "and neither is what it could not lower"
         );
 
         // Not vacuous: the value actually carries the schema.
@@ -245,6 +295,19 @@ ex:Person {
             .lookup("http://example.org/Person")
             .expect("ex:Person");
         assert_eq!(person.properties.len(), 3);
+        // And the position IS the difference — not both sides being empty.
+        assert!(
+            person.properties[0].span.is_some(),
+            "a compact document says where it declares a predicate"
+        );
+        assert!(
+            json.lookup("http://example.org/Person")
+                .expect("ex:Person")
+                .properties[0]
+                .span
+                .is_none(),
+            "and a JSON one does not: its offsets would be offsets in JSON"
+        );
         assert_eq!(
             person.properties[2].targets,
             ["http://example.org/Person"],

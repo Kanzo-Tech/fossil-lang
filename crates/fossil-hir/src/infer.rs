@@ -952,6 +952,8 @@ mod tests {
             datatype,
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs: Occurs::ONE,
+            // A test fixture, not a document: no text to point into.
+            span: None,
         };
         let shape = Shape {
             iri: "https://example.org/Beam".to_string(),
