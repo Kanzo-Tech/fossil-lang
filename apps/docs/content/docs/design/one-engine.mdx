@@ -29,15 +29,31 @@ a static library already built. Removing it removes that unit.
 
 ## What has to be rewritten, and it is three things
 
-1. **The layout pass.** Fifteen sites in `fossil-runtime` reach DuckDB, and what
-   they use it for is `COPY`. The GraphAr writer is **already `arrow-rs`**
-   (`fossil-df/src/files.rs`), native and browser both; what is missing is the
-   layout writing through it rather than through a `COPY`.
+1. **The layout pass — done.** It reads and writes Parquet with `arrow-rs` and
+   holds no connection. The finding is that **none of the algorithm was in SQL**:
+   Louvain and Morton were already Rust, and the SQL only read, applied arrays
+   that Rust had computed, sorted, and wrote. What replaced it is three Arrow
+   kernels — `concat_batches`, `lexsort_to_indices`, `take` — plus the encoder
+   `fossil-df` already had.
 2. **The corpus verbs' native executor.** `DuckRuntime` runs the verb SQL
    `fossil-graph` produces. DataFusion reads Parquet natively.
 3. **The assertions.** `fossil-cli` and `fossil-engine` open an in-memory DuckDB
    to read the Parquet they just wrote. That is a test convenience, not a
    dependency of the language.
+
+## What the first piece cost, and it is not measured yet
+
+The memory budget no longer reaches the layout. `--memory` used to open the
+connection and cap it with `apply_memory_budget`, and DuckDB's sort spilled to
+`temp_directory` when it hit the cap. The Arrow sort does not spill: the
+adjacency is `concat_batches`'d whole and `lexsort_to_indices` runs over all of
+it. At ten million edges the arithmetic is roughly **+2 GB of peak** and there is
+no valve.
+
+This is stated rather than measured, and it is the first number owed before the
+piece is called good. The budget still reaches the DataFusion half of the run
+(`bounded_context`), which is where the joins and the aggregation are; what is
+uncapped is the post-pass.
 
 ## The one measured gap
 

@@ -19,7 +19,39 @@ workspace = true
 # for wasm32. The `bundled` feature is inherited from the workspace pin
 # `duckdb = { version = "1.10502", features = ["bundled"] }` (~80MB C++,
 # 3-5 min cold-cache compile).
+#
+# What is left of it here is `execute` (runs a compiled plan's SQL),
+# `apply_memory_budget` and `install_secret` — the CLI/engine seam, which is the
+# *second* and *third* pieces of `docs/design/one-engine.mdx`. The layout pass
+# no longer names it: `src/layout.rs` reads and writes Parquet through
+# arrow-rs/parquet-rs, so the one thing this crate does that the language needs
+# is engine-free. The wasm32 tripwire in `src/lib.rs` stays until those two
+# pieces land and this line can go.
 duckdb = { workspace = true }
+
+# The layout pass's I/O. `parquet` reads the vertex/adjacency Parquet the
+# DataFusion writer produced (footer for the row count, projected column chunks
+# for the CSR scan); `arrow` supplies the three kernels the rewrite is made of —
+# `concat_batches`, `lexsort_to_indices` and `take`. Both are the workspace pin
+# (58), the single arrow line `datafusion` itself resolves to, which is what
+# makes a `RecordBatch` built here the same type `fossil-df` encodes.
+#
+# Default features on purpose, and the one that matters is snappy: everything
+# the write path emits is uncompressed, but a Parquet handed to this pass by
+# anything else (a `DuckDB` COPY, in the fixtures) is snappy by that engine's
+# default, and a reader that cannot decode it is a trap rather than a policy.
+# `snap` is pure Rust, so unifying it into `fossil-df`'s deliberately narrow
+# `parquet` feature set costs its wasm build nothing.
+arrow = { workspace = true }
+parquet = { workspace = true }
+
+# The single Arrow→Parquet encoder (`files::batches_to_parquet`), shared with
+# the native fs sink and the browser executor. The layout emits tiles through it
+# rather than through a second writer, so the row-group-per-tile property that
+# makes the footer a reader's index is stated in exactly one place. It is the
+# wasm-clean half of `fossil-df` — depending on it does not put a `wasm32`
+# obstacle in this crate's way.
+fossil-df = { path = "../fossil-df" }
 
 # The six `native_udf_only` UDF impl crates (unicode-normalization, slug,
 # voca_rs, hmac, sha2, uuid) were here for `src/udf.rs`. Ruling 15 of

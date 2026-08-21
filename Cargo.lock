@@ -2141,11 +2141,14 @@ dependencies = [
 name = "fossil-runtime"
 version = "0.1.0"
 dependencies = [
+ "arrow",
  "duckdb",
+ "fossil-df",
  "fossil-hir",
  "fossil-mem-probe",
  "fossil-resolver",
  "fossil-sinks",
+ "parquet",
  "serde",
  "serde_json",
  "sha2",

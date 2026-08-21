@@ -653,12 +653,12 @@ fn enrich_written_layout(
     memory_bytes: Option<u64>,
     status: &mut RunStatus,
 ) -> miette::Result<()> {
-    let conn =
-        duckdb::Connection::open_in_memory().map_err(|e| miette::miette!("open duckdb: {e}"))?;
-    if let Some(bytes) = memory_bytes {
-        fossil_runtime::apply_memory_budget(&conn, bytes)
-            .map_err(|e| miette::miette!("apply duckdb memory budget: {e}"))?;
-    }
+    // `memory_bytes` used to open a DuckDB connection here and cap it with
+    // `apply_memory_budget` before handing it to the layout pass. The layout
+    // reads and writes Parquet with `arrow-rs` now and holds no connection, so
+    // there is nothing to cap — and nothing enforcing the budget either. The
+    // edge sort is entirely in memory; see `design/one-engine.mdx`.
+    let _ = memory_bytes;
 
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
     let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
@@ -727,7 +727,7 @@ fn enrich_written_layout(
         })
         .collect();
 
-    fossil_runtime::layout::enrich_layout(&conn, &targets, &adjacencies)
+    fossil_runtime::layout::enrich_layout(&targets, &adjacencies)
         .map_err(|e| miette::miette!("layout: {e}"))?;
 
     // The single-file vertex Parquet was this pass's input and nothing reads it

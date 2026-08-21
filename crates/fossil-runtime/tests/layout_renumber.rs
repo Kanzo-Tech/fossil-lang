@@ -6,6 +6,13 @@
 //! `UINTEGER`s, so a mistake anywhere here produces a well-formed corpus that
 //! answers queries and means something else. Nothing throws. The only way to
 //! catch it is to state the invariants and check them.
+//!
+//! **The fixtures and the assertions are `DuckDB`; the pass under test is not.**
+//! `enrich_layout` reads and writes Parquet through `arrow-rs`, and what is on
+//! either side of it here is a second engine reading those bytes back. That is
+//! worth keeping rather than porting: a corpus only one writer can read is a
+//! corpus, and the assertions below are the only place anything checks that what
+//! this pass emits is Parquet in the sense the rest of the world means.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -140,7 +147,7 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     // single file — the only point at which that file is the source of truth.
     let before = edges_by_subject(&conn, &lit(&vertices), &by_source);
     let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
-    fossil_runtime::layout::enrich_layout(&conn, &v, &a).expect("enrich_layout");
+    fossil_runtime::layout::enrich_layout(&v, &a).expect("enrich_layout");
 
     // 1. The graph is the same graph. Ids changed; who is connected to whom did
     //    not. This is the assertion a missed adjacency file fails.
@@ -253,7 +260,7 @@ fn a_dangling_endpoint_is_an_error_and_not_a_missing_row() {
     fs::create_dir_all(&chunks).expect("chunk dir");
 
     let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
-    let err = fossil_runtime::layout::enrich_layout(&conn, &v, &a)
+    let err = fossil_runtime::layout::enrich_layout(&v, &a)
         .expect_err("a dangling endpoint must not pass silently");
     assert!(
         matches!(err, LayoutError::DanglingEndpoint { dropped: 1, .. }),
@@ -275,7 +282,7 @@ fn an_unknown_vertex_type_is_refused() {
 
     let (v, mut a) = targets(&vertices, &by_source, &by_target, &chunks);
     a[0].dst_type = "Nowhere".to_string();
-    let err = fossil_runtime::layout::enrich_layout(&conn, &v, &a).expect_err("unknown type");
+    let err = fossil_runtime::layout::enrich_layout(&v, &a).expect_err("unknown type");
     assert!(
         matches!(err, LayoutError::UnknownVertexType { ref vertex_type, .. } if vertex_type == "Nowhere"),
         "expected the unknown type to be named, got {err:?}",
