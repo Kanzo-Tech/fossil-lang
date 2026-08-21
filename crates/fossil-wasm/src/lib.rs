@@ -363,7 +363,7 @@ impl FossilPlayground {
             let uri = self.files.path_for(h, &self.db).unwrap_or_default();
             let index = fossil_ide::line_index(&self.db, file);
             for d in diagnostics_for_file(&self.db, file) {
-                all.push(to_check_row(&uri, &index, &d));
+                all.push(to_check_row(&self.db, file, &uri, &index, &d));
             }
         }
         all
@@ -380,7 +380,7 @@ impl FossilPlayground {
         Some(
             diagnostics_for_file(&self.db, file)
                 .into_iter()
-                .map(|d| to_check_row(&uri, &index, &d))
+                .map(|d| to_check_row(&self.db, file, &uri, &index, &d))
                 .collect(),
         )
     }
@@ -636,6 +636,25 @@ pub struct CheckRow {
     pub range: CheckRange,
     pub severity: u8,
     pub message: String,
+    /// The other places this one diagnostic points at — LSP's
+    /// `relatedInformation`, which is the concept for a report whose content is
+    /// a RELATION between two places.
+    ///
+    /// Empty for nearly every diagnostic. Non-empty when the mistake needs a
+    /// second underline: two mappings minting two identities for one type, the
+    /// binding a row came from, and the line of the `.shex` a violated
+    /// constraint is declared on — which is in ANOTHER FILE, and is why each
+    /// entry carries its own `uri`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<CheckRelated>,
+}
+
+/// One entry of [`CheckRow::related`] — a place, and what is there.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CheckRelated {
+    pub uri: String,
+    pub range: CheckRange,
+    pub message: String,
 }
 
 /// LSP-shaped range (zero-based line + UTF-16 column).
@@ -695,17 +714,40 @@ fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
 /// into the message as a `help:` suffix (mirroring `fossil-lsp::
 /// to_lsp_diagnostic` — keep the structured carriers reachable by
 /// re-draining the accumulator on the consumer side).
-fn to_check_row(uri: &str, index: &LineIndex, d: &Diagnostic) -> CheckRow {
+fn to_check_row(
+    db: &WasmDb,
+    file: SourceFile,
+    uri: &str,
+    index: &LineIndex,
+    d: &Diagnostic,
+) -> CheckRow {
     let range = span_to_range(index, d.span);
     let message = d.suggestion_source.as_ref().map_or_else(
         || d.message.clone(),
         |s| format!("{}\nhelp: {s}", d.message),
     );
+    // **The labels reach the browser now, and none of them did.** This dropped
+    // `d.labels` exactly as `fossil-lsp`'s twin did, so a report naming two
+    // mappings arrived as one squiggle. `fossil_ide::related_locations` answers
+    // which file each label is in — one answer, rendered here into the JS row
+    // shape and there into `DiagnosticRelatedInformation`.
+    let related = fossil_ide::related_locations(db, file, d)
+        .into_iter()
+        .map(|r| CheckRelated {
+            // A `LineIndex` per file: a UTF-16 column is a fact about the text
+            // the range is in, and it is memoised, so the labels that are in
+            // the program cost nothing extra.
+            range: span_to_range(&fossil_ide::line_index(db, r.file), r.span),
+            uri: r.file.path(db).clone(),
+            message: r.text,
+        })
+        .collect();
     CheckRow {
         uri: uri.to_string(),
         range,
         severity: severity_to_lsp_int(d.severity),
         message,
+        related,
     }
 }
 

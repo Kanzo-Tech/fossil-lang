@@ -58,12 +58,12 @@ use lsp_types::request::{
 };
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, Diagnostic as LspDiagnostic,
-    DiagnosticSeverity, DocumentSymbolResponse, GotoDefinitionResponse, Hover, HoverContents,
-    HoverProviderCapability, Location, MarkupContent, MarkupKind, OneOf, Position,
-    PublishDiagnosticsParams, Range, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensOptions, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    WorkDoneProgressOptions,
+    DiagnosticRelatedInformation, DiagnosticSeverity, DocumentSymbolResponse,
+    GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability, Location, MarkupContent,
+    MarkupKind, OneOf, Position, PublishDiagnosticsParams, Range, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Uri, WorkDoneProgressOptions,
 };
 
 /// The editor's [`System`].
@@ -690,7 +690,7 @@ fn publish_diagnostics(
     let index = fossil_ide::line_index(db, file);
     let diagnostics: Vec<LspDiagnostic> = diagnostics_for(db, file)
         .iter()
-        .map(|d| to_lsp_diagnostic(&index, d))
+        .map(|d| to_lsp_diagnostic(db, file, &index, d))
         .collect();
     let params = PublishDiagnosticsParams {
         uri: uri.clone(),
@@ -709,18 +709,70 @@ fn publish_diagnostics(
 /// byte span is converted to a UTF-16 range; the `suggestion_source` (when
 /// present) is folded into the message as a help line (the structured carriers
 /// are recovered for code actions by re-draining the accumulator).
-fn to_lsp_diagnostic(index: &LineIndex, d: &Diagnostic) -> LspDiagnostic {
+///
+/// # The labels reach the editor now, and none of them did
+///
+/// `d.labels` was dropped on the floor here, so a report whose whole content is
+/// a RELATION between two places — «`Users` and `Imported` mint two identities
+/// for Person», which names both mappings and underlines both `@subject` lines
+/// — arrived as one squiggle with no second half. `fossil check` rendered it in
+/// full throughout, which is why nothing caught it.
+///
+/// `relatedInformation` is the LSP's word for exactly this, and it takes a URI
+/// per entry — so a label pointing into the `.shex` the program named lands on
+/// THAT file, which is what makes the two-file report an editor feature and not
+/// a terminal one. `fossil_ide::related_locations` answers which file each
+/// label is in; this turns the answer into LSP.
+fn to_lsp_diagnostic(
+    db: &LspDb,
+    file: SourceFile,
+    index: &LineIndex,
+    d: &Diagnostic,
+) -> LspDiagnostic {
     let range = span_to_lsp_range(index, d.span);
     let message = d.suggestion_source.as_ref().map_or_else(
         || d.message.clone(),
         |s| format!("{}\nhelp: {s}", d.message),
     );
+    let related: Vec<DiagnosticRelatedInformation> = fossil_ide::related_locations(db, file, d)
+        .into_iter()
+        .filter_map(|r| {
+            // A `LineIndex` per file and not the program's: a UTF-16 column
+            // is a fact about the text the range is in, and reusing the
+            // program's index over a document's bytes puts the entry on a
+            // plausible wrong line. `line_index` is memoised per file, so the
+            // program's own labels cost nothing extra.
+            let index = fossil_ide::line_index(db, r.file);
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: path_to_uri(r.file.path(db))?,
+                    range: span_to_lsp_range(&index, r.span),
+                },
+                message: r.text,
+            })
+        })
+        .collect();
     LspDiagnostic {
         range,
         severity: Some(severity_to_lsp(d.severity)),
         message,
+        related_information: (!related.is_empty()).then_some(related),
         ..LspDiagnostic::default()
     }
+}
+
+/// A registry key as a `file://` URI.
+///
+/// Goes through [`local_path`] rather than testing the prefix again: that is
+/// the function that already knows which keys this host can answer for, and a
+/// second reading of the same question is how the editor's `registry_key` came
+/// to disagree with the checker's. `None` for a key no filesystem can answer —
+/// another scheme, an unopened remote buffer — and a related entry that cannot
+/// be located is dropped rather than pointed somewhere.
+fn path_to_uri(key: &str) -> Option<Uri> {
+    use std::str::FromStr as _;
+    let path = local_path(key)?;
+    Uri::from_str(&format!("file://{}", path.display())).ok()
 }
 
 const fn severity_to_lsp(s: Severity) -> DiagnosticSeverity {

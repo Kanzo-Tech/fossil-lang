@@ -57,6 +57,7 @@ pub mod hover;
 pub mod line_index;
 pub mod outline;
 pub mod position;
+pub mod related;
 pub mod semantic;
 pub mod shape_documents;
 pub mod symbol_index;
@@ -77,6 +78,7 @@ pub use semantic::{decode_tokens, legend_type_name, semantic_legend, semantic_to
 // `fossil_hir::documents`'s now — the compiler's own answer to which documents
 // a program names and what key each is looked up under — and a re-export would
 // be a second name for one function.
+pub use related::{Related, related_locations};
 pub use shape_documents::register_missing_documents;
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;

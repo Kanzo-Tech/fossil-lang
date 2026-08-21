@@ -213,3 +213,65 @@ fn a_document_opened_after_the_program_is_still_found_by_it() {
         "the document is resolved relative to the program that names it"
     );
 }
+
+/// **The report reaches the browser with both halves.**
+///
+/// A type error is about two texts — `name = users.name` in the program, and
+/// the line of the `.shex` that says what `name` must be — and until
+/// `CheckRow::related` existed the second one had nowhere to go: `to_check_row`
+/// converted the span, the severity and the message and dropped `d.labels`
+/// entirely, so a report whose whole content is a RELATION between two places
+/// arrived as one squiggle. `fossil check` rendered it in full throughout.
+///
+/// **The document is `ShExC` and it has to be.** Every other fixture in this
+/// file is `ShExJ`, which carries no positions — offsets in JSON are not the
+/// text anyone is reading a report about — so the compact form is the one that
+/// can say where it declares a predicate (`fossil_shex::spans`). A `ShExJ`
+/// fixture here would assert the ABSENCE of the label and pass forever.
+#[test]
+fn a_violated_constraint_points_at_the_document_that_declares_it() {
+    const COMPACT: &str = "\
+PREFIX ex:  <http://example.org/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name xsd:integer
+}
+";
+    let mut pg = FossilPlayground::new();
+    pg.register_inferred_descriptor_native(USERS_DESCRIPTOR)
+        .expect("the descriptor JSON is well-formed");
+    pg.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    pg.open_file_native("person.shex".to_string(), COMPACT.to_string());
+
+    let row = pg
+        .check_rows()
+        .into_iter()
+        .find(|r| r.message.contains("expects Integer"))
+        .expect("the shape demands an integer where the program writes a string");
+    assert_eq!(
+        row.uri, "prog.fossil",
+        "the diagnostic is about the program"
+    );
+
+    let in_document: Vec<_> = row
+        .related
+        .iter()
+        .filter(|r| r.uri == "person.shex")
+        .collect();
+    assert_eq!(
+        in_document.len(),
+        1,
+        "one entry pointing into the document, got {:#?}",
+        row.related
+    );
+    let entry = in_document[0];
+    assert_eq!(entry.message, "`Person` declares `name` as Integer");
+    // Line 4, zero-based — `ex:name xsd:integer`, the fifth line of the fixture.
+    assert_eq!(entry.range.start.line, 4, "got {:#?}", entry.range);
+    assert_eq!(
+        entry.range.start.character, 2,
+        "and the caret is on the predicate, not on the line: {:#?}",
+        entry.range
+    );
+}
