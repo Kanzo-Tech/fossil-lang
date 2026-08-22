@@ -51,10 +51,11 @@
 //! Because the *host* supplies the table and `System` is here. A row that reads
 //! types carries a `fn` pointer into a schema language, and the compiler may not
 //! link one — `0e6898d` cut `ShEx` out of `fossil-mir` and the same cut applies to
-//! `fossil-hir`. So the rows that read rows are `&'static` constants below (the
-//! compiler can name a `DuckDB` reader), the rows that read types come from the
-//! crate that owns the parser, and [`crate::system::System::providers`] is where
-//! a host hands over the assembled table.
+//! `fossil-hir`. So the rows that read rows are `&'static` constants in this
+//! crate (the compiler can name a `DuckDB` reader), the rows that read types come
+//! from the crate that owns the parser, and [`crate::system::System::providers`]
+//! is where a host hands over the assembled table. That split is what decides
+//! which of the two generated files a row lands in — see below.
 //!
 //! This is a table of *behaviour*, and behaviour is what a table of `fn` is for:
 //! the extension point is a table of `fn`, never a trait object, because a `fn`
@@ -75,15 +76,35 @@
 //! capabilities it declares, and two predicates over those.
 //!
 //! That is not left to a comment: `tests/substrate_has_no_prose.rs` reads this
-//! file and fails on a string literal outside `mod tests` with a space in it.
-//! Every literal a catalogue needs — `"csv"`, `"ttl"`, `"io.{}"` — is one token;
-//! a sentence is not. It is a crude rule and it says so, but it is the rule that
-//! would have caught the two functions that just left.
+//! file **and the module beside it** and fails on a string literal outside `mod tests`
+//! with a space in it. Every literal a catalogue needs — `"csv"`, `"ttl"`,
+//! `"io.{}"` — is one token; a sentence is not. It is a crude rule and it says
+//! so, but it is the rule that would have caught the two functions that just
+//! left.
+//!
+//! # The rows themselves are not written here any more
+//!
+//! `CSV`, `JSON`, `PARQUET`, `RDF`, `DATA` and [`NativeReader`] are **generated
+//! from `catalogue.bnf`** into `providers/generated.rs`, by `cargo xtask
+//! catalogue`. What is left in this file is the row TYPE, the two predicates
+//! over it, the one lookup, and the Salsa input a host installs through — the
+//! machinery, none of which a data file can carry.
+//!
+//! `catalogue.bnf` had been the source of truth for the DATA half since ruling
+//! 14, with a parity test failing when the hand-written statics drifted from it;
+//! the file's own `# Status` named generating them as the step after, and this
+//! is that step. What it buys beyond "cannot drift": a row's `decodes` token is
+//! now a Rust path the compiler resolves, which is the one thing the parity test
+//! said it could not prove.
 
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
 use fossil_graph_schema::{OutputShapes, Rejection};
+
+mod generated;
+
+pub use generated::{CSV, DATA, JSON, NativeReader, PARQUET, RDF};
 
 /// `(uri_as_written, text) -> decoded`.
 ///
@@ -93,20 +114,6 @@ use fossil_graph_schema::{OutputShapes, Rejection};
 /// passed because a document can carry relative references and a diagnostic
 /// wants to name the file — not so the decoder can go and read it.
 pub type DecodeTypes = fn(&str, &str) -> Result<OutputShapes, Rejection>;
-
-/// The native `DuckDB` readers a [`RowReader::Native`] maps to.
-///
-/// `fossil-mir` exhaustively maps each to a `SourceFormat`, so a new reader is a
-/// compile error until handled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NativeReader {
-    /// `read_csv_auto`.
-    CsvAuto,
-    /// `read_json_auto`.
-    JsonAuto,
-    /// `read_parquet`.
-    Parquet,
-}
 
 /// How a row-reading provider's bytes become rows a `DuckDB` plan can scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -273,48 +280,10 @@ pub fn provider(table: &[&'static Provider], constructor: &str) -> Option<&'stat
 // shapes the INPUT rows and `type { … }` is the OUTPUT contract, and nothing
 // says a program's two ends read one file.
 
-/// `io.csv` — `read_csv_auto`.
-pub static CSV: Provider = Provider {
-    name: "csv",
-    extensions: &["csv"],
-    reads_rows: Some(RowReader::Native(NativeReader::CsvAuto)),
-    reads_types: None,
-};
-
-/// `io.json` — `read_json_auto`.
-pub static JSON: Provider = Provider {
-    name: "json",
-    extensions: &["json"],
-    reads_rows: Some(RowReader::Native(NativeReader::JsonAuto)),
-    reads_types: None,
-};
-
-/// `io.parquet` — `read_parquet`.
-pub static PARQUET: Provider = Provider {
-    name: "parquet",
-    extensions: &["parquet"],
-    reads_rows: Some(RowReader::Native(NativeReader::Parquet)),
-    reads_types: None,
-};
-
-/// `io.rdf` — materialised outside the reader.
-///
-/// The extension list is kept in lockstep with the RDF provider's own.
-pub static RDF: Provider = Provider {
-    name: "rdf",
-    extensions: &["ttl", "nt", "n3", "rdf"],
-    reads_rows: Some(RowReader::Materialised),
-    reads_types: None,
-};
-
-/// The rows the compiler can name on its own: everything that reads DATA.
-///
-/// This is [`crate::system::System::providers`]'s default, and it is a real
-/// answer rather than a stub — a host that decodes no shape document still has
-/// to recognise `io.csv`. A host that compiles programs installs a superset
-/// (`fossil_descriptors_output::PROVIDERS`), and the rows it adds are the ones
-/// carrying a `fn` into a schema language the compiler may not link.
-pub static DATA: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF];
+// The four data rows and `DATA` stood here as hand-written statics. They are
+// generated from `catalogue.bnf` now — `mod generated`, above — and the argument
+// each one's doc comment carried moved into that file's `(* … *)` commentary,
+// which is where `catalogue.bnf` says the argument lives.
 
 // ===================================================================== the input
 

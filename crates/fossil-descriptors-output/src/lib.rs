@@ -3,7 +3,7 @@
 //!
 //! # What this crate is now
 //!
-//! [`SHEX`] and [`SHACL`] are [`Provider`] rows: a `name` (what a program writes
+//! [`SHEX`] and [`SHACL`] are [`fossil_base::Provider`] rows: a `name` (what a program writes
 //! after `io.`), the extensions the row accepts, and a pure
 //! `fn(&str, &str) -> Result<OutputShapes, Rejection>` under the *read types*
 //! capability. [`PROVIDERS`] is those two spliced onto `fossil_base`'s data rows
@@ -39,14 +39,14 @@
 //! method is `to_graph_schema`, which is the seam `apply_output_shape` already
 //! takes directly.
 
+mod generated;
 pub mod kind;
 pub mod shacl;
 
+pub use generated::{PROVIDERS, SHACL, SHEX};
 pub use kind::OutputDescriptorKind;
 pub use shacl::{decode_shacl, subject_value};
 
-use fossil_base::Provider;
-use fossil_base::providers::{CSV, JSON, PARQUET, RDF};
 use fossil_graph_schema::{OutputShapes, Rejection};
 use fossil_shex::{ShExDescriptor, ShExLoweringError};
 
@@ -87,41 +87,13 @@ pub fn decode_shex(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
     }
 }
 
-/// The `io.shex` row: it reads TYPES, from `.shex`, `.shexj` and `.shexc`.
-///
-/// It does **not** claim `.ttl`. `io.shex("catalogue.ttl")` is now an error that
-/// names the constructor and the extension, where before the extension alone
-/// chose the row and the constructor was decorative.
-pub static SHEX: Provider = Provider {
-    name: "shex",
-    extensions: &["shex", "shexj", "shexc"],
-    reads_rows: None,
-    reads_types: Some(decode_shex),
-};
-
-/// The `io.shacl` row: it reads TYPES, from `.ttl` and `.shacl`.
-///
-/// `.ttl` is claimed by [`fossil_base::providers::RDF`] as well, and that is not
-/// a conflict any more: `io.rdf("g.ttl")` reads ROWS out of a graph and
-/// `io.shacl("shapes.ttl")` reads TYPES out of a shapes graph. Two capabilities
-/// over one syntax, told apart by the name — which under extension dispatch was
-/// unexpressible, and is the second half of why the two tables had to become
-/// one.
-pub static SHACL: Provider = Provider {
-    name: "shacl",
-    extensions: &["ttl", "shacl"],
-    reads_rows: None,
-    reads_types: Some(decode_shacl),
-};
-
-/// **The registry a compiling host installs**: the data rows plus the two rows
-/// that read types.
-///
-/// A host that returns this from `System::providers` recognises every `io.*` the
-/// language has. The default (`fossil_base::providers::DATA`) is the data rows
-/// alone, which is correct for a host that runs a plan somebody else compiled
-/// and wrong for the host the plan comes from.
-pub static PROVIDERS: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX, &SHACL];
+// `SHEX`, `SHACL` and `PROVIDERS` stood here as hand-written statics. They are
+// generated from `catalogue.bnf` now — `mod generated`, above — and each one's
+// argument moved into that file's `(* … *)` commentary.
+//
+// The generated file writes `decode_shex` and `decode_shacl` as Rust PATHS, so
+// the compiler resolves them. That is the one thing `catalogue_parity.rs`, which
+// this replaces, said it could not prove.
 
 /// Output-side shape descriptor.
 ///

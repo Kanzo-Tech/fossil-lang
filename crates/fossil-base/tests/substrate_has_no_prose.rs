@@ -33,9 +33,22 @@
 //! - **It reads text, not tokens.** A literal in a macro that this file never
 //!   spells is invisible to it.
 
-/// The source under scan, embedded at compile time so there is no path to
+/// The sources under scan, embedded at compile time so there is no path to
 /// resolve and no working directory to be wrong about.
-const PROVIDERS: &str = include_str!("../src/providers.rs");
+///
+/// **Both halves, and the second is why this is a slice.** The rows moved to a
+/// file generated from `catalogue.bnf`, and they took every catalogue literal
+/// with them — `"csv"`, `"ttl"`, `"read_csv_auto"`. Scanning `providers.rs`
+/// alone would still pass, and would be measuring a file that no longer has
+/// anything to say. A generated file is exactly where an unnoticed sentence
+/// could arrive, because nobody reads a diff of one.
+const SCANNED: &[(&str, &str)] = &[
+    ("providers.rs", include_str!("../src/providers.rs")),
+    (
+        "providers/generated.rs",
+        include_str!("../src/providers/generated.rs"),
+    ),
+];
 
 /// Everything before `mod tests`. The test module is allowed its assertion
 /// messages; the module proper is not allowed a sentence.
@@ -76,17 +89,29 @@ fn literals(line: &str) -> Vec<String> {
     out
 }
 
+/// Every literal in either scanned file, tagged with the file it came from.
+fn scanned_literals() -> Vec<(&'static str, String)> {
+    SCANNED
+        .iter()
+        .flat_map(|(name, src)| {
+            shipped_source(src)
+                .lines()
+                .flat_map(literals)
+                .map(move |lit| (*name, lit))
+        })
+        .collect()
+}
+
 #[test]
 fn the_provider_catalogue_carries_no_sentence() {
-    let offenders: Vec<String> = shipped_source(PROVIDERS)
-        .lines()
-        .flat_map(literals)
-        .filter(|lit| lit.contains(' '))
+    let offenders: Vec<(&str, String)> = scanned_literals()
+        .into_iter()
+        .filter(|(_, lit)| lit.contains(' '))
         .collect();
     assert!(
         offenders.is_empty(),
-        "`providers.rs` is the catalogue, not the diagnostic — a message belongs \
-         in `fossil_hir::refusals`, beside the checker that raises it. Found: {offenders:?}"
+        "the catalogue is not the diagnostic — a message belongs in \
+         `fossil_hir::refusals`, beside the checker that raises it. Found: {offenders:?}"
     );
 }
 
@@ -112,18 +137,23 @@ fn the_scan_would_have_caught_the_two_functions_that_left() {
 
 /// A catalogue literal is one token and must keep passing — otherwise the fix
 /// for a red run is to delete data.
+///
+/// It is also what proves the scan reaches BOTH files, and it can only do that
+/// because the split put one of these two literals in each: `"csv"` is a row, so
+/// it is in the generated file, and `"io."` is [`Provider::constructor`]'s format
+/// string, which stayed with the machinery.
 #[test]
 fn the_catalogue_literals_themselves_are_single_tokens() {
-    let kept: Vec<String> = shipped_source(PROVIDERS)
-        .lines()
-        .flat_map(literals)
-        .collect();
-    assert!(
-        kept.iter().any(|l| l == "csv"),
+    let kept = scanned_literals();
+    let from = |lit: &str| kept.iter().find(|(_, l)| l == lit).map(|(file, _)| *file);
+    assert_eq!(
+        from("csv"),
+        Some("providers/generated.rs"),
         "the scan did not reach the rows at all: {kept:?}"
     );
-    assert!(
-        kept.iter().any(|l| l == "io."),
-        "nor the constructor prefix"
+    assert_eq!(
+        from("io."),
+        Some("providers.rs"),
+        "nor the constructor prefix: {kept:?}"
     );
 }

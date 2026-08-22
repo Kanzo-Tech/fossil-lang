@@ -6,20 +6,66 @@
 //!                is DERIVED from the resolved graph — there is no hand-maintained
 //!                list to drift (the old hardcoded `-p …` lists in `ci.yml` and the
 //!                `.cargo` alias had already diverged: 9 crates vs 6).
+//!   catalogue    Regenerate the provider statics from `catalogue.bnf`. `--check`
+//!                fails instead of writing, which is what CI runs.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::process::{Command, exit};
 
+use xtask::catalogue;
+
 fn main() {
-    match std::env::args().nth(1).as_deref() {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
         Some("wasm-check") => wasm_check(),
+        Some("catalogue") => catalogue_cmd(args.next().as_deref() == Some("--check")),
         other => {
             if let Some(c) = other {
                 eprintln!("xtask: unknown command {c:?}");
             }
-            eprintln!("usage: cargo xtask wasm-check");
+            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check]>");
             exit(2);
         }
+    }
+}
+
+/// Write — or, under `--check`, prove current — every file generated from
+/// `catalogue.bnf`.
+///
+/// The check mode names the file and the command that fixes it, because the
+/// failure a generator produces in CI is read by somebody who did not run it.
+fn catalogue_cmd(check: bool) {
+    let root = catalogue::repo_root();
+    let mut stale = Vec::new();
+    for (path, want) in catalogue::generated() {
+        let shown = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        if have == want {
+            continue;
+        }
+        if check {
+            stale.push(shown);
+        } else {
+            std::fs::create_dir_all(path.parent().expect("a file has a parent"))
+                .expect("create the generated file's directory");
+            std::fs::write(&path, want).expect("write the generated file");
+            eprintln!("xtask: wrote {shown}");
+        }
+    }
+    if !stale.is_empty() {
+        eprintln!(
+            "xtask: {} generated file(s) do not match `catalogue.bnf`:",
+            stale.len()
+        );
+        for s in &stale {
+            eprintln!("  {s}");
+        }
+        eprintln!("run `cargo xtask catalogue` and commit the result");
+        exit(1);
     }
 }
 

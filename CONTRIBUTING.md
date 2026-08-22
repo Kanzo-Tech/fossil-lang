@@ -73,6 +73,25 @@ cargo xtask wasm-check
 Without any LLVM at all, check the compiler closure directly — it is the smaller
 claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-graph-wasm`.
 
+## Generated files
+
+Two files in `crates/` are generated and must not be hand-edited:
+
+```
+catalogue.bnf ──cargo xtask catalogue──▶ crates/fossil-base/src/providers/generated.rs
+                                         crates/fossil-descriptors-output/src/generated.rs
+```
+
+Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit both.
+`cargo xtask catalogue --check` fails without writing, and there is no CI step for
+it on purpose: `crates/xtask/tests/catalogue_generated.rs` is the same check as a
+test, so `cargo test --workspace` already fails on a stale file and a second gate
+would be one idea in two places.
+
+The file carries the argument for each row in its `(* … *)` commentary. A doc
+comment in the generated Rust is derived and one line long; if you want to know
+*why* `io.shex` refuses `.ttl`, that is in the `.bnf`.
+
 ## Development cycle
 
 1. Read `CLAUDE.md` for the standing rules, and `git log --oneline` for where the
