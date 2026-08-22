@@ -977,7 +977,114 @@ pub fn compatible<'db>(
         );
     }
 
+    if let Some(help) = expected.and_then(|e| repair_for(cx, actual, e, source_value)) {
+        d = d.with_help(help);
+    }
+
     Err(cx.raise(d))
+}
+
+/// What to do about a value of the wrong type, when the compiler can see a way.
+///
+/// Two suggestions, both of which `errors/wrong-type`'s hand-written target
+/// asked for and neither of which existed — the artefact said *«`Purchase.amount`
+/// is Float. If `reference` really holds the number,
+/// `parse.float(Purchase.reference)` converts it.»* and blessing the program
+/// deleted the only description of them.
+///
+/// 1. **A column of the EXPECTED type on the same row.** The commonest cause of
+///    this error is reaching for the wrong column of the right row, and the
+///    right one is already in the schema the checker is holding.
+/// 2. **A stdlib function from the actual type to the expected one.** The
+///    catalogue is DATA, so this is a search rather than a table of special
+///    cases: a row taking exactly one `actual` and returning `expected`.
+///
+/// `None` when neither fires, which is when the compiler has nothing to add to
+/// what the labels already showed.
+///
+/// # The candidates are SORTED, and that is not tidiness
+///
+/// `FunctionRegistry::iter` walks a `HashMap`, so its order is the process's
+/// hash seed. An unsorted `first` would put a different function in the message
+/// on different runs of the same compiler — and this text is committed as a
+/// conformance artefact, so it would be a golden that fails at random.
+/// `crates/fossil-shex/examples/declaration_order.rs` measured this exact class
+/// of bug once already: six parses, six orders.
+fn repair_for<'db>(
+    cx: &Expr<'db>,
+    actual: Ty<'db>,
+    expected: Ty<'db>,
+    source_value: &HirExpr,
+) -> Option<String> {
+    let db = cx.db();
+    let mut parts: Vec<String> = Vec::new();
+    let expected_display = render_ty_kind(db, expected.kind(db));
+
+    // (1) The row the value was read from, and the columns of it that WOULD
+    //     satisfy the constraint. Only for a reference: a literal or a call has
+    //     no row to look across.
+    let (row, binding, written) = match source_value {
+        HirExpr::ColumnRef { binding, column } => (
+            cx.rows.as_ref().and_then(|r| r.row_of(binding)),
+            Some(binding.as_str()),
+            Some(column.as_str()),
+        ),
+        HirExpr::FieldRef(name) => (cx.flat, None, Some(name.as_str())),
+        _ => (None, None, None),
+    };
+    if let (Some(row), Some(written)) = (row, written)
+        && let TyKind::Record(rec) = row.kind(db)
+    {
+        let fits: Vec<String> = rec
+            .fields(db)
+            .iter()
+            .filter(|f| f.ty == expected && f.name != written)
+            .map(|f| {
+                binding.map_or_else(|| format!("`{}`", f.name), |b| format!("`{b}.{}`", f.name))
+            })
+            .collect();
+        // Two named and the rest counted. Naming ten columns is not a
+        // suggestion, and naming two of ten silently is a lie about the row.
+        if let Some((first, rest)) = fits.split_first() {
+            let named = match rest.split_first() {
+                None => first.clone(),
+                Some((second, [])) => format!("{first} and {second}"),
+                Some((second, more)) => format!("{first}, {second} and {} others", more.len()),
+            };
+            let verb = if fits.len() == 1 { "is" } else { "are" };
+            parts.push(format!("{named} {verb} {expected_display}."));
+        }
+    }
+
+    // (2) A conversion, spelled as the call the author would write.
+    let is_ty =
+        |tag: Option<crate::stdlib::ScalarTy>, t: Ty<'db>| tag.is_some_and(|s| s.to_ty(db) == t);
+    let mut conversions: Vec<&crate::stdlib::RegistryEntry> = crate::stdlib::stdlib()
+        .iter()
+        .filter(|e| {
+            is_ty(e.sig.ret.scalar(), expected)
+                && matches!(e.sig.params.as_slice(), [only] if is_ty(only.ty.scalar(), actual))
+        })
+        .collect();
+    // **The one NAMED after the type wins**, then alphabetical. `parse.decimal`
+    // and `parse.float` both answer String → Float — the catalogue has no
+    // Decimal type in the MVP lattice, so `decimal` returns a Float by
+    // compromise and says so in its own row — and sorting on the name alone
+    // put `decimal` in front of an author who asked for a Float. The tiebreak
+    // is what a reader would reach for; the alphabetical order under it is what
+    // keeps the answer the same on every run.
+    let wanted = expected_display.to_ascii_lowercase();
+    conversions.sort_by(|a, b| (a.member != wanted, &a.name).cmp(&(b.member != wanted, &b.name)));
+    if let Some(convert) = conversions.first() {
+        let text = crate::display::expr_text(source_value);
+        let subject = written.map_or_else(|| format!("`{text}`"), |w| format!("`{w}`"));
+        parts.push(format!(
+            "If {subject} really holds the value, `{}({text})` converts it.",
+            convert.name
+        ));
+    }
+
+    (!parts.is_empty()).then(|| parts.join(" "))
 }
 
 /// The cardinality a shape declares, in the words the `help:` uses.

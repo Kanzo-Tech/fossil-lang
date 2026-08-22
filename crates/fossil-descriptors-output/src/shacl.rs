@@ -34,6 +34,50 @@
 //! `OutputShapes::to_graph_schema` gives the executor byte-identical output to
 //! what the old walk produced.
 //!
+//! # Positions: a `.shex` report cites the document and a `.ttl` one does not
+//!
+//! `fossil_graph_schema::PropertyConstraint::span` is what lets a type error
+//! underline the line that declares the constraint it violated, in the shape
+//! document itself. `fossil_shex::spans` supplies it for `ShExC` and this
+//! decoder supplies `None`, so a program checked against a `.ttl` gets the
+//! half-report every program used to get. **That is deliberate, and here is the
+//! measurement.**
+//!
+//! `oxttl` carries no position on a parsed triple. Its `TextPosition` exists
+//! only inside `TurtleSyntaxError`, and the low-level parser
+//! (`LowLevelTurtleParser::parse_next`) yields `Result<Triple, …>` with the
+//! same shape — checked against `oxttl` 0.2.3, both the reader and the
+//! low-level API. `shex_ast` is in exactly the same state, which is why the
+//! `ShEx` side reads the document text.
+//!
+//! **What does not transfer is that reading the text is SAFE there.**
+//! `fossil_shex::spans` is a lookup and never a parser: a predicate sits inside
+//! `label { … }`, textually delimited, and the shape's identity IS that label,
+//! so scoping a search to one shape is matching a brace. Turtle gives none of
+//! that. A shape is identified by its `sh:targetClass` and not by the subject
+//! it is written under; a property shape is usually a blank node `[ … ]` that
+//! may be nested or named or referenced from elsewhere; `;` and `.` terminate
+//! at arbitrary depth; and one `sh:path shop:label` may appear in any number of
+//! property shapes across the file. Deciding which node shape a given `sh:path`
+//! belongs to means tracking nesting and statement termination — that is
+//! PARSING Turtle, and a second parser that can disagree with the first is
+//! precisely what the `ShEx` module argues against. There the failure mode of a
+//! disagreement is a missing label; here it would be a caret on another shape's
+//! constraint, in the right file, silently.
+//!
+//! So the cost is not the work, it is that the cheap version would be wrong.
+//!
+//! **What reverses this:** `oxttl` exposing the token range of a parsed triple
+//! — the lexer already computes one (`toolkit::lexer::last_token_location`), it
+//! is simply not on the public iterator. With that, this is a field on the
+//! walk's row rather than a reader of anything, and it is strictly better than
+//! the `ShEx` side because the position would come from the real parser. It is
+//! an upstream ask, not a local one.
+//!
+//! The corpus has one SHACL document (`apps/docs/programs/catalogue`) and that
+//! program is clean, so nothing today would render such a label even if it
+//! existed. That is why this is written down rather than built.
+//!
 //! # Declaration order is load-bearing
 //!
 //! `type { A, B } := io.shacl("shapes.ttl")` binds **by position** — the Nth
@@ -199,15 +243,10 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
                 datatype: datatype_of(&store, &psh.value),
                 targets: edge_targets(&store, &psh.value),
                 occurs: occurs_of(&store, &psh.value),
-                // **SHACL declares no position yet.** A report against a
-                // `.ttl` shapes graph says everything it says about the
-                // program and nothing about the document, where a `.shex` one
-                // underlines the constraint it violated — `fossil_shex::spans`
-                // is the lookup that does it, and it reads `ShExC`. Closing
-                // this needs the same thing there: the range of `sh:path`'s
-                // object within `psh.value`'s property shape, which the store
-                // here does not keep. Until then `None`, which every consumer
-                // already handles because `ShExJ` gives it too.
+                // **SHACL declares no position, and this is a decision** — see
+                // the module's «Positions» section for the measurement and for
+                // the one upstream change that reverses it. Every consumer
+                // already handles `None`, because `ShExJ` gives it too.
                 span: None,
             });
         }

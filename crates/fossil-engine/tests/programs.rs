@@ -121,14 +121,20 @@
 //!   `Person`/`User` IS and the name is part of that sentence.
 //! - **Block layout is miette's**, including which snippet comes first.
 //!
-//! # And one thing the blessing DELETED, which is owed
+//! # One thing the blessing deleted, and it came back
 //!
-//! `wrong-type`'s target carried a `help:` the compiler does not produce:
+//! `wrong-type`'s target carried a `help:` the compiler did not produce —
 //! *«`Purchase.amount` is Float. If `reference` really holds the number,
-//! `parse.float(Purchase.reference)` converts it.»* Two suggestions, neither
-//! built — a column of the EXPECTED type on the same row, and the stdlib
-//! conversion that would bridge the two types. Nothing else in the corpus
-//! describes them, so they are written here rather than nowhere.
+//! `parse.float(Purchase.reference)` converts it.»* — so for one commit this
+//! header was the only description of it. Both halves exist now
+//! (`fossil_hir::check::repair_for`): a column of the EXPECTED type on the same
+//! row, and a stdlib row taking the actual type and returning the expected one.
+//! The second is a SEARCH over the catalogue rather than a table of pairs,
+//! because the catalogue is data.
+//!
+//! The wording differs by one word — «really holds the value» where the target
+//! wrote «really holds the number», because the sentence is generated for every
+//! pair of types and only one of them is a number.
 //!
 //! # Three causes of failure, and only one of them is the parser
 //!

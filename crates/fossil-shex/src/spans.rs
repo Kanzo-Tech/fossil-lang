@@ -31,8 +31,11 @@
 //! `ShExJ` — the JSON interchange syntax — gets no spans. `ShExDescriptor` only
 //! keeps the source for the compact path, and a JSON document's positions would
 //! be positions in JSON, which is not what a reader of `ShExC` is looking at.
-//! SHACL gets none either: `fossil_descriptors_output::decode_shacl` is a
-//! separate decoder over Turtle and would need its own lookup.
+//!
+//! SHACL gets none either, and that one is a DECISION rather than an omission:
+//! Turtle gives no textual scope to search inside, so the equivalent lookup
+//! would have to parse. `fossil_descriptors_output::shacl`'s «Positions»
+//! section carries the measurement and the upstream change that reverses it.
 
 use fossil_graph_schema::Span;
 

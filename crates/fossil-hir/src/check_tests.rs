@@ -825,6 +825,140 @@ Orders : Order from Purchase
     );
 }
 
+/// A value of the wrong type gets told what to DO about it, both ways.
+///
+/// `errors/wrong-type`'s hand-written target asked for these and neither
+/// existed, so blessing that program deleted the only description of them:
+/// *«`Purchase.amount` is Float. If `reference` really holds the number,
+/// `parse.float(Purchase.reference)` converts it.»*
+///
+/// The two halves are independent and both are here because they fail
+/// independently — the column search reads the row the checker is holding, and
+/// the conversion search reads the stdlib catalogue.
+///
+/// **`parse.float` and not `parse.decimal`.** Both answer String → Float; the
+/// MVP lattice has no Decimal, so `parse.decimal` returns a Float by compromise
+/// and says so in its own catalogue row. Sorting on the name alone put it in
+/// front of an author who asked for a Float, which is why the tiebreak prefers
+/// the row NAMED after the type. Under that, alphabetical — because
+/// `FunctionRegistry::iter` walks a `HashMap` and its order is the process's
+/// hash seed, so an unsorted pick would put a different function in a committed
+/// artefact on different runs.
+#[test]
+fn a_wrong_type_is_told_the_column_that_fits_and_the_call_that_converts() {
+    const SRC: &str = "\
+type { Order } := io.shex(\"shape.shex\")
+Purchase := io.csv(\"orders.csv\")
+Orders : Order from Purchase
+    @subject = \"https://shop.example/order/{Purchase.id}\"
+    total = Purchase.reference
+";
+    #[salsa::tracked]
+    fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return false;
+        };
+        let mut cx = build_checker(
+            db,
+            m,
+            // `amount` is the column that FITS, `reference` the one written.
+            Some(row_record(
+                db,
+                &[
+                    ("reference", Primitive::String),
+                    ("amount", Primitive::Float),
+                ],
+            )),
+            Some(ResolvedShape {
+                constraints: vec![crate::shapes::ShapeConstraint {
+                    predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
+                    value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
+                    occurs: Occurs::ONE,
+                    span: None,
+                }],
+                rejections: Vec::new(),
+                document: smol_str::SmolStr::from("shape.shex"),
+            }),
+        );
+        cx.check_property(
+            ExprId(0),
+            &HirProperty {
+                key: PropertyKey::Name(smol_str::SmolStr::from("total")),
+                value: HirExpr::ColumnRef {
+                    binding: smol_str::SmolStr::from("Purchase"),
+                    column: smol_str::SmolStr::from("reference"),
+                },
+            },
+        );
+        cx.expr.first_error.is_some()
+    }
+
+    let (db, file) = db_with(SRC);
+    assert!(refuse(&db, file), "String does not satisfy Float");
+    let raised = refuse::accumulated::<Diagnostic>(&db, file);
+    let help = raised
+        .iter()
+        .find(|d| d.message.contains("expects Float"))
+        .and_then(|d| d.help.clone())
+        .expect("the refusal carries a repair");
+
+    assert_eq!(
+        help,
+        "`Purchase.amount` is Float. If `reference` really holds the value, \
+         `parse.float(Purchase.reference)` converts it."
+    );
+}
+
+/// And it says nothing when there is nothing to say.
+///
+/// A `help:` that fires on every mismatch is noise, and the two searches can
+/// both come up empty: a row with no column of the wanted type, and a pair of
+/// types the catalogue bridges with no single-argument function. `Bool` from a
+/// `Date` is both.
+#[test]
+fn a_wrong_type_with_no_repair_says_nothing() {
+    #[salsa::tracked]
+    fn refuse(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+        let Some(m) = def_map(db, file).mappings(db).first().copied() else {
+            return false;
+        };
+        let mut cx = build_checker(
+            db,
+            m,
+            Some(row_record(db, &[("name", Primitive::Date)])),
+            Some(ResolvedShape {
+                constraints: vec![crate::shapes::ShapeConstraint {
+                    predicate: smol_str::SmolStr::from("https://example.org/name"),
+                    value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Bool))),
+                    occurs: Occurs::ONE,
+                    span: None,
+                }],
+                rejections: Vec::new(),
+                document: smol_str::SmolStr::from("personas.shex"),
+            }),
+        );
+        cx.check_property(
+            ExprId(0),
+            &HirProperty {
+                key: PropertyKey::Name(smol_str::SmolStr::from("name")),
+                value: HirExpr::ColumnRef {
+                    binding: smol_str::SmolStr::from("users"),
+                    column: smol_str::SmolStr::from("name"),
+                },
+            },
+        );
+        cx.expr.first_error.is_some()
+    }
+
+    let (db, file) = db_with(HELLO);
+    assert!(refuse(&db, file), "Date does not satisfy Bool");
+    let d = refuse::accumulated::<Diagnostic>(&db, file)
+        .into_iter()
+        .find(|d| d.message.contains("expects Bool"))
+        .expect("the value is refused");
+    assert_eq!(d.help, None, "no repair means no `help:`, not an empty one");
+}
+
 // ── The four ways a named document fails to produce a shape ────────────────
 
 /// Every one of these was a silent `None` — the same answer as "this program

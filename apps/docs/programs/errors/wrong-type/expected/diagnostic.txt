@@ -5,6 +5,8 @@
    ·                ─────────┬────────
    ·                         ╰── `Purchase.reference` is String
    ╰────
+  help: `Purchase.amount` is Float. If `reference` really holds the value,
+        `parse.float(Purchase.reference)` converts it.
   × `total` expects Float, and this is String
    ╭─[shape.shex:5:3]
  4 │ shop:Order {
