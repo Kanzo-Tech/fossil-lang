@@ -99,9 +99,8 @@ which exists for this and reproduces the shape of the real finding at a scale
 that fits on a laptop — wide rows (a subject IRI and two properties, ~124
 bytes/row) over a planted partition, so the gather is a real scatter:
 
-| | 1M vertices, 117 MB | | 2M vertices, 236 MB | |
+| | 1M / 117 MB, before | 1M, after | 2M / 236 MB, before | 2M, after |
 |---|---|---|---|---|
-| | before | after | before | after |
 | `read vertices` | +0.21 G | **+0.06 G** | +0.47 G | **+0.32 G** |
 | the gather | +0.11 G | **+0.00 G** | +0.25 G | **+0.00 G** |
 | **the vertex half** | **+0.32 G** | **+0.06 G** | **+0.72 G** | **+0.32 G** |
