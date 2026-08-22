@@ -442,21 +442,22 @@ pub enum PlanOp {
     Aggregate,
     /// `seq.count` → `COUNT(*)`.
     Count,
-    /// An `io/` source constructor. The tag mirrors `fossil-mir::SourceFormat`
-    /// but is registry-local to avoid a dependency cycle on `fossil-mir`.
-    Source(SourceFormatTag),
-}
-
-/// Registry-local mirror of `fossil-mir::SourceFormat` (avoids a `fossil-mir`
-/// dependency / cycle).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceFormatTag {
-    /// `io.csv` → `read_csv_auto`.
-    Csv,
-    /// `io.json` → `read_json_auto`.
-    Json,
-    /// `io.parquet` → `read_parquet`.
-    Parquet,
+    /// An `io/` source constructor. **Which** reader it is is not written here.
+    ///
+    /// It was `Source(SourceFormatTag)`, a registry-local three-variant mirror
+    /// of `fossil-mir::SourceFormat`, and it was write-only: constructed at the
+    /// three `io.` rows below and destructured nowhere — every reader of
+    /// [`LoweringKind`] matches `Expr` and takes `Op(_)` as a wildcard
+    /// (`fossil_df::lower_call`, `fossil_df::stdlib`). It was the reader half of
+    /// `fossil_base::providers` said a second time, which is the defect ruling
+    /// 13 collapsed one level up: `fossil-mir::lower::resolve_source` resolves
+    /// the format from the PROVIDER ROW (`Provider::reads_rows`) and has never
+    /// read this.
+    ///
+    /// So the row says what a `HirExpr::Call` needs it to say — *this name is a
+    /// source, not a scalar expression* — and the catalogue that owns readers
+    /// answers which one.
+    Source,
 }
 
 // ── Source dispatch lived here, and it was HALF of one table ──────────────
@@ -945,21 +946,21 @@ impl FunctionRegistry {
             "io.csv",
             vec![p("uri", S::String)],
             S::String,
-            L(P::Source(SourceFormatTag::Csv)),
+            L(P::Source),
         );
         add(
             e,
             "io.json",
             vec![p("uri", S::String)],
             S::String,
-            L(P::Source(SourceFormatTag::Json)),
+            L(P::Source),
         );
         add(
             e,
             "io.parquet",
             vec![p("uri", S::String)],
             S::String,
-            L(P::Source(SourceFormatTag::Parquet)),
+            L(P::Source),
         );
 
         reg
