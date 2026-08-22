@@ -16,12 +16,20 @@
  * `Primitive`. A value outside the union is rejected when the descriptor is
  * registered.
  *
- * `fossil-engine` does the same job natively, and where the two must agree
- * — the source-binding pattern, the reader each constructor picks, the
- * DuckDB→primitive table — `tests/rust-parity.test.ts` reads that crate's
- * source and goes red when they diverge. The agreement is checked, so no
- * comment in this file asserts it.
+ * `fossil-engine` does the same job natively, and the two must agree on three
+ * things. Two of them stopped being an agreement and became one source: the
+ * constructors that exist and the reader each picks are generated from
+ * `catalogue.bnf` into `catalogue.generated.ts`, and the Rust reads the same
+ * file through `fossil_base::providers`. The third — the DuckDB→primitive
+ * table — is still written twice, and `tests/rust-parity.test.ts` reads that
+ * crate's source and goes red when the two diverge.
+ *
+ * Zero @fossil-lang deps still holds: the generated module is a file in this
+ * package, not a dependency on another one. `packages/executor` gets its own
+ * projection of the same rows for the same reason.
  */
+
+import { NATIVE_READERS, NATIVE_ROWS, type NativeRow } from "./catalogue.generated.js";
 
 /**
  * The Fossil primitive lattice (mirror `@fossil-lang/wasm`'s
@@ -66,11 +74,15 @@ export interface InferredDescriptor {
 }
 
 /**
- * The `io/` source constructors — the wire form of `fossil-mir`'s
- * `SourceFormat`, and the alternation `extractSourceRefs` scrapes. `stdlib.rs`
- * registers exactly these three (`io.csv`, `io.json`, `io.parquet`).
+ * The `io/` source constructors an introspecting host can DESCRIBE — the rows
+ * `catalogue.bnf` gives a `reads native <fn>`.
+ *
+ * It was a hand-written union of three literals. It is `catalogue.bnf`'s now,
+ * through `cargo xtask catalogue`, which is the same source the Rust reads: a
+ * row added there reaches this type, the reader table below and the scrape
+ * alternation at once, and none of the three can be the one that was forgotten.
  */
-export type SourceFormat = "csv" | "json" | "parquet";
+export type SourceFormat = NativeRow;
 
 /** A source binding scraped from a `.fossil` mapping. */
 export interface SourceRef {
@@ -118,7 +130,7 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
  * reused across calls skips matches.
  */
 export const SOURCE_REF_PATTERN =
-  "(\\w[\\w\\d_]*)\\s*:=\\s*io\\.(csv|json|parquet)\\(\\s*['\"]([^'\"]+)['\"]";
+  `(\\w[\\w\\d_]*)\\s*:=\\s*io\\.(${NATIVE_ROWS.join("|")})\\(\\s*['"]([^'"]+)['"]`;
 
 /**
  * Scrape source-binding RHS URLs from a `.fossil` text.
@@ -146,12 +158,13 @@ export function extractSourceRefs(text: string): SourceRef[] {
  * introspects to one column named after its first line, so a file opening with
  * a bare `[` yields a schema whose only column is `[` and every real column
  * comes back unknown.
+ *
+ * The table is generated from the `native <fn>` token in `catalogue.bnf` — the
+ * same token `fossil_base::NativeReader::table_function` gives back on the Rust
+ * side. It used to be three literals here and three more in `fossil-engine`,
+ * kept in step by a parity test that read the Rust with a regex.
  */
-const READERS: Record<SourceFormat, string> = {
-  csv: "read_csv_auto",
-  json: "read_json_auto",
-  parquet: "read_parquet",
-};
+const READERS: Record<SourceFormat, string> = NATIVE_READERS;
 
 /**
  * The canonical DESCRIBE SQL for a resolved source URL. The URL is

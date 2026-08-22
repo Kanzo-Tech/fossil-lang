@@ -2,7 +2,7 @@
  * The parity guard.
  *
  * `packages/introspect` and `crates/fossil-engine` implement one capability
- * twice, and three things must agree or the browser and the CLI answer the
+ * twice, and three things had to agree or the browser and the CLI answer the
  * same program differently: the source-binding pattern, the DuckDB reader each
  * constructor picks, and the DuckDB→primitive table. Until this file existed
  * the agreement was asserted in a comment, and the comment was wrong in both
@@ -10,12 +10,28 @@
  * describing the Rust dispatch described a version of it that predated the
  * `read_json_auto` / `read_parquet` arms.
  *
- * So: read the Rust, derive the three tables from it, and compare against what
- * this package DOES. Nothing here restates a Rust value as a TS literal — a
- * copy of the answer cannot notice the answer changing. Every extraction is
- * `must*`, which throws when the shape it expects is gone: a guard that
- * silently finds nothing and passes is the failure this file exists to avoid,
- * so "the Rust moved" fails here rather than going quiet.
+ * **Two of the three stopped being an agreement.** Which constructors exist and
+ * which reader each one names now come from `catalogue.bnf` on both sides —
+ * `cargo xtask catalogue` writes `providers/generated.rs` and
+ * `catalogue.generated.ts` from it, and neither side carries a list. So what
+ * this file checks changed shape:
+ *
+ * - **The pattern** is still two regexes in two dialects, and the SCAFFOLD
+ *   around the alternation is still written twice. That comparison stays,
+ *   against the Rust source, with the alternation substituted from the
+ *   catalogue rather than scraped.
+ * - **The readers** are now two GENERATED projections of one file, by two
+ *   different emitters. `cargo xtask catalogue --check` proves each file
+ *   matches its own emitter and nothing compares the two, so this does: it
+ *   reads `providers/generated.rs` and asserts `describeSql` picks what the
+ *   Rust names, for every row, with neither side holding a row the other lacks.
+ * - **The type table** is unchanged — it is not catalogue data, it is still
+ *   written twice by hand, and this still reads the Rust for it.
+ *
+ * Nothing here restates a value as a literal — a copy of the answer cannot
+ * notice the answer changing. Every extraction throws when the shape it expects
+ * is gone: a guard that silently finds nothing and passes is the failure this
+ * file exists to avoid, so "the Rust moved" fails here rather than going quiet.
  *
  * WHAT IT CANNOT PROVE, beside what it can:
  *
@@ -30,6 +46,9 @@
  *   Unicode-aware and JS's is ASCII, so a non-ASCII binding name is scraped
  *   natively and skipped in the browser. Nothing in fossil can name one
  *   today, which is why this is a note and not a failing test.
+ * - **That the generated files are current.** `cargo xtask catalogue --check`
+ *   and `crates/xtask/tests/catalogue_generated.rs` own that. Two stale files
+ *   that are stale in the same way agree here.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -43,6 +62,7 @@ import {
   type InferredPrimitive,
   type SourceFormat,
 } from "../src/index.js";
+import { NATIVE_ROWS } from "../src/catalogue.generated.js";
 
 const ENGINE_REL = "crates/fossil-engine/src/lib.rs";
 
@@ -75,42 +95,88 @@ function must(re: RegExp, what: string): RegExpMatchArray {
   return m;
 }
 
-/** The regex literal `extract_source_refs` compiles, verbatim. */
+/**
+ * The pattern `extract_source_refs` compiles, with the alternation filled in.
+ *
+ * The Rust used to carry the alternation as a literal; it interpolates
+ * `{alternation}` from the catalogue now, so this substitutes the same source
+ * the TypeScript uses. What the comparison proves is therefore narrower and
+ * truer than before: the SCAFFOLD around the alternation, which is genuinely
+ * written twice in two regex dialects, still agrees.
+ */
 function rustPattern(): string {
   const fn = must(
-    /fn extract_source_refs[\s\S]*?regex::Regex::new\(\s*r#"([\s\S]*?)"#\s*\)/,
-    "`extract_source_refs`'s regex literal",
+    /fn extract_source_refs[\s\S]*?format!\(\s*r#"([\s\S]*?)"#\s*\)/,
+    "`extract_source_refs`'s pattern literal",
   );
-  return fn[1]!;
+  const literal = fn[1]!;
+  if (!literal.includes("{alternation}")) {
+    throw new Error(
+      "parity guard: the Rust pattern no longer interpolates `{alternation}`; " +
+        "if it went back to a literal list, this guard must compare it to the catalogue",
+    );
+  }
+  return literal.replace("{alternation}", NATIVE_ROWS.join("|"));
 }
 
-/** `constructor → DuckDB table function`, from the DESCRIBE dispatch. */
-function rustReaders(): { arms: Map<string, string>; fallback: string } {
-  const block = must(
-    /let reader = match constructor\.as_str\(\) \{([\s\S]*?)\};/,
-    "the `let reader = match constructor` dispatch",
-  )[1]!;
-  const arms = new Map<string, string>();
-  let fallback = "";
-  for (const line of block.split("\n")) {
-    const t = line.trim();
-    if (t === "" || t.startsWith("//")) continue;
-    const arm = t.match(/^"([^"]+)" => "([^"]+)",$/);
-    if (arm) {
-      arms.set(arm[1]!, arm[2]!);
-      continue;
+/** The generated Rust catalogue, the counterpart of `catalogue.generated.ts`. */
+const GENERATED_REL = "crates/fossil-base/src/providers/generated.rs";
+
+/**
+ * `row name → DuckDB table function`, read out of the GENERATED Rust.
+ *
+ * This is not the same guard as before and it is worth saying why. The reader
+ * dispatch used to be a hand-written `match` in `fossil-engine`, so the test
+ * compared two hand-written tables. Both sides are generated from
+ * `catalogue.bnf` now — but by two DIFFERENT emitters in `xtask`, and
+ * `cargo xtask catalogue --check` only proves each file matches its own
+ * emitter. Nothing else compares the two projections, and an emitter that
+ * derived `CsvAuto` from `read_csv_auto` one way in Rust and another way in
+ * TypeScript would pass every other check in the tree.
+ */
+function rustNativeReaders(): Map<string, string> {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  let generated = "";
+  for (let i = 0; i < 8; i++) {
+    try {
+      generated = readFileSync(join(dir, GENERATED_REL), "utf8");
+      break;
+    } catch {
+      dir = dirname(dir);
     }
-    const wild = t.match(/^_ => "([^"]+)",$/);
-    if (wild) {
-      fallback = wild[1]!;
-      continue;
+  }
+  if (generated === "") {
+    throw new Error(
+      `parity guard cannot find ${GENERATED_REL}; run \`cargo xtask catalogue\``,
+    );
+  }
+
+  // variant → table function, from `NativeReader::table_function`.
+  const fns = new Map<string, string>();
+  for (const m of generated.matchAll(/Self::(\w+) => "([^"]+)",/g)) {
+    fns.set(m[1]!, m[2]!);
+  }
+  // row name → variant, from each `pub static` block.
+  const out = new Map<string, string>();
+  for (const m of generated.matchAll(
+    /pub static \w+: Provider = Provider \{\s*name: "([^"]+)",[\s\S]*?reads_rows: ([^\n]+),/g,
+  )) {
+    const native = m[2]!.match(/RowReader::Native\(NativeReader::(\w+)\)/);
+    if (!native) continue;
+    const fn = fns.get(native[1]!);
+    if (!fn) {
+      throw new Error(
+        `parity guard: \`NativeReader::${native[1]}\` has no \`table_function\` arm`,
+      );
     }
-    throw new Error(`parity guard cannot read reader arm \`${t}\``);
+    out.set(m[1]!, fn);
   }
-  if (arms.size === 0 || fallback === "") {
-    throw new Error("parity guard read no reader arms; the dispatch changed shape");
+  if (out.size === 0) {
+    throw new Error(
+      "parity guard read no native rows out of the generated Rust; it changed shape",
+    );
   }
-  return { arms, fallback };
+  return out;
 }
 
 /** `Primitive::DateTime` → `"date_time"`, the wire spelling. */
@@ -186,40 +252,36 @@ describe("source-binding pattern parity with fossil-engine", () => {
   });
 });
 
-/** The constructors named in the Rust alternation — the corpus, never a literal. */
+/** The constructors this package knows, checked for plausibility first. */
 function mustFormats(): SourceFormat[] {
-  const alt = rustPattern().match(/io\\\.\(([^)]+)\)/);
-  if (!alt) {
-    throw new Error("parity guard cannot read the constructor alternation");
-  }
-  const formats = alt[1]!.split("|") as SourceFormat[];
-  // `"".split("|")` is `[""]`, not `[]` — an alternation that read as empty
-  // would otherwise give every loop below a corpus of one meaningless entry
-  // and pass by asserting nothing.
-  if (!formats.every((f) => /^[a-z][a-z0-9_]*$/.test(f))) {
+  const formats = [...NATIVE_ROWS] as SourceFormat[];
+  // A generated module that came out empty would give every loop below a
+  // corpus of nothing and pass by asserting nothing — the failure this whole
+  // file exists to avoid.
+  if (formats.length === 0 || !formats.every((f) => /^[a-z][a-z0-9_]*$/.test(f))) {
     throw new Error(
-      `parity guard read an implausible constructor alternation: ${JSON.stringify(formats)}`,
+      `parity guard read an implausible constructor list: ${JSON.stringify(formats)}`,
     );
   }
   return formats;
 }
 
-describe("reader dispatch parity with fossil-engine", () => {
-  it("picks the reader the Rust picks, for every constructor", () => {
-    const { arms, fallback } = rustReaders();
+describe("reader dispatch parity with the generated Rust catalogue", () => {
+  it("picks the reader the generated Rust names, for every constructor", () => {
+    const readers = rustNativeReaders();
     for (const format of mustFormats()) {
-      const reader = arms.get(format) ?? fallback;
+      const reader = readers.get(format);
+      expect(reader, `no native reader for \`io.${format}\` in the Rust`).toBeDefined();
       expect(describeSql("x", format)).toBe(
         `DESCRIBE SELECT * FROM ${reader}('x')`,
       );
     }
   });
 
-  it("leaves no Rust reader arm unreachable from a scraped constructor", () => {
-    const formats = mustFormats();
-    for (const constructor of rustReaders().arms.keys()) {
-      expect(formats).toContain(constructor);
-    }
+  it("names the same native rows on both sides — neither has one the other lacks", () => {
+    expect([...rustNativeReaders().keys()].sort()).toEqual(
+      [...mustFormats()].sort(),
+    );
   });
 });
 

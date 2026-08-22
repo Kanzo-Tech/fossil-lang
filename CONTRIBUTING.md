@@ -75,18 +75,32 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-gra
 
 ## Generated files
 
-Two files in `crates/` are generated and must not be hand-edited:
+Four files are generated and must not be hand-edited — two Rust, two TypeScript:
 
 ```
 catalogue.bnf ──cargo xtask catalogue──▶ crates/fossil-base/src/providers/generated.rs
                                          crates/fossil-descriptors-output/src/generated.rs
+                                         packages/introspect/src/catalogue.generated.ts
+                                         packages/executor/src/catalogue.generated.ts
 ```
 
-Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit both.
-`cargo xtask catalogue --check` fails without writing, and there is no CI step for
-it on purpose: `crates/xtask/tests/catalogue_generated.rs` is the same check as a
-test, so `cargo test --workspace` already fails on a stale file and a second gate
-would be one idea in two places.
+Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` gets
+the rows whose behaviour the compiler can link, `descriptors-output` the ones
+needing a shape-language parser, `introspect` the ones with a table function to
+`DESCRIBE` through (`io.rdf` has none), `executor` every row that reads data
+(`io.rdf` included — the host fetches its bytes like any other source). Which
+projection a row lands in is derived from its clauses, never configured.
+
+Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit all
+four. `cargo xtask catalogue --check` fails without writing, and there is no CI
+step for it on purpose: `crates/xtask/tests/catalogue_generated.rs` is the same
+check as a test, so `cargo test --workspace` already fails on a stale file and a
+second gate would be one idea in two places.
+
+The `--check` proves each file matches its own emitter and nothing more. That the
+Rust and TypeScript projections AGREE is a separate claim, and
+`packages/introspect/tests/rust-parity.test.ts` is where it is checked — a `pnpm`
+test, so `cargo test` will not tell you.
 
 The file carries the argument for each row in its `(* … *)` commentary. A doc
 comment in the generated Rust is derived and one line long; if you want to know

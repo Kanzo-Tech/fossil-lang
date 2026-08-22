@@ -186,21 +186,42 @@ fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
     }
 }
 
+/// The constructors this scraper looks for: the rows `catalogue.bnf` gives a
+/// `reads native <fn>`.
+///
+/// **Introspection is a `DESCRIBE` through a table function**, so a row that
+/// reads `materialised` — `io.rdf` — has nothing to describe it with and is
+/// correctly absent. That used to be an alternation of three literals which
+/// happened to be the same three; now the reason is the selection.
+fn native_rows() -> impl Iterator<Item = &'static fossil_base::Provider> {
+    fossil_base::providers::DATA
+        .iter()
+        .copied()
+        .filter(|p| matches!(p.reads_rows, Some(fossil_base::RowReader::Native(_))))
+}
+
 /// Scrape source-binding RHS source URLs from a `.fossil` file's text. It is a
 /// regex placeholder for an AST walk, and it is wrong on any binding the regex
 /// cannot see.
 ///
-/// `@fossil-lang/introspect` scrapes the same bindings for the browser, and
-/// the regex below plus the reader each constructor picks are read out of THIS
-/// FILE by `packages/introspect/tests/rust-parity.test.ts`. Editing either
-/// here turns that test red until the TypeScript follows; it is a `pnpm` test,
-/// so `cargo test` will not tell you.
+/// `@fossil-lang/introspect` scrapes the same bindings for the browser. **The
+/// alternation is no longer written here**: it is built from the catalogue, and
+/// the TypeScript builds its own from `catalogue.generated.ts`, which
+/// `cargo xtask catalogue` writes from the same file. A constructor added to
+/// `catalogue.bnf` reaches both scrapers at once.
+///
+/// What is still written twice is the pattern AROUND the alternation, in two
+/// regex dialects, and `packages/introspect/tests/rust-parity.test.ts` reads
+/// this file for it. It is a `pnpm` test, so `cargo test` will not tell you.
 fn extract_source_refs(text: &str) -> Vec<(SmolStr, SmolStr, String)> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r#"(\w[\w\d_]*)\s*:=\s*io\.(csv|json|parquet)\(\s*['"]([^'"]+)['"]"#)
-            .expect("static regex")
+        let alternation = native_rows().map(|p| p.name).collect::<Vec<_>>().join("|");
+        regex::Regex::new(&format!(
+            r#"(\w[\w\d_]*)\s*:=\s*io\.({alternation})\(\s*['"]([^'"]+)['"]"#
+        ))
+        .expect("the catalogue's constructor names are regex-safe")
     });
     re.captures_iter(text)
         .map(|c| {
@@ -310,10 +331,25 @@ fn pre_introspect_and_register(
         // schema whose only column was literally `[`, and every real column
         // came back as `unknown column \`id\` — did you mean \`[\`?`. The
         // did-you-mean is what made it legible: it printed the wrong schema.
-        let reader = match constructor.as_str() {
-            "json" => "read_json_auto",
-            "parquet" => "read_parquet",
-            _ => "read_csv_auto",
+        //
+        // The three arms were a second copy of `catalogue.bnf`'s `native <fn>`
+        // tokens, and the `_ =>` fallback was the ORIGINAL BUG wearing a
+        // default: unreachable only for as long as the alternation above listed
+        // exactly the constructors this match named. Both are the catalogue's
+        // answer now, and a row the table does not know is skipped loudly
+        // rather than read as CSV.
+        let Some(reader) = native_rows()
+            .find(|p| p.name == constructor.as_str())
+            .and_then(|p| match p.reads_rows {
+                Some(fossil_base::RowReader::Native(r)) => Some(r.table_function()),
+                _ => None,
+            })
+        else {
+            tracing::warn!(
+                "source `{source_name}` names `io.{constructor}`, which is not a \
+                 natively-readable catalogue row; skipping pre-introspection"
+            );
+            continue;
         };
         let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}')");
         let mut stmt = match conn.prepare(&sql) {

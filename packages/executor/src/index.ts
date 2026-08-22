@@ -30,8 +30,20 @@ export type { InitFossilExecutorOpts } from './load.js';
 export { runJob } from './run-job.js';
 export type { JobTransport, CompletePayload, RunJobOptions } from './run-job.js';
 
-/** The fetch strategy for a source — how the host must stage its bytes. */
-export type SourceFormat = 'csv' | 'json' | 'parquet' | 'rdf';
+import type { DataRow } from './catalogue.generated.js';
+
+/**
+ * The fetch strategy for a source — how the host must stage its bytes.
+ *
+ * It is the catalogue ROW's name: what the program wrote after `io.`, what
+ * {@link FossilExecutor.sources} emits, and what `fossil-df-wasm` reads back
+ * with `source_row`. It was a hand-written union of four literals; it is
+ * generated from `catalogue.bnf` now, by `cargo xtask catalogue`, from the same
+ * file the Rust side reads.
+ */
+export type SourceFormat = DataRow;
+
+export { DATA_ROWS } from './catalogue.generated.js';
 
 /**
  * The connection ref-map `{ name: baseUrl }` (the host's connections). A
