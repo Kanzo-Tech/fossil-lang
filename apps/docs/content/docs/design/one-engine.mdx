@@ -83,6 +83,40 @@ on the adjacency sort would buy 0.17 G. What needs one is the vertex read, and
 what it needs is chunking — the file is already emitted as tiles, and the pass
 reads it whole to re-order it.
 
+## The valve, fitted and measured
+
+**The pass held the vertex file three times over.** `read_parquet` gave a
+`Vec<RecordBatch>`; `concat_batches` made a second full copy beside it;
+`take_record_batch` over the whole permutation made a third. Nothing needed the
+relation to be contiguous — what follows wants **one tile at a time**, and
+`interleave_record_batch` gathers across batches, so the copy that was made to
+enable the gather is now the tile the gather produces. Three copies became one,
+and `gather + replace` and `write vertex chunks` became one phase because they
+are now one loop.
+
+Measured with `cargo run --release -p fossil-runtime --example enrich_memory`,
+which exists for this and reproduces the shape of the real finding at a scale
+that fits on a laptop — wide rows (a subject IRI and two properties, ~124
+bytes/row) over a planted partition, so the gather is a real scatter:
+
+| | 1M vertices, 117 MB | | 2M vertices, 236 MB | |
+|---|---|---|---|---|
+| | before | after | before | after |
+| `read vertices` | +0.21 G | **+0.06 G** | +0.47 G | **+0.32 G** |
+| the gather | +0.11 G | **+0.00 G** | +0.25 G | **+0.00 G** |
+| **the vertex half** | **+0.32 G** | **+0.06 G** | **+0.72 G** | **+0.32 G** |
+| whole-pass peak | 1.14 G | **0.88 G** | 2.25 G | **1.86 G** |
+
+Total wall clock 30.4 s → 30.7 s at 2M, which is inside the run-to-run spread of
+`community_hierarchy` alone (27.6 s against 28.0 s in the same pair). The valve
+costs nothing measurable.
+
+**What is left is the read, and it is now the whole of it.** The +0.32 G at 2M is
+the file held ONCE, as Arrow. Getting below that means not holding it at all —
+reading the source in chunks and scattering into tiles that arrive out of order,
+which is a multi-pass spill and a different change from this one. The three-copy
+figure was the cheap two thirds.
+
 ## The one measured gap, and it is closed
 
 **DataFusion's `read_json` is NDJSON only; DuckDB's reads arrays.** It was the

@@ -192,7 +192,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, UInt32Array};
-use arrow::compute::{SortColumn, cast, concat_batches, lexsort_to_indices, take_record_batch};
+use arrow::compute::{
+    SortColumn, cast, concat_batches, interleave_record_batch, lexsort_to_indices,
+    take_record_batch,
+};
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::error::ArrowError;
 use fossil_df::files::batches_to_parquet;
@@ -634,51 +637,77 @@ pub fn enrich_layout(
         // order the staging did too: nothing about the partition needs a subject
         // IRI or a property, and holding the whole type through Louvain would
         // put the corpus beside the graph.
-        let (schema, batches) = read_parquet(vurl)?;
-        let combined = concat_batches(&schema, &batches).map_err(arrow_err(vurl))?;
-        drop(batches);
+        //
+        // **The batches are kept AS batches.** `concat_batches` into one
+        // `RecordBatch` stood here, and it is a second full copy of the file
+        // alive beside the first — and then `take_record_batch` over the whole
+        // relation was a third. Measured on a one-million-vertex fixture
+        // (`examples/enrich_memory`), that was `read vertices` +0.21 G and
+        // `gather + replace` +0.11 G against a 117 MB file. Nothing needed the
+        // relation to be contiguous: what follows wants ONE TILE at a time, and
+        // `interleave_record_batch` gathers across batches, so the copy that was
+        // made to enable a gather can be the tile the gather produces.
+        let (_schema, batches) = read_parquet(vurl)?;
+        let batch_refs: Vec<&RecordBatch> = batches.iter().collect();
+        // Where each batch starts in file-row space, so a global row index —
+        // which is what `gather` holds — becomes the `(batch, offset)` pair
+        // `interleave` takes. `read_parquet` reads at a fixed batch size, but
+        // this is computed rather than divided: the last batch is short, and a
+        // reader that returns a different size is then a slower pass and not a
+        // wrong one.
+        let starts: Vec<u32> = batches
+            .iter()
+            .scan(0u32, |acc, b| {
+                let start = *acc;
+                *acc += u32::try_from(b.num_rows()).unwrap_or(u32::MAX);
+                Some(start)
+            })
+            .collect();
         probe.mark("read vertices");
-
-        let ordered =
-            take_record_batch(&combined, &UInt32Array::from(gather)).map_err(arrow_err(vurl))?;
-        drop(combined);
-        let enriched = replace_columns(
-            &ordered,
-            vurl,
-            &[
-                (
-                    "dense_id",
-                    Arc::new(UInt32Array::from(new_dense)) as ArrayRef,
-                ),
-                ("x", Arc::new(Float32Array::from(xs))),
-                ("y", Arc::new(Float32Array::from(ys))),
-                ("cluster_id", Arc::new(UInt32Array::from(cluster_ids))),
-            ],
-        )?;
-        drop(ordered);
-        probe.mark("gather + replace");
 
         // One Parquet per tile, which is the whole point: a tile is an HTTP
         // resource a browser and a CDN can cache, and its address is
         // `dense_id >> shift` — no index, no listing, no discovery.
         //
-        // A slice and not a filter. Ordering by the new id *is* ordering by
+        // A range and not a filter. Ordering by the new id *is* ordering by
         // Morton code — that is what the new id is — and the ids are a gapless
         // `0..n`, so tile `k` is the row range `[k·size, (k+1)·size)` of the
-        // batch above. The `WHERE dense_id >= lo AND dense_id < hi` that used to
+        // permutation. The `WHERE dense_id >= lo AND dense_id < hi` that used to
         // stand here was a range predicate over a staging table whose row-group
-        // statistics had to be made to prune it; the range is now the slice
-        // itself and there is nothing left to prune.
-        let rows = enriched.num_rows();
+        // statistics had to be made to prune it; the range is the slice of
+        // `gather` itself and there is nothing left to prune.
+        let rows = gather.len();
         let tiles = (rows as u64).div_ceil(target.chunk_size);
         for k in 0..tiles {
             let lo = (k << shift) as usize;
             let len = (rows - lo).min(target.chunk_size as usize);
+            let picks: Vec<(usize, usize)> = gather[lo..lo + len]
+                .iter()
+                .map(|&row| locate(&starts, row))
+                .collect();
+            let tile = interleave_record_batch(&batch_refs, &picks).map_err(arrow_err(vurl))?;
+            let enriched = replace_columns(
+                &tile,
+                vurl,
+                &[
+                    (
+                        "dense_id",
+                        Arc::new(UInt32Array::from(new_dense[lo..lo + len].to_vec())) as ArrayRef,
+                    ),
+                    ("x", Arc::new(Float32Array::from(xs[lo..lo + len].to_vec()))),
+                    ("y", Arc::new(Float32Array::from(ys[lo..lo + len].to_vec()))),
+                    (
+                        "cluster_id",
+                        Arc::new(UInt32Array::from(cluster_ids[lo..lo + len].to_vec())),
+                    ),
+                ],
+            )?;
             write_parquet(
                 &format!("{}chunk{k}.parquet", target.chunk_prefix),
-                &enriched.slice(lo, len),
+                &enriched,
             )?;
         }
+        probe.mark("gather + write vertex tiles");
         maps[index] = new_ids;
     }
 
@@ -692,7 +721,10 @@ pub fn enrich_layout(
             })
     };
 
-    probe.mark("write vertex chunks");
+    // `write vertex chunks` stood here and now measures nothing: the writes moved
+    // inside the per-type loop, where `gather + write vertex tiles` covers them.
+    // A phase that always reports +0.00 G is a line that teaches a reader the
+    // wrong shape of the pass.
 
     // Every adjacency: both endpoints remapped through their own type's mapping,
     // **re-sorted** because the manifest declares `ordered: true` and a CSR
@@ -885,6 +917,24 @@ fn arrow_err(url: &str) -> impl Fn(ArrowError) -> LayoutError + '_ {
         target: url.to_string(),
         source,
     }
+}
+
+/// The `(batch, offset)` pair a file-row index names, given where each batch
+/// starts.
+///
+/// A binary search and not a division: `read_parquet` asks for a fixed batch
+/// size and the last batch is short, and nothing in the Parquet reader's
+/// contract promises the others are not. Dividing would be right today and
+/// silently wrong the day a reader splits on a row group instead — and wrong
+/// here means a vertex tile holding the wrong rows, which is a well-formed
+/// corpus that means something else.
+fn locate(starts: &[u32], row: u32) -> (usize, usize) {
+    let batch = match starts.binary_search(&row) {
+        Ok(exact) => exact,
+        // `Err(0)` cannot happen: `starts[0]` is 0 and every row index is ≥ 0.
+        Err(after) => after.saturating_sub(1),
+    };
+    (batch, (row - starts[batch]) as usize)
 }
 
 /// Every `RecordBatch` of a Parquet, plus the schema they share.
@@ -1278,6 +1328,48 @@ mod tests {
     #[test]
     fn layout_empty_input() {
         assert!(cluster_layout(&[]).is_empty());
+    }
+
+    /// [`locate`] turns a file-row index into the `(batch, offset)` pair
+    /// `interleave_record_batch` takes, and it is the one piece of the tiled
+    /// gather whose failure is SILENT: an off-by-one picks a real row from a
+    /// real batch, so the tile is well-formed Parquet describing the wrong
+    /// vertex.
+    ///
+    /// The batch lengths here are deliberately UNEQUAL. The reader asks for a
+    /// fixed size and the last batch is short, so a division would pass a test
+    /// with even batches and be wrong on every real file — which is why this
+    /// states the boundaries rather than the arithmetic.
+    #[test]
+    fn a_file_row_locates_in_the_batch_that_holds_it() {
+        // Three batches of 4, 4 and 2 rows: starts at 0, 4, 8, ten rows total.
+        let starts = [0u32, 4, 8];
+        let all: Vec<(usize, usize)> = (0..10).map(|r| locate(&starts, r)).collect();
+        assert_eq!(
+            all,
+            vec![
+                (0, 0),
+                (0, 1),
+                (0, 2),
+                (0, 3), // first batch
+                (1, 0),
+                (1, 1),
+                (1, 2),
+                (1, 3), // second
+                (2, 0),
+                (2, 1), // the short one
+            ]
+        );
+    }
+
+    /// A single batch is the degenerate case the binary search must not get
+    /// wrong, and it is the shape every small fixture in this tree has — so a
+    /// bug reachable only with more than one batch would pass the whole suite.
+    #[test]
+    fn one_batch_locates_every_row_in_itself() {
+        let starts = [0u32];
+        assert_eq!(locate(&starts, 0), (0, 0));
+        assert_eq!(locate(&starts, 7), (0, 7));
     }
 
     /// The grid has to keep meaning something once clusters are the size real
