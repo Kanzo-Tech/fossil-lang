@@ -1,17 +1,24 @@
 # El plan de construcción
 
-> ## ⚠ DEPRECADO PARCIALMENTE — medido contra el árbol el 2026-08-21
+> ## ⚠ DEPRECADO PARCIALMENTE — medido contra el árbol el 2026-08-21, **re-medido el 22**
 >
 > Este documento es un plan, y un plan se convierte en segunda referencia el día que el trabajo
 > aterriza y el plan sigue describiéndolo. Ha pasado. **Lo que sigue gobernando son los DICTÁMENES
 > (9–17) y el destino de F8; el resto está caducado en varios sitios y hay que contrastarlo contra
-> el árbol antes de creérselo.** Lo verificado falso hoy, para que nadie repita el trabajo:
+> el árbol antes de creérselo.** Lo verificado falso, para que nadie repita el trabajo:
 >
-> - **«104 tests rojos» del paso 8 (§ El árbol).** El único rojo del workspace es el artefacto del
->   paso 8, `programs.rs`, y hoy imprime **8 de 23**: cinco diagnósticos aspiracionales bajo
->   `errors/` que **no se bendicen** hasta que el informe de dos ficheros exista, `sightings`
->   (el `read_json` de DataFusion es NDJSON), `projection` (`simplify_expressions` falla) y
->   `expressions` (`operator` se cae sin diagnóstico).
+> - **EL PASO 8 ESTÁ CERRADO (22 de agosto).** `programs.rs` es **23 de 23** y
+>   `test --workspace --no-fail-fast` no tiene ni un rojo. Esta entrada decía «104 tests rojos», se
+>   corrigió el 21 a «8 de 23», y las dos cifras están muertas. Los cinco diagnósticos bajo
+>   `errors/` **están bendecidos**: el informe de dos ficheros existe —
+>   `fossil_base::SpanLabel` lleva documento, el rango sale de `fossil_shex::spans` y los cuatro
+>   renderizadores agrupan por fichero — y de los cinco sólo TRES lo necesitaban, lo que este
+>   documento afirmaba de los cinco. `two-identities` no necesitaba nada; `unknown-field` quería
+>   una segunda etiqueta en su propio fichero y un caret más estrecho. La cabecera de `programs.rs`
+>   lleva el detalle y las tres diferencias deliberadas con los objetivos escritos a mano.
+> - **`sightings`, `projection` y `expressions` están verdes** y sus causas eran las que decía el
+>   parte del 21: el `read_json` de DataFusion, un `left_on == ""` mal catalogado como fallo del
+>   optimizador, y `anon.hash`.
 > - **La clave del join NO es uno de ellos, y el dictamen 17 está entero.** `on = .k` no existe:
 >   `fossil-mir/src/lower.rs` baja la condición como predicado. `compound-key`, `self-join` y `shop`
 >   fallaban por no tener `compiled.txt`, y `shop` **sí** escribe su arista. Lo que faltaba era que
@@ -23,6 +30,14 @@
 >   encima, así que por esa prueba son substrato. La regla que SÍ corta es otra, del dueño: **en
 >   `base` sólo traits**. Por ésa sobran las cuatro filas concretas, los dos enums que nombran
 >   funciones de DuckDB, `shape_documents` (serialización) y `NativeSystem`.
+>
+>   **`NativeSystem` ya salió (22 de agosto).** Y la medición volvió a decidirlo: cincuenta usos en
+>   ocho crates y **ninguno de producción** — era un fixture en la raíz del crate, y está en
+>   `test_support`. Los tres que quedan **no son movimientos mecánicos** y cada uno pide su
+>   medición: `DATA` es lo que devuelve el *default* de `System::providers`, así que sacar las
+>   cuatro filas cambia qué reconoce un host que no instala nada; `RowReader` es un **campo de
+>   `Provider`** y no puede salir si `Provider` se queda, y `NativeReader` es su carga; y
+>   `shape_documents` es una consulta Salsa que leen seis crates.
 > - **§ «phases/, research/ … el código los cita 88 veces».** Eran **41**, y están hechas. Esas
 >   carpetas no existen y `git log --diff-filter=D` no las encuentra: nunca estuvieron en git.
 > - **§ Housekeeping: `crates/fossil-codegen/`** no existe. `HANDOFF-FROM-KANZO-UI.md` tampoco.
@@ -1105,7 +1120,13 @@ docblock confiesa que comprueba que la línea **exista**, no que **diga** lo que
 
 ---
 
-## Cinco de los 23 programas de conformidad NO SE EJECUTAN (medido el 16)
+## ~~Cinco de los 23 programas de conformidad NO SE EJECUTAN~~ (medido el 16, CERRADO el 22)
+
+> **Los 23 ejecutan y los 23 están bendecidos.** Lo que sigue es el registro de por qué se
+> retiraron aquellos artefactos, y sigue valiendo como razonamiento: un golden que graba un
+> `REFUSED` convierte «no lo sabíamos» en «es lo esperado». Las tres causas de abajo están
+> arregladas; lo único que no salió de aquí es la regla, que se quedó.
+
 
 Los artefactos de `programs.rs` se escribieron el 15 y **cinco salieron con `REFUSED` en su sección
 `── run ──`**. Se bendijeron y hubo que retirarlos: un golden que registra una negativa es
