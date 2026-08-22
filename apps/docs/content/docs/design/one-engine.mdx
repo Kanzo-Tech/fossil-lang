@@ -41,19 +41,47 @@ a static library already built. Removing it removes that unit.
    to read the Parquet they just wrote. That is a test convenience, not a
    dependency of the language.
 
-## What the first piece cost, and it is not measured yet
+## What the first piece cost, measured — and the mechanism was misattributed
 
 The memory budget no longer reaches the layout. `--memory` used to open the
 connection and cap it with `apply_memory_budget`, and DuckDB's sort spilled to
-`temp_directory` when it hit the cap. The Arrow sort does not spill: the
-adjacency is `concat_batches`'d whole and `lexsort_to_indices` runs over all of
-it. At ten million edges the arithmetic is roughly **+2 GB of peak** and there is
-no valve.
+`temp_directory` when it hit the cap; nothing in the Arrow pass spills.
 
-This is stated rather than measured, and it is the first number owed before the
-piece is called good. The budget still reaches the DataFusion half of the run
-(`bounded_context`), which is where the joins and the aggregation are; what is
-uncapped is the post-pass.
+That much is confirmed. **Measured 2026-08-22**, one million nodes and ten
+million edges through `fossil run` with `FOSSIL_MEM_PROBE=1` — two vertex types
+(the nodes, and the ten million link vertices the edge mapping also produces),
+two adjacency targets, 847 MB of output in 5,376 Parquet files:
+
+| | no budget | `--memory-gib 2` |
+|---|---|---|
+| `execute_graph` peak | 7.42 G | **2.21 G** |
+| layout entry → peak | 7.93 → 9.25 G | 2.80 → **4.80 G** |
+| what the layout ADDS | +1.32 G | **+2.00 G** |
+
+**The budget works on the half it reaches and the post-pass walks through it.**
+Capped at 2 GiB the executor obeys — 7.42 G becomes 2.21 G — and then the layout
+adds two gigabytes on top, ending at 2.4× the cap. That is the valve that is
+missing, and it is now a number rather than an inference.
+
+**But the mechanism this section named is not where the memory goes.** It blamed
+the adjacency: `concat_batches` over the whole relation and `lexsort_to_indices`
+across it. Measured, `remap adjacencies + write edge tiles` is **+0.07 G**
+unbudgeted and **+0.17 G** capped, in 1.9 s — ten million edges is two `u32`
+columns, about 80 MB, and the arithmetic that produced "+2 GB" was applied to the
+wrong relation.
+
+Where it actually goes is the VERTEX half of the same pass: `read vertices`
+**+0.95 G** and `gather + replace` **+0.51 G** under the cap. `layout.rs` says so
+in its own comment at the read — *«It is the largest allocation this pass
+makes»* — so the pass knew and the design note did not. A ten-million-row vertex
+file carries a subject IRI and every property per row; an adjacency carries two
+integers.
+
+The figure «roughly +2 GB» survives to two significant figures and its
+explanation does not, which is the more useful half of the correction: a valve
+on the adjacency sort would buy 0.17 G. What needs one is the vertex read, and
+what it needs is chunking — the file is already emitted as tiles, and the pass
+reads it whole to re-order it.
 
 ## The one measured gap, and it is closed
 

@@ -666,8 +666,14 @@ fn enrich_written_layout(
     // `memory_bytes` used to open a DuckDB connection here and cap it with
     // `apply_memory_budget` before handing it to the layout pass. The layout
     // reads and writes Parquet with `arrow-rs` now and holds no connection, so
-    // there is nothing to cap — and nothing enforcing the budget either. The
-    // edge sort is entirely in memory; see `design/one-engine.mdx`.
+    // there is nothing to cap — and nothing enforcing the budget either.
+    //
+    // **Measured, and it is 2.00 G through a 2 GiB cap**: one million nodes and
+    // ten million edges, `--memory-gib 2`, the executor obeying at 2.21 G and
+    // the layout then ending at 4.80 G. What costs it is the VERTEX read and
+    // the gather, not the edge sort — the sort is +0.17 G of that, and this
+    // comment used to say it was the whole of it. `design/one-engine.mdx`
+    // carries the table.
     let _ = memory_bytes;
 
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
