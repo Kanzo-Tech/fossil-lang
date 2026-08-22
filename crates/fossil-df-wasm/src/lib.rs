@@ -36,7 +36,7 @@ use std::time::SystemTime;
 
 use datafusion::execution::context::SessionContext;
 use datafusion::prelude::SessionConfig;
-use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
+use fossil_base::{FossilDb, FsError, Provider, RowReader, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 // The `ShEx` AST, named from its own crate: `fossil-descriptors-output` stopped
 // re-exporting it, so a consumer that wants it says so in its `Cargo.toml`.
@@ -50,35 +50,60 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use url::Url;
 use wasm_bindgen::prelude::*;
 
-/// One source the host fetched: its program URI (`io.csv("…")`), its format, and
-/// the raw bytes. Object-store formats are staged in an [`InMemory`] store;
-/// `Rdf` is decoded through the provider seam.
+/// One source the host fetched: its program URI (`io.csv("…")`), the catalogue
+/// ROW it was written with, and the raw bytes.
+///
+/// # `format` is a row, and it used to be a fourth enum
+///
+/// It was `SourceKind { Csv, Json, Parquet, Rdf }` with a hand-written
+/// `parse` — the names of the rows that read data, spelled out a fourth time
+/// after `catalogue.bnf`, `providers::DATA` and `fossil_mir::SourceFormat`, and
+/// re-parsed from the wire by a `match` that `fossil_base::provider` already is.
+///
+/// **And its four variants drew exactly one distinction.** Every use was
+/// `== SourceKind::Rdf`, twice; `Csv`, `Json` and `Parquet` were never told
+/// apart from each other anywhere in this crate. The question actually being
+/// asked was never "is this RDF" — it was *does this go through the object store
+/// or through the provider seam*, which is [`RowReader::Native`] against
+/// [`RowReader::Materialised`], a property the row already carries. Asking the
+/// row means a second materialised provider works here the day it is a line in
+/// `catalogue.bnf`, instead of being silently staged as bytes for a reader that
+/// cannot read it.
 #[derive(Debug, Clone)]
 pub struct SourceInput {
     pub uri: String,
-    pub format: SourceKind,
+    pub format: &'static Provider,
     pub bytes: Vec<u8>,
 }
 
-/// The source formats the host knows how to fetch + stage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceKind {
-    Csv,
-    Json,
-    Parquet,
-    Rdf,
+/// The row a wire `format` string names, which must be one that reads DATA.
+///
+/// [`DATA`](fossil_base::providers::DATA) rather than the full table: a host
+/// fetching bytes for `io.shex` would be a program that got past the checker,
+/// and the wire has no business naming a row that decodes types.
+///
+/// Public because a caller building a [`SourceInput`] needs one, which is
+/// exactly what `SourceKind` was for. It is not new surface — it is the same
+/// surface, doing the lookup `fossil_base::provider` already is instead of a
+/// `match` over four string literals.
+///
+/// # Errors
+///
+/// When no data row is called `name`.
+pub fn source_row(name: &str) -> Result<&'static Provider, String> {
+    fossil_base::provider(fossil_base::providers::DATA, name)
+        .ok_or_else(|| format!("unknown source format `{name}`"))
 }
 
-impl SourceKind {
-    fn parse(s: &str) -> Result<Self, String> {
-        match s {
-            "csv" => Ok(Self::Csv),
-            "json" => Ok(Self::Json),
-            "parquet" => Ok(Self::Parquet),
-            "rdf" => Ok(Self::Rdf),
-            other => Err(format!("unknown source format `{other}`")),
-        }
-    }
+/// Does this row's bytes get staged in the object store for a native reader to
+/// scan? The complement is the provider seam — see [`SourceInput`].
+const fn is_object_store(row: &Provider) -> bool {
+    matches!(row.reads_rows, Some(RowReader::Native(_)))
+}
+
+/// Does this row's relation get materialised outside the reader?
+const fn is_materialised(row: &Provider) -> bool {
+    matches!(row.reads_rows, Some(RowReader::Materialised))
 }
 
 /// The executor result: the `GraphAr` output files (the bytes the host
@@ -175,10 +200,14 @@ pub async fn execute_core(
     Ok(ExecOutput { files, run_status })
 }
 
-/// Enumerate the program's sources as `(uri, format-kind)` — the target-agnostic
+/// Enumerate the program's sources as `(uri, row-name)` — the target-agnostic
 /// core behind [`FossilExecutor::sources`]. Pure (no IO); the host uses it to
-/// plan its fetches before [`execute_core`]. `format` is the fetch-strategy
-/// string (`"csv"`/`"json"`/`"parquet"`/`"rdf"`).
+/// plan its fetches before [`execute_core`]. The second element is the catalogue
+/// row's name, which is what the program wrote after `io.` and what the host
+/// hands back on `SourceInput.format`.
+///
+/// It was `&'static str`, which is what forced `format_kind`'s `Provider` arm
+/// to be a literal instead of the name the format carries.
 ///
 /// # Errors
 /// `ShEx` parse failures.
@@ -187,12 +216,12 @@ pub fn program_sources_core(
     program: &str,
     shex: Option<&str>,
     connections: &HashMap<String, String>,
-) -> Result<Vec<(String, &'static str)>, String> {
+) -> Result<Vec<(String, String)>, String> {
     let (db, file, descriptor) = build_program(program, shex)?;
     Ok(
         fossil_df::program_sources(&db, file, &descriptor, connections)
             .into_iter()
-            .map(|s| (s.uri, format_kind(&s.format)))
+            .map(|s| (s.uri, format_kind(&s.format).to_owned()))
             .collect(),
     )
 }
@@ -287,13 +316,22 @@ fn build_descriptor(
     ))
 }
 
-/// The host fetch-strategy string for a source format.
-const fn format_kind(f: &SourceFormat) -> &'static str {
+/// The host fetch-strategy string for a source format — **the catalogue row's
+/// name**, which is what a program wrote after `io.` and what [`row_named`]
+/// reads back off the wire.
+///
+/// The `Provider` arm returned the literal `"rdf"` and that was a latent defect,
+/// not a shorthand: `SourceFormat::Provider { name }` carries the name precisely
+/// because more than one row can be materialised, so an `io.avro` source would
+/// have gone out over the wire labelled `rdf` and come back as the RDF row. It
+/// is unreachable today because `rdf` is the only materialised row there is,
+/// which is exactly the kind of "correct by coincidence" a second row deletes.
+fn format_kind(f: &SourceFormat) -> &str {
     match f {
         SourceFormat::Csv => "csv",
         SourceFormat::Json => "json",
         SourceFormat::Parquet => "parquet",
-        SourceFormat::Provider { .. } => "rdf",
+        SourceFormat::Provider { name } => name.as_str(),
     }
 }
 
@@ -306,7 +344,7 @@ async fn register_object_store_sources(
 ) -> Result<(), String> {
     let mut stores: HashMap<String, Arc<InMemory>> = HashMap::new();
     for src in sources {
-        if src.format == SourceKind::Rdf {
+        if !is_object_store(src.format) {
             continue;
         }
         let url = Url::parse(&src.uri).map_err(|e| format!("source URI `{}`: {e}", src.uri))?;
@@ -342,7 +380,7 @@ fn register_rdf_sources(
     for binding in fossil_df::provider_bindings(db, file, descriptor, connections) {
         let src = sources
             .iter()
-            .find(|s| s.format == SourceKind::Rdf && s.uri == binding.uri)
+            .find(|s| is_materialised(s.format) && s.uri == binding.uri)
             .ok_or_else(|| format!("RDF source `{}` was not provided", binding.uri))?;
         let turtle = std::str::from_utf8(&src.bytes)
             .map_err(|e| format!("RDF source `{}` is not UTF-8: {e}", binding.uri))?;
@@ -410,7 +448,7 @@ impl FossilExecutor {
         for (uri, format) in srcs {
             let obj = js_sys::Object::new();
             set(&obj, "uri", &JsValue::from_str(&uri)).map_err(|e| JsError::new(&e))?;
-            set(&obj, "format", &JsValue::from_str(format)).map_err(|e| JsError::new(&e))?;
+            set(&obj, "format", &JsValue::from_str(&format)).map_err(|e| JsError::new(&e))?;
             arr.push(&obj);
         }
         Ok(arr.into())
@@ -420,8 +458,9 @@ impl FossilExecutor {
     /// `{ files: [{ path, bytes: Uint8Array }], runStatus }`.
     ///
     /// `sources` is a JS array of `{ uri, format, bytes: Uint8Array }` (the `uri`
-    /// being the RESOLVED one [`Self::sources`] returned); `format` is
-    /// `"csv"`/`"json"`/`"parquet"`/`"rdf"`. `shex` is the optional output schema
+    /// being the RESOLVED one [`Self::sources`] returned); `format` is the
+    /// catalogue row's name — what the program wrote after `io.`, and exactly the
+    /// string [`Self::sources`] emitted. `shex` is the optional output schema
     /// text. `refs` is the same `{ name: baseUrl }` map passed to `sources`.
     ///
     /// # Errors
@@ -479,7 +518,7 @@ fn parse_sources(sources: &JsValue) -> Result<Vec<SourceInput>, String> {
     let mut out = Vec::with_capacity(arr.length() as usize);
     for item in arr.iter() {
         let uri = get_string(&item, "uri")?;
-        let format = SourceKind::parse(&get_string(&item, "format")?)?;
+        let format = source_row(&get_string(&item, "format")?)?;
         let bytes_val =
             js_sys::Reflect::get(&item, &JsValue::from_str("bytes")).map_err(|e| js_err(&e))?;
         let bytes = bytes_val

@@ -37,7 +37,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_df_wasm::{SourceInput, SourceKind, execute_core, program_sources_core};
+use fossil_df_wasm::{SourceInput, execute_core, program_sources_core, source_row};
 
 /// The schema the browser fetched and hands to the executor. It is the SAME
 /// text the program names, and that is the point: this host has one shape and
@@ -59,7 +59,7 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     let bytes = std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture");
     let sources = vec![SourceInput {
         uri: "https://data.example.com/users.csv".to_string(),
-        format: SourceKind::Csv,
+        format: source_row("csv").expect("the csv row"),
         bytes,
     }];
 
@@ -167,11 +167,22 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     let listed = program_sources_core(CONN_PROGRAM, Some(EXECUTOR_SHEX), &refs).expect("sources");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, "https://data.example.com/users.csv");
+    // The wire `format` round-trips: what `sources()` emits is a catalogue row
+    // name, and `source_row` reads it back. Nothing asserted this before — the
+    // second element of the pair was never looked at, so the string could have
+    // been anything and both halves of the host contract would still have passed.
+    assert_eq!(listed[0].1, "csv");
+    assert_eq!(
+        source_row(&listed[0].1)
+            .expect("the emitted name is a row")
+            .name,
+        "csv"
+    );
 
     let resolved_uri = &listed[0].0;
     let sources = vec![SourceInput {
         uri: resolved_uri.clone(),
-        format: SourceKind::Csv,
+        format: source_row("csv").expect("the csv row"),
         bytes: std::fs::read("../fossil-df/tests/fixtures/users.csv").expect("fixture"),
     }];
 
