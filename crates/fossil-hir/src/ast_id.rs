@@ -174,7 +174,8 @@ User := io.csv(\"x.csv\")
 Users : Person from User
     @subject = \"https://example.org/u/{User.id}\"
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "test.fossil".to_string());
         let m = ast_id_map(&db, file);
@@ -190,7 +191,8 @@ Users : Person from User
     #[test]
     fn ast_id_map_memoises_per_file() {
         let src = "User := io.csv(\"u.csv\")\n";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "m.fossil".to_string());
         let a = ast_id_map(&db, file);

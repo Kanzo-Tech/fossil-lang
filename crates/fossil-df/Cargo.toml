@@ -91,8 +91,11 @@ unicode-normalization = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+# `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
+# production surface into its `test_support` module, which is behind this
+# feature — they had no consumer that was not a test.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
 tokio = { workspace = true }
-fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
 # `tests/rdf_source.rs` builds a `ShExDescriptor` to exercise the ShEx→edge path
 # end to end. It names the decode directly because `fossil-descriptors-output`

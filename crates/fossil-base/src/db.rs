@@ -113,7 +113,7 @@ impl Db for FossilDb {
 mod tests {
     use super::*;
     use crate::files::SourceFile;
-    use crate::system::NativeSystem;
+    use crate::test_support::NativeSystem;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Tracked helper that DOES fire a `WillExecute` event so the smoke test

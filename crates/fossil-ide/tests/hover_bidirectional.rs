@@ -42,7 +42,7 @@ use std::time::SystemTime;
 use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
 
 /// The test's host `System` — a filesystem plus the `ShEx` decoder row, the
-/// same pair `fossil-lsp`'s `LspSystem` installs. `fossil_base::NativeSystem`
+/// same pair `fossil-lsp`'s `LspSystem` installs. `fossil_base::test_support::NativeSystem`
 /// is not enough: its decoder table is the trait default `&[]`, and a document
 /// nothing decodes resolves no shape.
 #[derive(Debug, Default)]

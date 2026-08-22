@@ -24,7 +24,7 @@
 //!
 //! # The host has to be the EDITOR's, and it was not
 //!
-//! This built its db on `fossil_base::NativeSystem`, whose provider table is the
+//! This built its db on `fossil_base::test_support::NativeSystem`, whose provider table is the
 //! trait default: **no row reads types**. Since ruling 3 of 2026-08-11 a program
 //! must name a shape document, and the fixture does; under `NativeSystem` that
 //! document decodes to nothing, `resolve_target_shape` fails per mapping, and

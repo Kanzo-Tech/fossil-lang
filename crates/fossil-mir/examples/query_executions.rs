@@ -45,7 +45,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, SourceFile, System};
 
 /// A program with `n` mappings over one source, in the shape `hello.fossil` has.
 // The `${ex:}` / `${.id}` in the template are fossil's own interpolation, which

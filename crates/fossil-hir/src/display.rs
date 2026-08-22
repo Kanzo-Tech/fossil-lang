@@ -213,7 +213,8 @@ pub fn pipe_text(pipe: &HirSourcePipe) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+    use fossil_base::test_support::NativeSystem;
+    use fossil_base::{FossilDb, SourceFile, System};
 
     use super::{expr_text, pipe_text};
     use crate::lower::{HirSourceOp, lower_to_hir};

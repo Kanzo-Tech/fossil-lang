@@ -496,7 +496,8 @@ User : Person from users
 
     #[test]
     fn body_returns_two_properties_for_hello() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, HELLO.to_string(), "hello.fossil".to_string());
         let dm = def_map(&db, file);
@@ -547,7 +548,8 @@ Mapping_B : Shape from users
 Mapping_C : Shape from users
     @subject = \"https://example.org/c/{users.c}\"
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, src.to_string(), "indexing.fossil".to_string());
@@ -583,7 +585,8 @@ Mapping_C : Shape from users
 
     #[test]
     fn body_is_memoised_per_mapping() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, HELLO.to_string(), "hello.fossil".to_string());
         let dm = def_map(&db, file);

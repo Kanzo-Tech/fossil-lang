@@ -39,11 +39,10 @@ pub use shape_documents::{TypeDocument, decode_shape_document, shape_document};
 pub use system::{FsError, System};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use system::NativeSystem;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::NativeSystem;
     use std::sync::Arc;
 
     #[cfg(not(target_arch = "wasm32"))]

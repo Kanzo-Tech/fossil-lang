@@ -40,7 +40,7 @@ fn fixture() -> String {
 
 /// The editor's `System` — the rows that read shape documents, as
 /// `fossil-lsp`'s own `LspSystem` installs them. It was
-/// `fossil_base::NativeSystem`, which reads no types; see the hard gate.
+/// `fossil_base::test_support::NativeSystem`, which reads no types; see the hard gate.
 #[derive(Debug, Default)]
 struct EditorSystem;
 

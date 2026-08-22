@@ -367,7 +367,8 @@ User : Person from users
 ";
 
     fn db_with_text(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "hover.fossil".to_string());
         (db, file)
@@ -432,7 +433,8 @@ User : Person from users
     use fossil_hir::ty::{Record, RecordField, Ty, TyKind};
 
     fn bare_db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 

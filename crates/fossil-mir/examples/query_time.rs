@@ -32,7 +32,8 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fossil_base::{Db, FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Db, FossilDb, SourceFile, System};
 
 /// A program with `n` mappings over one source, in the shape `hello.fossil`
 /// has — the same generator `query_executions` uses, so the two examples are

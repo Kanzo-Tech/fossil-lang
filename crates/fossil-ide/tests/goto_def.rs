@@ -11,7 +11,7 @@
 //! It needs a HOST that has done its two jobs — installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the query
 //! asks for it — which is what `HostDb::new` + [`file`] do here and what
-//! `fossil-lsp` and `fossil-wasm` do in production. `fossil_base::NativeSystem`
+//! `fossil-lsp` and `fossil-wasm` do in production. `fossil_base::test_support::NativeSystem`
 //! is not enough: its provider table reads no types, so every program resolves
 //! no shape and every assertion below would fail for the wrong reason.
 

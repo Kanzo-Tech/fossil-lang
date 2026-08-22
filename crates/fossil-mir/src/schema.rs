@@ -185,7 +185,8 @@ mod tests {
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 

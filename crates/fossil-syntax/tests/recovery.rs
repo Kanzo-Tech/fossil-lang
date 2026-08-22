@@ -40,7 +40,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
 use fossil_syntax::parse;
 
 /// Parse `input` on a worker thread; panic with "parser hung — regression"

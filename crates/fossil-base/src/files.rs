@@ -126,7 +126,8 @@ mod tests {
 
     use super::*;
     use crate::db::FossilDb;
-    use crate::system::{NativeSystem, System};
+    use crate::system::System;
+    use crate::test_support::NativeSystem;
 
     /// A tracked query's key must be a Salsa struct — salsa 0.26 rejects a bare
     /// `String` with "the trait bound `String: SalsaStructInDb` is not

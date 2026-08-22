@@ -22,4 +22,8 @@ text-size = { workspace = true }
 smol_str = { workspace = true }
 
 [dev-dependencies]
+# `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
+# production surface into its `test_support` module, which is behind this
+# feature — they had no consumer that was not a test.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
 expect-test = { workspace = true }

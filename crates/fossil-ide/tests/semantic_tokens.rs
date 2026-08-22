@@ -12,7 +12,8 @@
 
 use std::sync::Arc;
 
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_ide::{decode_tokens, legend_type_name, semantic_tokens};
 
 /// A fixture exercising every legend token type the classifier can still

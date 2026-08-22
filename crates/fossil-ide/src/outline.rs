@@ -99,7 +99,8 @@ mod tests {
     use std::sync::Arc;
 
     fn db_file(src: &str) -> (fossil_base::FossilDb, SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         (db, file)

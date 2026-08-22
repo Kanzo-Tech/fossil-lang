@@ -75,7 +75,7 @@ use lsp_types::{
 /// [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] go quietly
 /// empty for exactly the programs that declare a shape.
 ///
-/// It replaced `fossil_base::NativeSystem`, whose decoder table is the trait
+/// It replaced `fossil_base::test_support::NativeSystem`, whose decoder table is the trait
 /// default — `&[]`, correct for a host that decodes nothing and wrong for this
 /// one. No descriptor table: the LSP introspects no sources yet, and `None` is
 /// a real answer rather than an empty table pretending to be one.

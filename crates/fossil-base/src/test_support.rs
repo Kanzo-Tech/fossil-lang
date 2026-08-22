@@ -66,7 +66,44 @@ use fossil_graph_schema::{Occurs, OutputShapes, Primitive, PropertyConstraint, R
 use crate::db::{Db, FossilDb};
 use crate::files::{SourceFile, register_file};
 use crate::providers::{CSV, JSON, PARQUET, Provider, RDF};
-use crate::system::{FsError, NativeSystem, System};
+use crate::system::{FsError, System};
+use fossil_descriptors_input::DescriptorCache;
+
+/// The cheapest `System` a test can stand up: a real filesystem, a real clock,
+/// and whatever provider table the trait defaults to.
+///
+/// It lived in [`crate::system`] beside the trait, and moved here because it
+/// has no production consumer — every use in the workspace is a test, a bench
+/// or an example. A host that COMPILES a program installs the rows that read
+/// types, and the default table is the data rows alone; `fossil-lsp`'s
+/// `LspSystem` says so where it replaced this.
+///
+/// **It is not enough on its own for a test that resolves a shape document** —
+/// see [`DecodingHost`], which is this plus that table.
+#[derive(Debug, Default)]
+pub struct NativeSystem {
+    /// The introspected-schema table this host owns. One field, no methods —
+    /// the storage, the locking and the freshness rule all live on
+    /// [`DescriptorCache`].
+    descriptors: DescriptorCache,
+}
+
+impl System for NativeSystem {
+    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
+        std::fs::read(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => FsError::NotFound(path.display().to_string()),
+            _ => FsError::Io(e.to_string()),
+        })
+    }
+
+    fn now(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    fn descriptors(&self) -> Option<&DescriptorCache> {
+        Some(&self.descriptors)
+    }
+}
 
 /// One shape with one un-narrowed `name` predicate — the document most of the
 /// tests name.

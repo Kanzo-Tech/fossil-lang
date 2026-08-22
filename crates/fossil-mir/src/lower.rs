@@ -1278,7 +1278,8 @@ mod tests {
     /// binding lowers `Op::Source` with the real URI from the binding and the
     /// format selected by the constructor name.
     fn lower_source_for(src: &str) -> (SmolStr, SourceFormat) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
@@ -1308,7 +1309,8 @@ People : Person from Adults
     @subject = \"https://example.org/user/{Users.id}\"
     name = Users.name
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
@@ -1367,7 +1369,8 @@ Venta : Person from Sales
     @subject = \"https://example.org/venta/{Orders.id}\"
     name = People.nombre
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
@@ -1430,7 +1433,8 @@ Cat : Person from Pairs
     @subject = \"https://example.org/cat/{Node.id}\"
     name = Other.label
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         let dm = def_map(&db, file);
@@ -1497,7 +1501,8 @@ People : Person from Rows
 
     /// A db for the lowering helpers, which need one to type a `Ternary`.
     fn test_db() -> fossil_base::FossilDb {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
     }
 
@@ -1606,7 +1611,8 @@ mod null_lowering_tests {
     /// when the fixture is small. The operator is decided in MIR because it is
     /// a fact about the algebra, not about a backend.
     fn filter_of(condition: &str) -> Expr<'static> {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db: &'static fossil_base::FossilDb =
             Box::leak(Box::new(fossil_base::FossilDb::new(system)));
         let src = format!(

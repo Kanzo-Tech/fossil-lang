@@ -35,7 +35,7 @@ use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
 use lsp_types::CompletionItemKind;
 
 /// The test's host `System`: a filesystem plus the `ShEx` decoder row, exactly
-/// as `fossil-lsp`'s `LspSystem` installs it. `fossil_base::NativeSystem` is
+/// as `fossil-lsp`'s `LspSystem` installs it. `fossil_base::test_support::NativeSystem` is
 /// not enough any more — its decoder table is the trait default `&[]`, so a
 /// `.shex` it can read is still a document nothing decodes.
 #[derive(Debug, Default)]

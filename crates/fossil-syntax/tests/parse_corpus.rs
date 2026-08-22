@@ -49,7 +49,8 @@
 use std::sync::Arc;
 
 use expect_test::expect_file;
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_syntax::{SyntaxKind, SyntaxNode, parse};
 
 /// Build a minimal Salsa db, run the parser, render the resulting CST as

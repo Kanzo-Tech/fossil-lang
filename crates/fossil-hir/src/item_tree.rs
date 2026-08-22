@@ -213,7 +213,8 @@ User : Person from users
 
     #[test]
     fn item_tree_for_hello_fossil_has_two_items_signatures_only() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, HELLO_FOSSIL.to_string(), "hello.fossil".to_string());
@@ -252,7 +253,8 @@ users := io.csv(\"x.csv\")
 User : Person from users
     a = users.b
 "; // users.a → users.b — body-only edit
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db_a = fossil_base::FossilDb::new(system.clone());
         let db_b = fossil_base::FossilDb::new(system);
         let f_a = fossil_base::SourceFile::new(&db_a, src_a.to_string(), "x.fossil".to_string());

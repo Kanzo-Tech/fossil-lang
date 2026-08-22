@@ -162,7 +162,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use fossil_base::{FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_hir::ast_id::ast_id_map;
 use fossil_hir::body::body;
 use fossil_hir::check::typecheck_mapping;

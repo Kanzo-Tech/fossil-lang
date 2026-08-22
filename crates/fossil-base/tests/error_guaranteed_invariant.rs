@@ -15,8 +15,9 @@
 //!    `delay_span_bug` exposes the diagnostic to the host via
 //!    `Diagnostic::accumulated`".
 
+use fossil_base::test_support::NativeSystem;
 use fossil_base::{
-    Db, Diagnostic, FossilDb, NativeSystem, Severity, SourceFile, Span, System, bug, delay_span_bug,
+    Db, Diagnostic, FossilDb, Severity, SourceFile, Span, System, bug, delay_span_bug,
 };
 use std::sync::Arc;
 

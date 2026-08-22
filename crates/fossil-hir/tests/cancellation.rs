@@ -62,7 +62,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex, PoisonError};
 
-use fossil_base::{Db, FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Db, FossilDb, SourceFile, System};
 use salsa::{Cancelled, Database};
 
 // ── Shared, thread-safe observation state for the sentinel tracked query.

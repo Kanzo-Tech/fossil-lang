@@ -9,7 +9,7 @@
 //! not compile")`. Every program in this crate's tests therefore carries a
 //! `type { … } := io.shex("…")` line, and every test builds its database here.
 //!
-//! `fossil_base::NativeSystem` is NOT enough on its own: its decoder table is
+//! `fossil_base::test_support::NativeSystem` is NOT enough on its own: its decoder table is
 //! the trait default `&[]`, and a document nothing decodes resolves no shape —
 //! which `resolve_target_shape` reports as `Undecodable`, not as a missing
 //! document. Hence [`ShapeHost`], which delegates the filesystem to
@@ -23,7 +23,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_base::{FossilDb, FsError, NativeSystem, Provider, SourceFile, System, register_file};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, FsError, Provider, SourceFile, System, register_file};
 
 /// The real filesystem (the CSV/JSON/Turtle sources still read through it) plus
 /// the `ShEx` decoder row.

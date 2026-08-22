@@ -69,7 +69,8 @@ Users : Person from User
 
     #[test]
     fn parse_hello_produces_three_top_level_items() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -96,7 +97,8 @@ Users : Person from User
 
     #[test]
     fn parse_hello_mapping_body_has_two_properties() {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -127,7 +129,8 @@ Users : Person from User
     #[test]
     fn parse_hello_round_trips_text() {
         // CST is lossless: re-serialising the root yields the original text.
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -150,7 +153,8 @@ Users : Person from User
     #[test]
     fn ast_view_extracts_the_shape_name() {
         use crate::ast::{Mapping, MappingHeader};
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(
             &db,
@@ -187,7 +191,8 @@ Users : ex:Person from User
     email = .email
     slug = `u/${User.id}`
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, RETIRED.to_string(), "retired.fossil".to_string());

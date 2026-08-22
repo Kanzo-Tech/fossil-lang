@@ -345,7 +345,8 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
 // integration boundary tested is hover.rs's Markdown body — identical to what
 // `result.contents.value` would carry over JSON-RPC.
 
-use fossil_base::{FossilDb, NativeSystem, Span, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{FossilDb, Span, System};
 use fossil_graph_schema::Primitive;
 use fossil_hir::body::ExprId;
 use fossil_hir::provenance::{ExprTypeEntry, Provenance, ProvenanceKind};

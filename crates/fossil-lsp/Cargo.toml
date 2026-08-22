@@ -53,6 +53,10 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+# `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
+# production surface into its `test_support` module, which is behind this
+# feature — they had no consumer that was not a test.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # The lattice a hover renders.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The lsp_hover_smoke integration test drives implicit-closure synthesis +

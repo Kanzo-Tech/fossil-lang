@@ -218,7 +218,8 @@ const fn spans_overlap(a: Span, b: Span) -> bool {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use fossil_base::{NativeSystem, Severity, System};
+    use fossil_base::test_support::NativeSystem;
+    use fossil_base::{Severity, System};
     use std::sync::Arc;
 
     fn db() -> fossil_base::FossilDb {

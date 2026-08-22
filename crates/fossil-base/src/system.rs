@@ -104,36 +104,24 @@ pub enum FsError {
     Io(String),
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Default)]
-pub struct NativeSystem {
-    /// The introspected-schema table this host owns. One field, no methods —
-    /// the storage, the locking and the freshness rule all live on
-    /// [`DescriptorCache`].
-    descriptors: DescriptorCache,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl System for NativeSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => FsError::NotFound(path.display().to_string()),
-            _ => FsError::Io(e.to_string()),
-        })
-    }
-
-    fn now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-
-    fn descriptors(&self) -> Option<&DescriptorCache> {
-        Some(&self.descriptors)
-    }
-}
+// `NativeSystem` — a filesystem, a clock and the DEFAULT provider table — lived
+// here beside the trait it implements, and is `crate::test_support` now.
+//
+// It had no production consumer. Measured across the workspace: every mention
+// outside this crate is `#[cfg(test)]`, a `tests/` file, a bench or an example,
+// and the one in `fossil-lsp` is a docblock saying `LspSystem` replaced it. That
+// is not an accident of history — a host that COMPILES a program has to install
+// the rows that read types, and the trait default is the data rows alone, so
+// every real host (`LspSystem`, the engine's, the playground's) declares its
+// own. What was left is a fixture: the cheapest `System` a test can stand up.
+//
+// A fixture on the crate root is a fixture something will eventually reach for
+// in production, and «in `base` only traits» is the rule that says so.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod inferred_tests {
     use super::*;
+    use crate::test_support::NativeSystem;
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
     use fossil_graph_schema::Primitive;
 

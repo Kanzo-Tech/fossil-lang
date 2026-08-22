@@ -2477,7 +2477,8 @@ prop https://example.org/name - 1 1
 ";
 
     fn lower_src(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "x.fossil".to_string());
         (db, file)
@@ -2701,7 +2702,8 @@ User : Person from users
     @subject = \"https://example.org/user/{users.id}\"
     slug = str.slug(users.name)
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, CALLS_A_BUILTIN.to_string(), "t.fossil".to_string());
@@ -2752,7 +2754,8 @@ User : Person from users
     @subject = \"https://example.org/user/{users.id}\"
     adult = users.age >= 18
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, COMPARES.to_string(), "t.fossil".to_string());
         let dm = crate::def_map::def_map(&db, file);
@@ -2798,7 +2801,8 @@ User : Person from users
     @subject = \"https://example.org/user/{users.id}\"
     adult = (users.age >= 18)
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, GROUPED.to_string(), "t.fossil".to_string());
         let dm = crate::def_map::def_map(&db, file);
@@ -2851,7 +2855,8 @@ User : Person from users
     @subject = \"https://example.org/user/{users.id}\"
     doble = .id
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, REFUSED.to_string(), "t.fossil".to_string());
 
@@ -2896,7 +2901,8 @@ User : Person from users
     @subject = \"https://example.org/user/{users.id}\"
     doble = users.id * 2
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, ARITHMETIC.to_string(), "t.fossil".to_string());
@@ -2963,7 +2969,8 @@ User : Person from users
     @subject = \"https://example.org/user/{users.id}\"
     slug = str.slugg(users.name)
 ";
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file =
             fossil_base::SourceFile::new(&db, UNKNOWN_FN.to_string(), "t.fossil".to_string());
@@ -3127,7 +3134,8 @@ User : Persn from users
     // table, so neither has a form to be about.
 
     fn db_with(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-        let system: Arc<dyn fossil_base::System> = Arc::new(fossil_base::NativeSystem::default());
+        let system: Arc<dyn fossil_base::System> =
+            Arc::new(fossil_base::test_support::NativeSystem::default());
         let db = fossil_base::FossilDb::new(system);
         let file = fossil_base::SourceFile::new(&db, src.to_string(), "t.fossil".to_string());
         (db, file)

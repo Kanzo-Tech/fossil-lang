@@ -303,7 +303,8 @@ fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use fossil_base::{Catalogue, Files, NativeSystem, System};
+    use fossil_base::test_support::NativeSystem;
+    use fossil_base::{Catalogue, Files, System};
     use std::sync::Arc;
 
     // A minimal host db stand-in, so these unit tests exercise the stdlib +

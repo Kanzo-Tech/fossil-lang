@@ -12,8 +12,9 @@
 
 use std::sync::Arc;
 
+use fossil_base::test_support::NativeSystem;
 use fossil_base::test_support::db_with_document_at;
-use fossil_base::{Diagnostic, FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
 use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use fossil_hir::def_map::def_map;
 use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};

@@ -7,7 +7,8 @@
 //! `fossil-descriptors-input::cache`, and the `System` accessor to
 //! `fossil-base`; neither is re-asserted here.
 
-use fossil_base::{Db, FossilDb, NativeSystem, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Db, FossilDb, SourceFile, System};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
 use fossil_hir::def_map::def_map;
