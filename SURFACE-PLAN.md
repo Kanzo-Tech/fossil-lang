@@ -978,9 +978,21 @@ puede verlo, porque comprueba rutas citadas y un rótulo de nodo mermaid no es u
     existen**: dos ficheros de datos y un compilador. Añadir `str.slugify` sobre `regexp_replace` deja
     de tocar Rust.
 
-    Hoy el catálogo tiene el mismo defecto que tenía la tabla de decodificadores: `RegistryEntry.name`
-    es *«el nombre punteado completo»* — la cadena `"clean.trim"`. Despacha por cadena, que es
-    exactamente lo que ADR-0059 §3 manda sustituir por despacho por tipo de receptor.
+    **Estado, medido: la mitad pequeña está entregada y la grande no.**
+
+    - **Filas de `io.` — hecho.** `catalogue.bnf` declara las seis y `cargo xtask catalogue` **genera**
+      `crates/fossil-base/src/providers/generated.rs` y
+      `crates/fossil-descriptors-output/src/generated.rs` desde él. Ya no hay statics escritos a mano
+      que puedan desviarse, y el test de paridad que los vigilaba está borrado por innecesario. En qué
+      fichero cae una fila es derivado: la que tiene `decodes` necesita un crate que enlace un parser
+      de shapes, que es la partición DATA/BEHAVIOUR que el propio `.bnf` argumenta.
+    - **El catálogo de la stdlib — no.** Sigue siendo `stdlib_default()` en Rust. Es la mitad grande,
+      y `catalogue.bnf` es la forma que tomará.
+
+    El defecto que este dictamen le achacaba al catálogo — `RegistryEntry.name` es *«el nombre
+    punteado completo»*, despacho por cadena — **ya no está**: hay `recv` + `member` derivados por
+    `split_receiver`, y `lookup_member` / `members_of` son el despacho por receptor que ADR-0059 §3
+    pedía. Lo que queda es que las filas viven en Rust, no que despachen mal.
 
 15. **`LoweringKind` colapsa de 13 variantes a DOS: `Expr(plantilla)` y `Op(operador)`.**
 
