@@ -423,6 +423,30 @@ pub fn run(
     let dest_dir = local_dest_dir(dest_url).ok_or_else(|| {
         miette::miette!("the DataFusion run path writes a local directory; cloud dest `{dest_url}` is not yet wired")
     })?;
+    // And the same refusal for a cloud SOURCE, which had none — measured against
+    // a real MinIO on 2026-08-23 (`tests/cloud_source.rs`). A program reading
+    // `@conn/users.csv` INTROSPECTS fine: the host's DuckDB installs the
+    // connection's `CREATE SECRET` and the DESCRIBE comes back with real column
+    // types, so the program type-checks against the columns it actually has.
+    // Then the run reached DataFusion, which has no object store registered for
+    // the scheme — `register_object_store` appears in exactly one file in this
+    // workspace and it is the browser's — and the operator got
+    // `Internal error: No suitable object store found for s3://…`, an error that
+    // names a DataFusion API and nothing they wrote.
+    //
+    // This does not close the gap. It stops the gap being reported as an
+    // internal error, and it says the part that is actually confusing: it
+    // type-checked because a different engine read it.
+    if let Some(uri) = fossil_df::program_sources(&db, file, &descriptor, connections)
+        .iter()
+        .map(|s| s.uri.clone())
+        .find(|uri| uri.contains("://") && !uri.starts_with("file://"))
+    {
+        return Err(miette::miette!(
+            "the DataFusion run path reads local files; source `{uri}` is not yet wired. \
+             It type-checked because `check` introspects through DuckDB, which does read it"
+        ));
+    }
     // The host's byte seam for provider (RDF) sources. `provider_bindings` has
     // already put every URI through the anchor, so this call is idempotent on
     // what it is handed — it is here because a host that read a raw URI would
