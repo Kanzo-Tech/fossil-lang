@@ -1231,6 +1231,31 @@ fn morton2(x: u16, y: u16) -> u32 {
     spread(x) | (spread(y) << 1)
 }
 
+/// One coordinate onto the `u16` grid, over `[lo, hi]`; a degenerate axis maps
+/// to 0 rather than dividing by zero.
+///
+/// **The width is part of the contract, not an implementation detail.** The
+/// subtraction, the division, the multiply by 65535 and the rounding are all
+/// binary32, and a port that does the same arithmetic in binary64 disagrees:
+/// `quantize(147, 0, 167)` is 57687 here and 57686 there. One unit is a
+/// different Morton code, a different rank, a different `dense_id` and a
+/// different tile — so the two engines that read a corpus stop agreeing about
+/// which vertices are in it.
+///
+/// It was a closure inside [`morton_codes`] and therefore untestable, which is
+/// how the writer came to be the one side of this contract nothing executed:
+/// `apps/corpus/guards/vectors.json` publishes the table, `guards/arithmetic.mjs`
+/// is checked against it, and until `quantize_agrees_with_the_published_table`
+/// existed the Rust could have been switched to `f64` with every test in the
+/// workspace still green.
+fn quantize(v: f32, lo: f32, hi: f32) -> u16 {
+    if hi <= lo {
+        return 0;
+    }
+    let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+    (t * f32::from(u16::MAX)).round() as u16
+}
+
 /// Morton codes for a position list — quantises each coordinate to `u16` over
 /// the list's bounding box (a degenerate axis maps to 0). Index-aligned with
 /// `positions`.
@@ -1246,13 +1271,6 @@ fn morton_codes(positions: &[(f32, f32)]) -> Vec<u32> {
         max_x = max_x.max(x);
         max_y = max_y.max(y);
     }
-    let quantize = |v: f32, lo: f32, hi: f32| -> u16 {
-        if hi <= lo {
-            return 0;
-        }
-        let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
-        (t * f32::from(u16::MAX)).round() as u16
-    };
     positions
         .iter()
         .map(|&(x, y)| morton2(quantize(x, min_x, max_x), quantize(y, min_y, max_y)))
@@ -1265,6 +1283,88 @@ mod tests {
 
     fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
         (a.0 - b.0).hypot(a.1 - b.1)
+    }
+
+    /// The writer side of the quantisation contract, read off the published
+    /// table instead of restated beside it.
+    ///
+    /// `apps/corpus/guards/vectors.json` is the deliverable — a second
+    /// implementation is checked against that table and not against a sentence
+    /// — and `apps/corpus/guards/arithmetic.mjs` executes it. **The engine that
+    /// writes the corpus did not.** Nothing in Rust read that file; the two
+    /// `morton_codes` tests below assert relative ordering and no-panic, which
+    /// hold for either float width. So the reference implementation was pinned
+    /// to the border cases and the producer was free to drift past them.
+    ///
+    /// Proved red twice, and the second one is the point: with `quantize`'s
+    /// arithmetic widened to `f64` (`(f64::from(v) - f64::from(lo)) / …`, the
+    /// change that leaves the whole workspace green) this fails on the
+    /// 147/0/167 row with `57686, want 57687`.
+    ///
+    /// **What it cannot prove.** That the `DuckDB` half agrees:
+    /// `apps/corpus/guards/guards.mjs` spells the width `::FLOAT` in SQL, and
+    /// that `FLOAT / FLOAT` stays binary32 rather than promoting is evidenced
+    /// by a passing guard, not by a width proof. And it says nothing about the
+    /// bounding box the coordinates are quantised against — `morton_codes`
+    /// derives that from the positions it is handed, and no vector covers it.
+    #[test]
+    fn quantize_agrees_with_the_published_table() {
+        // Widening to binary64 is the drift this guard exists to catch, so it
+        // has to be computable here — otherwise the table could quietly lose
+        // the one row that separates the two widths and still pass.
+        fn in_binary64(v: f64, lo: f64, hi: f64) -> u16 {
+            if hi <= lo {
+                return 0;
+            }
+            let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+            (t * f64::from(u16::MAX)).round() as u16
+        }
+
+        let table = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("CARGO_MANIFEST_DIR has two parents")
+            .join("apps/corpus/guards/vectors.json");
+        let published: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&table)
+                .unwrap_or_else(|e| panic!("read {}: {e}", table.display())),
+        )
+        .expect("vectors.json is JSON");
+
+        let rows = published["quantize"]["vectors"]
+            .as_array()
+            .expect("vectors.json declares quantize.vectors");
+        assert!(!rows.is_empty(), "the published table is empty");
+
+        let f = |row: &serde_json::Value, key: &str| -> f64 {
+            row[key]
+                .as_f64()
+                .unwrap_or_else(|| panic!("row {row} has no numeric {key}"))
+        };
+
+        let mut separates_the_widths = false;
+        for row in rows {
+            let (v, lo, hi) = (f(row, "v"), f(row, "lo"), f(row, "hi"));
+            let want =
+                u16::try_from(row["q"].as_u64().expect("q is an integer")).expect("q fits in u16");
+            let got = quantize(v as f32, lo as f32, hi as f32);
+            assert_eq!(
+                got,
+                want,
+                "quantize({v}, {lo}, {hi}) = {got}, want {want} — {}",
+                row["why"].as_str().unwrap_or("(no why)")
+            );
+            separates_the_widths |= in_binary64(v, lo, hi) != want;
+        }
+
+        assert!(
+            separates_the_widths,
+            "every published vector is exact in both float widths, so this \
+             guard passes against a binary64 implementation and proves nothing \
+             about the width the table calls part of the contract. Restore a \
+             row that separates them — 147 over [0, 167] is 57687 in binary32 \
+             and 57686 in binary64."
+        );
     }
 
     #[test]
