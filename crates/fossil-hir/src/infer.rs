@@ -605,8 +605,9 @@ fn pipe_error(
 /// `subject` IRI column (the pivoted RDF row carries the entity IRI there, so
 /// `iri = .subject` types).
 ///
-/// Two rules, and they are the same two the output decomposition applies
-/// (`fossil-sinks::decomp::classify_object`):
+/// Two rules, and they are the same two the output side applies in
+/// [`fossil_graph_schema::OutputShapes::to_graph_schema`], which branches on
+/// the same `targets` field:
 ///
 /// - A constraint with **targets** is an edge, and the source-side value of an
 ///   edge is the referenced subject's IRI — so the column is [`TyKind::Iri`].
