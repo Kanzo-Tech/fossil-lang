@@ -60,9 +60,11 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         // `None` rather than leaving it to fall through the catch-all is the
         // difference between a gap that is declared and a gap that is a typo.
         "error" => return None,
-        // `json_extract` is DuckDB's; DataFusion ships no JSON extraction in
-        // its default function set.
-        "json_extract" => return None,
+        // `json_extract_string` is DuckDB's; DataFusion ships no JSON
+        // extraction in its default function set. The name here was
+        // `json_extract`, which no template says any more: that one returns
+        // DuckDB's `JSON` type against a row declaring `String`.
+        "json_extract_string" => return None,
         // Aggregates are not scalar expressions: `math.sum` in a property
         // position is a different feature (a pipeline with a group-by), and F5
         // is where it lands. Saying so beats emitting a call that plans wrong.
@@ -94,10 +96,17 @@ const UNREACHABLE_ON_DATAFUSION: &[&str] = &[
     "str.split",
     // 2 — `error()`. There is no way to raise from a DataFusion expression, so
     //     "return this value or stop the run" has no spelling. It is the sole
-    //     cause for all five.
+    //     cause for all six.
+    //
+    //     `validate.regex` is the newcomer, and its arrival is the shape of the
+    //     fix rather than a regression: it lowered to a bare `regexp_matches`,
+    //     which this engine renders happily — as a BOOLEAN, under a row
+    //     declaring `String`. Renderable and wrong became unrenderable and
+    //     declared, which is the trade this list exists to make visible.
     "core.require",
     "validate.email",
     "validate.iso_date",
+    "validate.regex",
     "validate.url",
     "validate.uuid",
     // 3 — the aggregates are not scalar calls at all: `math.sum` in a property

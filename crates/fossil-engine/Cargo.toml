@@ -63,6 +63,12 @@ fossil-introspect = { path = "../fossil-introspect" }
 # The tests read back the Parquet a run wrote — the same «test convenience, not a
 # dependency of the language» `fossil-runtime` demoted.
 duckdb = { workspace = true }
+# `fossil-hir` is a regular dependency above, and an integration test cannot see
+# one: `tests/` links the crate plus its DEV deps only. `tests/stdlib_return_types.rs`
+# reads the catalogue directly, because the question it asks — does the type the
+# checker believes match the type the engine produces — has the registry on one
+# side and a real DuckDB on the other, and this is the only crate that carries both.
+fossil-hir = { path = "../fossil-hir" }
 secrecy = { workspace = true }
 # The conformance-set harness (tests/programs.rs) keeps each program's rendered
 # diagnostic as a committed artefact, and it has to be the text `fossil check`

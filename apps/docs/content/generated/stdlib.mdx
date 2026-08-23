@@ -47,7 +47,7 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 | `math.avg` | `(value: Float) -> Float` | `avg(%0)` |
 | `math.max` | `(value: Float) -> Float` | `max(%0)` |
 | `math.min` | `(value: Float) -> Float` | `min(%0)` |
-| `math.round` | `(value: Float) -> Integer` | `round(%0)` |
+| `math.round` | `(value: Float) -> Integer` | `CAST(round(%0) AS BIGINT)` |
 | `math.sum` | `(value: Float) -> Float` | `sum(%0)` |
 
 </section>
@@ -57,12 +57,12 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 | | signature | lowers to |
 | --- | --- | --- |
 | `parse.csv_row` | `(text: String, separator: String, field: Integer) -> String` | `split_part(%0, %1, %2)` |
-| `parse.date` | `(text: String, format: String) -> Date` | `strptime(%0, %1)` |
+| `parse.date` | `(text: String, format: String) -> Date` | `CAST(strptime(%0, %1) AS DATE)` |
 | `parse.datetime` | `(text: String, format: String) -> DateTime` | `strptime(%0, %1)` |
-| `parse.decimal` | `(text: String) -> Float` | `CAST(%0 AS DECIMAL(38,18))` |
+| `parse.decimal` | `(text: String) -> Float` | `CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)` |
 | `parse.float` | `(text: String) -> Float` | `CAST(%0 AS DOUBLE)` |
 | `parse.integer` | `(text: String) -> Integer` | `CAST(%0 AS BIGINT)` |
-| `parse.json` | `(text: String, path: String) -> String` | `json_extract(%0, %1)` |
+| `parse.json` | `(text: String, path: String) -> String` | `json_extract_string(%0, %1)` |
 
 </section>
 
@@ -112,7 +112,7 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 | --- | --- | --- |
 | `validate.email` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^[^@]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$') THEN %0 ELSE error('validate.email: not an email: ' \|\| %0) END` |
 | `validate.iso_date` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^[0-9]{4}-(0[1-9]\|1[0-2])-(0[1-9]\|[12][0-9]\|3[01])$') THEN %0 ELSE error('validate.iso_date: not a YYYY-MM-DD date: ' \|\| %0) END` |
-| `validate.regex` | `(value: String, pattern: String) -> String` | `regexp_matches(%0, %1)` |
+| `validate.regex` | `(value: String, pattern: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, %1) THEN %0 ELSE error('validate.regex: ' \|\| %0 \|\| ' does not match ' \|\| %1) END` |
 | `validate.url` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^[A-Za-z][A-Za-z0-9+.-]*://(?s).+$') THEN %0 ELSE error('validate.url: not a URL: ' \|\| %0) END` |
 | `validate.uuid` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$\|^[0-9a-fA-F]{32}$\|^\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}$') THEN %0 ELSE error('validate.uuid: not a UUID: ' \|\| %0) END` |
 

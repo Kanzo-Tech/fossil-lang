@@ -546,11 +546,18 @@ impl FunctionRegistry {
                 },
             );
         };
-        // A verb of the algebra: it takes a relation and gives one back. A
-        // separate helper from `add` and not a flag on it, because the two say
-        // different things — the split `LoweringKind` already draws between a
-        // scalar expression and a `PlanOp`.
-        let add_verb = |entries: &mut HashMap<SmolStr, RegistryEntry>,
+        // A row that gives back a RELATION: the verbs of the algebra, which
+        // take one and hand one on, and the `io/` constructors, which make the
+        // first one. A separate helper from `add` and not a flag on it, because
+        // the two say different things — the split `LoweringKind` already draws
+        // between a scalar expression and a `PlanOp`.
+        //
+        // It was `add_verb`, and the name was the reason the `io/` rows below
+        // could not use it: they are not verbs, so they went through `add` with
+        // `S::String`, and three rows that construct a relation declared they
+        // return a string. Naming the helper after WHAT IT SAYS rather than what
+        // it was first used for is the whole of that fix.
+        let add_rows = |entries: &mut HashMap<SmolStr, RegistryEntry>,
                         name: &str,
                         params: Vec<ParamSpec>,
                         lowering: LoweringKind| {
@@ -607,49 +614,49 @@ impl FunctionRegistry {
         // say so by their `PlanOp`; what they gain here is that the day one is
         // implemented, its arguments are checked by the same code that checks
         // `str.trim`'s.
-        add_verb(
+        add_rows(
             e,
             "seq.where",
             vec![rows("rows"), pred("keep")],
             L(P::Where),
         );
-        add_verb(e, "seq.map", vec![rows("rows")], L(P::Map));
-        add_verb(e, "seq.flatten", vec![rows("rows")], L(P::Flatten));
-        add_verb(
+        add_rows(e, "seq.map", vec![rows("rows")], L(P::Map));
+        add_rows(e, "seq.flatten", vec![rows("rows")], L(P::Flatten));
+        add_rows(
             e,
             "seq.take",
             vec![rows("rows"), p("n", S::Integer)],
             L(P::Take),
         );
-        add_verb(
+        add_rows(
             e,
             "seq.drop",
             vec![rows("rows"), p("n", S::Integer)],
             L(P::Drop),
         );
-        add_verb(e, "seq.distinct", vec![rows("rows")], L(P::Distinct));
-        add_verb(e, "seq.sort", vec![rows("rows")], L(P::Sort));
+        add_rows(e, "seq.distinct", vec![rows("rows")], L(P::Distinct));
+        add_rows(e, "seq.sort", vec![rows("rows")], L(P::Sort));
         // `select`'s columns are NAMES and not values, so they are not
         // parameters: `crate::lower` reads them off the CST as
         // `SelectedColumn`s. The signature says what the verb takes of the
         // ALGEBRA, which is the relation.
-        add_verb(e, "seq.select", vec![rows("rows")], L(P::Select));
+        add_rows(e, "seq.select", vec![rows("rows")], L(P::Select));
         // A join's condition is a predicate over BOTH sides (ruling 17), which
         // is the relation this row hands the checker once the right side is in.
-        add_verb(
+        add_rows(
             e,
             "seq.join",
             vec![rows("rows"), rows("other"), pred("on")],
             L(P::Join),
         );
-        add_verb(
+        add_rows(
             e,
             "seq.union",
             vec![rows("rows"), rows("other")],
             L(P::Union),
         );
-        add_verb(e, "seq.group_by", vec![rows("rows")], L(P::GroupBy));
-        add_verb(e, "seq.aggregate", vec![rows("rows")], L(P::Aggregate));
+        add_rows(e, "seq.group_by", vec![rows("rows")], L(P::GroupBy));
+        add_rows(e, "seq.aggregate", vec![rows("rows")], L(P::Aggregate));
         // The one `seq/` row that is not a verb of the algebra: it takes a
         // relation and gives back a NUMBER.
         add(e, "seq.count", vec![rows("rows")], S::Integer, L(P::Count));
@@ -773,20 +780,32 @@ impl FunctionRegistry {
             S::Float,
             expr("CAST(%0 AS DOUBLE)"),
         );
-        // decimal: no Decimal type in MVP → returns Float.
+        // decimal: no Decimal type in MVP → returns Float, and the OUTER cast
+        // is what makes that sentence true. The template was
+        // `CAST(%0 AS DECIMAL(38,18))`, which returns a `DECIMAL(38,18)` — a
+        // fixed-point column, not a `DOUBLE` — while the row said `Float`.
+        // The inner cast stays because it is the only thing separating this row
+        // from `parse.float`: `CAST('1e400' AS DECIMAL(38,18))` REFUSES the
+        // value where `CAST('1e400' AS DOUBLE)` yields `inf`. Measured on
+        // DuckDB v1.5.3.
         add(
             e,
             "parse.decimal",
             vec![p("text", S::String)],
             S::Float,
-            expr("CAST(%0 AS DECIMAL(38,18))"),
+            expr("CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)"),
         );
+        // `strptime` returns a TIMESTAMP whatever the format string asks for,
+        // so the bare call was `parse.datetime` under a second name and this row
+        // declared `Date` over it. The cast is what makes the two rows two
+        // things; without it, `parse.date` and `parse.datetime` were the same
+        // template and one of them was mislabelled.
         add(
             e,
             "parse.date",
             vec![p("text", S::String), p("format", S::String)],
             S::Date,
-            expr("strptime(%0, %1)"),
+            expr("CAST(strptime(%0, %1) AS DATE)"),
         );
         add(
             e,
@@ -800,12 +819,21 @@ impl FunctionRegistry {
         // signature declared ONE parameter while its own doc-comment wrote
         // `json_extract(s, path)` — the second argument is now in the signature
         // instead of only in the prose.
+        //
+        // `json_extract_string` and NOT `json_extract`, which returns DuckDB's
+        // `JSON` type against a row that declares `String`. The two also differ
+        // in the VALUE, not only the type: on `{"a":"x"}` `$.a`, `json_extract`
+        // gives `"x"` — the quote characters are in the data — and
+        // `json_extract_string` gives `x`. A row whose return is `xsd:string`
+        // and whose value carries JSON quoting is the same lie one level in.
+        // On an object or an array the two agree (`{"b":1}`), and a missing
+        // path is NULL on both. Measured on DuckDB v1.5.3.
         add(
             e,
             "parse.json",
             vec![p("text", S::String), p("path", S::String)],
             S::String,
-            expr("json_extract(%0, %1)"),
+            expr("json_extract_string(%0, %1)"),
         );
         // csv_row had the same defect and worse: two declared parameters, a
         // doc-comment reading `split_part(s, sep, n)`, and no renderer, so
@@ -858,12 +886,23 @@ impl FunctionRegistry {
             S::Float,
             expr("abs(%0)"),
         );
+        // The only Float → Integer row in the catalogue, and the cast is what
+        // makes it one: `round(DOUBLE)` is a DOUBLE in DuckDB, so the bare call
+        // returned `2.0` under a row that promised an integer. Rounding first
+        // and casting second is not a double rounding — `round` has already
+        // made the value integral, so the cast is exact, and half-away-from-zero
+        // survives it (`-1.5` → `-2`). Measured on DuckDB v1.5.3.
+        //
+        // The alternative was to declare `Float` and match the engine. Rejected:
+        // a `round` that gives back a Float is a no-op an author still has to
+        // follow with a cast, and getting an integer out of a Float is the only
+        // reason to call this row.
         add(
             e,
             "math.round",
             vec![p("value", S::Float)],
             S::Integer,
-            expr("round(%0)"),
+            expr("CAST(round(%0) AS BIGINT)"),
         );
 
         // ── validate/ (5) ──────────────────────────────────────────────────
@@ -900,12 +939,17 @@ impl FunctionRegistry {
             S::String,
             expr(VALIDATE_ISO_DATE_TEMPLATE),
         );
+        // The fifth was NOT one of the four, and nothing said so. It lowered to
+        // a bare `regexp_matches(%0, %1)` — a BOOLEAN — under a row declaring
+        // `String`, so `M.code = validate.regex(Row.code, '^[A-Z]{3}$')` type-
+        // checked as a string and wrote `true` into the property. See
+        // `VALIDATE_REGEX_TEMPLATE` for why the row and not the signature moved.
         add(
             e,
             "validate.regex",
             vec![p("value", S::String), p("pattern", S::String)],
             S::String,
-            expr("regexp_matches(%0, %1)"),
+            expr(VALIDATE_REGEX_TEMPLATE),
         );
 
         // ── anon/ (2) ──────────────────────────────────────────────────────
@@ -941,27 +985,24 @@ impl FunctionRegistry {
         );
 
         // ── io/ (3 in v0.1) — source constructors ──────────────────────────
-        add(
-            e,
-            "io.csv",
-            vec![p("uri", S::String)],
-            S::String,
-            L(P::Source),
-        );
-        add(
-            e,
-            "io.json",
-            vec![p("uri", S::String)],
-            S::String,
-            L(P::Source),
-        );
-        add(
-            e,
-            "io.parquet",
-            vec![p("uri", S::String)],
-            S::String,
-            L(P::Source),
-        );
+        //
+        // `SigTy::Rows`, not `Scalar(String)`. These three declared `String`
+        // because `add` is the helper that takes a `ScalarTy` and `add_verb`
+        // was the one that did not — a helper's NAME decided a row's type, and
+        // it decided it wrong: a source constructor makes a relation, which is
+        // what `Receiver::Namespace`'s own doc-comment above already says
+        // («its entries **create** the thing»).
+        //
+        // Nothing read the old answer, which is why it survived: a source
+        // binding is lifted by `crate::lower` on the `io.` prefix before it can
+        // become a `HirExpr::Call`, so `check_call` never saw one. What changes
+        // is the case that DID reach it — `io.csv("u.csv")` written in a value
+        // position, e.g. inside a mapping — which typed as `xsd:string` and now
+        // gets the diagnostic `check_call` already had waiting for a non-scalar
+        // return.
+        add_rows(e, "io.csv", vec![p("uri", S::String)], L(P::Source));
+        add_rows(e, "io.json", vec![p("uri", S::String)], L(P::Source));
+        add_rows(e, "io.parquet", vec![p("uri", S::String)], L(P::Source));
 
         reg
     }
@@ -1137,6 +1178,39 @@ const VALIDATE_EMAIL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0
 const VALIDATE_URL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, \
      '^[A-Za-z][A-Za-z0-9+.-]*://(?s).+$') \
      THEN %0 ELSE error('validate.url: not a URL: ' || %0) END";
+
+/// `validate.regex` — the fifth validator, and for a long time the only one
+/// that was not one.
+///
+/// It lowered to a bare `regexp_matches(%0, %1)`, which `DuckDB` types BOOLEAN,
+/// while its row declared `String`. Everything downstream believes the row:
+/// `fossil_hir::check` types the call `xsd:string` and
+/// `fossil_mir::lower::call_result_ty` gives the property that type, so a
+/// mapping that validated a code wrote the literal `true` into it and nothing
+/// anywhere failed. That is the silent mode, and it is why the row is what
+/// moved.
+///
+/// **The alternative was to change `sig.ret` to `Bool`, and it was rejected on
+/// what the catalogue already contains.** A `String → Bool` "does this match"
+/// row is `str.contains` with a pattern instead of a needle, and it belongs
+/// beside it in `str/`; what `validate/` means — the ONE thing all five of its
+/// rows would then share — is *the value or an error, never a null*, stated in
+/// the section comment above and pinned by
+/// `fossil-runtime/tests/builtin_smoke.rs`. Declaring `Bool` here would leave
+/// the namespace with four rows of one shape and one of another, and would
+/// leave the language with no way at all to say "this must match, or stop".
+///
+/// The `%0 IS NULL OR` opening and the lazy `error()` are the two `DuckDB` facts
+/// its sisters rest on — see the block above them; this row inherits both
+/// rather than restating them. The error names the PATTERN as well as the
+/// value, because a regex failure with only the value in it tells an author
+/// nothing about which of several validations refused.
+///
+/// `%1` appears twice: once as the pattern and once in the message. That is the
+/// second row in the catalogue to read an argument twice, after `core.require`,
+/// and it is why the holes are indexed (see [`LoweringKind`]).
+const VALIDATE_REGEX_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, %1) \
+     THEN %0 ELSE error('validate.regex: ' || %0 || ' does not match ' || %1) END";
 
 /// Helper: a scalar SQL expression template.
 fn expr(template: &str) -> LoweringKind {

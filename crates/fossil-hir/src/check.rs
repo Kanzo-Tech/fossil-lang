@@ -1924,14 +1924,24 @@ impl<'db> Expr<'db> {
         }
 
         entry.sig.ret.scalar().map_or_else(
-            // A verb of the algebra gives back the relation it was given. The
-            // surface cannot write one in a value position, so nothing reaches
-            // here with a `Rows` return today; when `crate::lower` stops
-            // lifting pipelines out of `Call`, this is where the answer is.
+            // A row with a `Rows` return gives back a RELATION: a verb of the
+            // algebra hands on the one it was given, an `io/` constructor makes
+            // the first one. Neither is a value.
+            //
+            // A pipeline is lifted out of `Call` by `crate::lower`, and so is a
+            // source binding (on the `io.` prefix), so what reaches here is the
+            // relation written where a value belongs — `M.x = io.csv("u.csv")`.
+            // That used to type as `xsd:string`, because the three `io/` rows
+            // declared `String`; the message does not name verbs any more
+            // because the rows are no longer only verbs.
             || {
-                Ty::new(db, TyKind::Error(self.error_at(expr_id, format!(
-                "`{func}` is a verb of the algebra and gives back a relation, which is not a value"
-            ))))
+                Ty::new(
+                    db,
+                    TyKind::Error(self.error_at(
+                        expr_id,
+                        format!("`{func}` gives back a relation, which is not a value"),
+                    )),
+                )
             },
             |s| s.to_ty(db),
         )
