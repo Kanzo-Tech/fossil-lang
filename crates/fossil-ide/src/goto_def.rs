@@ -393,7 +393,11 @@ fn brace_members(node: &SyntaxNode) -> Vec<String> {
 /// 2. **a prefixed name**, when the document declares a prefix whose expansion
 ///    the IRI starts with. `PREFIX shop: <https://shop.example/voc#>` makes
 ///    `https://shop.example/voc#Person` findable as `shop:Person`, which is how
-///    every `.shex` in `apps/docs/programs/` actually spells its shapes.
+///    every `.shex` in `apps/docs/programs/` actually spells its shapes —
+///    asserted here for months and now held by
+///    [`tests::every_corpus_shape_is_reached_through_tier_2`], which walks the
+///    directory. A document with no `PREFIX` line makes tier 2 unreachable and
+///    goto-def lands at the top of the file, silently.
 ///
 /// Both tiers require the match to stand alone — `http://example.org/name` must
 /// not match inside `http://example.org/nameOfThing`, and `shop:Person` must not
@@ -604,5 +608,200 @@ shop:Person {
         let doc = "PREFIX a: <https://x/>\nPREFIX b: <https://x/voc#>\nb:Person {}\n";
         let range = locate_iri(doc, "https://x/voc#Person").expect("b:Person");
         assert_eq!(&doc[range.start as usize..range.end as usize], "b:Person");
+    }
+
+    // -- the corpus, which is the half the synthetic documents above cannot see -
+
+    /// The conformance corpus, from this crate's manifest directory.
+    fn corpus_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("crates/fossil-ide is two levels below the repo root")
+            .join("apps/docs/programs")
+    }
+
+    /// Every `.shex` under [`corpus_dir`], as `(path, text)`.
+    fn corpus_documents() -> Vec<(std::path::PathBuf, String)> {
+        fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, String)>) {
+            let entries =
+                std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
+            // `read_dir` order is the filesystem's. Sort, or a failure message
+            // names a different file on each machine.
+            let mut paths: Vec<_> = entries
+                .map(|e| e.expect("a directory entry").path())
+                .collect();
+            paths.sort();
+            for path in paths {
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|e| e == "shex") {
+                    let text = std::fs::read_to_string(&path)
+                        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+                    out.push((path, text));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&corpus_dir(), &mut out);
+        out
+    }
+
+    /// The `prefix:Local` heads the document declares a shape under: the token
+    /// before a `{`, when it is a single prefixed name.
+    ///
+    /// This is the same not-a-parser bargain [`locate_iri`] makes. It is enough
+    /// to notice a document written the other way, which is the whole claim.
+    fn declared_shape_heads(text: &str) -> Vec<(usize, String)> {
+        let mut out = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            let Some((head, _)) = line.split_once('{') else {
+                continue;
+            };
+            let head = head.trim();
+            let Some((prefix, local)) = head.split_once(':') else {
+                continue;
+            };
+            let named = |s: &str| !s.is_empty() && s.chars().all(is_name_char);
+            if named(prefix) && named(local) {
+                out.push((i, head.to_string()));
+            }
+        }
+        out
+    }
+
+    /// Whether every shape `text` declares is reachable through tier 2 — the
+    /// document's own `PREFIX` table — landing on the declaration line.
+    ///
+    /// `Ok(n)` counts the shapes checked; `Err` is the reason, ready to print.
+    /// Pure over the text, so the failure modes below can be driven without
+    /// writing into the corpus.
+    fn tier_2_reaches_every_shape(text: &str) -> Result<usize, String> {
+        let prefixes = declared_prefixes(text);
+        if prefixes.is_empty() {
+            return Err(
+                "declares no prefix, so tier 2 of `locate_iri` can never answer \
+                        for it and goto-def lands at the top of the file"
+                    .to_string(),
+            );
+        }
+        let heads = declared_shape_heads(text);
+        if heads.is_empty() {
+            return Err("declares no `prefix:Local {` shape, so this guard read \
+                        nothing out of it"
+                .to_string());
+        }
+
+        for (line, head) in &heads {
+            let (prefix, local) = head.split_once(':').expect("a prefixed head");
+            let Some((_, expansion)) = prefixes.iter().find(|(p, _)| p == prefix) else {
+                return Err(format!(
+                    "line {}: declares `{head}` under the undeclared prefix `{prefix}:`",
+                    line + 1
+                ));
+            };
+            let iri = format!("{expansion}{local}");
+            let Some(range) = locate_iri(text, &iri) else {
+                return Err(format!(
+                    "`{iri}` — the expansion of `{head}` through the document's own \
+                     prefix table — is not locatable in it"
+                ));
+            };
+            let found = &text[range.start as usize..range.end as usize];
+            if found != head {
+                return Err(format!(
+                    "`{iri}` located `{found}`, not the prefixed spelling `{head}` \
+                     the document writes"
+                ));
+            }
+            let landed = text[..range.start as usize].matches('\n').count();
+            if landed != *line {
+                return Err(format!(
+                    "goto-def on `{head}` lands on line {} and the declaration is on \
+                     line {}",
+                    landed + 1,
+                    line + 1
+                ));
+            }
+        }
+        Ok(heads.len())
+    }
+
+    /// Every shape the corpus declares is reachable through tier 2 — the
+    /// document's own `PREFIX` table — and lands on the declaration.
+    ///
+    /// Tier 1 cannot answer for any of them: `ShExC` writes `shop:Person`, not
+    /// the expanded IRI, so a corpus document with no `PREFIX` line would send
+    /// goto-def to byte 0 of the right file with nothing going red.
+    ///
+    /// WHAT IT CANNOT PROVE: that goto-def as a whole answers. It exercises the
+    /// locator against the real corpus, not the Salsa query above it — the
+    /// decode, the document registry and the position lookup are
+    /// `tests/goto_def.rs`'s subject. Nor does it say the corpus is complete;
+    /// it says every document IN it is spelled the way tier 2 needs.
+    #[test]
+    fn every_corpus_shape_is_reached_through_tier_2() {
+        let documents = corpus_documents();
+        assert!(
+            !documents.is_empty(),
+            "no `.shex` under {} — this guard is asserting nothing. If the corpus \
+             moved, repoint it; do not delete it",
+            corpus_dir().display()
+        );
+
+        let mut shapes = 0usize;
+        for (path, text) in &documents {
+            match tier_2_reaches_every_shape(text) {
+                Ok(n) => shapes += n,
+                Err(why) => panic!("{}: {why}", path.display()),
+            }
+        }
+        assert!(
+            shapes >= documents.len(),
+            "{shapes} shapes across {} documents — a document contributed none",
+            documents.len()
+        );
+    }
+
+    // ------------------------------------ the failure modes, each proved
+    //
+    // The corpus is right today, which is exactly when a guard stops
+    // demonstrating that it works. These feed the same pure function the
+    // documents a contributor could plausibly write.
+
+    #[test]
+    fn a_document_with_no_prefix_line_is_caught() {
+        let doc = "<https://shop.example/voc#Person> {\n  <https://shop.example/voc#name> xsd:string\n}\n";
+        let why = tier_2_reaches_every_shape(doc).expect_err("no PREFIX line");
+        assert!(why.contains("declares no prefix"), "{why}");
+    }
+
+    #[test]
+    fn a_shape_under_an_undeclared_prefix_is_caught() {
+        let doc = "PREFIX shop: <https://shop.example/voc#>\n\nother:Person {\n  shop:name xsd:string\n}\n";
+        let why = tier_2_reaches_every_shape(doc).expect_err("`other:` is not declared");
+        assert!(why.contains("undeclared prefix `other:`"), "{why}");
+    }
+
+    /// The bounded miss the locator's own doc comment admits: a mention before
+    /// the declaration wins. Held here so the corpus cannot quietly acquire one.
+    #[test]
+    fn a_mention_before_the_declaration_is_caught() {
+        let doc = "PREFIX shop: <https://shop.example/voc#>\n\nshop:Order {\n  shop:buyer @shop:Person\n}\n\nshop:Person {\n  shop:name xsd:string\n}\n";
+        let why = tier_2_reaches_every_shape(doc).expect_err("`@shop:Person` comes first");
+        assert!(why.contains("lands on line 4"), "{why}");
+    }
+
+    #[test]
+    fn a_document_declaring_no_shape_is_not_a_document_that_passes() {
+        let doc = "PREFIX shop: <https://shop.example/voc#>\n";
+        let why = tier_2_reaches_every_shape(doc).expect_err("nothing was checked");
+        assert!(why.contains("declares no"), "{why}");
+    }
+
+    #[test]
+    fn a_well_formed_document_passes_and_says_how_many() {
+        let doc = "PREFIX shop: <https://shop.example/voc#>\n\nshop:Person {\n  shop:name xsd:string\n}\n\nshop:Order {\n  shop:buyer @shop:Person\n}\n";
+        assert_eq!(tier_2_reaches_every_shape(doc), Ok(2));
     }
 }
