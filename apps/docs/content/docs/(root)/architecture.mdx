@@ -2,10 +2,10 @@
 title: The architecture
 description: One core and thin shells, because that is what every comparable compiler does. Why the rings are withdrawn, what `base` is supposed to mean, and the dependency graph fossil has today.
 direction:
-  summary: The tree is cut by what a piece of code is allowed to know rather than by where it runs, which collapses the deployment targets into shells thin enough to be uninteresting and takes twenty-six crates towards five to eight.
+  summary: The tree is cut by what a piece of code is allowed to know rather than by where it runs, which collapses the deployment targets into shells thin enough to be uninteresting and takes twenty-five crates towards five to eight.
   arguedIn: /docs/design/three-hosts
 today:
-  summary: Twenty-six crates, forty-six cross-group edges across five subject groups, and one pair of groups still pointing at each other — the engine and the corpus, over four named edges rather than a misfiled crate; `fossil-graph` reaches the rest of the tree exactly once, through its only fossil dependency, `fossil-sinks`.
+  summary: Twenty-five crates, forty-five cross-group edges across five subject groups, and one pair of groups still pointing at each other — the engine and the corpus, over four named edges rather than a misfiled crate; `fossil-graph` reaches the rest of the tree exactly once, through its only fossil dependency, `fossil-sinks`.
   backedBy: apps/docs/content.test.ts
 ---
 
@@ -20,19 +20,18 @@ graph LR
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 7 crates<br/>df · df-wasm · engine · cli<br/>sinks · resolver · introspect"]
   C["<b>corpus</b> · 4 crates<br/>graph · graph-wasm · mcp · layout"]
-  X["<b>no home</b> · 3 crates<br/>run-status · mem-probe · xtask"]
+  X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
-  E -->|15| L
+  E -->|16| L
   M -->|22| L
   M -->|1| C
   C -->|3| M
-  E -->|1| X
   X -->|1| L
-  M -->|2| X
+  M -->|1| X
   C -->|1| X
 ```
 
-Twenty-six crates, forty-six cross-group edges, and **one pair still runs both ways**. Measured
+Twenty-five crates, forty-five cross-group edges, and **one pair still runs both ways**. Measured
 2026-08-23 from `cargo metadata`, `[dependencies]` only — a test may depend on whatever it likes, so
 dev edges are out of scope here for the same reason they are in `content.test.ts`.
 
@@ -199,27 +198,41 @@ on the way out.
 `crates/fossil-ide/src/completion.rs:69`. We made Gleam's mistake, which has `use lsp_types::Position`
 inside the crate its own documentation calls *"entirely pure"*, rather than rust-analyzer's choice.
 
-And that relocates one crate rather than renaming it. `fossil-run-status` holds three unrelated wire
-contracts — the output of `run`, of `providers`, and of `refs`. They are not a crate: **they are the
-outbound half of a protocol**, and in rust-analyzer they would live in the binary. Six crates depend on it and it depends on nothing, which is not being foundational — it is
-being the place where types that did not fit were left.
+And that relocated one crate rather than renaming it. `fossil-run-status` held three unrelated wire
+contracts — the output of `run`, of `providers`, and of `refs`. They were not a crate: **they were the
+outbound half of a protocol**, and in rust-analyzer they would live in the binary. Six crates depended
+on it and it depended on nothing, which is not being foundational — it is being the place where types
+that did not fit were left.
+
+**It is gone** (`0d04c27`). Each contract went back to whoever produces it: `RunStatus` to `fossil-df`,
+`ProviderInfo` and `SourceRefInfo` to `fossil-lineage`, which had been importing its own output types
+back from it. None became a method of the LSP — `run` is not an editor operation, `providers` is a
+constant, and `refs` is called once per launch.
+
+What the dissolution turned up is the better argument for it. The crate's declared reason was that
+hosts depend on it, which `publish = false` makes impossible; keasy re-wrote the shape by hand, and
+the hand copy is **still wrong in this repo**: `packages/executor/src/index.ts` declares
+`version: number` as a required field, `3db248e` deleted that field from the Rust on 2026-08-20, and
+`fossil-df-wasm` serialises the Rust struct straight to JS. A TypeScript consumer reading
+`runStatus.version` gets `undefined` against a type that says it cannot.
 
 ## The verdict, which is not the crate count
 
-**Twenty-four crates and about 45,000 lines.** Against the references: Gluon has ~11 for 90k, Gleam 15
+**Twenty-five crates and about 45,000 lines.** Against the references: Gluon has ~11 for 90k, Gleam 15
 (six real; the rest are test harnesses and vendored libraries) for 228k, rust-analyzer 36 for 571k.
 **For 45k the honest target is five to eight.**
 
 But what makes two dozen feel like a maze is not the count:
 
-> **Four of them lie about what they are.** `fossil-ide` is not an IDE, `fossil-sinks` writes nothing,
-> `fossil-engine` is not an engine, `fossil-run-status` is not a status.
+> **Three of them lie about what they are.** `fossil-ide` is not an IDE, `fossil-sinks` writes nothing,
+> and `fossil-engine` is not an engine. There were four: `fossil-run-status` was not a status, and
+> that one was answered by deleting the crate rather than by renaming it.
 
 A false name costs more than a surplus crate, because you cannot skip it while reading. `fossil-ide`
 is the set of LSP functions, and exists only because `fossil-lsp` does not compile to wasm32.
 `fossil-sinks` writes nothing — it is the GraphAr manifest model, and half its dependents are readers.
-`fossil-engine` is credential resolution and pre-introspection, not a façade. `fossil-run-status` is
-four wire contracts, two of which are inputs.
+`fossil-engine` is credential resolution and pre-introspection, not a façade — and less of it than
+this page has said since `fbd1102` moved the pre-introspection out to `fossil-introspect`.
 
 <Callout title="Deliberately absent">
 **No numbered layers.** A rule that needs a number to explain itself is a taxonomy, not a rule.

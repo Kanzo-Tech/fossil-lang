@@ -234,7 +234,6 @@ all three:
 |---|---|---|
 | `@fossil-lang/*` (npm packages) | npmjs.org (public) | `.github/workflows/release.yml` (changesets) |
 | `ghcr.io/kanzo-tech/fossil:X.Y.Z` (`fossil` + `fossil-mcp`) | GHCR | `.github/workflows/fossil-image.yml` |
-| `fossil-run-status` (wire-contract crate) | git tag `vX.Y.Z` | the tag itself (keasy uses a git-dep) |
 
 The version's source of truth is the git tag `vX.Y.Z` that `changesets/action` creates when it
 publishes. `fossil-image.yml` triggers on `push: tags: ['v*']`, so npm and the image land on the
@@ -257,12 +256,11 @@ After that the per-release flow has no manual step beyond one merge: land change
 creates the tag; the tag builds and pushes the image with provenance; keasy's Renovate opens one
 grouped PR bumping the packages, the git-dep tag and the image together.
 
-Three dry runs, none of which publish:
+Two dry runs, neither of which publishes:
 
 ```bash
 pnpm --filter @fossil-lang/wasm pack --dry-run   # confirm pkg/fossil_wasm_bg.wasm is listed
 docker build -t fossil:local . && docker run --rm fossil:local --help
-cargo build -p fossil-run-status --features utoipa   # the contract crate, isolated
 ```
 
 ## Issues, PRs, communication

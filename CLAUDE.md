@@ -135,7 +135,6 @@ crates/
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-layout) report through it
-  fossil-run-status/       the `fossil run --output-json` wire contract
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
   fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)
   fossil-mcp/              that same verb surface as a native server-side service
