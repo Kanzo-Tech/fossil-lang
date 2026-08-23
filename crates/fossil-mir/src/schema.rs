@@ -1,9 +1,13 @@
 //! Structural MIR helpers: [`schema_of`] and [`free_cols`].
 //!
 //! These are plain-Rust functions (NOT `#[salsa::tracked]` queries), so they
-//! do NOT affect `MAX_PER_MAPPING_FAN_OUT`. They reason about the column schema
-//! flowing through a [`crate::graph::MirGraph`] and the free column references
-//! inside an [`Expr`].
+//! do NOT affect `MAX_PER_MAPPING_FAN_OUT` — a function with no Salsa key
+//! cannot be re-executed by an invalidation, which is a property of the
+//! signature and not of the body. `tests/fan_out.rs` measures the fan-out of
+//! [`crate::lower_to_mir_pg`] and does not put these two in its loop, so the
+//! claim is read off the `fn` above, not off a count. They reason about the
+//! column schema flowing through a [`crate::graph::MirGraph`] and the free
+//! column references inside an [`Expr`].
 //!
 //! # `schema_of` takes `&dyn fossil_base::Db`
 //!

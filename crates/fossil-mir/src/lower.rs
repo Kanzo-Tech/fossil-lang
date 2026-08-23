@@ -51,6 +51,13 @@
 //! structurally stable across body-only edits, so the `def_map` reads here do
 //! not widen the per-mapping fan-out.
 //!
+//! `tests/fan_out.rs` is what goes red. It edits one property of one mapping in
+//! ten and counts `lower_to_mir_pg` re-executions off Salsa's own events: one.
+//! The rule was written in three places in this file and measured in none —
+//! `MAX_PER_MAPPING_FAN_OUT` exists only in two `fossil-hir` test files, over
+//! `fossil-hir`'s queries, so adding the forbidden read here left the whole of
+//! that crate green. It now takes the count from one to ten.
+//!
 //! # Public Salsa query signature (Phase 2-9 contract — locked)
 //!
 //! ```ignore
