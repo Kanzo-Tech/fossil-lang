@@ -1,6 +1,6 @@
 ---
 title: In your editor
-description: Completion, hover, go-to-definition and the action that fills a mapping body from the shape — what to expect from each, and how to switch it on.
+description: Completion, hover, go-to-definition, the two quick fixes and diagnostics as you type — what each one answers today, what it does not, and how to switch it on.
 ---
 
 fossil ships a language server, and it is the same code that checks your program on the command
@@ -19,74 +19,135 @@ entry naming the binary and the filetype; in Helix a `[[language]]` block with
 `language-servers = ["fossil-lsp"]`; in any editor that speaks the protocol, the equivalent. It reads
 the program on stdin and stdout and needs no configuration of its own.
 
-## Completion after a dot
+It advertises hover, definition, completion, document symbols, semantic tokens and code actions, and
+every handler is a thin adapter over a `fossil-ide` free function. The browser calls the same
+functions, which is why the two cannot answer differently.
 
-The receiver's type decides what is on the list. After a source binding, the columns of that file:
+## Completion
+
+Three sources merge into one list (`crates/fossil-ide/src/completion.rs:59`), and it is worth knowing
+which of them looked at your cursor.
+
+**The shape's properties**, when the enclosing mapping's target shape resolves — your program named
+its output document and the editor could read it. The entries are that shape's own
+`constraints[].predicate`, each with the value type the document declares, so the list is what
+`Person` requires and nothing else.
+
+**The source's columns**, when the cursor is on a `.` inside a mapping body and the source that
+mapping reads has been introspected:
 
 ```
-User.        →  id   email   name   age
+name = User.        →  id   email   name   age
 ```
 
-After a string, the string operations:
+Each entry carries the inferred type. With no introspection there are no entries at all — the editor
+says nothing rather than guessing column names.
 
-```
-User.email.  →  trim   lower   upper   slug   length   split   …
-```
+**Every row of the standard library**, and this one does not look at the cursor. `str.trim`,
+`seq.join` and `io.csv` are all offered wherever completion fires, spelled in full and carrying no
+`sortText`, so your editor orders them by label and your editor's own prefix filter is the only thing
+narrowing them. `seq.join` is on the list after a string, and `str.upper` is on it after a relation.
 
-After a relation, the relational ones:
-
-```
-Adults.      →  where   select   join   union   distinct   sort   …
-```
-
-The list is what applies and nothing else. There is no entry on it that would fail to compile if you
-picked it, because the thing that produces the list is the same thing that would reject it.
+That last paragraph is a gap, not a design. Every row already carries the receiver it hangs off —
+`Scalar(ScalarTy::String)` for `str.trim`, `Relation` for `seq.where`, `Namespace` for `io.csv`
+(`crates/fossil-hir/src/stdlib.rs:181`) — and the bare member name beside it
+(`crates/fossil-hir/src/stdlib.rs:186`). Nothing in `crates/fossil-ide/` reads either field. Filtering
+by the receiver's type, and offering `trim` rather than `str.trim` once the receiver is known, is the
+step that would make the list exact; the argument for why it should be is
+[tooling for humans](/docs/design/tooling-for-humans), and `stdlib_completions`
+(`crates/fossil-ide/src/completion.rs:81`) is the function that would change.
 
 ## Hover
 
-Hover a field and you get its type and the file it came from. Hover a property key and you get the
-predicate IRI the shape declares, its value type and its cardinality — which is the fastest way to
-answer "why will it not take this?" without opening the shape document.
+Hover anywhere in a property line and you get two type blocks
+(`crates/fossil-ide/src/hover.rs:120`): the type of the expression you wrote, with where it came from
+— an input descriptor names the binding and the column — and, below it, the type the shape demands
+of the predicate that property's key names. Two blocks because a property is a meeting of two
+documents, and seeing only one of them is how you end up arguing with the checker.
+
+The second block appears only when the shape resolves. A program that names no output document, or
+one whose document the editor could not read, gets the first block and no error: the missing document
+is the checker's diagnostic to report, not the hover's.
+
+The cursor's exact column inside the property does not change the answer — hover resolves to the
+whole property, so the key and its right-hand side give the same two blocks. The predicate IRI is
+resolved to find the constraint and is not itself displayed, and neither is the constraint's
+cardinality; if you want either, go to the definition, which opens the document at the line that
+declares it.
 
 ## Go to definition
 
-- On a source name, it opens the binding.
-- On a property key, it opens the shape document, at the line that declares the predicate.
-- On a relation name, it opens the line that derived it.
+Three positions, and the first two leave the `.fossil` file entirely
+(`crates/fossil-ide/src/goto_def.rs:123`):
 
-That third one is worth using more than it looks. A mapping that reads from `Recent` and writes
-`User.name` makes more sense once you have jumped to the join that put `User` in scope.
+- On the **shape name** in a mapping header, it opens the shape document, at the shape. When the
+  document is not registered it falls back to the `type { … } := io.shex("…")` line that introduced
+  the name — the honest degraded answer rather than nothing.
+- On a **property key**, it opens the same document at the predicate the key names. `@subject` is
+  deliberately not one of these: a shape declares a node's predicates, and in RDF the subject *is*
+  the node.
+- On a **mapping name**, it stays in the program and resolves through the open files. This is the one
+  position that never left the language.
 
-## Fill the body
+A source name and a relation name resolve to nothing today. The index behind the third case walks
+only `MAPPING` nodes (`crates/fossil-ide/src/symbol_index.rs:75`), so `User` in
+`User := io.csv("data/users.csv")` and `Adults` in `Adults := User.where(…)` are not in it, and a jump
+from either returns no target. Both are `:=` bindings a few lines up in the same file, which is why
+the gap has been survivable; it is still a gap.
 
-The one that changes how it feels to write a mapping.
+## Quick fixes
 
-Type a header and stop:
+Two, and both hang off a diagnostic you can already see
+(`crates/fossil-ide/src/code_action.rs:53`) — there is no action that fires on a clean file.
+
+- **Did you mean.** A column that is not a field of the row a mapping reads carries its nearest
+  candidate as a structured field, not as prose in the message, so the fix replaces exactly the span
+  that was wrong with exactly the name that was meant. The candidates are that row's own fields,
+  which is what makes it a short list — see [when it does not compile](/docs/book/diagnostics). It is
+  offered only when the caret is on the name: where the compiler recorded no span finer than the
+  whole right-hand side, an edit would delete `User.` along with the typo, so none is generated.
+- **Split the mapping.** A value disjunction in the shape is not supported in v0.1, and the repair is
+  one mapping per branch. The diagnostic already carries that rewrite — the same header, the same
+  `from` clause, the same identity, one mapping per disjunct — so the action inserts what the
+  checker generated rather than regenerating it.
+
+### Not yet: the body, filled from the shape
+
+Write a mapping header and stop:
 
 <Program src="shop/shop.fossil" region="header" title="shop.fossil" />
 
-The server knows what `Person` declares and with what cardinality — it is the same table the checker
-reads — so it offers to write the body for you, one hole per property:
+Everything needed to write the body's skeleton is already in the editor — the shape's properties and
+their cardinalities on one side, the fields of `Adults` on the other, both as types the checker
+already holds:
 
-<Program src="shop/editor/filled-body.txt" title="what the action inserts" />
+<Program src="shop/editor/filled-body.txt" title="what such an action would insert" />
 
-The names came from the shape. Now fill the holes, and inside each one completion offers the fields of
-`Adults` — which is a relation of `User`s, and `User` is a type because its binding named one:
-
-<Program src="shop/shop.fossil" region="first-mapping" title="shop.fossil" />
-
-Both halves of a mapping complete from opposite ends, and neither of them needed a heuristic. It is
-the type answering.
+**No such code action exists.** `code_actions` produces the two quick fixes above and nothing else.
+The argument for building it, and why this design makes it cheap where other mapping languages cannot
+have it at all, is [tooling for humans](/docs/design/tooling-for-humans).
 
 ## Diagnostics as you type
 
 The squiggles are the diagnostics from
-[when it does not compile](/docs/book/diagnostics), at the same spans, with the same `help:` text. A
-missing required property appears against the header the moment the body stops satisfying the shape;
-an unknown column appears as you finish typing it.
+[when it does not compile](/docs/book/diagnostics), at the same spans, with the same `help:` text —
+folded onto the end of the message, because LSP has no field for it
+(`crates/fossil-lsp/src/main.rs:735`). A diagnostic's secondary labels travel too, as
+`relatedInformation`, so an error whose whole content is *these two spans disagree* arrives with both
+halves rather than as one underline with no context.
+
+An edit republishes for the file you edited. A missing required property appears against the header
+the moment the body stops satisfying the shape; an unknown column appears as you finish typing it.
 
 ## In a browser
 
-The language server compiles to WebAssembly and runs in a browser tab, with nothing on the other end
-of it. Checking a program needs a parser, a shape document and the columns of a file — none of which
-needs a machine somewhere else — so everything on this page is available in a page.
+`fossil-lsp` itself is native — it is a stdio transport, and it refuses to compile for wasm32
+(`crates/fossil-lsp/src/main.rs:35`). What compiles to WebAssembly is everything under it:
+`fossil-ide` and the compiler crates it calls carry no engine, so the browser serves the same six
+requests — hover, definition, completion, document symbols, semantic tokens, code actions — by
+calling the same functions, dispatched in `crates/fossil-wasm/src/lsp_worker.rs:209` instead of over
+a pipe.
+
+Checking a program needs a parser, a shape document and the columns of a file — none of which needs a
+machine somewhere else — so what this page describes is available in a page, with nothing on the
+other end of it.
