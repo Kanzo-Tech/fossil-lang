@@ -113,9 +113,9 @@ fn the_wire_contract_finally_reports_a_schema_provider() {
             .unwrap_or_else(|| panic!("{name}"))
             .kind
     };
-    assert_eq!(kind("csv"), fossil_run_status::ProviderKind::Data);
-    assert_eq!(kind("shex"), fossil_run_status::ProviderKind::Schema);
-    assert_eq!(kind("shacl"), fossil_run_status::ProviderKind::Schema);
+    assert_eq!(kind("csv"), fossil_lineage::ProviderKind::Data);
+    assert_eq!(kind("shex"), fossil_lineage::ProviderKind::Schema);
+    assert_eq!(kind("shacl"), fossil_lineage::ProviderKind::Schema);
 }
 
 // ------------------------------------------------------------- the SHACL row

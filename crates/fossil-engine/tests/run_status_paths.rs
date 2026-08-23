@@ -38,7 +38,7 @@ ex:Person {
 const USERS: &str = "id,name\n1,Alice\n2,Bob\n3,Cleo\n";
 
 /// Every path the status hands out, resolved against the dataset root.
-fn paths(status: &fossil_run_status::RunStatus) -> Vec<String> {
+fn paths(status: &fossil_df::run_status::RunStatus) -> Vec<String> {
     let mut out: Vec<String> = status.vertices.iter().map(|v| v.file.clone()).collect();
     for e in &status.edges {
         out.push(e.by_source.clone());

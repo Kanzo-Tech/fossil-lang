@@ -505,7 +505,7 @@ fn render_diagnostics(
 
 /// The run's answer, rendered without a single machine-dependent byte. `dest` is
 /// a tempdir and is deliberately not here.
-fn render_run(status: &fossil_run_status::RunStatus) -> String {
+fn render_run(status: &fossil_df::run_status::RunStatus) -> String {
     let mut out = String::from("\n── run ──\n");
     if status.vertices.is_empty() {
         out.push_str("NO VERTEX TYPE was written\n");

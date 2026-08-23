@@ -620,7 +620,7 @@ pub fn refs(program: &str) -> Result<JsValue, JsError> {
 /// (refs is parse-only and called once per job launch, not per keystroke), so
 /// it never touches the editor's persistent workspace.
 #[must_use]
-pub fn refs_native(program: &str) -> Vec<fossil_run_status::SourceRefInfo> {
+pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
     let system = Arc::new(WasmSystem::default()) as Arc<dyn System>;
     let db = WasmDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "<refs>".to_string());

@@ -58,7 +58,8 @@ use std::path::{Path, PathBuf};
 
 use fossil_base::{Diagnostic, SourceAnchor};
 use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_run_status::{ProviderInfo, RunStatus, SourceRefInfo};
+use fossil_df::run_status::RunStatus;
+use fossil_lineage::{ProviderInfo, SourceRefInfo};
 use smol_str::SmolStr;
 
 pub mod census;

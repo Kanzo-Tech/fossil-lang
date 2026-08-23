@@ -12,7 +12,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use fossil_run_status::RefRole;
+use fossil_lineage::RefRole;
 use fossil_wasm::refs_native;
 
 // Mirrors `fossil-cli/tests/refs.rs`, byte for byte, because a parity test whose

@@ -44,9 +44,6 @@ fossil-df           = { path = "../fossil-df" }
 # resolver with it, and `install_secret` went with the `DuckDB` connection.
 fossil-layout       = { path = "../fossil-layout" }
 fossil-sinks        = { path = "../fossil-sinks" }
-# The `RunStatus` / `SourceRefInfo` / `ProviderInfo` wire types
-# the engine produces (one source of truth; keasy reuses them).
-fossil-run-status = { path = "../fossil-run-status" }
 
 regex    = { workspace = true }
 smol_str = { workspace = true }

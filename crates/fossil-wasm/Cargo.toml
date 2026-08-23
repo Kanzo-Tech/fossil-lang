@@ -44,11 +44,6 @@ smol_str = { workspace = true }
 # fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
 # NEITHER fossil-layout NOR any native UDF crate.
 fossil-lineage = { path = "../fossil-lineage" }
-# WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
-# surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host
-# (keasy consumes the SAME structs). fossil-ide produces them; we name the
-# return type of the test-reachable `refs_native` core.
-fossil-run-status = { path = "../fossil-run-status" }
 # The `check()` method converts byte-offset spans to UTF-16 LSP ranges via
 # `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
 # WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
