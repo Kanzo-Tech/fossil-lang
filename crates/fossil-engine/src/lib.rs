@@ -38,9 +38,19 @@
 // above because it is where the coupling lives, and a reader who follows the
 // pointer should land on the code rather than on a paraphrase of it.
 
+// The reason is this crate's OWN `duckdb` dependency, and it used to say
+// otherwise: «depends on fossil-runtime which uses bundled DuckDB». That stopped
+// being true when `fossil-runtime` dropped the dependency and started compiling
+// for wasm32 — a tripwire naming the wrong crate sends whoever tries to remove it
+// to the crate that already has none.
+//
+// What holds it: `pre_introspect` opens an in-memory DuckDB and asks
+// `DESCRIBE SELECT * FROM <reader>('<path>')` for each source's columns. Three
+// things stand between that and DataFusion, and they are measured in
+// `docs/design/one-engine.mdx` rather than guessed.
 #[cfg(target_arch = "wasm32")]
 compile_error!(
-    "fossil-engine is native-only (depends on fossil-runtime which uses bundled DuckDB); \
+    "fossil-engine is native-only (its own bundled DuckDB, for `pre_introspect`); \
      do not add it to the WASM CI gate"
 );
 

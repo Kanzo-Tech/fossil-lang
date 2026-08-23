@@ -54,8 +54,38 @@ not sufficient: `fossil-resolver` was an unused edge carrying its own wasm32
 `compile_error!` for an unrelated reason, and `cargo check` never reports an
 unused dependency, so only building for the target found it.
 
-`fossil-engine`'s tripwire stays. Its `DESCRIBE` pre-introspection opens a
-connection, which is piece 2 for that crate.
+`fossil-engine`'s tripwire stays, and its message was wrong until now — it named
+`fossil-runtime` as the reason, which stopped being true the moment that crate
+dropped DuckDB. What holds it is this crate's own `pre_introspect`, which opens
+an in-memory DuckDB and asks `DESCRIBE SELECT * FROM <reader>('<path>')` for each
+source's columns.
+
+### Three things stand between that and DataFusion, and the third is a decision
+
+1. **No runtime.** `fossil-engine` names `tokio` nowhere and is sync throughout.
+   DataFusion's schema inference is async, so this needs a runtime added to a
+   crate that has deliberately never had one.
+2. **DataFusion cannot see a cloud source at all, natively.** `read_source`'s own
+   doc says «the host owns that registration, NOT this crate», and
+   `register_object_store` appears in exactly ONE file in the workspace:
+   `fossil-df-wasm`, staging bytes the browser already fetched. Nothing on the
+   native path registers a store, and `object_store` is not a workspace
+   dependency. So today a cloud `@conn` source has its **types inferred** through
+   DuckDB, with `CREATE SECRET` credentials, and there is no matching path for
+   **reading** it — an asymmetry this page had not stated. (Measured by grep, not
+   by running a cloud source end to end.)
+3. **The browser introspects through DuckDB-WASM, and that is not changing.**
+   `@fossil-lang/introspect` builds `DESCRIBE SELECT * FROM read_csv_auto(…)` for
+   a host-supplied DuckDB-WASM. `packages/introspect/tests/rust-parity.test.ts`
+   exists because «the browser and the CLI answer the same program differently»
+   is a bug — and CSV type sniffing is exactly where two engines disagree. Moving
+   the native side to DataFusion does not remove a duplicated implementation; it
+   makes the two implementations use different engines, which is a change to what
+   the compiler infers and not a cleanup.
+
+So this piece is not the same shape as `fossil-runtime`'s, where the work was
+deleting things nothing called. It is a decision about whether native and browser
+may infer a source's columns with two engines.
 
 ## What the first piece cost, measured — and the mechanism was misattributed
 
