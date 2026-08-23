@@ -55,10 +55,11 @@ fn every_path_the_run_status_names_exists_on_disk() {
     std::fs::write(dir.path().join("users.csv"), USERS).expect("write csv");
 
     let dest = dir.path().join("out");
+    introspect(&dir.path().join("prog.fossil"));
     let status = fossil_engine::run(
         &dir.path().join("prog.fossil"),
         &dest.to_string_lossy(),
-        &fossil_engine::RunCreds::default(),
+        &std::collections::HashMap::new(),
         None,
     )
     .expect("the walking-skeleton shape of program runs");
@@ -91,10 +92,11 @@ fn the_vertices_are_the_chunk_prefix_and_the_staged_parquet_is_gone() {
     std::fs::write(dir.path().join("users.csv"), USERS).expect("write csv");
 
     let dest = dir.path().join("out");
+    introspect(&dir.path().join("prog.fossil"));
     let status = fossil_engine::run(
         &dir.path().join("prog.fossil"),
         &dest.to_string_lossy(),
-        &fossil_engine::RunCreds::default(),
+        &std::collections::HashMap::new(),
         None,
     )
     .expect("run");
@@ -117,5 +119,18 @@ fn the_vertices_are_the_chunk_prefix_and_the_staged_parquet_is_gone() {
     assert!(
         !chunks.is_empty(),
         "and the prefix holds the chunks the rows moved into"
+    );
+}
+
+/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
+/// stopped doing for themselves. Without it a program's sources have no
+/// forward-propagated types, which is a different (and quietly weaker) answer.
+fn introspect(path: &std::path::Path) {
+    let system = fossil_engine::host_system(path);
+    let _ = fossil_introspect::introspect_program(
+        &*system,
+        path,
+        &std::collections::HashMap::new(),
+        &fossil_introspect::RunCreds::default(),
     );
 }

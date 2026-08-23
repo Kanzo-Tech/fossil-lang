@@ -39,6 +39,7 @@ fn programs_dir() -> PathBuf {
 
 /// Every diagnostic message `fossil check` produces for `path`.
 fn messages(path: &Path) -> Vec<String> {
+    introspect(path);
     fossil_engine::check(path)
         .expect("the program is readable")
         .diagnostics
@@ -406,5 +407,18 @@ fn a_file_with_no_mapping_still_reports_its_bindings() {
             .iter()
             .any(|m| m.starts_with("`io.csv` reads rows, not types")),
         "got {diagnostics:?}"
+    );
+}
+
+/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
+/// stopped doing for themselves. Without it a program's sources have no
+/// forward-propagated types, which is a different (and quietly weaker) answer.
+fn introspect(path: &std::path::Path) {
+    let system = fossil_engine::host_system(path);
+    let _ = fossil_introspect::introspect_program(
+        &*system,
+        path,
+        &std::collections::HashMap::new(),
+        &fossil_introspect::RunCreds::default(),
     );
 }

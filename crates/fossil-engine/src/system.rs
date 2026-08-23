@@ -35,6 +35,26 @@ use fossil_descriptors_input::DescriptorCache;
 /// it is the scope of the table. Entries are never evicted; a long-lived host
 /// holds one table per program directory it has ever compiled, and the
 /// freshness token — not eviction — is what keeps an entry truthful.
+/// The `System` a compile of `program_path` runs against — **and the one a host
+/// must introspect through.**
+///
+/// Public because filling the descriptor cache is the host's job and the host
+/// is another crate: `fossil-cli` calls `fossil_introspect::pre_introspect_and_register`
+/// against this before `check`/`run`. Two calls for one program get the same
+/// cache — the table is ambient and keyed by the program's DIRECTORY (see
+/// [`descriptor_cache`]), so the `Arc` is shared even though the `System` and
+/// the `FossilDb` are not.
+///
+/// It takes the program PATH and derives the directory itself, which is the
+/// whole reason it exists rather than the caller building an `EngineSystem`: a
+/// caller that derived the directory differently would key a different cache and
+/// the introspection would silently not reach the compile.
+#[must_use]
+pub fn host_system(program_path: &Path) -> Arc<dyn System> {
+    let program_dir = program_path.parent().unwrap_or_else(|| Path::new("."));
+    Arc::new(EngineSystem::for_program_dir(program_dir))
+}
+
 fn descriptor_cache(program_dir: &Path) -> Arc<DescriptorCache> {
     static CACHES: OnceLock<Mutex<HashMap<PathBuf, Arc<DescriptorCache>>>> = OnceLock::new();
     let caches = CACHES.get_or_init(|| Mutex::new(HashMap::new()));
@@ -106,8 +126,7 @@ pub(crate) fn open_db(
     text: String,
     path: &Path,
 ) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
-    let program_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let system: Arc<dyn System> = Arc::new(EngineSystem::for_program_dir(program_dir));
+    let system = host_system(path);
     let mut db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     crate::documents::register_shape_documents(&mut db, file);

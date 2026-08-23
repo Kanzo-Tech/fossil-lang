@@ -204,10 +204,11 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // once was a race waiting to be written. A source path now resolves against
     // the directory of the program that wrote it, so the fixture means the same
     // thing from anywhere and the test does not have to move to read it.
+    introspect(&dir.path().join("mapping.fossil"));
     let status = fossil_engine::run(
         &dir.path().join("mapping.fossil"),
         &format!("file://{}", dest.display()),
-        &fossil_engine::RunCreds::default(),
+        &std::collections::HashMap::new(),
         None,
     )
     .expect("fossil run");
@@ -594,4 +595,17 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // What 12 does not prove is that a hop is *cheap*, only that it is correct
     // from two addresses. The cost is a request count over an HTTP origin and it
     // is measured on the reader's side, not here.
+}
+
+/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
+/// stopped doing for themselves. Without it a program's sources have no
+/// forward-propagated types, which is a different (and quietly weaker) answer.
+fn introspect(path: &std::path::Path) {
+    let system = fossil_engine::host_system(path);
+    let _ = fossil_introspect::introspect_program(
+        &*system,
+        path,
+        &std::collections::HashMap::new(),
+        &fossil_introspect::RunCreds::default(),
+    );
 }

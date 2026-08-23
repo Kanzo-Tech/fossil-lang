@@ -16,7 +16,7 @@
  * `Primitive`. A value outside the union is rejected when the descriptor is
  * registered.
  *
- * `fossil-engine` does the same job natively, and the two must agree on three
+ * `fossil-introspect` does the same job natively, and the two must agree on three
  * things. Two of them stopped being an agreement and became one source: the
  * constructors that exist and the reader each picks are generated from
  * `catalogue.bnf` into `catalogue.generated.ts`, and the Rust reads the same

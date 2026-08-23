@@ -1,8 +1,9 @@
 /**
  * The parity guard.
  *
- * `packages/introspect` and `crates/fossil-engine` implement one capability
- * twice, and three things had to agree or the browser and the CLI answer the
+ * `packages/introspect` and `crates/fossil-introspect` implement one capability
+ * twice — the native half was `fossil-engine`'s until introspection became the
+ * host's job — and three things had to agree or the browser and the CLI answer the
  * same program differently: the source-binding pattern, the DuckDB reader each
  * constructor picks, and the DuckDB→primitive table. Until this file existed
  * the agreement was asserted in a comment, and the comment was wrong in both
@@ -40,8 +41,8 @@
  *   `fossil-syntax`'s `Ident` (`[A-Za-z_][A-Za-z0-9_]*`) does not — and they
  *   are equally wrong together.
  * - **That the Rust behaves as its source reads.** This is a text comparison:
- *   it does not run `fossil-engine`. A change to how the crate *uses* the
- *   pattern it compiles is invisible here.
+ *   it does not run `fossil-introspect`. A change to how the crate *uses*
+ *   the pattern it compiles is invisible here.
  * - **That identical pattern text means identical matches.** Rust's `\w` is
  *   Unicode-aware and JS's is ASCII, so a non-ASCII binding name is scraped
  *   natively and skipped in the browser. Nothing in fossil can name one
@@ -64,7 +65,11 @@ import {
 } from "../src/index.js";
 import { NATIVE_ROWS } from "../src/catalogue.generated.js";
 
-const ENGINE_REL = "crates/fossil-engine/src/lib.rs";
+// It was `crates/fossil-engine/src/lib.rs`. The scrape moved with the code:
+// introspection is the HOST's job and lives in `fossil-introspect` now, which
+// is what let `fossil-engine` stop linking a database. The pattern and the type
+// table did not change — this file compares the same two implementations.
+const ENGINE_REL = "crates/fossil-introspect/src/lib.rs";
 
 /** The repo root, found by walking up until the engine crate is under it. */
 function engineSource(): string {

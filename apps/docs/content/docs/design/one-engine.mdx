@@ -17,8 +17,9 @@ project is built on — *fossil is a compiler consumed as a WASM library* — is
 true of `fossil-wasm` and false of the layout pass and the engine. One
 dependency is what makes it half true.
 
-`fossil-runtime`'s is gone; `fossil-engine`'s is not. See *Where the tripwire
-stands now*, below.
+**Both are discharged.** `fossil-runtime`'s tripwire is gone. `fossil-engine`
+still has one and it no longer says DuckDB: what makes it native is that `run`
+writes files to a directory. See below.
 
 Remove it and the whole compiler is WASM-capable. That is the decision; the rest
 is consequence.
@@ -42,9 +43,9 @@ a static library already built. Removing it removes that unit.
    `fossil-graph` produces. DataFusion reads Parquet natively. This one is
    `fossil-mcp`'s, and it is the piece this page's last section argues should
    NOT move: the host brings the engine there.
-3. **The assertions.** `fossil-cli` and `fossil-engine` open an in-memory DuckDB
-   to read the Parquet they just wrote. That is a test convenience, not a
-   dependency of the language.
+3. **The assertions — done.** `fossil-cli` and `fossil-engine` open an in-memory
+   DuckDB to read the Parquet they just wrote. That is a test convenience, not a
+   dependency of the language, and it is a **dev**-dependency in both now.
 
 **Where the tripwire stands now.** `fossil-runtime`'s is **gone** — the crate
 compiles for `wasm32`, and `cargo xtask wasm-check` covers it because the crate
@@ -54,38 +55,54 @@ not sufficient: `fossil-resolver` was an unused edge carrying its own wasm32
 `compile_error!` for an unrelated reason, and `cargo check` never reports an
 unused dependency, so only building for the target found it.
 
-`fossil-engine`'s tripwire stays, and its message was wrong until now — it named
-`fossil-runtime` as the reason, which stopped being true the moment that crate
-dropped DuckDB. What holds it is this crate's own `pre_introspect`, which opens
-an in-memory DuckDB and asks `DESCRIBE SELECT * FROM <reader>('<path>')` for each
-source's columns.
+**`fossil-engine` links no database either, and the reason it is still native
+changed.** Its tripwire named `fossil-runtime`, then named its own `DuckDB`.
+Neither is true now: `pre_introspect` and the credentials that let it reach a
+cloud source are `fossil-introspect`, a crate the HOST takes.
 
-### Three things stand between that and DataFusion, and the third is a decision
+That shape was not invented for this. **The browser has always done it**:
+`fossil-wasm` implements `System::descriptors`, `@fossil-lang/introspect`
+describes through the page's DuckDB-WASM, and the compiler reads the cache. The
+native side did the same job from inside the compiler, which is what made the
+compiler open a connection. `fossil-cli` now introspects and then compiles —
+the browser's order — and `fossil_engine::run` takes a map of connection URLs
+instead of a `RunCreds`, so the compiler cannot see a secret.
 
-1. **No runtime.** `fossil-engine` names `tokio` nowhere and is sync throughout.
-   DataFusion's schema inference is async, so this needs a runtime added to a
-   crate that has deliberately never had one.
+It matters that this is not the DataFusion rewrite: **`DuckDB` is still the
+engine that DESCRIBES, on both sides**, so nothing about what the compiler
+infers changed and `rust-parity.test.ts` still compares two implementations of
+one capability. The three blockers below are all sidestepped rather than paid.
+
+### What is left is the filesystem, and it is a different sentence
+
+`cargo check --target wasm32-unknown-unknown -p fossil-engine` now reports
+exactly one error: `fossil_df::run_to_dir` is itself `cfg(not(wasm32))` because
+it writes a GraphAr tree to a local directory. `check` is wasm-capable; `run` is
+not, in one crate.
+
+And that does not contradict *fossil is a compiler consumed as a WASM library*
+the way bundling a database did. Writing files to a disk is what a native host
+DOES — the browser's host writes its bytes back over its own seam. Splitting
+`check` from `run` is a decision, not a cleanup, and nothing forces it today.
+
+### The three blockers, kept because they price the OTHER route
+
+If the native side ever should describe through DataFusion rather than `DuckDB`,
+this is what it costs — measured, and unchanged by the move above:
+
+1. **No runtime.** `fossil-engine` names `tokio` nowhere. DataFusion's schema
+   inference is async.
 2. **DataFusion cannot see a cloud source at all, natively.** `read_source`'s own
    doc says «the host owns that registration, NOT this crate», and
    `register_object_store` appears in exactly ONE file in the workspace:
-   `fossil-df-wasm`, staging bytes the browser already fetched. Nothing on the
-   native path registers a store, and `object_store` is not a workspace
-   dependency. So today a cloud `@conn` source has its **types inferred** through
-   DuckDB, with `CREATE SECRET` credentials, and there is no matching path for
-   **reading** it — an asymmetry this page had not stated. (Measured by grep, not
-   by running a cloud source end to end.)
-3. **The browser introspects through DuckDB-WASM, and that is not changing.**
-   `@fossil-lang/introspect` builds `DESCRIBE SELECT * FROM read_csv_auto(…)` for
-   a host-supplied DuckDB-WASM. `packages/introspect/tests/rust-parity.test.ts`
-   exists because «the browser and the CLI answer the same program differently»
-   is a bug — and CSV type sniffing is exactly where two engines disagree. Moving
-   the native side to DataFusion does not remove a duplicated implementation; it
-   makes the two implementations use different engines, which is a change to what
-   the compiler infers and not a cleanup.
-
-So this piece is not the same shape as `fossil-runtime`'s, where the work was
-deleting things nothing called. It is a decision about whether native and browser
-may infer a source's columns with two engines.
+   `fossil-df-wasm`. `object_store` is not a workspace dependency. So a cloud
+   `@conn` source has its TYPES inferred through `DuckDB` and there is no
+   matching path for READING it. (Measured by grep, not by running a cloud
+   source end to end.)
+3. **The browser introspects through DuckDB-WASM and that is not changing.** Two
+   engines disagree on CSV type sniffing, and `rust-parity.test.ts` exists
+   because «the browser and the CLI answer the same program differently» is a
+   bug.
 
 ## What the first piece cost, measured — and the mechanism was misattributed
 

@@ -245,7 +245,7 @@ User : Person from users
     /// type — without it there is nothing for the shape's constraint to
     /// disagree with. `check` and `run` do the same, in the same order.
     fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
-        crate::pre_introspect_and_register(
+        fossil_introspect::pre_introspect_and_register(
             db.system(),
             PROGRAM,
             fossil_base::SourceAnchor::beside(dir),

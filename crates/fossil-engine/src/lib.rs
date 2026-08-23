@@ -1,4 +1,4 @@
-//! **`fossil-engine` is fossil's native host.** It supplies the [`System`] the
+//! **`fossil-engine` is fossil's native host.** It supplies the [`fossil_base::System`] the
 //! compiler runs against, does the pre-compile jobs the compiler cannot do for
 //! itself — introspect the sources, register the shape documents a program
 //! names, install the cloud secrets a `@conn` needs — and drives the
@@ -38,38 +38,41 @@
 // above because it is where the coupling lives, and a reader who follows the
 // pointer should land on the code rather than on a paraphrase of it.
 
-// The reason is this crate's OWN `duckdb` dependency, and it used to say
-// otherwise: «depends on fossil-runtime which uses bundled DuckDB». That stopped
-// being true when `fossil-runtime` dropped the dependency and started compiling
-// for wasm32 — a tripwire naming the wrong crate sends whoever tries to remove it
-// to the crate that already has none.
+// **The reason changed, and that is the point of the change.** This said
+// «depends on fossil-runtime which uses bundled DuckDB», then «its own bundled
+// DuckDB, for `pre_introspect`». Neither is true: introspection and credentials
+// are `fossil-introspect`'s, and this crate links no database.
 //
-// What holds it: `pre_introspect` opens an in-memory DuckDB and asks
-// `DESCRIBE SELECT * FROM <reader>('<path>')` for each source's columns. Three
-// things stand between that and DataFusion, and they are measured in
-// `docs/design/one-engine.mdx` rather than guessed.
-#[cfg(target_arch = "wasm32")]
-compile_error!(
-    "fossil-engine is native-only (its own bundled DuckDB, for `pre_introspect`); \
-     do not add it to the WASM CI gate"
-);
+// What is left is `run`, and it is the FILESYSTEM. `fossil_df::run_to_dir` is
+// itself `cfg(not(wasm32))` because it writes a GraphAr tree to a local
+// directory, which a browser has no concept of — measured by building for the
+// target, and it is the only remaining error. That does not contradict «fossil
+// is a compiler consumed as a WASM library»: writing files to a disk is what a
+// native host DOES, and the browser's host writes bytes back over its own seam.
+//
+// So `check` is wasm-capable and `run` is not, in one crate. Splitting them is a
+// decision and not a cleanup; `docs/design/one-engine.mdx` records it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use fossil_base::{Db, Diagnostic, SourceAnchor, System};
-use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+use fossil_base::{Diagnostic, SourceAnchor};
 use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_graph_schema::Primitive;
 use fossil_run_status::{ProviderInfo, RunStatus, SourceRefInfo};
 use smol_str::SmolStr;
 
 pub mod census;
-pub mod creds;
 mod documents;
 mod system;
 
-pub use creds::RunCreds;
+pub use system::host_system;
+
+#[cfg(target_arch = "wasm32")]
+compile_error!(
+    "fossil-engine is native-only: `run` writes a GraphAr tree to a local \
+     directory through `fossil_df::run_to_dir`, which is itself wasm-gated"
+);
+
 use system::open_db;
 
 // ===================================================================== providers
@@ -133,8 +136,12 @@ pub struct CheckOutcome {
 /// the host's pre-compile jobs, and ask
 /// [`fossil_mir::program_diagnostics`] what is wrong with the program.
 ///
-/// The pre-introspection is the same one [`run`] does, so `check` sees the same
-/// forward-propagated types the compiler will (no `@conn` creds on `check`).
+/// **Introspection is the caller's, and doing it is what makes the two commands
+/// agree.** `check` and [`run`] both read whatever
+/// `fossil_introspect::pre_introspect_and_register` put in the `System`'s
+/// descriptor cache; neither fills it. A caller that skips it gets a `check`
+/// with no forward-propagated source types — the same answer the browser gets
+/// before `registerInferredDescriptor` has run, which is the shape this follows.
 ///
 /// **The drain itself is not here, and used to be.** It is one capability
 /// answered three ways — this crate, `fossil-lsp` and `fossil-wasm` — and the
@@ -158,15 +165,12 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
     let (db, file) = open_db(text.clone(), path);
-    // `check` has no `--creds-stdin`, so it resolves with no connection map —
-    // and against the SAME directory `run` will. The two used to differ here:
-    // `check` pre-introspected against `path.parent()` while the executor read
-    // against the process's cwd, so the two commands disagreed about where one
-    // file was.
-    let program_dir = fossil_base::program_dir(&path.to_string_lossy());
-    let anchor = SourceAnchor::beside(&program_dir);
-    pre_introspect_and_register(db.system(), &text, anchor, &HashMap::new());
-
+    // `check` built a `SourceAnchor` here and used it for exactly one thing: the
+    // pre-introspection. That went to the caller, and so did the anchor — which
+    // is where the note it carried belongs too. `check` has no `--creds-stdin`,
+    // so a caller resolves it with no connection map, and against the SAME
+    // directory `run` will: the two used to differ, `check` introspecting
+    // against `path.parent()` while the executor read against the process's cwd.
     let mappings = fossil_hir::def_map::def_map(&db, file).mappings(&db).len();
     Ok(CheckOutcome {
         source: text,
@@ -176,224 +180,12 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
     })
 }
 
-// =============================================================== pre-introspection
-
-/// Map a `DuckDB` column-type string onto the lattice — the native sibling of
-/// `@fossil-lang/introspect`'s `duckdbTypeToFossilPrimitive`. A vocabulary the
-/// engine reads and nobody else does, which is why it lives here and not on
-/// [`Primitive`]; the xsd direction is the one the lattice owns.
-fn duckdb_type_to_fossil_primitive(t: &str) -> Primitive {
-    let upper = t.trim().to_ascii_uppercase();
-    match upper.as_str() {
-        "INTEGER" | "BIGINT" | "INT" | "SMALLINT" | "TINYINT" | "HUGEINT" => Primitive::Integer,
-        "DOUBLE" | "FLOAT" | "REAL" => Primitive::Float,
-        t if t.starts_with("DECIMAL") => Primitive::Float,
-        "BOOLEAN" | "BOOL" => Primitive::Bool,
-        "DATE" => Primitive::Date,
-        "TIMESTAMP" | "DATETIME" => Primitive::DateTime,
-        "TIME" => Primitive::Time,
-        _ => Primitive::String,
-    }
-}
-
-/// The constructors this scraper looks for: the rows `catalogue.bnf` gives a
-/// `reads native <fn>`.
-///
-/// **Introspection is a `DESCRIBE` through a table function**, so a row that
-/// reads `materialised` — `io.rdf` — has nothing to describe it with and is
-/// correctly absent. That used to be an alternation of three literals which
-/// happened to be the same three; now the reason is the selection.
-fn native_rows() -> impl Iterator<Item = &'static fossil_base::Provider> {
-    fossil_base::providers::DATA
-        .iter()
-        .copied()
-        .filter(|p| matches!(p.reads_rows, Some(fossil_base::RowReader::Native(_))))
-}
-
-/// Scrape source-binding RHS source URLs from a `.fossil` file's text. It is a
-/// regex placeholder for an AST walk, and it is wrong on any binding the regex
-/// cannot see.
-///
-/// `@fossil-lang/introspect` scrapes the same bindings for the browser. **The
-/// alternation is no longer written here**: it is built from the catalogue, and
-/// the TypeScript builds its own from `catalogue.generated.ts`, which
-/// `cargo xtask catalogue` writes from the same file. A constructor added to
-/// `catalogue.bnf` reaches both scrapers at once.
-///
-/// What is still written twice is the pattern AROUND the alternation, in two
-/// regex dialects, and `packages/introspect/tests/rust-parity.test.ts` reads
-/// this file for it. It is a `pnpm` test, so `cargo test` will not tell you.
-fn extract_source_refs(text: &str) -> Vec<(SmolStr, SmolStr, String)> {
-    use std::sync::OnceLock;
-    static RE: OnceLock<regex::Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        let alternation = native_rows().map(|p| p.name).collect::<Vec<_>>().join("|");
-        regex::Regex::new(&format!(
-            r#"(\w[\w\d_]*)\s*:=\s*io\.({alternation})\(\s*['"]([^'"]+)['"]"#
-        ))
-        .expect("the catalogue's constructor names are regex-safe")
-    });
-    re.captures_iter(text)
-        .map(|c| {
-            (
-                SmolStr::from(c.get(1).unwrap().as_str()),
-                SmolStr::from(c.get(2).unwrap().as_str()),
-                c.get(3).unwrap().as_str().to_string(),
-            )
-        })
-        .collect()
-}
-
-/// The token that decides whether a cached descriptor still describes its
-/// source: the file's modification time in nanoseconds since the epoch, paired
-/// with its byte length. Two `stat` fields, no read of the source itself: the
-/// native host does NOT hash the bytes because hashing means reading the whole
-/// source to decide whether the source needs reading — hundreds of megabytes
-/// to save a `DESCRIBE` that reads the first rows, which would make the cache
-/// cost more than the thing it caches. `mtime` can say "changed" when nothing
-/// did (a `touch`), which costs one extra `DESCRIBE` and no wrong answer;
-/// pairing it with the size is what narrows the one case that *is* wrong, a
-/// file restored with both its old `mtime` and its exact old length.
-///
-/// Returns `""` for anything this host cannot `stat` — an `http(s)://` or
-/// `s3://` locator, or a path that does not exist. An empty token is never
-/// fresh ([`fossil_descriptors_input::DescriptorCache::is_fresh`]), so those are
-/// re-introspected on every compile. That is the honest answer for an object we
-/// would have to make a network round trip to interrogate.
-fn freshness_token(resolved: &str) -> String {
-    let Ok(meta) = std::fs::metadata(resolved) else {
-        return String::new();
-    };
-    let Ok(modified) = meta.modified() else {
-        return String::new();
-    };
-    let Ok(since_epoch) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH) else {
-        return String::new();
-    };
-    format!(
-        "mtime:{}.{:09}:size:{}",
-        since_epoch.as_secs(),
-        since_epoch.subsec_nanos(),
-        meta.len()
-    )
-}
-
-/// Pre-introspect every source the program names and register an
-/// [`InferredDescriptor`] on the host's descriptor cache BEFORE typecheck,
-/// keyed by the URI the program writes rather than by the resolved locator —
-/// the written URI is the only string the host and the checker both see.
-///
-/// A source whose cached descriptor still carries the current
-/// [`freshness_token`] is skipped — no `DESCRIBE`, no read. That is where the
-/// cost is: programs are small and sources are not, so the introspection is
-/// the expensive half of a compile and it is the half that rarely needs doing
-/// twice.
-///
-/// Per-source failures are non-fatal — they log + skip; the compile may still
-/// succeed with no forward propagation for that source.
-fn pre_introspect_and_register(
-    system: &dyn System,
-    source_text: &str,
-    anchor: SourceAnchor<'_>,
-    connections: &HashMap<String, creds::ConnectionCreds>,
-) {
-    let Some(cache) = system.descriptors() else {
-        tracing::debug!("host keeps no descriptor cache; skipping pre-introspection");
-        return;
-    };
-
-    // Opened on the first miss, not on entry. A compile whose sources are all
-    // fresh must do no DuckDB work at all, and opening a connection is work.
-    let mut conn: Option<duckdb::Connection> = None;
-
-    for (source_name, constructor, raw_uri) in extract_source_refs(source_text) {
-        let token = freshness_token(&anchor.locator(&raw_uri));
-        if cache.is_fresh(&raw_uri, &token) {
-            tracing::debug!("`{raw_uri}` is unchanged since it was introspected; reusing");
-            continue;
-        }
-
-        let conn = if let Some(c) = &conn {
-            c
-        } else {
-            let opened = match duckdb::Connection::open_in_memory() {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!("DuckDB in-memory open failed; skipping pre-introspection: {e}");
-                    return;
-                }
-            };
-            if let Err(e) = apply_source_creds(&opened, connections) {
-                tracing::warn!("applying source creds for pre-introspection failed: {e}");
-            }
-            conn.insert(opened)
-        };
-
-        // Resolved a second time deliberately: the token above is about the
-        // bytes on disk, this is the string DuckDB reads, and conflating them
-        // would make a `@conn` alias silently change meaning between the two.
-        let resolved_path = anchor.locator(&raw_uri);
-        let escaped_path = resolved_path.replace('\'', "''");
-        // The CONSTRUCTOR chooses the reader, and it used to not: every source
-        // was `read_csv_auto` whatever `io.` said. A JSON array read as CSV
-        // introspects to one column named after the first line, so
-        // `data/sightings.json` — which opens with a bare `[` — produced a
-        // schema whose only column was literally `[`, and every real column
-        // came back as `unknown column \`id\` — did you mean \`[\`?`. The
-        // did-you-mean is what made it legible: it printed the wrong schema.
-        //
-        // The three arms were a second copy of `catalogue.bnf`'s `native <fn>`
-        // tokens, and the `_ =>` fallback was the ORIGINAL BUG wearing a
-        // default: unreachable only for as long as the alternation above listed
-        // exactly the constructors this match named. Both are the catalogue's
-        // answer now, and a row the table does not know is skipped loudly
-        // rather than read as CSV.
-        let Some(reader) = native_rows()
-            .find(|p| p.name == constructor.as_str())
-            .and_then(|p| match p.reads_rows {
-                Some(fossil_base::RowReader::Native(r)) => Some(r.table_function()),
-                _ => None,
-            })
-        else {
-            tracing::warn!(
-                "source `{source_name}` names `io.{constructor}`, which is not a \
-                 natively-readable catalogue row; skipping pre-introspection"
-            );
-            continue;
-        };
-        let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}')");
-        let mut stmt = match conn.prepare(&sql) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(
-                    "DESCRIBE prepare failed for source `{source_name}` (uri=`{raw_uri}`): {e}"
-                );
-                continue;
-            }
-        };
-        let cols: Vec<InferredColumn> = match stmt.query_map([], |row| {
-            let name: String = row.get(0)?;
-            let typ: String = row.get(1)?;
-            Ok(InferredColumn {
-                name: SmolStr::from(name),
-                primitive: duckdb_type_to_fossil_primitive(&typ),
-            })
-        }) {
-            Ok(iter) => iter.filter_map(Result::ok).collect(),
-            Err(e) => {
-                tracing::warn!("DESCRIBE query_map failed for `{source_name}`: {e}");
-                continue;
-            }
-        };
-        cache.insert(InferredDescriptor {
-            uri: SmolStr::from(raw_uri.as_str()),
-            columns: cols,
-            freshness_token: token,
-        });
-        tracing::debug!("introspected `{raw_uri}` for source `{source_name}`");
-    }
-}
-
+// The pre-introspection block stood here — `pre_introspect_and_register`, the
+// DuckDB type table, the source scrape, the freshness token — and it is
+// `fossil-introspect` now. It is what a HOST does before compiling, which the
+// browser has always done from outside: `fossil-wasm` implements
+// `System::descriptors` and `@fossil-lang/introspect` fills it. Doing it from
+// inside this crate is what made the compiler open a DuckDB connection.
 // ================================================================== run pipeline
 
 /// Resolve the program-resident OUTPUT descriptor. The shape is sourced from the
@@ -558,54 +350,10 @@ fn read_output_shape(
     ))
 }
 
-/// The name→base-URL view of the run's connections — what
-/// [`fossil_base::SourceAnchor`] expands a `@conn` alias through, and what the
-/// executor is handed for the same purpose.
-///
-/// Projected ONCE per command and then borrowed, rather than rebuilt inside a
-/// per-URI resolver: the map was cloned for every source of every program, and
-/// a second copy of it was built again at the executor seam. One projection is
-/// also what lets the anchor be a borrow — the pair (directory, connections)
-/// has to outlive every resolution done against it, which is exactly the
-/// lifetime of the command.
-fn connection_urls(
-    connections: &HashMap<String, creds::ConnectionCreds>,
-) -> HashMap<String, String> {
-    connections
-        .iter()
-        .map(|(name, c)| (name.clone(), c.url.clone()))
-        .collect()
-}
-
-/// Install each source connection's scoped read secret on `conn`, so a
-/// `read_csv_auto` over a cloud `@conn` source authenticates. No-op for
-/// connections without a secret (local / public-URL sources).
-///
-/// This ran through `fossil_runtime::install_secret`, and that indirection is
-/// gone. The rendering — which is the part with a decision in it, and the part
-/// with tests — is [`ResolvedPath::create_secret_sql`], in `fossil-resolver`,
-/// and it has not moved. What wrapped it was `conn.execute_batch(sql)` under an
-/// error enum that both of its two callers immediately flattened to a string.
-/// A crate does not need a dependency to run one statement on a connection it
-/// already holds, and that dependency was the last thing making `fossil-runtime`
-/// link `DuckDB`.
-fn apply_source_creds(
-    conn: &duckdb::Connection,
-    connections: &HashMap<String, creds::ConnectionCreds>,
-) -> miette::Result<()> {
-    for (i, c) in connections.values().enumerate() {
-        if let Some(spec) = &c.secret {
-            let resolved =
-                fossil_resolver::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
-            if let Some(sql) = resolved.create_secret_sql(&format!("__fossil_src_{i}")) {
-                conn.execute_batch(&sql)
-                    .map_err(|e| miette::miette!("install source secret: {e}"))?;
-            }
-        }
-    }
-    Ok(())
-}
-
+// `connection_urls` and `apply_source_creds` went with it, and `mod creds` with
+// them. This crate takes a `HashMap<String, String>` of connection URLs and
+// never sees a secret — which is what lets it drop `fossil-resolver`, whose own
+// wasm32 tripwire says cloud credentials must not cross that boundary.
 /// The local filesystem directory a dest URL writes under, or `None` for a cloud
 /// object store (which needs no directory pre-creation).
 fn local_dest_dir(url: &str) -> Option<PathBuf> {
@@ -631,28 +379,33 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 ///
 /// # Errors
 /// Returns a compile, read, or materialisation error.
+#[allow(clippy::implicit_hasher)] // the host builds one connection map and hands
+// it over; a generic hasher would be a parameter no caller varies.
 pub fn run(
     path: &Path,
     dest_url: &str,
-    creds: &RunCreds,
+    connections: &HashMap<String, String>,
     memory_bytes: Option<u64>,
 ) -> miette::Result<RunStatus> {
     tracing::debug!(?path, dest_url, "fossil run");
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
 
-    let (db, file) = open_db(text.clone(), path);
+    // `run` does not read the text again: the pre-introspection that did — and
+    // that is why this was a clone — is the caller's now.
+    let (db, file) = open_db(text, path);
     // The run's one anchor: the directory of the program being run, and the
     // `@conn` map it expands aliases through. Everything below resolves through
     // this and nothing below consults the process's working directory — which
     // is what makes `fossil run apps/docs/programs/hello/hello.fossil` mean the
     // same thing from the repository root as from beside the program.
-    let connections = connection_urls(&creds.connections);
     let program_dir = fossil_base::program_dir(&path.to_string_lossy());
-    let anchor = SourceAnchor::new(&program_dir, &connections);
-    // CSV type pre-introspection (DuckDB DESCRIBE) feeds the type-checker's
-    // `source_row`, which the property-graph lowering reads for prop datatypes.
-    pre_introspect_and_register(db.system(), &text, anchor, &creds.connections);
+    let anchor = SourceAnchor::new(&program_dir, connections);
+    // The CSV type pre-introspection that fed the type-checker's `source_row`
+    // stood here. It is the CALLER's now — `fossil_introspect::pre_introspect_and_register`
+    // against this db's `System`, before this call — which is the order the
+    // browser has always used, and the reason `connections` arrives as URLs
+    // rather than as credentials.
 
     let def_map = fossil_hir::def_map::def_map(&db, file);
     if def_map.mappings(&db).is_empty() {
@@ -683,7 +436,7 @@ pub fn run(
         file,
         &descriptor,
         &dest_dir,
-        &connections,
+        connections,
         read_uri,
         memory_bytes,
     )
@@ -823,151 +576,4 @@ fn enrich_written_layout(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn conns(pairs: &[(&str, &str)]) -> HashMap<String, creds::ConnectionCreds> {
-        pairs
-            .iter()
-            .map(|(name, url)| {
-                (
-                    (*name).to_string(),
-                    creds::ConnectionCreds {
-                        url: (*url).to_string(),
-                        secret: None,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    /// The four `@conn` cases this file used to assert against its own resolver
-    /// now live beside the rule itself, in `fossil_base::locator` — there is one
-    /// implementation, so there is one place to test it. What is left here is
-    /// the engine's own half: the projection the anchor is built from.
-    #[test]
-    fn the_creds_map_projects_onto_the_anchor_the_rule_takes() {
-        let c = conns(&[("sales", "s3://bucket/prefix")]);
-        let urls = connection_urls(&c);
-        let dir = std::path::PathBuf::from("/programs/shop");
-        assert_eq!(
-            SourceAnchor::new(&dir, &urls).locator("@sales/2024/orders.csv"),
-            "s3://bucket/prefix/2024/orders.csv"
-        );
-        assert_eq!(
-            SourceAnchor::new(&dir, &urls).locator("data/items.csv"),
-            "/programs/shop/data/items.csv"
-        );
-    }
-
-    /// The cache's done-when, counted rather than timed: changing the CSV and
-    /// re-running re-introspects; not changing it does not.
-    ///
-    /// `registrations()` moves only when a `DESCRIBE` actually ran, so the
-    /// assertion is on the number of reads of the source and not on how long
-    /// the second call took. The third write adds a column, which moves the
-    /// size as well as the mtime — the token is both, so the test does not
-    /// depend on the filesystem's clock resolution.
-    #[test]
-    fn a_source_is_re_introspected_when_it_changes_and_not_when_it_does_not() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let csv = dir.path().join("users.csv");
-        std::fs::write(&csv, "id,name\n1,ada\n").expect("write csv");
-        let program = "users := io.csv(\"users.csv\")\n";
-        let no_creds = HashMap::new();
-
-        let system = system::EngineSystem::for_program_dir(dir.path());
-        let cache = system.descriptors().expect("the engine keeps a table");
-
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &no_creds,
-        );
-        assert_eq!(
-            cache.registrations(),
-            1,
-            "the first compile reads the source"
-        );
-        assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
-
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &no_creds,
-        );
-        assert_eq!(
-            cache.registrations(),
-            1,
-            "an untouched source must not be read a second time"
-        );
-
-        std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &no_creds,
-        );
-        assert_eq!(
-            cache.registrations(),
-            2,
-            "a changed source must be read again"
-        );
-        assert_eq!(
-            cache.get("users.csv").expect("registered").columns.len(),
-            3,
-            "and the new column is visible to the checker"
-        );
-    }
-
-    /// The key is the URI, so two bindings over one file cost one read — the
-    /// case a binding-name key charged twice for.
-    #[test]
-    fn two_bindings_over_one_file_introspect_once() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join("u.csv"), "id\n1\n").expect("write csv");
-        let program = "a := io.csv(\"u.csv\")\nb := io.csv(\"u.csv\")\n";
-
-        let system = system::EngineSystem::for_program_dir(dir.path());
-        let cache = system.descriptors().expect("the engine keeps a table");
-        pre_introspect_and_register(
-            &system,
-            program,
-            SourceAnchor::beside(dir.path()),
-            &HashMap::new(),
-        );
-
-        assert_eq!(cache.registrations(), 1);
-        assert_eq!(cache.len(), 1);
-    }
-
-    /// A source this host cannot `stat` gets an empty token, and an empty token
-    /// is never fresh — so a remote object is re-introspected rather than
-    /// trusted. The assertion is on the token, since the DESCRIBE of an
-    /// unreachable URL fails and registers nothing.
-    #[test]
-    fn a_locator_that_cannot_be_stat_ed_yields_no_token() {
-        assert_eq!(freshness_token("https://example.org/users.csv"), "");
-        assert_eq!(freshness_token("/nonexistent/users.csv"), "");
-    }
-
-    #[test]
-    fn the_token_moves_when_the_file_does() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let csv = dir.path().join("u.csv");
-        std::fs::write(&csv, "id\n1\n").expect("write");
-        let path = csv.to_string_lossy().into_owned();
-        let first = freshness_token(&path);
-        assert!(!first.is_empty(), "a local file has a token");
-        assert_eq!(first, freshness_token(&path), "and it is stable");
-
-        std::fs::write(&csv, "id,name\n1,ada\n").expect("rewrite");
-        assert_ne!(first, freshness_token(&path));
-    }
 }

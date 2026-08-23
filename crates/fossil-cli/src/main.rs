@@ -16,12 +16,13 @@ compile_error!(
      do not add it to the WASM CI gate"
 );
 
+use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use fossil_base::{Diagnostic, Severity};
-use fossil_engine::RunCreds;
+use fossil_introspect::RunCreds;
 use fossil_run_status::RunStatus;
 use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource, SourceSpan};
 use tracing_subscriber::EnvFilter;
@@ -190,6 +191,9 @@ fn cmd_providers(output_json: bool) -> miette::Result<()> {
 /// `fossil check`: render each accumulated diagnostic rustc-style via miette;
 /// exit non-zero iff any `Severity::Error` was accumulated.
 fn cmd_check(path: &Path) -> miette::Result<()> {
+    // `check` has no `--creds-stdin`, so it introspects with no connection map —
+    // and against the same directory `run` will.
+    introspect(path, &HashMap::new(), &RunCreds::default())?;
     let outcome = fossil_engine::check(path)?;
     let named = NamedSource::new(path.to_string_lossy(), outcome.source);
 
@@ -247,6 +251,32 @@ fn gib_to_bytes(raw: &str) -> Result<u64, String> {
 }
 
 /// `fossil run`: compile + execute, then report the resulting `RunStatus`.
+/// Fill the compiler's descriptor cache before asking it to compile — the one
+/// pre-compile job a native host owes, and the reason `fossil-engine` links no
+/// database.
+///
+/// `fossil-wasm` does the same from the other side: `@fossil-lang/introspect`
+/// describes through the page's DuckDB-WASM and calls
+/// `registerInferredDescriptor`. Same engine, same dialect, so the two hosts
+/// answer one program the same way — which is what
+/// `packages/introspect/tests/rust-parity.test.ts` is there to catch.
+fn introspect(
+    path: &Path,
+    connections: &HashMap<String, String>,
+    creds: &RunCreds,
+) -> miette::Result<()> {
+    // `host_system` takes the program PATH and derives the directory itself —
+    // the cache is keyed by that directory, so a caller deriving it differently
+    // would fill a table the compile never reads.
+    fossil_introspect::introspect_program(
+        &*fossil_engine::host_system(path),
+        path,
+        connections,
+        creds,
+    )
+    .map_err(|e| miette::miette!("read {}: {e}", path.display()))
+}
+
 fn cmd_run(
     path: &Path,
     dest: &str,
@@ -259,7 +289,13 @@ fn cmd_run(
     } else {
         RunCreds::default()
     };
-    let status = fossil_engine::run(path, dest, &creds, memory_bytes)?;
+    // Introspect, then compile — the host's order, and the browser's. `run` used
+    // to take the whole `RunCreds` and do this itself; it takes connection URLS
+    // now and never sees a secret. The credential exists so that a `DESCRIBE`
+    // over a cloud `@conn` source authenticates, which happens here.
+    let connections = fossil_introspect::connection_urls(&creds.connections);
+    introspect(path, &connections, &creds)?;
+    let status = fossil_engine::run(path, dest, &connections, memory_bytes)?;
     report(&status, output_json);
     Ok(())
 }

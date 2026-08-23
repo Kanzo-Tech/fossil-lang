@@ -55,10 +55,11 @@ fn a_cloud_destination_is_refused_and_says_which() {
     for dest in ["s3://bucket/prefix", "az://container/prefix", "gcs://b/p"] {
         let dir = tempfile::tempdir().expect("tempdir");
         fixture(dir.path());
+        introspect(&dir.path().join("prog.fossil"));
         let err = fossil_engine::run(
             &dir.path().join("prog.fossil"),
             dest,
-            &fossil_engine::RunCreds::default(),
+            &std::collections::HashMap::new(),
             None,
         )
         .expect_err("the write path is a local directory; a cloud dest must be refused");
@@ -75,16 +76,25 @@ fn a_cloud_destination_is_refused_and_says_which() {
 /// secrets for it. This is the assertion that makes the deleted `dest` section
 /// dead rather than merely unused — nothing a host can put in the payload
 /// changes the answer.
+///
+/// **What it proves moved down a layer.** `run` used to take the whole
+/// `RunCreds`, so this compared two runs over two payloads. It takes connection
+/// URLS now — `fossil_introspect::connection_urls` is the projection, and it is
+/// the last thing a secret touches — so the payload with credentials and the
+/// payload without produce the same ARGUMENT, and the test says so by asserting
+/// on the projection as well as on the two refusals. A `run` that could be
+/// changed by a credential is no longer expressible.
 #[test]
 fn the_refusal_does_not_depend_on_what_the_creds_payload_carries() {
     let dir = tempfile::tempdir().expect("tempdir");
     fixture(dir.path());
     let dest = "s3://bucket/prefix";
 
+    introspect(&dir.path().join("prog.fossil"));
     let bare = fossil_engine::run(
         &dir.path().join("prog.fossil"),
         dest,
-        &fossil_engine::RunCreds::default(),
+        &std::collections::HashMap::new(),
         None,
     )
     .expect_err("refused");
@@ -92,14 +102,20 @@ fn the_refusal_does_not_depend_on_what_the_creds_payload_carries() {
     // A payload naming a connection WITH a secret, plus a `dest` section of the
     // shape the wire used to carry. Both are accepted by the parser and neither
     // reaches the destination decision.
-    let loaded = fossil_engine::RunCreds::from_json(
+    let loaded = fossil_introspect::RunCreds::from_json(
         r#"{ "dest": { "secret": { "type": "s3", "params": { "KEY_ID": "AKIA" } } },
              "connections": { "sales": { "url": "s3://bucket/prefix",
                                          "secret": { "type": "s3",
                                                      "params": { "KEY_ID": "AKIA" } } } } }"#,
     )
     .expect("the payload parses");
-    let with_creds = fossil_engine::run(&dir.path().join("prog.fossil"), dest, &loaded, None)
+    let urls = fossil_introspect::connection_urls(&loaded.connections);
+    assert_eq!(
+        urls.get("sales").map(String::as_str),
+        Some("s3://bucket/prefix"),
+        "the projection keeps the URL"
+    );
+    let with_creds = fossil_engine::run(&dir.path().join("prog.fossil"), dest, &urls, None)
         .expect_err("still refused");
 
     assert_eq!(
@@ -123,14 +139,28 @@ fn both_spellings_of_a_local_destination_are_accepted() {
         } else {
             out.to_string_lossy().into_owned()
         };
+        introspect(&dir.path().join("prog.fossil"));
         let status = fossil_engine::run(
             &dir.path().join("prog.fossil"),
             &url,
-            &fossil_engine::RunCreds::default(),
+            &std::collections::HashMap::new(),
             None,
         )
         .unwrap_or_else(|e| panic!("a local dest spelt `{dest}` must run: {e}"));
         assert_eq!(status.vertices.len(), 1);
         assert!(out.join("vertex/Person/").is_dir());
     }
+}
+
+/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
+/// stopped doing for themselves. Without it a program's sources have no
+/// forward-propagated types, which is a different (and quietly weaker) answer.
+fn introspect(path: &std::path::Path) {
+    let system = fossil_engine::host_system(path);
+    let _ = fossil_introspect::introspect_program(
+        &*system,
+        path,
+        &std::collections::HashMap::new(),
+        &fossil_introspect::RunCreds::default(),
+    );
 }

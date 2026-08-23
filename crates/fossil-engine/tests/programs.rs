@@ -619,6 +619,7 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
             .into_owned();
 
         // ── stage 1: compile, the production path ─────────────────────────────
+        introspect(&program.source);
         let outcome = match fossil_engine::check(&program.source) {
             Ok(outcome) => outcome,
             Err(e) => {
@@ -747,10 +748,11 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
                 // anchors both to the program's own directory, which is what
                 // lets twenty-three programs be compiled from one process
                 // without any of them caring where that process stands.
+                introspect(&program.source);
                 let outcome = fossil_engine::run(
                     &program.source,
                     &url,
-                    &fossil_engine::RunCreds::default(),
+                    &std::collections::HashMap::new(),
                     None,
                 );
                 match outcome {
@@ -836,5 +838,18 @@ fn the_census_counts_hello_by_hand() {
         "hello.fossil lowers to two properties; {} survived, and the ones that did not are {:?}",
         census.lowered(),
         census.drops(),
+    );
+}
+
+/// Introspect before compiling — what `fossil-cli` does, and what `check`/`run`
+/// stopped doing for themselves. Without it a program's sources have no
+/// forward-propagated types, which is a different (and quietly weaker) answer.
+fn introspect(path: &std::path::Path) {
+    let system = fossil_engine::host_system(path);
+    let _ = fossil_introspect::introspect_program(
+        &*system,
+        path,
+        &std::collections::HashMap::new(),
+        &fossil_introspect::RunCreds::default(),
     );
 }

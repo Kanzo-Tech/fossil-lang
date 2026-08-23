@@ -1870,6 +1870,7 @@ dependencies = [
  "duckdb",
  "fossil-base",
  "fossil-engine",
+ "fossil-introspect",
  "fossil-run-status",
  "fossil-runtime",
  "insta",
@@ -1969,9 +1970,9 @@ dependencies = [
  "fossil-df",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-introspect",
  "fossil-lineage",
  "fossil-mir",
- "fossil-resolver",
  "fossil-run-status",
  "fossil-runtime",
  "fossil-sinks",
@@ -2053,6 +2054,25 @@ dependencies = [
  "rowan",
  "salsa",
  "smol_str",
+]
+
+[[package]]
+name = "fossil-introspect"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "fossil-base",
+ "fossil-descriptors-input",
+ "fossil-graph-schema",
+ "fossil-resolver",
+ "miette",
+ "regex",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

@@ -41,12 +41,10 @@ fossil-df           = { path = "../fossil-df" }
 # Native runtime (layout + secrets) + sinks + cloud-path resolver.
 fossil-runtime      = { path = "../fossil-runtime" }
 fossil-sinks        = { path = "../fossil-sinks" }
-fossil-resolver     = { path = "../fossil-resolver" }
 # The `RunStatus` / `SourceRefInfo` / `ProviderInfo` wire types
 # the engine produces (one source of truth; keasy reuses them).
 fossil-run-status = { path = "../fossil-run-status" }
 
-duckdb   = { workspace = true }
 regex    = { workspace = true }
 smol_str = { workspace = true }
 serde    = { workspace = true, features = ["derive"] }
@@ -58,6 +56,13 @@ miette   = { workspace = true }
 tracing  = { workspace = true }
 
 [dev-dependencies]
+# The host half this crate stopped doing. Production callers (`fossil-cli`) take
+# it as a real dependency; the five test files here that drive `check`/`run` need
+# the descriptor cache filled first, exactly as the CLI does it.
+fossil-introspect = { path = "../fossil-introspect" }
+# The tests read back the Parquet a run wrote — the same «test convenience, not a
+# dependency of the language» `fossil-runtime` demoted.
+duckdb = { workspace = true }
 secrecy = { workspace = true }
 # The conformance-set harness (tests/programs.rs) keeps each program's rendered
 # diagnostic as a committed artefact, and it has to be the text `fossil check`
