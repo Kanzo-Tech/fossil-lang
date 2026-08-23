@@ -156,7 +156,7 @@ impl Primitive {
     /// spellings and the variants out of this `match` and fails on a second
     /// `match` anywhere in the repository that pairs them. Uniqueness was
     /// asserted here and checked nowhere, which is how three copies of
-    /// [`local_name`](crate::local_name) came to exist.
+    /// [`local_name`] came to exist.
     ///
     /// `None` for an XSD type outside the lattice — callers decide between a
     /// diagnostic and a `String` fallback, and they do differ: `ShEx` narrowing

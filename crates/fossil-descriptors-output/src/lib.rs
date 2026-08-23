@@ -116,10 +116,13 @@ pub trait OutputDescriptor: Send + Sync + std::fmt::Debug {
 
 /// Phase 1 stub: accept-all output descriptor.
 ///
-/// Returns `true` for [`OutputDescriptor::accepts_anything`] — the type-checker
-/// short-circuits backward shape inference. It survives as the `AcceptAll`
-/// variant of [`OutputDescriptorKind`]: the fallback when no `ShEx` schema is
-/// loaded.
+/// Returns `true` for [`OutputDescriptor::accepts_anything`]. It survives as
+/// the `AcceptAll` variant of [`OutputDescriptorKind`]: the fallback when no
+/// `ShEx` schema is loaded, and that variant — not this bool — is what a
+/// consumer branches on. The sentence here used to add "the type-checker
+/// short-circuits backward shape inference", which named a reader that does not
+/// exist: `fossil-hir` does not depend on this crate, and nothing in the tree
+/// calls `accepts_anything` outside these tests.
 ///
 /// Declared as a unit struct (`pub struct AcceptAllDescriptor;`) so the
 /// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`] inherent const is

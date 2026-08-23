@@ -404,7 +404,17 @@ pub enum LoweringKind {
 
 /// Operators of the algebra: the relation verbs plus the `io/` sources.
 ///
-/// These mirror the multi-input MIR ops. They were documented as
+/// They were said to "mirror the multi-input MIR ops", and this crate cannot
+/// see one: there is no `fossil-mir` dependency in its `Cargo.toml`, the
+/// direction of the graph forbids adding one, and the names are not a mirror in
+/// any case — `Where` lowers to a `FilterOp`, `Map` to `ExtendOp`s plus a
+/// `ProjectOp`, and `Take`/`Drop`/`Sort`/`Flatten`/`Count` have no `fossil-mir`
+/// `Op` of their own at all. What a variant means is written beside it, and
+/// **no reader destructures this enum**: every consumer of [`LoweringKind`]
+/// matches `Expr` and takes `Op(_)` as a wildcard, so the variant says only
+/// *this name is an operator of the algebra, not a scalar template*.
+///
+/// They were documented as
 /// "surface-unreachable in v0.1", and that stopped being true with the
 /// receiver: a [`Receiver::Relation`] row is reached by writing
 /// `User.where(User.age >= 18)`, which `grammar.bnf, PostfixExpr` spells and the

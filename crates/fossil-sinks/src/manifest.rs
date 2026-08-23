@@ -316,9 +316,26 @@ impl GraphInfo {
 
 /// Map an [`arrow_schema::DataType`] to its `GraphAr` `data_type` string spelling.
 ///
-/// `arrow-schema` is the single authority for the spellings — never hand-rolled:
-/// the manifest's declared types must match what `DuckDB` COPY actually writes. Unhandled
-/// arrow types fall back to `binary` (the `GraphAr` catch-all for opaque columns).
+/// `arrow-schema` is the single authority for the spellings — never
+/// hand-rolled. Unhandled arrow types fall back to `binary` (the `GraphAr`
+/// catch-all for opaque columns).
+///
+/// **This said the declared types "must match what `DuckDB` COPY actually
+/// writes", and both halves of that were wrong.** `DuckDB` COPY is not the
+/// writer any more for a payload — the module header above says so: `fossil-df`'s
+/// `files.rs` encodes Arrow→Parquet, and COPY survives only in the layout
+/// post-pass. And "must match" was a `must` nothing enforces. Nothing in the
+/// tree compares a manifest's declared `data_type` against the type of the
+/// column the file actually holds: `fossil-engine/tests/conformance.rs` checks
+/// paths, counts, tiling and the adjacency joins, and
+/// `apps/corpus/guards/guards.mjs` records the same gap in its own
+/// `cannotProve` — a `dense_id` stored as a string opens, describes and
+/// addresses until a reader shifts it.
+///
+/// It cannot be closed here. This crate declares the tiling and emits no bytes,
+/// and it holds `arrow-schema` ALONE on purpose (see `Cargo.toml`); comparing a
+/// declaration to a file needs a Parquet reader and a written artefact, so the
+/// guard belongs beside the one that already opens them.
 #[must_use]
 pub fn data_type_name(dt: &DataType) -> String {
     match dt {

@@ -367,8 +367,17 @@ async fn register_object_store_sources(
 
 /// Decode + register every provider (RDF) source through
 /// [`fossil_df::register_rdf`] — match each program-derived provider binding to
-/// the host-fetched bytes by URI, exactly the browser counterpart of
-/// `fossil_df::register_provider_sources` (which reads bytes from the fs).
+/// the host-fetched bytes by URI.
+///
+/// It is the browser counterpart of `fossil_df::register_provider_sources`,
+/// which walks the same `provider_bindings` and calls the same `register_rdf`;
+/// where the bytes come from is the whole difference, and it gives this side one
+/// failure the native side cannot have — a binding the host did not provide.
+///
+/// **"Exactly the counterpart" is a reading, not a result.** `tests/` here holds
+/// one end-to-end case and it is CSV; no test drives an RDF source through both
+/// halves and compares. The two can drift in the browser's favour or against it
+/// and only a program would notice.
 fn register_rdf_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,

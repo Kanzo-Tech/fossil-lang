@@ -78,8 +78,13 @@ impl OutputDescriptorKind {
     }
 
     /// `true` iff the descriptor is `AcceptAll` (no backward-shape
-    /// constraints). `fossil_hir`'s typecheck reads this to short-circuit
-    /// backward checking.
+    /// constraints).
+    ///
+    /// It said `fossil_hir`'s typecheck reads this to short-circuit backward
+    /// checking. It does not, and cannot: `fossil-hir` has no dependency on this
+    /// crate. Nothing in the tree calls this outside the tests below, and the
+    /// same is true of [`Self::name`] — which is why the doc on [`Self::ShEx`]
+    /// saying the executor reads only [`Self::to_graph_schema`] is still true.
     #[must_use]
     pub const fn accepts_anything(&self) -> bool {
         matches!(self, Self::AcceptAll(_))
