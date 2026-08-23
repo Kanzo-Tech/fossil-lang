@@ -151,7 +151,12 @@ impl Primitive {
     /// Parse an XSD datatype IRI into the lattice. Accepts all three spellings
     /// the tree carries: the full `http://www.w3.org/2001/XMLSchema#<name>` IRI,
     /// the `xsd:<name>` prefixed form, and the bare local name.
-    /// **This is the only xsd → [`Primitive`] table in the tree.**
+    /// **This is the only xsd → [`Primitive`] table in the tree**, and
+    /// `crates/xtask/tests/xsd_table.rs` is what keeps it that way: it reads the
+    /// spellings and the variants out of this `match` and fails on a second
+    /// `match` anywhere in the repository that pairs them. Uniqueness was
+    /// asserted here and checked nowhere, which is how three copies of
+    /// [`local_name`](crate::local_name) came to exist.
     ///
     /// `None` for an XSD type outside the lattice — callers decide between a
     /// diagnostic and a `String` fallback, and they do differ: `ShEx` narrowing
