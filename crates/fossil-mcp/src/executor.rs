@@ -6,13 +6,13 @@
 //! implements the same seam against DuckDB-WASM — neither re-derives a verb's
 //! SQL.
 //!
-//! The executor futures are single-threaded by design (see `fossil_graph::exec`),
+//! The executor futures are single-threaded by design (see `fossil_graph::executor`),
 //! so `future_not_send` is allowed here too.
 #![allow(clippy::future_not_send)]
 
 use duckdb::Connection;
 use duckdb::types::Value as DuckValue;
-use fossil_graph::{ColumnedRows, DuckExecutor, GraphError, Result};
+use fossil_graph::{DuckExecutor, GraphError, QueryResult, Result};
 use serde_json::{Map, Value};
 
 /// A [`DuckExecutor`] backed by a native `DuckDB` [`Connection`]. The caller
@@ -54,11 +54,11 @@ impl DuckExecutor for ConnectionExecutor<'_> {
     // the native runtime and the async DuckDB-WASM binding.
     async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
         self.run(sql)
-            .map(|(_, rows)| rows)
+            .map(|result| result.rows)
             .map_err(|e| GraphError::Execution(e.to_string()))
     }
 
-    async fn query_columns(&self, sql: &str) -> Result<ColumnedRows> {
+    async fn query_columns(&self, sql: &str) -> Result<QueryResult> {
         self.run(sql)
             .map_err(|e| GraphError::Execution(e.to_string()))
     }
@@ -69,7 +69,7 @@ impl ConnectionExecutor<'_> {
     /// Column metadata is only populated once the query has executed, so it is
     /// read from the executed statement (via `rows`), not the prepared one. The
     /// type string is the Arrow logical-type spelling `DuckDB` exposes.
-    fn run(&self, sql: &str) -> duckdb::Result<ColumnedRows> {
+    fn run(&self, sql: &str) -> duckdb::Result<QueryResult> {
         let mut stmt = self.conn.prepare(sql)?;
         let mut rows = stmt.query([])?;
         let columns: Vec<(String, String)> = rows.as_ref().map_or_else(Vec::new, |stmt| {
@@ -88,7 +88,7 @@ impl ConnectionExecutor<'_> {
             }
             out.push(Value::Object(obj));
         }
-        Ok((columns, out))
+        Ok(QueryResult { columns, rows: out })
     }
 }
 

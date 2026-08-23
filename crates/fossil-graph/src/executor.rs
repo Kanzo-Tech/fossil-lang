@@ -33,9 +33,27 @@ use crate::operations::schema::{
 use crate::operations::sql::{ColumnDescriptor, ExecuteSqlParams, ExecuteSqlResult};
 use crate::{GraphError, Operation, Result};
 
-/// `(column_name, column_type)` descriptors paired with the JSON result rows —
-/// the return of [`DuckExecutor::query_columns`].
-pub type ColumnedRows = (Vec<(String, String)>, Vec<Value>);
+/// What [`DuckExecutor::query_columns`] gives back: the result rows, and the
+/// `(name, type)` descriptor of each column.
+///
+/// It was `pub type ColumnedRows = (Vec<(String, String)>, Vec<Value>)`, and
+/// the name and the shape were the same complaint. A two-`Vec` tuple is
+/// destructured positionally at every call site — `let (columns, mut rows) =`
+/// here, `.map(|(_, rows)| rows)` in the native executor — so which `Vec` is
+/// which was carried by argument order and by a name («columned») that had to
+/// be read twice. Two fields say it once.
+#[derive(Debug, Clone)]
+pub struct QueryResult {
+    /// `(column_name, column_type)`, in the order the query returns them.
+    ///
+    /// The type string is whatever the binding can say: the native executor
+    /// reads `DuckDB`'s own logical-type spelling off the executed statement,
+    /// and the default below derives it from the JSON value kinds, which is
+    /// best-effort and says so.
+    pub columns: Vec<(String, String)>,
+    /// One JSON object per row, column name → value.
+    pub rows: Vec<Value>,
+}
 
 /// The thin `DuckDB` seam. A binding implements
 /// exactly this — run a query, hand back rows as JSON objects — and inherits
@@ -57,7 +75,7 @@ pub trait DuckExecutor {
     /// # Errors
     ///
     /// As [`DuckExecutor::query_json`].
-    fn query_columns(&self, sql: &str) -> impl std::future::Future<Output = Result<ColumnedRows>> {
+    fn query_columns(&self, sql: &str) -> impl std::future::Future<Output = Result<QueryResult>> {
         async move {
             let rows = self.query_json(sql).await?;
             let columns = rows
@@ -69,7 +87,7 @@ pub trait DuckExecutor {
                         .collect()
                 })
                 .unwrap_or_default();
-            Ok((columns, rows))
+            Ok(QueryResult { columns, rows })
         }
     }
 }
@@ -406,7 +424,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         // neither host can interrupt a running statement, so a query that is
         // slow rather than large runs to completion.
         let wrapped = format!("SELECT * FROM ({}) AS _q LIMIT {}", p.sql, cap + 1);
-        let (columns, mut rows) = self.exec.query_columns(&wrapped).await?;
+        let QueryResult { columns, mut rows } = self.exec.query_columns(&wrapped).await?;
         let truncated = u64::try_from(rows.len()).unwrap_or(u64::MAX) > cap;
         rows.truncate(usize::try_from(cap).unwrap_or(usize::MAX));
         Ok(ExecuteSqlResult {

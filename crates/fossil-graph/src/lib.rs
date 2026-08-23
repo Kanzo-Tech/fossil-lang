@@ -66,10 +66,10 @@
 //! not a verb's.**
 
 pub mod error;
-pub mod exec;
+pub mod executor;
 pub mod manifest;
 pub mod operations;
 
 pub use error::{GraphError, Result};
-pub use exec::{ColumnedRows, DuckExecutor, dispatch};
+pub use executor::{DuckExecutor, QueryResult, dispatch};
 pub use operations::Operation;

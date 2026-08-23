@@ -26,7 +26,7 @@
 //! block. The pipeline it documented, `CREATE VIEW … read_csv_auto(…)` followed
 //! by `COPY (…) TO … (FORMAT PARQUET)`, is emitted by nothing: `grep` for
 //! `CREATE VIEW` across every `src/` finds this doc comment and
-//! `fossil_graph::exec`'s verb SQL, which is the corpus READ side. The compile
+//! `fossil_graph::executor`'s verb SQL, which is the corpus READ side. The compile
 //! path went to `fossil-df` (DataFusion/Arrow) and this stayed behind.
 //!
 //! `apply_memory_budget(conn, bytes)` had **no caller at all**, not even a test

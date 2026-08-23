@@ -17,7 +17,7 @@ pub mod executor;
 pub use executor::ConnectionExecutor;
 
 use duckdb::Connection;
-use fossil_graph::exec::quote_ident;
+use fossil_graph::executor::quote_ident;
 use fossil_graph::manifest::{Manifest, ManifestSource, edge_table_name};
 use fossil_graph::{GraphError, Operation, Result as GraphResult};
 use fossil_resolver::{CloudSecret, ResolvedPath};
@@ -69,8 +69,10 @@ impl ManifestSource for MapSource {
 /// parse, or view registration fails.
 pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), String> {
     // No memory budget: a budget is an input of the command that declares it,
-    // and an MCP dataset does not declare one. When it does, it calls
-    // `fossil_runtime::apply_memory_budget` with that number.
+    // and an MCP dataset does not declare one. This named
+    // `fossil_runtime::apply_memory_budget` as what it would call when one does;
+    // that function is deleted, because this comment was the only thing in the
+    // workspace that mentioned it and nothing ever called it.
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
 
     if let Some(spec) = &dataset.secret {
@@ -189,10 +191,10 @@ fn register_views_sql(manifest: &Manifest, dest: &str) -> String {
 
 /// A `DuckDB` single-quoted string literal's INNARDS — the quotes are written
 /// by the `format!` around it, which is what makes this different from
-/// `fossil_graph::exec::sql_str_lit` and why it is not that function.
+/// `fossil_graph::executor::sql_str_lit` and why it is not that function.
 ///
 /// Its sibling `quote_ident` WAS a byte-identical copy of
-/// [`fossil_graph::exec::quote_ident`], and is now a call: `fossil-mcp` already
+/// [`fossil_graph::executor::quote_ident`], and is now a call: `fossil-mcp` already
 /// depends on `fossil-graph`, so nothing but privacy held the copy in place.
 fn escape_lit(s: &str) -> String {
     s.replace('\'', "''")
