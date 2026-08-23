@@ -216,8 +216,11 @@ express, the schema is not the answer.
 </Callout>
 
 The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
-same corpus with only what fossil publishes?** `apps/corpus/conformance/verify.mjs` is that reader —
-plain Node, no npm, no build — and it executes the same table of addresses the module does.
+same corpus with only what fossil publishes?** `apps/corpus/conformance/reader.mjs` is that reader —
+plain Node, no npm, no build. It has two harnesses: `verify.mjs` runs it against the same table of
+addresses the module does, and `writer.mjs` runs it against a corpus `fossil run` has just written.
+The second exists because the first cannot catch two readers being wrong *together*, which is what
+they are whenever the convention they both copied has moved.
 
 ## The published vectors
 

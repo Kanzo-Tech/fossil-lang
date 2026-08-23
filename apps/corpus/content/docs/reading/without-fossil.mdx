@@ -168,7 +168,11 @@ that must compose and every one that must be refused.
 node apps/corpus/conformance/verify.mjs
 ```
 
-That runner is a reader with no npm, no build and no fossil in it — the position this page is
-written for. `resolveCorpus` in `@fossil-lang/graph` is the same table executed by the published
-module, for a reader that would rather take the dependency than copy the arithmetic. Neither is the
-authority; `expected.json` is.
+That harness runs `reader.mjs`, which has no npm, no build and no fossil in it — the position this
+page is written for. `resolveCorpus` in `@fossil-lang/graph` is the same table executed by the
+published module, for a reader that would rather take the dependency than copy the arithmetic.
+Neither is the authority; `expected.json` is.
+
+`expected.json` is not the whole authority either, because nothing in it was written by the writer.
+`writer.mjs` is the harness that closes that: it runs `fossil run` and checks the same reader against
+the bytes, which is the only check here that would notice fossil and this page disagreeing.

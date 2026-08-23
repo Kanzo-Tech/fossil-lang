@@ -123,9 +123,22 @@ node apps/corpus/conformance/verify.mjs
   declared tile size disagrees with the vertex type addressing it.
 - `expected.json` — every address that must compose, and every one that must be **refused**.
 
-Two implementations execute that table and neither wrote it: `verify.mjs`, in plain Node with no npm
+Two implementations execute that table and neither wrote it: `reader.mjs`, in plain Node with no npm
 and no build, and `packages/graph/tests/conformance.test.ts`, which runs the published
 `resolveCorpus`. A change on either side that moves an address moves it away from the other.
+
+**A table cannot catch them being wrong together**, and that is a different failure: it was written
+by whoever read the conventions last, the corpus under it came from `guards/fixture.mjs`, and fossil
+was consulted by neither. `writer.mjs` runs `fossil run` and points the same reader at the bytes.
+
+```bash
+node apps/corpus/conformance/writer.mjs --fossil target/release/fossil
+```
+
+It needs a `fossil` binary and exits `2` without one, which is why it is the one check here that is
+not in `guards/` — that directory runs on `node` and `duckdb` alone and continues to. What it cannot
+reach: `fossil run` has no `--chunk-size`, so a reader that hard-codes 4,096 passes it, and the
+64-row case below stays with the fixture.
 
 **`chunk_size` is 64 there, and that is the point rather than a shortcut.** 4,096 is a measured
 trade-off between requests and bytes on a corpus of millions, not an invariant — the convention is a
