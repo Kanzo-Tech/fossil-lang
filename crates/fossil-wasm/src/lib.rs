@@ -699,12 +699,26 @@ pub struct CheckPosition {
 /// that is not wrong. In an editor that is squiggles down the length of the
 /// user's `ShEx`. The `ShExC` document in the same file measured fourteen, and
 /// **three of those claimed an internal compiler error** (`mapping has no HIR
-/// at its DefMap index`) — a shape declaration parses far enough to look like a
-/// mapping header and then has no HIR.
+/// at its DefMap index`).
 ///
 /// It was invisible while the browser's drain was the per-mapping loop, because
 /// a `.shex` produces no mappings. Reading the file-level accumulators, which
 /// is where `parse` lives, is what surfaced it.
+///
+/// **That ICE was a real defect and it is fixed** (`fossil-hir`'s
+/// `HirFile::mappings`). The guess that stood here — «a shape declaration
+/// parses far enough to look like a mapping header and then has no HIR» — had
+/// the first half right and the second half backwards. `def_map` and
+/// `lower_to_hir` walk the same CST and both number mappings densely, but
+/// `lower_to_hir`'s vector was FILTERED, so a header it declined renumbered
+/// every mapping after it. The ICE fired on the LAST mappings of the file,
+/// never on the one that was wrong, and on a file with a broken mapping and a
+/// healthy one the healthy one was lowered against the wrong header in
+/// silence. Reduced, it is four bytes: `a:b` is a mapping header the parser
+/// recovers and the lowering then declines for having no `from`. Three of this
+/// document's lines recover that way, which is where the three came from. The
+/// same fixture measures **sixteen rows and no ICE** now — two more because the
+/// body under a declined header is checked at last.
 ///
 /// **The notion of «which open files are programs» was already in the tree**,
 /// and the note that stood here saying it was not is what took the longest to

@@ -8,9 +8,19 @@
 //! STRING` eight, `expected IDENT, found INDENT` once and `expected DEFINE,
 //! found DEDENT` at the closing brace. In an editor that is squiggles down the
 //! length of the user's `ShEx`. The `ShExC` document in the same file measured
-//! fourteen, and three of THOSE claimed an *internal compiler error* — a shape
-//! declaration parses far enough to look like a mapping header and then has no
-//! HIR.
+//! fourteen, and three of THOSE claimed an *internal compiler error*.
+//!
+//! **The ICE is fixed, and this guard was never what fixed it.** Silencing the
+//! document only hid it: calling `fossil_mir::program_diagnostics` on that same
+//! text, past the guard, reproduced all three.
+//! The note that stood here guessed «a shape declaration parses far enough to
+//! look like a mapping header and then has no HIR», which is half right and
+//! points the wrong way — `fossil-hir`'s `HirFile::mappings` was FILTERED while
+//! eight call sites read it by `DefMap` index, so a header the lowering
+//! declined renumbered the mappings after it, and the `bug()` landed on the
+//! LAST mapping of the file rather than on the one that was wrong. The minimal
+//! input is `a:b`. `fossil-mir/tests/program_diagnostics.rs` is where it is
+//! pinned now, and that is the right place: nothing about it is a browser fact.
 //!
 //! # What answers «which open files are programs»
 //!
