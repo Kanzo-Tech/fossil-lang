@@ -10,25 +10,30 @@ description = "Native execution runtime via DuckDB (bundled C++); WASM-host exec
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
+# This crate compiles for wasm32 and nothing wasm depends on it yet, so the
+# cdylib closure `cargo xtask wasm-check` derives would not cover it. The claim
+# lives here, beside the crate that makes it, and the gate reads it — see
+# `xtask::wasm_closure`. Remove this key the day the crate stops being true to
+# it; do not remove it to make a red gate go green.
+[package.metadata.fossil]
+wasm = true
+
 [lints]
 workspace = true
 
 [dependencies]
-# NATIVE-ONLY (per CLAUDE.md Project Layout). The cfg-tripwire in
-# src/lib.rs enforces the workspace contract that this crate is never built
-# for wasm32. The `bundled` feature is inherited from the workspace pin
-# `duckdb = { version = "1.10502", features = ["bundled"] }` (~80MB C++,
-# 3-5 min cold-cache compile).
+# `duckdb = { workspace = true }` stood here, and with it the wasm32 tripwire in
+# `src/lib.rs`. It is gone: `execute` and `apply_memory_budget` had no callers,
+# and `install_secret` was `conn.execute_batch(sql)` under an error enum that
+# both of its callers flattened to a string — the rendering it wrapped is
+# `ResolvedPath::create_secret_sql` in `fossil-resolver` and never moved. This is
+# the second and third pieces of `docs/design/one-engine.mdx` for THIS crate;
+# `fossil-engine`'s own `DESCRIBE` pre-introspection still opens a connection.
 #
-# What is left of it here is `execute` (runs a compiled plan's SQL),
-# `apply_memory_budget` and `install_secret` — the CLI/engine seam, which is the
-# *second* and *third* pieces of `docs/design/one-engine.mdx`. The layout pass
-# no longer names it: `src/layout.rs` reads and writes Parquet through
-# arrow-rs/parquet-rs, so the one thing this crate does that the language needs
-# is engine-free. The wasm32 tripwire in `src/lib.rs` stays until those two
-# pieces land and this line can go.
-duckdb = { workspace = true }
-
+# What it bought: the workspace's cold build stops paying for `libduckdb-sys` on
+# this crate's account, and `cargo check --target wasm32-unknown-unknown -p
+# fossil-runtime` now passes — the layout pass is WASM-capable, which is the
+# sentence the project is built on and which this crate made half true.
 # The layout pass's I/O. `parquet` reads the vertex/adjacency Parquet the
 # DataFusion writer produced (footer for the row count, projected column chunks
 # for the CSR scan); `arrow` supplies the three kernels the rewrite is made of —
@@ -59,18 +64,21 @@ fossil-df = { path = "../fossil-df" }
 # the language needs no native crate to run a catalogued function. `sha2`
 # survives as a DEV-dependency below, for the parity digest — a different job.
 
-# GraphAr materialiser. fossil-sinks emits the WriteSqlPlan +
-# ManifestSet (WASM-clean planning side); this crate (native) runs the
-# COPY against DuckDB and threads the resolver's cloud-config into SET
-# statements. fossil-resolver is itself native-only by intent (cloud
-# credentials must not cross the wasm boundary). thiserror gives the
-# materialise step typed errors so CLI hosts can render them via miette
-# without substring-matching.
-fossil-sinks = { path = "../fossil-sinks" }
-fossil-resolver = { path = "../fossil-resolver" }
+# `fossil-sinks` and `fossil-resolver` stood here and NEITHER is named by a
+# single line of this crate any more. The comment they shared described a
+# materialiser that no longer exists — «this crate (native) runs the COPY
+# against DuckDB and threads the resolver's cloud-config into SET statements»;
+# the COPY went to `fossil-df` and the resolver went with `materialize.rs`.
+# `fossil-sinks` had already outlived it silently: grep finds it in no `.rs` in
+# this crate at all.
+#
+# `fossil-resolver` is why this is not merely tidying. It carries its OWN
+# wasm32 `compile_error!`, for a different reason (cloud credentials must not
+# cross the wasm boundary), so an unused edge to it kept this crate off wasm32
+# even after DuckDB left — and `cargo check` does not report an unused
+# dependency, so nothing said so.
 thiserror = { workspace = true }
 
-serde_json = { workspace = true }
 
 # The memory probe (`FOSSIL_MEM_PROBE`) — both halves of the write path report
 # through it (the DataFusion executor in fossil-df and the DuckDB layout pass
@@ -85,6 +93,20 @@ serde_json = { workspace = true }
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 
 [dev-dependencies]
+# `serde_json` moved here: the cross-engine parity baseline (tests/corpus_exec.rs)
+# is its only caller in this crate.
+serde_json = { workspace = true }
+# DuckDB is a DEV dependency now, and the demotion is the whole point: the
+# library links no engine, and three test files bring one to read back what the
+# library wrote. `one-engine.mdx` calls exactly this «a test convenience, not a
+# dependency of the language», and `tests/layout_renumber.rs` argues for keeping
+# it in its own header — «a corpus only one writer can read is a corpus», and
+# those assertions are the only place anything checks that what the layout emits
+# is Parquet in the sense the rest of the world means.
+#
+# The consequence that matters: `cargo check -p fossil-runtime` and every
+# non-test build stop compiling ~80MB of C++, and the crate compiles for wasm32.
+duckdb = { workspace = true }
 # Graph-verb integration (tests/graph_verbs.rs): deserialise dispatch JSON into the
 # verb result structs.
 serde = { workspace = true }

@@ -60,7 +60,7 @@ const CLUSTER_SPACING: f32 = 100.0;
 /// the picture silently lose whole communities rather than coarsen. A budget
 /// of 2,048 stays under 10,000 for up to four vertex types.
 const CLUSTER_BUDGET: u32 = 2_048;
-/// Intra-cluster packing radius scale (kept well below [`CLUSTER_SPACING`] so
+/// Intra-cluster packing radius scale (kept well below `CLUSTER_SPACING` so
 /// same-cluster nodes stay closer to each other than to other clusters).
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;
 /// Empty space between one vertex type's region and the next — two cluster
@@ -122,7 +122,7 @@ fn find(parent: &mut [u32], mut x: u32) -> u32 {
 }
 
 /// Deterministic 2-D positions from a per-vertex `cluster_id` list (as produced
-/// by [`community_hierarchy`], [`flatten_to_budget`] and [`order_by_hierarchy`]).
+/// by [`community_hierarchy`], `flatten_to_budget` and `order_by_hierarchy`).
 /// Clusters occupy the cells of a Z-order grid; within a cell, the `k`-th vertex
 /// is placed at golden-angle phyllotaxis radius `R·√k`. Same-cluster vertices
 /// cluster visually; the mapping is a pure function of the input (stable across
@@ -146,7 +146,7 @@ fn find(parent: &mut [u32], mut x: u32) -> u32 {
 /// replaced: it returned one giant component, and a single cluster has no
 /// neighbour to overlap. Real communities put several hundred vertices in every
 /// cell at once, so the pitch is now the largest disc's diameter plus
-/// [`CLUSTER_SPACING`] as the gap between them.
+/// `CLUSTER_SPACING` as the gap between them.
 ///
 /// The pitch is uniform rather than per-cluster because a cluster's *cell* must
 /// be findable from its id alone — that is what makes the placement a pure

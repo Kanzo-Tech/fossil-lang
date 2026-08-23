@@ -1,11 +1,22 @@
-//! `fossil-runtime`: the layout post-pass, and the `DuckDB` secret seam two
-//! hosts still share.
+//! `fossil-runtime`: the layout post-pass, and it links no engine.
 //!
-//! This crate is **NATIVE-ONLY** by design and the `compile_error!` below says
-//! so at compile time rather than at run time. What makes it native is now ONE
-//! thing — [`materialize`], which installs a `CREATE SECRET` on a caller's
-//! `DuckDB` connection. [`layout`] holds no connection: it reads and writes
-//! Parquet with `arrow-rs`.
+//! **This crate compiles for `wasm32`.** It carried a `compile_error!` naming
+//! bundled `DuckDB` as the reason it could not, and `docs/design/one-engine.mdx`
+//! opens on what that cost: *«the sentence this project is built on — fossil is
+//! a compiler consumed as a WASM library — is true of `fossil-wasm` and false of
+//! the layout pass and the engine. One dependency is what makes it half true.»*
+//! The dependency is gone from here. `fossil-engine` still has one.
+//!
+//! What is left is [`layout`], which holds no connection: it reads and writes
+//! Parquet through `arrow-rs`/`parquet-rs` and its algorithm — Louvain, Morton —
+//! was always Rust.
+//!
+//! `DuckDB` is a **dev**-dependency, and the demotion is the point rather than a
+//! technicality. Three test files bring an engine to read back what the library
+//! wrote, which `one-engine.mdx` calls *«a test convenience, not a dependency of
+//! the language»* and which `tests/layout_renumber.rs` argues for in its own
+//! header: *«a corpus only one writer can read is a corpus»*. The library links
+//! nothing; the tests check somebody else can read it.
 //!
 //! # What left, and it had no callers
 //!
@@ -24,6 +35,12 @@
 //! pass no longer opens a connection. Two comments named the function; neither
 //! called it, and both were honest about that (*«used to»*, *«when it does»*).
 //!
+//! And the three that were merely dead: `fossil-sinks` (named by no `.rs` in
+//! this crate at all), `fossil-resolver` (which went with `materialize.rs` —
+//! and which carries its OWN wasm32 `compile_error!`, so the unused edge kept
+//! this crate off wasm32 even after `DuckDB` left), and `serde_json`, which
+//! only ever served one test and is a dev-dependency now.
+//!
 //! `tests/assertion_negative.rs` went with them, and it is the one worth
 //! stating. It transcribed
 //! `CASE WHEN <guard> THEN <value> ELSE error('fossil_assertion_<name>:line=<N>') END`
@@ -37,11 +54,6 @@
 //! not exist on the engine the language runs on, and that is declared where a
 //! reader will meet it.
 
-#[cfg(target_arch = "wasm32")]
-compile_error!(
-    "fossil-runtime is native-only (uses bundled DuckDB C++); use duckdb-wasm in fossil-wasm"
-);
-
 // `pub mod graph_exec;` lived here — `ConnectionExecutor`, then called
 // `DuckRuntime` after this crate, which is the native side of the
 // corpus verbs. It reads a corpus; this crate WRITES one, and the two only
@@ -50,7 +62,6 @@ compile_error!(
 // on the read path of the format. It is `fossil-mcp`'s now, which was its only
 // caller and already depended on `fossil-graph`.
 pub mod layout;
-pub mod materialize;
 // `pub mod udf;` lived here — eight native Rust UDF trampolines
 // (`fossil_slug`, `fossil_validate_email`, `fossil_hmac`, …) registered on a
 // DuckDB connection. Ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering
@@ -58,5 +69,3 @@ pub mod materialize;
 // expression templates in the catalogue, so there is nothing left to register.
 // The module went with them, and so did the `WasmClass` concept it was the
 // whole reason for.
-
-pub use materialize::{MaterializeError, install_secret};

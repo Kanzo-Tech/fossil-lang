@@ -570,6 +570,15 @@ fn connection_urls(
 /// Install each source connection's scoped read secret on `conn`, so a
 /// `read_csv_auto` over a cloud `@conn` source authenticates. No-op for
 /// connections without a secret (local / public-URL sources).
+///
+/// This ran through `fossil_runtime::install_secret`, and that indirection is
+/// gone. The rendering — which is the part with a decision in it, and the part
+/// with tests — is [`ResolvedPath::create_secret_sql`], in `fossil-resolver`,
+/// and it has not moved. What wrapped it was `conn.execute_batch(sql)` under an
+/// error enum that both of its two callers immediately flattened to a string.
+/// A crate does not need a dependency to run one statement on a connection it
+/// already holds, and that dependency was the last thing making `fossil-runtime`
+/// link `DuckDB`.
 fn apply_source_creds(
     conn: &duckdb::Connection,
     connections: &HashMap<String, creds::ConnectionCreds>,
@@ -578,8 +587,10 @@ fn apply_source_creds(
         if let Some(spec) = &c.secret {
             let resolved =
                 fossil_resolver::ResolvedPath::with_secret(&c.url, spec.to_cloud_secret());
-            fossil_runtime::install_secret(conn, &resolved, &format!("__fossil_src_{i}"))
-                .map_err(|e| miette::miette!("install source secret: {e}"))?;
+            if let Some(sql) = resolved.create_secret_sql(&format!("__fossil_src_{i}")) {
+                conn.execute_batch(&sql)
+                    .map_err(|e| miette::miette!("install source secret: {e}"))?;
+            }
         }
     }
     Ok(())

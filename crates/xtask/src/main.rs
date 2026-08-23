@@ -88,7 +88,28 @@ fn wasm_check() {
 }
 
 /// The workspace crates reachable from the cdylib (WASM) crates in the resolved
-/// dependency graph — exactly the set that compiles to wasm32.
+/// dependency graph — plus any crate that DECLARES it compiles to wasm32.
+///
+/// # Why there is a second root, and why it is not a list
+///
+/// The cdylib closure answers "what does a wasm artefact already pull in". It
+/// cannot answer "what is wasm-CAPABLE", and those differ the moment a crate
+/// stops linking a native engine before anything wasm consumes it —
+/// `fossil-runtime` is exactly that: the layout pass compiles for wasm32 now,
+/// and no cdylib depends on it, so the gate would not have noticed a dependency
+/// putting it back.
+///
+/// The claim therefore lives **in the crate that makes it**:
+///
+/// ```toml
+/// [package.metadata.fossil]
+/// wasm = true
+/// ```
+///
+/// which is a declaration beside the thing declared, not the hand-maintained
+/// `-p …` list this gate exists to have deleted. Nothing here names a crate; a
+/// crate that adds the key joins the gate, and one that removes it leaves —
+/// which is the same shape as the cdylib rule, read from a different field.
 fn wasm_closure() -> BTreeSet<String> {
     let meta = cargo_metadata();
 
@@ -115,7 +136,10 @@ fn wasm_closure() -> BTreeSet<String> {
                     .is_some_and(|cts| cts.iter().any(|c| c.as_str() == Some("cdylib")))
             })
         });
-        if is_cdylib {
+        // `[package.metadata.fossil] wasm = true` — a crate declaring itself
+        // wasm-capable is a root even with no cdylib above it. See the header.
+        let declares_wasm = p["metadata"]["fossil"]["wasm"].as_bool() == Some(true);
+        if is_cdylib || declares_wasm {
             roots.push(id);
         }
     }

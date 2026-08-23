@@ -83,8 +83,13 @@ pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), St
             &dataset.dest,
             CloudSecret::new(spec.secret_type.clone(), params),
         );
-        fossil_runtime::install_secret(&conn, &resolved, "__fossil_mcp_dest")
-            .map_err(|e| e.to_string())?;
+        // `fossil_runtime::install_secret` stood here and was this crate's ONLY
+        // use of `fossil-runtime`, so the dependency is gone with it. The
+        // rendering is `ResolvedPath::create_secret_sql`, in `fossil-resolver`,
+        // which this crate already depends on and which is where the tests are.
+        if let Some(sql) = resolved.create_secret_sql("__fossil_mcp_dest") {
+            conn.execute_batch(&sql).map_err(|e| e.to_string())?;
+        }
     }
 
     let files: HashMap<String, Vec<u8>> = dataset
