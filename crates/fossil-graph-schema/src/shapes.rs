@@ -65,13 +65,29 @@ pub fn local_name(iri: &str) -> &str {
 /// **The name a predicate is written and emitted under**: the `@rename` a
 /// program addressed to it, or [`local_name`] when it wrote none.
 ///
-/// [`local_name`] is the default and this is the rule — every side that turns a
-/// predicate IRI into a name owes the rename the same look-up, because the
-/// rename is what makes a colliding predicate writable at all. Four sides did
-/// not: the checker's required-property pass reported a renamed predicate the
-/// body HAD written as missing, and [`OutputShapes::to_graph_schema`] then
-/// emitted its column under the un-renamed name — so the one program the repair
-/// exists for could neither compile nor round-trip.
+/// [`local_name`] is the default and this is the rule on the OUTPUT side —
+/// every side that turns a predicate IRI into the name a program WRITES or the
+/// writer EMITS owes the rename the same look-up, because the rename is what
+/// makes a colliding predicate writable at all. Four sides did not: the
+/// checker's required-property pass reported a renamed predicate the body HAD
+/// written as missing, and [`OutputShapes::to_graph_schema`] then emitted its
+/// column under the un-renamed name — so the one program the repair exists for
+/// could neither compile nor round-trip.
+///
+/// **It is not every call site of [`local_name`], and the claim used to read as
+/// if it were.** `@rename` is addressed to a `type` binding, so it governs the
+/// target shape's names and nothing else. Three sides call the bare function on
+/// a predicate IRI and are right to:
+///
+/// - `fossil_hir::infer`'s source-row builder and
+///   `fossil_descriptors_input::shex` (through
+///   `ResolvedConstraint::predicate_local_name`) name INPUT row fields, which no
+///   `@rename` is addressed to;
+/// - `fossil_hir::shapes::suggested_alias` proposes what to rename a colliding
+///   predicate TO, and it needs the un-renamed segment to build the suggestion.
+///
+/// Everything else the tree calls [`local_name`] on is a SHAPE IRI, not a
+/// predicate one, and this function has no opinion about those.
 ///
 /// Generic over the string type so the checker's `SmolStr` pairs and the
 /// program's owned `String` pairs reach the same function.
