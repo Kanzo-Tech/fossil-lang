@@ -10,17 +10,44 @@
 //!
 //! [`providers`] is a projection of [`fossil_base::providers`] and
 //! [`source_refs`] walks the def map, so its content is the language's. What
-//! keeps it out of `fossil-hir` is the other end: the result types are
-//! `fossil-run-status`, the host wire contract, and that contract dissolves
-//! into the shell. This crate is the projection onto that wire, so it moves
-//! when the wire does. Until this crate existed the projection sat in `fossil-ide`
-//! while the data sat in the registry and the result type in
-//! `fossil-run-status` — one idea across three crates that did not know each
-//! other, and it made `fossil-engine` depend on the editor surface for five
-//! lines.
+//! keeps it out of `fossil-hir` is the other end: these are the shapes a HOST
+//! reads — serde JSON on the CLI's stdout, `serde-wasm-bindgen` values in the
+//! browser — and `fossil-hir` answers to the compiler, not to a host.
+//!
+//! The four types below used to live in `fossil-run-status`, which this crate
+//! imported to name its own output: the projection sat here, the data in the
+//! registry, and the result type in a third crate that nothing but this one
+//! produced. A contract belongs to whoever fills it.
 
 use fossil_base::{Db, SourceFile};
-use fossil_run_status::{ProviderInfo, ProviderKind, RefRole, SourceRefInfo};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+/// The position a reference plays in an `io.*` source constructor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RefRole {
+    /// The positional data URI (`io.rdf("…")`).
+    Data,
+    /// The `schema = io.shex("…")` argument (a shape document).
+    Schema,
+}
+
+/// One external reference a program makes. `connection` is the `@conn` alias the
+/// reference targets (`Some("cpi")` for `@cpi/graph.ttl`), or `None` for a direct
+/// URL / local path. `path` is the remainder after the alias (or the whole
+/// locator when there is no alias). This is the program's TYPED lineage — a host
+/// derives a job's connection set from the distinct `connection`s, never from a
+/// regex over the script text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SourceRefInfo {
+    /// The `@conn` alias this reference targets, or `None` for a direct URL/path.
+    pub connection: Option<String>,
+    /// The path within the connection, or the whole locator when unaliased.
+    pub path: String,
+    /// Where this reference appears in the source constructor.
+    pub role: RefRole,
+}
 
 /// Parse-only typed lineage: every external reference a program makes — its
 /// data URIs and `schema =` arguments — each tagged with the `@conn` alias it
@@ -70,6 +97,31 @@ fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
     }
 }
 
+/// What a provider can appear as in a program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    /// Only defines a type (e.g. a schema descriptor).
+    Schema,
+    /// Loads data (the `io.*` source constructors).
+    Data,
+    /// Usable in both positions.
+    Both,
+}
+
+/// One data-source provider fossil exposes: its short name, the file extensions
+/// it reads, and how it can be used. A host lists these so its UI can offer the
+/// constructors and filter files by extension.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProviderInfo {
+    /// Short provider name (e.g. `csv`, `json`, `parquet`).
+    pub name: String,
+    /// File extensions this provider reads (no leading dot).
+    pub extensions: Vec<String>,
+    /// Whether the provider defines a type, loads data, or both.
+    pub kind: ProviderKind,
+}
+
 /// The providers a host installs, projected onto the wire contract. Sorted for
 /// a deterministic order (the registry's own order is priority, not display).
 ///
@@ -110,9 +162,7 @@ pub fn providers(table: &[&'static fossil_base::Provider]) -> Vec<ProviderInfo> 
 
 #[cfg(test)]
 mod tests {
-    use fossil_run_status::ProviderKind;
-
-    use super::providers;
+    use super::{ProviderKind, providers};
 
     #[test]
     fn providers_are_sorted_nonempty_and_include_csv() {

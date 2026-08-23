@@ -25,6 +25,9 @@ pub mod files;
 /// sources it reads (`Filter` / `Project` / `Join`).
 pub mod plan;
 pub mod rdf;
+/// What a run tells its host it wrote: the `fossil run --output-json` wire
+/// contract, built by [`GraphArData::run_status`] and by nothing else.
+pub mod run_status;
 // `pub mod shacl` lived here: a SHACL shapes graph walked into a `GraphSchema`.
 // It has moved to `fossil-descriptors-output` and produces `OutputShapes`, the
 // neutral vocabulary the CHECKER reads — a `GraphSchema` is the output model,
@@ -75,11 +78,12 @@ use fossil_hir::shapes::{inner_primitive, primitive_to_graphar};
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
-use fossil_run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus};
 use fossil_sinks::manifest::{
     AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property, PropertyGroup,
     VertexInfo, data_type_name,
 };
+
+use crate::run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -553,7 +557,7 @@ async fn execute_edges<'db>(
 /// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
 /// and nothing else, so THIS is where an edge becomes CSR/CSC. What still reads
 /// the pair afterwards is the layout pass, which re-sorts the tiles in place
-/// (`fossil-runtime/src/layout.rs`).
+/// (`fossil-layout/src/layout.rs`).
 #[allow(clippy::too_many_arguments)] // the edge spec is a flat tuple, not worth a struct here
 async fn execute_edge(
     ctx: &SessionContext,

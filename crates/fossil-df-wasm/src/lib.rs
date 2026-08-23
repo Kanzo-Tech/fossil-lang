@@ -42,7 +42,7 @@ use fossil_descriptors_output::OutputDescriptorKind;
 // re-exporting it, so a consumer that wants it says so in its `Cargo.toml`.
 use fossil_df::SourceFormat;
 use fossil_df::files::GraphArFile;
-use fossil_run_status::RunStatus;
+use fossil_df::run_status::RunStatus;
 use fossil_shex::ShExDescriptor;
 use object_store::memory::InMemory;
 use object_store::path::Path as ObjPath;

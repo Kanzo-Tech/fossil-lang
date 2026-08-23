@@ -14,14 +14,17 @@ publish = false
 workspace = true
 
 [dependencies]
-# `providers` is a projection of `fossil_base::providers` and
-# `source_refs` walks the def map. This crate
-# is the projection ONTO THE WIRE, which is why it is not in `fossil-hir`:
-# `fossil-run-status` is the host contract, and that contract dissolves into
-# the shell. Keeping the edge here means that move takes this crate with it.
+# `providers` is a projection of `fossil_base::providers` and `source_refs`
+# walks the def map. What keeps this out of `fossil-hir` is the other end: the
+# result types are what a HOST reads, and they are declared here, beside the two
+# functions that fill them.
 fossil-hir = { path = "../fossil-hir" }
 fossil-base = { path = "../fossil-base" }
-fossil-run-status = { path = "../fossil-run-status" }
+# `ProviderInfo` / `SourceRefInfo` cross to a host as JSON (the CLI's stdout) or
+# as a JS value (`serde-wasm-bindgen`), and `schemars` publishes the same shape
+# for TS codegen. Both pure Rust, WASM-clean.
+serde = { workspace = true }
+schemars = { workspace = true }
 
 [dev-dependencies]
 # The reference `DecodeTypes` — a row that reads types, with no schema language

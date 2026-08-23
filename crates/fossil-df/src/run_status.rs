@@ -1,16 +1,14 @@
-//! The `fossil run --output-json` wire contract.
+//! The `fossil run --output-json` wire contract, beside the code that fills it.
 //!
 //! `fossil run --dest <url> --output-json` emits one [`RunStatus`] object on
 //! stdout describing the `GraphAr` dataset it just wrote: per vertex type its
 //! Parquet file + row count + property columns; per edge type its CSR/CSC file
-//! pair + endpoints + count. A host (keasy) deserializes it to persist the job's
-//! output structure WITHOUT re-introspecting the dataset.
+//! pair + endpoints + count. A host deserializes it to persist the job's output
+//! structure WITHOUT re-introspecting the dataset.
 //!
-//! This crate is the SINGLE source of truth for that shape: the CLI serializes
-//! [`RunStatus`], host consumers deserialize the same struct (depend on this
-//! crate — it is dependency-light + WASM-clean, NOT the execution library), and
-//! the `JsonSchema` derives publish the contract for TypeScript codegen (the
-//! same pipeline `fossil-graph` uses for its verb result types).
+//! [`super::GraphArData::run_status`] is the only thing that builds one, which
+//! is why the shape lives here and not in a crate of its own: the wire contract
+//! is what this backend says about what it wrote.
 //!
 //! ## Stats boundary
 //!
@@ -103,71 +101,9 @@ pub struct EdgeStatus {
     pub count: Option<i64>,
 }
 
-// ── `fossil providers` contract ─────────────────────────────────────────
-//
-// The host (keasy) lists the data-source constructors fossil supports so its UI
-// can offer them + filter files by extension. fossil owns this set (host
-// boundary): the `providers` subcommand enumerates the registry and emits this
-// contract; keasy reads it over the subprocess and serves `/v1/providers`.
-
-/// What a provider can appear as in a program.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderKind {
-    /// Only defines a type (e.g. a schema descriptor).
-    Schema,
-    /// Loads data (the `io.*` source constructors).
-    Data,
-    /// Usable in both positions.
-    Both,
-}
-
-/// One data-source provider fossil exposes: its short name, the file extensions
-/// it reads, and how it can be used.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ProviderInfo {
-    /// Short provider name (e.g. `csv`, `json`, `parquet`).
-    pub name: String,
-    /// File extensions this provider reads (no leading dot).
-    pub extensions: Vec<String>,
-    /// Whether the provider defines a type, loads data, or both.
-    pub kind: ProviderKind,
-}
-
-// ----- `refs` (host boundary) -----------------------------------------------
-// The `refs` subcommand parses a program and emits its external references —
-// the TYPED lineage of what the program reads. keasy consumes this (instead of
-// regex-matching `@name/` in script text) to know a job's connections.
-
-/// The position a reference plays in an `io.*` source constructor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RefRole {
-    /// The positional data URI (`io.rdf("…")`).
-    Data,
-    /// The `schema = io.shex("…")` argument (a shape document).
-    Schema,
-}
-
-/// One external reference a program makes. `connection` is the `@conn` alias the
-/// reference targets (`Some("cpi")` for `@cpi/graph.ttl`), or `None` for a direct
-/// URL / local path. `path` is the remainder after the alias (or the whole
-/// locator when there is no alias). This is the program's TYPED lineage — keasy
-/// derives a job's connection set from the distinct `connection`s, never from a
-/// regex over the script text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct SourceRefInfo {
-    /// The `@conn` alias this reference targets, or `None` for a direct URL/path.
-    pub connection: Option<String>,
-    /// The path within the connection, or the whole locator when unaliased.
-    pub path: String,
-    /// Where this reference appears in the source constructor.
-    pub role: RefRole,
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::RunStatus;
 
     #[test]
     fn round_trips_the_wire_contract() {

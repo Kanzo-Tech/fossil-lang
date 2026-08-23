@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use fossil_base::{Diagnostic, Severity};
+use fossil_df::run_status::RunStatus;
 use fossil_introspect::RunCreds;
-use fossil_run_status::RunStatus;
 use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource, SourceSpan};
 use tracing_subscriber::EnvFilter;
 

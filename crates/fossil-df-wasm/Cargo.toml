@@ -46,8 +46,6 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # consumers that genuinely wants the parse — it lowers the schema blob the
 # browser handed it before any query runs.
 fossil-shex = { path = "../fossil-shex" }
-# The host↔fossil wire status keasy consumes for DCAT (serialized to JS).
-fossil-run-status = { path = "../fossil-run-status" }
 
 # DataFusion (match fossil-df: no `sql` frontend, keep `parquet` reads). The
 # wasm host owns the SessionContext so it can register source object stores +
