@@ -25,7 +25,7 @@ functions, which is why the two cannot answer differently.
 
 ## Completion
 
-Three sources merge into one list (`crates/fossil-ide/src/completion.rs:59`), and it is worth knowing
+Three sources merge into one list (`crates/fossil-ide/src/completion.rs:60`), and it is worth knowing
 which of them looked at your cursor.
 
 **The shape's properties**, when the enclosing mapping's target shape resolves — your program named
@@ -43,19 +43,38 @@ name = User.        →  id   email   name   age
 Each entry carries the inferred type. With no introspection there are no entries at all — the editor
 says nothing rather than guessing column names.
 
-**Every row of the standard library**, and this one does not look at the cursor. `str.trim`,
-`seq.join` and `io.csv` are all offered wherever completion fires, spelled in full and carrying no
-`sortText`, so your editor orders them by label and your editor's own prefix filter is the only thing
-narrowing them. `seq.join` is on the list after a string, and `str.upper` is on it after a relation.
+**The standard library, narrowed to what is to the left of your dot.** Every row carries the receiver
+it hangs off — `Scalar(ScalarTy::String)` for `str.trim`, `Relation` for `seq.where`, `Namespace` for
+`io.csv` (`crates/fossil-hir/src/stdlib.rs:181`) — and the bare member name beside it
+(`crates/fossil-hir/src/stdlib.rs:186`), and `stdlib_completions`
+(`crates/fossil-ide/src/completion.rs:131`) asks the catalogue for the rows that receiver HAS rather
+than for all of them:
 
-That last paragraph is a gap, not a design. Every row already carries the receiver it hangs off —
-`Scalar(ScalarTy::String)` for `str.trim`, `Relation` for `seq.where`, `Namespace` for `io.csv`
-(`crates/fossil-hir/src/stdlib.rs:181`) — and the bare member name beside it
-(`crates/fossil-hir/src/stdlib.rs:186`). Nothing in `crates/fossil-ide/` reads either field. Filtering
-by the receiver's type, and offering `trim` rather than `str.trim` once the receiver is known, is the
-step that would make the list exact; the argument for why it should be is
-[tooling for humans](/docs/design/tooling-for-humans), and `stdlib_completions`
-(`crates/fossil-ide/src/completion.rs:81`) is the function that would change.
+```
+name = Adults.      →  aggregate  count  distinct  drop  flatten  group_by  join
+                       map  select  sort  take  union  where
+name = str.         →  concat  contains  ends_with  length  lower  replace  slice
+                       slug  split  starts_with  strip_html  trim  upper
+```
+
+Thirteen after a `:=` binding, where there were fifty-one; and they are spelled `where`, not
+`seq.where`, because after a dot the member is what you are typing. The full dotted signature is
+still there as the entry's detail, so the type path is never hidden.
+
+Four heads resolve (`crates/fossil-ide/src/completion.rs:201`): `str` and `seq`, which the catalogue
+classifies itself; a namespace like `io`, whose own rows are offered and not another namespace's; and
+any name a `:=` binding introduces, which is a relation and so has the verbs. A head that is none of
+those — `orders.`, a column you have not bound — gets nothing from this source, and the columns of
+the row (above) are the answer there. Away from any dot there is no receiver to narrow by, so the
+catalogue is offered whole and spelled in full.
+
+The list carries no `sortText`, so your editor orders it by label — and the list itself is now sorted
+by label before it leaves, because `FunctionRegistry` is a `HashMap` and three consecutive runs of the
+unsorted version printed three different orders.
+
+**Not narrowed:** a receiver that needs inference. `u.name.` — a member of a *column's* type — is a
+head this does not resolve, so it falls to the quiet case rather than offering `str.*`. The argument
+for closing that is [tooling for humans](/docs/design/tooling-for-humans).
 
 ## Hover
 

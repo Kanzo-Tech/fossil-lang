@@ -4,12 +4,13 @@
 //! (the `lsp-types`-direct shape is WASM-clean, so the browser host and the LSP
 //! both consume it without a second conversion):
 //!
-//! 1. **stdlib functions**. Every [`fossil_hir::stdlib::RegistryEntry`] from
-//!    [`FunctionRegistry::stdlib_default`] becomes a `CompletionItem` (kind =
-//!    Function, detail = the rendered signature). There is no auto-import edit
-//!    and no `(native-only)` tag: the first named a `use <ns>` line no program
-//!    writes, and the second named `WasmClass::NativeUdfOnly`, a class that no
-//!    longer exists.
+//! 1. **stdlib functions**, narrowed to the cursor's RECEIVER. After `str.`
+//!    the list is what a string HAS, labelled `trim`; after a `:=` binding it
+//!    is the relation verbs; away from any dot it is the catalogue whole,
+//!    spelled `str.trim`. See [`stdlib_completions`] for what the narrowing
+//!    does not cover. There is no auto-import edit and no `(native-only)` tag:
+//!    the first named a `use <ns>` line no program writes, and the second named
+//!    `WasmClass::NativeUdfOnly`, a class that no longer exists.
 //! 2. **shape properties** — when the cursor is in a mapping whose target `ShEx`
 //!    shape resolves (the program names its output document with
 //!    `type { … } := io.shex("…")`), the shape's `constraints[].predicate` names
@@ -40,7 +41,7 @@ use fossil_base::SourceFile;
 use fossil_hir::def_map::def_map;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
-use fossil_hir::stdlib::FunctionRegistry;
+use fossil_hir::stdlib::{FunctionRegistry, Receiver};
 use fossil_hir::ty::TyKind;
 use fossil_syntax::SyntaxKind;
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag};
@@ -69,21 +70,97 @@ pub fn completions(
 ) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
-    stdlib_completions(&mut items);
+    stdlib_completions(db, file, line, character, &mut items);
     shape_property_completions(db, file, line, character, &mut items);
     source_field_completions(db, file, line, character, &mut items);
 
     items
 }
 
-/// Source 1: stdlib functions with the gleam-lsp auto-import edit + native-only
-/// tag.
-fn stdlib_completions(items: &mut Vec<CompletionItem>) {
+/// What the head to the left of the cursor's dot selects out of the catalogue.
+///
+/// The whole of the receiver question, as an enum, so the two decisions —
+/// *which rows* and *what they are labelled* — are taken in one place.
+enum Scope {
+    /// No dot: the cursor is not in a member position, so the catalogue is
+    /// offered whole and spelled in full (`str.trim`). Nothing narrower is
+    /// honest — there is no receiver to narrow by.
+    Catalogue,
+    /// A head the catalogue classifies as a type: `str` → `Scalar(String)`,
+    /// `seq` → `Relation`. Also what a `:=` binding resolves to.
+    Members(Receiver),
+    /// A namespace head (`io`, `parse`, `math`, `validate`, `core`, `anon`).
+    /// [`Receiver::Namespace`] is ONE receiver shared by all six, so
+    /// `members_of` would answer with every namespace's rows; the head is
+    /// carried so `io.` offers `io.*` and not `math.abs`.
+    Namespace(String),
+    /// A dot whose left half names nothing the catalogue or the file knows —
+    /// `orders.`, or a bare leading `.`. The stdlib source stays quiet: the
+    /// columns of the row (source 3) are the honest answer there.
+    Nothing,
+}
+
+/// Source 1: the standard library, narrowed to the cursor's RECEIVER.
+///
+/// It was not narrowed at all: every row of `stdlib_default` was pushed
+/// wherever completion fired, so a `.` after a relation offered 51 items — 13
+/// `str.*` and 3 `io.*` among them — in `HashMap` iteration order, which three
+/// consecutive runs gave three different spellings of. `RegistryEntry` has
+/// carried `recv` and `member` since the receiver replaced dispatch-by-string,
+/// and nothing in this crate read either field.
+///
+/// Two things follow from knowing the receiver, and both are here:
+///
+/// - the rows are the ones the value HAS (`FunctionRegistry::members_of`);
+/// - they are labelled by their MEMBER (`trim`, not `str.trim`), because after
+///   `x.` the member is what the user is typing. The `detail` still renders the
+///   full dotted signature, so the type path is never hidden.
+///
+/// The order is by label, always. `FunctionRegistry` is a `HashMap` and an
+/// unsorted list is a different list on every call — `xtask`'s reference
+/// emitter sorts its groups for the same reason (`crates/xtask/src/reference.rs`,
+/// `by_head`).
+///
+/// **Not covered:** a receiver that needs inference. `str.` and `seq.` are
+/// resolved from the catalogue's own head classification and a `:=` binding is
+/// taken to be a relation, which is what the grammar's one binding form
+/// produces; `u.name.` — a member of a column's TYPE — falls to
+/// [`Scope::Nothing`] rather than resolving `name` to `String` and offering
+/// `str.*`. That needs `source_row_inferred` per field and a story for a
+/// partially-typed expression, and it is a separate change.
+fn stdlib_completions(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    line: u32,
+    character: u32,
+    items: &mut Vec<CompletionItem>,
+) {
     let registry = FunctionRegistry::stdlib_default();
-    for entry in registry.iter() {
-        let name = entry.name.as_str();
+    let scope = scope_at_cursor(db, file, line, character, &registry);
+
+    // `(label, entry)` — the label differs between the two shapes, so it is
+    // decided while selecting rather than guessed afterwards from the name.
+    let mut rows: Vec<(String, &fossil_hir::stdlib::RegistryEntry)> = match &scope {
+        Scope::Nothing => Vec::new(),
+        Scope::Catalogue => registry.iter().map(|e| (e.name.to_string(), e)).collect(),
+        Scope::Members(recv) => registry
+            .members_of(*recv)
+            .map(|e| (e.member.to_string(), e))
+            .collect(),
+        Scope::Namespace(head) => {
+            let prefix = format!("{head}.");
+            registry
+                .iter()
+                .filter(|e| e.recv == Receiver::Namespace && e.name.starts_with(&prefix))
+                .map(|e| (e.member.to_string(), e))
+                .collect()
+        }
+    };
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.name.cmp(&b.1.name)));
+
+    for (label, entry) in rows {
         // The receiver is the dotted prefix (`str` in `str.trim`).
-        let namespace = name.split('.').next().unwrap_or(name);
+        let namespace = entry.name.split('.').next().unwrap_or(&entry.name);
 
         // A `WasmClass::NativeUdfOnly` entry was tagged DEPRECATED here with a
         // `(native-only)` detail suffix, so the browser playground could gray
@@ -104,7 +181,7 @@ fn stdlib_completions(items: &mut Vec<CompletionItem>) {
         let additional_text_edits = None;
 
         items.push(CompletionItem {
-            label: name.to_string(),
+            label,
             kind: Some(CompletionItemKind::FUNCTION),
             detail: Some(detail),
             tags,
@@ -112,6 +189,80 @@ fn stdlib_completions(items: &mut Vec<CompletionItem>) {
             ..Default::default()
         });
     }
+}
+
+/// Which rows the cursor's position selects.
+///
+/// The head is the token before the dot, and there are two ways to be after
+/// one: the cursor is ON the dot (completion fired the moment `.` was typed),
+/// or it is inside the partial member that follows it (`users.wh|`). Both are
+/// handled, because an editor that re-requests on every keystroke produces the
+/// second on the very next character.
+fn scope_at_cursor(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    line: u32,
+    character: u32,
+    registry: &FunctionRegistry,
+) -> Scope {
+    let Some(token) = token_at_position(db, file, line, character) else {
+        return Scope::Catalogue;
+    };
+    let dot = if token.kind() == SyntaxKind::DOT {
+        token
+    } else {
+        match prev_meaningful(&token) {
+            Some(t) if t.kind() == SyntaxKind::DOT => t,
+            // Not in a member position at all.
+            _ => return Scope::Catalogue,
+        }
+    };
+    let Some(head) = prev_meaningful(&dot) else {
+        return Scope::Nothing;
+    };
+    if head.kind() != SyntaxKind::IDENT {
+        // A leading `.field` — the form a mapping body writes — has a `=` or a
+        // newline to its left. Source 3 answers it; the catalogue has nothing
+        // to say.
+        return Scope::Nothing;
+    }
+    let head = head.text().to_string();
+
+    // The catalogue classifies its own heads, and `receiver_of` is the ONE
+    // place that classification lives (`fossil-hir/src/stdlib.rs`). Asking it
+    // about an arbitrary identifier would answer `Namespace` for `orders`, so
+    // the head has to be catalogued FIRST.
+    if registry.is_catalogued_head(&head) {
+        let recv = fossil_hir::stdlib::receiver_of(&head);
+        return if recv == Receiver::Namespace {
+            Scope::Namespace(head)
+        } else {
+            Scope::Members(recv)
+        };
+    }
+
+    // A `:=` binding is a relation, so its members are the verbs. The symbol
+    // index is the file's own table of them and is a plain CST walk — no Salsa
+    // key is added here.
+    let indexed_source = crate::SymbolIndex::build(db, file)
+        .of_kind(crate::SymbolKind::Source)
+        .any(|e| e.name == head);
+    if indexed_source {
+        return Scope::Members(Receiver::Relation);
+    }
+    Scope::Nothing
+}
+
+/// The token before `t`, skipping whitespace and comments.
+fn prev_meaningful(t: &fossil_syntax::SyntaxToken) -> Option<fossil_syntax::SyntaxToken> {
+    let mut cur = t.prev_token();
+    while let Some(tok) = cur {
+        if !matches!(tok.kind(), SyntaxKind::WHITESPACE | SyntaxKind::COMMENT) {
+            return Some(tok);
+        }
+        cur = tok.prev_token();
+    }
+    None
 }
 
 /// Source 3: shape predicate names, when the enclosing mapping's target `ShEx`

@@ -188,3 +188,161 @@ User : Person from users
         "a `prefix:` completion is a form this language does not have",
     );
 }
+
+// ── The receiver ───────────────────────────────────────────────────────────
+//
+// Measured before the narrowing existed, at the `.` of `users.name` in `SRC`:
+// **51 stdlib rows** offered whatever the receiver — 13 `seq.*`, 13 `str.*`,
+// 3 `io.*`, the rest `parse` / `math` / `validate` / `core` / `anon` — in
+// `HashMap` order, which three consecutive runs printed three different
+// spellings of. Below: 13, all of them `seq.*`, in one order.
+
+/// After a `:=` binding's dot, the catalogue offers the RELATION VERBS and
+/// nothing else — labelled bare, because the member is what is being typed.
+#[test]
+fn a_relation_receiver_offers_the_verbs_and_no_other_row() {
+    let mut db = HostDb::new();
+    let f = file(&mut db, SRC);
+    // `    name = users.name` is line 3; the `.` is at column 16, so 17 is the
+    // first character of the member.
+    let items = fossil_ide::completions(&db, &[f], f, 3, 17);
+    let fns: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert_eq!(
+        fns,
+        vec![
+            "aggregate",
+            "count",
+            "distinct",
+            "drop",
+            "flatten",
+            "group_by",
+            "join",
+            "map",
+            "select",
+            "sort",
+            "take",
+            "union",
+            "where",
+        ],
+        "`users` is a relation: its members are the verbs, sorted, bare",
+    );
+    // The dotted spelling is still reachable — it is the `detail`.
+    let where_ = items.iter().find(|i| i.label == "where").expect("where");
+    assert!(
+        where_
+            .detail
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("seq.where("),
+        "the detail must still name the row's full dotted signature; got {:?}",
+        where_.detail,
+    );
+}
+
+/// A `str.` head is a TYPE path, and `receiver_of` classifies it — so the list
+/// is what a string has, and carries no verb and no `io` row.
+#[test]
+fn a_scalar_head_offers_only_that_type_s_members() {
+    const WITH_STR: &str = "\
+users := io.csv(\"users.csv\")
+User : Person from users
+    name = str.
+";
+    let mut db = HostDb::new();
+    let f = file(&mut db, WITH_STR);
+    // `    name = str.` — the `.` is the last character of line 2, column 14.
+    let items = fossil_ide::completions(&db, &[f], f, 2, 15);
+    let fns: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(fns.contains(&"trim"), "a string has `trim`; got {fns:?}");
+    assert!(fns.contains(&"upper"), "a string has `upper`; got {fns:?}");
+    assert!(
+        !fns.contains(&"where") && !fns.contains(&"csv"),
+        "a string has no verb and no reader; got {fns:?}",
+    );
+    let mut sorted = fns.clone();
+    sorted.sort_unstable();
+    assert_eq!(fns, sorted, "the list is ordered by label, always");
+}
+
+/// `Receiver::Namespace` is ONE receiver shared by six heads, so `members_of`
+/// alone would answer `io.` with `math.abs`. The head narrows it.
+#[test]
+fn a_namespace_head_offers_only_its_own_namespace() {
+    const WITH_IO: &str = "\
+users := io.
+";
+    let mut db = HostDb::new();
+    let f = file(&mut db, WITH_IO);
+    let items = fossil_ide::completions(&db, &[f], f, 0, 12);
+    let fns: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(fns.contains(&"csv"), "`io.` offers `csv`; got {fns:?}");
+    assert!(
+        !fns.contains(&"abs") && !fns.contains(&"email"),
+        "`math.abs` and `validate.email` are other namespaces; got {fns:?}",
+    );
+}
+
+/// A head the catalogue does not know and the file does not bind gets nothing
+/// from the stdlib source — the editor stays quiet rather than offering 51.
+#[test]
+fn an_unknown_head_offers_no_catalogue_row() {
+    const UNKNOWN: &str = "\
+users := io.csv(\"users.csv\")
+User : Person from users
+    name = orders.
+";
+    let mut db = HostDb::new();
+    let f = file(&mut db, UNKNOWN);
+    let items = fossil_ide::completions(&db, &[f], f, 2, 18);
+    assert!(
+        !items
+            .iter()
+            .any(|i| i.kind == Some(CompletionItemKind::FUNCTION)),
+        "`orders` names nothing; got {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>(),
+    );
+}
+
+/// Away from any dot the catalogue is offered whole, spelled in full — and
+/// SORTED. `FunctionRegistry` is a `HashMap`; without the sort this vector is a
+/// different vector on every call.
+#[test]
+fn the_bare_catalogue_is_whole_and_sorted() {
+    let mut db = HostDb::new();
+    let f = file(&mut db, SRC);
+    let items = fossil_ide::completions(&db, &[f], f, 3, 6);
+    let fns: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
+        .map(|i| i.label.as_str())
+        .collect();
+    assert!(
+        fns.contains(&"str.trim") && fns.contains(&"seq.where") && fns.contains(&"io.csv"),
+        "no receiver is known here, so every row is offered dotted; got {fns:?}",
+    );
+    let mut sorted = fns.clone();
+    sorted.sort_unstable();
+    assert_eq!(fns, sorted, "ordered by label, always");
+    // The same call twice is the same list. This is what was false.
+    let again: Vec<String> = fossil_ide::completions(&db, &[f], f, 3, 6)
+        .into_iter()
+        .map(|i| i.label)
+        .collect();
+    assert_eq!(
+        again,
+        items.into_iter().map(|i| i.label).collect::<Vec<_>>(),
+        "two calls, one order",
+    );
+}
