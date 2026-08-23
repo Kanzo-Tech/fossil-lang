@@ -119,11 +119,18 @@ crates/
   fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
   fossil-df/               DataFusion backend for the property-graph MIR
   fossil-engine/           fossil's native HOST: the `System` the compiler runs against, the
-                           pre-compile jobs it cannot do for itself (introspect sources,
-                           register shape documents, install `@conn` secrets), and the
-                           compile→run pipeline. `fossil-wasm` is the same shape for the
-                           browser  [NATIVE-ONLY]
-  fossil-runtime/          DuckDB native execution  [NATIVE-ONLY]
+                           shape documents a program names, and the compile→run pipeline.
+                           `fossil-wasm` is the same shape for the browser. It no longer
+                           introspects or installs `@conn` secrets  [NATIVE-ONLY]
+  fossil-introspect/       those two, which are a host job and not a compiler one: `DESCRIBE`
+                           each source's columns, and the `--creds-stdin` payload that
+                           authenticates one. `fossil-cli` calls it before the compile. The one
+                           crate linking `DuckDB` on a normal edge — and it is native by that
+                           edge and by `fossil-resolver`, without a tripwire of its own
+  fossil-runtime/          the layout post-pass — Louvain + Morton over Parquet through
+                           arrow-rs, linking no engine (`DuckDB` is a dev-dependency). It
+                           COMPILES for wasm32 and declares it with `[package.metadata.fossil]
+                           wasm = true`, which is what puts it in the gate closure
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
                            write. Depends on NOTHING; both halves of the write path
                            (fossil-df, fossil-runtime) report through it
@@ -148,12 +155,13 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   executor/                datafusion-wasm query executor
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
-  introspect/              source-binding schema introspection (the one home; `fossil-engine`
+  introspect/              source-binding schema introspection (the one home; `fossil-introspect`
                            is the Rust sibling). Their agreement is ENFORCED, not asserted:
-                           `packages/introspect/tests/rust-parity.test.ts` derives the regex,
-                           the reader arms and the type table out of `fossil-engine/src/lib.rs`
-                           and fails on drift. It is a **pnpm** test — editing that Rust turns
-                           it red and `cargo test` will not tell you.
+                           `packages/introspect/tests/rust-parity.test.ts` derives the regex, the
+                           reader arms and the type table out of
+                           `crates/fossil-introspect/src/lib.rs` and fails on drift. It is a
+                           **pnpm** test — editing that Rust turns it red and `cargo test` will
+                           not tell you.
 
 apps/                      NOT published, and no RECURSIVE CI step reaches them (all are
                            filtered to `./packages/*` by path — see release.yml). Each gets its
