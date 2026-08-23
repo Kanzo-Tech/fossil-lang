@@ -13,7 +13,14 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 doctest = false
-test = false
+# `test = false` stood here and it was scaffold boilerplate from `6bb78b4`, the
+# commit that created the workspace — no other manifest under `crates/` carries
+# it. What it did in the end was switch off the two `#[test]`s in
+# `src/lsp_worker.rs`, which had therefore never run: `cargo test -p fossil-wasm`
+# emitted no `Running unittests src/lib.rs` line at all, so there was nothing to
+# notice. Both pass. The `rlib` half of `crate-type` is what makes a unit test
+# linkable, and the wasm gate compiles without `--all-targets`, so a test target
+# costs the browser build nothing.
 
 [lints]
 workspace = true
