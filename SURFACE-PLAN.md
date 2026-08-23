@@ -225,13 +225,16 @@ tras editar un cuerpo con diez mapeos siguen en **18**. Ninguna constante se mue
 
 ## El estado, medido
 
-| | |
-|---|---|
-| Ficheros `.fossil` versionados | **74** — no 68, no 83, no 35. Reparto: `packages/examples/src` 36, `fossil-syntax/tests` 20, `fossil-hir/tests` 14, sueltos 4 |
-| Crates | **24**. ADR-0046 §7 apunta a 5–8 |
-| Operadores del álgebra | **14** — `operator-algebra.md` dice «nueve más dos refinamientos» |
-| Entradas de la stdlib | **53** — ADR-0048 dice 56 |
-| Verbos del grafo | **6** — ADR-0039 dice 14 |
+**Re-medido el 2026-08-23.** Una tabla que se titula «medido, no recordado» envejece sola, y ésta
+lo había hecho en tres de sus cinco filas. La columna nueva es lo que cuenta hoy.
+
+| | decía | hoy | por qué se movió |
+|---|---|---|---|
+| Ficheros `.fossil` versionados | 74 | **50** | su propio reparto nombraba `packages/examples/src` (36), **un paquete que ya no existe** — `packages/` son seis y ninguno se llama así. La cifra no se equivocó: describía un árbol anterior |
+| Crates | 24 | **26** | ADR-0046 §7 apunta a 5–8, así que el movimiento es en contra. `fossil-mem-probe` (`07e082f`) y `fossil-introspect` (`fbd1102`); el segundo es una decisión tomada a la vista de la alternativa (una *feature* en `fossil-engine`), y se eligió el crate porque «wasm-limpio» tras una feature que todo consumidor enciende es una afirmación sobre una configuración que nadie construye |
+| Operadores del álgebra | 14 | **14** ✅ | sigue exacto. `operator-algebra.md` sigue diciendo «nueve más dos refinamientos» y sigue equivocado |
+| Entradas de la stdlib | 53 | **no cuadra** | dos conteos independientes dan 43 nombres punteados únicos y 51 sitios de construcción. La cifra buena sale del registro, no de un grep, y la produce quien esté generando `book/stdlib.mdx` desde él — ahí es donde debe quedar escrita |
+| Verbos del grafo | 6 | **6** ✅ | sigue exacto. ADR-0039 sigue diciendo 14 |
 | Enmiendas de ADR-0057 | **10** — el índice dice siete |
 | Referencias muertas en la prosa versionada | **159** |
 | Citas `ADR-0050` que resuelven al registro equivocado | **18 de 20** (16 → 0053, 2 → 0052) |
