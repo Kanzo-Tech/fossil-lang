@@ -629,8 +629,15 @@ mod tests {
         SourceFile::new(db, src.to_string(), "c.fossil".to_string())
     }
 
-    /// The stdlib source is unconditional and BARE: every catalogued entry is
-    /// offered wherever the cursor is, with no auto-import edit and no tag.
+    /// The stdlib source is BARE: no auto-import edit and no tag on any row it
+    /// offers, and no `prefix:` completion at all.
+    ///
+    /// It said "unconditional — every catalogued entry is offered wherever the
+    /// cursor is", and that stopped being true twice: `5be2de6` gave completion
+    /// a [`Scope`], and `88091c0` gave the row binding one. The catalogue is
+    /// offered WHOLE only in [`Scope::Catalogue`] — no dot to the left of the
+    /// cursor — which is the position this fixture puts it in. After a dot the
+    /// rows are the receiver's, and after an unknown one there are none.
     ///
     /// Four tests stood here and all four asserted the opposite. Two wanted an
     /// `additional_text_edits` inserting `use clean` — there is no `use`
