@@ -33,8 +33,25 @@ const EDGES: [(u32, u32); 7] = [
     (0, 3), // the bridge
 ];
 
+/// A fresh, empty directory under `std::env::temp_dir()`, named
+/// `fossil_layout_<name>_<pid>`.
+///
+/// **The `<pid>` is load-bearing**, for the same reason it is in
+/// `fossil-cli/tests/common/mod.rs`. The directory is wiped before it is
+/// seeded, so a path keyed only on the test name is shared by every process on
+/// the machine running this binary, and a second `cargo test` deletes this
+/// one's fixtures between the `COPY` that writes them and the read that checks
+/// them. The failures are not honest about their cause: `write vertices: IO
+/// Error: Cannot open file …`, or — worse, because it looks like a real defect
+/// in the pass — `renumbering changed which subjects are connected` with three
+/// surviving edges out of seven. Measured 2026-08-23: six concurrent copies of
+/// this binary, five rounds, thirty processes, thirty failures; the same binary
+/// alone is green. Keep the path unique per process.
+///
+/// The wipe stays even so: pids are reused, and a reused one must not inherit
+/// the previous run's chunk files, which assertion 3 counts.
 fn dir(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("fossil_layout_{name}"));
+    let path = std::env::temp_dir().join(format!("fossil_layout_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create test dir");
     path
