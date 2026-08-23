@@ -34,21 +34,22 @@
 //! program was opened under, so a `/tmp` URI looks for `/tmp/canonical_200.shex`
 //! and the whole output contract silently disappears.
 //!
-//! All frames are written upfront, then stdin is dropped and stdout drained —
-//! the pattern from `lsp_hover_smoke.rs`.
+//! All frames are written upfront, then stdin is dropped and stdout drained.
+//! That is `tests/common/mod.rs` now — and this file is where the LENIENT
+//! `parse_frames` lived, the one that turned a malformed frame into a missing
+//! one and reported `missing response id=N` for a server that had written
+//! garbage. The shared one is strict; the module docs there say why.
 
 #![cfg(not(target_arch = "wasm32"))]
-// `req`/`notif` take `serde_json::Value` by value for call-site ergonomics
-// (`json!(..)` moves into them); clippy's pass-by-value lint is noise here.
-#![allow(clippy::needless_pass_by_value)]
 // The fixtures contain `${ex:}` IRI-template placeholders — LITERAL Fossil
 // source embedded in assertion messages, not Rust format args.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use std::io::{Read, Write};
+mod common;
+
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+
+use common::{did_open, drive, notif, req, text_pos};
 
 fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -57,61 +58,6 @@ fn repo_root() -> PathBuf {
         .and_then(std::path::Path::parent)
         .expect("CARGO_MANIFEST_DIR has at least two parents")
         .to_path_buf()
-}
-
-/// The `fossil-lsp` binary this test drives.
-///
-/// **It used to shell out to `cargo build` and then hard-code
-/// `<repo>/target/debug/fossil-lsp`, and that is a test that can pass against a
-/// binary it did not build.** With `CARGO_TARGET_DIR` set — which this repo's
-/// own instructions require, because six agents share one build directory — the
-/// build lands somewhere else and the hard-coded path is whatever was left
-/// there last. It was measured: the file at that path was two days old and
-/// still spoke a retired grammar, so every assertion below was about a compiler
-/// nobody had edited.
-///
-/// `CARGO_BIN_EXE_<name>` is cargo's answer: it is set for an integration test
-/// to the path of that package's binary, and cargo has already BUILT it before
-/// the test runs. No `Command`, no path arithmetic, and no way to drift.
-fn fossil_lsp_binary() -> &'static PathBuf {
-    static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil-lsp")))
-}
-
-fn frame(body: &str) -> String {
-    format!("Content-Length: {}\r\n\r\n{}", body.len(), body)
-}
-
-fn parse_frames(mut buf: &[u8]) -> Vec<serde_json::Value> {
-    let mut out = Vec::new();
-    while !buf.is_empty() {
-        let Some(boundary) = find_subslice(buf, b"\r\n\r\n") else {
-            break;
-        };
-        let header_block = std::str::from_utf8(&buf[..boundary]).unwrap_or("");
-        let len: usize = header_block
-            .lines()
-            .find_map(|l| l.strip_prefix("Content-Length:"))
-            .and_then(|v| v.trim().parse().ok())
-            .unwrap_or(0);
-        let body_start = boundary + 4;
-        let body_end = body_start + len;
-        if body_end > buf.len() {
-            break;
-        }
-        if let Ok(val) = serde_json::from_slice(&buf[body_start..body_end]) {
-            out.push(val);
-        }
-        buf = &buf[body_end..];
-    }
-    out
-}
-
-fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || hay.len() < needle.len() {
-        return None;
-    }
-    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
 }
 
 /// The URI the program is opened under — its REAL path, because the shape
@@ -155,39 +101,9 @@ fn pos_of(src: &str, needle: &str, inside: u32) -> (u32, u32) {
     (line, col)
 }
 
-/// One JSON-RPC request frame.
-fn req(id: i64, method: &str, params: serde_json::Value) -> String {
-    frame(
-        &serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
-            .to_string(),
-    )
-}
-
-/// One JSON-RPC notification frame.
-fn notif(method: &str, params: serde_json::Value) -> String {
-    frame(&serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params }).to_string())
-}
-
-fn did_open(uri: &str, text: &str) -> String {
-    notif(
-        "textDocument/didOpen",
-        serde_json::json!({
-            "textDocument": { "uri": uri, "languageId": "fossil", "version": 1, "text": text }
-        }),
-    )
-}
-
-fn text_pos(uri: &str, line: u32, character: u32) -> serde_json::Value {
-    serde_json::json!({
-        "textDocument": { "uri": uri },
-        "position": { "line": line, "character": character }
-    })
-}
-
 #[test]
 #[allow(clippy::too_many_lines)]
 fn lsp_serves_all_six_capabilities_over_the_transport() {
-    let bin = fossil_lsp_binary();
     let src_a = fixture_a();
     let uri_a = uri_program();
     let uri_doc = uri_document();
@@ -212,132 +128,49 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
     let (ca_l, ca_c) = pos_of(&src_a, "nick = str.lower(Users.nick)", 0);
 
     {
-        let mut child = Command::new(bin)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn fossil-lsp");
-        let stdin = child.stdin.as_mut().expect("child stdin");
-
-        stdin
-            .write_all(
-                req(
-                    1,
-                    "initialize",
-                    serde_json::json!({
-                        "capabilities": {}, "processId": null, "rootUri": null
-                    }),
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-        stdin
-            .write_all(notif("initialized", serde_json::json!({})).as_bytes())
-            .unwrap();
-        stdin
-            .write_all(did_open(&uri_a, &src_a).as_bytes())
-            .unwrap();
-
-        stdin
-            .write_all(req(2, "textDocument/hover", text_pos(&uri_a, hover_l, hover_c)).as_bytes())
-            .unwrap();
-        stdin
-            .write_all(req(3, "textDocument/definition", text_pos(&uri_a, def_l, def_c)).as_bytes())
-            .unwrap();
-        stdin
-            .write_all(
-                req(
-                    4,
-                    "textDocument/completion",
-                    text_pos(&uri_a, comp_l, comp_c),
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-        stdin
-            .write_all(
-                req(
-                    5,
-                    "textDocument/documentSymbol",
-                    serde_json::json!({
-                        "textDocument": { "uri": uri_a }
-                    }),
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-        stdin
-            .write_all(
-                req(
-                    6,
-                    "textDocument/semanticTokens/full",
-                    serde_json::json!({
-                        "textDocument": { "uri": uri_a }
-                    }),
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-        stdin
-            .write_all(
-                req(
-                    7,
-                    "textDocument/codeAction",
-                    serde_json::json!({
-                        "textDocument": { "uri": uri_a },
-                        "range": {
-                            "start": { "line": ca_l, "character": ca_c },
-                            "end": { "line": ca_l, "character": ca_c + 9 }
-                        },
-                        "context": { "diagnostics": [] }
-                    }),
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-
-        stdin
-            .write_all(req(99, "shutdown", serde_json::Value::Null).as_bytes())
-            .unwrap();
-        stdin
-            .write_all(notif("exit", serde_json::Value::Null).as_bytes())
-            .unwrap();
-        stdin.flush().unwrap();
-        drop(child.stdin.take());
-
-        let mut stdout_buf = Vec::new();
-        child
-            .stdout
-            .as_mut()
-            .unwrap()
-            .read_to_end(&mut stdout_buf)
-            .unwrap();
-        let mut stderr_buf = Vec::new();
-        child
-            .stderr
-            .as_mut()
-            .unwrap()
-            .read_to_end(&mut stderr_buf)
-            .unwrap();
-        let status = child.wait().expect("fossil-lsp terminates");
-        assert!(
-            status.success(),
-            "fossil-lsp exited non-zero: {status:?}\nstderr: {}",
-            String::from_utf8_lossy(&stderr_buf)
-        );
-
-        let frames = parse_frames(&stdout_buf);
-        let stderr = String::from_utf8_lossy(&stderr_buf);
-        let by_id = |id: i64| {
-            frames
-                .iter()
-                .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(id))
-                .unwrap_or_else(|| panic!("missing response id={id}; stderr: {stderr}"))
-        };
+        let t = drive(&[
+            req(
+                1,
+                "initialize",
+                serde_json::json!({ "capabilities": {}, "processId": null, "rootUri": null }),
+            ),
+            notif("initialized", serde_json::json!({})),
+            did_open(&uri_a, &src_a),
+            req(2, "textDocument/hover", text_pos(&uri_a, hover_l, hover_c)),
+            req(3, "textDocument/definition", text_pos(&uri_a, def_l, def_c)),
+            req(
+                4,
+                "textDocument/completion",
+                text_pos(&uri_a, comp_l, comp_c),
+            ),
+            req(
+                5,
+                "textDocument/documentSymbol",
+                serde_json::json!({ "textDocument": { "uri": uri_a } }),
+            ),
+            req(
+                6,
+                "textDocument/semanticTokens/full",
+                serde_json::json!({ "textDocument": { "uri": uri_a } }),
+            ),
+            req(
+                7,
+                "textDocument/codeAction",
+                serde_json::json!({
+                    "textDocument": { "uri": uri_a },
+                    "range": {
+                        "start": { "line": ca_l, "character": ca_c },
+                        "end": { "line": ca_l, "character": ca_c + 9 }
+                    },
+                    "context": { "diagnostics": [] }
+                }),
+            ),
+            req(99, "shutdown", serde_json::Value::Null),
+            notif("exit", serde_json::Value::Null),
+        ]);
 
         // 1. hover → Markdown contents with a fenced fossil block.
-        let hover = by_id(2);
+        let hover = t.by_id(2);
         let value = hover
             .pointer("/result/contents/value")
             .and_then(serde_json::Value::as_str)
@@ -353,7 +186,7 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
         //    and only one of them is goto-def: the server had to register a
         //    document it was never asked to open, and the resolution had to
         //    leave the language.
-        let def = by_id(3);
+        let def = t.by_id(3);
         let locs = def
             .pointer("/result")
             .and_then(serde_json::Value::as_array)
@@ -382,7 +215,7 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
         );
 
         // 3. completion → a non-empty item list (stdlib + prefixes are unconditional).
-        let comp = by_id(4);
+        let comp = t.by_id(4);
         let items = comp
             .pointer("/result")
             .and_then(serde_json::Value::as_array)
@@ -390,7 +223,7 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
         assert!(!items.is_empty(), "completion must return items: {comp}");
 
         // 4. documentSymbol → a non-empty outline.
-        let sym = by_id(5);
+        let sym = t.by_id(5);
         let symbols = sym
             .pointer("/result")
             .and_then(serde_json::Value::as_array)
@@ -401,13 +234,13 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
         );
 
         // 5. semanticTokens/full → a non-empty token stream (data is a flat u32 array).
-        let tokens = by_id(6);
+        let tokens = t.by_id(6);
         let data = tokens
             .pointer("/result/data")
             .and_then(serde_json::Value::as_array)
             .unwrap_or_else(|| panic!("semanticTokens missing result.data: {tokens}"));
         assert!(
-            !data.is_empty() && data.len() % 5 == 0,
+            !data.is_empty() && data.len().is_multiple_of(5),
             "semantic tokens must be a non-empty multiple-of-5 stream; got {} entries",
             data.len()
         );
@@ -415,7 +248,7 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
         // 6. codeAction → a Response (array, possibly empty — the fixture is
         //    clean so no quick-fixes; the point is the handler answers without
         //    error and the transport translation works).
-        let ca = by_id(7);
+        let ca = t.by_id(7);
         assert!(
             ca.pointer("/result")
                 .is_some_and(serde_json::Value::is_array),
@@ -423,15 +256,7 @@ fn lsp_serves_all_six_capabilities_over_the_transport() {
         );
 
         // The published diagnostics for the clean fixture must be empty.
-        let diags_a: Vec<&serde_json::Value> = frames
-            .iter()
-            .filter(|m| {
-                m.get("method").and_then(serde_json::Value::as_str)
-                    == Some("textDocument/publishDiagnostics")
-                    && m.pointer("/params/uri").and_then(serde_json::Value::as_str)
-                        == Some(uri_a.as_str())
-            })
-            .collect();
+        let diags_a = t.published(&uri_a);
         assert!(
             !diags_a.is_empty(),
             "expected a publishDiagnostics for the program"

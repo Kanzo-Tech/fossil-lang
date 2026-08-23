@@ -12,7 +12,8 @@
 //! 4. `result.contents.kind` is `"markdown"`.
 //!
 //! Pattern mirrors Phase 1's `lsp_smoke.rs`: all frames written upfront,
-//! then stdin dropped, then stdout drained and parsed.
+//! then stdin dropped, then stdout drained and parsed. Those mechanics are
+//! `tests/common/mod.rs` now, written once for all three wire tests.
 //!
 //! # The program is written to disk, and it has to be
 //!
@@ -28,73 +29,9 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::io::{Read, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+mod common;
 
-/// The `fossil-lsp` binary this test drives — cargo's own path for it.
-///
-/// This shelled out to `cargo build` and then hard-coded
-/// `<repo>/target/debug/fossil-lsp`, which is a test that can pass against a
-/// binary it did not build: with `CARGO_TARGET_DIR` set the build lands
-/// elsewhere and that path holds whatever was left there last. Measured on
-/// 2026-08-13 — the file there was two days old. `CARGO_BIN_EXE_<name>` is set
-/// by cargo for an integration test, and cargo has already built the binary
-/// before the test runs.
-fn fossil_lsp_binary() -> &'static PathBuf {
-    static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil-lsp")))
-}
-
-fn frame(body: &str) -> String {
-    format!("Content-Length: {}\r\n\r\n{}", body.len(), body)
-}
-
-fn parse_frames(mut buf: &[u8]) -> Vec<serde_json::Value> {
-    const HEADER: &str = "Content-Length:";
-    let mut out = Vec::new();
-    while !buf.is_empty() {
-        let Some(boundary) = find_subslice(buf, b"\r\n\r\n") else {
-            break;
-        };
-        let header_block = std::str::from_utf8(&buf[..boundary]).unwrap_or("");
-        let len: usize = header_block
-            .lines()
-            .find_map(|line| {
-                let line = line.trim();
-                if line
-                    .to_ascii_lowercase()
-                    .starts_with(&HEADER.to_ascii_lowercase())
-                {
-                    line[HEADER.len()..].trim().parse::<usize>().ok()
-                } else {
-                    None
-                }
-            })
-            .expect("LSP frame missing Content-Length header");
-        let body_start = boundary + 4;
-        let body_end = body_start + len;
-        assert!(
-            body_end <= buf.len(),
-            "frame body truncated: declared {len} bytes, only {} available",
-            buf.len() - body_start,
-        );
-        let body = &buf[body_start..body_end];
-        let val: serde_json::Value =
-            serde_json::from_slice(body).expect("frame body is not valid JSON");
-        out.push(val);
-        buf = &buf[body_end..];
-    }
-    out
-}
-
-fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || hay.len() < needle.len() {
-        return None;
-    }
-    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
-}
+use common::{did_open, drive, notif, req, text_pos};
 
 /// `.fossil` source the hover smoke test opens. Line layout (0-indexed):
 ///   0: type { Person } := io.shex("hover.shex")
@@ -135,141 +72,31 @@ fn write_program() -> String {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)]
 fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
-    let bin = fossil_lsp_binary();
     let uri = write_program();
 
-    let mut child = Command::new(bin)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn fossil-lsp");
+    // Line 3, character 10 — inside the identity property's iri template.
+    let t = drive(&[
+        req(
+            1,
+            "initialize",
+            serde_json::json!({ "capabilities": {}, "processId": null, "rootUri": null }),
+        ),
+        notif("initialized", serde_json::json!({})),
+        did_open(&uri, FOSSIL_SRC),
+        req(2, "textDocument/hover", text_pos(&uri, 3, 10)),
+        req(3, "shutdown", serde_json::Value::Null),
+        notif("exit", serde_json::Value::Null),
+    ]);
 
-    // ---- Drive the protocol (write all frames upfront) ----
-    {
-        let stdin = child.stdin.as_mut().expect("child stdin");
-
-        // 1. initialize (id=1)
-        let init_req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": { "capabilities": {}, "processId": null, "rootUri": null }
-        });
-        stdin
-            .write_all(frame(&init_req.to_string()).as_bytes())
-            .expect("write initialize");
-
-        // 2. initialized
-        let init_notif = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "initialized",
-            "params": {}
-        });
-        stdin
-            .write_all(frame(&init_notif.to_string()).as_bytes())
-            .expect("write initialized");
-
-        // 3. didOpen
-        let did_open = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": uri,
-                    "languageId": "fossil",
-                    "version": 1,
-                    "text": FOSSIL_SRC,
-                }
-            }
-        });
-        stdin
-            .write_all(frame(&did_open.to_string()).as_bytes())
-            .expect("write didOpen");
-
-        // 4. textDocument/hover (id=2) — line 3, character 10 (inside iri template)
-        let hover_req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "textDocument/hover",
-            "params": {
-                "textDocument": { "uri": uri },
-                "position": { "line": 3, "character": 10 }
-            }
-        });
-        stdin
-            .write_all(frame(&hover_req.to_string()).as_bytes())
-            .expect("write hover");
-
-        // 5. shutdown (id=3)
-        let shutdown_req = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "shutdown",
-            "params": null
-        });
-        stdin
-            .write_all(frame(&shutdown_req.to_string()).as_bytes())
-            .expect("write shutdown");
-
-        // 6. exit
-        let exit_notif = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "exit",
-            "params": null
-        });
-        stdin
-            .write_all(frame(&exit_notif.to_string()).as_bytes())
-            .expect("write exit");
-
-        stdin.flush().expect("flush child stdin");
-    }
-    drop(child.stdin.take());
-
-    let mut stdout_buf = Vec::new();
-    child
-        .stdout
-        .as_mut()
-        .expect("child stdout")
-        .read_to_end(&mut stdout_buf)
-        .expect("read child stdout");
-    let mut stderr_buf = Vec::new();
-    child
-        .stderr
-        .as_mut()
-        .expect("child stderr")
-        .read_to_end(&mut stderr_buf)
-        .expect("read child stderr");
-
-    let exit_status = child.wait().expect("fossil-lsp should terminate");
     assert!(
-        exit_status.success(),
-        "fossil-lsp should exit cleanly; got {exit_status:?}\n\
-         stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&stdout_buf),
-        String::from_utf8_lossy(&stderr_buf),
-    );
-
-    let frames = parse_frames(&stdout_buf);
-    assert!(
-        !frames.is_empty(),
+        !t.frames.is_empty(),
         "expected at least one framed response on stdout; got 0 (raw bytes: {})",
-        String::from_utf8_lossy(&stdout_buf),
+        t.stdout,
     );
 
     // The hover response (id=2) MUST be a Markdown Hover.
-    let hover_response = frames
-        .iter()
-        .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(2))
-        .unwrap_or_else(|| {
-            panic!(
-                "missing hover response (id=2); frames were: {frames:#?}\n\
-                 stderr: {}",
-                String::from_utf8_lossy(&stderr_buf),
-            )
-        });
+    let hover_response = t.by_id(2);
     let contents = hover_response
         .pointer("/result/contents")
         .unwrap_or_else(|| panic!("hover response missing result.contents: {hover_response}"));
@@ -299,10 +126,7 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
     );
 
     // The initialize response: id == 1, hover_provider advertised.
-    let init_response = frames
-        .iter()
-        .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(1))
-        .expect("missing initialize response (id=1)");
+    let init_response = t.by_id(1);
     let hover_cap = init_response
         .pointer("/result/capabilities/hoverProvider")
         .expect("initialize response missing capabilities.hoverProvider");
@@ -313,10 +137,7 @@ fn lsp_hover_on_the_identity_returns_markdown_naming_a_reference() {
     );
 
     // The shutdown response: id == 3, result == null.
-    let shutdown_response = frames
-        .iter()
-        .find(|m| m.get("id").and_then(serde_json::Value::as_i64) == Some(3))
-        .expect("missing shutdown response (id=3)");
+    let shutdown_response = t.by_id(3);
     assert!(
         shutdown_response
             .get("result")
