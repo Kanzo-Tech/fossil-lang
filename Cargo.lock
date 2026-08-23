@@ -1869,9 +1869,9 @@ dependencies = [
  "clap",
  "duckdb",
  "fossil-base",
+ "fossil-df",
  "fossil-engine",
  "fossil-introspect",
- "fossil-run-status",
  "fossil-layout",
  "insta",
  "miette",
@@ -1916,13 +1916,14 @@ dependencies = [
  "fossil-hir",
  "fossil-mem-probe",
  "fossil-mir",
- "fossil-run-status",
  "fossil-shex",
  "fossil-sinks",
  "log",
  "oxrdf",
  "oxttl",
  "parquet",
+ "schemars 0.8.22",
+ "serde",
  "serde_json",
  "serde_yaml_ng",
  "slug",
@@ -1945,7 +1946,6 @@ dependencies = [
  "fossil-df",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-run-status",
  "fossil-shex",
  "getrandom 0.3.4",
  "js-sys",
@@ -1971,10 +1971,9 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-introspect",
+ "fossil-layout",
  "fossil-lineage",
  "fossil-mir",
- "fossil-run-status",
- "fossil-layout",
  "fossil-sinks",
  "fossil-syntax",
  "miette",
@@ -2048,6 +2047,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-mir",
  "fossil-syntax",
  "insta",
  "lsp-types",
@@ -2076,12 +2076,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-layout"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "duckdb",
+ "fossil-df",
+ "fossil-hir",
+ "fossil-mem-probe",
+ "parquet",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "fossil-lineage"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
  "fossil-hir",
- "fossil-run-status",
+ "schemars 0.8.22",
+ "serde",
 ]
 
 [[package]]
@@ -2097,6 +2113,7 @@ dependencies = [
  "fossil-hir",
  "fossil-ide",
  "fossil-mir",
+ "fossil-wasm",
  "lsp-server",
  "lsp-types",
  "salsa",
@@ -2149,30 +2166,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-run-status"
-version = "0.1.0"
-dependencies = [
- "schemars 0.8.22",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "fossil-layout"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "duckdb",
- "fossil-df",
- "fossil-hir",
- "fossil-mem-probe",
- "parquet",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "fossil-shex"
 version = "0.1.0"
 dependencies = [
@@ -2218,7 +2211,6 @@ dependencies = [
  "fossil-ide",
  "fossil-lineage",
  "fossil-mir",
- "fossil-run-status",
  "fossil-syntax",
  "getrandom 0.3.4",
  "js-sys",
