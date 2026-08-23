@@ -417,11 +417,21 @@ Ni teselas, ni `dense_id`, ni Morton, ni `by_source`, ni prefijos, ni footers.
 1. **El contrato es el corpus de conformidad, no el TypeScript.** Ya existe (`apps/corpus/conformance/`,
    con `chunk_size: 64` a propósito para cazar a quien clave el desplazamiento). Falta que sea el
    contrato de *esta* API y no sólo del direccionamiento.
-2. **Una segunda implementación que no comparta código con la primera.** Hoy `verify.mjs` es una
-   transcripción casi línea a línea de `address.ts`: detecta deriva, que es su trabajo, pero **una
-   idea equivocada compartida pasa las dos**. Y hay un vacío peor — **el escritor no está en el
-   lazo**: el corpus de conformidad lo generó `guards/fixture.mjs`, no `fossil run`, así que hay dos
-   *lectores* que coinciden y ningún lector comparado con el *escritor*.
+2. **Una segunda implementación que no comparta código con la primera.** ~~Hoy `verify.mjs` es una
+   transcripción casi línea a línea de `address.ts`~~ — **eso era falso al escribirlo**: los dos
+   ficheros nacieron en el mismo commit (`8d8a8fd`) 47 segundos antes de la frase, `address.ts` son
+   cuatro funciones y siete interfaces alrededor de `resolveCorpus` y `verify.mjs` es un `resolve()`
+   y cuatro ayudantes. Lo que sí comparten es `guards/manifest.mjs` y `guards/arithmetic.mjs`, y la
+   cabecera de `verify.mjs` declara esa frontera y la argumenta. **La preocupación de fondo se
+   mantiene entera**: una idea equivocada compartida pasa las dos.
+
+   Y el vacío peor —**el escritor no estaba en el lazo**: el corpus de conformidad lo generó
+   `guards/fixture.mjs`, no `fossil run`— **está cerrado** (`b3a66e8`). El lector salió a
+   `conformance/reader.mjs` y `conformance/writer.mjs` lo apunta a bytes que escribió `fossil run`,
+   con cinco roturas probadas en rojo. Falta lo que ese trabajo dejó dicho: no está en CI (construir
+   fossil no cabe en el presupuesto de `corpus.yml`), y una de las cinco **pasó en silencio al
+   principio** porque ningún manifiesto lleva el número de vértices — un corpus truncado era
+   invisible, y hubo que cerrarlo por los extremos de las aristas.
 
 Además, cinco cosas que un consumidor todavía tiene que aportar de su cosecha y que la API debe
 absorber o declarar: **qué contenedor** (fichero por tesela o row-groups — tres artefactos del árbol
@@ -430,18 +440,35 @@ teselas** (ningún manifiesto lleva el número de vértices), **las cajas** `x`/
 payload**, y **la identidad del corpus** — no hay forma de nombrar un vértice que sobreviva a un
 relayout, que es el hueco 5 del traspaso y sigue sin dueño.
 
-**Lo primero que hay que corregir es la premisa de la sección de arriba: la arista NO es una.** Son
+~~**Lo primero que hay que corregir es la premisa de la sección de arriba: la arista NO es una.** Son
 tres, y las lleva `fossil-mcp` (`→ fossil-graph`, `→ fossil-runtime`, `→ fossil-resolver`), y
 `fossil-runtime → fossil-graph` va en sentido contrario. La causa raíz es que **`fossil-runtime` son
 dos crates**: `graph_exec.rs` es el ejecutor del lado corpus, `layout.rs` + `materialize.rs` son la
-ruta de escritura del lenguaje.
+ruta de escritura del lenguaje.~~
+
+**Re-medido el 2026-08-23 con `cargo metadata`, y este párrafo describe un árbol que ya no existe.**
+Cada una de sus tres afirmaciones cayó, y las tres por commits que este documento no vio:
+
+| decía | hoy |
+|---|---|
+| tres aristas vía `fossil-mcp` | **dos**: `→ fossil-graph` y `→ fossil-resolver`. `→ fossil-runtime` murió en `1e11a91` |
+| `fossil-runtime → fossil-graph` al revés | **no existe**; se fue en `d6f957f` |
+| `fossil-runtime` son dos crates | **es uno.** `graph_exec.rs` ES `fossil-mcp/src/executor.rs` desde `d6f957f`; `materialize.rs` está borrado (`1e11a91`) |
+
+Así que **el corpus ya salió, y salió solo.** El subárbol `{graph, graph-wasm, mcp, sinks}` tiene
+exactamente una arista saliente que no es corpus (`fossil-mcp → fossil-resolver`) y una entrante
+(`fossil-df → fossil-sinks`). Lo que queda del paso 3 no es una partición: es **un renombrado y una
+reasignación de grupo**, porque el crate que sobra ya es sólo el paso de layout.
 
 **Y el árbol está mejor de lo que la conversación sugería.** `fossil-lineage`, `fossil-syntax`,
 `fossil-graph-schema`, `fossil-mir` y el corte `fossil-ide`/`fossil-lsp` están todos forzados por algo
-real y verificado. **Dos crates hacen todo el ruido:** `fossil-base` (≈1090 de 2459 líneas no son ni
-el trait ni la db — eran ≈1310 de 2686 antes de que salieran `Probe` y la prosa de los refusals) y
-`fossil-engine` (cinco verbos sin relación que sólo comparten `open_db` — no es hondo, es ancho).
-Arreglar esos dos es la mayor parte de «está todo un poco liado».
+real y verificado. **Dos crates hacen todo el ruido:** `fossil-base` (1.252 de 2.727 líneas no son ni
+el trait ni la db — y **subió**, no bajó: eran 1.198 de 2.686 el 2026-08-20) y `fossil-engine` (cinco
+verbos sin relación que sólo comparten `open_db` — no es hondo, es ancho). Arreglar esos dos es la
+mayor parte de «está todo un poco liado» — con la salvedad de que `fossil-engine` ya soltó un sexto
+verbo sin que este plan se enterase: `fbd1102` sacó la pre-introspección y las credenciales a
+**`fossil-introspect`**, un crate que no aparece en esta sección, ni en el `## El árbol` de arriba,
+ni en el diagrama de `architecture.mdx`. Son 26 crates, no 24.
 
 ### Lo que una frontera compra aquí, y quién no paga
 
@@ -475,10 +502,25 @@ compilador escribe y el corpus lee. Su encabezado dice hoy *«Two contracts, one
 
 **Lo que se resiste, y por qué:**
 
-- ~~**`fossil-runtime` no se puede partir sin sacar `Probe` de `fossil-base`**~~ — **hecho.** `Probe`
-  es `fossil-mem-probe`, una hoja sin dependencias, y ese `use` era en efecto la única arista:
-  `cargo tree -p fossil-runtime -e normal` ya no alcanza `fossil-base` por ningún camino (sólo lo ve
-  como dev-dependency, vía `fossil-hir`). El corte del corpus deja de estar bloqueado por aquí.
+- ~~**`fossil-runtime` no se puede partir sin sacar `Probe` de `fossil-base`**~~ — **hecho**, y la
+  frase que lo celebraba **era falsa tres días después de escribirse**. `Probe` es
+  `fossil-mem-probe`, una hoja sin dependencias, y sacarlo quitó el `use`. Pero esta línea decía
+  «`cargo tree -p fossil-runtime -e normal` ya no alcanza `fossil-base` por ningún camino», y
+  **lo alcanza**, a profundidad 2, desde que `c3967ca` añadió `fossil-df` (por
+  `batches_to_parquet`):
+
+  ```
+  fossil-runtime
+  └── fossil-df
+      ├── fossil-base            ← aquí
+      └── …
+  ```
+
+  Lo cierto y lo que se quería decir: **no hay un solo `use fossil_base` en
+  `crates/fossil-runtime/`**, ni una línea suya en su `Cargo.toml`. La conclusión —el corte del
+  corpus no está bloqueado por aquí— se sostiene; la medición que la respaldaba, no. La misma
+  afirmación falsa está copiada en `apps/docs/content/docs/(root)/architecture.mdx`. Es el modo de
+  fallo que este documento se reprocha a sí mismo en la línea 356, esta vez sobre sí mismo.
 - **`fossil-shex` no puede volver con los descriptores mientras exista `fossil-base →
   fossil-descriptors-input`**, que es **un solo método de trait** y cierra un ciclo. **Costado el
   2026-08-20 y NO hecho**, con la razón en `/docs/architecture`: las tres salidas son un genérico en
@@ -488,32 +530,76 @@ compilador escribe y el corpus lee. Su encabezado dice hoy *«Two contracts, one
   los tres tests se quedan donde están). Lo que lo revierte es que alguien pliegue de verdad
   `fossil-shex` dentro de `fossil-descriptors-output`: ese pliegue quita un crate, la hoja añade
   otro, y el coste pasa a ser cero el día que hay motivo para pagarlo.
-- **`fossil-base` no puede llamarse substrato** mientras tenga dentro una query `tracked`
-  (`shape_documents.rs`), la resolución de rutas `@conn` (`locator.rs`) y el catálogo `io.`
-  (`providers.rs`). **La prosa de los errores de usuario ya no está ahí**: `decline_capability` y
-  `decline_extension` son `fossil_hir::refusals`, y `crates/fossil-base/tests/substrate_has_no_prose.rs`
-  lee `providers.rs` y falla ante un literal con un espacio dentro. Con eso y con `Probe` fuera, la
-  cuenta baja de ~1310 sobre 2686 a ~1090 sobre 2459. `CLAUDE.md` prohíbe lógica de compilador ahí
-  por su nombre, y lo que queda son las otras dos.
+- **`fossil-base` retiene tres cosas, y la regla que gobierna admite una de las tres.** Esta línea
+  las metía en un solo saco —una query `tracked` (`shape_documents.rs`), la resolución `@conn`
+  (`locator.rs`) y el catálogo `io.` (`providers.rs`)— y citaba `CLAUDE.md` sin leer lo que dice.
+  Lo que dice, en la 208, es: *«Putting compiler logic in `fossil-base` — it is the trait + db
+  substrate, no business logic.»* **Lógica**, no volumen. Contra esa regla, y sólo contra esa:
+
+  | | veredicto |
+  |---|---|
+  | `providers.rs`, el catálogo | **admitido.** Son datos que un `System` sirve. Y la admisión no es prosa: `crates/fossil-base/tests/substrate_has_no_prose.rs` la escribe y la hace fallar, y ya expulsó lo que sí era lógica — `decline_capability` y `decline_extension`, que componían frases en inglés, son `fossil_hir::refusals` |
+  | `shape_documents.rs` | **no admitido.** Una query `tracked` que decodifica un documento es lógica de compilador y la regla la prohíbe por su nombre. Va a `fossil-hir`, que ya es su único llamante de producción — con una consecuencia que esta línea no veía: `test_support.rs` reexporta `shape_document`, así que **tiene que irse con ella**, y con él la feature `test-support` de ocho `Cargo.toml`. Uno de esos ocho es `fossil-syntax`, que está *por debajo* de `fossil-hir`: apuntarlo allí abre un ciclo de dev-dependency que cargo tolera pero que hace que `cargo check -p fossil-syntax --all-targets` construya el compilador entero. **Cuéstalo antes de moverlo** |
+  | `locator.rs` | ni lo uno ni lo otro: 291 líneas que no importan nada salvo `std`. No viola la regla nombrada; simplemente no es substrato. Es el único de los tres que sale sin abrir nada — una hoja, sin ciclos, cuatro crates que la usan |
+
+  **Y las cifras estaban mal en los dos términos y en el signo.** Decían «baja de ~1310 sobre 2686 a
+  ~1090 sobre 2459». Medido: los tres ocupan **1.252 de 2.727** hoy, y ocupaban 1.198 de 2.686 el
+  2026-08-20. **El crate creció.** Ninguno de los cuatro números anteriores se reconstruye desde
+  ningún subconjunto de ficheros; trátalos como prosa.
+
+  El coste real de partir `providers.rs`, que esta línea tampoco daba: son **dos** cosas con un
+  nombre, y sólo la mitad hoja (~350 de 504 líneas) puede salir — `Registry`, `Catalogue`,
+  `installed` e `install` nombran `crate::db::Db` y se quedan. Radio de explosión medido: **27
+  ficheros en 12 crates**, más dos literales de ruta en `crates/xtask/src/catalogue.rs` (`:450-451`
+  y `:552`) y una regeneración, porque `providers/generated.rs` es una de las cinco proyecciones de
+  `catalogue.bnf`.
 - **`fossil-engine` no es un crate, es un saco** — cinco verbos sin relación que sólo comparten
   `open_db`. Cada uno se va con su grupo; lo que quede es la carcasa nativa.
 - **`fossil-run-status` no va a ningún grupo: desaparece.** Sus tres contratos vuelven a quien los
   produce — `RunStatus` a `fossil-df`, `ProviderInfo` y `SourceRefInfo` a `fossil-lineage`, que hoy
   se los importa de vuelta a sí mismo. Ninguno se convierte en método del LSP: `run` no es una
   operación de editor, `providers` es una constante y `refs` se llama una vez por lanzamiento.
-- **`fossil-lsp` y `fossil-wasm/src/lsp_worker.rs` son el mismo servidor dos veces** — ~600 líneas
-  cada uno, doce handlers, cuatro derivas probadas bajo un docblock que se declara «the 1:1 model».
-  Uno de los dos deja de existir, o la afirmación sale del comentario.
+- **`fossil-lsp` y `fossil-wasm/src/lsp_worker.rs` son el mismo servidor dos veces** — 838 y 619
+  líneas (no «~600 cada uno»), doce handlers, cuatro derivas probadas bajo un docblock que se declara
+  «the 1:1 model». Uno de los dos deja de existir, o la afirmación sale del comentario.
+
+  **Y la factura llegó mientras esto seguía sin hacerse.** `353228c` puso una guarda en
+  `fossil-wasm` para que un `.shex` abierto no se analizase como programa fossil; `fossil-lsp` tenía
+  el defecto idéntico y hubo que arreglarlo **por segundo lugar, un día después** (`470a13b`, 21
+  diagnósticos → 0 sobre el cable, el mismo histograma mensaje a mensaje). Antes de eso, ninguno de
+  los dos ruteaba `d.labels` y también se arregló dos veces. Ese es el coste medido de la
+  duplicación, no una hipótesis.
 
 ### El orden
 
-1. **Los defectos vivos.** No es reorganización, pero ensucian cualquier medición posterior:
+1. ~~**Los defectos vivos.**~~ **Los siete están cerrados, y esta lista nunca fue cierta.** Eran
    `registry_key` a mano, `@rename` ignorado por cuatro de cinco, el `RunStatus` que anuncia un
    fichero borrado, `quantize` en f32 contra f64, la llamada viva a `classification()`, el módulo de
-   direccionamiento inimportable, y `apps/corpus` sin correr en CI.
-2. **Limpiar `fossil-base` y vaciar `fossil-engine`.** Son los dos que hacen todo el ruido, y hasta
-   que no se muevan, nada del lado corpus puede salir.
-3. **Sacar el corpus.** `graph_exec` y `layout` fuera de `fossil-runtime`; `fossil-mcp` con ellos.
+   direccionamiento inimportable, y `apps/corpus` sin correr en CI. `ac2a742` cerró cinco y `8d8a8fd`
+   los otros dos — y `cfbe282`, el commit que **escribió estas cuatro líneas**, aterrizó **47
+   segundos después**. `git blame` pone las siete en `cfbe282` y los dos arreglos son ancestros
+   suyos. No es una lista que caducó: es el to-do de aquella sesión, ejecutado en la misma sentada y
+   transcrito aquí sin tocar, de modo que **ya era falsa el día que se escribió**. Eso es un fallo
+   distinto y peor que la deriva, y la lección es la única que sale gratis: *un plan no se actualiza
+   copiando el to-do de la sesión que acaba de cerrarlo.*
+
+   Sobrevive un residuo, y sólo por una dirección que nadie miraba: `quantize` estaba cerrado del
+   lado JS y **el escritor no ejecutaba la tabla que publica** — `apps/corpus/guards/vectors.json`
+   lleva la fila 147/0/167 justamente para separar binary32 de binary64, y ningún Rust la leía.
+   Cerrado en `dd47c3b`. Y un portón que esta lista no nombraba estaba rojo: `cargo deny check bans`
+   (`28ead50`).
+2. **Limpiar `fossil-base` y vaciar `fossil-engine`.** Son los dos que hacen todo el ruido —
+   ~~y hasta que no se muevan, nada del lado corpus puede salir~~. **Esa condición es falsa**: el
+   corpus salió primero, sin tocar `fossil-base` en absoluto. El paso 3 nunca dependió de éste, y
+   creerlo es lo que mantuvo el paso 3 sin hacer mientras ya estaba casi hecho.
+3. **Sacar el corpus.** ~~`graph_exec` y `layout` fuera de `fossil-runtime`; `fossil-mcp` con
+   ellos.~~ **Hecho al ~70% y por otras manos**: `graph_exec` es `fossil-mcp/src/executor.rs`
+   (`d6f957f`) y `materialize.rs` está borrado (`1e11a91`). Lo que queda es renombrar el crate que
+   sobra —es sólo el paso de layout, compila a wasm32 y no enlaza motor— y reasignarlo al grupo
+   corpus. **No** sacar `batches_to_parquet` con él: es la única línea que toma de `fossil-df`
+   (`layout.rs:201`), llevarla a `fossil-sinks` metería `arrow` y `parquet` en el bundle de
+   navegador de `fossil-graph-wasm`, que hoy no tiene ninguno de los dos, y una hoja nueva cuesta un
+   crate. Se deja la arista y se paga el día que haya un segundo motivo.
 4. **La API de referencia**, encima del direccionamiento que ya existe, con el corpus de conformidad
    como contrato y una segunda implementación que no comparta código.
 5. **Las superficies de host**: disolver `fossil-run-status`, colapsar el LSP duplicado.
