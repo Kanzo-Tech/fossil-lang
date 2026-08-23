@@ -11,12 +11,12 @@
 //!   characters `.` and `:`), `document_symbol_provider`, `code_action_provider`,
 //!   and `semantic_tokens_provider` (full-document, legend from
 //!   [`fossil_ide::semantic_legend`]).
-//! - `textDocument/didOpen` → records `(uri, SourceFile)` and publishes the
-//!   real `parse → def_map → typecheck` diagnostics.
+//! - `textDocument/didOpen` → records `(uri, SourceFile)` and publishes
+//!   [`fossil_ide::lsp_diagnostics`].
 //! - `textDocument/didChange` → mutates the SAME `SourceFile` via the Salsa
 //!   `Setter` (`set_text`), which BUMPS THE REVISION — the real cancellation
-//!   trigger (NOT a fictional `db.cancel_pending()`) — then republishes
-//!   diagnostics.
+//!   trigger (NOT a fictional `db.cancel_pending()`) — then republishes.
+//! - `textDocument/didClose` → forgets the buffer and publishes an empty list.
 //! - `textDocument/hover` → [`fossil_ide::hover_bidirectional`] (the
 //!   target-side `ShEx` type is reachable whenever the program names its output
 //!   document — the editor supplies a filesystem, not a contract).
@@ -30,6 +30,33 @@
 //! The transport is `lsp-server`, NOT `tower-lsp`, and CLAUDE.md "Hard Rules"
 //! (`fossil-lsp` is native-only). The dispatch loop pattern is derived from
 //! `rust-analyzer/lsp-server/examples/goto_def.rs`.
+//!
+//! # The other transport
+//!
+//! `fossil-wasm`'s `lsp_worker` serves the same LSP over `postMessage` to a Web
+//! Worker. Its module docs used to call the handlers here «the 1:1 model; the
+//! only difference is the wire channel», and that was not so — the two dropped
+//! `d.labels` separately, got the shape-document guard a day apart, and
+//! published diagnostics in two different JSON shapes.
+//!
+//! Neither can be deleted: two transports (stdio versus `postMessage`), two
+//! hosts (a filesystem versus buffers only), two `#[salsa::db]` structs. What
+//! IS one thing is the ANSWERS, and they are `fossil-ide` free functions that
+//! both call. `crates/fossil-lsp/tests/transport_parity.rs` drives both with the
+//! same buffers and compares the JSON, and holds the whole list of ways they are
+//! still allowed to differ. Three things remain outside it, and all three are
+//! about the HOST rather than the wire:
+//!
+//! - **The filesystem.** This server reads an unopened shape document off disk
+//!   ([`LspState::register_named_documents`]); the worker has no disk, so there
+//!   the only copy of a document is a buffer somebody opened.
+//! - **Introspected descriptors.** The worker answers
+//!   `fossil/registerInferredDescriptor`, because the browser has to push in
+//!   what a `DESCRIBE` found. [`LspSystem`] has no descriptor table at all, so
+//!   every diagnostic that needs a source column's type is absent here. That is
+//!   a capability gap, not a translation difference.
+//! - **`fossil/checkAll`.** A workspace-wide drain for a playground panel. An
+//!   editor already receives one `publishDiagnostics` per file.
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
@@ -43,14 +70,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_base::{
-    Catalogue, Diagnostic, Files, FsError, Provider, Severity, SourceFile, Span, System,
-    register_file,
-};
-use fossil_ide::{LineIndex, Utf16Position};
+use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System, register_file};
 use lsp_server::{Connection, ErrorCode, ExtractError, Message, Notification, Request, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidOpenTextDocument, Notification as _, PublishDiagnostics,
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
+    PublishDiagnostics,
 };
 use lsp_types::request::{
     CodeActionRequest, Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest,
@@ -58,9 +82,8 @@ use lsp_types::request::{
 };
 use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, Diagnostic as LspDiagnostic,
-    DiagnosticRelatedInformation, DiagnosticSeverity, DocumentSymbolResponse,
-    GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability, Location, MarkupContent,
-    MarkupKind, OneOf, Position, PublishDiagnosticsParams, Range, SemanticTokens,
+    DocumentSymbolResponse, GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability,
+    Location, MarkupContent, MarkupKind, OneOf, PublishDiagnosticsParams, Range, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, Uri, WorkDoneProgressOptions,
@@ -254,6 +277,24 @@ impl LspState {
     /// a feature before sending `didOpen`.
     fn get(&self, uri: &Uri) -> Option<SourceFile> {
         self.files.get(uri.as_str()).copied()
+    }
+
+    /// Forget a closed buffer.
+    ///
+    /// **This did not exist, and the worker had it from the day it was
+    /// written.** A file the user closed stayed in this table forever: still in
+    /// [`Self::open_files`], which IS the workspace goto-def and completion
+    /// resolve against, so a name from a closed buffer kept resolving; and still
+    /// carrying whatever diagnostics were last published for it, with no
+    /// notification to clear them.
+    ///
+    /// It does NOT deregister the file from `fossil_base`'s registry, and that
+    /// is the same choice the worker makes. Closing the `.shex` a program names
+    /// must not silently re-check the program against nothing — the last text
+    /// the user had is a better answer than no contract at all, and the
+    /// registry is the only place holding it.
+    fn close(&mut self, uri: &Uri) {
+        self.files.remove(uri.as_str());
     }
 
     /// The open-file set as a slice — the cross-file workspace for goto-def /
@@ -536,9 +577,11 @@ fn handle_code_action(
         return send_null_response(connection, req_id);
     };
     // The wire `CodeActionParams.context.diagnostics` are stripped of our
-    // structured carriers; re-drain the Salsa accumulator to recover the
-    // full `Diagnostic`s (with `did_you_mean` / `suggestion_source`).
-    let diagnostics = diagnostics_for(&state.db, file);
+    // structured carriers; re-drain to recover the full `Diagnostic`s (with
+    // `did_you_mean` / `suggestion_source`). The SAME drain the publish path
+    // uses, so a shape document offers no quick-fixes either — see
+    // `fossil_ide::diagnostics`.
+    let diagnostics = fossil_ide::diagnostics(&state.db, file);
     let actions = fossil_ide::code_actions(&state.db, file, params.range, &diagnostics);
     let payload: Vec<lsp_types::CodeActionOrCommand> = actions
         .into_iter()
@@ -658,86 +701,53 @@ fn handle_notification(
                 publish_diagnostics(connection, &state.db, &uri, file)?;
             }
         }
+        DidCloseTextDocument::METHOD => {
+            let params = cast_notif::<DidCloseTextDocument>(notif)?;
+            let uri = params.text_document.uri;
+            tracing::debug!("didClose: {}", uri.as_str());
+            state.close(&uri);
+            // The spec's way of saying «nothing here any more». Without it the
+            // squiggles from the last `didChange` stay on a file nobody has
+            // open, and there is no longer anything to drain them from.
+            publish(connection, &uri, Vec::new())?;
+        }
         m => tracing::debug!("ignoring notification: {m}"),
     }
     Ok(())
 }
 
-/// Every diagnostic `file` produces, from the one implementation of that
-/// question — [`fossil_mir::program_diagnostics`], which `fossil-engine` and
-/// `fossil-wasm` also call.
+/// Publish `textDocument/publishDiagnostics` for `file`.
 ///
-/// **This used to be a per-mapping loop of its own**, byte-identical to
-/// `fossil-wasm`'s and three drains short of `fossil check`'s. What the editor
-/// did not show, for as long as that was true: a file the parser recovered no
-/// mapping from published NO diagnostics at all (the parse errors were present
-/// and unreachable), a top-level binding's provider errors vanished, two
-/// mappings minting two identities for one type was never checked, and one
-/// top-level mistake was published once per mapping.
+/// The payload is [`fossil_ide::lsp_diagnostics`] and nothing else — the drain,
+/// the `claimed` guard that keeps a shape document from being checked as a
+/// program, and the whole LSP rendering are one function shared with the browser
+/// worker.
 ///
-/// # A file the catalogue reads is not drained as a program
-///
-/// Opening the `.shex` a program names is the ordinary way to look at your own
-/// output contract, and until the guard below existed doing it ran the fossil
-/// parser over the document and attributed every complaint to it —
-/// **twenty-one diagnostics** measured over the wire for the `ShExJ` document of
-/// `tests/documents_are_not_programs.rs`: `unexpected token` eleven times,
-/// `expected IDENT, found STRING` eight, `expected IDENT, found INDENT` once,
-/// and `expected DEFINE, found DEDENT` at the closing brace, for a file with
-/// nothing wrong with it. In VS Code that is squiggles down the length of the
-/// user's `ShEx`. It is the same defect `353228c` fixed in `fossil-wasm`, whose
-/// commit message named this function as the one still carrying it.
-///
-/// The question «which open files are programs» is the provider catalogue's:
-/// a row declares the extensions it accepts, [`fossil_base::claimed`] asks all
-/// of them at once, and a URI some row READS is an input to a program rather
-/// than a program. [`LspSystem::providers`] returns
-/// `fossil_descriptors_output::PROVIDERS`, so nothing about fossil's syntax is
-/// decided here. The `path` a buffer is opened under in this host is the whole
-/// `file://…` URI ([`handle_notification`]); `Provider::accepts` reads the
-/// extension off the last path segment, so a URI answers exactly as a path
-/// does.
-///
-/// Three things this deliberately does not do.
-///
-/// It does not consult a **program** extension. `.fossil` is a convention, a URI
-/// with no extension is claimed by nobody, and the default is to check — so an
-/// unrecognised file falls back to the old behaviour and never to silence.
-///
-/// It does not deregister the document. `LspState::open` puts an opened `.shex`
-/// in the file registry under its own URI precisely so the OPEN COPY is what
-/// every program naming it reads, and that is untouched: the buffer is still
-/// decoded, so a program is still checked against the document it names and a
-/// broken `ShEx` is still reported *on the program*. What has no home is a
-/// document nobody names — nothing checks it, because there is nothing to check
-/// it against.
-///
-/// And it does not stop at diagnostics. [`handle_code_action`] is the other
-/// caller, so no quick-fix is offered inside a shape document either. That is
-/// right and not a side effect: every action `fossil_ide::code_actions` can
-/// build is keyed off a fossil diagnostic and edits fossil source, so inside a
-/// `.shex` it would be a lightbulb rewriting the user's `ShEx` into fossil.
-fn diagnostics_for(db: &LspDb, file: SourceFile) -> Vec<Diagnostic> {
-    if fossil_base::claimed(fossil_base::installed(db), file.path(db)) {
-        return Vec::new();
-    }
-    fossil_mir::program_diagnostics(db, file)
-}
-
-/// Publish `textDocument/publishDiagnostics` for `file`: drain the accumulator
-/// and convert each `fossil_base::Diagnostic` to an `lsp_types::Diagnostic`
-/// with a UTF-16 range (`LineIndex`).
+/// **All three of those lived here**, in a twin of `fossil-wasm`'s, and each was
+/// got wrong independently on one side or the other: `d.labels` dropped on the
+/// floor by both, the `claimed` guard added to the two a day apart, and the
+/// worker publishing `related` where LSP says `relatedInformation`.
+/// `crates/fossil-ide/src/diagnostics.rs` records which and when, and
+/// `tests/transport_parity.rs` is what notices next time.
 fn publish_diagnostics(
     connection: &Connection,
     db: &LspDb,
     uri: &Uri,
     file: SourceFile,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
-    let index = fossil_ide::line_index(db, file);
-    let diagnostics: Vec<LspDiagnostic> = diagnostics_for(db, file)
-        .iter()
-        .map(|d| to_lsp_diagnostic(db, file, &index, d))
-        .collect();
+    publish(connection, uri, fossil_ide::lsp_diagnostics(db, file))
+}
+
+/// Send one `textDocument/publishDiagnostics` notification.
+///
+/// Separate from [`publish_diagnostics`] because `didClose` publishes an EMPTY
+/// list for a buffer that is no longer open, and there is nothing left to drain
+/// it from.
+fn publish(
+    connection: &Connection,
+    uri: &Uri,
+    diagnostics: Vec<LspDiagnostic>,
+) -> Result<(), Box<dyn Error + Sync + Send>> {
     let params = PublishDiagnosticsParams {
         uri: uri.clone(),
         diagnostics,
@@ -751,107 +761,10 @@ fn publish_diagnostics(
     Ok(())
 }
 
-/// Convert one `fossil_base::Diagnostic` to an `lsp_types::Diagnostic`. The
-/// byte span is converted to a UTF-16 range; the `suggestion_source` (when
-/// present) is folded into the message as a help line (the structured carriers
-/// are recovered for code actions by re-draining the accumulator).
-///
-/// # The labels reach the editor now, and none of them did
-///
-/// `d.labels` was dropped on the floor here, so a report whose whole content is
-/// a RELATION between two places — «`Users` and `Imported` mint two identities
-/// for Person», which names both mappings and underlines both `@subject` lines
-/// — arrived as one squiggle with no second half. `fossil check` rendered it in
-/// full throughout, which is why nothing caught it.
-///
-/// `relatedInformation` is the LSP's word for exactly this, and it takes a URI
-/// per entry — so a label pointing into the `.shex` the program named lands on
-/// THAT file, which is what makes the two-file report an editor feature and not
-/// a terminal one. `fossil_ide::related_locations` answers which file each
-/// label is in; this turns the answer into LSP.
-fn to_lsp_diagnostic(
-    db: &LspDb,
-    file: SourceFile,
-    index: &LineIndex,
-    d: &Diagnostic,
-) -> LspDiagnostic {
-    let range = span_to_lsp_range(index, d.span);
-    let message = d.suggestion_source.as_ref().map_or_else(
-        || d.message.clone(),
-        |s| format!("{}\nhelp: {s}", d.message),
-    );
-    let related: Vec<DiagnosticRelatedInformation> = fossil_ide::related_locations(db, file, d)
-        .into_iter()
-        .filter_map(|r| {
-            // A `LineIndex` per file and not the program's: a UTF-16 column
-            // is a fact about the text the range is in, and reusing the
-            // program's index over a document's bytes puts the entry on a
-            // plausible wrong line. `line_index` is memoised per file, so the
-            // program's own labels cost nothing extra.
-            let index = fossil_ide::line_index(db, r.file);
-            Some(DiagnosticRelatedInformation {
-                location: Location {
-                    uri: path_to_uri(r.file.path(db))?,
-                    range: span_to_lsp_range(&index, r.span),
-                },
-                message: r.text,
-            })
-        })
-        .collect();
-    LspDiagnostic {
-        range,
-        severity: Some(severity_to_lsp(d.severity)),
-        message,
-        related_information: (!related.is_empty()).then_some(related),
-        ..LspDiagnostic::default()
-    }
-}
-
-/// A registry key as a `file://` URI.
-///
-/// Goes through [`local_path`] rather than testing the prefix again: that is
-/// the function that already knows which keys this host can answer for, and a
-/// second reading of the same question is how the editor's `registry_key` came
-/// to disagree with the checker's. `None` for a key no filesystem can answer —
-/// another scheme, an unopened remote buffer — and a related entry that cannot
-/// be located is dropped rather than pointed somewhere.
-fn path_to_uri(key: &str) -> Option<Uri> {
-    use std::str::FromStr as _;
-    let path = local_path(key)?;
-    Uri::from_str(&format!("file://{}", path.display())).ok()
-}
-
-const fn severity_to_lsp(s: Severity) -> DiagnosticSeverity {
-    match s {
-        Severity::Error => DiagnosticSeverity::ERROR,
-        Severity::Warning => DiagnosticSeverity::WARNING,
-        Severity::Info => DiagnosticSeverity::INFORMATION,
-    }
-}
-
 /// Translate a byte-offset range (from a `fossil-ide` feature) to a UTF-16 LSP
-/// `Range` via `LineIndex` (it replaced an ASCII-only walk).
+/// `Range`, resolving the file's memoised `LineIndex` first.
 fn byte_range_to_lsp_range(db: &LspDb, file: SourceFile, range: std::ops::Range<u32>) -> Range {
-    let index = fossil_ide::line_index(db, file);
-    Range {
-        start: utf16_to_position(fossil_ide::offset_to_lsp_position(&index, range.start)),
-        end: utf16_to_position(fossil_ide::offset_to_lsp_position(&index, range.end)),
-    }
-}
-
-/// Translate a `fossil_base::Span` to a UTF-16 LSP `Range`.
-fn span_to_lsp_range(index: &LineIndex, span: Span) -> Range {
-    Range {
-        start: utf16_to_position(fossil_ide::offset_to_lsp_position(index, span.start)),
-        end: utf16_to_position(fossil_ide::offset_to_lsp_position(index, span.end)),
-    }
-}
-
-const fn utf16_to_position(p: Utf16Position) -> Position {
-    Position {
-        line: p.line,
-        character: p.character,
-    }
+    fossil_ide::byte_range_to_range(&fossil_ide::line_index(db, file), range)
 }
 
 /// Thin wrapper around [`Notification::extract`] — typed by `N`'s associated

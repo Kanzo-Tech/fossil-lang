@@ -1,9 +1,8 @@
 //! `fossil-ide` — hover, completion, goto-def, code actions for IDE features.
 //!
-//! [`Analysis::diagnostics`] is still a stub returning an empty `Vec`. The
-//! crate exists so both `fossil-lsp` (the native server) and `fossil-wasm` (the
-//! browser playground) can `use fossil_ide::Analysis;` without a churn commit
-//! when feature work lands.
+//! The crate exists so both editor hosts — `fossil-lsp` (the native server) and
+//! `fossil-wasm` (the browser worker) — answer a question once. Each is a
+//! transport with a host attached; neither owns an answer.
 //!
 //! The hover bridge:
 //!
@@ -52,6 +51,7 @@
 
 pub mod code_action;
 pub mod completion;
+pub mod diagnostics;
 pub mod goto_def;
 pub mod hover;
 pub mod line_index;
@@ -65,6 +65,9 @@ pub mod workspace;
 
 pub use code_action::code_actions;
 pub use completion::completions;
+pub use diagnostics::{
+    byte_range_to_range, diagnostics, file_uri, lsp_diagnostic, lsp_diagnostics, span_to_range,
+};
 pub use goto_def::{NavigationTarget, goto_definition};
 pub use hover::{HoverInfo, hover, hover_bidirectional};
 pub use line_index::{LineIndex, Utf16Position};
@@ -83,47 +86,10 @@ pub use shape_documents::register_missing_documents;
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;
 
-/// IDE analysis entry point.
-///
-/// [`Self::diagnostics`] is the only method. `hover`, `completions`,
-/// `goto_definition`, `code_actions`, `semantic_tokens` and `document_symbols`
-/// are free functions rather than methods, because the Salsa db is passed in
-/// directly — the rust-analyzer pattern.
-#[derive(Debug, Default)]
-pub struct Analysis;
-
-impl Analysis {
-    /// A stub: returns an empty diagnostics vector.
-    ///
-    /// What it owes is the drain of the Salsa `Diagnostic` accumulator after
-    /// running `parse → def_map → typecheck` over `file`. `fossil-lsp` does
-    /// that drain itself today, in its own `diagnostics_for`.
-    #[must_use]
-    pub fn diagnostics(
-        _db: &dyn fossil_base::Db,
-        _file: fossil_base::SourceFile,
-    ) -> Vec<fossil_base::Diagnostic> {
-        Vec::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn diagnostics_stub_is_empty() {
-        use std::sync::Arc;
-        let system: Arc<dyn fossil_base::System> =
-            Arc::new(fossil_base::test_support::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file = fossil_base::SourceFile::new(
-            &db,
-            "prefix ex: <a>".to_string(),
-            "test.fossil".to_string(),
-        );
-        let diags = Analysis::diagnostics(&db, file);
-        assert!(diags.is_empty());
-    }
-}
+// `Analysis` lived here: a zero-field struct whose one associated function
+// returned an empty `Vec` and whose docblock said «what it owes is the drain of
+// the Salsa `Diagnostic` accumulator … `fossil-lsp` does that drain itself
+// today». It owed it for as long as both hosts did it themselves, and the
+// [`diagnostics`] module is that debt paid. A namespace over one free function
+// would be the rust-analyzer shape without the reason for it — the db is passed
+// in directly here, so everything else in this crate is already a free function.

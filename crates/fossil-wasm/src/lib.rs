@@ -55,8 +55,9 @@ pub use crate::tokenize::{TokenRow, tokenize_native};
 
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Diagnostic, Files, Severity, SourceFile, Span, System};
-use fossil_ide::{LineIndex, Utf16Position};
+use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
+use fossil_ide::LineIndex;
+use lsp_types::{DiagnosticSeverity, Range};
 use wasm_bindgen::prelude::*;
 
 use crate::wasm_system::WasmSystem;
@@ -214,21 +215,22 @@ impl FossilPlayground {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Run `parse → def_map → typecheck_mapping` across every open **program**
-    /// and return a flat JS array of `{ uri, range, severity, message }` rows
-    /// keyed by file URI. The LSP Worker republishes these grouped
-    /// by URI as `textDocument/publishDiagnostics` notifications.
+    /// Every open **program**'s diagnostics as a flat JS array of
+    /// `{ uri, range, severity, message }` rows keyed by file URI — the
+    /// playground's panel view. It is NOT what the LSP Worker publishes; see
+    /// [`CheckRow`], and `lsp_worker::publish_diagnostics` for the wire.
     ///
     /// A buffer the installed provider catalogue claims — the `.shex` the
     /// playground had to open to give the compiler a document, a `.csv`, a
-    /// `.parquet` — is an INPUT and is not parsed as fossil, and
-    /// `diagnostics_for_file` in this file is where that is said and measured.
+    /// `.parquet` — is an INPUT and is not parsed as fossil.
+    /// [`fossil_ide::diagnostics()`] is where that is said and measured, for both
+    /// hosts.
     ///
     /// `range` is the UTF-16 LSP range (via `fossil_ide::LineIndex` — the
-    /// rust-analyzer model). `severity` is the LSP integer
-    /// constant (1 = error, 2 = warning, 3 = info). `message` carries any
-    /// `suggestion_source` as a `\nhelp: ...` suffix, mirroring
-    /// `fossil-lsp`'s `to_lsp_diagnostic`.
+    /// rust-analyzer model). `severity` is the LSP integer constant
+    /// (1 = error, 2 = warning, 3 = info). `message` carries any
+    /// `suggestion_source` as a `\nhelp: ...` suffix. All three come from
+    /// [`fossil_ide::lsp_diagnostic`], the rendering an editor is shown.
     ///
     /// # Errors
     ///
@@ -367,7 +369,7 @@ impl FossilPlayground {
         for (h, file) in self.files.iter() {
             let uri = self.files.path_for(h, &self.db).unwrap_or_default();
             let index = fossil_ide::line_index(&self.db, file);
-            for d in diagnostics_for_file(&self.db, file) {
+            for d in fossil_ide::diagnostics(&self.db, file) {
                 all.push(to_check_row(&self.db, file, &uri, &index, &d));
             }
         }
@@ -383,7 +385,7 @@ impl FossilPlayground {
         let uri = self.files.path_for(handle, &self.db).unwrap_or_default();
         let index = fossil_ide::line_index(&self.db, file);
         Some(
-            diagnostics_for_file(&self.db, file)
+            fossil_ide::diagnostics(&self.db, file)
                 .into_iter()
                 .map(|d| to_check_row(&self.db, file, &uri, &index, &d))
                 .collect(),
@@ -507,7 +509,7 @@ impl FossilPlayground {
     /// `textDocument/codeAction` to re-derive the carriers the wire form
     /// drops — mirrors fossil-lsp's `diagnostics_for`.
     pub(crate) fn drain_diagnostics_for_file(&self, file: SourceFile) -> Vec<Diagnostic> {
-        diagnostics_for_file(&self.db, file)
+        fossil_ide::diagnostics(&self.db, file)
     }
 
     // ----- Inferred-descriptor registration -----
@@ -629,27 +631,40 @@ pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
 
 /// One diagnostic row in the [`FossilPlayground::check`] return array.
 ///
-/// Mirrors the LSP `Diagnostic` shape exactly so the LSP Worker can
-/// republish each row as-is inside a `PublishDiagnosticsParams` payload
-/// without a second translation step. UTF-16 ranges; integer LSP severities.
+/// The playground's own shape, and **not the LSP wire's** — the LSP Worker
+/// publishes `lsp_types::Diagnostic` (`lsp_worker::publish_diagnostics`), which
+/// is the mistake this type's docblock used to make: it said it «mirrors the LSP
+/// `Diagnostic` shape exactly so the LSP Worker can republish each row as-is»,
+/// and the worker did, so an extra `uri` and a `related` spelled nothing like
+/// `relatedInformation` went out on the wire.
 ///
-/// Pub-visible for the native cargo-test path (`check_rows`,
-/// `diagnostics_for_rows`).
+/// What it is for is `check()`: one flat array across every open file, which
+/// needs a `uri` per row precisely because it is not per-file. The rows are
+/// keyed by the path the HOST opened the buffer under, which in the browser is
+/// often a bare name and not a URI — see [`Self::related`].
+///
+/// Everything but those keys is projected from the shared rendering, so the
+/// message, the severity and the ranges here cannot disagree with what an editor
+/// is shown.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CheckRow {
     pub uri: String,
-    pub range: CheckRange,
-    pub severity: u8,
+    pub range: Range,
+    pub severity: DiagnosticSeverity,
     pub message: String,
     /// The other places this one diagnostic points at — LSP's
-    /// `relatedInformation`, which is the concept for a report whose content is
-    /// a RELATION between two places.
+    /// `relatedInformation`, in this array's own shape.
     ///
     /// Empty for nearly every diagnostic. Non-empty when the mistake needs a
     /// second underline: two mappings minting two identities for one type, the
     /// binding a row came from, and the line of the `.shex` a violated
     /// constraint is declared on — which is in ANOTHER FILE, and is why each
-    /// entry carries its own `uri`.
+    /// entry carries its own key.
+    ///
+    /// `uri` here is the registry key verbatim, matching [`Self::uri`], and NOT
+    /// put through `fossil_ide::file_uri`: a caller filtering this array by the
+    /// path it opened a file under has to find the same string in both fields.
+    /// The LSP wire does convert, because LSP will not accept anything else.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<CheckRelated>,
 }
@@ -658,99 +673,16 @@ pub struct CheckRow {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CheckRelated {
     pub uri: String,
-    pub range: CheckRange,
+    pub range: Range,
     pub message: String,
 }
 
-/// LSP-shaped range (zero-based line + UTF-16 column).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct CheckRange {
-    pub start: CheckPosition,
-    pub end: CheckPosition,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct CheckPosition {
-    pub line: u32,
-    pub character: u32,
-}
-
-/// Every diagnostic `file` produces, from the one implementation of that
-/// question — [`fossil_mir::program_diagnostics`], which `fossil-engine` and
-/// `fossil-lsp` also call.
+/// Project one diagnostic onto the JS-side row shape.
 ///
-/// **This used to be a per-mapping loop of its own**, byte-identical to
-/// `fossil-lsp`'s and three drains short of `fossil check`'s. What the browser
-/// did not show, for as long as that was true: a file the parser recovered no
-/// mapping from produced NO rows at all (the parse errors were present and
-/// unreachable), a top-level binding's provider errors vanished, two mappings
-/// minting two identities for one type was never checked, and one top-level
-/// mistake was reported once per mapping.
-///
-/// # A file the catalogue reads is not drained as a program
-///
-/// [`FossilPlayground::check_rows`] loops over the whole workspace and calls
-/// this for each handle, and in the playground the only way to hand the
-/// compiler a shape document is to open it. So this used to parse `person.shex`
-/// as fossil and attribute its errors to it — **twenty-one rows** for the
-/// `ShExJ` document of `tests/shape_document.rs`: `unexpected token` eleven
-/// times, `expected IDENT, found STRING` eight, `expected IDENT, found INDENT`
-/// once and `expected DEFINE, found DEDENT` at the closing brace, for a file
-/// that is not wrong. In an editor that is squiggles down the length of the
-/// user's `ShEx`. The `ShExC` document in the same file measured fourteen, and
-/// **three of those claimed an internal compiler error** (`mapping has no HIR
-/// at its DefMap index`).
-///
-/// It was invisible while the browser's drain was the per-mapping loop, because
-/// a `.shex` produces no mappings. Reading the file-level accumulators, which
-/// is where `parse` lives, is what surfaced it.
-///
-/// **That ICE was a real defect and it is fixed** (`fossil-hir`'s
-/// `HirFile::mappings`). The guess that stood here — «a shape declaration
-/// parses far enough to look like a mapping header and then has no HIR» — had
-/// the first half right and the second half backwards. `def_map` and
-/// `lower_to_hir` walk the same CST and both number mappings densely, but
-/// `lower_to_hir`'s vector was FILTERED, so a header it declined renumbered
-/// every mapping after it. The ICE fired on the LAST mappings of the file,
-/// never on the one that was wrong, and on a file with a broken mapping and a
-/// healthy one the healthy one was lowered against the wrong header in
-/// silence. Reduced, it is four bytes: `a:b` is a mapping header the parser
-/// recovers and the lowering then declines for having no `from`. Three of this
-/// document's lines recover that way, which is where the three came from. The
-/// same fixture measures **sixteen rows and no ICE** now — two more because the
-/// body under a declined header is checked at last.
-///
-/// **The notion of «which open files are programs» was already in the tree**,
-/// and the note that stood here saying it was not is what took the longest to
-/// disprove. It is the provider catalogue: a row declares the extensions it
-/// accepts, [`fossil_base::claimed`] asks all of them, and a URI some row reads
-/// is an INPUT to a program rather than a program. The host installs
-/// `fossil_descriptors_output::PROVIDERS` (`wasm_system.rs`), so `.shex` /
-/// `.shexj` / `.shexc` / `.ttl` / `.shacl` are claimed alongside `.csv` /
-/// `.json` / `.parquet`, and nothing about fossil's syntax is decided here —
-/// the question is «does something read this», and only the catalogue answers
-/// it.
-///
-/// Two things this deliberately does not do. It does not consult a **program**
-/// extension: `.fossil` is a convention, a URI with no extension is claimed by
-/// nobody, and the default is to check, so the failure mode is the old
-/// behaviour rather than silence. And it does not deregister the document — the
-/// buffer is still the text the checker decodes, so a broken `ShEx` is still
-/// reported, on the program that names it and with a label pointing into the
-/// document (`tests/shape_document.rs`). What has no home is a document nobody
-/// names: it is not checked, because there is nothing to check it against.
-fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
-    if fossil_base::claimed(fossil_base::installed(db), file.path(db)) {
-        return Vec::new();
-    }
-    fossil_mir::program_diagnostics(db, file)
-}
-
-/// Convert one `fossil_base::Diagnostic` to the JS-side row shape. UTF-16
-/// range conversion via [`fossil_ide::LineIndex`]; `suggestion_source` folded
-/// into the message as a `help:` suffix (mirroring `fossil-lsp::
-/// to_lsp_diagnostic` — keep the structured carriers reachable by
-/// re-draining the accumulator on the consumer side).
+/// The range, the severity and the `help:`-suffixed message come from
+/// [`fossil_ide::lsp_diagnostic`] — the same rendering both LSP transports
+/// publish — so this cannot drift from what an editor shows. Only the two keys
+/// are this array's own; [`CheckRow::related`] says why.
 fn to_check_row(
     db: &WasmDb,
     file: SourceFile,
@@ -758,60 +690,32 @@ fn to_check_row(
     index: &LineIndex,
     d: &Diagnostic,
 ) -> CheckRow {
-    let range = span_to_range(index, d.span);
-    let message = d.suggestion_source.as_ref().map_or_else(
-        || d.message.clone(),
-        |s| format!("{}\nhelp: {s}", d.message),
-    );
-    // **The labels reach the browser now, and none of them did.** This dropped
-    // `d.labels` exactly as `fossil-lsp`'s twin did, so a report naming two
-    // mappings arrived as one squiggle. `fossil_ide::related_locations` answers
-    // which file each label is in — one answer, rendered here into the JS row
-    // shape and there into `DiagnosticRelatedInformation`.
-    let related = fossil_ide::related_locations(db, file, d)
-        .into_iter()
-        .map(|r| CheckRelated {
-            // A `LineIndex` per file: a UTF-16 column is a fact about the text
-            // the range is in, and it is memoised, so the labels that are in
-            // the program cost nothing extra.
-            range: span_to_range(&fossil_ide::line_index(db, r.file), r.span),
-            uri: r.file.path(db).clone(),
-            message: r.text,
-        })
-        .collect();
+    let rendered = fossil_ide::lsp_diagnostic(db, file, index, d);
     CheckRow {
         uri: uri.to_string(),
-        range,
-        severity: severity_to_lsp_int(d.severity),
-        message,
-        related,
+        range: rendered.range,
+        severity: rendered.severity.unwrap_or(DiagnosticSeverity::ERROR),
+        message: rendered.message,
+        related: fossil_ide::related_locations(db, file, d)
+            .into_iter()
+            .map(|r| CheckRelated {
+                // A `LineIndex` per file: a UTF-16 column is a fact about the
+                // text the range is in, and it is memoised, so the labels that
+                // are in the program cost nothing extra.
+                range: fossil_ide::span_to_range(&fossil_ide::line_index(db, r.file), r.span),
+                uri: r.file.path(db).clone(),
+                message: r.text,
+            })
+            .collect(),
     }
 }
 
-/// Map `fossil_base::Severity` to the LSP integer constant the playground /
-/// LSP Worker expects (1 = error, 2 = warning, 3 = info).
-const fn severity_to_lsp_int(s: Severity) -> u8 {
-    match s {
-        Severity::Error => 1,
-        Severity::Warning => 2,
-        Severity::Info => 3,
-    }
-}
-
-/// Translate a byte-offset [`Span`] to a UTF-16 LSP-shaped range.
-fn span_to_range(index: &LineIndex, span: Span) -> CheckRange {
-    CheckRange {
-        start: utf16_to_pos(fossil_ide::offset_to_lsp_position(index, span.start)),
-        end: utf16_to_pos(fossil_ide::offset_to_lsp_position(index, span.end)),
-    }
-}
-
-const fn utf16_to_pos(p: Utf16Position) -> CheckPosition {
-    CheckPosition {
-        line: p.line,
-        character: p.character,
-    }
-}
+// `diagnostics_for_file`, `severity_to_lsp_int`, `span_to_range` and
+// `utf16_to_pos` lived here, and every one of them had a twin in
+// `fossil-lsp/src/main.rs`. They are `crates/fossil-ide/src/diagnostics.rs` now
+// — which carries the measurements this file used to: the twenty-one rows a
+// `ShExJ` document produced before the `claimed` guard, the fourteen the `ShExC`
+// one did, and the three of those that were an internal compiler error.
 
 // ----- LSP dispatch test hook -----
 //

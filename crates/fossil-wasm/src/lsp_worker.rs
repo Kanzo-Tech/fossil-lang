@@ -6,9 +6,30 @@
 //! response but trigger `textDocument/publishDiagnostics`.
 //!
 //! Architectural seam: `fossil-wasm` IS the LSP worker — NOT a recompiled
-//! `fossil-lsp`, and the cfg-tripwire on `fossil-lsp` stays. The LSP
-//! capabilities + handlers in `fossil-lsp/src/main.rs` are the 1:1 model; the only difference is the wire channel (postMessage vs
-//! stdio).
+//! `fossil-lsp`, and the cfg-tripwire on `fossil-lsp` stays.
+//!
+//! ## What is shared with `fossil-lsp`, and what is not
+//!
+//! **This said «the LSP capabilities + handlers in `fossil-lsp/src/main.rs` are
+//! the 1:1 model; the only difference is the wire channel», and it was three
+//! defects wrong.** Both sides dropped `d.labels` on the floor and both were
+//! fixed separately. The `fossil_base::claimed` guard — a `.shex` buffer is an
+//! input, not a program — landed here in `353228c` and there in `470a13b`, a day
+//! later, so for a day an editor put twenty-one squiggles down the length of the
+//! user's `ShEx` and the browser did not. And this file's
+//! `publishDiagnostics` republished the playground's [`CheckRow`] verbatim, so
+//! the payload carried `related` where LSP says `relatedInformation` and a flat
+//! `uri`/`range` where LSP says a nested `location`: a client reading the spec
+//! found nothing there.
+//!
+//! What is actually shared is the ANSWERS, as `fossil-ide` free functions both
+//! transports call — including the diagnostics now
+//! ([`fossil_ide::lsp_diagnostics`], drain and rendering in one place). What is
+//! NOT shared is this file: a `postMessage` channel instead of stdio, and a host
+//! with no filesystem. `crates/fossil-lsp/tests/transport_parity.rs` drives both
+//! over the same buffers, compares the JSON, and carries the whole list of
+//! declared differences. `fossil-lsp`'s module docs name the three, all of which
+//! are the HOST and not the wire.
 //!
 //! ## Cancellation
 //!
@@ -20,8 +41,8 @@
 //! ## Per-file diagnostics drain (B3 fix — mandatory)
 //!
 //! [`publish_diagnostics`] takes `(&FossilPlayground, &str)` and returns
-//! `Option<serde_json::Value>` — drains the Salsa accumulator for the SINGLE
-//! file named by `uri` (never all open files) and constructs the LSP
+//! `Option<serde_json::Value>` — drains for the SINGLE file named by `uri`
+//! (never all open files) and constructs the LSP
 //! `textDocument/publishDiagnostics` notification. The caller (the
 //! `onmessage` closure) posts it to the Worker scope. Returns `None` if the
 //! URI is not currently open.
@@ -54,7 +75,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::{CheckRow, FossilPlayground};
+use crate::FossilPlayground;
 
 // ---------- JSON-RPC wire types ----------
 
@@ -333,18 +354,33 @@ fn server_capabilities() -> serde_json::Value {
 
 // ---------- Per-file diagnostics drain (B3 fix) ----------
 
-/// Drain Salsa diagnostics for the SINGLE file identified by `uri` (per-file
-/// drain — NOT all open files). Returns the constructed
+/// Drain diagnostics for the SINGLE file identified by `uri` (per-file drain —
+/// NOT all open files). Returns the constructed
 /// `textDocument/publishDiagnostics` notification as a `serde_json::Value`;
 /// the dispatch caller posts it to the `DedicatedWorkerGlobalScope`. Returns
 /// `None` if the URI is not currently open.
+///
+/// # This published a shape that was not an LSP diagnostic
+///
+/// It sent [`crate::CheckRow`] — the playground's `check()` row — straight into
+/// `params.diagnostics`, and that type's own docblock said it «mirrors the LSP
+/// `Diagnostic` shape exactly so the LSP Worker can republish each row as-is».
+/// It did not: every entry carried an extra `uri` the spec has no field for, and
+/// the labels came out under `related`, as `{ uri, range, message }`, where LSP
+/// says `relatedInformation` with a nested `location`. A client following the
+/// spec read no related information at all.
+///
+/// `CheckRow` is a fine shape for what it is — a flat workspace-wide array for
+/// a playground panel, keyed by whatever path the host opened a buffer under,
+/// which in the browser is not always a URI. It is not the wire, and this is the
+/// wire: [`fossil_ide::lsp_diagnostics`], the same call `fossil-lsp` makes.
 pub(crate) fn publish_diagnostics(pg: &FossilPlayground, uri: &str) -> Option<serde_json::Value> {
-    let handle = pg.lookup_handle_by_uri(uri)?;
-    let rows: Vec<CheckRow> = pg.diagnostics_for_rows(handle)?;
+    let file = pg.lookup_file_by_uri(uri)?;
+    let diagnostics = fossil_ide::lsp_diagnostics(pg.base_db(), file);
     Some(serde_json::json!({
         "jsonrpc": "2.0",
         "method": "textDocument/publishDiagnostics",
-        "params": { "uri": uri, "diagnostics": rows }
+        "params": { "uri": uri, "diagnostics": diagnostics }
     }))
 }
 

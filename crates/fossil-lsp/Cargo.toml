@@ -53,6 +53,16 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+# The OTHER transport. `tests/transport_parity.rs` drives this binary over
+# stdio and `fossil-wasm`'s `dispatch` in-process, with the same buffers and the
+# same cursors, and compares the JSON — the two are one LSP server behind two
+# wire channels and nothing checked that they answered alike. It has to be this
+# crate's dev-dependency and not the reverse: `CARGO_BIN_EXE_fossil-lsp` is set
+# only for THIS package's integration tests. A dev-dependency does not enter
+# `fossil-wasm`'s cdylib closure, so `cargo xtask wasm-check` is unaffected —
+# the BFS there runs from the cdylib roots downwards and never reaches a binary
+# crate that merely depends on one.
+fossil-wasm = { path = "../fossil-wasm" }
 # `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
 # production surface into its `test_support` module, which is behind this
 # feature — they had no consumer that was not a test.
