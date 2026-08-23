@@ -38,7 +38,13 @@ use crate::position::line_index;
 
 /// Token-type indices into [`semantic_legend`]'s `token_types`. The numeric
 /// value IS the `tokenType` field of the emitted 5-tuples, so the order here
-/// MUST stay in lock-step with [`LEGEND_TYPES`].
+/// MUST stay in lock-step with [`LEGEND_TYPES`] — and with the third table,
+/// [`legend_type_name`], which renders the same indices back for review.
+///
+/// `tests/semantic_legend.rs` holds all three: it scrapes the names out of this
+/// module (they are `pub(super)`, so the name is reachable nowhere else) and
+/// calls the other two. It was prose, and prose does not go red — permuting any
+/// two of these left every test in the tree green.
 mod ty {
     pub(super) const KEYWORD: u32 = 0;
     pub(super) const NAMESPACE: u32 = 1;
@@ -402,19 +408,13 @@ mod tests {
         (db, file)
     }
 
+    /// v0.1 emits no modifiers, so the `tokenModifiers` bitset of every token is
+    /// `0`. The types are `tests/semantic_legend.rs`'s subject, not this one's:
+    /// this counted to ten and pinned indices 0 and 8, which is a copy of two
+    /// tenths of the answer and could not notice the other eight moving.
     #[test]
-    fn legend_has_ten_types_and_no_modifiers() {
-        let legend = semantic_legend();
-        assert_eq!(legend.token_types.len(), 10);
-        assert!(legend.token_modifiers.is_empty());
-        assert_eq!(
-            legend.token_types[ty::KEYWORD as usize],
-            SemanticTokenType::KEYWORD
-        );
-        assert_eq!(
-            legend.token_types[ty::COMMENT as usize],
-            SemanticTokenType::COMMENT
-        );
+    fn the_legend_declares_no_modifiers() {
+        assert!(semantic_legend().token_modifiers.is_empty());
     }
 
     /// A whole small program, so the token stream is the one a real file emits.
