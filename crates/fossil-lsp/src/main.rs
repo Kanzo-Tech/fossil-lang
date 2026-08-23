@@ -674,7 +674,53 @@ fn handle_notification(
 /// and unreachable), a top-level binding's provider errors vanished, two
 /// mappings minting two identities for one type was never checked, and one
 /// top-level mistake was published once per mapping.
+///
+/// # A file the catalogue reads is not drained as a program
+///
+/// Opening the `.shex` a program names is the ordinary way to look at your own
+/// output contract, and until the guard below existed doing it ran the fossil
+/// parser over the document and attributed every complaint to it —
+/// **twenty-one diagnostics** measured over the wire for the `ShExJ` document of
+/// `tests/documents_are_not_programs.rs`: `unexpected token` eleven times,
+/// `expected IDENT, found STRING` eight, `expected IDENT, found INDENT` once,
+/// and `expected DEFINE, found DEDENT` at the closing brace, for a file with
+/// nothing wrong with it. In VS Code that is squiggles down the length of the
+/// user's `ShEx`. It is the same defect `353228c` fixed in `fossil-wasm`, whose
+/// commit message named this function as the one still carrying it.
+///
+/// The question «which open files are programs» is the provider catalogue's:
+/// a row declares the extensions it accepts, [`fossil_base::claimed`] asks all
+/// of them at once, and a URI some row READS is an input to a program rather
+/// than a program. [`LspSystem::providers`] returns
+/// `fossil_descriptors_output::PROVIDERS`, so nothing about fossil's syntax is
+/// decided here. The `path` a buffer is opened under in this host is the whole
+/// `file://…` URI ([`handle_notification`]); `Provider::accepts` reads the
+/// extension off the last path segment, so a URI answers exactly as a path
+/// does.
+///
+/// Three things this deliberately does not do.
+///
+/// It does not consult a **program** extension. `.fossil` is a convention, a URI
+/// with no extension is claimed by nobody, and the default is to check — so an
+/// unrecognised file falls back to the old behaviour and never to silence.
+///
+/// It does not deregister the document. `LspState::open` puts an opened `.shex`
+/// in the file registry under its own URI precisely so the OPEN COPY is what
+/// every program naming it reads, and that is untouched: the buffer is still
+/// decoded, so a program is still checked against the document it names and a
+/// broken `ShEx` is still reported *on the program*. What has no home is a
+/// document nobody names — nothing checks it, because there is nothing to check
+/// it against.
+///
+/// And it does not stop at diagnostics. [`handle_code_action`] is the other
+/// caller, so no quick-fix is offered inside a shape document either. That is
+/// right and not a side effect: every action `fossil_ide::code_actions` can
+/// build is keyed off a fossil diagnostic and edits fossil source, so inside a
+/// `.shex` it would be a lightbulb rewriting the user's `ShEx` into fossil.
 fn diagnostics_for(db: &LspDb, file: SourceFile) -> Vec<Diagnostic> {
+    if fossil_base::claimed(fossil_base::installed(db), file.path(db)) {
+        return Vec::new();
+    }
     fossil_mir::program_diagnostics(db, file)
 }
 
