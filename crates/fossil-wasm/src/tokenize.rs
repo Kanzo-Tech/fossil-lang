@@ -9,9 +9,8 @@
 //!   `Vec<TokenRow>` to `JsValue` via `serde_wasm_bindgen`. Throws `JsError` on
 //!   serialisation failure (extremely rare — the rows are plain numbers).
 //! - [`semantic_legend`] — re-exports `fossil-ide`'s semantic-token legend
-//!   over the `wasm-bindgen` boundary so `CodeMirror` (in
-//!   `@fossil-lang/codemirror-fossil`) can map LSP `semanticTokens` responses
-//!   to highlight categories.
+//!   over the `wasm-bindgen` boundary, so a host can map LSP `semanticTokens`
+//!   responses to highlight categories.
 //!
 //! ## Token kind stability (the public Rust ↔ `JS` contract)
 //!
@@ -19,14 +18,18 @@
 //! comes from the enum's discriminant — i.e. variant declaration order in
 //! `fossil_syntax::lexer::Token`. What follows from that:
 //!
-//! - APPENDING a new variant at the end is backwards-compatible — old
-//!   consumers see the new tag as an unknown highlight category (rendered with
-//!   default tag, no crash).
-//! - REORDERING existing variants is a BREAKING CHANGE for
-//!   `@fossil-lang/codemirror-fossil` consumers (the tag table maps numeric kind
-//!   → `CodeMirror` tag and is keyed on the discriminant). The tag table lives
-//!   in `packages/codemirror-fossil/src/tags.ts` and MUST be updated in
-//!   lockstep with any reorder.
+//! - APPENDING a new variant at the end is backwards-compatible — a consumer
+//!   keyed on the discriminant sees the new tag as an unknown category.
+//! - REORDERING existing variants silently remaps every kind a consumer has
+//!   already written down.
+//!
+//! **This used to name the consumer, and it was gone.** It said the tag table
+//! in `packages/codemirror-fossil/src/tags.ts` «MUST be updated in lockstep
+//! with any reorder»; `873cbc0` deleted that package with the rest of the React
+//! family, so the obligation named a file that does not exist and no guard could
+//! ever have held it. There is no in-repo consumer of these discriminants today.
+//! The stability property above is real and worth stating; naming an enforcer
+//! that is not there made it read as enforced.
 //!
 //! ## Salsa boundary
 //!
@@ -44,10 +47,9 @@ use wasm_bindgen::prelude::*;
 /// One token row in the [`tokenize`] return array.
 ///
 /// `kind` is `fossil_syntax::lexer::Token as u32`. `start` + `end` are byte
-/// offsets into the source string (UTF-8 byte indices; the `JS` side converts
-/// to UTF-16 code-unit offsets via `LineIndex` if needed — for v0.1 the
-/// `CodeMirror` `StreamParser` consumes byte offsets directly because it
-/// operates on the same source string).
+/// offsets into the source string (UTF-8 byte indices; a `JS` host converts to
+/// UTF-16 code-unit offsets via `LineIndex` if it needs them — a highlighter
+/// running over the same source string does not).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct TokenRow {
     pub kind: u32,
@@ -80,8 +82,7 @@ pub fn tokenize_native(text: &str) -> Vec<TokenRow> {
 }
 
 /// `JS`-facing tokenize. Returns the same row stream as [`tokenize_native`],
-/// serialised via `serde_wasm_bindgen`. Consumed by
-/// `@fossil-lang/codemirror-fossil`'s `StreamParser`.
+/// serialised via `serde_wasm_bindgen`.
 ///
 /// # Errors
 ///
@@ -98,9 +99,8 @@ pub fn tokenize(text: &str) -> Result<JsValue, JsError> {
 /// `JS`-facing re-export of the semantic-token legend.
 ///
 /// Returns `{ tokenTypes: string[], tokenModifiers: string[] }` — the exact
-/// LSP `SemanticTokensLegend` shape. `CodeMirror`, via
-/// `packages/codemirror-fossil/src/tags.ts`, uses this to translate
-/// LSP `semanticTokens/full` response indices into highlight tag names.
+/// LSP `SemanticTokensLegend` shape, which is what turns the indices in a
+/// `semanticTokens/full` response into names a host can style.
 ///
 /// Delegates to [`fossil_ide::semantic_legend`], the one definition — a second
 /// legend here would desynchronise the indices the native LSP already emits.
