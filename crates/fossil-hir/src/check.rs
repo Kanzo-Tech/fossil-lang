@@ -780,8 +780,7 @@ impl Checker<'_> {
     fn mapping_name(&self) -> SmolStr {
         let file = self.mapping.file(self.expr.db);
         lower_to_hir(self.expr.db, file)
-            .mappings(self.expr.db)
-            .get(self.mapping.index(self.expr.db))
+            .mapping(self.expr.db, self.mapping.index(self.expr.db))
             .map_or_else(|| SmolStr::from("Mapping"), |m| m.name.clone())
     }
 
@@ -851,8 +850,7 @@ pub(crate) fn source_binding_name<'db>(
     mapping: MappingLoc<'db>,
 ) -> SmolStr {
     lower_to_hir(db, mapping.file(db))
-        .mappings(db)
-        .get(mapping.index(db))
+        .mapping(db, mapping.index(db))
         .map_or_else(SmolStr::default, |m| m.source_binding.clone())
 }
 
@@ -865,8 +863,7 @@ pub(crate) fn source_binding_name<'db>(
 fn shape_iri_of<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Option<SmolStr> {
     let file = mapping.file(db);
     lower_to_hir(db, file)
-        .mappings(db)
-        .get(mapping.index(db))
+        .mapping(db, mapping.index(db))
         .map(|m| m.shape_iri.clone())
         .filter(|iri| !iri.is_empty())
 }

@@ -73,7 +73,7 @@ pub fn source_row_inferred<'db>(
 ) -> Option<Ty<'db>> {
     let file = mapping.file(db);
     let mappings = crate::lower::lower_to_hir(db, file);
-    let hir_mapping = mappings.mappings(db).get(mapping.index(db))?;
+    let hir_mapping = mappings.mapping(db, mapping.index(db))?;
     let source_name = hir_mapping.source_binding.clone();
     let inferred = lookup_inferred(db, def_map(db, file), source_name.as_str())?;
     Some(record_from_inferred(db, &inferred))
@@ -133,7 +133,7 @@ pub fn resolve_source_scope<'db>(
 
     // 1. Find the mapping's source binding name.
     let mappings = crate::lower::lower_to_hir(db, file);
-    let Some(hir_mapping) = mappings.mappings(db).get(mapping.index(db)) else {
+    let Some(hir_mapping) = mappings.mapping(db, mapping.index(db)) else {
         return Ok(None);
     };
     let source_name = hir_mapping.source_binding.clone();

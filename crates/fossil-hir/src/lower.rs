@@ -24,8 +24,29 @@ use crate::def_map::def_map;
 
 #[salsa::tracked(debug)]
 pub struct HirFile<'db> {
+    /// **One slot per `MAPPING` node, in written order** — the same dense index
+    /// space [`crate::def_map::MappingLoc::index`] counts in, and the same one
+    /// [`crate::body::body`] filter-then-`nth`s in. Eight call sites pair a
+    /// `MappingLoc` with its signature by that index, so the slot for a header
+    /// this could not read is `Err` and never absent.
+    ///
+    /// **It used to be filtered**, and the pairing was correct only while every
+    /// mapping lowered. One that did not shifted every LATER mapping's
+    /// signature onto its predecessor: measured on a two-mapping file whose
+    /// first header has no `from`, `lower_to_mir_pg` for mapping 0 received
+    /// mapping 1's `HirMapping` — a valid `Good : Person from Users` lowered
+    /// under the broken mapping's body — and mapping 1, the healthy one, ran
+    /// off the end of the vector and raised
+    /// `internal compiler error: mapping has no HIR at its DefMap index`.
+    /// The ICE never fired on the mapping that was wrong.
+    ///
+    /// The `Err` carries [`fossil_base::ErrorGuaranteed`], which is to say the
+    /// diagnostic is already published — `lower_mapping_node` emits exactly one
+    /// per declined header, into this query's accumulator, which
+    /// `fossil_mir::program_diagnostics` drains file-level. A consumer
+    /// propagates the taint; it does not report again.
     #[returns(ref)]
-    pub mappings: Vec<HirMapping>,
+    pub mappings: Vec<Result<HirMapping, fossil_base::ErrorGuaranteed>>,
     /// The source bindings whose right-hand side is a PIPELINE rather than an
     /// `io.*` call. A binding that reads a file is `def_map`'s business — a
     /// constructor and a URI, both signature-only; a binding that derives a
@@ -33,6 +54,24 @@ pub struct HirFile<'db> {
     /// here or they are lowered twice.
     #[returns(ref)]
     pub source_pipes: Vec<HirSourcePipe>,
+}
+
+impl<'db> HirFile<'db> {
+    /// The signature at a [`crate::def_map::MappingLoc`]'s dense index, or
+    /// `None` when that header did not lower.
+    ///
+    /// The one way to ask, so that the `Err` slot cannot be mistaken for an
+    /// absent one by a caller writing `.get(i)` by hand. `None` here means
+    /// *declined*, never *out of range*: only
+    /// [`crate::lower::lower_to_hir`]'s own caller in `fossil-mir` needs to
+    /// tell those apart, because only it has an ICE to raise if the two walks
+    /// ever disagree.
+    #[must_use]
+    pub fn mapping(self, db: &'db dyn fossil_base::Db, index: usize) -> Option<&'db HirMapping> {
+        self.mappings(db)
+            .get(index)
+            .and_then(|slot| slot.as_ref().ok())
+    }
 }
 
 /// Per-mapping HEADER data. The previous `properties` field
@@ -425,7 +464,10 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
     for child in cst.root(db).syntax().children() {
         match child.kind() {
             fossil_syntax::SyntaxKind::MAPPING => {
-                if let Some(mut m) = lower_mapping_node(db, &child, dm) {
+                // Pushed unconditionally — see `HirFile::mappings`. A `MAPPING`
+                // node that contributes no slot renumbers every mapping after
+                // it, which is a silent wrong answer rather than a missing one.
+                mappings.push(lower_mapping_node(db, &child, dm).map(|mut m| {
                     // `Orders : Order from Purchase.join(User, on = …)`.
                     // `MappingHeader := IDENT SHAPE_SEP ShapeExpr 'from'
                     // Expression` (grammar.bnf), so a `from` clause derives a
@@ -446,8 +488,8 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
                         m.source_binding = pipe.name.clone();
                         source_pipes.push(pipe);
                     }
-                    mappings.push(m);
-                }
+                    m
+                }));
             }
             fossil_syntax::SyntaxKind::SOURCE_DEF => {
                 check_provider(db, &child, fossil_base::Capability::ReadRows);
@@ -1260,12 +1302,57 @@ fn emit_item(db: &dyn fossil_base::Db, span: Span, message: String) {
 // four callers threaded between them are both gone. What resolves a name now is
 // `DefMap::lookup_type`, against a document — see `lower_mapping_node`.
 
+/// A `MAPPING` node whose header this cannot read: report it once, keep the
+/// slot, and hand back the taint.
+///
+/// The taint is the point. `fossil_base::ErrorGuaranteed` may not be minted
+/// without a diagnostic, so a consumer that wants to poison itself on a
+/// declined header would otherwise have to invent a second message for the same
+/// mistake — which is exactly what `fossil-mir` did, and it invented an
+/// *internal compiler error*. Emitting here and carrying the taint in the slot
+/// means one statement, in the place that knows why.
+///
+/// `why` is a clause and not a sentence: four places decline and the user reads
+/// one shape of message from all four. The span is the HEADER and not the whole
+/// `MAPPING` node, because the body under it is still checked —
+/// `fossil_mir::lower_to_mir_pg` forces `crate::body::body` before it poisons.
+fn decline_mapping(
+    db: &dyn fossil_base::Db,
+    node: &fossil_syntax::SyntaxNode,
+    why: &str,
+) -> fossil_base::ErrorGuaranteed {
+    let range = node
+        .children()
+        .find(|c| c.kind() == fossil_syntax::SyntaxKind::MAPPING_HEADER)
+        .map_or_else(|| node.text_range(), |h| h.text_range());
+    fossil_base::raise(
+        db,
+        Diagnostic::new(
+            Severity::Error,
+            format!(
+                "this is not a mapping header — {why} — so nothing is produced from it. \
+                 A mapping is `Name : Shape from <source>`."
+            ),
+            Span::new(range.start().into(), range.end().into()),
+        )
+        // Reached from `lower_to_hir`, which walks the WHOLE-FILE CST, so the
+        // node's range is already a file offset — see `diagnose_item`.
+        .file_absolute(),
+    )
+}
+
 /// Lower a `MAPPING`'s header into its [`HirMapping`] signature.
 ///
 /// `db` is threaded in for one reason: a header this cannot read makes the
 /// WHOLE MAPPING disappear from the HIR, and it used to do that without a word.
-/// Every `None` below either follows a parse error the parser already reported,
-/// or emits its own.
+/// Every `Err` below is [`decline_mapping`], which reports before it returns.
+///
+/// **It used to be `Option`, and the `None`s were silent** on the claim that
+/// the parser had already spoken. Measured on `A : B from\n`, it has not: the
+/// parser accepts a `from` with nothing after it, `source_binding_of` answered
+/// `None`, the mapping vanished from the HIR, and the only thing anyone was
+/// told about the file came from the unbound shape name. The slot that vanished
+/// with it is the other half — see [`HirFile::mappings`].
 ///
 /// `dm` is threaded in for the shape. `ShapeExpr := IDENT` (grammar.bnf,
 /// `ShapeExpr`) — one of the names a `type { … } := io.shex(…)` binding
@@ -1275,12 +1362,13 @@ fn lower_mapping_node<'db>(
     db: &'db dyn fossil_base::Db,
     node: &fossil_syntax::SyntaxNode,
     dm: crate::def_map::DefMap<'db>,
-) -> Option<HirMapping> {
+) -> Result<HirMapping, fossil_base::ErrorGuaranteed> {
     use fossil_syntax::SyntaxKind;
 
     let header = node
         .children()
-        .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)?;
+        .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)
+        .ok_or_else(|| decline_mapping(db, node, "there is no header here"))?;
     // Properties are NOT collected here — the body() Salsa
     // query owns them. The MAPPING_BODY's presence is no longer required for
     // a successful header lowering; an empty-bodied mapping is still a valid
@@ -1304,7 +1392,8 @@ fn lower_mapping_node<'db>(
         .children_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)
-        .map(|t| SmolStr::from(t.text()))?;
+        .map(|t| SmolStr::from(t.text()))
+        .ok_or_else(|| decline_mapping(db, node, "it names nothing"))?;
 
     // ShapeExpr → its one IDENT: the shape's NAME (grammar.bnf, ShapeExpr).
     // There is no `IRI_EXPR` under it any more and no prefix to expand — the
@@ -1316,7 +1405,8 @@ fn lower_mapping_node<'db>(
     // `A` alone. The `&` left the grammar rather than the drop being made loud.
     let shape_expr = header
         .children()
-        .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)?;
+        .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)
+        .ok_or_else(|| decline_mapping(db, node, "there is no `: Shape` after the name"))?;
     let Some(shape_name) = shape_expr
         .children_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
@@ -1324,15 +1414,16 @@ fn lower_mapping_node<'db>(
         .map(|t| SmolStr::from(t.text()))
     else {
         // No name at all — the parser has already refused whatever was there
-        // (a CURIE, a `<…>`, or nothing). Returning `None` here would delete the
-        // mapping AND say nothing about it, which is the failure this whole
-        // step exists to remove, so the mapping survives with no shape and
-        // `shapes::resolve_target_shape` reads the empty IRI as «no shape
-        // clause». The parser's diagnostic is the one that names the form.
-        return Some(HirMapping {
+        // (a CURIE, a `<…>`, or nothing). Returning `Err` here would delete the
+        // mapping's SIGNATURE and say nothing new about it, which is the failure
+        // this whole step exists to remove, so the mapping survives with no
+        // shape and `shapes::resolve_target_shape` reads the empty IRI as «no
+        // shape clause». The parser's diagnostic is the one that names the form.
+        return Ok(HirMapping {
             name,
             shape_iri: SmolStr::default(),
-            source_binding: source_binding_of(&header)?,
+            source_binding: source_binding_of(&header)
+                .ok_or_else(|| decline_mapping(db, node, "it reads `from` nothing"))?,
         });
     };
 
@@ -1358,10 +1449,11 @@ fn lower_mapping_node<'db>(
         SmolStr::default()
     });
 
-    Some(HirMapping {
+    Ok(HirMapping {
         name,
         shape_iri,
-        source_binding: source_binding_of(&header)?,
+        source_binding: source_binding_of(&header)
+            .ok_or_else(|| decline_mapping(db, node, "it reads `from` nothing"))?,
     })
 }
 
@@ -3036,12 +3128,70 @@ User : Persn from users
     fn lower_hello_produces_one_mapping_header() {
         let (db, file) = db_with_hello();
         let hir = lower_to_hir(&db, file);
-        let mappings = hir.mappings(&db);
-        assert_eq!(mappings.len(), 1);
-        let m = &mappings[0];
+        assert_eq!(hir.mappings(&db).len(), 1);
+        let m = hir.mapping(&db, 0).expect("the header lowers");
         assert_eq!(m.name.as_str(), "User");
         assert_eq!(m.shape_iri.as_str(), "https://example.org/Person");
         assert_eq!(m.source_binding.as_str(), "users");
+    }
+
+    /// **A mapping that does not lower took its neighbour's signature.**
+    ///
+    /// `HirFile::mappings` is paired with `DefMap::mappings` by position at
+    /// eight call sites, and it used to be built with a filter. `Broken` has no
+    /// `from`, so it produced no entry, so `hir.mappings[0]` was `Good` — and
+    /// `fossil_mir::lower_to_mir_pg` lowered `Broken`'s body against `Good`'s
+    /// header while `Good`, the mapping that is correct, ran off the end of the
+    /// vector and raised `internal compiler error: mapping has no HIR at its
+    /// DefMap index`. Neither half of that is visible in a one-mapping fixture,
+    /// which is why nothing caught it: the shift is zero there.
+    ///
+    /// Both assertions matter. The length is the invariant — one slot per
+    /// `MAPPING` node — and the name is what the length alone would not catch:
+    /// a vector of the right size whose entries are off by one.
+    #[test]
+    fn a_header_that_does_not_lower_keeps_its_slot() {
+        const ONE_BROKEN_ONE_GOOD: &str = "\
+type { Person } := io.shex(\"personas.shex\")
+Users := io.csv(\"users.csv\")
+
+Broken : Person
+    name = Users.name
+
+Good : Person from Users
+    @subject = \"https://example.org/person/{Users.id}\"
+    name = Users.name
+";
+        let (db, file) = fossil_base::test_support::db_with_document(
+            ONE_BROKEN_ONE_GOOD,
+            "personas.shex",
+            PERSONAS_DOCUMENT,
+        );
+        let dm = crate::def_map::def_map(&db, file);
+        let hir = lower_to_hir(&db, file);
+        assert_eq!(
+            hir.mappings(&db).len(),
+            dm.mappings(&db).len(),
+            "one slot per MAPPING node, or every index after the first broken \
+             one names the wrong mapping"
+        );
+        assert!(
+            hir.mapping(&db, 0).is_none(),
+            "`Broken` has no `from`, so its header declined"
+        );
+        assert_eq!(
+            hir.mapping(&db, 1).expect("`Good` lowers").name.as_str(),
+            "Good",
+            "the healthy mapping keeps its own index"
+        );
+        let diags = lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("this is not a mapping header")),
+            "and the decline is reported, once, where it happened: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>(),
+        );
     }
 
     /// Body content (the property list) now lives behind the

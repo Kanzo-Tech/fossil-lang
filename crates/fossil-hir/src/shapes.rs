@@ -540,7 +540,7 @@ pub fn resolve_target_shape<'db>(
     // `lower_to_hir`). A mapping with no shape clause yields no resolution.
     let file = mapping.file(db);
     let hir = crate::lower::lower_to_hir(db, file);
-    let Some(hir_mapping) = hir.mappings(db).get(mapping.index(db)) else {
+    let Some(hir_mapping) = hir.mapping(db, mapping.index(db)) else {
         return Ok(None);
     };
     let shape_iri = hir_mapping.shape_iri.clone();

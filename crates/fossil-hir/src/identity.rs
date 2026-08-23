@@ -223,7 +223,13 @@ pub fn subject_templates<'db>(
     for (i, loc) in dm.mappings(db).iter().enumerate() {
         // The header carries the shape; a header that did not lower has already
         // been diagnosed by `lower_mapping_node` and contributes no identity.
-        let Some(m) = hir.mappings(db).get(i) else {
+        //
+        // `HirFile::mapping` and not `.mappings(db).get(i)`, and the difference
+        // was a wrong answer rather than a missing one: the vector used to skip
+        // the mappings that declined, so `get(i)` handed mapping `i` the
+        // signature of whichever mapping came after it. It is one slot per
+        // `MAPPING` node now, so `None` here means THIS header declined.
+        let Some(m) = hir.mapping(db, i) else {
             continue;
         };
         if m.shape_iri.is_empty() {

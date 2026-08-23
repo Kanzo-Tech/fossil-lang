@@ -106,11 +106,48 @@ pub fn lower_to_mir_pg<'db>(
         );
     }
     let hir = lower_to_hir(db, file);
-    let Some(m) = hir.mappings(db).get(dense_idx) else {
-        return poisoned(
-            db,
-            fossil_base::bug(db, span, "mapping has no HIR at its DefMap index"),
-        );
+    // **This ICE reached users, and it was never about the mapping it named.**
+    // `HirFile::mappings` used to be FILTERED — one entry per mapping whose
+    // header lowered, indexed as if it were one per `MAPPING` node — so a file
+    // with a header `lower_to_hir` declined ran the whole vector short. The
+    // shortest input that produced it is four bytes, `a:b`, which is a mapping
+    // header with no `from`; the fourteen-row `ShExC` drain of
+    // `fossil-wasm/tests/shape_document.rs` produced three, one per line the
+    // parser recovered into a `MAPPING`. On a file with a broken mapping AND a
+    // healthy one it was worse than an ICE and silent: mapping 0 was lowered
+    // against mapping 1's signature, and mapping 1 — the correct one — was the
+    // one that ran off the end and reported the bug.
+    //
+    // The vector is one slot per `MAPPING` node now. `Err` is a header
+    // `lower_to_hir` declined, and it already said so, once, file-level; the
+    // taint travels and nothing is reported twice. `None` is the two CST walks
+    // disagreeing about how many mappings the file has, which is the only thing
+    // here that was ever a compiler bug.
+    let m = match hir.mappings(db).get(dense_idx) {
+        Some(Ok(m)) => m,
+        Some(Err(eg)) => {
+            // The body is still checked. `body` is keyed by the mapping and
+            // reads the CST directly, so it needs nothing the header failed to
+            // give; forcing it here puts its diagnostics in THIS query's
+            // dependency subtree, which is where `program_diagnostics` drains
+            // them from. Without this line a mapping whose header is one token
+            // wrong loses every report about the lines under it, which is the
+            // failure `lower_mapping_node` already refuses for a shape name it
+            // cannot resolve.
+            let _ = body(db, mapping);
+            return poisoned(db, *eg);
+        }
+        None => {
+            return poisoned(
+                db,
+                fossil_base::bug(
+                    db,
+                    span,
+                    "the HIR has no slot at this mapping's DefMap index: `def_map` and \
+                     `lower_to_hir` disagree about how many MAPPING nodes the file has",
+                ),
+            );
+        }
     };
     let body = body(db, mapping);
     // A typecheck failure taints (it already emitted the diagnostic). A source

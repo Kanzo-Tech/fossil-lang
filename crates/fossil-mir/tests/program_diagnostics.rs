@@ -218,3 +218,125 @@ People : Person from Users
         .collect();
     assert!(errors.is_empty(), "a clean program reported {errors:?}");
 }
+
+/// **An internal compiler error reached the browser, and it was found by
+/// accident.**
+///
+/// `crates/fossil-wasm/tests/shape_document.rs`'s `ShExC` fixture — a `ShEx`
+/// shape document, not fossil at all — was drained as a program before the
+/// provider catalogue silenced it, and three of its fourteen rows claimed
+/// `internal compiler error: mapping has no HIR at its DefMap index`. Reduced,
+/// the input is FOUR BYTES: `a:b` is a mapping header the parser recovers and
+/// `lower_to_hir` then declines, because there is no `from`. The three rows
+/// were the three lines that recovery turned into a `MAPPING` — the two
+/// `PREFIX` lines and the shape declaration.
+///
+/// Whatever else it deserves, garbage deserves a syntax error and not a claim
+/// that the compiler is broken. This asserts the class, not a count: no
+/// diagnostic anywhere in the drain says `internal compiler error`.
+///
+/// **What this cannot prove** is that the ICE is unreachable in general. It is
+/// one `bug()` call among several, it is still there, and it still fires if
+/// `def_map` and `lower_to_hir` ever count `MAPPING` nodes differently — which
+/// is the only thing it was ever entitled to mean.
+#[test]
+fn four_bytes_of_non_fossil_do_not_reach_an_internal_compiler_error() {
+    for source in [
+        "a:b\n",
+        "A : B\n",
+        "A : B from\n",
+        // The `ShExC` document of `fossil-wasm/tests/shape_document.rs`,
+        // verbatim. Sixteen rows, and it was fourteen with three ICEs among
+        // them; the two extra are the body of the third recovered mapping,
+        // which nothing reached while the header was being deleted.
+        "PREFIX ex:  <http://example.org/>\n\
+         PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\n\
+         \n\
+         ex:Person {\n\
+         \x20 ex:name xsd:integer\n\
+         }\n",
+    ] {
+        let (db, file) = test_support::db_with_document_at("t.fossil", source, "p.shex", SHAPE);
+        let messages: Vec<_> = program_diagnostics(&db, file)
+            .into_iter()
+            .map(|d| d.message)
+            .collect();
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("internal compiler error")),
+            "{source:?} claimed a compiler bug: {messages:#?}"
+        );
+        assert!(
+            !messages.is_empty(),
+            "{source:?} is not a fossil program and must not report clean"
+        );
+    }
+}
+
+/// **The ICE never fired on the mapping that was wrong.**
+///
+/// `HirFile::mappings` was built with a filter and read by position, so one
+/// header that did not lower shifted every later mapping's signature onto its
+/// predecessor. Here that meant `Broken`'s body was lowered against `Good`'s
+/// header, and `Good` — the mapping with nothing wrong with it — was the one
+/// that ran off the end of the vector and got the `bug()`.
+///
+/// So this asserts the positive: the healthy sibling of a broken mapping still
+/// produces a graph. A test that only asserted the absence of the ICE would
+/// pass on a compiler that lowered nothing.
+#[test]
+fn a_broken_mapping_does_not_poison_the_one_after_it() {
+    let program = "\
+type { Person } := io.shex(\"p.shex\")
+Users := io.csv(\"users.csv\")
+
+Broken : Person
+    name = Users.name
+
+Good : Person from Users
+    @subject = \"https://example.org/person/{Users.id}\"
+    name = Users.name
+";
+    let (db, file) = test_support::db_with_document_at("t.fossil", program, "p.shex", SHAPE);
+    let mappings = fossil_hir::def_map::def_map(&db, file)
+        .mappings(&db)
+        .clone();
+    assert_eq!(mappings.len(), 2, "the fixture must recover both mappings");
+
+    let good = fossil_mir::lower_to_mir_pg(&db, mappings[1]);
+    assert!(
+        good.error(&db).is_none(),
+        "the healthy mapping is not poisoned by its broken neighbour"
+    );
+    assert_eq!(
+        fossil_hir::lower::lower_to_hir(&db, file)
+            .mapping(&db, 1)
+            .expect("`Good` lowers")
+            .name
+            .as_str(),
+        "Good",
+        "and it was lowered from its OWN header"
+    );
+
+    // And the broken one is still reported, in words about the program.
+    let messages: Vec<_> = program_diagnostics(&db, file)
+        .into_iter()
+        .map(|d| d.message)
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("this is not a mapping header")),
+        "got {messages:#?}"
+    );
+    // The body under a declined header is still checked — `lower_to_mir_pg`
+    // forces `body` before it poisons, which is the only thing keeping those
+    // lines from going silent.
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("declares no `@subject`")),
+        "got {messages:#?}"
+    );
+}
