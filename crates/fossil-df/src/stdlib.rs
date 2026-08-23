@@ -119,7 +119,7 @@ const UNREACHABLE_ON_DATAFUSION: &[&str] = &[
     "parse.json",
     // WHAT IS NOT HERE ANY MORE, and it is the point of ruling 15 on this
     // engine: `str.slug` and `str.strip_html`. They were native Rust UDFs whose
-    // logic lived inside `fossil-runtime`'s DuckDB trampolines, unreachable
+    // logic lived inside `fossil-layout`'s DuckDB trampolines, unreachable
     // from this crate by construction. As templates they render here, because a
     // template is portable in a way a UDF is not. `clean.strip_html` was the
     // name in this list; the row is `str.strip_html` now and it is renderable.

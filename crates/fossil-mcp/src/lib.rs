@@ -70,7 +70,7 @@ impl ManifestSource for MapSource {
 pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), String> {
     // No memory budget: a budget is an input of the command that declares it,
     // and an MCP dataset does not declare one. This named
-    // `fossil_runtime::apply_memory_budget` as what it would call when one does;
+    // `fossil_layout::apply_memory_budget` as what it would call when one does;
     // that function is deleted, because this comment was the only thing in the
     // workspace that mentioned it and nothing ever called it.
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
@@ -85,8 +85,8 @@ pub fn open(dataset: &Dataset) -> std::result::Result<(Connection, Manifest), St
             &dataset.dest,
             CloudSecret::new(spec.secret_type.clone(), params),
         );
-        // `fossil_runtime::install_secret` stood here and was this crate's ONLY
-        // use of `fossil-runtime`, so the dependency is gone with it. The
+        // `fossil_layout::install_secret` stood here and was this crate's ONLY
+        // use of `fossil-layout`, so the dependency is gone with it. The
         // rendering is `ResolvedPath::create_secret_sql`, in `fossil-resolver`,
         // which this crate already depends on and which is where the tests are.
         if let Some(sql) = resolved.create_secret_sql("__fossil_mcp_dest") {
@@ -162,7 +162,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// changes again, this does not.
 ///
 /// Edges are unaffected: the layout pass rewrites `by_source.parquet` in place
-/// (`crates/fossil-runtime/src/layout.rs:630`) and emits its tiles alongside it.
+/// (`crates/fossil-layout/src/layout.rs:630`) and emits its tiles alongside it.
 fn register_views_sql(manifest: &Manifest, dest: &str) -> String {
     use std::fmt::Write;
     let base = dest.trim_end_matches('/');

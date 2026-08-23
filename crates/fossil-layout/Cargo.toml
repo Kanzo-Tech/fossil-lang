@@ -1,12 +1,12 @@
 [package]
-name = "fossil-runtime"
+name = "fossil-layout"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Native execution runtime via DuckDB (bundled C++); WASM-host execution lives in fossil-wasm"
+description = "The layout post-pass — Louvain communities and Morton tiling over Parquet through arrow-rs. Links no engine and compiles for wasm32"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -32,7 +32,7 @@ workspace = true
 #
 # What it bought: the workspace's cold build stops paying for `libduckdb-sys` on
 # this crate's account, and `cargo check --target wasm32-unknown-unknown -p
-# fossil-runtime` now passes — the layout pass is WASM-capable, which is the
+# fossil-layout` now passes — the layout pass is WASM-capable, which is the
 # sentence the project is built on and which this crate made half true.
 # The layout pass's I/O. `parquet` reads the vertex/adjacency Parquet the
 # DataFusion writer produced (footer for the row count, projected column chunks
@@ -81,14 +81,14 @@ thiserror = { workspace = true }
 
 
 # The memory probe (`FOSSIL_MEM_PROBE`) — both halves of the write path report
-# through it (the DataFusion executor in fossil-df and the DuckDB layout pass
-# here) and neither may depend on the other, so it is a dependency-free leaf of
-# its own. Regular dep, not dev: the instrument has to be in the binary that
-# writes ten million vertices, which is the only place the number exists.
+# through it (the DataFusion executor in fossil-df and the layout pass here) and
+# neither may depend on the other, so it is a dependency-free leaf of its own.
+# Regular dep, not dev: the instrument has to be in the binary that writes ten
+# million vertices, which is the only place the number exists.
 #
 # It used to be a module in `fossil-base`, and that single `use` was this
-# crate's ONLY edge to the compiler substrate — a native execution runtime
-# linking the Salsa `Db` trait to time a phase. There is no `fossil-base` line
+# crate's ONLY edge to the compiler substrate — a post-pass over Parquet linking
+# the Salsa `Db` trait in order to time a phase. There is no `fossil-base` line
 # here now, and there should not be one again.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 
@@ -104,21 +104,26 @@ serde_json = { workspace = true }
 # those assertions are the only place anything checks that what the layout emits
 # is Parquet in the sense the rest of the world means.
 #
-# The consequence that matters: `cargo check -p fossil-runtime` and every
+# The consequence that matters: `cargo check -p fossil-layout` and every
 # non-test build stop compiling ~80MB of C++, and the crate compiles for wasm32.
 duckdb = { workspace = true }
-# Graph-verb integration (tests/graph_verbs.rs): deserialise dispatch JSON into the
-# verb result structs.
-serde = { workspace = true }
+# `serde = { workspace = true }` stood here for a `tests/graph_verbs.rs` that no
+# longer exists, and no file in this crate has ever named `serde::` — only
+# `serde_json`, which brings it transitively. Dead since the graph verbs left.
 # Cross-engine parity baseline producer (tests/corpus_exec.rs): SHA-256 of
 # the canonical ordered result-set serialization + JSON writer for
-# native_baseline.json. Both are native-only test deps (the runtime crate is
-# native-only anyway via the wasm32 cfg-tripwire).
+# native_baseline.json.
+#
+# «Native-only anyway via the wasm32 cfg-tripwire» stood here and was false:
+# `1e11a91` deleted that tripwire and the library compiles for wasm32. What
+# keeps these three dev-deps off the gate is that `cargo xtask wasm-check` runs
+# `cargo check --target wasm32-unknown-unknown` WITHOUT `--all-targets`, so no
+# `tests/` target is built for wasm32 at all.
 sha2 = { workspace = true }
 # Native-builtin smoke (tests/builtin_smoke.rs): drive a SELECT <duckdb_name>(...)
 # per pure_sql Builtin entry from the authoritative catalog so a renamed/removed
-# builtin fails CI on native DuckDB. fossil-hir is WASM-clean; it
-# is a dev-dep only here so the native-only runtime's wasm32 tripwire is unaffected.
+# builtin fails CI on native DuckDB. `fossil-hir` is WASM-clean, so this edge
+# would cost the gate nothing even if the gate did build `tests/`.
 fossil-hir = { path = "../fossil-hir" }
 # `salsa` was here too, and no test in this crate has ever named it: the module
 # doc says this crate runs OUTSIDE the query graph, and it does. It went with

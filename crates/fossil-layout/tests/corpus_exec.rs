@@ -5,7 +5,7 @@
 //! 1.33.x.
 //!
 //! Native-only, and no longer for the reason this line used to give. It said
-//! `fossil-runtime` carried a `wasm32` `compile_error!` tripwire; `1e11a91`
+//! `fossil-layout` carried a `wasm32` `compile_error!` tripwire; `1e11a91`
 //! deleted that tripwire, and the crate now compiles for wasm32 and declares it
 //! with `[package.metadata.fossil] wasm = true` — it is IN the
 //! `cargo xtask wasm-check` closure. What stays native is THIS FILE, which

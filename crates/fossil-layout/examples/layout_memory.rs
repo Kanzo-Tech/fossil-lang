@@ -20,7 +20,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use fossil_runtime::layout::community_hierarchy;
+use fossil_layout::layout::community_hierarchy;
 
 /// Peak resident set in bytes, from the OS rather than from an allocator hook.
 ///

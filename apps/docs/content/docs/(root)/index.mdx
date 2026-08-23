@@ -84,7 +84,7 @@ and `datafusion` outside it too.
 <Callout type="warn" title="True today: the guard is written, was run, and is switched off">
 It was written and executed on 2026-08-05 and it came out **red**. What it caught on the first
 attempt is that `fossil-wasm` — the reader — reaches the engine transitively, through
-`fossil-ide → fossil-engine`, while its own `Cargo.toml` says *"NOT pull `fossil-runtime` or any
+`fossil-ide → fossil-engine`, while its own `Cargo.toml` says *"NOT pull `fossil-layout` or any
 native UDF crate (the WASM gate)"*. The rule had been written as a comment the whole time and the graph
 broke it anyway.
 

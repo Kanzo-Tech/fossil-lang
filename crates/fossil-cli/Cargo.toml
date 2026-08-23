@@ -19,13 +19,10 @@ fossil-engine = { path = "../fossil-engine" }
 # The host half: DESCRIBE each source before the compile, and hold the
 # credentials that let it. See its module doc for why it is not in the engine.
 fossil-introspect = { path = "../fossil-introspect" }
-# `Diagnostic` / `Severity` for rustc-style `check` rendering.
+# `Diagnostic` / `Severity` for rustc-style `check` rendering, and the `RunStatus`
+# / `SourceRefInfo` / `ProviderInfo` wire types the commands format to stdout.
 fossil-base       = { path = "../fossil-base" }
-# `RunStatus` — the shape `run` prints, named where it is produced. The binary
-# already links this crate through the engine; what it adds here is the name.
-# (`refs` and `providers` print `Vec`s the engine hands back and this file never
-# names, so `fossil-lineage` is not an edge.)
-fossil-df         = { path = "../fossil-df" }
+fossil-run-status = { path = "../fossil-run-status" }
 # Machine JSON on stdout (`--output-json`) for keasy subprocess consumption.
 serde_json = { workspace = true }
 

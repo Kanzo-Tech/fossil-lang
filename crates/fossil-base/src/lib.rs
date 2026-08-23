@@ -2,7 +2,7 @@
 //!
 //! This crate is the substrate every downstream compiler crate
 //! (`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-codegen`,
-//! `fossil-runtime`, `fossil-cli`, `fossil-lsp`, `fossil-wasm`) consumes.
+//! `fossil-layout`, `fossil-cli`, `fossil-lsp`, `fossil-wasm`) consumes.
 //!
 //! **Public-API commitment**: the signatures here are stable. The
 //! change this commitment exists to prevent is widening the `Db` trait —

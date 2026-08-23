@@ -13,14 +13,14 @@
 //! **Fossil byte-writes Parquet from Rust, and this sentence used to deny it.** `fossil-df`'s
 //! `files.rs` is the single Arrow→Parquet encoder, shared by the native sink and the browser
 //! executor; the `DuckDB` `COPY` `GraphAr` writer was retired when both the `run` and `catalog`
-//! paths moved to the `fossil-df` materializer (`fossil-runtime/src/materialize.rs`). What still
+//! paths moved to the `fossil-df` materializer (`fossil-layout/src/materialize.rs`). What still
 //! goes through `DuckDB` `COPY ... (FORMAT PARQUET)` is the layout post-pass in
-//! `fossil-runtime/src/layout.rs`, which re-tiles into the manifest-declared `prefix`. The
+//! `fossil-layout/src/layout.rs`, which re-tiles into the manifest-declared `prefix`. The
 //! vertex-tile naming
 //! convention is `<prefix>chunk{k}.parquet` and the edge-tile one is
 //! `<edge prefix><adj_list prefix>tile{k}.parquet` — `by_source/` and `by_target/`, one per
 //! declared [`AdjList`]. This module declares the tiling; it does not emit bytes,
-//! and `fossil-runtime`'s `enrich_layout` is the only thing that does — **what the emitter writes
+//! and `fossil-layout`'s `enrich_layout` is the only thing that does — **what the emitter writes
 //! is what the manifest says**, asserted on the artefact by
 //! `fossil-engine/tests/conformance.rs` rather than agreed by convention. That gap stood open for
 //! a long time; it does not get to reopen.

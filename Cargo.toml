@@ -40,7 +40,7 @@ serde_yaml_ng = "0.10"
 # JSON Schema draft-07 dialect for openapi-typescript interop.
 schemars = { version = "0.8" }
 # Pure-Rust SHA-256 for the cross-engine parity digest (native_baseline.json
-# producer in fossil-runtime tests). Already a transitive dep via duckdb/parquet;
+# producer in fossil-layout tests). Already a transitive dep via duckdb/parquet;
 # WASM-safe (no C/FFI) though only used in a native-only dev dependency here.
 sha2 = "0.10"
 
@@ -97,11 +97,17 @@ arrow-schema = "58"
 arrow = "58"
 parquet = "58"
 
-# === Runtime — NATIVE ONLY ===
-# `vscalar` enables the scalar-UDF registration API (VScalar trait + Connection::
-# register_scalar_function) used for the native_udf_only stdlib functions in
-# fossil-runtime. Native-only crate (wasm32 cfg-tripwire) so these
-# never reach the WASM gate.
+# === The native engine — NATIVE ONLY ===
+# `fossil-introspect` is the one crate on a normal edge; `fossil-engine`,
+# `fossil-layout`, `fossil-mcp` and `fossil-cli` keep it as a dev-dependency, to
+# read written Parquet back or to bring an engine to a test. `deny.toml`'s
+# `duckdb` wrappers list is the enforced version of that sentence.
+#
+# `vscalar` enables the scalar-UDF registration API (VScalar trait +
+# Connection::register_scalar_function). It was for the `native_udf_only` stdlib
+# functions, and ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering kind
+# and `fossil-layout/src/udf.rs` with it: `grep -rn 'VScalar\|register_scalar_function'
+# crates/` now finds nothing, so the feature has no user left.
 duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
 
 # === Reference implementations for stdlib fidelity tests (NATIVE ONLY) ===
@@ -157,9 +163,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
 wasm-bindgen-test = "0.3"
-# Native temp dirs for fossil-runtime W0b/4 integration tests that
-# write GraphAr Parquet to disk and read back via duckdb. Native-only
-# (uses real filesystem); not in the WASM gate.
+# Native temp dirs for integration tests that write Parquet to disk and read it
+# back via duckdb — `fossil-engine`, `fossil-df` and `fossil-introspect`, which
+# are its three dev-dependents. (It named `fossil-layout` here and that crate
+# dropped it along with the `tests/graphar_decomp.rs` it served.) Native-only
+# (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"
 # The spill test (fossil-df tests/spill.rs) reads DataFusion's own log records:
 # an operator that spills says so through `log`, and nothing else survives the

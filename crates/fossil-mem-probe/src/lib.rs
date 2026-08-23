@@ -4,7 +4,7 @@
 //! 2026-08-04), and four hypotheses about where that memory went were false — each eliminated by
 //! measurement rather than argument. This is the instrument that eliminated them, and both halves
 //! of the write path report through it: the `DataFusion` executor and Parquet sink in `fossil-df`,
-//! and the `DuckDB` layout pass in `fossil-runtime`. Neither may depend on the other, so it is a
+//! and the layout post-pass in `fossil-layout`. Neither may depend on the other, so it is a
 //! crate of its own rather than a module inside one of them.
 //!
 //! ```text
@@ -17,8 +17,8 @@
 //! not substrate: it asks the OS for a number and reads a monotonic clock, which is exactly the
 //! I/O `fossil-base`'s `System` exists to keep behind a trait — and it did neither through
 //! `System`. The consequence was structural rather than aesthetic: this `ps` call was the ONLY
-//! edge from `fossil-runtime` to `fossil-base`, so the runtime linked the whole compiler substrate
-//! to time a phase.
+//! edge from `fossil-layout` to `fossil-base`, so a post-pass over Parquet linked the whole
+//! compiler substrate in order to time a phase.
 //!
 //! # The clock is `Instant`, on purpose
 //!

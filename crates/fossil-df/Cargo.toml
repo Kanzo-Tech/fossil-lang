@@ -25,10 +25,11 @@ fossil-hir = { path = "../fossil-hir" }
 # neither half of the write path may depend on the other.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
-# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
-# (arrow-schema / serde only) — the backend reuses them instead of re-deriving
-# the GraphAr layout.
+# Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name) and the
+# host↔fossil wire contract (RunStatus). Both WASM-clean (arrow-schema / serde
+# only) — the backend reuses them instead of re-deriving the GraphAr layout.
 fossil-sinks = { path = "../fossil-sinks" }
+fossil-run-status = { path = "../fossil-run-status" }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
 # manifest/RunStatus materialize from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
@@ -68,12 +69,6 @@ datafusion = { version = "54", default-features = false, features = ["parquet"] 
 # write (`sink.rs`) is native-gated.
 parquet = { version = "58", default-features = false, features = ["arrow"] }
 
-# `src/run_status.rs` — the wire contract this backend emits. `serde` is the
-# (de)serialization the CLI writes to stdout and a host reads back; `schemars`
-# publishes the same shape as JSON Schema for TS codegen (the pipeline
-# `fossil-graph`'s verb result types use). Both pure Rust, WASM-clean.
-serde = { workspace = true }
-schemars = { workspace = true }
 # The JSON array reader (`read_json_source`). `arrow-json` decodes a slice of
 # `serde_json::Value`, so the parse and the decode speak the same type; both are
 # pure Rust, so neither costs the wasm build anything.

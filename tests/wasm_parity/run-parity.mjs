@@ -3,7 +3,7 @@
 // 1.10502 AND on DuckDB-WASM 1.33.x.
 //
 // The upper tier of the two-tier strategy:
-//   1. native tier      — fossil-runtime/tests/corpus_exec.rs runs the executable
+//   1. native tier      — fossil-layout/tests/corpus_exec.rs runs the executable
 //                        corpus subset on native duckdb 1.10502, asserts the
 //                        result bytes, and WRITES the digest baseline
 //                        tests/wasm_parity/native_baseline.json
@@ -46,7 +46,7 @@ const CORPUS_SQL_PATH = resolve(
 );
 
 // The io/csv + io/json + io/parquet parity tier. Written by
-// crates/fossil-runtime/tests/io_parity_corpus.rs (the native side) — a mapping
+// crates/fossil-layout/tests/io_parity_corpus.rs (the native side) — a mapping
 // reading all three source formats + clean/parse/seq ops (sources end-to-end;
 // the ops are reachable only by direct MIR/Expr::Call construction, since no
 // surface syntax lowers to them). This
@@ -180,7 +180,7 @@ async function main() {
     ioSql = JSON.parse(readFileSync(IO_SQL_PATH, "utf8"));
   } catch {
     console.warn(
-      "WARN: io_parity_baseline.json not found — run `cargo test -p fossil-runtime --test io_parity_corpus` first to produce the io tier.",
+      "WARN: io_parity_baseline.json not found — run `cargo test -p fossil-layout --test io_parity_corpus` first to produce the io tier.",
     );
   }
 

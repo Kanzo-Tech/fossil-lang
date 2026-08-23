@@ -21,7 +21,7 @@ workspace = true
 [dependencies]
 # Compiler-core crates wired into FossilPlayground::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
-# fossil-runtime (native DuckDB), NO fossil-cli/fossil-lsp (binaries), NO
+# fossil-layout (the write path's post-pass), NO fossil-cli/fossil-lsp (binaries), NO
 # fossil-sinks/fossil-codegen (the SQL/GraphAr backend — the browser does not
 # compile to SQL anymore; the editor is LSP-only).
 fossil-base    = { path = "../fossil-base" }
@@ -42,7 +42,7 @@ smol_str = { workspace = true }
 # `fossil_lineage::source_refs` is what the test-reachable `refs_native` core
 # calls to report a program's source bindings. WASM-clean: its own deps are
 # fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
-# NEITHER fossil-runtime NOR any native UDF crate.
+# NEITHER fossil-layout NOR any native UDF crate.
 fossil-lineage = { path = "../fossil-lineage" }
 # WASM-clean wire types (serde + schemars) — the `refs()`/`providers()` lineage
 # surface returns `SourceRefInfo`/`ProviderInfo`, shared verbatim with the host

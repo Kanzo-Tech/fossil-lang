@@ -38,8 +38,11 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # → write_to_dir). Re-exports `OutputDescriptorKind`. DuckDB now serves only the
 # layout post-pass + CSV type pre-introspection.
 fossil-df           = { path = "../fossil-df" }
-# Native runtime (layout + secrets) + sinks + cloud-path resolver.
-fossil-runtime      = { path = "../fossil-runtime" }
+# The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
+# after the write. It links no engine and it is not the «native runtime + secrets
+# + cloud-path resolver» this line used to call it: `materialize.rs` took the
+# resolver with it, and `install_secret` went with the `DuckDB` connection.
+fossil-layout       = { path = "../fossil-layout" }
 fossil-sinks        = { path = "../fossil-sinks" }
 # The `RunStatus` / `SourceRefInfo` / `ProviderInfo` wire types
 # the engine produces (one source of truth; keasy reuses them).
@@ -61,7 +64,7 @@ tracing  = { workspace = true }
 # the descriptor cache filled first, exactly as the CLI does it.
 fossil-introspect = { path = "../fossil-introspect" }
 # The tests read back the Parquet a run wrote — the same «test convenience, not a
-# dependency of the language» `fossil-runtime` demoted.
+# dependency of the language» `fossil-layout` demoted.
 duckdb = { workspace = true }
 # `fossil-hir` is a regular dependency above, and an integration test cannot see
 # one: `tests/` links the crate plus its DEV deps only. `tests/stdlib_return_types.rs`

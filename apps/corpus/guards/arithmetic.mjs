@@ -105,7 +105,7 @@ export function morton2(x, y) {
  * dividing by zero.
  *
  * **Every step is binary32**, which is why each one is wrapped in `Math.fround`. The writer is
- * `morton_codes` in `crates/fossil-runtime/src/layout.rs`, whose positions, extent and intermediate
+ * `morton_codes` in `crates/fossil-layout/src/layout.rs`, whose positions, extent and intermediate
  * ratio are all `f32`; JavaScript's own arithmetic is binary64, so a literal transcription of the
  * formula is a *different function*. It differs on 8 of the 44,850 integer cases with `lo = 0` and
  * `hi ∈ 2..299` — `quantize(147, 0, 167)` is 57687 in binary32 and 57686 in binary64 — and one unit

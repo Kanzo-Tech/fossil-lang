@@ -140,7 +140,7 @@ data does not vary by 3.7 GiB. It was operator memory nobody had bounded.
 
 **−1.71 GiB, against the ≈ −1.7 GB predicted before it was attempted**, and the corpus is byte-identical again: 87
 files, all 87 md5s equal to the previous binary's, and the three parity tests in
-`crates/fossil-runtime/tests/layout_renumber.rs` passed without being touched.
+`crates/fossil-layout/tests/layout_renumber.rs` passed without being touched.
 
 The `community_hierarchy` row is the whole finding. The step used to cost +2.09 GiB because it built
 the CSR on entry; now the CSR already exists and the step costs +0.08. **The memory did not move

@@ -1,4 +1,10 @@
-//! `fossil-runtime`: the layout post-pass, and it links no engine.
+//! `fossil-layout`: the layout post-pass, and it links no engine.
+//!
+//! It was `fossil-runtime`, and both words of "native execution runtime" had
+//! stopped being true: `graph_exec.rs` left in `d6f957f` (it is
+//! `fossil_mcp::executor` now), `materialize.rs` was deleted in `1e11a91`, and
+//! what is left is one module. **The crate IS the layout pass**, so it is named
+//! after it and it sits with the corpus rather than with the engine.
 //!
 //! **This crate compiles for `wasm32`.** It carried a `compile_error!` naming
 //! bundled `DuckDB` as the reason it could not, and `docs/design/one-engine.mdx`
@@ -10,6 +16,20 @@
 //! What is left is [`layout`], which holds no connection: it reads and writes
 //! Parquet through `arrow-rs`/`parquet-rs` and its algorithm — Louvain, Morton —
 //! was always Rust.
+//!
+//! # The one edge to `fossil-df`, and it stays
+//!
+//! `layout.rs` takes exactly one thing from the language side:
+//! `fossil_df::files::batches_to_parquet`, the single Arrow→Parquet encoder.
+//! That is a corpus crate depending on an engine crate, and the obvious repairs
+//! both cost more than the edge does. Moving the encoder to `fossil-sinks` puts
+//! `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which today
+//! has neither; giving it a leaf crate of its own buys one shared function for
+//! a twenty-seventh crate. **The decision is to leave the edge and pay for it
+//! when there is a second reason** — a second consumer of the encoder that is
+//! not on the engine side. Until then, do not re-derive this: the tiles are
+//! emitted through the same writer as the sink so that the
+//! row-group-per-tile property a reader indexes on is stated in one place.
 //!
 //! `DuckDB` is a **dev**-dependency, and the demotion is the point rather than a
 //! technicality. Three test files bring an engine to read back what the library
@@ -57,7 +77,7 @@
 // `pub mod graph_exec;` lived here — `ConnectionExecutor`, then called
 // `DuckRuntime` after this crate, which is the native side of the
 // corpus verbs. It reads a corpus; this crate WRITES one, and the two only
-// shared a `Connection`. It was also the single `fossil-runtime -> fossil-graph`
+// shared a `Connection`. It was also the single `fossil-layout -> fossil-graph`
 // edge, and that edge ran backwards: the write path of the language depending
 // on the read path of the format. It is `fossil-mcp`'s now, which was its only
 // caller and already depended on `fossil-graph`.

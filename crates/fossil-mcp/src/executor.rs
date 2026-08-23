@@ -23,11 +23,12 @@ use serde_json::{Map, Value};
 ///
 /// Two things were wrong with it, and the second is the one that matters.
 ///
-/// It is not a **runtime**. `fossil-runtime` is a crate and it is the WRITE path
-/// of the language — this reads a corpus. The comment at `fossil_runtime`'s
-/// module root records the move: *«`pub mod graph_exec;` lived here»*. The name
-/// pointed at a home it no longer had, and the crate it pointed at means
-/// something else.
+/// It is not a **runtime**. It was named for the crate it lived in, which was
+/// called `fossil-runtime` — and that crate is `fossil-layout` now, because it
+/// was not a runtime either: it is the WRITE path of the language, and this
+/// reads a corpus. The comment at `fossil_layout`'s module root records the
+/// move: *«`pub mod graph_exec;` lived here»*. The name pointed at a home it no
+/// longer had, and then at a crate that no longer exists under that name.
 ///
 /// And **`Duck` distinguished nothing.** Every implementor of [`DuckExecutor`]
 /// is a `DuckDB` one — that is what the trait says, and `DuckDB` there is

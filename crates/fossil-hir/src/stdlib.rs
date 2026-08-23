@@ -60,7 +60,7 @@
 //! There was a `WasmClass` field, a `derive_wasm_class` that computed it, a
 //! `NativeUdfOnly` variant and a test asserting `PureSql ⟺ non-Udf`. With no
 //! `Udf` variant the bad state is unrepresentable rather than derived and
-//! checked, so all four go, and `fossil-runtime/src/udf.rs` with them. **The
+//! checked, so all four go, and `fossil-layout/src/udf.rs` with them. **The
 //! language now runs entirely in the browser**, which is a change of product
 //! and not of housekeeping.
 
@@ -1196,7 +1196,7 @@ const VALIDATE_URL_TEMPLATE: &str = "CASE WHEN %0 IS NULL OR regexp_matches(%0, 
 /// beside it in `str/`; what `validate/` means — the ONE thing all five of its
 /// rows would then share — is *the value or an error, never a null*, stated in
 /// the section comment above and pinned by
-/// `fossil-runtime/tests/builtin_smoke.rs`. Declaring `Bool` here would leave
+/// `fossil-layout/tests/builtin_smoke.rs`. Declaring `Bool` here would leave
 /// the namespace with four rows of one shape and one of another, and would
 /// leave the language with no way at all to say "this must match, or stop".
 ///

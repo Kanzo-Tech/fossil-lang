@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use duckdb::Connection;
-use fossil_runtime::layout::{AdjacencyTarget, Endpoint, LayoutError, VertexLayoutTarget};
+use fossil_layout::layout::{AdjacencyTarget, Endpoint, LayoutError, VertexLayoutTarget};
 
 /// Two triangles joined by one edge — the smallest graph with communities to
 /// find, so the layout actually moves the vertices and the renumbering is a
@@ -164,7 +164,7 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     // single file — the only point at which that file is the source of truth.
     let before = edges_by_subject(&conn, &lit(&vertices), &by_source);
     let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
-    fossil_runtime::layout::enrich_layout(&v, &a).expect("enrich_layout");
+    fossil_layout::layout::enrich_layout(&v, &a).expect("enrich_layout");
 
     // 1. The graph is the same graph. Ids changed; who is connected to whom did
     //    not. This is the assertion a missed adjacency file fails.
@@ -277,7 +277,7 @@ fn a_dangling_endpoint_is_an_error_and_not_a_missing_row() {
     fs::create_dir_all(&chunks).expect("chunk dir");
 
     let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
-    let err = fossil_runtime::layout::enrich_layout(&v, &a)
+    let err = fossil_layout::layout::enrich_layout(&v, &a)
         .expect_err("a dangling endpoint must not pass silently");
     assert!(
         matches!(err, LayoutError::DanglingEndpoint { dropped: 1, .. }),
@@ -299,7 +299,7 @@ fn an_unknown_vertex_type_is_refused() {
 
     let (v, mut a) = targets(&vertices, &by_source, &by_target, &chunks);
     a[0].dst_type = "Nowhere".to_string();
-    let err = fossil_runtime::layout::enrich_layout(&v, &a).expect_err("unknown type");
+    let err = fossil_layout::layout::enrich_layout(&v, &a).expect_err("unknown type");
     assert!(
         matches!(err, LayoutError::UnknownVertexType { ref vertex_type, .. } if vertex_type == "Nowhere"),
         "expected the unknown type to be named, got {err:?}",

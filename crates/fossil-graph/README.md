@@ -34,9 +34,9 @@ Adding a verb is a 4-touch change: enum variant in `operations/mod.rs` + `Params
 
 ## Status
 
-Every verb is implemented and snapshot-tested; the `DuckExecutor` seam has a native impl in `fossil-runtime` and a browser one in `fossil-graph-wasm`, and neither re-derives a verb's SQL.
+Every verb is implemented and snapshot-tested; the `DuckExecutor` seam has a native impl in `fossil-layout` and a browser one in `fossil-graph-wasm`, and neither re-derives a verb's SQL.
 
-**W3 landed in `fossil-runtime::layout`, not in `fossil-sinks`** — worth knowing, because looking for it in the writer finds nothing. The layout needs the resolved edge set in `dense_id` space, which only exists *after* the vertex and edge COPYs have run, and `fossil-sinks` emits SQL from pure data and cannot read N rows. `enrich_layout` fills `x`/`y` from a modularity community partition placed by phyllotaxis, and rewrites each vertex Parquet Morton-sorted.
+**W3 landed in `fossil-layout::layout`, not in `fossil-sinks`** — worth knowing, because looking for it in the writer finds nothing. The layout needs the resolved edge set in `dense_id` space, which only exists *after* the vertex and edge COPYs have run, and `fossil-sinks` emits SQL from pure data and cannot read N rows. `enrich_layout` fills `x`/`y` from a modularity community partition placed by phyllotaxis, and rewrites each vertex Parquet Morton-sorted.
 
 That sort is still what the tiles will be addressed through, but it is no longer what a verb queries: the bbox predicate was measured reading the whole file anyway. **The hierarchy gives the levels of aggregation; the Morton order gives the ranges of bytes.** They are two orthogonal structures, and they were once confused into one — the mistake was to read a Morton range as if it selected a level.
 

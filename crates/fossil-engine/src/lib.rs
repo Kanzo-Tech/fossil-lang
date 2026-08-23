@@ -39,7 +39,7 @@
 // pointer should land on the code rather than on a paraphrase of it.
 
 // **The reason changed, and that is the point of the change.** This said
-// «depends on fossil-runtime which uses bundled DuckDB», then «its own bundled
+// «depends on fossil-layout which uses bundled DuckDB», then «its own bundled
 // DuckDB, for `pre_introspect`». Neither is true: introspection and credentials
 // are `fossil-introspect`'s, and this crate links no database.
 //
@@ -517,7 +517,7 @@ fn enrich_written_layout(
             e.src_type, e.label, e.dst_type
         ))
     };
-    let targets: Vec<fossil_runtime::layout::VertexLayoutTarget> = graph
+    let targets: Vec<fossil_layout::layout::VertexLayoutTarget> = graph
         .schema
         .nodes
         .iter()
@@ -528,7 +528,7 @@ fn enrich_written_layout(
                 .filter(|e| e.src_type == node.label && e.dst_type == node.label)
                 .map(|e| adjacency(e, "by_source"))
                 .collect();
-            fossil_runtime::layout::VertexLayoutTarget {
+            fossil_layout::layout::VertexLayoutTarget {
                 type_name: node.label.clone(),
                 vertex_parquet: path_str(format!("vertex/{}.parquet", node.label)),
                 // Trailing separator: the layout appends `chunk{k}.parquet`.
@@ -557,17 +557,17 @@ fn enrich_written_layout(
     // adjacency file back with plain SQL and fails on a dense id no vertex
     // carries. A file this loop skipped keeps ids from before the renumbering
     // and dangles there.
-    let adjacencies: Vec<fossil_runtime::layout::AdjacencyTarget> = graph
+    let adjacencies: Vec<fossil_layout::layout::AdjacencyTarget> = graph
         .edges
         .iter()
         .flat_map(|e| {
-            use fossil_runtime::layout::Endpoint;
+            use fossil_layout::layout::Endpoint;
             [
                 (adjacency(e, "by_source"), Endpoint::Src),
                 (adjacency(e, "by_target"), Endpoint::Dst),
             ]
             .map(
-                |(parquet, ordered_by)| fossil_runtime::layout::AdjacencyTarget {
+                |(parquet, ordered_by)| fossil_layout::layout::AdjacencyTarget {
                     parquet,
                     src_type: e.src_type.clone(),
                     dst_type: e.dst_type.clone(),
@@ -577,7 +577,7 @@ fn enrich_written_layout(
         })
         .collect();
 
-    fossil_runtime::layout::enrich_layout(&targets, &adjacencies)
+    fossil_layout::layout::enrich_layout(&targets, &adjacencies)
         .map_err(|e| miette::miette!("layout: {e}"))?;
 
     // The single-file vertex Parquet was this pass's input and nothing reads it

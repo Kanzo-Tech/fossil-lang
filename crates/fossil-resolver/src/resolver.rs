@@ -8,7 +8,7 @@ use crate::{ResolveError, ResolvedPath};
 ///
 /// `Send + Sync + Debug` mirrors the bound on `fossil-base::System` —
 /// resolvers are typically shared across worker threads in
-/// `fossil-runtime` and across request handlers in a server host.
+/// `fossil-layout` and across request handlers in a server host.
 ///
 /// Standalone CLIs and the playground mount [`DefaultPathResolver`].
 /// Multi-tenant hosts implement this trait against their own connection

@@ -9,7 +9,7 @@
 //!
 //! * **A — today.** `DuckDB COPY (… ORDER BY dense_id) TO 'chunk{k}.parquet'
 //!   (FORMAT PARQUET)`, one file per 4,096-row tile, the statement
-//!   `fossil-runtime/src/layout.rs:570` emits verbatim (no options: DuckDB's own
+//!   `fossil-layout/src/layout.rs:570` emits verbatim (no options: DuckDB's own
 //!   defaults, which are snappy and 122,880-row row groups — the latter is moot
 //!   at 4,096 rows a file). Two more DuckDB shapes are written so the writer can
 //!   be told apart from the layout: one file with DuckDB's default row groups,
@@ -63,7 +63,7 @@ const WINDOWS: usize = 9;
 const WINDOW_VERTICES: usize = 20_000;
 
 // ── the corpus ────────────────────────────────────────────────────────────
-// `cluster_layout` + `morton2` are `fossil_runtime::layout`'s, copied because
+// `cluster_layout` + `morton2` are `fossil_layout::layout`'s, copied because
 // that crate owns DuckDB and cannot be depended on from a spike. If those
 // constants move, this measures a corpus the writer no longer produces.
 
@@ -766,7 +766,7 @@ fn window_cost(l: &Layout, h: &[u32], cx: f32, cy: f32, half: f32) -> WindowCost
 // ── the edges ─────────────────────────────────────────────────────────────
 // An edge lives in its SOURCE's tile (CSR), so edge tile `k` holds every edge
 // whose `src_dense` is in vertex tile `k` — `fossil_sinks::manifest::EdgeInfo`
-// says so and `fossil_runtime::layout` writes it. That is the whole of the
+// says so and `fossil_layout::layout` writes it. That is the whole of the
 // mapping from a camera window to an edge URL: no box, no index, the same `k`.
 
 /// SplitMix64 — a deterministic corpus is a re-runnable one, and no dependency.

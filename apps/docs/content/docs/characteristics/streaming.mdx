@@ -80,7 +80,7 @@ megabytes at this size, and saying so is not the same as saying it saved some.
 
 ### 3. The layout reads the whole edge list into a `Vec` — landed 2026-08-05
 
-`crates/fossil-runtime/src/layout.rs`
+`crates/fossil-layout/src/layout.rs`
 
 This was the largest of the three and it is gone. `enrich_layout` now reads both adjacency files
 **as the CSR they already are**, through `Statement::stream_arrow`, whose item is a `RecordBatch` —
@@ -112,10 +112,10 @@ The result, at ten million under a 4 GiB budget:
 | process peak | 10.10 GiB | **8.39 GiB** |
 
 −1.71 GiB against the ≈ −1.7 GB predicted before it was attempted, corpus byte-identical, and the three parity tests
-in `crates/fossil-runtime/tests/layout_renumber.rs` green **without being touched**.
+in `crates/fossil-layout/tests/layout_renumber.rs` green **without being touched**.
 
 `from_edges` was not deleted. A bag costs what a bag costs, and the tests and
-`crates/fossil-runtime/examples/layout_memory.rs` still hand it one. What changed is that the write
+`crates/fossil-layout/examples/layout_memory.rs` still hand it one. What changed is that the write
 path no longer does.
 
 ## The attempt that failed first, and why it is kept here

@@ -147,14 +147,14 @@ struct Corpus {
 }
 
 /// Golden angle, cluster spacing and packing radius — copied from
-/// `fossil_runtime::layout`, which owns `DuckDB` and so cannot be depended on
+/// `fossil_layout::layout`, which owns `DuckDB` and so cannot be depended on
 /// from here. If those constants move, this example measures a corpus the
 /// writer no longer produces.
 const GOLDEN_ANGLE: f32 = 2.399_963_2;
 const CLUSTER_SPACING: f32 = 100.0;
 const INTRA_CLUSTER_RADIUS: f32 = 12.0;
 
-/// `fossil_runtime::layout::cluster_layout`, verbatim in behaviour: clusters on
+/// `fossil_layout::layout::cluster_layout`, verbatim in behaviour: clusters on
 /// a Z-order grid, phyllotaxis within the cell, uniform pitch sized by the
 /// largest disc.
 fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
@@ -200,7 +200,7 @@ fn morton_decode(code: u32) -> (u32, u32) {
     (compact(code), compact(code >> 1))
 }
 
-/// Interleave the low 16 bits of `x` and `y` — `fossil_runtime::layout::morton2`.
+/// Interleave the low 16 bits of `x` and `y` — `fossil_layout::layout::morton2`.
 fn morton2(x: u16, y: u16) -> u32 {
     fn spread(n: u16) -> u32 {
         let mut n = u32::from(n);

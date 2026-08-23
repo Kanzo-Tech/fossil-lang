@@ -13,7 +13,7 @@
 //! question is "how much, and against what", not "how fast".
 //!
 //! ```text
-//! FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-runtime --example enrich_memory -- 1000000
+//! FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-layout --example enrich_memory -- 1000000
 //! ```
 //!
 //! # What makes the number mean anything
@@ -46,7 +46,7 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Array, RecordBatch, StringArray, UInt32Array};
 use arrow::datatypes::{DataType, Field, Schema};
-use fossil_runtime::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
+use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
 use parquet::arrow::ArrowWriter;
 
 /// Rows per `RecordBatch` handed to the writer — the fixture is streamed in
@@ -74,7 +74,7 @@ fn main() {
     if std::env::var("FOSSIL_MEM_PROBE").is_err() {
         eprintln!(
             "note: FOSSIL_MEM_PROBE is unset, so `enrich_layout` will report nothing.\n\
-             re-run as: FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-runtime \\\n\
+             re-run as: FOSSIL_MEM_PROBE=1 cargo run --release -p fossil-layout \\\n\
              \x20   --example enrich_memory -- {rows} {degree}"
         );
     }
@@ -135,7 +135,7 @@ fn main() {
         },
     ];
 
-    fossil_runtime::layout::enrich_layout(std::slice::from_ref(&target), &adjacencies)
+    fossil_layout::layout::enrich_layout(std::slice::from_ref(&target), &adjacencies)
         .expect("enrich_layout runs on its own fixture");
 
     let chunks = std::fs::read_dir(root.join("chunks"))

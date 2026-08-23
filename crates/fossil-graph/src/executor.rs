@@ -1,7 +1,7 @@
 //! Verb execution: the [`DuckExecutor`] seam + per-verb SQL generation.
 //!
 //! The verb→SQL logic lives here (pure string building, WASM-safe) so every
-//! binding reuses it: the native impl (`fossil-runtime`, `duckdb` crate) and
+//! binding reuses it: the native impl (`fossil-layout`, `duckdb` crate) and
 //! the WASM impl (`fossil-wasm`, DuckDB-WASM) differ only in how they satisfy
 //! [`DuckExecutor`] — they never re-derive a verb's SQL
 //!.
@@ -1067,7 +1067,7 @@ mod tests {
 
     /// Canned executor: matches the verb SQL shapes by substring so the verb
     /// wiring is testable without a real `DuckDB` (SQL correctness is covered by
-    /// the fossil-runtime integration test).
+    /// the fossil-layout integration test).
     /// Drive a future to completion synchronously. Our test executors never
     /// suspend (they return ready values), so a noop-waker poll loop returns on
     /// the first poll — no runtime dependency needed.
@@ -1108,7 +1108,7 @@ mod tests {
 
     /// Executor backed by a closure — canned responses keyed on the SQL, so a
     /// verb's wiring (param → SQL → result shaping) is tested without real `DuckDB`
-    /// (SQL correctness is the fossil-runtime integration test's job).
+    /// (SQL correctness is the fossil-layout integration test's job).
     struct FnExecutor<F: Fn(&str) -> Vec<Value>>(F);
     impl<F: Fn(&str) -> Vec<Value>> DuckExecutor for FnExecutor<F> {
         async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {

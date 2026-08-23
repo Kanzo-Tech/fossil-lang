@@ -127,13 +127,14 @@ crates/
                            authenticates one. `fossil-cli` calls it before the compile. The one
                            crate linking `DuckDB` on a normal edge — and it is native by that
                            edge and by `fossil-resolver`, without a tripwire of its own
-  fossil-runtime/          the layout post-pass — Louvain + Morton over Parquet through
+  fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
                            arrow-rs, linking no engine (`DuckDB` is a dev-dependency). It
                            COMPILES for wasm32 and declares it with `[package.metadata.fossil]
-                           wasm = true`, which is what puts it in the gate closure
+                           wasm = true`, which is what puts it in the gate closure. It was
+                           `fossil-runtime`, and it is not a runtime: the crate IS the pass
   fossil-mem-probe/        `FOSSIL_MEM_PROBE` — peak RSS + elapsed seconds per phase of a
                            write. Depends on NOTHING; both halves of the write path
-                           (fossil-df, fossil-runtime) report through it
+                           (fossil-df, fossil-layout) report through it
   fossil-run-status/       the `fossil run --output-json` wire contract
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract
   fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)

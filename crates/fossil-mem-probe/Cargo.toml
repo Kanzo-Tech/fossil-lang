@@ -1,8 +1,8 @@
 # The `FOSSIL_MEM_PROBE` instrument: peak resident set and elapsed seconds
 # around each phase of a long write. A leaf with NO dependencies — not even
 # `fossil-base` — which is the whole point of it being its own crate: it is the
-# one thing `fossil-df` and `fossil-runtime` share, and sharing it through the
-# compiler substrate is what made `fossil-runtime` depend on the language side
+# one thing `fossil-df` and `fossil-layout` share, and sharing it through the
+# compiler substrate is what made `fossil-layout` depend on the language side
 # for a `ps` call.
 [package]
 name = "fossil-mem-probe"

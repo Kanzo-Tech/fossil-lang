@@ -97,7 +97,7 @@ fn wasm_check() {
 /// The cdylib closure answers "what does a wasm artefact already pull in". It
 /// cannot answer "what is wasm-CAPABLE", and those differ the moment a crate
 /// stops linking a native engine before anything wasm consumes it —
-/// `fossil-runtime` is exactly that: the layout pass compiles for wasm32 now,
+/// `fossil-layout` is exactly that: the layout pass compiles for wasm32 now,
 /// and no cdylib depends on it, so the gate would not have noticed a dependency
 /// putting it back.
 ///

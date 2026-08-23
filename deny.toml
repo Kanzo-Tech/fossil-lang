@@ -89,7 +89,7 @@ deny = [
     # Measured 2026-08-23 with the authority named above. Only the first TWO are
     # normal edges; the other three reach `duckdb` as a dev-dependency and are
     # listed because a dev edge is still a direct parent to this check. The list
-    # said the opposite for a day: it named `fossil-engine` and `fossil-runtime`,
+    # said the opposite for a day: it named `fossil-engine` and `fossil-layout`,
     # both of which had demoted `duckdb` to dev, and did NOT name the one crate
     # that took over linking it. This whole check was RED as a result — the ban
     # fired and CI's `cargo-deny` job with it, and nothing said so, because
@@ -98,7 +98,7 @@ deny = [
         "fossil-introspect",
         "fossil-mcp",
         "fossil-engine",
-        "fossil-runtime",
+        "fossil-layout",
         "fossil-cli",
     ], reason = "The engine layer only: the native engine. Ring 1 must start in milliseconds and ring 3 addresses bytes — neither may link a database. `fossil-introspect` is the one that links it: DESCRIBE opens a connection, which is what `fbd1102` moved out of `fossil-engine`, and declaring that crate native is exactly the review this list exists to force. The last three keep it as a dev-dependency — to read written Parquet back, or to bring an engine to a test — which is not a ring crossing." },
     { name = "datafusion", wrappers = [

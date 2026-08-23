@@ -48,7 +48,7 @@
 //!
 //! This crate currently depends on [`fossil_sinks`] (manifest types — WASM
 //! clean) and will gain a `DuckExecutor` trait in W2 for execution. The
-//! native impl lives in `fossil-runtime`; the WASM impl in `fossil-wasm`
+//! native impl lives in `fossil-layout`; the WASM impl in `fossil-wasm`
 //! (TS-side calls a DuckDB-WASM connection). For W1 the impls are stubs
 //! (`todo!()`), and the crate carries NO wasm32 tripwire because the verb
 //! logic itself is WASM-safe.

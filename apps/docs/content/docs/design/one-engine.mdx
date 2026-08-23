@@ -5,19 +5,19 @@ description: The language runs on DataFusion, and DuckDB leaves the compiler.
 
 fossil compiles to relational algebra and something has to execute it. Two things
 did: DataFusion in `fossil-df`, and DuckDB — bundled, compiled from C++ — in
-`fossil-runtime`, `fossil-engine`, `fossil-mcp` and `fossil-cli`.
+`fossil-layout`, `fossil-engine`, `fossil-mcp` and `fossil-cli`.
 
 **The language runs on DataFusion. DuckDB leaves the compiler.**
 
 ## Why it is not a preference
 
-`fossil-runtime` and `fossil-engine` each carried a `compile_error!` for
+`fossil-layout` and `fossil-engine` each carried a `compile_error!` for
 `wasm32`, and the reason named in both is bundled DuckDB. So the sentence this
 project is built on — *fossil is a compiler consumed as a WASM library* — is
 true of `fossil-wasm` and false of the layout pass and the engine. One
 dependency is what makes it half true.
 
-**Both are discharged.** `fossil-runtime`'s tripwire is gone. `fossil-engine`
+**Both are discharged.** `fossil-layout`'s tripwire is gone. `fossil-engine`
 still has one and it no longer says DuckDB: what makes it native is that `run`
 writes files to a directory. See below.
 
@@ -33,7 +33,7 @@ a static library already built. Removing it removes that unit.
 
 ## What has to be rewritten, and it is three things
 
-1. **The layout pass — done, and `fossil-runtime` no longer links an engine at
+1. **The layout pass — done, and `fossil-layout` no longer links an engine at
    all.** It reads and writes Parquet with `arrow-rs` and holds no connection. The finding is that **none of the algorithm was in SQL**:
    Louvain and Morton were already Rust, and the SQL only read, applied arrays
    that Rust had computed, sorted, and wrote. What replaced it is three Arrow
@@ -47,7 +47,7 @@ a static library already built. Removing it removes that unit.
    DuckDB to read the Parquet they just wrote. That is a test convenience, not a
    dependency of the language, and it is a **dev**-dependency in both now.
 
-**Where the tripwire stands now.** `fossil-runtime`'s is **gone** — the crate
+**Where the tripwire stands now.** `fossil-layout`'s is **gone** — the crate
 compiles for `wasm32`, and `cargo xtask wasm-check` covers it because the crate
 declares `[package.metadata.fossil] wasm = true` and the gate takes that as a
 second root beside the cdylib closure. Removing DuckDB from it was necessary and
@@ -56,7 +56,7 @@ not sufficient: `fossil-resolver` was an unused edge carrying its own wasm32
 unused dependency, so only building for the target found it.
 
 **`fossil-engine` links no database either, and the reason it is still native
-changed.** Its tripwire named `fossil-runtime`, then named its own `DuckDB`.
+changed.** Its tripwire named `fossil-layout`, then named its own `DuckDB`.
 Neither is true now: `pre_introspect` and the credentials that let it reach a
 cloud source are `fossil-introspect`, a crate the HOST takes.
 
@@ -152,7 +152,7 @@ enable the gather is now the tile the gather produces. Three copies became one,
 and `gather + replace` and `write vertex chunks` became one phase because they
 are now one loop.
 
-Measured with `cargo run --release -p fossil-runtime --example enrich_memory`,
+Measured with `cargo run --release -p fossil-layout --example enrich_memory`,
 which exists for this and reproduces the shape of the real finding at a scale
 that fits on a laptop — wide rows (a subject IRI and two properties, ~124
 bytes/row) over a planted partition, so the gather is a real scatter:

@@ -11,7 +11,7 @@ heavy, so the parity is split into tiers:
 
 | Tier | Where | When | What it proves |
 |------|-------|------|----------------|
-| Native exec | `crates/fossil-runtime/tests/corpus_exec.rs` | every PR (`cargo test`) | the executable corpus runs on native `duckdb` 1.10502, asserts result bytes, and **writes** `native_baseline.json` + `corpus_sql.json` |
+| Native exec | `crates/fossil-layout/tests/corpus_exec.rs` | every PR (`cargo test`) | the executable corpus runs on native `duckdb` 1.10502, asserts result bytes, and **writes** `native_baseline.json` + `corpus_sql.json` |
 | WASM exec (THIS) | `tests/wasm_parity/run-parity.mjs` | **manual, on demand** | the SAME SQL runs on DuckDB-WASM, reproduces the digests, and diffs them against the native baseline |
 
 There used to be a snapshot tier above these — `fossil-codegen/tests/corpus.rs`,
@@ -48,7 +48,7 @@ asserts equality — exiting non-zero on any divergence.
 `run-parity.mjs` also looks for `io_parity_baseline.json` + `io_parity_sql.json`
 — the `io/csv` + `io/json` + `io/parquet` source tier — and its three fixtures
 are committed under `fixtures/`. **The producer is not in the tree:** the
-harness names `crates/fossil-runtime/tests/io_parity_corpus.rs` and no such file
+harness names `crates/fossil-layout/tests/io_parity_corpus.rs` and no such file
 exists. The load is wrapped in a `try`, so today the harness prints a `WARN`,
 reports `io=0`, and gates on the corpus tier alone. Do not read a green run as
 covering the source formats.
@@ -97,7 +97,7 @@ artifacts, and `fixtures/`.
 Re-run the native tier (it rewrites both artifacts):
 
 ```bash
-cargo test -p fossil-runtime --test corpus_exec
+cargo test -p fossil-layout --test corpus_exec
 ```
 
 Then re-run the harness to confirm WASM still matches. A baseline diff in a PR
