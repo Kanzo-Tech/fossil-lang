@@ -79,7 +79,14 @@ fn main() {
         );
     }
 
-    let root = std::env::temp_dir().join("fossil_enrich_memory");
+    // `<pid>` for the reason `tests/layout_renumber.rs` and
+    // `fossil-cli/tests/common/mod.rs` carry one: the directory is WIPED before
+    // it is seeded, so a fixed path means a second invocation deletes the
+    // fixture the first is mid-measurement over. That file was measured red at
+    // 30 concurrent processes, 30 failures; this is an example rather than a
+    // test, so nothing runs two of it — but two `cargo run` in two terminals is
+    // exactly the case, and the failure would look like a memory number.
+    let root = std::env::temp_dir().join(format!("fossil_enrich_memory_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("chunks")).expect("create the fixture directory");
 
