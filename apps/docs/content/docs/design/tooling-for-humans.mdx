@@ -19,6 +19,11 @@ namespace-shaped catalogue offers string operations after an integer, because it
 A list derived from the receiver's type offers exactly the applicable entries, because the same index
 that answers *does this member exist* answers *what members are there*.
 
+The index is built and the completion list does not consult it: every catalogue row is offered
+wherever completion fires, so `seq.join` is on the list after a string today. The receiver sits on
+every row already — see [in your editor](/docs/book/editor) for what that costs and what closing it
+takes. The argument is what the design makes cheap, not what the list does this week.
+
 **An unknown member searches the right space.** When a member does not exist, the suggestion is drawn
 from that type's members rather than from the whole catalogue — so the candidate set is a handful of
 plausible names rather than the entire language:
@@ -45,11 +50,16 @@ side, because `Adults` is a relation of `User`s and `User` is a named type gener
 
 So it can write the body's skeleton — one hole per property the shape requires:
 
-<Program src="shop/editor/filled-body.txt" title="the body, offered as a code action" />
+<Program src="shop/editor/filled-body.txt" title="the body, as a code action would offer it" />
 
 **The names come from the shape. The holes are filled by the author. And inside each hole, completion
 offers the fields of the source.** Two halves of the mapping completed from two opposite extremes,
 and neither half is a heuristic: it is the type answering.
+
+The action is not built — `fossil_ide::code_actions` produces two quick fixes and neither is this
+one, and [in your editor](/docs/book/editor) is where what exists is written down. What the design
+buys is that building it needs no information the editor does not already hold: both tables are
+already open, for the checking it does anyway.
 
 The precedent is rust-analyzer's *implement missing members*, and the comparison is instructive
 because there the two ends are a trait and an implementation — both written by programmers, in the
