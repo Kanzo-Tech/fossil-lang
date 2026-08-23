@@ -2,8 +2,9 @@
 //!
 //! Measures the SAME per-keystroke analysis round-trip as the hard-gate
 //! correctness test (`tests/didchange_budget.rs`): `set_text` (Salsa Setter,
-//! revision bump) → `def_map` → `typecheck_mapping` over every mapping → drain
-//! the `Diagnostic` accumulator, on the canonical 200-line fixture.
+//! revision bump) → [`fossil_mir::program_diagnostics`], on the canonical
+//! 200-line fixture. It is the same *call*, not a resemblance — see
+//! [`round_trip`], which described a loop the budget test had already retired.
 //!
 //! # Status: ADVISORY
 //!
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use fossil_base::{Diagnostic, FossilDb, FsError, Provider, SourceFile, System};
+use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use salsa::Setter as _;
 
 /// The path the program is opened under — the REAL one, because the shape
@@ -56,19 +57,28 @@ impl System for EditorSystem {
     }
 }
 
-/// One `didChange` round-trip — identical to the budget test's, kept in sync so
-/// the advisory benchmark and the hard gate measure the same work.
+/// One `didChange` round-trip: bump the revision via `set_text`, then run
+/// exactly what the handler runs. Returns the diagnostic count so the optimiser
+/// cannot elide the work.
+///
+/// # This said it was the budget test's function and had not been for a while
+///
+/// The line above read «identical to the budget test's, kept in sync». It was
+/// not. The budget test collapsed onto [`fossil_mir::program_diagnostics`] —
+/// the one function `fossil-lsp`'s `didChange` handler calls — and its own
+/// docblock closes with «there is now one function, so the two cannot drift
+/// again». This bench stayed on the hand-rolled `def_map` +
+/// `typecheck_mapping` loop that collapse replaced, so the advisory number and
+/// the hard gate measured different programs: the loop never drained
+/// `lower_to_mir_pg`, and had no equivalent of the three FILE-level drains.
+/// Every lowering a keystroke pays for was outside this clock.
+///
+/// «Kept in sync» is not a mechanism, and this is the third place in these two
+/// crates where a comment claimed an agreement nothing checked. Calling the
+/// same function is the mechanism.
 fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
     file.set_text(db).to(new_text);
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mappings = def_map.mappings(db).clone();
-    let mut count = 0;
-    for mapping in &mappings {
-        let _ = fossil_hir::check::typecheck_mapping(db, *mapping);
-        let diags = fossil_hir::check::typecheck_mapping::accumulated::<Diagnostic>(db, *mapping);
-        count += diags.len();
-    }
-    count
+    fossil_mir::program_diagnostics(db, file).len()
 }
 
 fn bench_didchange(c: &mut Criterion) {
