@@ -298,3 +298,61 @@ fn goto_def_on_whitespace_is_empty() {
         "goto-def on a separator must not produce a malformed target; got {hits:?}",
     );
 }
+
+/// 4. A SOURCE NAME resolves to its `:=` binding — at the binding itself, at a
+///    `from`, and inside another binding's right-hand side.
+///
+/// Measured before `SymbolIndex` grew a `SOURCE_DEF` arm: **0 targets at all
+/// four positions below.** The index walked only `MAPPING` nodes, so no `:=`
+/// binding was in it and the workspace lookup had nothing to match.
+#[test]
+fn a_source_name_resolves_to_its_binding() {
+    const WITH_DERIVED: &str = "\
+type { Person, Order } := io.shex(\"shop.shex\")
+
+User := io.csv(\"users.csv\")
+
+Adults := User.where(User.age)
+
+Users : Person from Adults
+    email = User.email
+";
+    let mut db = HostDb::new();
+    let f = program(&mut db, WITH_DERIVED);
+
+    // Line 2 col 1 — the read binding's own name.
+    let at_binding = goto_definition(&db, &[f], f, 2, 1);
+    assert_eq!(at_binding.len(), 1, "one binding; got {at_binding:?}");
+    let (_, slice) = hit(&db, &at_binding[0]);
+    assert!(
+        slice.starts_with("User :="),
+        "the range must cover the binding, from its name; got {slice:?}",
+    );
+
+    // Line 4 col 1 — a DERIVED binding is the same node kind, so it is indexed
+    // too. A fix that special-cased `io.` readers would pass the case above and
+    // fail this one.
+    let derived = goto_definition(&db, &[f], f, 4, 1);
+    assert_eq!(derived.len(), 1, "one binding; got {derived:?}");
+    assert!(hit(&db, &derived[0]).1.starts_with("Adults :="));
+
+    // Line 6 col 21 — the `from` of a mapping header. `shape_name_under_cursor`
+    // claims only a `SHAPE_EXPR` parent, so this falls through to the index.
+    let at_from = goto_definition(&db, &[f], f, 6, 21);
+    assert_eq!(at_from.len(), 1, "`from Adults` resolves; got {at_from:?}");
+    assert!(hit(&db, &at_from[0]).1.starts_with("Adults :="));
+
+    // Line 4 col 11 — `User` inside the derived relation's right-hand side.
+    let in_rhs = goto_definition(&db, &[f], f, 4, 11);
+    assert_eq!(
+        in_rhs.len(),
+        1,
+        "`User` in the RHS resolves; got {in_rhs:?}"
+    );
+    assert!(hit(&db, &in_rhs[0]).1.starts_with("User :="));
+
+    // The shape name still leaves the language — the new arm must not have
+    // shadowed the document path.
+    let shape = goto_definition(&db, &[f], f, 6, 9);
+    assert_eq!(hit(&db, &shape[0]).1, "shop:Person");
+}

@@ -77,7 +77,7 @@ declares it.
 
 ## Go to definition
 
-Three positions, and the first two leave the `.fossil` file entirely
+Four positions, and the first two leave the `.fossil` file entirely
 (`crates/fossil-ide/src/goto_def.rs:123`):
 
 - On the **shape name** in a mapping header, it opens the shape document, at the shape. When the
@@ -88,12 +88,15 @@ Three positions, and the first two leave the `.fossil` file entirely
   the node.
 - On a **mapping name**, it stays in the program and resolves through the open files. This is the one
   position that never left the language.
+- On a **source name**, it stays in the program too. The index the third case reads walks `:=`
+  bindings as well as mappings (`crates/fossil-ide/src/symbol_index.rs:83`), so `User` in
+  `User := io.csv("data/users.csv")`, `Adults` in `Adults := User.where(…)`, and either of them where
+  a mapping's `from` or another binding's right-hand side names it, all resolve to the binding line.
+  It walked only `MAPPING` nodes before, and all four of those positions answered with nothing.
 
-A source name and a relation name resolve to nothing today. The index behind the third case walks
-only `MAPPING` nodes (`crates/fossil-ide/src/symbol_index.rs:75`), so `User` in
-`User := io.csv("data/users.csv")` and `Adults` in `Adults := User.where(…)` are not in it, and a jump
-from either returns no target. Both are `:=` bindings a few lines up in the same file, which is why
-the gap has been survivable; it is still a gap.
+A destructuring binding — `{ Person, Org } := io.rdf(…)` — puts each name in the index separately, so
+a jump to `Org` does not land on `Person`. A shape name is the one thing here that is not a `.fossil`
+definition, and it is handled by the first case above rather than by the index.
 
 ## Quick fixes
 

@@ -74,6 +74,11 @@ const fn map_kind(kind: FossilSymbolKind) -> LspSymbolKind {
     match kind {
         FossilSymbolKind::Mapping => LspSymbolKind::CLASS,
         FossilSymbolKind::Shape => LspSymbolKind::INTERFACE,
+        // A `:=` binding is a name bound to a value, which is what `VARIABLE`
+        // is for; `OBJECT` and `FILE` were the two alternatives and both say
+        // something about what the right-hand side READS, which the index does
+        // not know — `Adults := User.where(…)` opens no file.
+        FossilSymbolKind::Source => LspSymbolKind::VARIABLE,
     }
 }
 

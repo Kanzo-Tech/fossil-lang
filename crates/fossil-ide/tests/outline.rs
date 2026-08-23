@@ -18,8 +18,12 @@ use lsp_types::SymbolKind;
 ///
 /// It opened with `prefix ex: <https://example.org/>`, and the outline carried a
 /// NAMESPACE for it. There is no vocabulary declaration and so no namespace to
-/// outline — `outline.rs`'s `map_kind` emits CLASS and INTERFACE and nothing
-/// else, which is why `kind_name` names only those two.
+/// outline — `outline.rs`'s `map_kind` emits CLASS, INTERFACE and VARIABLE and
+/// nothing else, which is why `kind_name` names only those three.
+///
+/// `users` is the third: the `:=` binding on line 2 was in NO outline until
+/// `SymbolIndex` grew its `SOURCE_DEF` arm, because the walk tested only for
+/// `MAPPING`. The snapshot below gained exactly that row.
 const FIXTURE: &str = "\
 type { Person, Organization } := io.shex(\"org.shex\")
 
@@ -36,6 +40,7 @@ const fn kind_name(k: SymbolKind) -> &'static str {
     match k {
         SymbolKind::CLASS => "class",
         SymbolKind::INTERFACE => "interface",
+        SymbolKind::VARIABLE => "variable",
         _ => "other",
     }
 }
