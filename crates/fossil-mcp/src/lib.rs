@@ -3,7 +3,7 @@
 //! `fossil-graph` owns the verb→SQL logic (WASM-clean); this crate runs it
 //! NATIVELY: open a `DuckDB` connection, install the dataset's cloud secret,
 //! register the `GraphAr` views the verbs query, load the manifest, and
-//! [`fossil_graph::dispatch`] the operation via [`DuckRuntime`].
+//! [`fossil_graph::dispatch`] the operation via [`ConnectionExecutor`].
 //!
 //! The MCP transport (`main.rs`, `rmcp`) is a thin shell over [`dispatch_json`]:
 //! the host (keasy) spawns this binary, calls the verb tool with a
@@ -13,8 +13,8 @@
 
 use std::collections::HashMap;
 
-pub mod graph_exec;
-pub use graph_exec::DuckRuntime;
+pub mod executor;
+pub use executor::ConnectionExecutor;
 
 use duckdb::Connection;
 use fossil_graph::exec::quote_ident;
@@ -117,7 +117,7 @@ pub async fn dispatch_json(
 ) -> std::result::Result<Value, String> {
     tokio::task::spawn_blocking(move || {
         let (conn, manifest) = open(&dataset)?;
-        let exec = DuckRuntime::new(&conn);
+        let exec = ConnectionExecutor::new(&conn);
         block_on(fossil_graph::dispatch(&operation, &manifest, &exec)).map_err(|e| e.to_string())
     })
     .await

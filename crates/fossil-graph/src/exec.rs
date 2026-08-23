@@ -1069,8 +1069,8 @@ mod tests {
         block_on(dispatch(op, m, exec))
     }
 
-    struct FakeExec;
-    impl DuckExecutor for FakeExec {
+    struct FakeExecutor;
+    impl DuckExecutor for FakeExecutor {
         async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
             // The batched stats query carries both spellings, so it is matched
             // first: `count(*) AS n, count(DISTINCT …) AS d0, …`.
@@ -1091,8 +1091,8 @@ mod tests {
     /// Executor backed by a closure — canned responses keyed on the SQL, so a
     /// verb's wiring (param → SQL → result shaping) is tested without real `DuckDB`
     /// (SQL correctness is the fossil-runtime integration test's job).
-    struct FnExec<F: Fn(&str) -> Vec<Value>>(F);
-    impl<F: Fn(&str) -> Vec<Value>> DuckExecutor for FnExec<F> {
+    struct FnExecutor<F: Fn(&str) -> Vec<Value>>(F);
+    impl<F: Fn(&str) -> Vec<Value>> DuckExecutor for FnExecutor<F> {
         async fn query_json(&self, sql: &str) -> Result<Vec<Value>> {
             Ok(self.0(sql))
         }
@@ -1101,7 +1101,7 @@ mod tests {
     #[test]
     fn aggregate_count_groups_and_maps_rows() {
         let m = fixture();
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             assert!(sql.contains("count(*)"), "count agg, no measure: {sql}");
             assert!(sql.contains("GROUP BY"));
             vec![
@@ -1141,7 +1141,7 @@ mod tests {
                 limit: 1000,
             }),
             &m,
-            &FakeExec,
+            &FakeExecutor,
         )
         .unwrap_err();
         assert!(matches!(
@@ -1156,7 +1156,7 @@ mod tests {
     #[test]
     fn read_projects_identity_and_user_columns_ordered_and_capped() {
         let m = fixture();
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             assert!(sql.contains("ORDER BY") && sql.contains("DESC") && sql.contains("LIMIT 5"));
             // The writer's columns are the tiles' business, not the algebra's.
             assert!(!sql.contains("dense_id"), "reserved cols filtered: {sql}");
@@ -1181,7 +1181,7 @@ mod tests {
     #[test]
     fn read_by_subject_is_what_get_vertex_was() {
         let m = fixture();
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             assert!(sql.contains("WHERE subject = 'urn:a'"), "predicate: {sql}");
             vec![serde_json::json!({ "age": 30, "name": "Alice" })]
         });
@@ -1205,7 +1205,7 @@ mod tests {
     #[test]
     fn read_that_matches_nothing_is_no_rows() {
         let m = fixture();
-        let exec = FnExec(|_sql: &str| Vec::new());
+        let exec = FnExecutor(|_sql: &str| Vec::new());
         let v = run(
             &Operation::Read(ReadParams {
                 vertex_type: "Person".into(),
@@ -1226,7 +1226,7 @@ mod tests {
     fn aggregate_over_ranges_is_dense_and_carries_its_edges() {
         let m = fixture();
         // age is int64 → binnable. First query = bounds, second = the grouping.
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             if sql.contains("min(") {
                 vec![serde_json::json!({ "lo": 0.0, "hi": 4.0 })]
             } else {
@@ -1263,7 +1263,7 @@ mod tests {
         // The two arms are told apart by `edges`, so a grouping over values
         // must not carry any: there is no range for a bin edge to bound.
         let m = fixture();
-        let exec = FnExec(|_: &str| vec![serde_json::json!({ "grp": "a", "val": 1.0 })]);
+        let exec = FnExecutor(|_: &str| vec![serde_json::json!({ "grp": "a", "val": 1.0 })]);
         let v = run(
             &Operation::Aggregate(AggregateParams {
                 vertex_type: "Person".into(),
@@ -1297,7 +1297,7 @@ mod tests {
                 limit: 1000,
             }),
             &m,
-            &FakeExec,
+            &FakeExecutor,
         )
         .unwrap_err();
         assert!(matches!(
@@ -1323,7 +1323,7 @@ mod tests {
         // The property the collapse had to keep: naming no type must not cost a
         // query per column. Recording the SQL is the only way to assert it.
         let seen = std::cell::RefCell::new(Vec::<String>::new());
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             seen.borrow_mut().push(sql.to_string());
             vec![serde_json::json!({ "n": 3 })]
         });
@@ -1357,7 +1357,7 @@ mod tests {
     fn schema_with_a_vertex_type_batches_fields_and_roles() {
         let m = fixture();
         // ONE query for every field: count(*) + a count(DISTINCT) per column.
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             if sql.contains("count(DISTINCT") {
                 assert_eq!(sql.matches("count(DISTINCT").count(), 2, "one pass: {sql}");
                 return vec![serde_json::json!({ "n": 3, "d0": 3, "d1": 2 })];
@@ -1390,7 +1390,7 @@ mod tests {
         let v = run(
             &Operation::Schema(schema_params(Some("Person"), Some("age"))),
             &m,
-            &FakeExec,
+            &FakeExecutor,
         )
         .unwrap();
         let r: SchemaResult = serde_json::from_value(v).unwrap();
@@ -1455,7 +1455,7 @@ mod tests {
     #[test]
     fn expand_all_walks_out_of_the_named_set() {
         let m = fixture();
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             if sql.contains("WITH RECURSIVE") {
                 assert!(
                     sql.contains("WHERE src IN ('urn:a')"),
@@ -1505,7 +1505,7 @@ mod tests {
         let m = fixture();
         // The induced subgraph has no frontier, so there is no recursion and no
         // vertex the caller did not name.
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             if sql.contains("src IN") && sql.contains("dst IN") {
                 assert!(!sql.contains("RECURSIVE"), "one pass, no walk: {sql}");
                 return vec![serde_json::json!({
@@ -1540,7 +1540,7 @@ mod tests {
     #[test]
     fn path_reconstructs_the_ordered_route() {
         let m = fixture();
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             if sql.contains("WITH RECURSIVE") {
                 vec![serde_json::json!({
                     "nodes": ["urn:a", "urn:b", "urn:c"],
@@ -1573,7 +1573,7 @@ mod tests {
     #[test]
     fn execute_sql_caps_rows_and_reports_columns() {
         let m = fixture();
-        let exec = FnExec(|sql: &str| {
+        let exec = FnExecutor(|sql: &str| {
             // row_cap 2 → fetch 3 (cap + 1) to detect truncation.
             assert!(sql.contains("LIMIT 3"));
             vec![

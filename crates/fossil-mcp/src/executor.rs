@@ -18,12 +18,29 @@ use serde_json::{Map, Value};
 /// A [`DuckExecutor`] backed by a native `DuckDB` [`Connection`]. The caller
 /// owns the connection (and registers the `GraphAr` vertex/edge views on it); this
 /// borrows it for the lifetime of a dispatch.
+///
+/// # It was `DuckRuntime`, and the name was a fossil of where it used to live
+///
+/// Two things were wrong with it, and the second is the one that matters.
+///
+/// It is not a **runtime**. `fossil-runtime` is a crate and it is the WRITE path
+/// of the language — this reads a corpus. The comment at `fossil_runtime`'s
+/// module root records the move: *«`pub mod graph_exec;` lived here»*. The name
+/// pointed at a home it no longer had, and the crate it pointed at means
+/// something else.
+///
+/// And **`Duck` distinguished nothing.** Every implementor of [`DuckExecutor`]
+/// is a `DuckDB` one — that is what the trait says, and `DuckDB` there is
+/// load-bearing because the verb SQL is `DuckDB`'s dialect. What separates the
+/// implementors is what BACKS them, which is the rule the other one already
+/// follows: `fossil_graph_wasm::JsExecutor` is named for the `js_sys::Function`
+/// it wraps. This wraps a [`Connection`].
 #[derive(Debug)]
-pub struct DuckRuntime<'c> {
+pub struct ConnectionExecutor<'c> {
     conn: &'c Connection,
 }
 
-impl<'c> DuckRuntime<'c> {
+impl<'c> ConnectionExecutor<'c> {
     /// Wrap a connection on which the `GraphAr` views are already registered.
     #[must_use]
     pub const fn new(conn: &'c Connection) -> Self {
@@ -31,7 +48,7 @@ impl<'c> DuckRuntime<'c> {
     }
 }
 
-impl DuckExecutor for DuckRuntime<'_> {
+impl DuckExecutor for ConnectionExecutor<'_> {
     // Native execution is synchronous; the `async fn` just wraps it in an
     // immediately-ready future so the verb surface stays single-source across
     // the native runtime and the async DuckDB-WASM binding.
@@ -47,7 +64,7 @@ impl DuckExecutor for DuckRuntime<'_> {
     }
 }
 
-impl DuckRuntime<'_> {
+impl ConnectionExecutor<'_> {
     /// Run `sql`, returning real `(column_name, type)` descriptors + JSON rows.
     /// Column metadata is only populated once the query has executed, so it is
     /// read from the executed statement (via `rows`), not the prepared one. The

@@ -12,7 +12,7 @@ use fossil_graph::operations::discovery::{
 };
 use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, Result, dispatch};
-use fossil_mcp::DuckRuntime;
+use fossil_mcp::ConnectionExecutor;
 use fossil_sinks::manifest::{
     DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
 };
@@ -130,7 +130,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 }
 
 fn run<T: serde::de::DeserializeOwned>(conn: &Connection, m: &Manifest, op: &Operation) -> T {
-    let exec = DuckRuntime::new(conn);
+    let exec = ConnectionExecutor::new(conn);
     let value = block_on(dispatch(op, m, &exec)).expect("verb dispatch");
     serde_json::from_value(value).expect("result deserialises")
 }

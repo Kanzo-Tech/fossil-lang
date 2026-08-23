@@ -22,7 +22,8 @@ compile_error!(
 
 use duckdb::Connection;
 
-// `pub mod graph_exec;` lived here — `DuckRuntime`, the native side of the
+// `pub mod graph_exec;` lived here — `ConnectionExecutor`, then called
+// `DuckRuntime` after this crate, which is the native side of the
 // corpus verbs. It reads a corpus; this crate WRITES one, and the two only
 // shared a `Connection`. It was also the single `fossil-runtime -> fossil-graph`
 // edge, and that edge ran backwards: the write path of the language depending
