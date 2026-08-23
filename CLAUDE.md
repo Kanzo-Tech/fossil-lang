@@ -50,13 +50,13 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
   `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
-- **`tokio` never reaches a wasm build, and that is the whole rule.** It lives in `fossil-df`
-  (native-gated, for `run_to_dir`), `fossil-df-wasm` (native-gated — the browser drives
-  `execute_graph` from JS's own event loop) and `fossil-mcp` (rmcp's runtime). Each carries its
-  justification in its own `Cargo.toml`; adding a fourth means writing one there.
-  **This rule used to read "no `tokio` outside `fossil-lsp`", and it was inverted**: `fossil-lsp`
-  has no `tokio` at all, so a contributor obeying it literally would have rejected three correct
-  manifests and approved the one crate that dropped it.
+- **`tokio` never reaches a wasm build, and that is the whole rule.** A crate may hold it behind
+  `cfg(not(target_arch = "wasm32"))`, or as a dev-dependency, or unconditionally if it sits
+  outside the wasm closure — and it must say which, and why, in a comment beside the dependency
+  in its own `Cargo.toml`. **This rule names no crate, on purpose.** It read "no tokio outside X"
+  for months and X was the one crate that had none, because the set was kept by hand.
+  `crates/xtask/tests/tokio_placement.rs` derives it instead, prints the real table on any
+  failure, and goes red if a crate name reappears in this bullet.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
 - **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (Salsa Update for rowan types; future FFI), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
@@ -195,7 +195,6 @@ The `ui/ viewer/ editor/ codemirror-fossil/` React family moved to `@kanzo-tech/
 
 ## Anti-patterns
 
-- Letting `tokio` reach a wasm target, or adding it to a crate without gating it and saying why in that crate's `Cargo.toml`.
 - Using `default-features = true` on rudof crates — be explicit about what you opt into; the
   defaults drag in crates that do not build for wasm32.
 - Putting compiler logic in `fossil-base` — it is the trait + db substrate, no business logic.
