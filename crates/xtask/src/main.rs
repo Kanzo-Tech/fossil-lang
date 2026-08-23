@@ -6,7 +6,9 @@
 //!                is DERIVED from the resolved graph — there is no hand-maintained
 //!                list to drift (the old hardcoded `-p …` lists in `ci.yml` and the
 //!                `.cargo` alias had already diverged: 9 crates vs 6).
-//!   catalogue    Regenerate the provider statics from `catalogue.bnf`. `--check`
+//!   catalogue    Regenerate every projection of the catalogue: the provider
+//!                statics from `catalogue.bnf`, and the reference page's tables
+//!                from that file plus `fossil_hir::stdlib`'s registry. `--check`
 //!                fails instead of writing, which is what CI runs.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};

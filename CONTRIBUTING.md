@@ -75,13 +75,18 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-gra
 
 ## Generated files
 
-Four files are generated and must not be hand-edited — two Rust, two TypeScript:
+Five files are generated and must not be hand-edited — two Rust, two TypeScript,
+one MDX:
 
 ```
 catalogue.bnf ──cargo xtask catalogue──▶ crates/fossil-base/src/providers/generated.rs
                                          crates/fossil-descriptors-output/src/generated.rs
                                          packages/introspect/src/catalogue.generated.ts
                                          packages/executor/src/catalogue.generated.ts
+
+catalogue.bnf ─┐
+               ├─cargo xtask catalogue──▶ apps/docs/content/generated/stdlib.mdx
+fossil-hir ────┘   (crates/fossil-hir/src/stdlib.rs — the FunctionRegistry)
 ```
 
 Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` gets
@@ -91,11 +96,24 @@ needing a shape-language parser, `introspect` the ones with a table function to
 (`io.rdf` included — the host fetches its bytes like any other source). Which
 projection a row lands in is derived from its clauses, never configured.
 
-Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit all
-four. `cargo xtask catalogue --check` fails without writing, and there is no CI
-step for it on purpose: `crates/xtask/tests/catalogue_generated.rs` is the same
-check as a test, so `cargo test --workspace` already fails on a stale file and a
-second gate would be one idea in two places.
+The fifth has a second source, because the catalogue has two halves and only the
+`io.` one became a file. `FunctionRegistry` is already a table of values —
+`RegistryEntry { name, recv, member, sig, lowering }` — so the emitter reads it
+rather than the Rust that writes it down, and `apps/docs/content/docs/book/stdlib.mdx`
+pulls each section in with `<include>` and keeps only the prose. It had written
+the same table out by hand: 58 rows, of which **seven named nothing the checker
+knows**, two of them (`io.sql`, `io.http`) occurring nowhere else in the
+repository at all. `crates/xtask/src/reference.rs` has the measurement and the
+argument for where each half comes from.
+
+Add or change a row in `catalogue.bnf` **or in `fossil-hir`'s registry**, run
+`cargo xtask catalogue`, commit what it wrote. `cargo xtask catalogue --check`
+fails without writing, and there is no CI step for it on purpose:
+`crates/xtask/tests/catalogue_generated.rs` is the same check as a test, so
+`cargo test --workspace` already fails on a stale file and a second gate would be
+one idea in two places. That file also holds the two guards the reference page
+needs and `--check` cannot give it: that every registry row reaches the page, and
+that the page has not gone back to writing a row of its own.
 
 The `--check` proves each file matches its own emitter and nothing more. That the
 Rust and TypeScript projections AGREE is a separate claim, and

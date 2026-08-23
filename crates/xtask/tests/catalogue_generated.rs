@@ -24,8 +24,14 @@
 //! - **That every generated file is listed.** `catalogue::generated()` is the
 //!   list; a target added to the generator and forgotten there is invisible to
 //!   this, exactly as it is to `--check`.
+//! - **That the reference page's prose is true.** The tables below the fold are
+//!   generated and therefore cannot be wrong; the sentences between them are
+//!   written by hand and no test reads English. What the last three tests here
+//!   buy is narrower and precise: the page cannot go back to writing a ROW by
+//!   hand, and a row cannot quietly stop reaching it.
 
 use xtask::catalogue::{self, Reads};
+use xtask::reference;
 
 /// The generator's own view of the file, parsed once.
 fn rows() -> Vec<catalogue::Row> {
@@ -136,4 +142,129 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
         emitted.contains("reads_rows: Some(RowReader::Native(NativeReader::AvroScan))"),
         "and the row points at it: {emitted}"
     );
+}
+
+// ── The reference page ─────────────────────────────────────────────────────
+//
+// `apps/docs/content/docs/book/stdlib.mdx` used to write the catalogue out by
+// hand. The measurement that ended that is in `xtask::reference`'s module doc:
+// 51 rows in the registry, 58 on the page, seven of the page's naming nothing
+// the checker knows. These three tests are what stops it happening twice.
+
+/// The page pulls in every section the partial emits, and writes none of them
+/// itself.
+///
+/// Two halves, and the second is the one with teeth. A `<include>` that names a
+/// section the partial does not have fails the docs build, so the first half is
+/// belt and braces; a hand-written table row does NOT fail any build, which is
+/// exactly how the 58 rows accumulated.
+///
+/// **What it cannot prove:** that the page includes a section in the right
+/// place, or that the prose around it describes the rows below it. A section
+/// pasted under the wrong heading passes here.
+#[test]
+fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
+    let root = catalogue::repo_root();
+    let page = std::fs::read_to_string(root.join("apps/docs/content/docs/book/stdlib.mdx"))
+        .expect("the reference page is on disk");
+    let partial = std::fs::read_to_string(root.join(reference::PARTIAL))
+        .expect("the generated partial is on disk");
+
+    let ids: Vec<&str> = partial
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("<section id=\""))
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    // Without this the two loops below would sweep a corpus of zero and report
+    // it as a clean page — the vacuous pass this file's second test already
+    // exists to prevent, one level up.
+    assert!(
+        ids.len() >= 8,
+        "the partial declares {} section(s); the catalogue has at least eight receivers",
+        ids.len()
+    );
+
+    for id in &ids {
+        let include = format!("<include>../../generated/stdlib.mdx#{id}</include>");
+        assert!(
+            page.contains(&include),
+            "the page never includes section `{id}`; write `{include}`"
+        );
+    }
+
+    // A catalogue row is a table row carrying an arrow. The two example tables
+    // under «How to read this page» carry call spellings and no arrow, which is
+    // what keeps them out of this.
+    for (n, line) in page.lines().enumerate() {
+        assert!(
+            !(line.starts_with('|') && line.contains("->")),
+            "apps/docs/content/docs/book/stdlib.mdx:{} writes a catalogue row by hand:\n  {line}\n\
+             rows come from `cargo xtask catalogue`; the page carries the prose",
+            n + 1
+        );
+    }
+}
+
+/// Every row of the registry reaches the page.
+///
+/// The emitter groups by receiver head and prints one table per group, so a row
+/// whose head nothing includes would vanish silently — the partial would simply
+/// be one section shorter and would still match itself, which is precisely the
+/// failure `every_row_lands_in_exactly_one_generated_file` guards for the Rust
+/// halves.
+///
+/// **What it cannot prove:** that the row's SIGNATURE is right. That
+/// `str.slice` should take an `end` is a decision, and `stdlib.rs` is where it
+/// is argued; this proves the page says what the registry says.
+#[test]
+fn every_registry_row_reaches_the_reference_page() {
+    let partial = std::fs::read_to_string(catalogue::repo_root().join(reference::PARTIAL))
+        .expect("the generated partial is on disk");
+
+    let grouped = reference::by_head();
+    assert!(
+        grouped.values().map(Vec::len).sum::<usize>() >= 40,
+        "the registry yielded almost nothing; a guard over an empty catalogue passes vacuously"
+    );
+
+    for entries in grouped.values() {
+        for entry in entries {
+            let cell = format!("| `{}` |", reference::call_spelling(entry));
+            assert!(
+                partial.contains(&cell),
+                "`{}` is in the registry and not on the page",
+                entry.name
+            );
+        }
+    }
+}
+
+/// The `io` section comes from `catalogue.bnf` and not from the registry, and
+/// this is the claim that makes choosing safe rather than merely deliberate:
+/// every `io.` row the registry carries is a `catalogue.bnf` row too.
+///
+/// The registry has three (`csv`, `json`, `parquet`) against the file's six —
+/// they are stubs saying «this name is a source», and the file is the datum.
+/// Printing the registry's three would have deleted `io.rdf`, `io.shex` and
+/// `io.shacl` from the page. If the subset ever stops holding, a name exists
+/// that this page cannot show, and the choice of source has to be reopened.
+///
+/// **What it cannot prove:** the converse. `io.rdf` has no registry row and
+/// binds perfectly well, so a file row without a registry row is normal.
+#[test]
+fn every_registry_io_row_is_a_catalogue_row() {
+    let names: Vec<String> = rows().iter().map(|r| r.name.clone()).collect();
+    let io = reference::by_head();
+    let io = io.get("io").expect("the registry carries `io.` rows");
+    assert!(!io.is_empty(), "an empty `io` group would pass vacuously");
+
+    for entry in io {
+        let member = entry.name.split_once('.').expect("a dotted name").1;
+        assert!(
+            names.iter().any(|n| n == member),
+            "the registry carries `{}` and `catalogue.bnf` has no `{member}` row, \
+             so the page's `io` table cannot show it",
+            entry.name
+        );
+    }
 }

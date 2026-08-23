@@ -12,3 +12,12 @@ description = "Repository automation — run via `cargo xtask <command>`."
 
 [dependencies]
 serde_json = { workspace = true }
+# The stdlib half of the catalogue (ruling 14). `FunctionRegistry` is already a
+# table of values, so `cargo xtask catalogue` reads it directly rather than
+# parsing the Rust that writes it down.
+#
+# No cycle, and it is worth saying which direction was checked: nothing depends
+# on `xtask` — it is `publish = false`, it is nobody's dependency, and
+# `cargo xtask wasm-check` derives its crate set from the cdylib closure, which
+# this crate is not in. So `xtask -> fossil-hir` adds an edge to a leaf.
+fossil-hir = { path = "../fossil-hir" }

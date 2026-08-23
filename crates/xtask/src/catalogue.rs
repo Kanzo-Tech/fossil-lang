@@ -534,6 +534,11 @@ pub fn repo_root() -> PathBuf {
 
 /// Every generated file: its path, and what it should contain.
 ///
+/// Four of the five are projections of `catalogue.bnf` alone. The fifth — the
+/// reference page's tables — is a projection of `catalogue.bnf` AND of
+/// `fossil_hir::stdlib`, because the catalogue has two halves and only the
+/// `io.` one became a file. See `crate::reference`.
+///
 /// # Panics
 ///
 /// If `catalogue.bnf` cannot be read or does not parse.
@@ -558,6 +563,14 @@ pub fn generated() -> Vec<(PathBuf, String)> {
         (
             root.join("packages/executor/src/catalogue.generated.ts"),
             emit_ts_executor(&rows),
+        ),
+        // The fifth projection, and the only one that is not Rust or TypeScript:
+        // the reference page's tables. It is also the only one with a SECOND
+        // source — `fossil_hir::stdlib` — which is why it lives in its own
+        // module. See `crate::reference`.
+        (
+            root.join(crate::reference::PARTIAL),
+            crate::reference::emit_stdlib_reference(&rows),
         ),
     ]
 }

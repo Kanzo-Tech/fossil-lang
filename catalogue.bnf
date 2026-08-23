@@ -92,7 +92,15 @@ row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        
    to has no syntax at all. A row for it here would be a name no program can
    write.
 
-   The stdlib catalogue — `str.slug`, `parse.date`, the receivers of ADR-0059 —
-   is NOT here yet. It is the larger half of ruling 14 (`stdlib.rs` is 1209
-   lines of Rust dispatching by string) and it wants the same treatment; this
-   file is the shape it will take. *)
+   The stdlib catalogue — `str.slug`, `parse.date`, the relation verbs — is NOT
+   here yet. It is the larger half of ruling 14 and this file is the shape it
+   would take.
+
+   It does not have to be here in order to be DATA, and that is what this
+   paragraph used to get wrong: `fossil_hir::stdlib`'s `FunctionRegistry` is
+   already a table of `RegistryEntry { name, recv, member, sig, lowering }`,
+   five fields and every one of them a value. `cargo xtask catalogue` reads it
+   directly — see `crates/xtask/src/reference.rs` — and generates the reference
+   page's tables from it beside the `io.` ones. What moving it into a file would
+   buy is what it bought the rows above: adding `str.slugify` over
+   `regexp_replace` would stop touching Rust. *)
