@@ -4,8 +4,9 @@
 //! columns are the shape's predicates. The result is a [`RecordBatch`] the host
 //! registers as a table, so the executor scans RDF exactly like a CSV — **RDF
 //! stays at the I/O border, the core never sees it** (design §C2; this is the
-//! DataFusion-native, WASM-clean counterpart of `fossil-provider-rdf`, which
-//! pivots into DuckDB).
+//! DataFusion-native, WASM-clean pivot, and there is no other — no
+//! `fossil-provider-rdf` crate has ever existed, which
+//! `fossil-base/src/providers.rs:127` already says outright).
 //!
 //! A column is scalar or multi-valued: a ShEx `*`/`+` cardinality pivots into an
 //! Arrow `List<Utf8>` of every object, a single-valued one into a `Utf8` cell.
@@ -31,8 +32,8 @@ use fossil_descriptors_output::subject_value;
 use oxrdf::{Literal, Term};
 use oxttl::TurtleParser;
 
-/// The `rdf:type` predicate — the sole subject selector (a shape's rows are the
-/// subjects typed with the shape's IRI), matching `fossil-provider-rdf`.
+/// The `rdf:type` predicate — the sole subject selector: a shape's rows are the
+/// subjects typed with the shape's IRI.
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 /// One pivoted column: the relation column `name` carries the object(s) of

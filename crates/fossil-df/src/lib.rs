@@ -1759,9 +1759,13 @@ fn column_status(p: &NodeProp) -> ColumnStatus {
     }
 }
 
-/// The `VertexInfo` manifest for one node type. Mirrors the writer's
-/// `build_vertex_manifest` (dense_id/subject/<props>/x/y/cluster_id), with the
-/// **real** per-prop `data_type` the schema carries.
+/// The `VertexInfo` manifest for one node type: `dense_id`, `subject`, the
+/// schema's props, then `x`/`y`/`cluster_id`, each with the **real** per-prop
+/// `data_type` the schema carries.
+///
+/// It said it mirrored «the writer's `build_vertex_manifest`». That name occurs
+/// exactly once in the tree — in the sentence that claimed it — and `lib.rs:557`
+/// already says there is no second writer left to mirror.
 fn vertex_info(node: &NodeType) -> VertexInfo {
     let mut properties = Vec::with_capacity(node.properties.len() + 5);
     properties.push(Property {
