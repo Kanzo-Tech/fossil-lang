@@ -11,11 +11,14 @@ did: DataFusion in `fossil-df`, and DuckDB — bundled, compiled from C++ — in
 
 ## Why it is not a preference
 
-`fossil-runtime` and `fossil-engine` each carry a `compile_error!` for `wasm32`,
-and the reason named in both is bundled DuckDB. So the sentence this project is
-built on — *fossil is a compiler consumed as a WASM library* — is true of
-`fossil-wasm` and false of the layout pass and the engine. One dependency is
-what makes it half true.
+`fossil-runtime` and `fossil-engine` each carried a `compile_error!` for
+`wasm32`, and the reason named in both is bundled DuckDB. So the sentence this
+project is built on — *fossil is a compiler consumed as a WASM library* — is
+true of `fossil-wasm` and false of the layout pass and the engine. One
+dependency is what makes it half true.
+
+`fossil-runtime`'s is gone; `fossil-engine`'s is not. See *Where the tripwire
+stands now*, below.
 
 Remove it and the whole compiler is WASM-capable. That is the decision; the rest
 is consequence.
@@ -29,17 +32,30 @@ a static library already built. Removing it removes that unit.
 
 ## What has to be rewritten, and it is three things
 
-1. **The layout pass — done.** It reads and writes Parquet with `arrow-rs` and
-   holds no connection. The finding is that **none of the algorithm was in SQL**:
+1. **The layout pass — done, and `fossil-runtime` no longer links an engine at
+   all.** It reads and writes Parquet with `arrow-rs` and holds no connection. The finding is that **none of the algorithm was in SQL**:
    Louvain and Morton were already Rust, and the SQL only read, applied arrays
    that Rust had computed, sorted, and wrote. What replaced it is three Arrow
    kernels — `concat_batches`, `lexsort_to_indices`, `take` — plus the encoder
    `fossil-df` already had.
-2. **The corpus verbs' native executor.** `DuckRuntime` runs the verb SQL
-   `fossil-graph` produces. DataFusion reads Parquet natively.
+2. **The corpus verbs' native executor.** `ConnectionExecutor` runs the verb SQL
+   `fossil-graph` produces. DataFusion reads Parquet natively. This one is
+   `fossil-mcp`'s, and it is the piece this page's last section argues should
+   NOT move: the host brings the engine there.
 3. **The assertions.** `fossil-cli` and `fossil-engine` open an in-memory DuckDB
    to read the Parquet they just wrote. That is a test convenience, not a
    dependency of the language.
+
+**Where the tripwire stands now.** `fossil-runtime`'s is **gone** — the crate
+compiles for `wasm32`, and `cargo xtask wasm-check` covers it because the crate
+declares `[package.metadata.fossil] wasm = true` and the gate takes that as a
+second root beside the cdylib closure. Removing DuckDB from it was necessary and
+not sufficient: `fossil-resolver` was an unused edge carrying its own wasm32
+`compile_error!` for an unrelated reason, and `cargo check` never reports an
+unused dependency, so only building for the target found it.
+
+`fossil-engine`'s tripwire stays. Its `DESCRIBE` pre-introspection opens a
+connection, which is piece 2 for that crate.
 
 ## What the first piece cost, measured — and the mechanism was misattributed
 
