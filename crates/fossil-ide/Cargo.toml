@@ -20,6 +20,11 @@ workspace = true
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
+# The primitive lattice, for the ONE table that maps a column's `Primitive` to
+# the `ScalarTy` the catalogue hangs its members off — `users.name.` offers
+# `str.*` because `name` is a `Primitive::String`. It was a dev-dependency, and
+# it is already in the wasm closure through fossil-hir, which speaks it too.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 # goto-def + completion consume the stdlib classification catalog, which is
 # WASM-clean, so fossil-ide stays WASM-clean. The cross-file symbol
 # infrastructure used to be `fossil-ide-db` and is now the `symbol_index` /
@@ -33,8 +38,6 @@ smol_str = { workspace = true }
 lsp-types = { workspace = true }
 
 [dev-dependencies]
-# Hover tests build `Ty`s over the lattice.
-fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The host with a shape decoder installed, so `shape_documents`' own tests can
 # ask the CHECKER whether the document this host registered reached it — the
 # only question that tells a key mismatch apart from a missing document.

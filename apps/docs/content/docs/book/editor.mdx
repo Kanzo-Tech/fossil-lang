@@ -25,16 +25,17 @@ functions, which is why the two cannot answer differently.
 
 ## Completion
 
-Three sources merge into one list (`crates/fossil-ide/src/completion.rs:60`), and it is worth knowing
-which of them looked at your cursor.
+Three sources merge into one list (`crates/fossil-ide/src/completion.rs:71`), and it is worth knowing
+which of them looked at your cursor. Two of the three ask one question — what is to the LEFT of your
+dot — and they ask it once, of one `Scope` (`crates/fossil-ide/src/completion.rs:105`).
 
 **The shape's properties**, when the enclosing mapping's target shape resolves — your program named
 its output document and the editor could read it. The entries are that shape's own
 `constraints[].predicate`, each with the value type the document declares, so the list is what
 `Person` requires and nothing else.
 
-**The source's columns**, when the cursor is on a `.` inside a mapping body and the source that
-mapping reads has been introspected:
+**The source's columns**, when the name to the left of your dot is the one the mapping's `from`
+clause bound and that source has been introspected:
 
 ```
 name = User.        →  id   email   name   age
@@ -43,11 +44,16 @@ name = User.        →  id   email   name   age
 Each entry carries the inferred type. With no introspection there are no entries at all — the editor
 says nothing rather than guessing column names.
 
+It fired on **every** dot inside a mapping body instead, and the columns were the same four whatever
+stood to the left of it: `str.` got them beside the thirteen string members, `orders.` got them and
+nothing else, and so did a leading `.` — a spelling the parser refuses by name. A column is a member
+of the row, so the row has to be what you named.
+
 **The standard library, narrowed to what is to the left of your dot.** Every row carries the receiver
 it hangs off — `Scalar(ScalarTy::String)` for `str.trim`, `Relation` for `seq.where`, `Namespace` for
 `io.csv` (`crates/fossil-hir/src/stdlib.rs:181`) — and the bare member name beside it
 (`crates/fossil-hir/src/stdlib.rs:186`), and `stdlib_completions`
-(`crates/fossil-ide/src/completion.rs:131`) asks the catalogue for the rows that receiver HAS rather
+(`crates/fossil-ide/src/completion.rs:167`) asks the catalogue for the rows that receiver HAS rather
 than for all of them:
 
 ```
@@ -55,26 +61,38 @@ name = Adults.      →  aggregate  count  distinct  drop  flatten  group_by  jo
                        map  select  sort  take  union  where
 name = str.         →  concat  contains  ends_with  length  lower  replace  slice
                        slug  split  starts_with  strip_html  trim  upper
+name = User.email.  →  concat  contains  ends_with  length  lower  replace  slice
+                       slug  split  starts_with  strip_html  trim  upper
 ```
 
 Thirteen after a `:=` binding, where there were fifty-one; and they are spelled `where`, not
 `seq.where`, because after a dot the member is what you are typing. The full dotted signature is
 still there as the entry's detail, so the type path is never hidden.
 
-Four heads resolve (`crates/fossil-ide/src/completion.rs:201`): `str` and `seq`, which the catalogue
-classifies itself; a namespace like `io`, whose own rows are offered and not another namespace's; and
-any name a `:=` binding introduces, which is a relation and so has the verbs. A head that is none of
-those — `orders.`, a column you have not bound — gets nothing from this source, and the columns of
-the row (above) are the answer there. Away from any dot there is no receiver to narrow by, so the
-catalogue is offered whole and spelled in full.
+Five heads resolve (`crates/fossil-ide/src/completion.rs:238`): `str` and `seq`, which the catalogue
+classifies itself; a namespace like `io`, whose own rows are offered and not another namespace's; any
+name a `:=` binding introduces, which is a relation and so has the verbs; and — the third line above
+— a **column of the row you named**, whose members are the members of its own type. That last one is
+inference: `email` is a `String` because the descriptor the host introspected says so, and the
+catalogue is asked about a `String`. A column that is an `Integer` answers with nothing, because the
+catalogue hangs no row off one.
+
+A head that is none of the five — `orders.`, a column the row does not have, the result of a call
+(`User.email.trim().`) — gets nothing from either source. Away from any dot there is no receiver to
+narrow by, so the catalogue is offered whole and spelled in full.
 
 The list carries no `sortText`, so your editor orders it by label — and the list itself is now sorted
 by label before it leaves, because `FunctionRegistry` is a `HashMap` and three consecutive runs of the
 unsorted version printed three different orders.
 
-**Not narrowed:** a receiver that needs inference. `u.name.` — a member of a *column's* type — is a
-head this does not resolve, so it falls to the quiet case rather than offering `str.*`. The argument
-for closing that is [tooling for humans](/docs/design/tooling-for-humans).
+**Not resolved:** a receiver that is an *expression*. `User.email.trim().` has a `)` to its left, and
+naming its type needs an id the body arena does not mint — it holds one entry per property value, so
+a sub-expression has none. Nor does a binding a body reaches through a *derivation*: a mapping that
+draws `from Adults`, where `Adults := User.where(…)`, addresses its columns as `User`, and only the
+checker's row scope knows that. Completion cannot ask it — that resolution can emit a diagnostic, and
+a Salsa accumulator outside a tracked function panics by construction — so a derived binding and a
+join alias resolve no row. The argument for closing both is
+[tooling for humans](/docs/design/tooling-for-humans).
 
 ## Hover
 
