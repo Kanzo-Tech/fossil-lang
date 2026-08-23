@@ -6,10 +6,11 @@ composed from a stale copy of a convention 404s at runtime, in a browser, with n
 nothing red.
 
 ```bash
-node verify.mjs        # from apps/corpus/conformance/
+node verify.mjs                                      # from apps/corpus/conformance/
+node writer.mjs --fossil ../../../target/release/fossil
 ```
 
-Exit `0` when every address reproduces, `1` when one does not.
+Exit `0` when every address reproduces, `1` when one does not, `2` when a harness could not run.
 
 ## What is here
 
@@ -18,11 +19,35 @@ Exit `0` when every address reproduces, `1` when one does not.
 | `expected.json` | **the deliverable.** Every address that must compose, and every one that must be refused. |
 | `corpus/` | 300 vertices in five tiles of 64, both orientations tiled. Real Parquet, real manifests. |
 | `manifests/` | four manifest sets with no payload, each holding a case a whole corpus cannot. |
-| `verify.mjs` | one implementation of the addressing, in plain Node with no npm and no build. |
+| `reader.mjs` | the addressing, in plain Node with no npm and no build. One reader, two harnesses. |
+| `verify.mjs` | the reader against `expected.json` — catches **two readers drifting apart**. |
+| `writer.mjs` | the reader against a corpus `fossil run` just wrote — catches **both readers being wrong together**. |
 
-The other implementation is `packages/graph/tests/conformance.test.ts`, which runs the published
-`resolveCorpus` against the same table. **Neither implementation wrote it**, and a change on either
-side that moves an address moves it away from the other.
+The other implementation of the table is `packages/graph/tests/conformance.test.ts`, which runs the
+published `resolveCorpus`. **Neither implementation wrote it**, and a change on either side that
+moves an address moves it away from the other.
+
+## Why a table is not enough, and what `writer.mjs` adds
+
+`expected.json` was written by whoever read the conventions last, and the corpus under it was
+written by `guards/fixture.mjs`. Two readers agreeing about a corpus no compiler produced is a
+closed loop with the *writer* outside it: a convention both readers copied from the same stale
+sentence stays green forever, and so does a change to fossil's tiling that neither reader heard
+about. `writer.mjs` runs `fossil run` and points `reader.mjs` — the same reader, not a third copy —
+at the bytes that come out.
+
+Five breaks it has been seen to catch, each on a corpus fossil wrote: a tile with a hole in the
+middle, a tile missing from the tail, a `chunk_size` the placement disagrees with, an orientation
+ordered on the wrong endpoint column, and a payload file no address reaches.
+
+**Three things it cannot reach.** `fossil run` has no `--chunk-size` — `DEFAULT_CHUNK_SIZE` is 4,096
+and nothing on the CLI moves it — so a reader that hard-codes 4,096 passes it, and the 64-row case
+below stays with the fixture. The cross-type, CSR-only and unaddressable manifests are shapes fossil
+has no program to emit. And it compares a reader against a writer: if both are wrong in the same way
+the loop is still closed, which is what `expected.json` is for. Neither harness subsumes the other.
+
+`--corpus <dir>` skips the run and checks a tree that is already there. That is how the harness is
+proved red, and it is the only form that reaches a corpus **some other writer** produced.
 
 ## The cases
 
