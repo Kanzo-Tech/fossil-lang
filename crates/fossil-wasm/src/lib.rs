@@ -214,10 +214,15 @@ impl FossilPlayground {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
-    /// Run `parse → def_map → typecheck_mapping` across every open file and
-    /// return a flat JS array of `{ uri, range, severity, message }` rows
+    /// Run `parse → def_map → typecheck_mapping` across every open **program**
+    /// and return a flat JS array of `{ uri, range, severity, message }` rows
     /// keyed by file URI. The LSP Worker republishes these grouped
     /// by URI as `textDocument/publishDiagnostics` notifications.
+    ///
+    /// A buffer the installed provider catalogue claims — the `.shex` the
+    /// playground had to open to give the compiler a document, a `.csv`, a
+    /// `.parquet` — is an INPUT and is not parsed as fossil, and
+    /// `diagnostics_for_file` in this file is where that is said and measured.
     ///
     /// `range` is the UTF-16 LSP range (via `fossil_ide::LineIndex` — the
     /// rust-analyzer model). `severity` is the LSP integer
@@ -682,30 +687,48 @@ pub struct CheckPosition {
 /// minting two identities for one type was never checked, and one top-level
 /// mistake was reported once per mapping.
 ///
-/// # Live defect: every open file is drained as if it were a program
+/// # A file the catalogue reads is not drained as a program
 ///
 /// [`FossilPlayground::check_rows`] loops over the whole workspace and calls
-/// this for each handle, and nothing here asks whether the handle holds a
-/// **fossil program**. In the playground the only way to hand the compiler a
-/// shape document is to open it, so a `.shex` is parsed as fossil and its
-/// errors are attributed to it — twenty-one rows of `expected DEFINE, found
-/// DEDENT` for a file that is not wrong. In an editor those are squiggles down
-/// the length of the user's `ShEx`.
-///
-/// It is not fixed here, deliberately. The fix needs a notion of *which open
-/// files are programs*, and `fossil-wasm` does not have one — a handle is a
-/// path and a text, and inventing the answer in the drain would put a language
-/// question in the host.
+/// this for each handle, and in the playground the only way to hand the
+/// compiler a shape document is to open it. So this used to parse `person.shex`
+/// as fossil and attribute its errors to it — **twenty-one rows** for the
+/// `ShExJ` document of `tests/shape_document.rs`: `unexpected token` eleven
+/// times, `expected IDENT, found STRING` eight, `expected IDENT, found INDENT`
+/// once and `expected DEFINE, found DEDENT` at the closing brace, for a file
+/// that is not wrong. In an editor that is squiggles down the length of the
+/// user's `ShEx`. The `ShExC` document in the same file measured fourteen, and
+/// **three of those claimed an internal compiler error** (`mapping has no HIR
+/// at its DefMap index`) — a shape declaration parses far enough to look like a
+/// mapping header and then has no HIR.
 ///
 /// It was invisible while the browser's drain was the per-mapping loop, because
 /// a `.shex` produces no mappings. Reading the file-level accumulators, which
 /// is where `parse` lives, is what surfaced it.
 ///
-/// **And whether those rows appear at all depends on which Salsa revision last
-/// touched the document**, so a workspace-wide list is not stable under an edit
-/// to a file the caller did not ask about. The test that used to cover this
-/// compared that list against itself.
+/// **The notion of «which open files are programs» was already in the tree**,
+/// and the note that stood here saying it was not is what took the longest to
+/// disprove. It is the provider catalogue: a row declares the extensions it
+/// accepts, [`fossil_base::claimed`] asks all of them, and a URI some row reads
+/// is an INPUT to a program rather than a program. The host installs
+/// `fossil_descriptors_output::PROVIDERS` (`wasm_system.rs`), so `.shex` /
+/// `.shexj` / `.shexc` / `.ttl` / `.shacl` are claimed alongside `.csv` /
+/// `.json` / `.parquet`, and nothing about fossil's syntax is decided here —
+/// the question is «does something read this», and only the catalogue answers
+/// it.
+///
+/// Two things this deliberately does not do. It does not consult a **program**
+/// extension: `.fossil` is a convention, a URI with no extension is claimed by
+/// nobody, and the default is to check, so the failure mode is the old
+/// behaviour rather than silence. And it does not deregister the document — the
+/// buffer is still the text the checker decodes, so a broken `ShEx` is still
+/// reported, on the program that names it and with a label pointing into the
+/// document (`tests/shape_document.rs`). What has no home is a document nobody
+/// names: it is not checked, because there is nothing to check it against.
 fn diagnostics_for_file(db: &WasmDb, file: SourceFile) -> Vec<Diagnostic> {
+    if fossil_base::claimed(fossil_base::installed(db), file.path(db)) {
+        return Vec::new();
+    }
     fossil_mir::program_diagnostics(db, file)
 }
 

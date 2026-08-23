@@ -106,26 +106,17 @@ fn messages(pg: &FossilPlayground) -> Vec<String> {
 
 /// The messages [`FossilPlayground::check_rows`] attributes to ONE file.
 ///
-/// # Why the whole-workspace list cannot be compared to itself
-///
-/// [`FossilPlayground::check_rows`] drains **every open file as if it were a
-/// fossil program**, and in the playground the only way to give the compiler a
-/// shape document is to open it. So `person.shex` — a `ShExJ` document — is run
-/// through the fossil parser, and the workspace list carries twenty-one rows
-/// like `expected IDENT, found STRING`, attributed to `person.shex`. In an
-/// editor those are squiggles drawn the length of the user's `ShEx` file.
-///
-/// That is not new and it is not this test's subject. It was invisible while
-/// the browser's drain was a per-mapping loop, because a `.shex` yields no
-/// mapping; it became visible when the drain started reading the FILE-level
-/// accumulators, which is where `parse` lives. Worse, whether those rows appear
-/// at all depends on which Salsa revision last touched the document — so the
-/// workspace list is not even stable across an unrelated edit.
-///
 /// Step (4) below asks a question about the PROGRAM, so it looks at the
-/// program's rows. Comparing the whole workspace would pin
-/// `check_rows`'s treatment of documents, which is the defect and not the
-/// contract.
+/// program's rows. It is the narrower question and it stays narrow.
+///
+/// **This used to carry the reason it HAD to be narrow**, and that reason is
+/// gone: `check_rows` drained every open file as if it were a fossil program,
+/// so `person.shex` — a `ShExJ` document — was run through the fossil parser and
+/// the workspace list carried twenty-one rows like `expected IDENT, found
+/// STRING` attributed to it. Comparing the whole workspace would have pinned
+/// that. `tests/documents_are_not_programs.rs` is where the fix is measured; a
+/// file the provider catalogue claims is an input, and an input is not drained
+/// as a program.
 fn messages_for(pg: &FossilPlayground, uri: &str) -> Vec<String> {
     pg.check_rows()
         .into_iter()

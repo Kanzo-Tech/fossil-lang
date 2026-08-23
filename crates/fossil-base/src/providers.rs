@@ -264,6 +264,24 @@ pub fn provider(table: &[&'static Provider], constructor: &str) -> Option<&'stat
     table.iter().copied().find(|p| p.name == name)
 }
 
+/// Is `uri` claimed by any row in `table` — is it a file something READS?
+///
+/// **This is not a selection**, which is the whole reason it can exist beside
+/// the tombstone below. It answers `bool` and names no row, so `.ttl` being
+/// claimed by both `io.rdf` and `io.shacl` is not a question with a wrong
+/// answer: every row is asked [`Provider::accepts`], and one `true` is enough.
+/// A URI with no extension is claimed by nobody.
+///
+/// The conclusion drawn from `true` belongs to the caller and is worded there.
+/// A HOST is what has a use for this: it holds buffers somebody opened and
+/// nothing in them says what they are, and a file the installed table claims is
+/// an INPUT — bytes a program reads through `io.…` — rather than a program.
+/// `fossil-wasm`'s `diagnostics_for_file` is the first caller.
+#[must_use]
+pub fn claimed(table: &[&'static Provider], uri: &str) -> bool {
+    table.iter().any(|p| p.accepts(uri))
+}
+
 // `type_reader_claiming(table, uri)` lived here — the one position with no name
 // to dispatch on, `{ A, B } := io.rdf("g.ttl", schema = "x.shex")`, where a
 // named argument carried a path and no constructor. It was the last
@@ -450,6 +468,29 @@ mod tests {
         assert!(SHACL.provides(Capability::ReadTypes));
         assert_eq!(provider(TABLE, "io.rdf"), Some(&RDF));
         assert_eq!(provider(TABLE, "io.shacl"), Some(&SHACL));
+    }
+
+    /// The question a host has about a buffer nobody described: is this a file
+    /// something READS, or is it a program?
+    ///
+    /// The table already answers it, and the answer is one `bool` over rows
+    /// that disagree about which row it is — `.ttl` is claimed twice here and
+    /// [`claimed`] does not care, because it selects nothing.
+    #[test]
+    fn the_table_says_which_uris_it_claims() {
+        assert!(claimed(TABLE, "person.shex"), "a shape document");
+        assert!(claimed(TABLE, "shapes/SHOP.ShExJ"), "case and path folded");
+        assert!(claimed(TABLE, "users.csv"), "a data file is read too");
+        assert!(claimed(TABLE, "g.ttl"), "claimed by io.rdf AND io.shacl");
+
+        assert!(!claimed(TABLE, "hello.fossil"), "no row reads a program");
+        assert!(!claimed(TABLE, "README"), "no extension, no claim");
+        assert!(
+            !claimed(DATA, "person.shex"),
+            "the DEFAULT table has no shape row, so a host that installed it \
+             claims no `.shex` — which is the honest answer for a host that \
+             cannot decode one"
+        );
     }
 
     /// The default table recognises every data constructor and nothing else.
