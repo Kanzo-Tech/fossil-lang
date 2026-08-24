@@ -400,13 +400,20 @@ would be a different product.
 
 **The idea.** Emit an established columnar graph format instead of a bespoke layout.
 **Why it is attractive.** Interoperability, for free, with a specification somebody else maintains.
-**The evidence against it.** It **gave vocabulary and stopped giving contract**: its manifest carries
-no vertex count and does not say how a reader discovers chunks, so derivability had to be invented
-anyway — and two questions that were declared blocking existed *only* because of conformance. As an
+**The evidence against it.** It **gave vocabulary and stopped giving contract**: its specification
+defines no count and no data-file path, so derivability had to be invented anyway — and two questions
+that were declared blocking existed *only* because of conformance. As an
 interchange format it does not pay either, since a recipient would have to learn an incubating
 specification, where self-explaining file names are more interoperable than a specification nobody
-has read. What survives as an internal invariant is the good part: both adjacency orientations, dense
-identifiers, and edges aligned to the source's chunk.
+has read. And conformance is not something that was given up in principle and kept in practice:
+every vertex manifest fossil writes declares `dense_id` as `uint32` with `is_primary: true`
+(`crates/fossil-df/src/lib.rs:1798`), and the built-in list GraphAr's `types.cc` parses has no
+unsigned type at all — so its own C++ reader would refuse the primary key of the first vertex type.
+What survives as an internal invariant is the good part: **the manifest's field names**, both
+adjacency orientations, dense identifiers, and edges aligned to the source's chunk. The full
+enumeration — eight divergences, each one the same rule applied once — is in [what is borrowed from
+GraphAr, and where borrowing
+stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
 **What would bring it back.** A second reader that is not ours, that already speaks it.
 
 ### One file per tile
