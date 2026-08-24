@@ -13,8 +13,12 @@ with no gaps and no repeats. This is not tidiness; four other conventions are bu
 
 - **A tile is a range of ids.** A gap is therefore either an addressable tile that holds nothing —
   a request that costs a round trip to learn it was empty — or a vertex that no address reaches.
-- **The tile count is derivable.** `ceil(V / chunk_size)` tiles exist, and a reader knows the whole
-  set without asking.
+- **The tile count is derivable.** The manifest declares `V` as `vertex_count`, so
+  `ceil(V / chunk_size)` tiles exist and a reader knows the whole set before it opens a file. That
+  number is the only thing in a corpus that catches a **missing tail**: tiles are addressed and
+  never listed, so a hole in the middle breaks the addressing and is caught, while a tree that stops
+  at `chunk16` is indistinguishable from a corpus with seventeen tiles. Gaplessness is also what
+  fixes the largest id at `V − 1`.
 - **The `dense_id` column need not be stored.** If tile `i` is the range `[i·4096, (i+1)·4096)` then
   row `j` of tile `i` *is* `i·4096 + j`. That column is 4.000 of the 9.23 compressed bytes per row a
   drawing tile costs — **43% of the payload** — and it is derivable arithmetic only because the ids
@@ -36,7 +40,7 @@ else's database — all of them key on the IRI. Anything that keys on a dense id
 address.
 
 The consequence that catches people is in the client rather than the corpus: a viewer that tracks
-selection or highlighting by *index into the currently resident buffers* has stored an address twice
+selection or highlighting by *index into the resident buffers* has stored an address twice
 over, and a tiled reader moves those buffers constantly. Selection is by identity or it is a bug
 waiting for a pan.
 

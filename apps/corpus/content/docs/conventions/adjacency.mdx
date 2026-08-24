@@ -33,13 +33,16 @@ appear in any order, and no reader may depend on which.
 
 ## One relation, stored twice
 
-The two orientations carry the same edge set. Nothing else in a corpus says so — the names do not,
-the counts do not, and a reader answering a neighbourhood query from one and a count from the other
-would silently disagree with itself.
+The two orientations carry the same edge set. The manifest carries **one** `edge_count` for the
+relation rather than one per orientation, and that is the shape of the claim: each orientation
+separately has to add up to that number. What it does not say is that the two hold the same *rows* —
+same size and different contents is a reader answering a neighbourhood query from one and a count
+from the other, and silently disagreeing with itself.
 
 Guard: `one-relation-twice`, checked as a symmetric difference in both directions, so neither a
 missing edge nor an extra one survives. What it cannot prove is that either orientation is the
-*whole* relation: both being wrong identically passes.
+*whole* relation: both being wrong identically passes the difference, and both being truncated by
+the same amount passes the count.
 
 And every endpoint addresses a vertex that exists, in its own type's dense space. That is the
 corruption a renumbering can introduce and that no row count would reveal — the edge counts still
@@ -56,6 +59,12 @@ which is why `src_chunk_size` and `dst_chunk_size` are two fields.
 A tile's row count is the total degree of those 4,096 vertices, not 4,096 — **`chunk_size` on an
 edge is an addressing unit and never a row count.** A tile with no rows is not written, so a 404 is
 the answer "these 4,096 vertices have no edges in this direction", and it costs nothing to give.
+
+**A 404 is that answer and also "this tile was never uploaded", and nothing in the address separates
+them.** The manifest's `edge_count` is what does: a reader sums the tiles it found against the
+declared number, and a short sum is a corpus that is missing rows rather than a graph that is
+sparse. The same hole exists on the vertex side and is closed the same way, with `vertex_count`
+([Identity](/docs/conventions/identity)).
 
 ### Given a `dense_id`, where its edges are
 
@@ -219,9 +228,10 @@ drawn, with 1.1×–1.3× over-read at run granularity and 1.9×–2.9× at tile
 
 <Callout title="What that comparison does not cover">
 **"Drawable" means both endpoints on screen.** An edge with one endpoint outside has a visible
-segment and neither placement brings it. Measuring that needs the CSC half, which is now tiled —
-but it was tiled for the traversal and not for this, and nobody has since measured what a window
-costs when it fetches both.
+segment and neither placement brings it. Measuring that needs the CSC half, which is tiled — but it
+is tiled for the traversal and not for this, and no figure on this page is a window that fetches
+both. The number that would settle it is the same table one column wider: over-read and tiles per
+window with `by_target` added, against the same six windows at each size.
 
 **Six windows per size, not a distribution**, all at one zoom, square and centred on the median
 vertex. **And the comparison is in rows, not bytes on the wire** — a high tile compresses *worse*

@@ -209,10 +209,14 @@ different `dense_id` space, nor that a window over one orientation is incomplete
 things a re-derivation gets wrong.
 
 What brings it back is the same thing that would retire the module: the addresses becoming
-**derivable from the manifest by a rule a schema can carry** — one container, one naming rule, and a
-declared vertex count, so composing a URL stops being arithmetic and becomes substitution. The
-conformance corpus is the measure of the gap: while `expected.json` holds a case a schema cannot
-express, the schema is not the answer.
+**derivable from the manifest by a rule a schema can carry**, so composing a URL stops being
+arithmetic and becomes substitution. Three things stood between here and there, and the manifest's
+declared row count is one of them delivered — `vertex_count` and `edge_count` are fields, so how far
+the corpus goes is read rather than probed. The two that remain are one container and one naming
+rule: nothing in the manifest distinguishes a tile that is a file from a tile that is a row group,
+and a schema that cannot say which cannot say what the URL is. The conformance corpus is the measure
+of the rest: while `expected.json` holds a case a schema cannot express, the schema is not the
+answer.
 </Callout>
 
 The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
@@ -240,5 +244,5 @@ vectors and the executed ones are the same bytes.
 
 The last two rows are not decoration. `2^31` is where a port that took the shift as signed gives a
 negative tile; `2^53` is where a port that ran the id through a JavaScript `Number` stops being
-exact. Both exceed the width a `dense_id` column carries in a corpus of today's size, and they are
-published for exactly that reason — they are where a wrong implementation is still right.
+exact. Both exceed the width a `dense_id` column carries in any corpus that has been written, and
+they are published for exactly that reason — they are where a wrong implementation is still right.
