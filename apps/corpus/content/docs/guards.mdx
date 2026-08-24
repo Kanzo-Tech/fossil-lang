@@ -75,6 +75,8 @@ harness and never the authority for it.
 | `entry-point` | the index names a per-type manifest that is not on disk |
 | `plain-parquet` | the vertex payload has no `y` column |
 | `declared-tiling` | the manifest declares a tile of 5,000 rows, which no shift addresses |
+| `declared-count` | the last vertex tile is deleted, so the corpus stops one tile early |
+| `declared-count` | the manifest declares a `vertex_count` the tiles do not add up to |
 | `dense-ids` | one vertex deleted, so the ids have a gap |
 | `tile-of` | one vertex placed in the file of the tile next door |
 | `published-vectors` | the vector table claims `tile_of(4096) = 0` |

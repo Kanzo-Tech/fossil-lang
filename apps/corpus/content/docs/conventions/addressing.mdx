@@ -237,7 +237,7 @@ constant finds it in the tests of independent implementations that copied it. PM
 Hilbert curve with a link to Wikipedia, and every port re-derives it differently.
 
 Every value below is a border. They live in `apps/corpus/guards/vectors.json`, the guard
-`published-vectors` executes that file, and this table is rendered from it — so the documented
+`published-vectors` executes that file, and these tables are rendered from it — so the documented
 vectors and the executed ones are the same bytes.
 
 <VectorTable of="tile_of" />
@@ -246,3 +246,13 @@ The last two rows are not decoration. `2^31` is where a port that took the shift
 negative tile; `2^53` is where a port that ran the id through a JavaScript `Number` stops being
 exact. Both exceed the width a `dense_id` column carries in any corpus that has been written, and
 they are published for exactly that reason — they are where a wrong implementation is still right.
+
+Which tile an id is in is one question; **how many tiles there are** is the other, and it is the
+manifest's declared count divided the same way:
+
+<VectorTable of="declared_count" />
+
+`count = 4096` at `chunk_size = 4096` is the row that catches ports: that is **one** tile, and an
+off-by-one addresses a `chunk1.parquet` nothing wrote. `count = 0` is the other — zero tiles, not
+one empty one, and a reader that assumed at least one pays a request to be told 404. Guard:
+`declared-count`.

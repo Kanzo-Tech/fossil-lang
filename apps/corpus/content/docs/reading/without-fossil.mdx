@@ -57,9 +57,10 @@ still cannot tell a short corpus from a complete one.
 
 The count is declared rather than optional for the same reason. A count a reader may skip is a count
 a reader may not depend on, and a reader that may not depend on it is exactly the one that cannot
-detect the failure the field exists for. The border worth writing a test at is `vertex_count = 4096`
-against `chunk_size = 4096`: that is **one** tile, and the off-by-one addresses a `chunk1.parquet`
-that is not there.
+detect the failure the field exists for. Its borders are published beside the addressing ones —
+[the `declared_count` table](/docs/conventions/addressing#the-published-vectors) — and the row worth
+copying first is `count = 4096` at `chunk_size = 4096`: that is **one** tile, and the off-by-one
+addresses a `chunk1.parquet` that is not there.
 
 ## 3. Ask the footer which tiles intersect the window
 

@@ -18,7 +18,8 @@ with no gaps and no repeats. This is not tidiness; four other conventions are bu
   number is the only thing in a corpus that catches a **missing tail**: tiles are addressed and
   never listed, so a hole in the middle breaks the addressing and is caught, while a tree that stops
   at `chunk16` is indistinguishable from a corpus with seventeen tiles. Gaplessness is also what
-  fixes the largest id at `V − 1`.
+  fixes the largest id at `V − 1`. Guard: `declared-count`, which cannot prove the count is the
+  *right* one — it is written by the writer and checked against bytes the same writer produced.
 - **The `dense_id` column need not be stored.** If tile `i` is the range `[i·4096, (i+1)·4096)` then
   row `j` of tile `i` *is* `i·4096 + j`. That column is 4.000 of the 9.23 compressed bytes per row a
   drawing tile costs — **43% of the payload** — and it is derivable arithmetic only because the ids
