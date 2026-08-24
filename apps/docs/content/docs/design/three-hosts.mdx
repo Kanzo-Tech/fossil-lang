@@ -132,8 +132,13 @@ command line, the language server, the wasm shim and the machine-facing server a
 none of them is the API. A verb that exists only behind the binary is not a smaller surface; it is a
 surface with no embedding.
 
-What is true today, measured on 2026-08-16: `cargo xtask wasm-check` derives seventeen crates from the
-cdylib dependency closure and checks them, and the compile→run pipeline is inside that set. `fossil
+What is true today: `cargo xtask wasm-check` derives the gated set and checks it, and the
+compile→run pipeline is inside that set. **The number is deliberately not written here** — this page
+carried *seventeen* from a measurement on 2026-08-16 and it was eighteen by the time anyone read it
+again, which is the same failure that retired the two hand-kept `-p …` lists xtask replaced. The
+mechanism is worth knowing and cannot drift: the roots are the cdylib crates, **plus** any crate
+declaring `[package.metadata.fossil] wasm = true`, which is how `fossil-layout` entered a closure
+that nothing wasm depends on yet. `fossil
 run` executes on DataFusion through `fossil_df::run_to_dir`; the browser executes on DataFusion
 through `fossil-df-wasm`; and `crates/fossil-df/src/files.rs` is one Arrow→Parquet encoder shared by
 both, so the native filesystem sink and the browser's signed `PUT` differ in where the bytes go and in
@@ -181,10 +186,19 @@ editor, because the browser side never recognised it as a source at all.
 > cannot share an implementation have two, and the second one is not watched by the first one's
 > tests. What the home buys is that the disagreement is now between two files instead of four.
 
-What closed it, on 2026-08-17: `packages/introspect/tests/rust-parity.test.ts` reads
-`crates/fossil-engine/src/lib.rs`, derives three tables out of it — the source-binding pattern, the
-reader each `io.` constructor picks, the DuckDB→primitive table — and compares each against what the
-package *does*. It restates no Rust value as a TypeScript literal, because a copy of the answer
+What closed it, on 2026-08-17: `packages/introspect/tests/rust-parity.test.ts` reads the Rust half,
+derives three tables out of it — the source-binding pattern, the reader each `io.` constructor picks,
+the DuckDB→primitive table — and compares each against what the package *does*.
+
+**Two of the three have since stopped being an agreement, and one of them stopped being in that
+crate.** The Rust half is `crates/fossil-introspect/src/lib.rs` now: `fbd1102` moved the `DESCRIBE`
+out of the compiler, and the guard's own constant records where it went rather than being repointed
+by hand. And which constructors exist and which reader each names are now two generated projections
+of `catalogue.bnf`, written by two emitters — so the test compares `providers/generated.rs` against
+`describeSql` instead of scraping a hand-written `match`. The type table is the one that is still
+written twice by hand, and it is still read out of the Rust.
+
+It restates no Rust value as a TypeScript literal, because a copy of the answer
 cannot notice the answer changing, and every extraction throws when the shape it expects is gone, so
 a rewritten crate fails the test rather than quietly matching nothing. It was proved red six ways,
 the last of which is the crate being absent altogether: that exits 1, rather than reporting no tests
