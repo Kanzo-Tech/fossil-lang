@@ -74,11 +74,12 @@ sides, because its tests asserted hand-written strings instead of resolving agai
 ## The format on that list we borrow from, and the one we do not conform to
 
 GraphAr appears above as evidence, and it is also where this corpus gets its manifest vocabulary:
-the three YAML filenames and every key in them are GraphAr's. **That is a loan of field names and
-not a claim of conformance**, and the boundary is stated once, with its divergences enumerated and
-measured, in [the corpus](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
-The rule there is short enough to restate: *fossil follows GraphAr as far as GraphAr specifies, and
-no further, because past that point there is nothing to follow but a C++ implementation.*
+the three YAML filenames and all but three of the keys in them are GraphAr's. **That is a loan of
+field names and not a claim of conformance**, and the boundary is stated once, with its divergences
+enumerated and measured, in
+[the corpus](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops). The rule
+there is short enough to restate: *fossil follows GraphAr as far as GraphAr specifies, and no
+further, because past that point there is nothing to follow but a C++ implementation.*
 
 It belongs on this page because the worked example of "no further" is obligation 1's own pathology,
 found in the format we borrow from. **GraphAr's specification does not define a count** — the word
@@ -88,6 +89,11 @@ anyway, as `sizeof(int64_t)` raw bytes in the writing machine's byte order, in a
 PMTiles line drawn above: PMTiles documents something badly, this documents nothing and is
 normative by accident, which is exactly what the warning at the foot of this page describes with
 Parquet's `created_by`.
+
+Here the count is one of those three added keys — `vertex_count` and `edge_count`, decimal integers
+in the manifest, required rather than optional, and checked against the rows on the disk by check 7
+below. Which is the borrowing rule producing a *better* answer than the thing borrowed from, and it
+only reads that way because the rule said in advance which of the two sources binds.
 
 ## What is true today
 
@@ -103,25 +109,38 @@ DuckDB connection**. It never touches `fossil-graph`, `fossil-df` or any other r
 is the entire point: a test that reads back through the writer's own types proves the types are
 self-consistent and nothing else. It cannot see a promise the format makes to somebody who is not us.
 
-Six invariants, each expressed as a count of violations:
+Ten numbered checks, most of them a count of violations, and the numbering is the test's own. This
+table said six for as long as there were six; the tiling added three and `c573e73` added the counts
+to the seventh:
 
 | # | the promise |
 | --- | --- |
-| 1 | `dense_id` is a gapless `0..n` with no repeats — a tile is a range of dense ids, so a gap is an addressable empty tile or an unaddressable vertex |
+| 0 | the corpus is not empty — the vacuity guard, and the reason it is numbered before the rest is in the callout below |
+| 1 | `dense_id` is a gapless `0..n−1` with no repeats — a tile is a range of dense ids, so a gap is an addressable empty tile or an unaddressable vertex |
 | 2 | each adjacency file is ordered by the key its name claims — `by_source` is CSR, `by_target` is CSC |
 | 3 | the two orientations carry the same edge set; they are one relation stored twice and nothing else in the writer says so |
 | 4 | every endpoint addresses a vertex that exists — the corruption renumbering could introduce and no row count would reveal |
 | 5 | `RunStatus` agrees with what was written, because a corpus disagreeing with its own status is undetectable from either side alone |
 | 6 | the staged single-file vertex Parquet is gone, not left behind as a stale second copy a reader would glob up |
+| 7 | the manifest declares the tiling that was emitted, and **the counts it declares are the rows on disk** — the size is read off the artefact and every later assertion derives from it, so the test cannot agree with the writer by sharing a constant |
+| 8 | every vertex is in the tile its own id names; a row in the wrong file is a vertex a reader will never fetch and never miss |
+| 9 | the edges are tiled too, **both orientations**, each by the tile of the endpoint its file is ordered by — walked as a triple rather than written twice, because a check that only ever ran against `by_source` is how the target half went untiled |
 
 It gates merges in the ordinary way: `cargo test --workspace` runs on every pull request.
 
 <Callout title="Checked for vacuity, and mutation-tested">
-Every assertion is a count of violations, so **an empty corpus satisfies all six at once** — which is
-exactly how a conformance suite comes to pass vacuously and stop being evidence. The fixture's row
-counts are asserted first for that reason. And inverting the ordering predicate reports 299
-violations over 300 rows, which is how the ordering check is known to measure the ordering rather
-than pass by construction.
+Most assertions are a count of violations, so **an empty corpus satisfies them all at once** — which
+is exactly how a conformance suite comes to pass vacuously and stops being evidence. That is what
+check 0 is, and why it is numbered first rather than filed as setup; check 9 repeats it for the edge
+directories, because an empty directory satisfies everything after it. Inverting the ordering
+predicate reports 299 violations over 300 rows, which is how the ordering check is known to measure
+the ordering rather than pass by construction.
+
+Check 7's count half is the one with a stated limit on what it proves. The number is computed before
+the layout post-pass, and the pass then re-reads, renumbers, re-tiles and deletes the file it was
+given — it survives only because the pass writes one row out for every row it reads. So the count is
+read back **off the tiles the pass wrote, after it ran**, rather than resting on the shape of that
+code.
 </Callout>
 
 ## What is absent, re-measured

@@ -79,6 +79,8 @@ wholesale** — three files named the way GraphAr names them, `<name>.graph.yml`
 
 And `version: gar/v1`, which is GraphAr's own string. Every one of those is in
 `docs/specification/format.md` in `apache/incubator-graphar`, and none of them was invented here.
+**Three keys are fossil's and are not in that document at all** — `iri`, `vertex_count` and
+`edge_count` — and each is an entry in the list below rather than a quiet addition.
 
 > **fossil follows GraphAr as far as GraphAr specifies, and no further** — because past that point
 > there is nothing left to follow but a C++ implementation.
@@ -135,10 +137,10 @@ None of these is a bug to be fixed. Each is the rule above applied once.
    type of every corpus fossil writes. Two more spellings leave by the same door: `time`, which the
    specification lists and that function never implemented, and `binary`, fossil's fallback for an
    Arrow type with no mapping, which is in neither the specification's list nor the parser.
-2. **No count file.** The reference writes three — `vertex_count` per vertex type,
-   `vertex_count` per adjacency, and `edge_count{k}` per vertex chunk. fossil writes none of them,
-   because the specification asks for none of them. A count belongs in the manifest as a field
-   rather than beside it as a file, for the reasons in the callout below.
+2. **A count is a manifest field, not a file.** The reference writes three files — `vertex_count`
+   per vertex type, `vertex_count` per adjacency, and `edge_count{k}` per vertex chunk. fossil
+   writes none of them, because the specification asks for none of them. It declares
+   `vertex_count` and `edge_count` in the YAML instead, for the reasons in the callout below.
 3. **No offset table.** The specification does ask for this one: *"there would be an offset table
    for **ordered_by_source** or **ordered_by_dest** edges… The first row of each offset chunk is
    always 0."* fossil emits no offset table of any kind: there is no `offset/` anywhere under
@@ -178,30 +180,33 @@ None of these is a bug to be fixed. Each is the rule above applied once.
    case `unaddressable`. So the specification's own example manifest reads here as a corpus whose
    adjacency nobody can address, which is the borrowing rule biting in the direction that costs us.
 
-<Callout title="The count is a declared field — decided, not built">
+<Callout title="The count is a declared field">
 **A row count is a field of the manifest** — `vertex_count` on the vertex info, `edge_count` on the
-edge info — a decimal integer in a YAML document the reader fetches anyway to learn the prefix, with
-a published vector beside the addressing ones in `apps/corpus/guards/vectors.json`.
+edge info — a decimal integer in a YAML document the reader fetches anyway to learn the prefix. Both
+sit immediately before `chunk_size`, because `tiles = count.div_ceil(chunk_size)` reads in that
+order.
 
 The contrast with the thing it replaces is the whole reason it is a field and not a file. GraphAr's
 count is eight bytes with no name in any specification, no declared width, no declared byte order
-and no vector. A YAML integer has a width because YAML integers have one, has no byte order because
-the question cannot be asked of a decimal string, and ships with vectors because that is what
-[publishing arithmetic as Iceberg publishes it](/docs/characteristics/corpus-contract) asks of every
-number a reader has to reproduce.
+and nothing that checks it. A YAML integer has a width because YAML integers have one, has no byte
+order because the question cannot be asked of a decimal string, and is checked against the rows on
+disk — `conformance.rs` reads both declarations back off the tiles rather than off the value the
+writer computed.
 
 It is `u64` and not `Option<u64>`: **a count a reader may skip is a count a reader cannot depend
 on**, and a reader that cannot depend on it is exactly the one that cannot detect the failure the
 field exists for. Tiles are addressed and never listed, so a tree holding `chunk0…chunk16` is
 indistinguishable from a corpus that has seventeen tiles. A hole in the middle is caught by the
 addressing; **a missing tail is caught by nothing** — `apps/corpus/conformance/writer.mjs` reaches it
-only sideways, through edge endpoints that point at vertices no tile holds. With a declared count,
-`tiles = ceil(vertex_count / chunk_size)` and a reader knows how far the corpus goes before it opens
-a file. The border that makes publishing the number worth anything is in the conformance corpus —
-**300 vertices in five tiles of 64, the last holding 44** — because a count that divides the tile
-size exactly never exercises the boundary.
+only sideways, through edge endpoints that point at vertices no tile holds. With a declared count a
+reader knows how far the corpus goes before it opens a file. The border that makes the number worth
+anything is the conformance corpus's own shape — **300 vertices in five tiles of 64, the last of
+them holding 44** — because a count that divides the tile size exactly never exercises the boundary.
 
-**Not built.** The last commit to `crates/fossil-sinks/` is `610a5ce` and neither field is in it.
+Landed in `c573e73`, and the count survives the layout post-pass only because the pass writes one
+row out for every row it reads. That is why the check does not take the writer's word for it: the
+declaration is compared against the tiles **after** the pass has re-read, renumbered, re-tiled and
+deleted its input.
 </Callout>
 
 <Callout type="warn" title="What would reverse all of this">
