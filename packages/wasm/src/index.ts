@@ -37,7 +37,7 @@ export {
 export type { FileHandle } from './client.js';
 
 /** One external reference a program makes — the typed lineage returned by
- *  {@link refs}. Mirrors `fossil_run_status::SourceRefInfo` (the SAME struct the
+ *  {@link refs}. Mirrors `fossil_lineage::SourceRefInfo` (the SAME struct the
  *  native `fossil refs` emits). `connection` is the `@conn` alias the reference
  *  targets, or `null` for a direct URL/path; `role` is where it appears in the
  *  source constructor. The host resolves `@conn` → `{base}/path` itself. */
@@ -48,7 +48,7 @@ export interface SourceRefInfo {
 }
 
 /** One data-source provider returned by {@link providers}. Mirrors
- *  `fossil_run_status::ProviderInfo`: the short name (`csv`, `rdf`, …), the file
+ *  `fossil_lineage::ProviderInfo`: the short name (`csv`, `rdf`, …), the file
  *  extensions it reads (no leading dot), and how it can be used. */
 export interface ProviderInfo {
   name: string;

@@ -89,7 +89,7 @@ export function semanticLegend(): SemanticTokensLegend {
  * (every data URI + `schema =` argument, each tagged with its `@conn` alias and
  * role). keasy's client-compute job runner reads this to derive a job's
  * connections WITHOUT subprocessing `fossil` / a server round-trip. Identical
- * shape to the native `fossil refs` (the SAME `fossil_run_status::SourceRefInfo`
+ * shape to the native `fossil refs` (the SAME `fossil_lineage::SourceRefInfo`
  * struct), so the browser and the CLI never diverge.
  *
  * MUST be called after {@link initFossilWasm} has resolved.

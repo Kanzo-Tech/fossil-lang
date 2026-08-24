@@ -100,9 +100,18 @@ export interface EdgeStatus {
   count?: number | null;
 }
 
-/** The run report keasy turns into a DCAT catalog (`fossil-run-status` wire). */
+/**
+ * The run report keasy turns into a DCAT catalog — the wire shape of
+ * `fossil_df::run_status::RunStatus`.
+ *
+ * It carried a required `version: number`, and the Rust has had no such field
+ * since `3db248e` deleted `WIRE_VERSION` and `is_compatible` as write-only.
+ * `fossil-df-wasm` serialises the struct straight to JS, so every reader of
+ * `runStatus.version` got `undefined` against a type that says it cannot be.
+ * Nothing read it, which is why three days passed. Keep this interface derived
+ * from the Rust by hand only until something generates it.
+ */
 export interface RunStatus {
-  version: number;
   dest: string;
   vertices: VertexStatus[];
   edges: EdgeStatus[];
