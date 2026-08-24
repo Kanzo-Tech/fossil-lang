@@ -71,8 +71,9 @@ each file, hands it over and drops it. **Peak RSS at ten million moved from 10.6
 Two identical runs of the same path differ by more than that, so the number is not small — it is
 absent.
 
-The whole output is 713 MB across six files, so holding six of them was never what the +0.58 GiB
-billed to that phase meant; that was the encoder's own working memory. The change stayed anyway,
+The encoder's whole output is 713 MB across those six files — the tiling that turns them into the
+corpus is a later pass — so holding six of them was never what the +0.58 GiB billed to this phase
+meant; that was the encoder's own working memory. The change stayed anyway,
 and the reason has to be stated separately from the number, because mixing them is how a refuted
 hypothesis quietly survives: holding N files in order to write them one at a time has **no reader on
 that path**. It is indefensible per file. It is simply not worth any megabytes at this size, and

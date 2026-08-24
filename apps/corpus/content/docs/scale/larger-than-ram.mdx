@@ -106,9 +106,10 @@ and that a plan free to choose a hash join survives — it does not, which is wh
 configuration turns the preference off, and the test therefore only ever sees the plan that leaves.
 
 **And the honest gap:** the ~14 GiB is *localised* — before the layout, in the write path — and not
-*attributed*. The budget bounds it without explaining it. Attributing it is the continuation of that
-work and it has not been done, and the spill test is the only thing standing between here and the
-same number returning unnoticed.
+*attributed*. The budget bounds it without explaining it, and a bound nobody can explain is a bound
+that moves when the plan does. **What would attribute it is a per-operator accounting of the pool at
+the moment RSS peaks**, against the phase table `FOSSIL_MEM_PROBE` already prints; short of that, the
+spill test is the only thing standing between here and the same number returning unnoticed.
 </Callout>
 
 ## What the corpus contributes, and what it does not
@@ -117,11 +118,17 @@ The corpus is written once and read many times, so the read side never faces thi
 window and a footer, and both are flat in N by construction. The scale question lives entirely on
 the write side.
 
-And it lives there in one place that the format does not help with. The community pass runs in
-memory over the whole graph, and it is the term the corpus's own ordering does not bound. Writing a
-corpus larger than RAM is the claim that the least evidence stands behind — the largest corpus
-measured is five million vertices, about 100 MB — and the metric that decides it is not the wall
-clock but the **peak heap**, which has to stay flat.
+And it lives there in one place the format does not help with. The corpus's own ordering bounds the
+*edges* the community pass reads — the pass walks them as the CSR they already are, and that term
+went from +2.09 GiB to +0.08 GiB ([Streaming](/docs/scale/streaming)) — but it does not bound the
+**per-vertex state**, which is O(n) and resident, about 200 MB at ten million. That term is linear
+in the vertex count and no convention on this site makes it otherwise.
+
+Which is why *larger than RAM* is the claim on this site with the least evidence behind it. The
+largest corpus measured is **ten million vertices**, and under a 4 GiB budget it peaks at 9.87 GiB —
+under a machine, not under the budget, and still growing with N. The metric that decides the claim
+is not the wall clock but the **peak heap**, and what would settle it is that curve staying flat
+across a size the machine cannot hold.
 
 **That fossil could not write a larger-than-RAM corpus would be a finding as important as any
 reading result**, and stating it that way is the point of writing it down here.

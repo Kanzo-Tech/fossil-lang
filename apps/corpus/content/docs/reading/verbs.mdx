@@ -4,9 +4,13 @@ description: A closed enum over an already-written corpus. schema, read, expand,
 ---
 
 Beside the corpus there is a read surface: **six verbs**, a closed set, with a JSON schema each and
-SQL generation behind them. `crates/fossil-graph` is the whole of it — 2,438 lines that know nothing
-about the language, touch no filesystem, and declare exactly two ports: fetch a manifest file by
-relative path, and run a query.
+SQL generation behind them. `crates/fossil-graph` is the whole of it, and the whole of it knows
+nothing about the language, touches no filesystem, and declares exactly two ports — `ManifestSource`,
+which fetches a manifest file by relative path, and `DuckExecutor`, which runs a query. "Knows
+nothing about the language" is a build failure rather than a sentence: `apps/docs/content.test.ts`
+reads the crate's `Cargo.toml` and requires its internal dependencies to be exactly
+`["fossil-sinks"]`, so the graph core growing a second root turns the tree red — and so does the
+last one disappearing, because that needs the claim rewritten too.
 
 The verbs are a convenience over the corpus, not the contract. **The contract is the corpus.** A
 browser, a notebook and a service are equal citizens because they read the same files, and a caller
