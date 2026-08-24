@@ -77,7 +77,7 @@ one capability. The three blockers below are all sidestepped rather than paid.
 
 `cargo check --target wasm32-unknown-unknown -p fossil-engine` now reports
 exactly one error: `fossil_df::run_to_dir` is itself `cfg(not(wasm32))` because
-it writes a GraphAr tree to a local directory. `check` is wasm-capable; `run` is
+it writes a corpus to a local directory. `check` is wasm-capable; `run` is
 not, in one crate.
 
 And that does not contradict *fossil is a compiler consumed as a WASM library*
@@ -88,16 +88,41 @@ DOES — the browser's host writes its bytes back over its own seam. Splitting
 ### The three blockers, kept because they price the OTHER route
 
 If the native side ever should describe through DataFusion rather than `DuckDB`,
-this is what it costs — measured, and unchanged by the move above:
+this is what it costs — measured, and unchanged by the move above except in
+**which crate would pay**. They were written when the `DESCRIBE` was
+`fossil-engine`'s; it is `fossil-introspect`'s now, and the bill moved with it:
 
-1. **No runtime.** `fossil-engine` names `tokio` nowhere. DataFusion's schema
-   inference is async.
+1. **No runtime.** `fossil-introspect` names `tokio` nowhere, and neither does
+   `fossil-engine`. DataFusion's schema inference is async, so the crate that
+   describes would have to take one.
 2. **DataFusion cannot see a cloud source at all, natively — confirmed against a
    real S3.** See *The cloud asymmetry* below; it is no longer a grep.
 3. **The browser introspects through DuckDB-WASM and that is not changing.** Two
    engines disagree on CSV type sniffing, and `rust-parity.test.ts` exists
    because «the browser and the CLI answer the same program differently» is a
-   bug.
+   bug. Its Rust side is `crates/fossil-introspect/src/lib.rs` — it followed the
+   code, and the crate carries a comment saying the test that reads it runs under
+   **pnpm**, because `cargo test` will not tell you.
+
+### Where `DuckDB` is now, and what keeps it there
+
+The whole decision is a ratchet over ground already held, so the thing that
+holds it is `deny.toml` rather than a habit. `cargo deny check bans` denies
+`duckdb` workspace-wide and names the crates permitted to wrap it, which makes
+adding a name to that list the review this rule exists to force. Measured
+2026-08-23 with `cargo tree -e normal -i duckdb --workspace`, which is the
+authority there and never prose: **two normal edges — `fossil-introspect` and
+`fossil-mcp`** — plus `fossil-engine`, `fossil-layout` and `fossil-cli` holding
+it as a dev-dependency, to read written Parquet back or to bring an engine to a
+test.
+
+The list said the opposite for a day. It carried four names, two of which had
+just demoted `duckdb` to a dev-dependency, and it did not carry
+`fossil-introspect` — the one crate that had taken over linking it. So
+`cargo deny check bans` exited 2 with *«direct parent `fossil-introspect` of
+banned crate `duckdb` was not marked as a wrapper»*, and CI's `cargo-deny` job
+went red with it, and nothing said so, because nobody runs it locally and the
+job's name does not say which of advisories / licenses / bans failed.
 
 ## What the first piece cost, measured — and the mechanism was misattributed
 
