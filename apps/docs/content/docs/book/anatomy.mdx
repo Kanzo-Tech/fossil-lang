@@ -44,11 +44,14 @@ therefore never collide: give them two different local names and carry on.
 
 <Program src="multi-document/multi-document.fossil" region="bindings" title="multi-document.fossil" />
 
-One consequence worth knowing before it surprises you: **naming as many members as the document
-declares is the arity check.** Name three members of a document that declares two and that is an
-error, right there at the binding, before anything else is read. And the other direction — reordering
-the two shapes inside the `.shex` — quietly rebinds the program. The document is a file you version,
-so this is a fair trade, but it is a trade.
+One consequence worth knowing before it surprises you: **a name past the end of the document binds
+nothing, and you hear about it where you use it.** Name three members of a document that declares
+two and the third is an error the first time a mapping names it — *`Extra` is declared and bound
+nothing: the binding names 3 shape(s) and the document declares 2* — not at the binding line, and
+not at all if you never use it. Naming fewer than the document declares is not an error either: you
+bind a prefix of it and leave the rest alone. And reordering the two shapes inside the `.shex`
+quietly rebinds the program. The document is a file you version, so this is a fair trade, but it is a
+trade.
 
 `io` is where the readers live: `io.shex`, `io.shacl`, `io.csv`, `io.json`, `io.parquet`, `io.rdf`.
 None of them take anything on the left, because they are what makes the thing.

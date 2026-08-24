@@ -54,8 +54,19 @@ English one, each with its own vocabulary, in one program:
 
 <Program src="multi-document/multi-document.fossil" title="multi-document.fossil" />
 
-It also gives you a check for free. Name three members of a document that declares two, and that is
-an error at the binding — before a single mapping is read.
+It also gives you a check, and it is worth knowing exactly which one. Name three members of a
+document that declares two and the third binds nothing — the Nth name takes the Nth shape, and there
+is no third shape to take. That is an error, reported at the **use** of the surplus name rather than
+at the binding line:
+
+```
+`Extra` is declared and bound nothing: the binding names 3 shape(s) and the
+document declares 2. Names bind by POSITION, so there is no 3th shape for it
+to take.
+```
+
+Which means a surplus name you never use is silent. The other direction is not an error at all:
+naming two members of a document that declares five binds the first two and ignores the rest.
 
 And it has a cost, stated plainly: reorder the shapes inside the document and the program rebinds.
 Shape documents are files you version and review, which is what makes that acceptable, but it is
