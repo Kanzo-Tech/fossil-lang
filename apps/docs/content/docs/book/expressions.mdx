@@ -1,6 +1,6 @@
 ---
 title: Values and expressions
-description: Every expression fossil admits — literals, member access, the two ways to reach one function, string interpolation for identities, and the operators.
+description: Every expression fossil admits — literals, member access, the two ways to reach one function, string interpolation for identities, the operators and the conditional.
 ---
 
 An expression is the right-hand side of a property line, the inside of a `{...}` hole, and the
@@ -82,6 +82,32 @@ things and only the first is a question.
 
 Do not reach for `!= ""` to mean this. It is a comparison against the empty string, it is only a
 test for absence on a text column, and it happened to work for as long as nothing typed it.
+
+`not` and `-` are also prefixes, and they bind tighter than everything above — `-Row.drift` negates
+the column, and `healthy = not Row.degraded` is an ordinary property value, not something only a
+`where` can hold:
+
+<Program src="negation/negation.fossil" region="minus" title="negation.fossil" />
+
+<Program src="negation/negation.fossil" region="not" title="negation.fossil" />
+
+## The conditional
+
+One value or another, decided per row:
+
+<Program src="ternary/ternary.fossil" region="simple" title="ternary.fossil" />
+
+`cond ? a : b`, and both branches have to be the same type — there is no coercion between them, and
+the widening between `Integer` and `Float` is the only exception anywhere in the language.
+
+It is right-associative, so a chain of them reads as a ladder without parentheses and each `:` pairs
+with the `?` to its left:
+
+<Program src="ternary/ternary.fossil" region="chained" title="ternary.fossil" />
+
+That `:` is the same token a mapping header spells its shape with (`grammar.bnf`, `SHAPE_SEP`). One
+lexeme, two readings, and what tells them apart is the `?` — which is why there is nothing to escape
+and no second colon to learn.
 
 ## Named arguments
 
