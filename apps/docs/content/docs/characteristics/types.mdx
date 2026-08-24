@@ -26,11 +26,14 @@ And this is where the expensive work is, which is easy to get backwards: **the p
 the sources are large.** A fossil script is tens of lines; the CSV it points at is not. Going to the
 source and inferring its schema is the only part of a compile that costs real time.
 
-That is why it happens **before the database exists** —
-`crates/fossil-engine/src/lib.rs:255` scrapes the `io.` bindings and `crates/fossil-engine/src/lib.rs:366`
-runs `DESCRIBE SELECT * FROM <reader>(...)` — the reader the constructor names, `read_csv_auto` /
-`read_json_auto` / `read_parquet` — and hands the result to the host — and why its cache is deliberately outside the query system. Being outside is
-correct: it is a function of the world, not of the program text.
+That is why it happens **before the compiler exists**, and since `fbd1102` it is not the compiler
+doing it. `fossil-introspect` is the native host's half: `extract_source_refs`
+(`crates/fossil-introspect/src/lib.rs:97`) scrapes the `io.` bindings out of the program text, and
+`crates/fossil-introspect/src/lib.rs:267` runs `DESCRIBE SELECT * FROM <reader>(...)` — the reader
+the constructor names, `read_csv_auto` / `read_json_auto` / `read_parquet` — and fills the host's
+descriptor cache. `fossil-cli` calls it and then compiles, which is the order the browser has always
+used. That is also why the cache is deliberately outside the query system: it is a function of the
+world, not of the program text.
 
 <Callout title="The cache exists since 2026-08-07, and its token is deliberately not a hash">
 It was the least-built thing in the tree: the field that drove invalidation was `String::new()` at
@@ -56,13 +59,14 @@ This is design principle D9 — *invisible types, total guarantees; if it compil
 true.
 
 **Three of those four are checked today, and what closed them was the document becoming an input.**
-`resolve_target_shape` (`crates/fossil-hir/src/shapes.rs:507`) reads the document the program names
+`resolve_target_shape` (`crates/fossil-hir/src/shapes.rs:535`) reads the document the program names
 through the file registry and the tracked `shape_document`, and `typecheck_mapping` calls it
-(`crates/fossil-hir/src/check.rs:121`). A key the shape does not declare is refused with a
-did-you-mean over the ones it does (`crates/fossil-hir/src/check.rs:819`); a value whose type the
-constraint will not admit is refused by `compatible` (`crates/fossil-hir/src/check.rs:442`); and a
+(`crates/fossil-hir/src/check.rs:128`). A key the shape does not declare is refused by
+`resolve_predicate` with a did-you-mean over the ones it does
+(`crates/fossil-hir/src/check.rs:480`); a value whose type the
+constraint will not admit is refused by `compatible` (`crates/fossil-hir/src/check.rs:908`); and a
 predicate the shape requires that the body never writes is refused by `check_required_properties`
-(`crates/fossil-hir/src/check.rs:901`).
+(`crates/fossil-hir/src/check.rs:599`).
 `apps/docs/programs/errors/wrong-type` is the third of the four spelled as a program, and
 `editing_the_document_rechecks_the_program_and_the_diagnostic_changes`
 (`crates/fossil-engine/src/documents.rs`) drives it through the production path: the shape declares
@@ -70,7 +74,7 @@ predicate the shape requires that the body never writes is refused by `check_req
 editing the document to say `xsd:string` makes it go away.
 
 <Callout title="The accept-all literal is still in the tree, and it is not on this path">
-`OutputDescriptorKind::ACCEPT_ALL_DEFAULT` at `crates/fossil-engine/src/lib.rs:470` is the **run's**
+`OutputDescriptorKind::ACCEPT_ALL_DEFAULT` at `crates/fossil-engine/src/lib.rs:268` is the **run's**
 fallback, not the checker's: one descriptor per program, resolved for the executor, and reached only
 when a program names no shape document *and* carries no `io.rdf` `schema =` argument. Since a bare
 property key resolves only against a predicate a shape declares, a program that reaches it writes no
@@ -81,7 +85,8 @@ is gone, and the exception with it.
 </Callout>
 
 **What is not checked is the upper bound.** `compatible` took an `occurs` parameter and lost it
-(`crates/fossil-hir/src/check.rs:454`), so the only cardinality the checker observes is a required
+(`crates/fossil-hir/src/check.rs:922`), and the property loop says in its own comment why it does not
+read `constraint.occurs` (`crates/fossil-hir/src/check.rs:451`), so the only cardinality the checker observes is a required
 property that is absent. Nothing in the language constructs a multi-valued expression, so a
 `maxCount 1` property has nothing to reject yet — the gap is real and is not currently reachable from
 a program.
@@ -90,7 +95,7 @@ a program.
 SHACL decoder lower into one format-neutral vocabulary and the checker reads that and nothing else;
 the argument is on [the shapes page](/docs/design/shapes), and the variant that used to be called
 `Shacl` is called `Lowered` for exactly that reason — it never meant SHACL, it meant the decode
-already happened (`crates/fossil-descriptors-output/src/kind.rs:40`). The one asymmetry that survives
+already happened (`crates/fossil-descriptors-output/src/kind.rs:48`). The one asymmetry that survives
 is about RDF 1.2 rather than about investment: SHACL 1.2 Core carries `sh:TripleTerm` as a node kind
 and a reifier-shape constraint component, so it can describe an
 [RDF 1.2](/docs/characteristics/rdf12) output, and ShEx has no working group and no mention of any of
@@ -125,9 +130,9 @@ catalogued one, and it is the thing sensitivity-as-a-type will need before it me
 ## The lattice, and the boundary it used to cross as text
 
 Nine xsd-aligned primitives in one enum — `String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`,
-`Time`, `GYear`, `AnyUri` (`crates/fossil-graph-schema/src/lib.rs:106`). It lives in the leaf crate
+`Time`, `GYear`, `AnyUri` (`crates/fossil-graph-schema/src/lib.rs:124`). It lives in the leaf crate
 the schema, the checker and the descriptors all depend on, so a column crosses the provider boundary
-carrying the enum itself (`crates/fossil-descriptors-input/src/inferred.rs:29`):
+carrying the enum itself (`crates/fossil-descriptors-input/src/inferred.rs:23`):
 
 ```rust
 pub struct InferredColumn {
@@ -144,12 +149,12 @@ system, and it cost seven implementations of one table — two of them inside th
 which existed only to assert that it agreed with another.
 
 What is left is one function per direction, both on the lattice itself:
-`Primitive::from_xsd_iri` (`crates/fossil-graph-schema/src/lib.rs:141`), which takes the full IRI,
+`Primitive::from_xsd_iri` (`crates/fossil-graph-schema/src/lib.rs:165`), which takes the full IRI,
 the `xsd:` prefixed form and the bare local name; and `Primitive::to_xsd_iri`
-(`crates/fossil-graph-schema/src/lib.rs:165`). Beside them stand two mappings that are not
+(`crates/fossil-graph-schema/src/lib.rs:189`). Beside them stand two mappings that are not
 duplicates but vocabularies a materializer owns: `primitive_to_graphar`
-(`crates/fossil-hir/src/shapes.rs:141`) and `duckdb_type_to_fossil_primitive`
-(`crates/fossil-engine/src/lib.rs:121`).
+(`crates/fossil-hir/src/shapes.rs:498`) and `duckdb_type_to_fossil_primitive`, which went to the
+host with the `DESCRIBE` (`crates/fossil-introspect/src/lib.rs:56`).
 
 The `D-INFERRED-UNKNOWN-DATATYPE` diagnostic went with the string. A host that sends a type fossil
 does not carry is now rejected where its JSON arrives, naming the value — not coerced to `String`
