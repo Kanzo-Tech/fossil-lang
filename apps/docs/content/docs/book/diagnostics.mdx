@@ -10,6 +10,12 @@ Five programs. Each one is a real file in this documentation's corpus, each one 
 diagnostic below is the one that program produces. Read them in order if you like; they are ordered
 by how early in a program's life you tend to meet them.
 
+Two things about the blocks below, so that running one yourself is not a surprise. They are
+committed artefacts, rendered by `crates/fossil-engine/tests/programs.rs` at a **fixed width of
+100** and compared byte for byte, so a `help:` line may wrap where your terminal would not. And
+`fossil check` puts a count in front of them — `× type-checking failed: 2 error(s)` — which the
+artefact does not carry, because the count is the CLI's and the diagnostics are the compiler's.
+
 ## 1. A field that is not in the source
 
 The shop program, one letter changed:
