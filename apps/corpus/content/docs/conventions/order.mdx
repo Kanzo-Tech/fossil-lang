@@ -70,13 +70,22 @@ implementations that agree on the formula and disagree on the width produce quan
 differ by one at the boundaries, and a difference of one is a different Morton code and a different
 order.
 
-The guard reproduces the arithmetic in the same width for the same reason. A writer that quantised
-in binary64 can show inversions here that are ties in its own view of the numbers, and naming the
-width is what turns that from an argument into a bug report.
+**Both sides execute that table, and the second one is the point.** `guards/arithmetic.mjs` reads
+the published rows and reproduces them in binary32, wrapping every step in `Math.fround`; so does
+the engine that writes a corpus, in a Rust test that reads the same `vectors.json` and asserts
+against it rather than restating it. A reader pinned to the borders while the producer walks past
+them is the asymmetry that pinning only one side buys, and it was measured before the second half
+existed: flipping the writer's `quantize` to binary64 left every other test in the workspace green
+and moved `quantize(147, 0, 167)` to 57686. The Rust test is red on that flip, and red again if the
+separating row leaves the table.
 
 The `v = 147, hi = 167` row above is the one that says so. The other four are exact in both widths,
 so a table without it passes against a binary64 port; that row is 57687 in binary32 and 57686 in
-binary64, and this guard's own JavaScript failed it until the arithmetic was moved to `Math.fround`.
+binary64. **The table is also checked to still contain a row that separates the widths**, because a
+table that lost this one would keep passing against a binary64 implementation and prove nothing.
+
+What neither side reaches: the `::FLOAT` half of the contract inside the engine's own SQL, and the
+bounding box the layout derives before quantising, which no vector covers.
 </Callout>
 
 ## Redoing the layout renumbers everything
