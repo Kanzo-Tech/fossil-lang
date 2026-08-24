@@ -1,6 +1,6 @@
 ---
 title: The corpus
-description: What a fossil program produces — a graph in columnar files, addressable by byte range with no service in the path — and why write-once/read-many is the topology that makes whole-program checking available in the first place.
+description: What a fossil program produces — a graph in columnar files, addressable by byte range with no service in the path — why write-once/read-many is the topology that makes whole-program checking available in the first place, and which of GraphAr's field names are borrowed and where borrowing stops.
 ---
 
 A fossil program produces a **corpus**: a graph written to disk as columnar files with a manifest
@@ -64,6 +64,154 @@ Which is why **capability negotiation is not built into a corpus that nobody els
 the trigger for building it is written down rather than left to judgement: *the day a corpus leaves
 this machine towards somebody who cannot regenerate it.* Before that day the mechanism answers a
 question nobody has asked. After it, it is late.
+
+## What is borrowed from GraphAr, and where borrowing stops
+
+The corpus did not invent its manifest vocabulary. **GraphAr's YAML field names are borrowed
+wholesale** — three files named the way GraphAr names them, `<name>.graph.yml`,
+`<label>.vertex.yml` and `<source>_<edge>_<destination>.edge.yml`, carrying GraphAr's own keys:
+
+| file | the keys, all of them GraphAr's |
+| --- | --- |
+| graph info | `name`, `prefix`, `vertices`, `edges`, `version` |
+| vertex info | `type`, `chunk_size`, `prefix`, `property_groups`, `version`; per property `name`, `data_type`, `is_primary`, `is_nullable` |
+| edge info | `src_type`, `edge_type`, `dst_type`, `chunk_size`, `src_chunk_size`, `dst_chunk_size`, `directed`, `prefix`, `adj_lists`, `property_groups`, `version`; per adjacency `ordered`, `aligned_by`, `prefix`, `file_type` |
+
+And `version: gar/v1`, which is GraphAr's own string. Every one of those is in
+`docs/specification/format.md` in `apache/incubator-graphar`, and none of them was invented here.
+
+> **fossil follows GraphAr as far as GraphAr specifies, and no further** — because past that point
+> there is nothing left to follow but a C++ implementation.
+
+That is the rule, and it is worth stating as a rule because it answers questions nobody has asked
+yet. Is the thing in the specification? Then fossil spells it the way the specification spells it,
+and a difference is a defect. Is it only in that repository's `cpp/`? Then it is somebody's code: it
+binds nobody, it is not a contract fossil is failing to meet, and the decision is taken here on this
+project's own evidence. **This is not a GraphAr-conformant corpus and does not claim to be.**
+
+### The count is why the rule is worded that way
+
+GraphAr's specification never defines a count. `docs/specification/format.md` contains the word
+"count" **zero times**: nothing it describes lets a reader learn how many vertices a type has.
+
+The reference implementation stores one anyway, and *how* it does it is the argument.
+`cpp/src/graphar/graph_info.cc` puts it at a path the specification never names —
+
+```cpp
+Result<std::string> VertexInfo::GetVerticesNumFilePath() const {
+  return BuildPath({impl_->prefix_}) + "vertex_count";
+}
+```
+
+— and `cpp/src/graphar/filesystem.cc` writes it as raw memory:
+
+```cpp
+RETURN_NOT_ARROW_OK(ofstream->Write(&value, sizeof(T)));
+```
+
+The only explicit instantiation of that template is `WriteValueToFile<IdType>`, and `IdType` is
+`int64_t` (`cpp/src/graphar/fwd.h`); the three call sites are in `cpp/src/graphar/arrow/chunk_writer.cc`.
+So a count is **eight raw bytes in the writing machine's byte order**, in a file with no declared
+width, no declared endianness and no test vector. A corpus written on a big-endian machine is
+misread on a little-endian one, and nothing in the artefact says so.
+
+That is precisely the pathology [the corpus contract](/docs/characteristics/corpus-contract) names
+about somebody else, and it sits *below* the line that page draws: PMTiles documents its curve badly
+and every port re-derives it, while this documents nothing at all and is normative by accident —
+Parquet's `created_by`, with the thirteen irrevocable years still ahead of it rather than behind.
+Following it would mean copying a byte layout out of a C++ template, which is the one thing this
+project has already decided it will not do.
+
+### The divergences, each one pointing at something
+
+None of these is a bug to be fixed. Each is the rule above applied once.
+
+1. **`data_type` spellings GraphAr's own reader refuses.** Every vertex manifest fossil writes
+   declares `dense_id` as `uint32` and marks it `is_primary`, and adds `cluster_id` as `uint32`
+   (`crates/fossil-df/src/lib.rs`). The specification's built-in list is Boolean, Int32, Int64,
+   Float, Double, String, Date, Timestamp, Time and List — no unsigned type. `TypeNameToDataType` in
+   `cpp/src/graphar/types.cc` accepts eight spellings plus five `list<…>` and throws
+   `Unsupported data type` on everything else, so it throws on the primary key of the first vertex
+   type of every corpus fossil writes. Two more spellings leave by the same door: `time`, which the
+   specification lists and that function never implemented, and `binary`, fossil's fallback for an
+   Arrow type with no mapping, which is in neither the specification's list nor the parser.
+2. **No count file.** The reference writes three — `vertex_count` per vertex type,
+   `vertex_count` per adjacency, and `edge_count{k}` per vertex chunk. fossil writes none of them,
+   because the specification asks for none of them. A count belongs in the manifest as a field
+   rather than beside it as a file, for the reasons in the callout below.
+3. **No offset table.** The specification does ask for this one: *"there would be an offset table
+   for **ordered_by_source** or **ordered_by_dest** edges… The first row of each offset chunk is
+   always 0."* fossil emits no offset table of any kind: there is no `offset/` anywhere under
+   `apps/corpus/conformance/corpus/edge/Person_knows_Person/`, which holds the edge info, the ten
+   tiles of `by_source/` and `by_target/`, and the two single-file containers of the same rows. A
+   vertex's run is found instead by filtering the tile that was fetched anyway on the endpoint
+   column that ordered it, which is a predicate rather than a second request. **This is a real
+   divergence from a specified thing**, and it is on this list rather than hidden in it.
+4. **`chunk_size` on an edge is not a row count.** The specification defines it as one — *"the
+   number of edges in an edge chunk"*, recommended 2²² — and pairs it with `src_chunk_size` so that
+   a sub-table splits again by rows. Here it *equals* `src_chunk_size` and is the addressing unit:
+   `by_source/tile{k}.parquet` holds every edge whose source is in vertex tile `k`, so its row count
+   is the total out-degree of those 4,096 vertices and nothing bounds it
+   (`crates/fossil-sinks/src/manifest.rs` says so on the field itself). Same key, different meaning
+   — the sharpest edge on this page, because a reader that takes the borrowed name at its borrowed
+   value gets a number instead of an error.
+5. **One flat tile per orientation, and a file naming rule that is ours because there is none to
+   borrow.** The reference composes `<prefix><property group prefix>chunk{k}` for vertices and
+   `<adjacency prefix>adj_list/part{vertex chunk}/chunk{edge chunk}` for edges, both extensionless.
+   fossil composes `<prefix>chunk{k}.parquet` and `<edge prefix><adjacency prefix>tile{k}.parquet`,
+   one level, extension in the name — and carries one property group holding every column rather
+   than the per-group directory the specification's prose implies. **The specification names no
+   data-file path anywhere**, which makes this the clearest case the rule decides: there is nothing
+   here to diverge from.
+6. **`chunk_size` is a power of two, and it is 4,096.** GraphAr requires nothing of the value and
+   recommends 2¹⁸ vertices and 2²² edges. The constraint is fossil's, because the address is
+   `dense_id >> 12` and not a division, and the number is measured rather than recommended — on
+   five million vertices over a plain HTTP origin, against requests and bytes at once, with the
+   table on the corpus site's own addressing page.
+7. **`iri` on the vertex info and the edge info.** The RDF type or predicate IRI, which GraphAr has
+   no field for; its one escape hatch, *"extra information for the graph"*, is on the graph info
+   only. It is omitted from the YAML when empty, so a non-RDF corpus is exactly the borrowed shape
+   and nothing more.
+8. **An `adj_lists` entry with no `prefix` has no address.** The specification's prose names a
+   per-adjacency prefix and **its own worked example omits it from all three entries**. fossil
+   reports such an orientation as absent rather than composing a URL from convention — conformance
+   case `unaddressable`. So the specification's own example manifest reads here as a corpus whose
+   adjacency nobody can address, which is the borrowing rule biting in the direction that costs us.
+
+<Callout title="The count is a declared field — decided, not built">
+**A row count is a field of the manifest** — `vertex_count` on the vertex info, `edge_count` on the
+edge info — a decimal integer in a YAML document the reader fetches anyway to learn the prefix, with
+a published vector beside the addressing ones in `apps/corpus/guards/vectors.json`.
+
+The contrast with the thing it replaces is the whole reason it is a field and not a file. GraphAr's
+count is eight bytes with no name in any specification, no declared width, no declared byte order
+and no vector. A YAML integer has a width because YAML integers have one, has no byte order because
+the question cannot be asked of a decimal string, and ships with vectors because that is what
+[publishing arithmetic as Iceberg publishes it](/docs/characteristics/corpus-contract) asks of every
+number a reader has to reproduce.
+
+It is `u64` and not `Option<u64>`: **a count a reader may skip is a count a reader cannot depend
+on**, and a reader that cannot depend on it is exactly the one that cannot detect the failure the
+field exists for. Tiles are addressed and never listed, so a tree holding `chunk0…chunk16` is
+indistinguishable from a corpus that has seventeen tiles. A hole in the middle is caught by the
+addressing; **a missing tail is caught by nothing** — `apps/corpus/conformance/writer.mjs` reaches it
+only sideways, through edge endpoints that point at vertices no tile holds. With a declared count,
+`tiles = ceil(vertex_count / chunk_size)` and a reader knows how far the corpus goes before it opens
+a file. The border that makes publishing the number worth anything is in the conformance corpus —
+**300 vertices in five tiles of 64, the last holding 44** — because a count that divides the tile
+size exactly never exercises the boundary.
+
+**Not built.** The last commit to `crates/fossil-sinks/` is `610a5ce` and neither field is in it.
+</Callout>
+
+<Callout type="warn" title="What would reverse all of this">
+GraphAr specifying what it presently leaves to `cpp/`: a data-file path, a count with a declared
+width and byte order, and a table of vectors. On that day the eight items above stop being decisions
+and become defects, and borrowing resumes where it stopped. The other trigger is the one
+[discarded alternatives](/docs/design/discarded) already records against conforming to a graph
+interchange format at all — **a second reader that is not ours and already speaks it** — and it is
+the stronger of the two, because a specification nobody reads is not interoperability.
+</Callout>
 
 ## Why write-once/read-many is not an implementation detail
 

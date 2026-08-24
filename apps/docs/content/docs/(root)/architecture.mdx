@@ -230,7 +230,9 @@ But what makes two dozen feel like a maze is not the count:
 
 A false name costs more than a surplus crate, because you cannot skip it while reading. `fossil-ide`
 is the set of LSP functions, and exists only because `fossil-lsp` does not compile to wasm32.
-`fossil-sinks` writes nothing — it is the GraphAr manifest model, and half its dependents are readers.
+`fossil-sinks` writes nothing — it is the manifest model, borrowing GraphAr's field names without
+conforming to GraphAr ([where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops)),
+and half its dependents are readers.
 `fossil-engine` is credential resolution and pre-introspection, not a façade — and less of it than
 this page has said since `fbd1102` moved the pre-introspection out to `fossil-introspect`.
 
@@ -276,9 +278,13 @@ exists read the same tree on 2026-08-04. The seam between the two halves is the 
 never an API.
 
 <Callout type="warn" title="A name that misleads, corrected here too">
-`fossil-graph` is **not** an implementation of GraphAr. It is the read surface over a corpus somebody
-else already wrote: a closed enum of [six verbs](/docs/characteristics/verbs). The crate that writes
-is `fossil-df`; the crate that models the manifest is `fossil-sinks`.
+`fossil-graph` is **not** an implementation of GraphAr, and neither is `fossil-sinks`. Nothing here
+writes a corpus a GraphAr reader can open: the manifest borrows GraphAr's YAML field names and stops
+where GraphAr stops specifying, which is
+[stated once with the divergences measured](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
+`fossil-graph` is the read surface over a corpus somebody else already wrote: a closed enum of
+[six verbs](/docs/characteristics/verbs). The crate that writes is `fossil-df`; the crate that models
+the manifest is `fossil-sinks`.
 </Callout>
 
 ## One repository
