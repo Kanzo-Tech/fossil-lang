@@ -7,38 +7,58 @@
 //! learn, and because the hand-templated spelling this superseded (`graphar_version: 1.0.0`,
 //! `vertex_types:`, `data_type: string`) was neither `GraphAr`'s nor anyone else's. **A fossil
 //! corpus is not a valid `GraphAr` corpus, and this module used to end that sentence the other
-//! way.** Fossil borrows the vocabulary and stops where `GraphAr` stops specifying.
+//! way.** That is a description and not a policy: divergence 1 below is a `data_type` spelling
+//! the reference C++ throws on, and it is on the primary key of the first vertex type.
 //!
-//! Six divergences, each checked against `docs/specification/format.md` in
-//! `apache/incubator-graphar` and against `cpp/src/graphar/` — not against a summary of either.
-//! Nothing is listed here that was not read there.
+//! Eight divergences, each read out of `docs/specification/format.md` in
+//! `apache/incubator-graphar` and out of `cpp/src/graphar/` — not out of a summary of either.
+//! **Nothing here was executed**: `GraphAr` was not built and no corpus was handed to it. Each of
+//! these is what two sources say, and the fourth column of the honesty is saying which.
 //!
-//! 1. **[`VertexInfo::vertex_count`] and [`EdgeInfo::edge_count`] are ours.** The specification
+//! 1. **The `data_type` spellings are not all `GraphAr`'s, and one of them stops its reader
+//!    dead.** `types.cc`'s `DataType::TypeNameToDataType` accepts exactly `bool`, `int32`,
+//!    `int64`, `float`, `double`, `string`, `date`, `timestamp` and five `list<…>` forms, and
+//!    `throw`s `"Unsupported data type"` on anything else. `fossil-df` declares `dense_id` as
+//!    `uint32` with `is_primary: true`, and `cluster_id` the same — so the reference reader
+//!    throws on the primary key of the first vertex type it opens. The specification's own type
+//!    list has no unsigned integer in it either. `time` and `binary` go out the same door: `time`
+//!    is in the specification's list and has no arm in the C++, and `binary` is in neither — see
+//!    [`data_type_name`], whose fallback it is.
+//! 2. **[`VertexInfo::vertex_count`] and [`EdgeInfo::edge_count`] are ours.** The specification
 //!    mentions no count of any kind: not a YAML field, not a file. The C++ writes one anyway —
 //!    `<vertex prefix>vertex_count`, `<edge prefix><adj_list prefix>vertex_count`,
-//!    `…edge_count{vertex_chunk_index}` — through `FileSystem::WriteValueToFile`, whose body is
-//!    `ofstream->Write(&value, sizeof(T))`. Eight raw bytes in the writing machine's byte order,
-//!    in a file the specification never names, with no declared width and no declared
-//!    endianness. That is a reference implementation normative by accident, which is the thing
-//!    `/docs/characteristics/corpus-contract` exists to refuse. Ours is a declared decimal
-//!    integer in the YAML, with a published vector table in `apps/corpus/guards/vectors.json`
-//!    and a guard that reads the rows back off the disk.
-//! 2. **`chunk_size` must be a power of two here.** A tile's address is [`tile_of`], a shift, and
+//!    `…edge_count{vertex_chunk_index}` — through `FileSystem::WriteValueToFile`, a template
+//!    whose generic body is `ofstream->Write(&value, sizeof(T))`. It has one full specialisation,
+//!    for `std::string`, which writes `value.size()` bytes; and one explicit instantiation,
+//!    `<IdType>`, with `IdType = int64_t` in `fwd.h`. The count therefore goes out as **eight raw
+//!    bytes in the writing machine's byte order**, in a file the specification never names, with
+//!    no declared width and no declared endianness. That is a reference implementation normative
+//!    by accident, which is the thing `/docs/characteristics/corpus-contract` exists to refuse.
+//!    Ours is a declared decimal integer in the YAML, with a published vector table in
+//!    `apps/corpus/guards/vectors.json` and a guard that reads the rows back off the disk.
+//! 3. **`chunk_size` must be a power of two here.** A tile's address is [`tile_of`], a shift, and
 //!    a shift is not a division. `GraphAr`'s own example vertex-info declares `chunk_size: 100`
 //!    and its prose recommends 2^18 and 2^22 as *empirical* values; nothing in it requires a
 //!    power of two. `fossil-layout`'s `shift_for` refuses anything else before a byte is written.
-//! 3. **[`EdgeInfo::chunk_size`] denotes something else here** — see the field. In `GraphAr` it
+//! 4. **[`EdgeInfo::chunk_size`] denotes something else here** — see the field. In `GraphAr` it
 //!    cuts a sub-logical table into edge chunks of that many rows; here it is not a row count at
 //!    all.
-//! 4. **One file per tile, carrying every column.** `GraphAr` gives each property group its own
+//! 5. **One file per tile, carrying every column.** `GraphAr` gives each property group its own
 //!    path prefix, so one chunk of one vertex type is several physical files. [`PropertyGroup`]
 //!    carries no prefix, fossil emits one group, and a tile is one Parquet.
-//! 5. **No offset table.** `GraphAr` requires one beside an `ordered_by_source`/`ordered_by_dest`
+//! 6. **No offset table.** `GraphAr` requires one beside an `ordered_by_source`/`ordered_by_dest`
 //!    adjacency, partitioned in alignment with the vertex chunking, to record where each
-//!    vertex's edges start. Fossil writes none: a tile is sorted on the endpoint that addresses
-//!    it, so a vertex's neighbours are a run of equal keys and a run is found by scanning the one
-//!    tile that was fetched anyway.
-//! 6. **The tile naming is ours, because the specification names no data file.** Here it is
+//!    vertex's edges start. Fossil writes none, and nothing under an edge prefix here is an
+//!    `offset/`: a tile is sorted on the endpoint that addresses it, so a vertex's neighbours are
+//!    a run of equal keys and a run is found by scanning the one tile that was fetched anyway.
+//! 7. **[`AdjList::prefix`] is required here and absent from the specification's example.** All
+//!    three `adj_lists` entries in `format.md` carry `ordered`, `aligned_by` and `file_type` and
+//!    no `prefix`, though the prose beside them says an adjList includes "the prefix of file
+//!    path". Here the prefix is the one part of a tile's URL a reader cannot compute, so an entry
+//!    without one addresses nothing — and the field is a plain `String` with no `serde` default,
+//!    so a specification-shaped edge-info does not even deserialize. That last half is the one
+//!    claim in this list that IS executed: `adj_list_without_a_prefix_is_not_an_adj_list`.
+//! 8. **The tile naming is ours, because the specification names no data file.** Here it is
 //!    `<prefix>chunk{k}.parquet` for a vertex tile and
 //!    `<edge prefix><adj_list prefix>tile{k}.parquet` for an edge one — `by_source/` and
 //!    `by_target/`, one per declared [`AdjList`]. The C++ composes
@@ -390,8 +410,14 @@ impl GraphInfo {
 /// Map an [`arrow_schema::DataType`] to its `GraphAr` `data_type` string spelling.
 ///
 /// `arrow-schema` is the single authority for the spellings — never
-/// hand-rolled. Unhandled arrow types fall back to `binary` (the `GraphAr`
-/// catch-all for opaque columns).
+/// hand-rolled. Unhandled arrow types fall back to `binary`, which is **fossil's
+/// fallback and not a `GraphAr` spelling**: `binary` is in neither the
+/// specification's type list nor `types.cc`, and `TypeNameToDataType` throws
+/// `"Unsupported data type"` on it. This sentence used to call it "the `GraphAr`
+/// catch-all for opaque columns", attributing to `GraphAr` a spelling `GraphAr`
+/// rejects. `time` is the same shape of problem from the other side — it is in
+/// the specification's list and has no arm in the C++ — and both are named in
+/// this module's header beside the `uint32` that is the real one.
 ///
 /// **This said the declared types "must match what `DuckDB` COPY actually
 /// writes", and both halves of that were wrong.** `DuckDB` COPY is not the
@@ -560,6 +586,38 @@ mod tests {
         let error = serde_yaml_ng::from_str::<VertexInfo>(&without)
             .expect_err("a vertex-info with no count must not deserialize");
         assert!(error.to_string().contains("vertex_count"), "{error}");
+    }
+
+    /// Divergence 7 in this module's header, executed rather than asserted.
+    ///
+    /// `format.md`'s edge-info example gives all three of its `adj_lists`
+    /// entries as `ordered` + `aligned_by` + `file_type`, with no `prefix`. Here
+    /// the prefix is the one part of a tile's URL a reader cannot compute, so
+    /// the field has no `serde` default and a specification-shaped edge-info
+    /// does not deserialize. Everything else in that list is what two documents
+    /// say; this is what this crate does.
+    #[test]
+    fn adj_list_without_a_prefix_is_not_an_adj_list() {
+        let spec_shaped = "\
+src_type: person
+edge_type: knows
+dst_type: person
+edge_count: 1024
+chunk_size: 1024
+src_chunk_size: 100
+dst_chunk_size: 100
+directed: false
+prefix: edge/person_knows_person/
+adj_lists:
+- ordered: true
+  aligned_by: src
+  file_type: parquet
+property_groups: []
+version: gar/v1
+";
+        let error = serde_yaml_ng::from_str::<EdgeInfo>(spec_shaped)
+            .expect_err("an adj_list with no prefix has no address and must not deserialize");
+        assert!(error.to_string().contains("prefix"), "{error}");
     }
 
     #[test]
