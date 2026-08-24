@@ -110,7 +110,9 @@ values it accepts; it was deleted from the language rather than quietly narrowed
 `math.sum`, `math.avg`, `math.min` and `math.max` are the four that go inside `aggregate`. Nothing
 in the rows says so — the catalogue has no field for it, and the table above is the catalogue.
 
-`math.round` takes no `digits` argument, and this page claimed one.
+`math.round` takes no `digits` argument, and this page claimed one. It is the catalogue's one
+`Float -> Integer` row, and the cast in its template is what makes that true: `round` in DuckDB
+returns a `DOUBLE`, so without it the row declared `Integer` and handed back `2.0`.
 
 ## `core` — the two that belong nowhere else
 
@@ -133,24 +135,37 @@ rather than `forall T. T? -> T` for the reason given above — the catalogue's t
 <Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
 
 `parse.json` takes a `path` and gives back a `String`, not a schema and a `T`: schema-directed
-parsing has no surface syntax yet, so the row lowers to a scalar extract. `parse.csv_row` takes the
+parsing has no surface syntax yet, so the row lowers to a scalar extract. `json_extract_string` and
+not `json_extract`, which is a difference in the **value** and not only in the type — on `{"a":"x"}`
+the second yields `"x"` with the quote characters inside your data. `parse.csv_row` takes the
 separator and a field index and gives back that one field.
+
+The nested casts in the third column are load-bearing, not noise. `parse.date` casts `strptime`'s
+result to `DATE`, because `strptime` returns a `TIMESTAMP` whatever the format string asks for and
+without the cast this row was `parse.datetime` under a second name. `parse.decimal` casts back out to
+`DOUBLE`, because the row says `Float`; the inner `DECIMAL(38,18)` stays because it is the only thing
+separating this row from `parse.float` — it refuses `'1e400'` where a bare `DOUBLE` cast yields
+`inf`.
 
 ## `validate` — text that has to look like something
 
-Each one is meant to return its input unchanged when the input is well formed.
+Each one returns its input unchanged when the input is well formed.
 
 <include>../../generated/stdlib.mdx#validate</include>
 
-Four of the five have exactly that shape — `CASE WHEN … THEN %0 ELSE error(…) END`, so the answer is
-the value or an error and never a null, and a `NULL` input passes through untouched. Each of those
-four templates was measured against the Rust function it replaced, and
+All five have exactly that shape — `CASE WHEN … THEN %0 ELSE error(…) END`, so the answer is the
+value or an error and never a null, and a `NULL` input passes through untouched. Four of the
+templates were measured against the Rust function each replaced, and
 `crates/fossil-hir/src/stdlib.rs` carries the hand corpus and the fuzz counts row by row.
 
-`validate.regex` does not have that shape. It lowers to a bare `regexp_matches`, which answers
-whether the pattern matched rather than giving the input back, so the row's declared return type and
-its lowering disagree. That is a defect in the row; it is stated here because the third column is
-the first thing on this page that made it visible.
+The fifth is `validate.regex`, and it is the row that put the third column on this page.
+It lowered to a bare `regexp_matches` — a `BOOLEAN`, which answers whether the pattern matched
+rather than giving the input back — under a row declaring `String`. It was the first of eight rows
+found to return a type other than the one they declared. The template moved rather than the
+signature, because "the value or an error, never a null" is the only thing the five rows of
+`validate/` share, and a `String -> Bool` row is `str.contains` with a pattern.
+`crates/fossil-engine/tests/stdlib_return_types.rs` is what asks a real engine, row by row, and goes
+red if a template and its signature part company again.
 
 ## `anon` — text you do not want to publish
 

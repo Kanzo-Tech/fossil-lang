@@ -47,36 +47,41 @@ And `join` takes a relation and an equality:
 The catalogue writes signatures like this:
 
 ```
-str.trim   :: String -> String
-str.split  :: (String, sep: String) -> Seq<String>
+trim         (text: String) -> String
+split        (text: String, separator: String) -> Seq<String>
+where        (rows: Relation, keep: Predicate) -> Relation
 ```
 
-Left of the arrow is what goes in, right of it is what comes out. A name before a colon is a named
-argument. `Seq<String>` is a sequence of strings.
+Inside the parentheses is what goes in, right of the arrow is what comes out. `Seq<String>` is a
+sequence of strings.
 
-Some signatures start with `forall`:
+**Every parameter carries a name, including the first**, and the name is what a named argument
+writes to reach that position. So `str.split(x, separator = ",")` is a call and `sep = ","` is an
+error naming the parameters the row actually has:
 
 ```
-where    :: forall R. (Relation<R>, (R) -> Bool) -> Relation<R>
-require  :: forall T. T? -> T
+`str.slice` has no parameter called `begin`. It takes `text`, `start`.
 ```
 
-`forall T.` means the function does not care what `T` is, and whatever you give it is what you get
-back. `where` over a relation of `User`s gives a relation of `User`s; `where` over a relation of
-`Purchase`s gives a relation of `Purchase`s. One entry in the catalogue, every source.
+The first parameter is the receiver — the thing to the left of the dot when you call it that way —
+which is why `x.trim()` and `str.trim(x)` are one row.
 
-That is why the library is as small as it is. There is no `filter_users` and no per-format verb: the
-same `where` reads a CSV, a Parquet file and an RDF graph, because it was never written against any
-of them.
+`where` over a relation of `User`s gives a relation of `User`s; `where` over a relation of
+`Purchase`s gives a relation of `Purchase`s. One entry in the catalogue, every source. That is why
+the library is as small as it is: there is no `filter_users` and no per-format verb, because `where`
+was never written against a format at all.
 
-`T?` is an optional value — one that may be absent. `require` turns one into a plain `T`, and it is
-how you tell the compiler that a nullable column really does have a value where the shape needs one.
+The signature does not say that in type-variable notation, and today it could not: the catalogue's
+types are scalar, so `Relation` and `Predicate` stand for *the receiver's own* relation and a
+condition over one of its rows, and `core.require` — the row that would most want a `forall T. T? ->
+T` — is written `(value: String) -> String`. [The standard library](/docs/book/stdlib) says what that
+approximation costs.
 
 ## Where they live
 
-[The standard library](/docs/book/stdlib) lists every function, grouped by what it attaches to: the
-operations of a relation, the operations of a string, the readers under `io`, and the namespaces for
-parsing, validating, anonymising and arithmetic.
+[The standard library](/docs/book/stdlib) lists every function with its signature, grouped by what it
+attaches to: the operations of a relation, the operations of a string, the readers under `io`, and
+the namespaces for parsing, validating, anonymising, arithmetic and the two in `core`.
 
 Because the receiver decides the members, your editor's completion list after a dot is exactly the
 functions that apply — after a `String`, the string operations; after a relation, the relational ones.
