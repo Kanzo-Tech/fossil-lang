@@ -67,8 +67,24 @@ The `on` is an equality between qualified references, or several of them joined 
 <Program src="compound-key/compound-key.fossil" region="on" title="compound-key.fossil" />
 
 Compound keys are ordinary, so `and` is ordinary. What it is not is a general condition —
-`on = A.date > B.since` is not a join, and the language says so rather than quietly turning into
-something with different performance.
+`on = A.date > B.since` is not a join, and it is refused rather than quietly becoming a nested loop
+over the product of two corpora.
+
+<Callout type="warn" title="True today: it is refused by `run`, not by `check`">
+`Purchase.join(User, on = Purchase.amount > User.age)` passes `fossil check` with `ok — no errors`,
+and fails at `fossil run`:
+
+```
+Error:   × execute: a join condition is an equality between columns
+         (`on = a.k == b.k`, or several joined by `and`); this one is a binary
+         operator that is not `==`
+```
+
+The rule lives in `join_equalities` (`crates/fossil-df/src/plan.rs:212`), which is the planner and
+runs after the checker has finished. So the message says the right thing, and it arrives without a
+span, at the wrong end of the loop, from a program the rest of this book would have told you was
+fine.
+</Callout>
 
 ### A join does not flatten
 
