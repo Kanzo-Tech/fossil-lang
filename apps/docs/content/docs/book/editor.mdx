@@ -172,17 +172,35 @@ have it at all, is [tooling for humans](/docs/design/tooling-for-humans).
 The squiggles are the diagnostics from
 [when it does not compile](/docs/book/diagnostics), at the same spans, with the same `help:` text —
 folded onto the end of the message, because LSP has no field for it
-(`crates/fossil-lsp/src/main.rs:735`). A diagnostic's secondary labels travel too, as
+(`crates/fossil-ide/src/diagnostics.rs:132`). A diagnostic's secondary labels travel too, as
 `relatedInformation`, so an error whose whole content is *these two spans disagree* arrives with both
-halves rather than as one underline with no context.
+halves rather than as one underline with no context. A label pointing into the `.shex` gets that
+file's URI and that file's line, which is what makes the two-file report an editor feature and not
+only a terminal one.
 
-An edit republishes for the file you edited. A missing required property appears against the header
-the moment the body stops satisfying the shape; an unknown column appears as you finish typing it.
+There is one implementation of all of that, and the file above is it. The two hosts each had their
+own, they disagreed, and the disagreement was invisible from either side: the browser published the
+labels under a `related` key of its own invention where the specification says `relatedInformation`,
+so a client that read the specification found none.
+`crates/fossil-lsp/tests/transport_parity.rs` drives both over the same buffers and is what notices
+next time.
+
+An edit republishes for the file you edited, and closing it publishes an empty list, so a buffer you
+are done with stops squiggling instead of staying in the server's file table for the session. A
+missing required property appears against the header the moment the body stops satisfying the shape;
+an unknown column appears as you finish typing it.
+
+A shape document you open beside your program is **not** checked as one. Which open files are
+programs is the provider catalogue's question and not a syntax question: a URI some `io.` row reads
+is an input, and an input is not drained. Without that rule the fossil parser ran over the document
+and blamed it for every complaint — twenty-one diagnostics, measured over the wire, for a `ShExJ`
+file with nothing wrong with it. A URI with no extension is claimed by nobody and is still checked,
+so an unrecognised file falls back to checking rather than to silence.
 
 ## In a browser
 
 `fossil-lsp` itself is native — it is a stdio transport, and it refuses to compile for wasm32
-(`crates/fossil-lsp/src/main.rs:35`). What compiles to WebAssembly is everything under it:
+(`crates/fossil-lsp/src/main.rs:61`). What compiles to WebAssembly is everything under it:
 `fossil-ide` and the compiler crates it calls carry no engine, so the browser serves the same six
 requests — hover, definition, completion, document symbols, semantic tokens, code actions — by
 calling the same functions, dispatched in `crates/fossil-wasm/src/lsp_worker.rs:209` instead of over
