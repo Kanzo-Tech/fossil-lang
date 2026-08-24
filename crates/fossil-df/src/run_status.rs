@@ -6,7 +6,7 @@
 //! pair + endpoints + count. A host deserializes it to persist the job's output
 //! structure WITHOUT re-introspecting the dataset.
 //!
-//! [`super::GraphArData::run_status`] is the only thing that builds one, which
+//! [`crate::GraphArData::run_status`] is the only thing that builds one, which
 //! is why the shape lives here and not in a crate of its own: the wire contract
 //! is what this backend says about what it wrote.
 //!

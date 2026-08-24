@@ -26,7 +26,7 @@ pub mod files;
 pub mod plan;
 pub mod rdf;
 /// What a run tells its host it wrote: the `fossil run --output-json` wire
-/// contract, built by [`GraphArData::run_status`] and by nothing else.
+/// contract, built by [`crate::GraphArData::run_status`] and by nothing else.
 pub mod run_status;
 // `pub mod shacl` lived here: a SHACL shapes graph walked into a `GraphSchema`.
 // It has moved to `fossil-descriptors-output` and produces `OutputShapes`, the
