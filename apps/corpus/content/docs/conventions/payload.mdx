@@ -6,10 +6,14 @@ description: Plain Parquet, row groups of 4,096, and statistics on the addressin
 The payload is **plain Parquet**. Files named for what they hold, columns named for what they are, no
 specification in incubation between a reader and the bytes.
 
-That is a choice with a discarded alternative behind it. The corpus borrows GraphAr's vocabulary —
-CSR and CSC, dense ids, edges aligned to the source's chunk — and none of its wire format. As an
-interchange format it does not pay: a recipient would have to learn a specification in incubation to
-read `vertices.parquet`. Names that explain themselves are **more** interoperable, not less.
+That is a choice with a discarded alternative behind it. What the corpus borrows from GraphAr is the
+**manifest's field vocabulary**, wholesale and down to `version: gar/v1`; what it does not borrow is
+anything below the manifest. The payload files have names of their own — `chunk{k}.parquet`,
+`by_source/tile{k}.parquet` — because GraphAr's specification names no data-file path at all, and
+there is nothing there to diverge from. **Borrowing the keys is not conformance: a corpus here is
+not a GraphAr corpus, and does not claim to be.** As an interchange format the wire half does not
+pay either, because a recipient would have to learn a specification in incubation before reading a
+Parquet file. Names that explain themselves are **more** interoperable, not less.
 
 ## Row groups of 4,096, and a tile is one
 
@@ -44,7 +48,9 @@ anybody a corpus, which is the cheap way to find it.
 </Callout>
 
 Guard: `footer-is-the-index`, which asserts a box for `x`, `y` and `dense_id` on every vertex row
-group and for `src_dense` on every edge tile. What it cannot prove is that the statistics are
+group, and on every edge tile a box for **the endpoint column that orientation is ordered by** —
+`src_dense` under `by_source`, `dst_dense` under `by_target`, never one standing in for the other.
+What it cannot prove is that the statistics are
 **true**. They are written by the writer and believed by the reader; a box wider than its rows costs
 a request, a box narrower than its rows loses vertices, and only re-reading every page tells them
 apart.

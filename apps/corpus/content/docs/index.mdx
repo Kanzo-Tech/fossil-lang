@@ -38,9 +38,10 @@ reader, and the conventions here are what makes that true rather than merely pos
 ```
 
 A reader over HTTP cannot list a directory, so nothing is discovered by listing. `graph.graph.yml`
-names every per-type manifest; each of those names a `prefix` and a `chunk_size`; and from a
-`chunk_size` the address of every tile is arithmetic. A reader computes every URL it wants before
-it emits the first request.
+names every per-type manifest; each of those names a `prefix`, a `chunk_size` and a row count —
+`vertex_count` on a vertex type, `edge_count` on an edge type. From the count and the `chunk_size`
+the whole set of tiles is `ceil(count / chunk_size)`, and from the `chunk_size` the address of each
+one is arithmetic. A reader computes every URL it wants before it emits the first request.
 
 ## The five conventions
 
@@ -66,8 +67,17 @@ engines reading the same table and none of them being the contract. For the read
 lineage is **Cloud-Optimized GeoTIFF → GeoParquet → PMTiles**: one file, an embedded directory, a
 spatial order, and a client that asks for byte ranges over HTTP with no server.
 
-And the counter-example that shaped the guards is **GraphAr**, whose vocabulary this format borrows
-— CSR and CSC, dense ids, edges aligned to the source's chunk. GraphAr ships a shared corpus that
+And the counter-example that shaped the guards is **GraphAr**, whose manifest vocabulary this format
+borrows wholesale: three files named the way GraphAr names them, carrying GraphAr's own keys —
+`prefix`, `chunk_size`, `property_groups`, `src_type`/`edge_type`/`dst_type`, `adj_lists` with
+`ordered`, `aligned_by` and `file_type` — down to `version: gar/v1`. **Borrowing the words is not
+conformance, and a corpus here is not a GraphAr corpus.** Where GraphAr's specification says
+something, this format spells it GraphAr's way and a difference is a defect; where only GraphAr's
+C++ says it, that is somebody's code and the decision is taken here — which is why `vertex_count` is
+a decimal integer in a YAML document a reader fetches anyway, and not the eight unnamed raw bytes
+the reference implementation writes beside the payload in the writing machine's byte order.
+
+The guards exist because of the *other* half of that project. GraphAr ships a shared corpus that
 every language's CI clones, and no job writes with one implementation and reads with another.
 Through that gap a fourth implementation landed having re-derived the path arithmetic differently
 from the other three *and* from the corpus on disk, with green CI on both sides, because its tests
