@@ -19,10 +19,17 @@ namespace-shaped catalogue offers string operations after an integer, because it
 A list derived from the receiver's type offers exactly the applicable entries, because the same index
 that answers *does this member exist* answers *what members are there*.
 
-The index is built and the completion list does not consult it: every catalogue row is offered
-wherever completion fires, so `seq.join` is on the list after a string today. The receiver sits on
-every row already — see [in your editor](/docs/book/editor) for what that costs and what closing it
-takes. The argument is what the design makes cheap, not what the list does this week.
+This paragraph said the opposite for as long as the list ignored the index — *every catalogue row is
+offered wherever completion fires, so `seq.join` is on the list after a string today* — and it is
+the affordance the argument had been promising, so it is worth saying what closing it took. It took
+nothing the design had to invent. The receiver was already a field on every catalogue row, so
+`stdlib_completions` asks the catalogue for the rows that receiver **has** rather than for all of
+them, and the same `Scope` that answers it answers which source columns are in play. Measured at one
+cursor before the narrowing: 51 rows offered whatever stood to the left, in `HashMap` order, which
+three consecutive runs printed three different spellings of. After it: thirteen, all of them the
+relation's verbs, in one order. A string head offers `trim` and no verb and no reader; `io.` offers
+`csv` and not `math.abs`; a head that names nothing offers nothing at all rather than 51 guesses.
+[In your editor](/docs/book/editor) is where the state of each source is written down.
 
 **An unknown member searches the right space.** When a member does not exist, the suggestion is drawn
 from that type's members rather than from the whole catalogue — so the candidate set is a handful of
