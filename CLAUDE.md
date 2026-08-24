@@ -73,7 +73,11 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   timeline means breaks are inevitable, and without the ritual the third one leaves the codebase
   opaque to its own author.
 - **Walking-skeleton invariant:** `fossil run examples/hello.fossil --dest <tmp>` must keep
-  producing a valid GraphAr dataset — 5 `Person` vertices, asserted by content, not existence.
+  producing a readable corpus — 5 `Person` vertices, asserted by content, not existence. It said
+  "a valid GraphAr dataset", and that is not the claim: fossil borrows GraphAr's manifest field
+  names and stops where the spec stops specifying, and a fossil corpus is not openable by GraphAr's
+  own reader (its `TypeNameToDataType` throws on `dense_id`'s `uint32`). See
+  `/docs/design/corpus` for the boundary and the eight measured divergences.
   `crates/fossil-cli/tests/walking_skeleton.rs` is the test that goes red. A refactor that
   breaks it for >3 days is reverted and broken into smaller steps.
 

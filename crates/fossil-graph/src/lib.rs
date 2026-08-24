@@ -10,7 +10,7 @@
 //!                  ▲
 //!   ┌──────────────┼──────────────┬────────────────┐
 //!   │              │              │                │
-//! fossil-mcp   fossil-http   fossil-cli   @fossil-lang/graph
+//! fossil-mcp   fossil-cli   @fossil-lang/graph
 //!   (stdio       (HTTP+SSE      (terminal      (in-process TS,
 //!    JSON-RPC      for          for             DuckDB-WASM)
 //!    for AI        keasy        scripting)
@@ -44,14 +44,19 @@
 //! with ids and the canvas masks its resident tiles with them — one mechanism,
 //! not a second renderer.
 //!
-//! ## Native-only (for now)
+//! ## The executor is a trait, and both impls exist
 //!
-//! This crate currently depends on [`fossil_sinks`] (manifest types — WASM
-//! clean) and will gain a `DuckExecutor` trait in W2 for execution. The
-//! native impl lives in `fossil-layout`; the WASM impl in `fossil-wasm`
-//! (TS-side calls a DuckDB-WASM connection). For W1 the impls are stubs
-//! (`todo!()`), and the crate carries NO wasm32 tripwire because the verb
-//! logic itself is WASM-safe.
+//! This crate depends on [`fossil_sinks`] (manifest types — WASM clean) and on
+//! nothing else of fossil's; `apps/docs/content.test.ts` fails if that list is
+//! ever anything but `["fossil-sinks"]`. It carries no wasm32 tripwire, because
+//! the verb logic is WASM-safe.
+//!
+//! The `DuckExecutor` trait exists and dispatch is implemented — this paragraph
+//! said it "will gain" one "in W2" and that the impls were `todo!()` stubs. The
+//! native impl is `fossil-mcp`'s `ConnectionExecutor`
+//! (`crates/fossil-mcp/src/executor.rs`), NOT `fossil-layout`: that crate is the
+//! layout post-pass and links no engine at all. The browser impl is
+//! `fossil-graph-wasm`, not `fossil-wasm`.
 //!
 //! ## What bounds a verb
 //!

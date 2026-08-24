@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Graph query surface over GraphAr+DuckDB. Verb-level operations (schema, discovery, aggregate, GraphRAG, viewport, sql) with JSON Schema contracts. Transport-agnostic — bindings live in fossil-mcp, fossil-http, fossil-cli, @fossil-lang/graph."
+description = "Graph query surface over GraphAr+DuckDB. Verb-level operations (schema, discovery, aggregate, GraphRAG, viewport, sql) with JSON Schema contracts. Transport-agnostic — bindings live in fossil-mcp, fossil-cli, @fossil-lang/graph."
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 

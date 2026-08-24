@@ -43,7 +43,14 @@ pub struct VertexTypeSummary {
     pub name: String,
     /// Full RDF type IRI.
     pub iri: String,
-    /// Vertex count from the manifest.
+    /// How many vertices the type has.
+    ///
+    /// **Not from the manifest, despite what this said.** The executor answers
+    /// it with `count_rows` — a `SELECT count(*)` over the type's tiles. The
+    /// manifest carries a declared `vertex_count` now, so the query is a second
+    /// way to ask one question and can go; what it buys until then is that it
+    /// measures the bytes rather than trusting the declaration, which is the
+    /// disagreement `apps/corpus`'s `declared-count` guard exists to catch.
     pub count: u64,
     /// Field names — what a follow-up `schema { vertex_type, field }` may name.
     pub fields: Vec<String>,

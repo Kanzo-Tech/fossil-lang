@@ -2,7 +2,7 @@
 //!
 //! Surface-level only — transport bindings translate `GraphError` into their
 //! native error shape (JSON-RPC error for `fossil-mcp`, HTTP 4xx/5xx for
-//! `fossil-http`, exit code + miette for `fossil-cli`).
+//! `fossil-mcp`, exit code + miette for `fossil-cli`).
 
 use thiserror::Error;
 

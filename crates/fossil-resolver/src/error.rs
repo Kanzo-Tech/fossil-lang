@@ -23,7 +23,7 @@ pub enum ResolveError {
     /// by the upstream provider, …).
     ///
     /// The `String` payload is the host's diagnostic message — bindings
-    /// (fossil-cli, fossil-http, keasy proxy) surface it verbatim to the
+    /// (fossil-cli, fossil-mcp, keasy proxy) surface it verbatim to the
     /// caller. Hosts that want a typed error of their own wrap their error
     /// in their crate and convert it to a string at this boundary; the
     /// resolver crate stays free of host-specific error enums.

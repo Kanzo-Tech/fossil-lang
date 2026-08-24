@@ -28,7 +28,7 @@ Adding a verb is a 4-touch change: enum variant in `operations/mod.rs` + `Params
                                    ▲
                                    │
        ┌──────────────┬────────────┴────────────┬──────────────────┐
-   fossil-mcp     fossil-http               fossil-cli       @fossil-lang/graph
+   fossil-mcp                    fossil-cli       @fossil-lang/graph
    (W4)           (future)                  (CLI extension)  (W5, in-process TS)
 ```
 

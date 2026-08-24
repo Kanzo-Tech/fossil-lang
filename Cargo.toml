@@ -34,7 +34,7 @@ serde_json = "1"
 serde_yaml_ng = "0.10"
 # `schemars` derives JSON Schema from Rust types. Adopted in `fossil-graph`
 # to publish a per-verb param/result schema once and have every
-# transport binding (fossil-mcp, fossil-http, @fossil-lang/graph) consume the
+# transport binding (fossil-mcp, fossil-cli, @fossil-lang/graph) consume the
 # SAME schema — no hand-written contract duplicated across bindings. Pin 0.8
 # because 0.9 is in alpha and the keasy-side TS codegen depends on the 0.8
 # JSON Schema draft-07 dialect for openapi-typescript interop.
