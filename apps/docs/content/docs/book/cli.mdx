@@ -3,8 +3,8 @@ title: 'Reference: the command line'
 description: Check a program, write a corpus, declare a memory budget, pass a credential, and ask a program what it reads.
 ---
 
-`fossil` is one binary and it has five things to say to it. Every command takes `--verbose` to raise
-the log level.
+`fossil` is one binary and it takes four subcommands — `check`, `run`, `refs` and `providers`. Every
+one of them takes `--verbose` to raise the log level.
 
 ## `fossil check`
 
@@ -13,8 +13,8 @@ fossil check shop.fossil
 ```
 
 Reads the program, the shape document it names and the sources it binds, and reports every
-disagreement. Exits zero when there are none. It touches no data beyond what it needs to know the
-columns, and writes nothing.
+disagreement. Exits zero and prints `ok — no errors in shop.fossil` when there are none. It touches
+no data beyond what it needs to know the columns, and writes no file.
 
 This is the one to put in a pre-commit hook and in CI. It is also what your editor runs — see
 [in your editor](/docs/book/editor).
@@ -70,11 +70,22 @@ and public URLs.
 fossil refs shop.fossil
 ```
 
-Lists every external thing the program names — each source path or URL, and the shape document. It
-parses and stops: no data is opened, no credential is needed.
+```
+Data	-	data/users.csv
+Data	-	data/orders.csv
+```
 
-This is what to run when you want to know what a program will touch before you let it touch anything.
-`--output-json` gives the same list as JSON.
+Lists the **data** a program reads — one line per distinct source path or URL, with the `@conn` alias
+it hangs off or `-` for a direct path. It parses and stops: no data is opened, no credential is
+needed.
+
+The shape document is **not** on that list. `refs` walks the source bindings, so it names what
+`io.csv` and its siblings open; the `type { … } := io.shex("shop.shex")` binding is a different kind
+of item and does not reach it. The one exception is a document passed as a `schema =` argument to a
+source constructor, which is part of a source binding and is reported with the role `Schema`.
+
+This is what to run when you want to know what data a program will touch before you let it touch
+anything. `--output-json` gives the same list as JSON.
 
 ## `fossil providers`
 
