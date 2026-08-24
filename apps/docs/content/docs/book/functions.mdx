@@ -83,6 +83,8 @@ approximation costs.
 attaches to: the operations of a relation, the operations of a string, the readers under `io`, and
 the namespaces for parsing, validating, anonymising, arithmetic and the two in `core`.
 
-Because the receiver decides the members, your editor's completion list after a dot is exactly the
-functions that apply — after a `String`, the string operations; after a relation, the relational ones.
-Offering you something that would not compile is not a thing it can do.
+Because the receiver decides the members, the **catalogue** half of your editor's completion list
+after a dot is exactly the functions that apply — after a `String`, the string operations; after a
+relation, the relational ones. A receiver it cannot name contributes nothing rather than the whole
+catalogue, which is what it used to do. The other half of that list is not narrowed and is not yet
+honest about it; [in your editor](/docs/book/editor) says which half is which.

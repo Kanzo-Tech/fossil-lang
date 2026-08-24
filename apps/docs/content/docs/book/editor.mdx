@@ -3,8 +3,31 @@ title: In your editor
 description: Completion, hover, go-to-definition, the two quick fixes and diagnostics as you type — what each one answers today, what it does not, and how to switch it on.
 ---
 
-fossil ships a language server, and it is the same code that checks your program on the command
-line. Nothing it tells you is an approximation of what `fossil check` would say.
+fossil ships a language server, and it runs the same compiler `fossil check` runs. Every handler is a
+thin adapter over a `fossil-ide` free function, and the browser calls the same functions, so nothing
+here is a second implementation of anything.
+
+<Callout type="warn" title="True today: the native server introspects nothing, and that is half this page">
+A host has to hand the compiler the columns of a CSV; the compiler does not open one.
+`fossil-cli` does that before every `check` and every `run`, and the browser playground does it with
+DuckDB-WASM and pushes the result in over `fossil/registerInferredDescriptor`. **`fossil-lsp` does
+neither** — `LspSystem` does not override `System::descriptors`, so the trait default answers `None`
+and there is no table (`crates/fossil-lsp/src/main.rs:106`).
+
+Everything below that needs a source column's type is therefore absent in a native editor today.
+Measured, driving the binary over stdio on `apps/docs/programs/errors/unknown-field/program.fossil`
+— the program [when it does not compile](/docs/book/diagnostics) opens with:
+
+- `fossil check` reports ``  `nmae` is not a field of `User`  `` and exits 1;
+- `fossil-lsp` publishes **zero** diagnostics for the same buffer. The pipeline is not broken —
+  the same probe on `errors/two-identities` publishes its one diagnostic — it is that this
+  particular error cannot be reached without the row's type.
+- completion after `User.` offers the thirteen relation verbs and no columns.
+
+The rest of the page describes what the shared code does when a host has introspected. Read the
+paragraphs below with this one in front of them; where the two disagree, this one is what your
+editor is doing.
+</Callout>
 
 ## Switching it on
 
@@ -19,9 +42,7 @@ entry naming the binary and the filetype; in Helix a `[[language]]` block with
 `language-servers = ["fossil-lsp"]`; in any editor that speaks the protocol, the equivalent. It reads
 the program on stdin and stdout and needs no configuration of its own.
 
-It advertises hover, definition, completion, document symbols, semantic tokens and code actions, and
-every handler is a thin adapter over a `fossil-ide` free function. The browser calls the same
-functions, which is why the two cannot answer differently.
+It advertises hover, definition, completion, document symbols, semantic tokens and code actions.
 
 ## Completion
 
@@ -34,8 +55,16 @@ its output document and the editor could read it. The entries are that shape's o
 `constraints[].predicate`, each with the value type the document declares, so the list is what
 `Person` requires and nothing else.
 
+This is the source that asks nothing about your cursor beyond *which mapping am I in*
+(`crates/fossil-ide/src/completion.rs:426`). It fires at every position inside a body, including
+after a dot, and it labels each entry with the **whole predicate IRI** —
+`https://shop.example/voc#email`, not `email`. A property key is the last segment and never the IRI,
+so accepting one of these writes a line that does not compile. Measured on the shop shape: three
+such entries, present in the list after `User.` and in the list away from any dot alike.
+
 **The source's columns**, when the name to the left of your dot is the one the mapping's `from`
-clause bound and that source has been introspected:
+clause bound and that source has been introspected — which, per the callout above, is the browser
+today and not `fossil-lsp`:
 
 ```
 name = User.        →  id   email   name   age
@@ -78,8 +107,10 @@ catalogue is asked about a `String`. A column that is an `Integer` answers with 
 catalogue hangs no row off one.
 
 A head that is none of the five — `orders.`, a column the row does not have, the result of a call
-(`User.email.trim().`) — gets nothing from either source. Away from any dot there is no receiver to
-narrow by, so the catalogue is offered whole and spelled in full.
+(`User.email.trim().`) — gets nothing from either of those two sources; the shape's properties are
+still in the list, because that source does not ask. Away from any dot there is no receiver to
+narrow by, so the catalogue is offered whole and spelled in full: fifty-four items measured inside a
+mapping body, the fifty-one catalogue rows plus the shape's three.
 
 The list carries no `sortText`, so your editor orders it by label — and the list itself is now sorted
 by label before it leaves, because `FunctionRegistry` is a `HashMap` and three consecutive runs of the
@@ -105,6 +136,10 @@ documents, and seeing only one of them is how you end up arguing with the checke
 The second block appears only when the shape resolves. A program that names no output document, or
 one whose document the editor could not read, gets the first block and no error: the missing document
 is the checker's diagnostic to report, not the hover's.
+
+The **first** block is the half that needs the columns, so in a native editor today it is the one
+that is missing and the shape's side is the one you get — the mirror of the paragraph above, and the
+same cause as everything else in the callout at the top of this page.
 
 The cursor's exact column inside the property does not change the answer — hover resolves to the
 whole property, so the key and its right-hand side give the same two blocks. The predicate IRI is
@@ -146,6 +181,8 @@ Two, and both hang off a diagnostic you can already see
   which is what makes it a short list — see [when it does not compile](/docs/book/diagnostics). It is
   offered only when the caret is on the name: where the compiler recorded no span finer than the
   whole right-hand side, an edit would delete `User.` along with the typo, so none is generated.
+  It hangs off the one diagnostic a native editor never produces, so today this action is the
+  browser's.
 - **Split the mapping.** A value disjunction in the shape is not supported in v0.1, and the repair is
   one mapping per branch. The diagnostic already carries that rewrite — the same header, the same
   `from` clause, the same identity, one mapping per disjunct — so the action inserts what the

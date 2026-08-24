@@ -70,9 +70,14 @@ past.
 message says so, at the line, with a suggestion drawn from `User`'s own fields. Nothing is left to be
 discovered later in a graph with nothing in it.
 
-**And your editor knows the answer.** Type `User.` and the completion list is the columns of that
-file. Not a guess, not a cached schema somebody wrote down in a config — the columns of the file the
-line names. See [in your editor](/docs/book/editor).
+**And your editor can know the answer.** Type `User.` and the completion list is the columns of that
+file: not a guess, not a cached schema somebody wrote down in a config — the columns of the file the
+line names.
+
+Whether it does depends on the host, and today `fossil-lsp` is not one that introspects: after
+`User.` a native editor offers the relation's verbs and no columns. The browser playground reads the
+file with DuckDB-WASM and hands the columns in, so there it is the sentence above.
+[In your editor](/docs/book/editor) opens on that gap and measures it.
 
 ## Fields, not rows
 
