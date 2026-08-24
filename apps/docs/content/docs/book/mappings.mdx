@@ -44,10 +44,17 @@ call `subject`.
 It is an assignment. The right-hand side is an ordinary expression, and the string is interpolated
 like any other — see [values and expressions](/docs/book/expressions).
 
-Two rules apply here and nowhere else in the body.
-
 **It depends only on the row.** An identity that reaches for anything but the data of the row it is
-identifying is not reproducible, and the checker refuses it. This is not a style guide.
+identifying is not reproducible. What enforces that is the ordinary scope rule, and it is worth being
+clear that it is ordinary — `@subject = "…/{Purchase.id}"` in a mapping that reads `User` reports
+*`Purchase.id` reads a row this mapping does not have; it maps `User`*, and the identical line as a
+property value reports the identical thing. The identity is held to it because everything is.
+
+Two rules do apply here and nowhere else in the body.
+
+**It is the first line.** Not by convention: put it third and the checker says so, by position —
+*`@subject` is the first line of a mapping body, and in `Users` it is line 3. The identity comes
+before what it identifies.*
 
 **One per type.** Every mapping that produces `Person` writes the same `@subject`. Two that disagree
 is an error, and it names both mappings and both templates:

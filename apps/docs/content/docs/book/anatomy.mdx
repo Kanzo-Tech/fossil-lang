@@ -145,10 +145,12 @@ checked exactly like anything else, because it is exactly the same grammar.
 The `@` marks the language's own namespace. Everything else in a body is a bare name your shape
 declared, and your names are arbitrary — you might genuinely have a property called `subject`.
 
-Two rules apply to `@subject` and to nothing else:
+An identity that reaches outside the row it is identifying is not reproducible, and the checker says
+so — but by the ordinary scope rule, the one every property line is held to as well. Two rules apply
+to `@subject` and to nothing else:
 
-- **It depends only on the row.** An identity that reaches outside the data is not reproducible, and
-  the checker says so.
+- **It is the first line of the body.** Written anywhere else it is an error that says which line it
+  is on.
 - **One per type.** Every mapping that produces `Person` writes the same `@subject`. Two that
   disagree is an error naming both mappings and both templates — see
   [when it does not compile](/docs/book/diagnostics).
