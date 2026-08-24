@@ -1,6 +1,6 @@
 ---
 title: Edges
-description: Connect two entities by naming the target type and giving it the identity — why that is all the information required, and why an edge may point at a node nothing emits.
+description: Connect two entities by naming the target type and giving it the identity — why that is all the information required, why the checker lets an edge point at a node nothing emits, and why the write path then drops it.
 ---
 
 Most properties hold a value. Some hold another entity, and the shape document says which:
@@ -28,17 +28,16 @@ drift apart — the failure that produces a graph full of nodes that almost join
 It also means the argument is checked. `Person` takes the thing its identity is built from, and if you
 hand it something of the wrong kind you hear about it at that line.
 
-## An edge is a reference
+## An edge may point outside the graph, and the checker will let you
 
-This is the part worth being clear about, because the natural assumption is the other one.
+This is the part worth being clear about, because the natural assumption is the other one, and
+because the two ends of the toolchain do not currently agree about it.
 
-**An edge may point at a subject that no mapping in your program emits.** RDF is open-world: an IRI
-denotes whether or not anything in this corpus says something about it, and fossil keeps it that way.
-The check it does make is that the IRI is the right one — well formed, and built by the scheme that
-type uses. Whether the node at the other end is in this graph is a different question, and fossil does
-not ask it.
+**The checker does not ask whether the node at the other end exists.** The check it makes is that
+the IRI is the right one — well formed, and built by the scheme that type uses. Whether anything in
+this program emits that subject is a different question, and `fossil check` does not ask it.
 
-Here is a program where that happens for real:
+Here is a program where the two come apart:
 
 <Program src="reviews/reviews.shex" title="reviews.shex" />
 
@@ -52,17 +51,32 @@ The people file has two of them:
 
 <Program src="reviews/data/users.csv" title="data/users.csv" />
 
-`r3` mints `author = Person("dora@shop.example")`, and `People` never emits that node. The corpus gets
-an edge to `https://shop.example/user/dora@shop.example` and nothing that describes it. That is a
-correct RDF graph, and it is often the graph you meant — the second half of the data arrives from
-somewhere else, or it does not arrive at all and something downstream knows what to do about that.
+`r3` mints `author = Person("dora@shop.example")`, and `People` never emits that node. The program
+type-checks, and it should: in RDF an IRI denotes whether or not anything in this corpus says
+something about it, so the second half of the data arriving from somewhere else — or not arriving,
+with something downstream knowing what to do about that — is often the graph you meant.
 
-It also happens by accident, and the shape it usually takes is a filter upstream. In
+<Callout type="warn" title="True today: the write path drops that edge, and says nothing">
+The corpus does **not** get an edge to `https://shop.example/user/dora@shop.example`. Run the program
+above and the `Review` table has three rows, the `Person` table has two, and
+`edge/Review_author_Person/*.edge.yml` says `edge_count: 2`.
+
+An edge is written as a pair of dense ids, and a dense id is a row number in a vertex table, so an
+endpoint with no row has nothing to be. `execute_edge` in `crates/fossil-df/src/lib.rs` resolves both
+endpoints with an **inner** join and its own doc comment says what that costs: *dangling endpoints
+drop*. There is no warning, no diagnostic and no debug line — the summary reports the same
+`1 edge type(s)` either way.
+
+So the open-world reading holds of the language and not of the artefact. Until it holds of both, an
+edge whose target you do not also emit is an edge you do not get.
+</Callout>
+
+The usual way to arrive here by accident is a filter upstream. In
 [the anatomy program](/docs/book/anatomy), `Orders` joins against `User` while `Users` maps from
-`Adults`, so an order placed by a seventeen-year-old points at a `Person` nobody wrote. If you want
-those edges to land inside your own graph, join against the same relation the mapping reads —
-`Purchase.join(Adults, ...)` rather than `Purchase.join(User, ...)`. That is a decision about your
-data, and the language leaves it to you.
+`Adults`, so an order placed by a seventeen-year-old would point at a `Person` nobody wrote — and,
+today, would simply not be in the corpus. If you want those edges to land inside your own graph, join
+against the same relation the mapping reads: `Purchase.join(Adults, ...)` rather than
+`Purchase.join(User, ...)`.
 
 ## Edges in both directions
 

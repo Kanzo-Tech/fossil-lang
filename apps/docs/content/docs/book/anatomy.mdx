@@ -202,11 +202,13 @@ one the other mapping minted — and this works precisely because of the one-ide
 above. There is exactly one `@subject` for `Person` in the program, so naming `Person` is enough to
 know the IRI.
 
-One thing to be clear about, because it is easy to assume otherwise: **an edge is a reference, not a
-guarantee.** `Orders` joins against `User` rather than `Adults`, so an order placed by a
-seventeen-year-old mints a `buyer` pointing at a `Person` that `Users` never emitted. That IRI is
-well formed and it denotes; nothing at the other end has to exist. RDF is open-world and fossil keeps
-it that way. [Edges](/docs/book/edges) shows a program where that happens on purpose.
+One thing to be clear about, because it is easy to assume otherwise: **an edge is a reference, and
+the checker does not ask whether the node at the other end exists.** `Orders` joins against `User`
+rather than `Adults`, so an order placed by a seventeen-year-old would mint a `buyer` pointing at a
+`Person` that `Users` never emitted, and the program would still type-check. Bob is seventeen and
+places no order in this data, so nothing here does it — but the arrangement that allows it is right
+there in the header. Whether such an edge survives into the corpus is a separate question with a
+different answer today, and [edges](/docs/book/edges) measures it.
 
 ## The program, whole
 
