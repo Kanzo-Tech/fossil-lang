@@ -21,64 +21,79 @@ in advance:
 graph.graph.yml
 ```
 
-It names every per-type manifest. Each vertex manifest carries a `type`, a `prefix` and a
-`chunk_size`; each edge manifest carries `src_type`, `edge_type`, `dst_type`, a `prefix`, and the
-`src_chunk_size` that ties its tiles to the source type's.
+It names every per-type manifest. Each vertex manifest carries a `type`, a `vertex_count`, a
+`prefix` and a `chunk_size`; each edge manifest carries `src_type`, `edge_type`, `dst_type`, an
+`edge_count`, a `prefix`, and the `src_chunk_size` and `dst_chunk_size` that tie each orientation's
+tiles to its own endpoint type's.
 
 The manifests are small and flat. Reading them with a line scan rather than a YAML library is a
-legitimate choice and the checker makes it — `apps/corpus/guards/manifest.mjs` is sixty lines and
+legitimate choice and the checker makes it — `apps/corpus/guards/manifest.mjs` is that scan, and it
 refuses what it cannot parse rather than guessing at it.
 
 ## 2. Everything else is arithmetic
 
-From `chunk_size` alone:
+From `chunk_size` and the declared count:
 
 ```
 shift       = log2(chunk_size)          # 12
 tile(id)    = id >> shift
 tile i       spans dense ids [i·chunk_size, (i+1)·chunk_size)
+tiles        = ceil(vertex_count / chunk_size)
+tail rows    = vertex_count − (tiles − 1)·chunk_size
 ```
 
-No index file, no manifest of tiles, nothing to fetch. A reader knows where any id lives from one
-number, which is what lets it compute every URL before it emits the first request. `chunk_size` is a
-power of two so that the address is a shift; it is 4,096 in a corpus fossil writes, and a reader
-takes it from the manifest rather than from that sentence.
+No index file, no manifest of tiles, nothing to fetch. A reader knows where any id lives, and how
+many there are of them, from two numbers in a document it fetched anyway — which is what lets it
+compute every URL before it emits the first request. `chunk_size` is a power of two so that the
+address is a shift; it is 4,096 in a corpus fossil writes, and a reader takes it from the manifest
+rather than from that sentence.
 
-**How many tiles there are is the one thing the arithmetic does not give**, because `ceil(V /
-chunk_size)` needs `V` and no manifest carries it. Over a filesystem or a bucket a glob answers it;
-over a plain HTTP origin there is no listing, and the answer is to `HEAD` `chunk{k}.parquet` —
-doubling `k` until one misses, then bisecting — which is about a dozen requests once, for a corpus
-of any size. The last tile's own footer says how short it is.
+**The count is not decoration, and it is the only field a truncated corpus fails.** Tiles are
+addressed and never listed, so a tree holding `chunk0…chunk16` is indistinguishable from a corpus
+that has seventeen tiles: a hole in the middle breaks the address of everything after it and is
+caught, and **a missing tail breaks nothing**. Without the field the answer was to probe — `HEAD`
+`chunk{k}.parquet`, doubling `k` until one misses, then bisecting — which is a dozen requests that
+still cannot tell a short corpus from a complete one.
 
-<Callout title="A design question, and it is open">
-A declared vertex count would delete that probe, and it is one scalar. What holds it back is that
-the count and the tiles then have to agree, and a manifest that declares a number the payload
-contradicts is a new way for a corpus to be wrong — one no reader can check without reading every
-tile, which is the thing addressing exists to avoid. What settles it is a guard that can compare the
-two cheaply.
-</Callout>
+The count is declared rather than optional for the same reason. A count a reader may skip is a count
+a reader may not depend on, and a reader that may not depend on it is exactly the one that cannot
+detect the failure the field exists for. The border worth writing a test at is `vertex_count = 4096`
+against `chunk_size = 4096`: that is **one** tile, and the off-by-one addresses a `chunk1.parquet`
+that is not there.
 
 ## 3. Ask the footer which tiles intersect the window
 
 Arithmetic gives the tiles that *exist*. The footer gives the ones that *intersect* — the row-group
-statistics on `x` and `y` are bounding boxes, they come with the first request, and selecting on
-them is the whole of viewport culling.
+statistics on `x` and `y` are bounding boxes, they arrive with the footer, and selecting on them is
+the whole of viewport culling.
+
+**Which file holds a tile is the second question, and there are two answers.** A corpus fossil
+writes puts one tile in one file, `chunk{k}.parquet`, with the address in the name; the other
+container is one file whose row groups are the tiles, addressed by row-group ordinal. The examples
+here are the first, which is what the corpus under `apps/corpus/conformance/` is; against the second
+one, drop the glob and the `file_name` column and read `row_group_id` as the tile number.
 
 ```sql
-SELECT row_group_id,
+SELECT file_name, row_group_id,
        min(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS x0,
        max(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS x1,
        min(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS y0,
        max(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS y1
-  FROM parquet_metadata('vertex/Person/tiles.parquet')
+  FROM parquet_metadata('vertex/Person/chunk*.parquet')
  WHERE path_in_schema IN ('x', 'y')
- GROUP BY row_group_id;
+ GROUP BY file_name, row_group_id;
 ```
 
-Keep the row groups whose box intersects the window; those ordinals are tile numbers, and contiguous
-ones coalesce into a single byte range. Note `min_value`/`max_value` before `min`/`max` — the
-deprecated pair is signed-comparison only and is empty for an unsigned column, which is every
+Keep the tiles whose box intersects the window. Note `min_value`/`max_value` before `min`/`max` —
+the deprecated pair is signed-comparison only and is empty for an unsigned column, which is every
 addressing column there is.
+
+The two containers are not equally cheap, and the arithmetic above is the reason: inside one file,
+contiguous tiles are a **single** byte range, and one footer covers all of them. Measured on five
+million vertices in 1,221 tiles, that is 5.6 requests per window against 22.3, for the same bytes —
+[Addressing](/docs/conventions/addressing) has the table. A glob over `chunk*.parquet` is also a
+listing, which is the thing an HTTP reader cannot do; over an origin, compose the names from the
+count and the shift instead.
 
 <Callout type="warn" title="Select the tiles; do not write the window as a predicate">
 Handing the ranges to the query planner as a `WHERE` is the intuitive move and it is measured to be
@@ -92,13 +107,16 @@ because the engine evaluates ranges per row instead of skipping row groups.
 ## 4. Read the vertices
 
 ```sql
+-- tile 10 is the dense_id range [40960, 45056), and it is a file
 SELECT dense_id, x, y, cluster_id
-  FROM read_parquet('vertex/Person/tiles.parquet')
- WHERE dense_id >= 40960 AND dense_id < 45056;   -- tiles 10..10
+  FROM read_parquet('vertex/Person/chunk10.parquet');
 ```
 
-Or, over HTTP, fetch the byte ranges the footer named and decode them directly. The columns are laid
-out to upload to a GPU without transformation — `x` and `y` as separate arrays, never interleaved.
+Or, over HTTP, fetch the byte ranges the footer named and decode them directly. `x` and `y` come out
+as separate arrays, which is what Parquet stores and what leaves the choice to the reader — a
+consumer that wants them apart gets them apart, and one that wants a single interleaved
+`[x0, y0, x1, y1, …]` buffer pays one pass. **The layout does not remove that pass, it moves it**;
+see [Payload](/docs/conventions/payload).
 
 ## 5. Read the edges of those tiles
 
@@ -134,7 +152,7 @@ after 45 seconds.
 
 ```sql
 SELECT v.subject
-  FROM read_parquet('vertex/Person/tiles.parquet') v
+  FROM read_parquet('vertex/Person/chunk10.parquet') v
  WHERE v.dense_id = 41000;
 ```
 
