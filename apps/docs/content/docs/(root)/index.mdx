@@ -81,30 +81,39 @@ queried](/docs/characteristics/verbs).
 Checked, not agreed — a `cargo-deny` `wrappers` entry banning `duckdb` outside the compiler layer,
 and `datafusion` outside it too.
 
-<Callout type="warn" title="True today: the guard is written, was run, and is switched off">
-It was written and executed on 2026-08-05 and it came out **red**. What it caught on the first
-attempt is that `fossil-wasm` — the reader — reaches the engine transitively, through
-`fossil-ide → fossil-engine`, while its own `Cargo.toml` says *"NOT pull `fossil-layout` or any
-native UDF crate (the WASM gate)"*. The rule had been written as a comment the whole time and the graph
-broke it anyway.
+<Callout title="True today: the guard is on, and it is green">
+`deny.toml` carries it — `duckdb` denied workspace-wide with `fossil-introspect`, `fossil-mcp`,
+`fossil-engine`, `fossil-layout` and `fossil-cli` named as wrappers, and `datafusion` denied with
+`fossil-df` and `fossil-df-wasm`. `cargo deny check bans` answers **bans ok**, and CI runs it on
+every PR.
 
-It is not left enabled because `deny` is a hard CI gate and today it would break the branch for
-everyone. `deny.toml` on disk carries the advisory, licence and four-crate ban list, and **not** the
-layering rule. Turning it on is the first task, not a side effect of it: the day it passes, the
-work is finished.
+Getting there corrected the belief the page was written on. This callout said the reader reaches the
+engine transitively through `fossil-ide → fossil-engine`; measured with
+`cargo tree -e normal -i duckdb --workspace`, that edge runs the other way and the reader layer was
+already clean. What the list actually got wrong was the opposite mistake — it named three crates
+that had demoted `duckdb` to a dev-dependency and did **not** name `fossil-introspect`, the one
+crate that links it. The check was red for a day for that reason and nothing said so, because
+nobody runs `cargo deny` locally.
+
+Two things it still does not prove. It is a check on *engines*, not on the layering rule above it: a
+`fossil-ide → fossil-cli` edge would be upward and this would not see it. And a name on the wrappers
+list is a declaration that the crate is native, reviewed once when it went on — `fossil-df-wasm` is
+there because it exists, not because compiling the executor into a browser agrees with anything else
+on this page.
 </Callout>
 
-That gap is the shape of the whole project right now. Twenty-four crates whose boundaries were drawn
-by **topic**, when what separates them is what each one may know — `fossil-mcp` is tooling and
-carries an engine; so does `fossil-cli`. The design did not bend because of a bad decision. It bent
-because of a decision nobody took.
+The rule holding is not the same as the boundaries being drawn on it. They were drawn by **topic** —
+`fossil-mcp` is tooling and carries an engine; so does `fossil-cli`, through `fossil-introspect` and
+`fossil-df` — when what separates them is what each one may know. That did not happen because of a
+bad decision. It happened because of a decision nobody took, and the guard is now what keeps the
+next one from being taken by accident.
 
 ## Where to read next
 
 <Cards>
   <Card href="/docs/characteristics/verbs" title="The verb surface" description="Six verbs, landed on 2026-08-05. What the seventeen collapsed into, and the one that left before its replacement existed." />
-  <Card href="/docs/characteristics/bounded-write" title="The bounded write path" description="One flag, two engines, a spill test — and ten million vertices at 8.39 GiB against ~21. Why that is still not larger-than-RAM." />
+  <Card href="/docs/characteristics/bounded-write" title="The bounded write path" description="One flag, a spill test, and ten million vertices at 8.39 GiB against roughly 21 — and the pass that runs after it, which the budget does not reach." />
   <Card href="/docs/characteristics/streaming" title="Streaming" description="Three seams named on structure: one landed, one was refuted by measurement, one still collects." />
-  <Card href="/docs/characteristics/corpus-contract" title="The corpus contract" description="Four obligations chosen on the evidence of nine formats, and the one quarter of them that exists." />
+  <Card href="/docs/characteristics/corpus-contract" title="The corpus contract" description="Four obligations chosen on the evidence of nine formats, some of each on disk, and none of them finished. Plus which of GraphAr's field names it borrows without conforming." />
   <Card href="/docs/design/discarded" title="What was discarded" description="Every alternative that was rejected, with the evidence against it and the observation that would bring it back. An entry that cannot state its last field does not go on the page." />
 </Cards>
