@@ -8,9 +8,10 @@ stands in the same relation to the checker that the grammar stands in to the par
 implements it, it does not describe the checker. A rule written here and absent from `crates/` is
 work outstanding, not an error on this page.
 
-The conformance set is the same one the grammar names — the eighteen programs under
-`apps/docs/programs/`, five of which are expected to fail and carry the diagnostic they must
-produce.
+The conformance set is the same one the grammar names — the programs under `apps/docs/programs/`,
+the five under `errors/` being the ones expected to fail, each carrying the diagnostic it must
+produce. There is no count here on purpose: `crates/fossil-engine/tests/programs.rs` walks the
+directory, and the number this line used to carry was five behind the tree.
 
 ## The commitment, stated once
 

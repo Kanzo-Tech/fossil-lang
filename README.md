@@ -3,9 +3,15 @@
 A typed compiler for RDF graph construction. Surface syntax is a small DSL
 (`.fossil`) with bidirectional type checking — forward from input descriptors
 (introspected from the source itself), backward from target shapes
-(ShEx). It lowers to a typed operator algebra and executes it, producing typed
-graphs in [Apache GraphAr](https://graphar.apache.org/) layout: DataFusion runs
-the mapping, DuckDB does source introspection and the layout pass.
+(ShEx). It lowers to a typed operator algebra and executes it, writing a corpus
+of Parquet tiles under YAML manifests: DataFusion runs the mapping, DuckDB does
+source introspection, and the layout post-pass reads the written Parquet back
+through arrow-rs and links no engine at all.
+
+The manifest borrows [Apache GraphAr](https://graphar.apache.org/)'s field
+names and follows GraphAr as far as GraphAr specifies, which is not far enough
+to make this a GraphAr corpus — `/docs/design/corpus` states the boundary once
+and measures the divergences.
 
 **Status:** pre-v0.1, in active development. Nothing is published; the surface
 is still changing. `playground.kanzo.dev` is not live.
@@ -56,9 +62,10 @@ cargo run --bin fossil -- run examples/hello.fossil --dest file:///tmp/hello
 ```
 
 `--dest` is required, and it is a URL (`file:///path`, `s3://bucket/prefix`, …).
-The run writes an Apache GraphAr dataset there: `vertex/Person.vertex.yml`
-declaring the columns, and `vertex/Person/*.parquet` holding the rows in
-4,096-row tiles. Inspect it with DuckDB:
+It prints `wrote 1 vertex type(s), 0 edge type(s) to <dest>` and leaves a corpus
+there: `vertex/Person.vertex.yml` declaring the columns, and
+`vertex/Person/*.parquet` holding the rows in 4,096-row tiles. Inspect it with
+DuckDB:
 
 ```bash
 duckdb -c "SELECT * FROM read_parquet('/tmp/hello/vertex/Person/*.parquet')"
@@ -98,8 +105,10 @@ There is **one** reference, and it is in four pieces that do not overlap:
   fossil is going, and what is true today with the file that would go red if it stopped holding.
 - [`apps/corpus/`](apps/corpus/) — the artifact: the format, its conventions, and the executable
   guards that make those conventions a contract.
-- [`apps/docs/programs/`](apps/docs/programs/) — the eighteen conformance programs. Every program
-  the documentation shows is one of these, read off disk at build time and never retyped into prose.
+- [`apps/docs/programs/`](apps/docs/programs/) — the conformance programs. Every program the
+  documentation shows is one of these, read off disk at build time and never retyped into prose.
+  No count here: `crates/fossil-engine/tests/programs.rs` walks the directory, and the number this
+  line used to carry was five behind it.
 
 Plus [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev cycle and commit policy, and
 [`CLAUDE.md`](CLAUDE.md) for project memory.
