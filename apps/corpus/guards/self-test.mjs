@@ -138,6 +138,31 @@ const MUTATIONS = [
     },
   },
   {
+    // The break this whole guard exists for, and the one that used to pass. A
+    // hole in the middle of the tiling is caught by `tile-of`; the TAIL is
+    // caught by nothing, because 17 tiles on disk and 17 tiles declared are the
+    // same picture as 18 declared and 17 uploaded. `no-dangling-endpoint` fires
+    // as collateral, which is not an accident: closing this sideways through the
+    // edge endpoints is exactly what `conformance/writer.mjs` had to do while
+    // the manifest carried no count. A corpus with no edges has neither.
+    guard: "declared-count",
+    what: "the last vertex tile is deleted, so the corpus stops one tile early",
+    layout: "files",
+    mutate: (dir) => rmSync(join(dir, VERTEX_DIR, "chunk17.parquet")),
+  },
+  {
+    guard: "declared-count",
+    what: "the manifest declares a `vertex_count` the tiles do not add up to",
+    layout: "rowgroups",
+    mutate(dir) {
+      const path = join(dir, "vertex", "Person.vertex.yml");
+      writeFileSync(
+        path,
+        readFileSync(path, "utf8").replace("vertex_count: 70000", "vertex_count: 69999"),
+      );
+    },
+  },
+  {
     guard: "dense-ids",
     what: "one vertex is deleted, so the ids have a gap",
     layout: "rowgroups",

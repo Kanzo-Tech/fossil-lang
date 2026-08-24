@@ -12,7 +12,7 @@
       "name": "corpus",
       "root": "corpus",
       "on_disk": true,
-      "about": "300 vertices in 5 tiles of 64, both orientations tiled. Passes all fifteen guards — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there.",
+      "about": "300 vertices in 5 tiles of 64, both orientations tiled. Passes every guard — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there.",
       "types": [
         {
           "type": "Person",

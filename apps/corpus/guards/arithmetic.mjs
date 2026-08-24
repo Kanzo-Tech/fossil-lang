@@ -70,6 +70,53 @@ export function shiftFor(rows) {
   return shift;
 }
 
+/**
+ * How many tiles a declared row count occupies — the arithmetic the count exists for.
+ *
+ * A manifest declares `vertex_count` (or `edge_count`) and `chunk_size`, and between them a reader
+ * knows **how far the corpus goes** before it opens a file. Nothing else says: tiles are addressed
+ * and never listed, so without the count a tree holding `chunk0..chunk16` is indistinguishable from
+ * a corpus that has seventeen tiles. A hole in the middle breaks the addressing and is caught; a
+ * missing tail breaks nothing at all.
+ *
+ * `BigInt` for the same reason {@link tileOf} is: a count can exceed 2^53, and above that a
+ * `Number` division silently loses the tail tile — which is precisely the tile this is here to
+ * find. `vectors.json` publishes that border.
+ *
+ * @param {bigint} count rows in the logical table
+ * @param {bigint} [chunkSize] rows per tile, from the manifest; defaults to {@link TILE_ROWS}
+ * @returns {bigint | null} the tile count, or `null` if no shift addresses `chunkSize`
+ */
+export function tilesOf(count, chunkSize = TILE_ROWS) {
+  if (typeof count !== "bigint") {
+    throw new TypeError(
+      `tilesOf takes a BigInt count; got ${typeof count}. Above 2^53 a Number loses the tail tile.`,
+    );
+  }
+  if (count < 0n) throw new RangeError(`a row count is unsigned; got ${count}`);
+  const shift = shiftFor(chunkSize);
+  if (shift === null) return null;
+  return (count + chunkSize - 1n) >> shift;
+}
+
+/**
+ * How many rows the last tile holds — `chunk_size` for a count that divides, the remainder
+ * otherwise, and `0` for an empty type, which has no last tile because it has none at all.
+ *
+ * The tail is where the off-by-one lives. A count that exactly fills a tile is one tile and not two,
+ * and an emitter that writes the empty second one has written a file a reader pays a request for and
+ * learns nothing from.
+ *
+ * @param {bigint} count
+ * @param {bigint} [chunkSize]
+ * @returns {bigint | null}
+ */
+export function tailRows(count, chunkSize = TILE_ROWS) {
+  const tiles = tilesOf(count, chunkSize);
+  if (tiles === null) return null;
+  return tiles === 0n ? 0n : count - (tiles - 1n) * chunkSize;
+}
+
 /** Spread the low 16 bits of `n` into the even bit positions of a `u32`. */
 function spread(n) {
   let v = n & 0xffff;

@@ -1,4 +1,5 @@
 type: Paper
+vertex_count: 576
 chunk_size: 128
 prefix: vertex/Paper/
 property_groups:

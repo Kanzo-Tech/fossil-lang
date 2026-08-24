@@ -29,7 +29,7 @@ form, take it.
 | `vectors.json` | the published test vectors. The deliverable — this is what gets copied. |
 | `manifest.mjs` | the manifest, read by line scan rather than through the struct that wrote it |
 | `inspect.mjs` | what is on disk, before any guard has an opinion about it |
-| `guards.mjs` | the fifteen conventions, each with what it proves and what it cannot |
+| `guards.mjs` | the conventions, each with what it proves and what it cannot. No count here: `check.mjs` prints one and this line had already been wrong |
 | `check.mjs` | the CLI |
 | `duck.mjs` | the only thing between the guards and the corpus: `duckdb` over stdin |
 | `fixture.mjs` | writes a conforming corpus in JavaScript, from the conventions alone |

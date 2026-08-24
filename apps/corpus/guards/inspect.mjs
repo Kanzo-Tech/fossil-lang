@@ -24,6 +24,20 @@ import { lit, query, scalar } from "./duck.mjs";
 import { load, rel, vertexPrefix, edgePrefix } from "./manifest.mjs";
 import { shiftFor } from "./arithmetic.mjs";
 
+/**
+ * A count a manifest declares, as a `BigInt`, or `null` when the field is not there.
+ *
+ * `null` and not `0`, because the two are different findings and only one of them is a corpus. A
+ * declared `0` is an empty type and legal; an absent count is a manifest that cannot be checked for
+ * truncation at all, which `declared-count` reports as the broken convention it is. Anything that is
+ * not a non-negative integer is also `null` — a scanner that guessed would be deciding what the
+ * writer meant.
+ */
+function declaredCount(value) {
+  if (value === undefined || !/^\d+$/.test(String(value).trim())) return null;
+  return BigInt(String(value).trim());
+}
+
 /** Parquet files directly inside `dir`, sorted, with the tile number their name claims. */
 function payload(dir) {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
@@ -111,6 +125,8 @@ export function inspect(root) {
       name: String(info.type ?? ""),
       rel: info.rel,
       prefix,
+      /** What the manifest says the row count is, against which the disk is checked. */
+      declared: declaredCount(info.vertex_count),
       chunkSize,
       shift: shiftFor(chunkSize),
       files,
@@ -154,6 +170,8 @@ export function inspect(root) {
       srcType: String(info.src_type ?? ""),
       dstType: String(info.dst_type ?? ""),
       edgeType: String(info.edge_type ?? ""),
+      /** One number for both orientations: they are one relation stored twice. */
+      declared: declaredCount(info.edge_count),
       chunkSize: BigInt(info.chunk_size ?? 0),
       srcChunkSize: BigInt(info.src_chunk_size ?? 0),
       dstChunkSize: BigInt(info.dst_chunk_size ?? 0),

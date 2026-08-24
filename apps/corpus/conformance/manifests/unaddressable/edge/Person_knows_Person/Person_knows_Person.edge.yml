@@ -1,6 +1,7 @@
 src_type: Person
 edge_type: knows
 dst_type: Person
+edge_count: 900
 chunk_size: 4096
 src_chunk_size: 4096
 dst_chunk_size: 4096

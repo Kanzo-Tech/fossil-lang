@@ -199,9 +199,12 @@ try {
   const composed = new Set();
 
   for (const vertex of corpus.types) {
-    // How many tiles there are is the one thing the manifest does not say — no field carries the
-    // vertex count — so the tile set has to come off the disk. That is not a shortcut taken here;
-    // it is the gap, measured: a reader over HTTP has no directory to list and no count to divide.
+    // The tile set comes off the disk here, and that is now a choice rather than the gap it was.
+    // `vertex_count` is in the manifest — `tiles = count.div_ceil(chunk_size)` — but this harness
+    // is the one that checks the writer against itself, and dividing the writer's own declaration
+    // to decide what the writer should have written is the closed loop it exists to break. The
+    // declaration is held against the bytes by `guards/check.mjs` (`declared-count`); what is
+    // checked here is that every file on disk has an address.
     const onDisk = payloadFiles(dest)
       .filter((p) => p.startsWith(vertex.prefix) && /chunk\d+\.parquet$/.test(p))
       .sort((a, b) => Number(/(\d+)\.parquet$/.exec(a)[1]) - Number(/(\d+)\.parquet$/.exec(b)[1]));
@@ -271,17 +274,20 @@ try {
     }
   }
 
-  // A tile missing from the *tail* is the one break the checks above cannot see, and the reason is
-  // gap 2 rather than an oversight: no manifest field carries the vertex count, so the tile set has
-  // to be read off the disk, and a disk holding tiles 0..1 is indistinguishable from a corpus that
-  // has two. A hole in the middle fires — the composed set stops matching the sorted disk set — and
-  // a truncation does not. Deleting `chunk2.parquet` from a corpus fossil wrote passed this harness
+  // A tile missing from the *tail* is the one break the checks above cannot see: the tile set is
+  // read off the disk, and a disk holding tiles 0..1 is indistinguishable from a corpus that has
+  // two. A hole in the middle fires — the composed set stops matching the sorted disk set — and a
+  // truncation does not. Deleting `chunk2.parquet` from a corpus fossil wrote passed this harness
   // until the check below existed.
   //
-  // The endpoints are what close it, without the count and without trusting the writer twice: every
+  // This was the *only* answer while no manifest field carried a count. There is one now, and the
+  // guard that reads it back off the bytes is `declared-count` — so this is no longer the format's
+  // answer to truncation, it is this harness's, and the two are independent on purpose. The
+  // endpoints close it without the count and without trusting the writer twice: every
   // `src_dense`/`dst_dense` in the edge tiles names a vertex, so the largest endpoint has to land
   // inside a vertex tile the reader addressed. It costs one query per orientation and it is the only
   // statement here that relates two payload sets rather than checking one against the manifest.
+  // A corpus with no edges has no such statement available, which is what the declared count is for.
   for (const edge of corpus.edges) {
     for (const direction of edge.directions) {
       const adjacency = edge.adjacency(direction);

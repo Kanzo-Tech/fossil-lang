@@ -20,7 +20,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { query, scalar } from "./duck.mjs";
 import { fileList, rowGroups } from "./inspect.mjs";
-import { TILE_ROWS, morton2, quantize, shiftFor, tileOf } from "./arithmetic.mjs";
+import { TILE_ROWS, morton2, quantize, shiftFor, tailRows, tileOf, tilesOf } from "./arithmetic.mjs";
 
 /**
  * The published borders, read on first use.
@@ -117,9 +117,20 @@ export function checkVectors(vectors) {
     const got = quantize(v.v, v.lo, v.hi);
     if (got !== v.q) failures.push(`quantize(${v.v}, ${v.lo}, ${v.hi}) = ${got}, not ${v.q}`);
   }
+  for (const v of vectors.declared_count.vectors) {
+    const count = BigInt(v.count);
+    const chunk = BigInt(v.chunk_size);
+    const tiles = tilesOf(count, chunk);
+    const tail = tailRows(count, chunk);
+    if (tiles !== BigInt(v.tiles)) failures.push(`tilesOf(${v.count}, ${v.chunk_size}) = ${tiles}, not ${v.tiles}`);
+    if (tail !== BigInt(v.tail_rows)) {
+      failures.push(`tailRows(${v.count}, ${v.chunk_size}) = ${tail}, not ${v.tail_rows}`);
+    }
+  }
   if (shiftFor(TILE_ROWS) !== 12n) failures.push("the shift and the row count disagree");
-  const counted =
-    vectors.tile_of.vectors.length + vectors.morton2.vectors.length + vectors.quantize.vectors.length;
+  const counted = Object.values(vectors)
+    .filter((section) => Array.isArray(section?.vectors))
+    .reduce((n, section) => n + section.vectors.length, 0);
   return result(failures, [`${counted} vectors`]);
 }
 
@@ -134,8 +145,10 @@ export const GUARDS = [
       "of every edge type are on disk *and tiled*, since a hop that has one of them is wrong in " +
       "one direction rather than slow.",
     cannotProve:
-      "That the corpus is complete. A corpus missing half its vertices is non-empty, and the " +
-      "manifest carries no vertex count to check it against.",
+      "That the corpus is complete. A corpus missing half its vertices is non-empty, and this " +
+      "guard counts what is there rather than what was promised. `declared-count` is the one that " +
+      "holds the manifest's `vertex_count` against the disk — a sentence that used to end here " +
+      "with «and the manifest carries no vertex count to check it against».",
     run(corpus) {
       const failures = [];
       if (corpus.types.length === 0) failures.push("the manifest names no vertex type");
@@ -298,6 +311,72 @@ export const GUARDS = [
   },
 
   {
+    id: "declared-count",
+    title: "The manifest says how many rows there are, and they are there",
+    proves:
+      "`vertex_count` is the rows across every tile of that type, and `edge_count` is the rows of " +
+      "each orientation of that relation. **This is the only guard a truncated corpus fails.** " +
+      "Tiles are addressed and never listed — that is the whole of the addressing — so a tree " +
+      "holding `chunk0..chunk16` is indistinguishable from a corpus that has seventeen tiles. A " +
+      "hole in the middle breaks `tile-of` and is caught; a missing tail breaks nothing, and the " +
+      "corpus reads clean and short. Together with `dense-ids` it also fixes the largest id in the " +
+      "corpus at `count − 1`, so a reader knows how far the ids go before it opens a file.",
+    cannotProve:
+      "That the count is the *right* count. It is written by the writer and checked against bytes " +
+      "the same writer produced: both wrong together passes, and only a second writer would show " +
+      "it. Nor which rows — a corpus that lost its tail and gained as many duplicates in the " +
+      "middle satisfies this and fails `dense-ids` and `exactly-once`, which is where that lives.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      const rowsIn = (files) => BigInt(scalar(`SELECT count(*) FROM read_parquet(${fileList(files)})`));
+
+      for (const type of corpus.types) {
+        if (type.declared === null) {
+          failures.push(
+            `${type.name} declares no vertex_count, so a reader cannot tell a corpus that stops ` +
+              `early from one that ends there`,
+          );
+          continue;
+        }
+        const onDisk = BigInt(type.count);
+        if (onDisk !== type.declared) {
+          failures.push(
+            `${type.name} declares ${type.declared} vertices and the tiles hold ${onDisk}`,
+          );
+        }
+        const tiles = tilesOf(type.declared, type.chunkSize);
+        notes.push(
+          `${type.name}: ${type.declared} declared, ${tiles ?? "?"} tile(s), ` +
+            `the last holding ${tailRows(type.declared, type.chunkSize) ?? "?"}`,
+        );
+      }
+
+      for (const edge of corpus.edges) {
+        if (edge.declared === null) {
+          failures.push(`${edge.rel} declares no edge_count`);
+          continue;
+        }
+        // Each orientation on its own, because they are one relation stored
+        // twice and a tail lost from one of them is a hop that answers short in
+        // one direction. `one-relation-twice` compares them to each other and
+        // would pass on both being truncated the same way.
+        for (const side of [edge.bySource, edge.byTarget]) {
+          if (side.tiles.length === 0) continue;
+          const onDisk = rowsIn(side.tiles);
+          if (onDisk !== edge.declared) {
+            failures.push(
+              `${edge.rel} ${side.name} declares ${edge.declared} edges and its tiles hold ${onDisk}`,
+            );
+          }
+        }
+        notes.push(`${edge.rel}: ${edge.declared} declared`);
+      }
+      return result(failures, notes);
+    },
+  },
+
+  {
     id: "dense-ids",
     title: "`dense_id` is a gapless 0..V−1",
     proves:
@@ -412,11 +491,12 @@ export const GUARDS = [
     id: "published-vectors",
     title: "The published vectors reproduce",
     proves:
-      "`tile_of`, `morton2` and the quantisation answer what `guards/vectors.json` says they " +
-      "answer, at every border where a re-implementation diverges: 2³¹ for a shift taken as " +
-      "signed, 2⁵³ for an id that went through a JavaScript `Number`, and bit 31 of a Morton code " +
-      "for an interleave that was not coerced back to unsigned. The vectors are the deliverable — " +
-      "they are what gets copied.",
+      "`tile_of`, `morton2`, the quantisation and the count-to-tiles arithmetic answer what " +
+      "`guards/vectors.json` says they answer, at every border where a re-implementation " +
+      "diverges: 2³¹ for a shift taken as signed, 2⁵³ for an id or a count that went through a " +
+      "JavaScript `Number`, bit 31 of a Morton code for an interleave that was not coerced back " +
+      "to unsigned, and a count that exactly fills a tile for the ceiling that writes an empty " +
+      "one after it. The vectors are the deliverable — they are what gets copied.",
     cannotProve:
       "Anything about the corpus. This is a statement about a function, and it is here so that a " +
       "checker run against somebody else's corpus also checks the checker.",

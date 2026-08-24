@@ -18,7 +18,7 @@ interface Table {
  *
  * So the page renders the file, and `published-vectors` executes the same file.
  */
-export function VectorTable({ of }: { of: "tile_of" | "morton2" | "quantize" }) {
+export function VectorTable({ of }: { of: "tile_of" | "declared_count" | "morton2" | "quantize" }) {
   const path = join(process.cwd(), "guards", "vectors.json");
   const table = JSON.parse(readFileSync(path, "utf8"))[of] as Table;
   const columns = Object.keys(table.vectors[0]).filter((key) => key !== "why");

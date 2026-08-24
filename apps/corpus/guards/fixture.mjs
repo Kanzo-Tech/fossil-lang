@@ -177,6 +177,9 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     join(dir, "vertex", "Person.vertex.yml"),
     [
       "type: Person",
+      // How far the corpus goes, which nothing else on disk says: tiles are
+      // addressed and never listed, so a tree one tile short reads clean.
+      `vertex_count: ${count}`,
       `chunk_size: ${tileRows}`,
       "prefix: vertex/Person/",
       "property_groups:",
@@ -195,6 +198,8 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "src_type: Person",
       "edge_type: knows",
       "dst_type: Person",
+      // One number for both orientations — they are one relation stored twice.
+      `edge_count: ${pairs.length}`,
       `chunk_size: ${tileRows}`,
       `src_chunk_size: ${tileRows}`,
       `dst_chunk_size: ${tileRows}`,

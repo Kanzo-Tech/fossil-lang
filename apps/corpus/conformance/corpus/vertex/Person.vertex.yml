@@ -1,4 +1,5 @@
 type: Person
+vertex_count: 300
 chunk_size: 64
 prefix: vertex/Person/
 property_groups:

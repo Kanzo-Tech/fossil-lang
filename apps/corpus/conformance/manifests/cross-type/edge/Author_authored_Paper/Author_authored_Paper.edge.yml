@@ -1,6 +1,7 @@
 src_type: Author
 edge_type: authored
 dst_type: Paper
+edge_count: 900
 chunk_size: 64
 src_chunk_size: 64
 dst_chunk_size: 128

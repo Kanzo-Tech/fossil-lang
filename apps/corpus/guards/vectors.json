@@ -27,6 +27,57 @@
       }
     ]
   },
+  "declared_count": {
+    "formula": "tiles = (count + chunk_size − 1) >> shift; tail_rows = count − (tiles − 1)·chunk_size",
+    "counts": "rows in the logical table — every row of every tile of one vertex type, or every row of one orientation of one edge type. The two orientations of an edge are one relation stored twice, so `edge_count` covers both and each of them separately has to add up to it. It is NOT the largest `dense_id` (that is `count − 1`, because the ids are a gapless `0..count−1`) and it is NOT a number of tiles.",
+    "input": "unsigned 64-bit count; chunk_size a power of two, so the ceiling is a shift and not a division",
+    "output": "unsigned 64-bit tile count; every tile but the last holds exactly chunk_size rows, and a tile with no rows is not written",
+    "vectors": [
+      {
+        "count": "0",
+        "chunk_size": 4096,
+        "tiles": "0",
+        "tail_rows": "0",
+        "why": "an empty type is zero tiles and not one empty one. A reader that assumed at least one pays a request to be told 404"
+      },
+      { "count": "1", "chunk_size": 4096, "tiles": "1", "tail_rows": "1", "why": "one row is one tile" },
+      {
+        "count": "4095",
+        "chunk_size": 4096,
+        "tiles": "1",
+        "tail_rows": "4095",
+        "why": "one short of the tile — still one tile, and the tail is short"
+      },
+      {
+        "count": "4096",
+        "chunk_size": 4096,
+        "tiles": "1",
+        "tail_rows": "4096",
+        "why": "a count that exactly fills one tile is ONE tile. The off-by-one here writes an empty tile 1 and addresses a file that is not there"
+      },
+      {
+        "count": "4097",
+        "chunk_size": 4096,
+        "tiles": "2",
+        "tail_rows": "1",
+        "why": "one row over: the tail tile holds a single row. That tile is what a truncated corpus loses, and without the count nothing else in the format notices — a hole in the middle breaks the addressing, a missing tail breaks nothing"
+      },
+      {
+        "count": "300",
+        "chunk_size": 64,
+        "tiles": "5",
+        "tail_rows": "44",
+        "why": "the conformance corpus itself, and a chunk_size that is not the default: the shift comes from the manifest, never from 4096"
+      },
+      {
+        "count": "9007199254740993",
+        "chunk_size": 4096,
+        "tiles": "2199023255553",
+        "tail_rows": "1",
+        "why": "2^53 + 1 — in a JavaScript Number the count is 2^53, the division comes out one tile short, and the tail tile disappears from a reader that never asks for it"
+      }
+    ]
+  },
   "morton2": {
     "formula": "morton = spread(x) | (spread(y) << 1)",
     "input": "two unsigned 16-bit quantised coordinates",

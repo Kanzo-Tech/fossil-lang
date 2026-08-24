@@ -52,7 +52,7 @@ proved red, and it is the only form that reaches a corpus **some other writer** 
 ## The cases
 
 - **`corpus`** — the whole artefact, and the only one with bytes. `node ../guards/check.mjs corpus`
-  passes all fifteen guards, so every address the table lists is checked to name a file that is on
+  passes every guard, so every address the table lists is checked to name a file that is on
   disk. The last tile is deliberately partial — 44 rows of 64 — because a corpus whose count divides
   the tile size exactly never exercises the boundary.
 - **`csr-only`** — one `adj_lists` entry, `aligned_by: src`. This is the shape every corpus written
