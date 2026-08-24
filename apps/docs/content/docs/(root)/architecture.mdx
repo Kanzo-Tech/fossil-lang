@@ -319,8 +319,16 @@ priority — a compiler that reports success and writes a corpus with a property
 [discarded alternative](/docs/design/discarded) with a named condition that would reopen it; and the
 design for statements is [RDF 1.2](/docs/characteristics/rdf12).
 
-<Callout title="Undone, all of it">
-The crate count is twenty-four today and nothing below the first diagram has been executed. The
+<Callout title="Three of them are done, and the rest is not">
+This callout said "the crate count is twenty-four today and nothing below the first diagram has been
+executed", and by 2026-08-24 both halves were false. Three of the moves argued below have happened:
+`fossil-run-status` was dissolved into the crates that produce its contracts, `fossil-runtime` became
+`fossil-layout` and moved to the corpus group, and `fossil-introspect` was extracted from
+`fossil-engine`. Twenty-five crates, and the count moved in both directions to get there.
+
+What has NOT happened is everything else — `fossil-base` still holds a `tracked` query and the
+`@conn` locator, `fossil-engine` is still a sack, and the engine↔corpus arrow above is the price of
+the third move rather than a leftover. The
 measurement backing the sentence at the top of this page is the manifest assertion in
 `apps/docs/content.test.ts`: it reads `crates/fossil-graph/Cargo.toml` and fails if that crate's
 fossil dependencies are ever anything other than `fossil-sinks` alone — including when the manifest
