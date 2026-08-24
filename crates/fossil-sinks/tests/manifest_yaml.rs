@@ -13,6 +13,7 @@ use fossil_sinks::manifest::{
 fn person_vertex() -> VertexInfo {
     VertexInfo::new(
         "Person",
+        10_000,
         DEFAULT_CHUNK_SIZE,
         "vertex/person/",
         vec![PropertyGroup {
@@ -41,6 +42,7 @@ fn knows_edge() -> EdgeInfo {
         edge_type: "knows".to_string(),
         iri: String::new(),
         dst_type: "Person".to_string(),
+        edge_count: 19_998,
         chunk_size: DEFAULT_CHUNK_SIZE,
         src_chunk_size: DEFAULT_CHUNK_SIZE,
         dst_chunk_size: DEFAULT_CHUNK_SIZE,

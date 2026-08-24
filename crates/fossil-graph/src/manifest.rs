@@ -244,6 +244,7 @@ mod tests {
         }
         VertexInfo::new(
             name,
+            3,
             DEFAULT_CHUNK_SIZE,
             format!("vertex/{name}/"),
             vec![PropertyGroup {
@@ -259,6 +260,7 @@ mod tests {
             edge_type: edge.into(),
             iri: String::new(),
             dst_type: dst.into(),
+            edge_count: 2,
             chunk_size: DEFAULT_CHUNK_SIZE,
             src_chunk_size: DEFAULT_CHUNK_SIZE,
             dst_chunk_size: DEFAULT_CHUNK_SIZE,

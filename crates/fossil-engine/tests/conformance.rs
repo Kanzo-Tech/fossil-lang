@@ -185,6 +185,29 @@ fn manifest_number(path: &Path, key: &str) -> u64 {
         .unwrap_or_else(|e| panic!("`{key}` in {} is not a number: {e}", path.display()))
 }
 
+/// The count a manifest declares, checked against the rows that are on disk.
+///
+/// This is where [`fossil_sinks::manifest::VertexInfo::vertex_count`] is
+/// answerable for surviving the layout post-pass. The count is computed from the
+/// materialised batches BEFORE `enrich_layout` runs, and the pass then re-reads,
+/// renumbers, re-tiles and deletes the file it was given — the same order that
+/// made `RunStatus.file` name a path that had just stopped existing. It survives
+/// because the pass writes one row out for every row it read (it skips a
+/// `dense_id` no row carries, never a row), but «it survives because of the
+/// shape of the code today» is exactly what this is here to stop being the only
+/// evidence. `on_disk` is read back off the tiles the pass wrote, after it ran.
+fn declared_count(manifest: &Path, key: &str, on_disk: i64) -> u64 {
+    let declared = manifest_number(manifest, key);
+    assert_eq!(
+        i64::try_from(declared).expect("a row count fits an i64"),
+        on_disk,
+        "{} declares {key} {declared} and the payload holds {on_disk} — a corpus that lost its \
+         tail declares the number it had before the layout pass",
+        manifest.display()
+    );
+    declared
+}
+
 /// How many files a directory holds — the count the emitter is answerable for.
 fn files_in(dir: &Path) -> u64 {
     std::fs::read_dir(dir)
@@ -342,7 +365,23 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "the manifest declares a tile of {tile_rows} rows, which no shift addresses"
     );
     let shift = tile_rows.trailing_zeros();
-    let expected_tiles = u64::from(PEOPLE).div_ceil(tile_rows);
+
+    //    And the manifest says how many rows there are, which for a long time it
+    //    could not — see [`declared_count`], which is also where that field is
+    //    made answerable for surviving the layout post-pass.
+    let declared_vertices =
+        declared_count(&dest.join("vertex/Person.vertex.yml"), "vertex_count", n);
+    declared_count(
+        &dest.join("edge/Person_knows_Person/Person_knows_Person.edge.yml"),
+        "edge_count",
+        edges,
+    );
+
+    //    The tile count is now derivable from the manifest alone, which is what
+    //    the field buys a reader that cannot list a directory. Derived from the
+    //    declaration and not from `PEOPLE`, so a writer that under-declares is
+    //    caught by the file check below rather than agreeing with the fixture.
+    let expected_tiles = declared_vertices.div_ceil(tile_rows);
     assert!(
         expected_tiles >= 3,
         "non-vacuity: {PEOPLE} rows in tiles of {tile_rows} is {expected_tiles} tile(s), \

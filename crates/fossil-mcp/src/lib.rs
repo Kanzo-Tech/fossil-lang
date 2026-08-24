@@ -241,6 +241,7 @@ mod tests {
 
         let mut person = VertexInfo::new(
             "Person",
+            3,
             DEFAULT_CHUNK_SIZE,
             "vertex/Person/",
             vec![PropertyGroup {
@@ -259,6 +260,7 @@ mod tests {
             edge_type: "knows".into(),
             iri: "http://example.org/knows".into(),
             dst_type: "Person".into(),
+            edge_count: 2,
             chunk_size: DEFAULT_CHUNK_SIZE,
             src_chunk_size: DEFAULT_CHUNK_SIZE,
             dst_chunk_size: DEFAULT_CHUNK_SIZE,

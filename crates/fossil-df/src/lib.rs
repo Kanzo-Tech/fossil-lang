@@ -1628,9 +1628,10 @@ fn edge_dir(src: &str, label: &str, dst: &str) -> String {
     format!("{src}_{label}_{dst}")
 }
 
-/// Total rows across a set of batches — the `count` for the wire status.
-fn count_rows(batches: &[RecordBatch]) -> i64 {
-    batches.iter().map(RecordBatch::num_rows).sum::<usize>() as i64
+/// Total rows across a set of batches — the count the manifest declares and the
+/// `count` the wire status carries, which are the same number read twice.
+fn count_rows(batches: &[RecordBatch]) -> u64 {
+    batches.iter().map(RecordBatch::num_rows).sum::<usize>() as u64
 }
 
 impl GraphArData {
@@ -1686,16 +1687,38 @@ impl GraphArData {
             yaml: graph.to_yaml()?,
         }];
 
+        // The counts come off the materialised batches and not off the schema,
+        // because the schema knows what types there are and only the data knows
+        // how many rows each one got. A declared type that materialised nothing
+        // is `0`, which is the honest answer and the one that says «no tiles»
+        // rather than «one empty tile».
         for (node, rel_path) in self.schema.nodes.iter().zip(vertex_paths) {
+            let rows = self
+                .vertices
+                .iter()
+                .find(|v| v.label == node.label)
+                .map_or(0, |v| count_rows(&v.batches));
             out.push(ManifestFile {
                 rel_path,
-                yaml: vertex_info(node).to_yaml()?,
+                yaml: vertex_info(node, rows).to_yaml()?,
             });
         }
         for (edge, rel_path) in self.schema.edges.iter().zip(edge_paths) {
+            // One orientation, because the two are one relation stored twice —
+            // and `by_source` rather than `by_target` so the number agrees with
+            // the one the wire status has always reported.
+            let rows = self
+                .edges
+                .iter()
+                .find(|e| {
+                    e.src_type == edge.source
+                        && e.label == edge.label
+                        && e.dst_type == edge.destination
+                })
+                .map_or(0, |e| count_rows(&e.by_source));
             out.push(ManifestFile {
                 rel_path,
-                yaml: edge_info(edge).to_yaml()?,
+                yaml: edge_info(edge, rows).to_yaml()?,
             });
         }
         Ok(out)
@@ -1715,7 +1738,7 @@ impl GraphArData {
                     vertex_type: v.label.clone(),
                     rdf_type: node.and_then(|n| n.iri.clone()),
                     file: format!("vertex/{}.parquet", v.label),
-                    count: Some(count_rows(&v.batches)),
+                    count: i64::try_from(count_rows(&v.batches)).ok(),
                     columns: node
                         .map(|n| n.properties.iter().map(column_status).collect())
                         .unwrap_or_default(),
@@ -1734,7 +1757,7 @@ impl GraphArData {
                     dst_type: e.dst_type.clone(),
                     by_source: format!("edge/{dir}/by_source.parquet"),
                     by_target: format!("edge/{dir}/by_target.parquet"),
-                    count: Some(count_rows(&e.by_source)),
+                    count: i64::try_from(count_rows(&e.by_source)).ok(),
                 }
             })
             .collect();
@@ -1766,7 +1789,10 @@ fn column_status(p: &NodeProp) -> ColumnStatus {
 /// It said it mirrored «the writer's `build_vertex_manifest`». That name occurs
 /// exactly once in the tree — in the sentence that claimed it — and `lib.rs:557`
 /// already says there is no second writer left to mirror.
-fn vertex_info(node: &NodeType) -> VertexInfo {
+///
+/// `rows` is the one argument that is not a function of the schema, and it is
+/// the whole of what the manifest could not say before: how far the corpus goes.
+fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     let mut properties = Vec::with_capacity(node.properties.len() + 5);
     properties.push(Property {
         name: "dense_id".to_string(),
@@ -1805,6 +1831,7 @@ fn vertex_info(node: &NodeType) -> VertexInfo {
 
     let mut info = VertexInfo::new(
         node.label.clone(),
+        rows,
         DEFAULT_CHUNK_SIZE,
         format!("vertex/{}/", node.label),
         vec![PropertyGroup {
@@ -1818,12 +1845,16 @@ fn vertex_info(node: &NodeType) -> VertexInfo {
 
 /// The `EdgeInfo` manifest for one edge type. W0b edges carry no properties
 /// (only `src_dense`/`dst_dense`); both CSR + CSC adjacencies are ordered.
-fn edge_info(edge: &GraphEdge) -> EdgeInfo {
+///
+/// `rows` is one orientation's row count, which is the relation's: the two
+/// orientations are the same edges twice.
+fn edge_info(edge: &GraphEdge, rows: u64) -> EdgeInfo {
     EdgeInfo {
         src_type: edge.source.clone(),
         edge_type: edge.label.clone(),
         iri: edge.iri.clone().unwrap_or_default(),
         dst_type: edge.destination.clone(),
+        edge_count: rows,
         chunk_size: DEFAULT_CHUNK_SIZE,
         src_chunk_size: DEFAULT_CHUNK_SIZE,
         dst_chunk_size: DEFAULT_CHUNK_SIZE,

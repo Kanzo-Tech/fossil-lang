@@ -1,29 +1,65 @@
-//! `GraphAr` v1.0.0 manifest structs + `serde_yaml_ng` emission.
+//! The corpus manifest structs + `serde_yaml_ng` emission.
 //!
-//! These structs serialize to the **`GraphAr` v1.0.0** vertex-info / edge-info YAML field
-//! names — `version: gar/v1`, `type`, `chunk_size`, `prefix`, `property_groups`, and edge
-//! `src_type`/`dst_type`/`adj_lists`. This deliberately supersedes an earlier hand-templated
-//! spelling (`graphar_version: 1.0.0`, `vertex_types:`, `data_type: string`), which conformed
-//! to no `GraphAr` reader.
+//! **The field vocabulary is `GraphAr` v1.0.0's. The conformance is not.** These structs
+//! serialize to the `GraphAr` vertex-info / edge-info / graph-info field names — `version:
+//! gar/v1`, `type`, `chunk_size`, `prefix`, `property_groups`, and edge
+//! `src_type`/`dst_type`/`adj_lists` — because a borrowed word is one fewer word a reader has to
+//! learn, and because the hand-templated spelling this superseded (`graphar_version: 1.0.0`,
+//! `vertex_types:`, `data_type: string`) was neither `GraphAr`'s nor anyone else's. **A fossil
+//! corpus is not a valid `GraphAr` corpus, and this module used to end that sentence the other
+//! way.** Fossil borrows the vocabulary and stops where `GraphAr` stops specifying.
+//!
+//! Six divergences, each checked against `docs/specification/format.md` in
+//! `apache/incubator-graphar` and against `cpp/src/graphar/` — not against a summary of either.
+//! Nothing is listed here that was not read there.
+//!
+//! 1. **[`VertexInfo::vertex_count`] and [`EdgeInfo::edge_count`] are ours.** The specification
+//!    mentions no count of any kind: not a YAML field, not a file. The C++ writes one anyway —
+//!    `<vertex prefix>vertex_count`, `<edge prefix><adj_list prefix>vertex_count`,
+//!    `…edge_count{vertex_chunk_index}` — through `FileSystem::WriteValueToFile`, whose body is
+//!    `ofstream->Write(&value, sizeof(T))`. Eight raw bytes in the writing machine's byte order,
+//!    in a file the specification never names, with no declared width and no declared
+//!    endianness. That is a reference implementation normative by accident, which is the thing
+//!    `/docs/characteristics/corpus-contract` exists to refuse. Ours is a declared decimal
+//!    integer in the YAML, with a published vector table in `apps/corpus/guards/vectors.json`
+//!    and a guard that reads the rows back off the disk.
+//! 2. **`chunk_size` must be a power of two here.** A tile's address is [`tile_of`], a shift, and
+//!    a shift is not a division. `GraphAr`'s own example vertex-info declares `chunk_size: 100`
+//!    and its prose recommends 2^18 and 2^22 as *empirical* values; nothing in it requires a
+//!    power of two. `fossil-layout`'s `shift_for` refuses anything else before a byte is written.
+//! 3. **[`EdgeInfo::chunk_size`] denotes something else here** — see the field. In `GraphAr` it
+//!    cuts a sub-logical table into edge chunks of that many rows; here it is not a row count at
+//!    all.
+//! 4. **One file per tile, carrying every column.** `GraphAr` gives each property group its own
+//!    path prefix, so one chunk of one vertex type is several physical files. [`PropertyGroup`]
+//!    carries no prefix, fossil emits one group, and a tile is one Parquet.
+//! 5. **No offset table.** `GraphAr` requires one beside an `ordered_by_source`/`ordered_by_dest`
+//!    adjacency, partitioned in alignment with the vertex chunking, to record where each
+//!    vertex's edges start. Fossil writes none: a tile is sorted on the endpoint that addresses
+//!    it, so a vertex's neighbours are a run of equal keys and a run is found by scanning the one
+//!    tile that was fetched anyway.
+//! 6. **The tile naming is ours, because the specification names no data file.** Here it is
+//!    `<prefix>chunk{k}.parquet` for a vertex tile and
+//!    `<edge prefix><adj_list prefix>tile{k}.parquet` for an edge one — `by_source/` and
+//!    `by_target/`, one per declared [`AdjList`]. The C++ composes
+//!    `<prefix><property group prefix>chunk{k}` and
+//!    `<prefix>adj_list/part{vertex chunk}/chunk{k}`: extensionless, and two levels deep on the
+//!    edge side because it partitions by source chunk and then by edge chunk.
 //!
 //! The structs are plain serializable data — no `Box<dyn Trait>`, safe to pass through Salsa
 //! queries (CLAUDE.md hard rule). `data_type` strings are derived from [`arrow_schema::DataType`]
 //! via [`data_type_name`], the single authority for the spec spellings (`int64`, `string`, ...).
 //!
-//! **Fossil byte-writes Parquet from Rust, and this sentence used to deny it.** `fossil-df`'s
+//! **Fossil byte-writes Parquet from Rust, and no engine is left on the path.** `fossil-df`'s
 //! `files.rs` is the single Arrow→Parquet encoder, shared by the native sink and the browser
 //! executor; the `DuckDB` `COPY` `GraphAr` writer was retired when both the `run` and `catalog`
-//! paths moved to the `fossil-df` materializer (`fossil-layout/src/materialize.rs`). What still
-//! goes through `DuckDB` `COPY ... (FORMAT PARQUET)` is the layout post-pass in
-//! `fossil-layout/src/layout.rs`, which re-tiles into the manifest-declared `prefix`. The
-//! vertex-tile naming
-//! convention is `<prefix>chunk{k}.parquet` and the edge-tile one is
-//! `<edge prefix><adj_list prefix>tile{k}.parquet` — `by_source/` and `by_target/`, one per
-//! declared [`AdjList`]. This module declares the tiling; it does not emit bytes,
-//! and `fossil-layout`'s `enrich_layout` is the only thing that does — **what the emitter writes
-//! is what the manifest says**, asserted on the artefact by
-//! `fossil-engine/tests/conformance.rs` rather than agreed by convention. That gap stood open for
-//! a long time; it does not get to reopen.
+//! paths moved to `fossil-df`. The layout post-pass in `fossil-layout/src/layout.rs`, which
+//! re-tiles into the manifest-declared `prefix`, went the same way in `1e11a91` — it reads and
+//! writes Parquet through `arrow-rs` and holds no connection, and this paragraph named a
+//! `materialize.rs` that commit deleted. This module declares the tiling; it does not emit bytes,
+//! and `enrich_layout` is the only thing that does — **what the emitter writes is what the
+//! manifest says**, asserted on the artefact by `fossil-engine/tests/conformance.rs` rather than
+//! agreed by convention. That gap stood open for a long time; it does not get to reopen.
 
 use arrow_schema::DataType;
 use serde::{Deserialize, Serialize};
@@ -45,6 +81,27 @@ pub struct VertexInfo {
     /// empty so non-RDF graphs keep the canonical `GraphAr` shape.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub iri: String,
+    /// **How many rows this vertex type has** — every row of every tile under
+    /// [`Self::prefix`], summed. Equivalently the count of distinct `dense_id`s,
+    /// and, because they are a gapless `0..n−1`, one more than the largest of
+    /// them. It is not a tile count and it is not the largest id.
+    ///
+    /// The field `GraphAr` does not have, and the one thing a manifest could not
+    /// say. Without it a reader has no way to know the corpus stops early: tiles
+    /// are addressed and never listed, so a tree holding `chunk0..chunk16` is
+    /// indistinguishable from a corpus that has seventeen tiles. A hole in the
+    /// middle is caught by the addressing — tile `k` is not where tile `k+1`
+    /// says it is — and **a missing tail is caught by nothing**, which is why
+    /// `apps/corpus/conformance/writer.mjs` had to close it sideways through the
+    /// edge endpoints. With this, `tiles = vertex_count.div_ceil(chunk_size)`,
+    /// and a reader knows how far the corpus goes before it opens a file.
+    ///
+    /// `u64` and not `Option<u64>`: a count that may be absent is a count a
+    /// reader may not depend on, and a reader that may not depend on it is
+    /// exactly the reader that cannot detect the truncation. The optional
+    /// spelling reproduces the gap it was added to close. A producer that does
+    /// not know its own row count is not one this format has.
+    pub vertex_count: u64,
     /// Rows per tile (configurable; default [`DEFAULT_CHUNK_SIZE`]). Tile `k` is
     /// the `dense_id` range `[k·chunk_size, (k+1)·chunk_size)` and a power of
     /// two, so a reader addresses it with [`tile_of`] rather than a division.
@@ -70,6 +127,20 @@ pub struct EdgeInfo {
     pub iri: String,
     /// Destination vertex type label.
     pub dst_type: String,
+    /// **How many edges this relation has** — the rows of one orientation, not
+    /// of both. The two orientations are one relation stored twice, so a single
+    /// number covers them and each of them separately has to add up to it.
+    ///
+    /// The sibling of [`VertexInfo::vertex_count`], and the same argument for
+    /// being a required `u64`. It closes the same hole on the adjacency side: an
+    /// edge tile with no rows is not written, so a reader that finds nothing at
+    /// `tile{k}.parquet` learns "this tile has no edges" and cannot tell that
+    /// from "this tile was never uploaded". Summing the tiles it did find
+    /// against this number is what tells it apart.
+    ///
+    /// Not a tile count for the second time in this struct: [`Self::chunk_size`]
+    /// is not a row count and this is not a size.
+    pub edge_count: u64,
     /// The addressing unit of an edge tile, equal to [`Self::src_chunk_size`].
     ///
     /// **Not a row count**, and it never was one for edges: an edge lives in the
@@ -253,6 +324,7 @@ impl VertexInfo {
     #[must_use]
     pub fn new(
         vertex_type: impl Into<String>,
+        vertex_count: u64,
         chunk_size: u64,
         prefix: impl Into<String>,
         property_groups: Vec<PropertyGroup>,
@@ -260,6 +332,7 @@ impl VertexInfo {
         Self {
             vertex_type: vertex_type.into(),
             iri: String::new(),
+            vertex_count,
             chunk_size,
             prefix: prefix.into(),
             property_groups,
@@ -360,6 +433,7 @@ mod tests {
     fn person_vertex() -> VertexInfo {
         VertexInfo::new(
             "Person",
+            10_000,
             DEFAULT_CHUNK_SIZE,
             "vertex/person/",
             vec![PropertyGroup {
@@ -388,6 +462,7 @@ mod tests {
             edge_type: "knows".to_string(),
             iri: String::new(),
             dst_type: "Person".to_string(),
+            edge_count: 19_998,
             chunk_size: DEFAULT_CHUNK_SIZE,
             src_chunk_size: DEFAULT_CHUNK_SIZE,
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
@@ -441,6 +516,52 @@ mod tests {
         assert_eq!(tile_of(DEFAULT_CHUNK_SIZE), 1);
     }
 
+    /// How many tiles a declared count implies, at the borders that matter.
+    ///
+    /// The same table as the `declared_count` section of
+    /// `apps/corpus/guards/vectors.json`, which is the published half — this is
+    /// the Rust half executing it. The two borders worth the name are a count
+    /// that exactly fills a tile (one tile, not two) and a count one row over
+    /// (two, the second holding one row), because the tail tile is the one a
+    /// truncated corpus loses and the one no other check can see.
+    #[test]
+    fn a_count_implies_a_tile_count() {
+        for (count, chunk_size, tiles, last) in [
+            (0u64, 4_096u64, 0u64, 0u64),
+            (1, 4_096, 1, 1),
+            (4_095, 4_096, 1, 4_095),
+            (4_096, 4_096, 1, 4_096),
+            (4_097, 4_096, 2, 1),
+            (300, 64, 5, 44),
+            (9_007_199_254_740_993, 4_096, 2_199_023_255_553, 1),
+        ] {
+            assert_eq!(count.div_ceil(chunk_size), tiles, "tiles of {count}");
+            let tail = count - tiles.saturating_sub(1) * chunk_size;
+            assert_eq!(if tiles == 0 { 0 } else { tail }, last, "tail of {count}");
+        }
+    }
+
+    /// The count is required, and a manifest without one does not deserialize.
+    ///
+    /// This is the `u64`-not-`Option<u64>` decision as a test. An optional count
+    /// is a count a reader may skip, and a reader that skips it is the reader
+    /// that cannot tell a truncated corpus from a whole one — the exact hole the
+    /// field was added to close. If this test is ever made to pass by adding a
+    /// `#[serde(default)]`, the field has been turned back into a hint.
+    #[test]
+    fn a_manifest_without_a_count_is_not_a_manifest() {
+        let yaml = person_vertex().to_yaml().expect("serialize");
+        let without = yaml
+            .lines()
+            .filter(|line| !line.starts_with("vertex_count:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(yaml.contains("vertex_count: 10000"), "{yaml}");
+        let error = serde_yaml_ng::from_str::<VertexInfo>(&without)
+            .expect_err("a vertex-info with no count must not deserialize");
+        assert!(error.to_string().contains("vertex_count"), "{error}");
+    }
+
     #[test]
     fn data_type_name_uses_spec_spellings() {
         assert_eq!(data_type_name(&DataType::Int64), "int64");
@@ -455,6 +576,11 @@ mod tests {
         // Field-name guard: spec spellings present, NOT the old hand-rolled template.
         assert!(yaml.contains("version: gar/v1"), "{yaml}");
         assert!(yaml.contains("type: Person"), "{yaml}");
+        // The count, and its position: it sits before the tiling, because
+        // `tiles = vertex_count.div_ceil(chunk_size)` reads in that order.
+        let count_at = yaml.find("vertex_count: 10000").expect(&yaml);
+        let chunk_at = yaml.find("chunk_size:").expect(&yaml);
+        assert!(count_at < chunk_at, "{yaml}");
         // Asserted against the constant, not a literal: the value is a measured trade-off
         // (see DEFAULT_CHUNK_SIZE) and this test is about the spec *spelling* of the key.
         assert!(
@@ -503,6 +629,7 @@ mod tests {
         assert!(yaml.contains("src_type: Person"), "{yaml}");
         assert!(yaml.contains("dst_type: Person"), "{yaml}");
         assert!(yaml.contains("edge_type: knows"), "{yaml}");
+        assert!(yaml.contains("edge_count: 19998"), "{yaml}");
         assert!(yaml.contains("adj_lists:"), "{yaml}");
         // Both orientations, each saying where its tiles are — the two lines a
         // reader needs to turn a `dense_id` into the URL of its edges in one
