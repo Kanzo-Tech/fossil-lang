@@ -249,7 +249,9 @@ mod tests {
                 properties: vec![Property {
                     name: "dense_id".into(),
                     data_type: "uint32".into(),
-                    is_primary: true,
+                    // The address is never the primary. This fixture declares
+                    // no identity column, so it declares no primary either.
+                    is_primary: false,
                     is_nullable: Some(false),
                 }],
             }],

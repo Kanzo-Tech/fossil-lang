@@ -113,12 +113,22 @@ describe('resolveCorpus', () => {
     const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
     const person = corpus.vertexType();
 
+    // Derived from the fixture, not transcribed from it. `chunkSize` was
+    // asserted as the literal 1024 and stayed green for months over a fixture
+    // nothing regenerated — `dump_fixture` writes 4,096 and has since
+    // `c416e07`. A constant copied out of a generated file is a second
+    // spelling of that file, and it is the copy that goes stale.
+    const declared = Number(
+      /^chunk_size: (\d+)$/m.exec(manifestFiles['vertex/Person.vertex.yml']!)![1]!,
+    );
     expect(person.type).toBe('Person');
-    expect(person.chunkSize).toBe(1024);
-    expect(person.shift).toBe(10n);
+    expect(person.chunkSize).toBe(declared);
+    expect(2 ** Number(person.shift)).toBe(declared);
     expect(person.tileUrl(0)).toBe('/bench/1000000/vertex/Person/chunk0.parquet');
-    expect(person.tileOf(1023n)).toBe(0n);
-    expect(person.tileOf(1024n)).toBe(1n);
+    // The boundary is what the shift is FOR, so it is asserted at the boundary
+    // wherever the fixture puts it.
+    expect(person.tileOf(BigInt(declared) - 1n)).toBe(0n);
+    expect(person.tileOf(BigInt(declared))).toBe(1n);
   });
 
   it('addresses relative to the dataset root when no base is given', () => {
@@ -162,13 +172,18 @@ describe('resolveCorpus', () => {
   });
 
   it('refuses a chunk_size no shift addresses', () => {
-    const broken = {
-      ...manifestFiles,
-      'vertex/Person.vertex.yml': manifestFiles['vertex/Person.vertex.yml']!.replace(
-        'chunk_size: 1024',
-        'chunk_size: 122880',
-      ),
-    };
+    // 122,880 is `DuckDB`'s default row-group size and not a power of two, so
+    // no shift names a tile.
+    const yaml = manifestFiles['vertex/Person.vertex.yml']!;
+    const mutated = yaml.replace(/^chunk_size: \d+$/m, 'chunk_size: 122880');
+    // **The mutation has to have happened.** This replaced the literal string
+    // `chunk_size: 1024`, and when the fixture stopped saying 1024 the replace
+    // became a no-op — leaving the test asserting that an UNMODIFIED manifest
+    // throws, which is a different claim and a false one. A mutation test whose
+    // mutation can silently miss is a test of the thing it meant to break.
+    expect(mutated).not.toBe(yaml);
+
+    const broken = { ...manifestFiles, 'vertex/Person.vertex.yml': mutated };
     expect(() => resolveCorpus({ manifestFiles: broken })).toThrow('no shift addresses');
   });
 

@@ -216,13 +216,18 @@ mod tests {
             Property {
                 name: "dense_id".into(),
                 data_type: "uint32".into(),
-                is_primary: true,
+                // The ADDRESS, and it cannot also be the identity: the layout
+                // pass reranks by Morton code and gives this number away.
+                is_primary: false,
                 is_nullable: Some(false),
             },
             Property {
                 name: "subject".into(),
                 data_type: "string".into(),
-                is_primary: false,
+                // The identity, which is what `is_primary` marks. This fixture
+                // is a transcription of `fossil_df::vertex_info`'s shape and
+                // spelled it the other way round until 2026-08-25.
+                is_primary: true,
                 is_nullable: Some(false),
             },
         ];

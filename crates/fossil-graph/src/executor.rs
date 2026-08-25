@@ -1006,7 +1006,9 @@ mod tests {
                     Property {
                         name: "dense_id".into(),
                         data_type: "uint32".into(),
-                        is_primary: true,
+                        // The address is never the primary; this fixture carries
+                        // no identity column, so it carries no primary.
+                        is_primary: false,
                         is_nullable: Some(false),
                     },
                     Property {
