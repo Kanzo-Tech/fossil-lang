@@ -2,21 +2,29 @@
 
 The query layer for whatever draws the graph. **Fossil ships no viewer.**
 
-Two halves, sharing the manifest and nothing else:
+Three entry points over one manifest, and each is a subpath because the other
+two are not what a given reader wants:
 
-- **the verbs** — `read`, `expand`, `path`, `aggregate`, `schema`, `executeSql`.
-  Verb→SQL runs in WASM (`fossil-graph-wasm`, single-source with the native
-  runtime); SQL **execution** is delegated to a host-provided DuckDB-WASM
-  `query` callback. The host's DuckDB streams Parquet over httpfs, so the
-  binding never materialises rows in JS — that is what lets a host scale past
-  RAM.
-- **the addressing** — `resolveCorpus`, which turns the manifest into the tile
-  URLs a camera reads. Synchronous, no WASM, no `fetch`, no promise. Import it
-  from `@fossil-lang/graph/address`, which is the half of the split that has a
-  subpath of its own: the root barrel reaches `client.ts` and `load.ts`, and both
-  static-import the wasm-bindgen output, so a reader without it cannot load the
-  barrel at all. `tests/address-standalone.test.ts` imports the subpath from a
-  package directory built with no `pkg/` in it, so the sentence above is a test.
+- **`@fossil-lang/graph/corpus`** — the reference API. `openCorpus(url, { query })`
+  and four members: `types`, `window`, `node`, `neighbours`. **Start here.** No
+  tiles, no `dense_id`, no Morton, no `by_source`, no prefixes, no footers.
+- **the verbs** (`@fossil-lang/graph`) — `read`, `expand`, `path`, `aggregate`,
+  `schema`, `executeSql`. Verb→SQL runs in WASM (`fossil-graph-wasm`,
+  single-source with the native runtime); SQL **execution** is delegated to a
+  host-provided DuckDB-WASM `query` callback. The host's DuckDB streams Parquet
+  over httpfs, so the binding never materialises rows in JS — that is what lets
+  a host scale past RAM.
+- **the addressing** (`@fossil-lang/graph/address`) — `resolveCorpus`, which
+  turns the manifest into the tile URLs a camera reads. Synchronous, no WASM, no
+  `fetch`, no promise. It is what `openCorpus` is built **on**, and it stays
+  published for a drawing path that wants the URLs and does its own fetching.
+
+The root barrel reaches `client.ts` and `load.ts`, and both static-import the
+wasm-bindgen output, so a reader without it cannot load the barrel at all —
+which is why the other two have subpaths. That is not a sentence:
+`tests/address-standalone.test.ts` compiles each closure into a package
+directory with no `pkg/` and no `node_modules`, and imports the subpath from a
+child Node process.
 
 ```
 @fossil-lang/graph (this package)
@@ -24,8 +32,10 @@ Two halves, sharing the manifest and nothing else:
   ├─ src/generated.ts   verb Params/Result types — codegen'd from schemars JSON Schema
   ├─ src/load.ts        initFossilGraphWasm({ wasmUrl })
   ├─ src/client.ts      createGraphClient({ query, manifestFiles })
+  ├─ src/query.ts       QueryFn — the one capability a host supplies, for both surfaces
   ├─ src/manifest.ts    the GraphAr manifest, scanned without a YAML dependency
-  └─ src/address.ts     resolveCorpus({ manifestFiles, base })
+  ├─ src/address.ts     resolveCorpus({ manifestFiles, base })
+  └─ src/corpus.ts      openCorpus(url, { query })
 ```
 
 ## Usage
@@ -56,6 +66,45 @@ const hist = await graph.aggregate({
   bins: 20,
 });
 ```
+
+## The corpus API
+
+```ts
+import { openCorpus } from '@fossil-lang/graph/corpus';
+
+const corpus = await openCorpus('https://data.example/graph', { query });
+
+corpus.types;                              // vertex types with counts and columns, edge types
+const box = await corpus.extent();         // the coordinates a window is expressed in
+const view = await corpus.window({ x: box.minX, y: box.minY, w: 100, h: 100 });
+const one = await corpus.node('https://example.org/person/15');
+const hood = await corpus.neighbours([one.id], { depth: 2 });
+```
+
+**One argument is the corpus and the other is the engine.** The host brings a
+`query` callback — DuckDB-WASM in a browser, a native `duckdb::Connection` on a
+server — and this package keeps its zero runtime dependencies. Three of the four
+members have to decode Parquet, and an engine also does the footer pruning a
+window would otherwise re-derive by hand. `read_text`, `read_parquet` and
+`parquet_metadata` are the whole of what it is asked for.
+
+**`id` is the subject IRI, never the `dense_id`.** Redoing the layout renumbers
+every vertex, so an address held outside the corpus names a different vertex
+after the next write. `node` refuses a `BigInt` with a `TypeError` that says so.
+The price is a scan of the `subject` column, because the corpus carries no index
+from a name to an address; `src/corpus.ts` measures it at the call site.
+
+**An answer says what it is missing.** `complete` is `true` only when every edge
+incident to the answer's vertices is in it. `gaps` names an orientation that was
+not read — the caller not asking and the corpus not publishing are different
+reasons and are reported as different reasons — and `neighbours` also returns
+the `frontier` its depth bound stopped at.
+
+**What it does not absorb**: the container. A tile is a range of rows, and
+whether one is a file or a row group inside a single file is not a question any
+manifest field answers. This reads the file-per-tile container that `fossil run`
+writes; handed the other it refuses by name, and it never globs, because a glob
+picks up the staged single-file copy beside the tiles and counts every row twice.
 
 ## The six verbs
 

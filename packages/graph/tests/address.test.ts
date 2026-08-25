@@ -7,7 +7,9 @@ import {
   CorpusManifestError,
   resolveCorpus,
   shiftFor,
+  tailRows,
   tileOf,
+  tilesOf,
   TILE_SHIFT,
 } from '../src/index.js';
 
@@ -24,21 +26,33 @@ const manifestFiles: Record<string, string> = JSON.parse(
   await readFile(fileURLToPath(new URL('./fixtures/manifest.json', import.meta.url)), 'utf8'),
 ) as Record<string, string>;
 
+/**
+ * The published vectors, **executed rather than restated**.
+ *
+ * `apps/corpus/guards/vectors.json` is the deliverable — the file a third party copies — and every
+ * other implementation reads it instead of transcribing it: the guard `published-vectors`, and a
+ * Rust test on the writer's side. A table transcribed here would be a fourth copy that drifts
+ * silently, which is the pathology the whole file exists to argue against.
+ */
+const vectors = JSON.parse(
+  await readFile(
+    fileURLToPath(new URL('../../../apps/corpus/guards/vectors.json', import.meta.url)),
+    'utf8',
+  ),
+) as {
+  tile_of: { vectors: Array<{ dense_id: string; tile: string }> };
+  declared_count: {
+    vectors: Array<{ count: string; chunk_size: number; tiles: string; tail_rows: string }>;
+  };
+};
+
 describe('tileOf', () => {
   it('reproduces the published border vectors', () => {
-    // The same table `apps/corpus/guards/vectors.json` publishes and `fossil-sinks` asserts in
-    // Rust. 2³¹ is where a port that took the shift as signed gives a negative tile; 2⁵³ is where
-    // one that went through a `Number` stops being exact.
-    for (const [denseId, tile] of [
-      [0n, 0n],
-      [4_095n, 0n],
-      [4_096n, 1n],
-      [8_191n, 1n],
-      [2_147_483_647n, 524_287n],
-      [2_147_483_648n, 524_288n],
-      [9_007_199_254_740_992n, 2_199_023_255_552n],
-    ] as const) {
-      expect(tileOf(denseId)).toBe(tile);
+    // 2³¹ is where a port that took the shift as signed gives a negative tile; 2⁵³ is where one
+    // that went through a `Number` stops being exact. Both are rows in the table below.
+    expect(vectors.tile_of.vectors.length).toBeGreaterThan(0);
+    for (const { dense_id, tile } of vectors.tile_of.vectors) {
+      expect(tileOf(BigInt(dense_id))).toBe(BigInt(tile));
     }
   });
 
@@ -55,6 +69,42 @@ describe('tileOf', () => {
     // DuckDB's default row-group size and the corpus's tile size before it was measured.
     expect(shiftFor(122_880)).toBeNull();
     expect(shiftFor(0)).toBeNull();
+  });
+});
+
+describe('tilesOf', () => {
+  it('reproduces the published declared_count vectors', () => {
+    // The borders that matter: 4,096 @ 4,096 is ONE tile (the off-by-one addresses a `chunk1` that
+    // nothing wrote), 4,097 is two with a tail of one (the tile a truncated corpus loses), 300 @ 64
+    // is the conformance corpus and catches a hard-coded stride, and 2⁵³+1 is where a `Number`
+    // division comes out one tile short and the tail disappears from a reader that never asks.
+    expect(vectors.declared_count.vectors.length).toBeGreaterThan(0);
+    for (const v of vectors.declared_count.vectors) {
+      const chunk = BigInt(v.chunk_size);
+      expect(tilesOf(BigInt(v.count), chunk)).toBe(BigInt(v.tiles));
+      expect(tailRows(BigInt(v.count), chunk)).toBe(BigInt(v.tail_rows));
+    }
+  });
+
+  it('still carries a row a Number implementation would fail', () => {
+    // The table proves nothing about the width if every row fits in 53 bits. This is the check that
+    // the separating row has not been dropped, which is how a published table quietly stops being
+    // evidence — the same guard the Morton half carries for its binary32 row.
+    const beyond = vectors.declared_count.vectors.filter(
+      (v) => !Number.isSafeInteger(Number(v.count)),
+    );
+    expect(beyond.length).toBeGreaterThan(0);
+    for (const v of beyond) {
+      const naive = BigInt(Math.ceil(Number(v.count) / v.chunk_size));
+      expect(naive).not.toBe(BigInt(v.tiles));
+    }
+  });
+
+  it('refuses a Number count, and a chunk size no shift addresses', () => {
+    expect(() => tilesOf(300 as unknown as bigint, 64n)).toThrow(TypeError);
+    expect(() => tilesOf(-1n, 64n)).toThrow(RangeError);
+    expect(tilesOf(300n, 122_880n)).toBeNull();
+    expect(tailRows(300n, 122_880n)).toBeNull();
   });
 });
 

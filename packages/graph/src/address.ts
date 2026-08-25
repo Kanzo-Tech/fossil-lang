@@ -21,6 +21,10 @@
  *   itself. So the host reads its own footers and hands the tile numbers back here.
  * - **No cache, no debounce, no sampling.** Those are the reader's, and they stay there.
  *
+ * `openCorpus` in `./corpus.ts` is the layer that does all three, by taking an engine from the host
+ * rather than growing one. It sits **on** this module and does not absorb it: the subpath
+ * `@fossil-lang/graph/address` stays importable with no dependencies and no `query`.
+ *
  * @see {@link resolveCorpus}
  */
 
@@ -29,6 +33,7 @@ import {
   GRAPH_INFO_PATH,
   join,
   mappings,
+  optionalCount,
   paths,
   required,
   requiredNumber,
@@ -84,6 +89,42 @@ export function tileOf(denseId: bigint, shift: bigint = TILE_SHIFT): bigint {
   return denseId >> shift;
 }
 
+/**
+ * How many tiles a declared row count occupies, or `null` when no shift addresses `chunkSize`.
+ *
+ * **This is the arithmetic the manifest's count exists for**, and until `vertex_count` and
+ * `edge_count` became required fields there was nothing to feed it: tiles are addressed and never
+ * listed, HTTP gives no directory, and a tree holding `chunk0..chunk16` was indistinguishable from
+ * a corpus with seventeen tiles. A hole in the middle breaks the addressing and is caught; a
+ * missing tail breaks nothing at all. One `read_text` of the manifest now settles it.
+ *
+ * `BigInt` for the same reason {@link tileOf} is, and the border is published rather than argued:
+ * `apps/corpus/guards/vectors.json`'s `declared_count` table carries 4,096 @ 4,096 → **one** tile
+ * (the off-by-one addresses a `chunk1.parquet` nothing wrote), 4,097 → two with a tail of one (the
+ * tile a truncated corpus loses), and 2⁵³+1, where a `Number` division comes out one tile short.
+ */
+export function tilesOf(count: bigint, chunkSize: bigint): bigint | null {
+  if (typeof count !== 'bigint') {
+    throw new TypeError(
+      `tilesOf takes a BigInt count; got ${typeof count}. Above 2^53 a Number loses the tail tile.`,
+    );
+  }
+  if (count < 0n) throw new RangeError(`a row count is unsigned; got ${count}`);
+  const shift = shiftFor(chunkSize);
+  if (shift === null) return null;
+  return (count + chunkSize - 1n) >> shift;
+}
+
+/**
+ * How many rows the last tile holds — `chunkSize` for a count that divides, the remainder
+ * otherwise, and `0` for an empty type, which has no last tile because it has none at all.
+ */
+export function tailRows(count: bigint, chunkSize: bigint): bigint | null {
+  const tiles = tilesOf(count, chunkSize);
+  if (tiles === null) return null;
+  return tiles === 0n ? 0n : count - (tiles - 1n) * chunkSize;
+}
+
 /** One vertex type's address: where its tiles are and which `dense_id` range each holds. */
 export interface VertexAddress {
   /** The type label, e.g. `Person`. */
@@ -94,6 +135,10 @@ export interface VertexAddress {
   readonly chunkSize: number;
   /** `log2(chunkSize)` — the shift that turns a `dense_id` into a tile number. */
   readonly shift: bigint;
+  /** The manifest's `vertex_count`, or `null` when it declares none. */
+  readonly count: bigint | null;
+  /** `ceil(count / chunkSize)`, or `null` when the manifest declares no count. */
+  readonly tiles: bigint | null;
   /** The tile holding `denseId`. */
   tileOf(denseId: bigint): bigint;
   /**
@@ -104,6 +149,12 @@ export interface VertexAddress {
    * That is a live design question on `/docs/conventions/addressing`, not something this resolves.
    */
   tileUrl(tile: number | bigint): string;
+  /**
+   * Every tile of this type, in order. Throws when the manifest declares no count, because then
+   * there is no set to enumerate — that is the difference between addressing a tile somebody asked
+   * for and knowing how many there are.
+   */
+  tileUrls(): readonly string[];
 }
 
 /** One orientation of one edge type: declared by the manifest, or absent from it. */
@@ -116,6 +167,14 @@ export interface AdjacencyAddress {
   /** `src_chunk_size` for `src`, `dst_chunk_size` for `dst` — a different space on a cross-type edge. */
   readonly chunkSize: number;
   readonly shift: bigint;
+  /**
+   * How many tiles this orientation has — **the endpoint vertex type's tile count, not the edge's.**
+   *
+   * An edge tile is addressed by a *vertex* tile, so `edge_count / chunk_size` is the wrong
+   * division and it is wrong quietly: on this corpus it gives ten where there are five, and every
+   * URL past the fifth composes cleanly and 404s. `null` when the endpoint type declares no count.
+   */
+  readonly tiles: bigint | null;
   tileOf(denseId: bigint): bigint;
   /** `<edge prefix><adj prefix>tile{k}.parquet`. A 404 is "these vertices have no edges here". */
   tileUrl(tile: number | bigint): string;
@@ -126,6 +185,11 @@ export interface EdgeAddress {
   readonly edgeType: string;
   readonly srcType: string;
   readonly dstType: string;
+  /**
+   * The manifest's `edge_count`, or `null` when it declares none. **One number for both
+   * orientations** — they are one relation stored twice — so it is not the tile count of either.
+   */
+  readonly count: bigint | null;
   /** Where the type lives, resolved against the corpus base and with a trailing separator. */
   readonly prefix: string;
   /**
@@ -242,13 +306,29 @@ function vertexAddress(base: string, path: string, yaml: ScannedManifest): Verte
     );
   }
   const prefix = prefixOf(join(base, required(yaml, path, 'prefix')));
+  const count = optionalCount(yaml, 'vertex_count');
+  const tiles = count === null ? null : tilesOf(count, BigInt(chunkSize));
+  const tileUrl = (tile: number | bigint): string => `${prefix}chunk${BigInt(tile)}.parquet`;
   return {
     type,
     prefix,
     chunkSize,
     shift,
+    count,
+    tiles,
     tileOf: (denseId) => tileOf(denseId, shift),
-    tileUrl: (tile) => `${prefix}chunk${BigInt(tile)}.parquet`,
+    tileUrl,
+    tileUrls: () => {
+      if (tiles === null) {
+        throw new CorpusManifestError(
+          `${path} declares no vertex_count, so how many tiles ${type} has is not derivable — ` +
+            `tiles are addressed and never listed, and HTTP gives no directory to fall back on`,
+        );
+      }
+      const urls: string[] = [];
+      for (let k = 0n; k < tiles; k += 1n) urls.push(tileUrl(k));
+      return urls;
+    },
   };
 }
 
@@ -313,6 +393,7 @@ function edgeAddress(
       column: COLUMN[alignedBy],
       chunkSize: vertex.chunkSize,
       shift: vertex.shift,
+      tiles: vertex.tiles,
       tileOf: (denseId) => tileOf(denseId, vertex.shift),
       tileUrl: (tile) => `${tilePrefix}tile${BigInt(tile)}.parquet`,
     });
@@ -322,6 +403,7 @@ function edgeAddress(
     edgeType,
     srcType,
     dstType,
+    count: optionalCount(yaml, 'edge_count'),
     prefix,
     directions: (['src', 'dst'] as const).filter((d) => declared.has(d)),
     adjacency: (direction) => declared.get(direction) ?? null,

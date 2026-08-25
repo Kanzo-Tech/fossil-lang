@@ -14,28 +14,12 @@ import type {
   ExecuteSqlParams,
   ExecuteSqlResult,
 } from './generated.js';
+import type { QueryFn, QueryRow } from './query.js';
 
-/** One row of a DuckDB result, as a plain `{ column: value }` object. */
-export type QueryRow = Record<string, unknown>;
-
-/**
- * The host's DuckDB-WASM query callback. Runs the SQL the verb logic emits and
- * resolves the rows as plain objects.
- *
- * In keasy this wraps the Mosaic coordinator, e.g.:
- *
- * ```ts
- * const query: QueryFn = async (sql) => {
- *   const table = await coordinator.query(sql, { type: 'arrow' });
- *   return table.toArray().map((r) => r.toJSON());
- * };
- * ```
- *
- * (Mosaic returns an Arrow table; the binding's WASM core expects row objects,
- * so the host adapts once here — keeping this package free of an Arrow/Mosaic
- * dependency.)
- */
-export type QueryFn = (sql: string) => Promise<QueryRow[]>;
+// The verb surface and `openCorpus` ask the host for exactly the same thing, so there is one type
+// for it and it lives where the WASM cannot reach — see `query.ts`. Re-exported rather than moved
+// out of sight: `createGraphClient` is where a host first meets it.
+export type { QueryFn, QueryRow } from './query.js';
 
 /** Options for {@link createGraphClient}. */
 export interface CreateGraphClientOpts {

@@ -15,7 +15,7 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "//exports": "`.` is the verb surface and it needs the WASM: `client.js` and `load.js` both static-import `../pkg/fossil_graph_wasm.js`, so importing the root barrel instantiates nothing but does resolve it, and a consumer without that build output cannot load the module at all. `./address` is the addressing half, whose closure is `address.js` + `manifest.js` and nothing else — synchronous, WASM-free, no `query` callback. That is not a claim in a comment: `tests/address-standalone.test.ts` compiles the closure into a package directory with no `pkg/` in it and imports this subpath from a child Node process.",
+  "//exports": "`.` is the verb surface and it needs the WASM: `client.js` and `load.js` both static-import `../pkg/fossil_graph_wasm.js`, so importing the root barrel instantiates nothing but does resolve it, and a consumer without that build output cannot load the module at all. `./address` is the addressing half, whose closure is `address.js` + `manifest.js` and nothing else — synchronous, WASM-free, no `query` callback. `./corpus` is the reference API, `openCorpus`, and it sits ON the addressing rather than absorbing it: its closure is `corpus.js` + those same two, because the engine it needs arrives as a callback instead of a dependency. Neither of those is a claim in a comment: `tests/address-standalone.test.ts` compiles each closure into a package directory with no `pkg/` in it and imports the subpath from a child Node process.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -24,6 +24,10 @@
     "./address": {
       "types": "./dist/address.d.ts",
       "import": "./dist/address.js"
+    },
+    "./corpus": {
+      "types": "./dist/corpus.d.ts",
+      "import": "./dist/corpus.js"
     },
     "./pkg/fossil_graph_wasm_bg.wasm": "./pkg/fossil_graph_wasm_bg.wasm"
   },

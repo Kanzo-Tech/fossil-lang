@@ -130,6 +130,26 @@ export function requiredNumber(manifest: ScannedManifest, path: string, key: str
   return value;
 }
 
+/**
+ * A declared row count — `vertex_count` or `edge_count` — as a `BigInt`, or `null` when absent.
+ *
+ * `null` rather than `0`, because the two are different findings and only one of them is a corpus:
+ * a declared `0` is an empty type and legal, an absent count is a manifest that cannot say how far
+ * the corpus goes. {@link resolveCorpus} composes URLs either way; {@link openCorpus} refuses,
+ * because enumerating tiles is the one thing the count is for.
+ *
+ * **Parsed to `BigInt` off the digits, never through `Number`.** `requiredNumber` beside this would
+ * be wrong for exactly the case `apps/corpus/guards/vectors.json` publishes: at 2⁵³+1 a `Number`
+ * count reads as 2⁵³, the ceiling comes out one tile short, and the tail tile disappears from a
+ * reader that never asks for it. Anything that is not a run of decimal digits is `null` — a scanner
+ * that guessed would be deciding what the writer meant.
+ */
+export function optionalCount(manifest: ScannedManifest, key: string): bigint | null {
+  const value = manifest[key];
+  if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return null;
+  return BigInt(value.trim());
+}
+
 /** A sequence of paths — `vertices` and `edges` on the index. */
 export function paths(manifest: ScannedManifest, key: string): string[] {
   const value = manifest[key];

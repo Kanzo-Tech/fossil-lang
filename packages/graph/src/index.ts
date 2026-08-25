@@ -46,7 +46,16 @@ export type {
 // output — which is why the subpath exists and why `tests/address-standalone.test.ts` imports it
 // from a package directory with no `pkg/` in it. The re-export below is for consumers who are
 // already using the verbs and want both halves from one specifier.
-export { resolveCorpus, shiftFor, tileOf, TILE_SHIFT, CorpusManifestError, GRAPH_INFO_PATH } from './address.js';
+export {
+  resolveCorpus,
+  shiftFor,
+  tailRows,
+  tileOf,
+  tilesOf,
+  TILE_SHIFT,
+  CorpusManifestError,
+  GRAPH_INFO_PATH,
+} from './address.js';
 export type {
   AdjacencyAddress,
   Direction,
@@ -59,6 +68,30 @@ export type {
   VertexAddress,
   Window,
 } from './address.js';
+
+// The reference API over that same addressing: `openCorpus(url, { query })` and the four members.
+// It is `@fossil-lang/graph/corpus` for the same reason the addressing is a subpath of its own —
+// it needs no WASM, only the engine the host already has — and this re-export is for a consumer
+// already holding the verbs. `tests/address-standalone.test.ts` proves the subpath, not this line.
+export { CorpusReadError, openCorpus } from './corpus.js';
+export type {
+  Answer,
+  Box,
+  Corpus,
+  CorpusEdge,
+  CorpusEdgeType,
+  CorpusField,
+  CorpusTypes,
+  CorpusVertex,
+  CorpusVertexType,
+  Extent,
+  Neighbourhood,
+  NeighboursParams,
+  NodeParams,
+  OpenCorpusOptions,
+  WindowAnswer,
+  WindowParams,
+} from './corpus.js';
 
 // The codegen'd wire types (params + results + the Operation envelope). Re-exported
 // so consumers type their calls without reaching into the generated module.
