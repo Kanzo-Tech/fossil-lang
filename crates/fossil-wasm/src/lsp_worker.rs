@@ -327,7 +327,7 @@ fn handle_notification(
 // ---------- Capability surface ----------
 
 fn server_capabilities() -> serde_json::Value {
-    // Mirror fossil-lsp/src/main.rs `server_capabilities` 1:1 — construct an
+    // Mirror fossil-lsp/src/lib.rs `server_capabilities` 1:1 — construct an
     // `lsp_types::ServerCapabilities` and serialize it, so the shape stays
     // in sync with the typed surface `fossil-lsp` advertises.
     let caps = ServerCapabilities {
