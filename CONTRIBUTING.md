@@ -171,7 +171,7 @@ So:
 
 - **The decision itself** is the page that states the rule. `apps/docs/content/docs/design/`
   for the language, `apps/docs/content/docs/format/` for the artifact, `grammar.bnf` for the
-  syntax, `apps/docs/content/docs/book/typing.mdx` for the static semantics.
+  syntax, `apps/docs/content/docs/design/typing.mdx` for the static semantics.
 - **The alternative you rejected** goes to `design/discarded.mdx`, in its four fields —
   the idea, why it is attractive, the evidence against it, and **what would bring it
   back**. An entry that cannot state the last field does not go on the page. That field
