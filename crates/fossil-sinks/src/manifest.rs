@@ -169,10 +169,20 @@ pub struct VertexInfo {
 /// So it is a second table, and it is **tiled like the first one**, with the
 /// same `chunk_size` and the same `tile{k}` spelling under a prefix of its own.
 /// A single file would be simpler to write and to read, and it is the container
-/// this format refuses by name everywhere else: at five million vertices the
-/// index is one ~40 MB object where the payload is a hundred and twenty-two
-/// addressable ones. A reader that already knows how to seek a tile needs
-/// nothing new to seek this.
+/// this format refuses by name everywhere else: at five million vertices, cut at
+/// the default `chunk_size`, the payload is **1,221** addressable objects and a
+/// single-file index would be one of ~60 MB beside them. A reader that already
+/// knows how to seek a tile needs nothing new to seek this.
+///
+/// **Both of those numbers were wrong when this paragraph was written**, and the
+/// way they were wrong is worth keeping. It said *"a hundred and twenty-two"*
+/// where `5,000,000 / 4,096` is 1,221 — a factor of ten, transcribed and never
+/// divided. And it said *"one ~40 MB object"*, which is `subject` at 8.016
+/// compressed bytes per row and nothing else: that is the size of the **scan**
+/// this index exists to avoid, not of the index, which carries `subject` **and**
+/// `dense_id` and is half again as large. A figure borrowed from the cost you are
+/// arguing against is the easiest one to get wrong, because it is sitting right
+/// there in the sentence above it.
 ///
 /// # What a reader does with it
 ///
