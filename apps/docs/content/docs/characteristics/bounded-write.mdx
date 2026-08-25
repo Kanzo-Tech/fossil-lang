@@ -4,9 +4,6 @@ description: A write path that honours a declared memory budget at any N — the
 direction:
   summary: The write path honours a declared memory budget at any N, so a corpus larger than the machine is a slower run rather than an OOM.
   arguedIn: /docs/design/larger-than-ram
-today:
-  summary: "`fossil run --memory-gib` declares one budget, a spill test asserts the mechanism in CI, and ten million vertices peak at 8.39 GiB against roughly 21 unbounded — but the budget now governs only the executor, the layout pass that follows it is bounded by nothing, and the peak still grows with N."
-  backedBy: crates/fossil-df/tests/spill.rs
 ---
 
 ## The destination

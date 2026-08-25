@@ -4,9 +4,6 @@ description: The engine streams and our seams collected. Three were named on str
 direction:
   summary: Every stage boundary in the write path is a stream, so no stage ever holds a whole value and memory follows the working set rather than the corpus.
   arguedIn: /docs/design/streaming
-today:
-  summary: Of the three seams named here, the layout's edge list landed as a CSR read on 2026-08-05 and the encoder's file list was measured and refuted — the materialised graph is the one that still collects, at 1.64 GiB of Arrow at ten million.
-  backedBy: crates/fossil-df/src/lib.rs
 ---
 
 ## The destination

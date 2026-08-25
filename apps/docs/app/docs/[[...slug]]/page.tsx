@@ -4,7 +4,7 @@ import { DocsBody, DocsDescription, DocsPage, DocsTitle } from "fumadocs-ui/page
 import { MarkdownCopyButton, ViewOptionsPopover } from "fumadocs-ui/layouts/docs/page";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
-import { Registers } from "@/components/registers";
+import { DirectionNote } from "@/components/direction";
 
 export default async function Page(props: { params: Promise<{ slug?: string[] }> }) {
   const params = await props.params;
@@ -24,9 +24,9 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover markdownUrl={markdownUrl} />
       </div>
-      {/* Above the body, always. The two registers are the page's contract with the reader, and a
+      {/* Above the body, always. The direction is the page's contract with the reader, and a
           contract at the bottom is a footnote. */}
-      <Registers direction={page.data.direction} today={page.data.today} />
+      <DirectionNote direction={page.data.direction} />
       <DocsBody>
         <MDX components={getMDXComponents()} />
       </DocsBody>

@@ -4,9 +4,6 @@ description: One new expression form and one new value type. Where a statement g
 direction:
   summary: The primitive is a triple term as a value assignable only where the shape declares `rdfs:Proposition`, a reifier is an ordinary mapping so the sugar desugars to one, and in the corpus a reifier is a vertex while a triple term is the edge row it annotates — with a discriminator in the id space for the case where there is no row.
   arguedIn: /docs/design/corpus
-today:
-  summary: There is no triple-term syntax — the RDF-star-era `<< s p o >>` went with the RDF-specific surface, so `<<` is not a token and `<` is only comparison — the corpus has no graph column at all, and our Turtle parser accepts a triple term on the way in — not because anyone decided that, but because rudof enables `oxttl`'s `rdf-12` by feature unification. Since 2026-08-07 that is declared rather than inherited, and a literal with a base direction is refused at the pivot instead of being flattened into text a host lays out backwards.
-  backedBy: grammar.bnf
 ---
 
 ## Where the spec is, and what that means for us

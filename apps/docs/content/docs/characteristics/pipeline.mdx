@@ -4,9 +4,6 @@ description: A source rarely arrives shaped the way a mapping needs it. That wor
 direction:
   summary: Sources compose through the verbs a relation carries — `User.where(User.age >= 18)` — which our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan, so the fourteen MIR operators are the pipeline's vocabulary and this compiler never grows a planner beside the one underneath it.
   arguedIn: /docs/design/algebra
-today:
-  summary: The source pipeline runs — `Adults := User.where(User.age >= 18)` compiles, types and writes the corpus the program describes, five rows in and three out measured through the binary, and a `join` brings a column its source does not have — with three verbs (`where`, `select`, `join`), an inner join whose `on` is a predicate over qualified columns, and no rewrite rules at all.
-  backedBy: crates/fossil-cli/tests/run_source_pipeline.rs
 ---
 
 ## The question this answers

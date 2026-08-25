@@ -4,9 +4,6 @@ description: Three jobs — the source, the shape, and sensitivity. The third is
 direction:
   summary: Types come from the source descriptor and the output shape with no user annotation, the shape is the target type so a mapping that could violate it does not compile, and a shape may declare a property sensitive — in which case a raw value is not assignable to it and only a pseudonym is.
   arguedIn: /docs/design/types
-today:
-  summary: The shape a program names reaches the tracked typecheck as a Salsa input, so an undeclared property key, an incompatible primitive and a required property never written are each a compile error; what no check reaches is the upper bound of a cardinality, the type of a join condition, and sensitivity.
-  backedBy: crates/fossil-hir/src/shapes.rs
 ---
 
 ## Why this is the core and not a feature

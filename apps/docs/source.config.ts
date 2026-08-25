@@ -6,19 +6,24 @@ import { z } from "zod";
 /**
  * The editorial stance, made a type.
  *
- * Every page under `characteristics/` and `protocols/` says two things and keeps them apart:
+ * A page that describes something not yet built declares where it is going:
  *
  *   direction — where this is going, and the page on this site that argues for it
- *   today     — what is true right now, and the file that would go red if it stopped being
  *
- * fumadocs' own page schema strips unknown keys, so without this extension neither block ever
- * reaches `page.data` and the renderer has nothing to show. That is all this file does — it checks
- * *shape*, and it cannot check *presence*, because a zod schema does not know which directory the
- * file came from and the index carries neither block by design.
+ * Everything else on a page describes what is there. That asymmetry is the stance: the destination
+ * is marked, the present is not, and a page with no `direction:` is making no claim about a future.
  *
- * Presence is `content.test.ts`, which does know the path, and which also checks that every path a
- * page cites is still on disk. It runs ahead of `next build` in the `build` script, so both halves
- * fail the same way: the build stops.
+ * There was a second block, `today`, carrying a one-sentence status and a `backedBy` path to a file
+ * that would go red if the sentence stopped holding. It is gone, and the reason is measured rather
+ * than editorial: the guard could only prove the cited file existed, never that it asserted the
+ * claim, and eight of forty-nine citations had drifted to a line saying something else — one to a
+ * blank line, one fifty-three lines adrift — with CI green throughout. A field that cannot fail
+ * when it is wrong is not evidence; it is a citation-shaped decoration. Evidence is transclusion:
+ * `<Program src= region= />` reads the file at build time and an absent region stops the build.
+ *
+ * fumadocs' own page schema strips unknown keys, so without this extension the block never reaches
+ * `page.data` and the renderer has nothing to show. That is all this file does — it checks *shape*.
+ * Presence is `content.test.ts`, which knows the path a file came from.
  */
 const direction = z.object({
   summary: z.string().min(1),
@@ -28,20 +33,11 @@ const direction = z.object({
   arguedIn: z.string().min(1),
 });
 
-const today = z.object({
-  summary: z.string().min(1),
-  // A path to something on disk that would fail or change if this stopped being true. The literal
-  // `unmeasured` is the honest alternative and the only one — "we think so" is not a third option.
-  backedBy: z.string().min(1).optional(),
-  unmeasured: z.literal(true).optional(),
-});
-
 export const docs = defineDocs({
   dir: "content/docs",
   docs: {
     schema: pageSchema.extend({
       direction: direction.optional(),
-      today: today.optional(),
     }),
   },
 });

@@ -4,9 +4,6 @@ description: A pure function of one row — literals, a qualified column referen
 direction:
   summary: An expression is a total function of one row — a call into the value library, an operator, a conditional — so it compiles to exactly one SQL expression, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
   arguedIn: /docs/design/generic-functions
-today:
-  summary: Every expression node the parser builds has a lowering arm — `HirExpr` carries twelve forms, and the fallback that used to swallow an expression in silence is a diagnostic only the parser's own error node reaches — and of the 35 catalogued functions an expression may call, 23 render on the DataFusion backend and the twelve that do not are pinned in a list a test compares against what actually fails.
-  backedBy: crates/fossil-hir/src/lower.rs
 ---
 
 ## An expression is a function of one row

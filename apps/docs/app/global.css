@@ -14,9 +14,9 @@
  */
 
 /*
- * The one thing the site actually needs from CSS: the two registers must be distinguishable at a
- * glance, without reading them. A page says where it is going and what is true today; if those look
- * alike the whole editorial stance collapses into prose nobody can audit.
+ * The one thing the site actually needs from CSS: a declared direction has to be distinguishable
+ * from the body at a glance, without reading it. The page's own prose describes what is there; this
+ * block is the one place saying where it is going, and the two must not look alike.
  */
 .register {
   --register-accent: var(--color-fd-primary);
@@ -25,11 +25,6 @@
   padding-inline: 1rem;
   border-radius: 0 0.5rem 0.5rem 0;
   background: color-mix(in oklab, var(--register-accent) 7%, transparent);
-}
-
-.register--today {
-  --register-accent: var(--color-fd-muted-foreground);
-  border-inline-start-style: dashed;
 }
 
 .register__label {

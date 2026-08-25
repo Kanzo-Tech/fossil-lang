@@ -4,9 +4,6 @@ description: The corpus is a promise made to strangers. How the format ships —
 direction:
   summary: The format ships as a specification with published test vectors and a single compiled oracle every reader calls, with round-trip conformance between the writer and every reader gating a merge.
   arguedIn: /docs/design/corpus
-today:
-  summary: An artefact validator reads the produced tree with plain SQL over DuckDB and never through our own reader; three tables of border vectors are published and executed on both sides of the writer; the `BigInt` boundary is held by a type rather than the decided lint rule; the verbs call one compiled oracle while the addressing deliberately does not; and two independent readers agree on addresses, leaving the wasm reader and the payload half of the round trip undone.
-  backedBy: crates/fossil-engine/tests/conformance.rs
 ---
 
 ## Why a corpus needs a contract at all

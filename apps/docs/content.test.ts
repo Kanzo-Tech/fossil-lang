@@ -7,46 +7,47 @@ import { repoRoot } from "@/lib/repo";
 /**
  * The editorial guard.
  *
- * This site says two things about every characteristic and every protocol, and keeps them apart:
- * where fossil is going, and what is true today. Prose cannot hold that line on its own — a target
- * quietly restated as a fact is the exact failure this whole site exists to avoid, and it is
- * invisible in a diff. So the line is a test.
+ * A page that describes something not yet built declares where it is going, and names the page here
+ * that argues for it. Everything else describes what is there. Prose cannot hold that line on its
+ * own — a destination quietly restated as a fact is the exact failure this site exists to avoid,
+ * and it is invisible in a diff. So the line is a test.
  *
- * Three assertions, and each one buys something a reader could otherwise be wrong about:
+ * Two assertions, and each buys something a reader could otherwise be wrong about:
  *
- *   1. Both registers are present. A page with only `direction:` reads as vapour; a page with only
- *      `today:` reads as a changelog. Neither is this site.
- *   2. Every `arguedIn` resolves to another page of this site. A target without an argument behind
+ *   1. A declared `direction:` is complete: a summary and an argument. Half a block is a page that
+ *      gestures at a future and never says who would settle it.
+ *   2. Every `arguedIn` resolves to another page of this site. A destination with no argument behind
  *      it is one person's preference written in the voice of a plan — and an argument kept anywhere
  *      but here is a second reference, which is the thing this site exists to be instead of.
- *   3. Every `backedBy` exists on disk. This is the one that catches the real drift: a test gets
- *      renamed, the claim it backed keeps its confident sentence, and nothing anywhere notices.
- *      Renaming that test now fails the docs build, because `build` runs this first.
  *
- * A fourth assertion joined them and is of a different kind: it does not check a citation, it *is*
- * the evidence one page cites — see `fossilDependenciesOf` below and `architecture.mdx`, whose
- * `backedBy` points here. A page may cite this file only for a claim this file actually measures.
+ * A third assertion joined them and is of a different kind: it does not check a citation, it *is*
+ * the evidence one page cites — see `fossilDependenciesOf` below. A page may cite this file only for
+ * a claim this file actually measures.
  *
- * What it does NOT prove, and this matters:
+ * WHAT WAS HERE AND IS NOT, because the deletion is the load-bearing part.
  *
- *   - That a `backedBy` path actually *tests* the claim. It checks that the file is there, not that
- *     it asserts anything. A path to a source file that merely contains the feature passes here,
- *     and two of them do today — see `bounded-write.mdx`, whose spill test is owed and has not
- *     been written. The page says so in its own prose; a reader gets the truth, the guard
- *     only gets the path.
- *   - That either sentence is *true*. No test can. What it can do is make the citation falsifiable,
- *     which is the difference between a claim and an assertion.
- *   - Anything about `protocols/`, which has no pages yet. The directory is in the list so the first
- *     one arrives already governed, rather than governed later by someone remembering.
- *   - That the page an `arguedIn` names actually *argues* the direction. Same gap as `backedBy`, and
- *     it is the reason the argument pages carry their own admission rule in prose: an entry that
- *     cannot state what would reverse it does not go on `design/discarded`.
+ * There was a second register, `today:`, with a `backedBy` path to a file that would go red if the
+ * sentence stopped holding. Both are gone. The guard behind `backedBy` could prove the file existed
+ * and nothing else, and the measurement is unambiguous: of forty-nine `file:line` citations, eight
+ * had drifted to a line that says something different — one to a blank line, one fifty-three lines
+ * adrift, one naming an enum that had moved — with CI green the whole time. And `unmeasured: true`,
+ * the honest alternative the schema offered, was used by exactly zero of nine pages: every one of
+ * them preferred a weak citation to admitting there was no evidence. A field that cannot fail when
+ * it is wrong is not evidence, and one nobody uses honestly is not an escape hatch.
+ *
+ * What replaced it is not a wider guard. It is `<Program src= region= />`, which reads the file at
+ * build time: a region that no longer exists stops the build, and the code on the page is the code
+ * on disk rather than a transcription of it. That is the property `backedBy` was reaching for.
+ *
+ * What this still does NOT prove:
+ *
+ *   - That the sentence is *true*. No test can. What it can do is make the argument locatable.
+ *   - That the page an `arguedIn` names actually *argues* the direction. It is the reason the
+ *     argument pages carry their own admission rule in prose: an entry that cannot state what would
+ *     reverse it does not go on `design/discarded`.
  */
 
 const CONTENT_ROOT = join(process.cwd(), "content/docs");
-
-/** The two directories the stance governs. `protocols/` is empty in this phase and still listed. */
-const GOVERNED = ["characteristics", "protocols"];
 
 interface Page {
   /** Repo-relative, so a failure message names the file the way `git` and the ADRs do. */
@@ -72,48 +73,35 @@ function read(path: string): Page {
   };
 }
 
-const inGovernedDirs = GOVERNED.flatMap((group) => mdxUnder(join(CONTENT_ROOT, group))).map(read);
-
 /**
- * And anywhere else, any page that opts in.
+ * Declaring a direction is the opt-in, and there is no governed directory.
  *
- * `architecture.mdx` sits at the root next to the index, which carries no registers by design, so
- * the directory rule alone would let it declare a `direction:` block and
- * then never be held to it — the one page on this site whose whole subject is a shape that does not
- * exist yet. Declaring either block is the opt-in; declaring one and not the other is the failure.
+ * There used to be one — `characteristics/`, plus `protocols/`, which never had a page and sat in
+ * the list anyway. Both are gone: `characteristics/` was the section that existed to carry the two
+ * registers, every one of its pages named a `design/` page as its `arguedIn`, and with one register
+ * left it folded into the pages it was already pointing at. A directory rule needs a directory.
+ *
+ * So the rule is now the honest one it was always trying to be: a page owes an argument because it
+ * claims a future, not because of where it sits in the tree.
  */
-const opted = mdxUnder(CONTENT_ROOT)
-  .filter((path) => !inGovernedDirs.some((page) => page.path === path))
+const pages: Page[] = mdxUnder(CONTENT_ROOT)
   .map(read)
-  .filter((page) => "direction" in page.data || "today" in page.data);
+  .filter((page) => "direction" in page.data);
 
-const pages: Page[] = [...inGovernedDirs, ...opted];
-
-describe("every governed page declares both registers", () => {
-  // A directory rename that emptied `characteristics/` would otherwise turn every assertion below
-  // into a vacuous pass over zero pages, which is the classic way a guard stops guarding.
-  it("finds pages to govern at all", () => {
+describe("a declared direction is complete", () => {
+  // Opt-in has a failure mode a directory rule did not: if the last `direction:` is deleted, every
+  // assertion below passes over zero pages and the guard reports green having checked nothing. This
+  // is the classic way a guard stops guarding, and it is measured in this repo rather than feared —
+  // `alpha-steps` matched a corpus of zero for a while over in kanzo-ui.
+  it("finds a page that declares one at all", () => {
     expect(pages.length).toBeGreaterThan(0);
   });
 
-  it.each(pages)("$id declares direction and today", ({ data }) => {
+  it.each(pages)("$id declares a summary and an argument", ({ data }) => {
     const direction = data.direction as { summary?: string; arguedIn?: string } | undefined;
-    const today = data.today as
-      | { summary?: string; backedBy?: string; unmeasured?: unknown }
-      | undefined;
 
     expect(direction?.summary, "direction.summary: one sentence, where this is going").toBeTruthy();
     expect(direction?.arguedIn, "direction.arguedIn: a /docs/… route on this site").toBeTruthy();
-    expect(today?.summary, "today.summary: one sentence, what is true right now").toBeTruthy();
-
-    // Exactly one, never both, never neither. `unmeasured: true` is the honest way to say there is
-    // no evidence; a page may not claim evidence and disclaim it in the same breath.
-    const hasBacking = typeof today?.backedBy === "string" && today.backedBy.length > 0;
-    const declaresUnmeasured = today?.unmeasured === true;
-    expect(
-      [hasBacking, declaresUnmeasured].filter(Boolean),
-      "today: exactly one of `backedBy: <path>` or `unmeasured: true`",
-    ).toHaveLength(1);
   });
 });
 
@@ -250,7 +238,7 @@ function pageFileForRoute(route: string): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-describe("every cited path is still there", () => {
+describe("every argument is a page of this site", () => {
   it.each(pages)("$id names an argument on this site", ({ path, data }) => {
     const arguedIn = (data.direction as { arguedIn?: string } | undefined)?.arguedIn as string;
 
@@ -260,14 +248,6 @@ describe("every cited path is still there", () => {
     expect(target, `${arguedIn} does not resolve to a page under content/docs/`).not.toBeNull();
     expect(target, `${arguedIn} is the page itself, which argues nothing`).not.toBe(path);
   });
-
-  it.each(pages.filter((p) => (p.data.today as { backedBy?: string })?.backedBy))(
-    "$id cites evidence that exists",
-    ({ data }) => {
-      const backedBy = (data.today as { backedBy?: string }).backedBy as string;
-      expect(existsSync(join(repoRoot, backedBy)), `${backedBy} is not on disk`).toBe(true);
-    },
-  );
 });
 
 /**

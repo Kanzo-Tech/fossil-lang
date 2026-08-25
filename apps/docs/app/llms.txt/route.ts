@@ -50,12 +50,12 @@ const SUMMARY =
 
 /**
  * The one thing a machine has to know before it reads any page here, and the one thing it cannot
- * infer from a list of titles. This site states targets and facts in the same voice on purpose and
- * keeps them apart structurally instead; an agent that flattens the two reports a plan as a
- * feature, which is the exact failure the registers exist to prevent.
+ * infer from a list of titles. Most of this site describes what is built; a few pages describe a
+ * destination and say so in a field rather than in their tone. An agent that flattens the two
+ * reports a plan as a feature, which is the exact failure the field exists to prevent.
  */
 const REGISTERS =
-  "**This site documents a language that is partly built, and says so per page.** Pages under `characteristics/` — and any page that opts in — carry two registers, and they are not interchangeable. `direction` is where fossil is going, and names the page on this site that argues for it (`arguedIn`) — the prior art it was read against, the measurement, and the observation that would reverse it. `today` is what is true right now, and either names a file on disk that would fail if it stopped being true (`backedBy`) or declares itself `unmeasured`. Never report a `direction` as a description of the current implementation. The registers are rendered above the body of every page that has them, and `content.test.ts` fails the build if either is missing or cites something that is not there.";
+  "**This site documents a language that is partly built, and marks the difference structurally.** A page that describes something not yet built carries a `direction` block: one sentence saying where fossil is going, plus `arguedIn`, a route to the page here that argues for it — the prior art it was read against, the measurement, and the observation that would reverse it. It is rendered above the body, and `content.test.ts` fails the build if a page declares one without an argument, or names an argument that is not a page of this site. Never report a `direction` as a description of the current implementation. Everything on a page that carries no `direction` describes what is there.";
 
 /**
  * Abort rather than emit a page with no note.
