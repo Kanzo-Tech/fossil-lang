@@ -960,7 +960,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
     assert_eq!(d.help, None, "no repair means no `help:`, not an empty one");
 }
 
-// ── The four ways a named document fails to produce a shape ────────────────
+// ── The five ways a named document fails to produce a shape ────────────────
 
 /// Every one of these was a silent `None` — the same answer as "this program
 /// names no document" — so the commonest mistake, a misspelt shape name,
@@ -984,13 +984,24 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 /// which name the document and the reason. The misspelt-shape row is gone with
 /// the CURIE: a bare name that binds nothing is a name nobody declared, which
 /// is a different sentence and the last case below.
+///
+/// # The arity row, and why it is spelled out to the last word
+///
+/// `ShapeBindError::Arity` is the fifth, and the one nothing went red for. Its
+/// message interpolated the count in front of a literal `th` and printed «there
+/// is no 3th shape»; `bbedcc1` rewrote the clause and no test in the tree
+/// carried either spelling, before the fix or after. So the substring below is
+/// the whole clause and not a keyword — a rendering defect is invisible to a
+/// substring that stops before the rendering — and the binding names THREE
+/// shapes on purpose, because 1, 2 and 3 are exactly the ordinals English is
+/// irregular for and 3 is the largest of them.
 #[test]
 fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
 
-    fn program(document: &str, shape: &str) -> String {
+    fn program(document: &str, binds: &str, shape: &str) -> String {
         format!(
-            "type {{ T }} := io.shex(\"{document}\")\n\
+            "type {{ {binds} }} := io.shex(\"{document}\")\n\
              users := io.csv(\"x.csv\")\n\
              User : {shape} from users\n    \
              @subject = \"http://example.org/u/{{users.id}}\"\n    \
@@ -1002,28 +1013,38 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     // message must carry).
     let cases: &[(String, &str, &str, &str)] = &[
         (
-            program("missing.shex", "T"),
+            program("missing.shex", "T", "T"),
             "person.shex",
             PERSON_DOCUMENT,
             "its document `missing.shex` could not be read",
         ),
         (
-            program("person.unknown", "T"),
+            program("person.unknown", "T", "T"),
             "person.unknown",
             PERSON_DOCUMENT,
             "its document `person.unknown` could not be read as a shape document",
         ),
         (
-            program("broken.shex", "T"),
+            program("broken.shex", "T", "T"),
             "broken.shex",
             "!malformed expected a shape line\n",
             "expected a shape line",
         ),
         (
-            program("person.shex", "Persn"),
+            program("person.shex", "T", "Persn"),
             "person.shex",
             PERSON_DOCUMENT,
             "`Persn` is not a shape this program declares",
+        ),
+        (
+            // `PERSON_DOCUMENT` declares one shape and the binding names three,
+            // so `Third` — the surplus name the header uses — binds nothing.
+            program("person.shex", "T, Second, Third", "Third"),
+            "person.shex",
+            PERSON_DOCUMENT,
+            "`Third` is declared and bound nothing: the binding names 3 shape(s) \
+             and the document declares 1. Names bind by POSITION, so there is no \
+             shape 3 for it to take.",
         ),
     ];
 
