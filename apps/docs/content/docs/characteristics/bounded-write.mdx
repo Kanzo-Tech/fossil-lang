@@ -36,6 +36,18 @@ The finding that mattered: **RSS was already 14.61 GiB when `enrich_layout` exec
 statement**, and the entire layout pass added 0.13 GiB net. The memory was spent before the pass
 everyone suspected had even started.
 
+It also taught its readers what a phase row is *not*, with the most counter-intuitive number of the
+investigation: **reading all 71M edges into a vector measured −3.12 GiB — more was released than
+reserved.** The vector is 568 MB, so the expected row was +0.57 GiB and the sign is wrong before the
+magnitude is. A row is the movement of *resident set size* across a phase, not the phase's own
+allocation: this one asked for 568 MB while the allocator was still handing back pages from the
+14.61 GiB the executor had left behind, and the return won by three gigabytes. Read as *what the
+phase costs*, it says the layout gives memory back, which it does not.
+
+That vector is gone — `enrich_layout` reads the CSR now, and what replaced the row is in the table
+further down. The rule for reading the probe outlived it: **a phase row localises, it does not
+attribute**, and the two numbers below that look like contradictions are the same effect.
+
 ### One budget, declared on the command — and it now reaches one engine
 
 `fossil run --memory-gib <GIB>` — fractions accepted, non-positive rejected at parse time. It
@@ -116,6 +128,16 @@ nothing about whether ten million vertices fit in 4 GiB — the numbers below ar
 measurement. And it only ever sees the plan `prefer_hash_join = false` leaves behind; a plan free to
 pick a hash join would still die, which is why that flag is cleared and not something the test would
 catch.
+
+**And the gap behind the test is larger than the test.** The 14.61 GiB above is *localised* — before
+the layout, in the write path — and it is not *attributed*. The budget bounds it without explaining
+it, and **a bound nobody can explain is a bound that moves when the plan does**: a different join
+order, a repartitioning, a DataFusion release, and the number is somewhere else with nothing to say
+so. What would attribute it is a **per-operator accounting of the pool at the moment RSS peaks**,
+against the phase table `FOSSIL_MEM_PROBE` already prints. `TrackConsumersPool` composes that report
+today and only when it refuses an allocation — the run that succeeds is the one nobody asks. Short of
+that, the spill test is the only thing standing between here and the same number returning
+unnoticed.
 </Callout>
 
 ## The numbers, at ten million vertices
