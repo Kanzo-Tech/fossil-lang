@@ -261,6 +261,9 @@ pub fn lower_to_mir_pg<'db>(
             key: prop.key.clone(),
             value,
         };
+        // The column's declared TYPE, per variant — and no wildcard, so a new
+        // variant cannot inherit someone else's type by falling through.
+        #[deny(clippy::wildcard_enum_match_arm)]
         match &prop.value {
             // `null` is refused as a property value by the checker (its type is
             // comparable with everything and assignable to nothing), so this is
@@ -969,6 +972,9 @@ fn substitute_edges<'db>(
     e: &HirExpr,
 ) -> HirExpr {
     let recur = |x: &HirExpr| substitute_edges(db, dm, templates, x);
+    // No wildcard: a variant added to `HirExpr` is a compile error here, not a
+    // sub-expression this walk silently stops recursing into.
+    #[deny(clippy::wildcard_enum_match_arm)]
     match e {
         HirExpr::Edge { target, args } => {
             // The arguments are resolved first: an edge whose argument is itself
@@ -1013,7 +1019,14 @@ fn substitute_edges<'db>(
                 })
                 .collect(),
         ),
-        other => other.clone(),
+        // The leaves, named — the same seven `contains_edge` answers `false` for.
+        HirExpr::FieldRef(_)
+        | HirExpr::ColumnRef { .. }
+        | HirExpr::StringLit(_)
+        | HirExpr::NullLit
+        | HirExpr::IntLit(_)
+        | HirExpr::FloatLit(_)
+        | HirExpr::BoolLit(_) => e.clone(),
     }
 }
 
@@ -1058,6 +1071,9 @@ fn lower_property_value<'db>(
     source_binding: &SmolStr,
     assert_line: Option<u32>,
 ) -> Expr<'db> {
+    // Exhaustive, no wildcard: this is where «every `HirExpr` variant has a
+    // lowering arm» is enforced, by `rustc` and not by anyone remembering.
+    #[deny(clippy::wildcard_enum_match_arm)]
     match value {
         // CODEGEN-LOWERING-01.
         HirExpr::ColumnRef { binding, column } => Expr::ColRef {

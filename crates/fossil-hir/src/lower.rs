@@ -1942,8 +1942,8 @@ fn lower_property(
 ///
 /// # The fallback arm is a diagnostic, not a `None`
 ///
-/// The parser builds fifteen kinds of expression node and this function reads
-/// four. Everything else used to reach `_ => None`, and a `None` here means
+/// The parser builds seven kinds of node in a value position and this function
+/// reads all seven. Everything else used to reach `_ => None`, and a `None` here means
 /// `lower_property` drops the whole property, which `body()` skips without a
 /// word — so `slug = str.slug(User.name)` type-checked clean, ran, reported
 /// *wrote 1 vertex type*, and emitted a corpus with no `slug` column at all.
