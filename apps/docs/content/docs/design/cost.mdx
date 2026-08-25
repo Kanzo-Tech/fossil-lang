@@ -64,11 +64,22 @@ megabytes and nearly five thousand round trips before a single vertex can be dra
 Two O(N) sweeps became one on the way here: `extent` swept the same footers on its own, so opening a
 corpus and framing it each paid for every tile. It is the union of the boxes and now reads them.
 
-**What would meet it:** the writer knows every tile's box when it cuts it. `tile, min_x, max_x,
-min_y, max_y` is 2,442 rows and about 100 kB at ten million — one request instead of 4,892, and the
-only reason it is not already there is that nobody had counted.
-[Addressing](/docs/format/conventions/addressing) says a corpus has no index to discover; this would
-be one, and saying so is cheaper than the sweep.
+**What would meet it is a decision already on the table.** The obvious fix is to publish the boxes —
+`tile, min_x, max_x, min_y, max_y`, 2,442 rows and about 100 kB at ten million. It is the wrong fix,
+because the **row-group container** in
+[Addressing](/docs/format/conventions/addressing) subsumes it: one Parquet file whose row groups are
+the tiles has **one footer**, 496 kB at five million, and the boxes are already in it. No index to
+publish, no sweep to pay, and the same bytes.
+
+That container was costed from the writer's side and won on the per-window figure — **5.6 range
+requests against 22.3** for the same tiles as separate files. This is the second number, from the
+reader's side and over the wire, and it is the larger one: it does not make opening a corpus cheaper,
+it **removes the O(N) term from opening altogether.** A file-per-tile corpus has `ceil(N / 4096)`
+footers to find; a row-group corpus has one.
+
+The two measurements are of different things — that one is per window and this one is per corpus —
+and they point the same way, which is worth saying because they were taken a repository apart and
+neither knew about the other.
 
 ## R2, R3 · One query per orientation, and cost that follows the answer
 
