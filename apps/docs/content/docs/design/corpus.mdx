@@ -181,7 +181,7 @@ and that it is tiled by the same shift as the vertices it addresses. There is st
 **store**, which is a different noun.
 </Callout>
 
-## Conformance is round-trip, and the third leg is missing
+## Conformance is a round trip, and what it rests on is not a headcount
 
 Write with the writer, read back with every independent reader, diff the results. GraphAr ships a
 shared corpus with no round trip, and through that gap its fourth implementation landed having
@@ -189,20 +189,51 @@ re-derived the path arithmetic differently from the other three *and* from the c
 on both sides, because its tests asserted hand-written strings instead of resolving against the
 artefact.
 
+**The lesson there is not "have four implementations".** It is the two the other formats state
+plainly, and fossil follows both:
+
+- **Iceberg publishes the arithmetic and a table of vectors**, and ports are checked against the
+  table rather than against a sentence. `apps/corpus/guards/vectors.json` is that table here, every
+  value a border, read by the guard *and* rendered by [addressing](/docs/format/conventions/addressing)
+  so the documented table and the executed one cannot drift apart.
+- **Arrow requires two implementations and integration tests _before_ a format change lands**, not
+  after. Two. What that buys is the ordering, not the count.
+
 ```mermaid
 graph LR
   W["writer (Rust)"] --> C[("corpus on disk")]
-  C --> TS["TypeScript / DuckDB path"]
-  C -.-> WA["wasm reader"]
-  TS --> D{"diff"}
-  WA -.-> D
-  classDef absent stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
-  class WA absent
+  C --> JS["reader.mjs · from the conventions alone"]
+  C --> TS["resolveCorpus · the published module"]
+  JS --> D{"diff"}
+  TS --> D
+  V[["vectors.json · the borders"]] --> D
+  S[["full scan · neither wrote it"]] --> D
 ```
 
-The dotted leg is not built, so the three-way diff is a two-way one. What does run lives in
-`apps/corpus/conformance/verify.mjs`, and the conventions it checks are documented for reader
-implementors on the corpus site rather than here.
+Two readers that never read each other, and the numbers they are diffed against come from a **full
+scan** — every tile read with no addressing at all and filtered in SQL, which is a third thing
+neither implementation wrote. Both prune, and both have to land where an unpruned read already is.
+That is what closes GraphAr's gap: an assertion here cannot be satisfied by agreeing with the other
+implementation, only by agreeing with the bytes.
+
+**A third implementation is not what is missing.** One in Rust would have no consumer today —
+`fossil-mcp` does not read through the conventions, keasy reads through the TypeScript path, and the
+writer's own validator reads the artefact with plain SQL *on purpose*, so that it never passes
+through reader code of ours. What is missing is Arrow's ordering applied to the change that is
+actually pending, and it is written down as an obligation rather than an intention:
+**a format change lands after both readers have been moved to it and diffed, never before.**
+
+What runs lives in `apps/corpus/conformance/verify.mjs`, and the conventions it checks are
+documented for reader implementors on the corpus site rather than here.
+
+<Callout type="warn" title="One consumer does not read through the conventions, and that is the real gap">
+`fossil-mcp` registers its relations with `read_parquet('{base}/vertex/<Type>/*.parquet')` and reads
+edges from `by_source.parquet`, the single-file container. **Expanding a wildcard is listing a
+directory**, which is the one thing this design says a reader may never need, and the single file is
+a second container for bytes the tiles already hold. It works — MCP is native and can list — but two
+readers disagreeing about where the bytes are is GraphAr's failure wearing a different coat.
+**Decided:** it is a defect, and MCP moves onto the same addresses the viewer uses.
+</Callout>
 
 <Callout title="Checked for vacuity">
 Most assertions count violations, so **an empty corpus satisfies them all at once** — which is
