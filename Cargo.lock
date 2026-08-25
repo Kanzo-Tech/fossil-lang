@@ -1922,7 +1922,6 @@ dependencies = [
  "oxrdf",
  "oxttl",
  "parquet",
- "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -2112,6 +2111,7 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
+ "fossil-introspect",
  "fossil-mir",
  "fossil-wasm",
  "lsp-server",
@@ -2120,6 +2120,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smol_str",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
@@ -6247,6 +6248,7 @@ version = "0.1.0"
 dependencies = [
  "fossil-hir",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

@@ -21,3 +21,14 @@ serde_json = { workspace = true }
 # `cargo xtask wasm-check` derives its crate set from the cdylib closure, which
 # this crate is not in. So `xtask -> fossil-hir` adds an edge to a leaf.
 fossil-hir = { path = "../fossil-hir" }
+
+[dev-dependencies]
+# `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring
+# policy — rather than a second copy of its list, so it needs a TOML parser.
+# Declared here and not in `[workspace.dependencies]` for the reason
+# `fossil-lsp` declares `criterion` the same way: one crate's test needs it, and
+# a workspace row is for a version several crates must agree on. It adds nothing
+# to the graph — `toml 0.9.12` was already resolved in `Cargo.lock` before this
+# line existed, and no shipped artefact links it, since `xtask` is nobody's
+# dependency and this is a dev-dependency of it.
+toml = "0.9"
