@@ -22,10 +22,20 @@ code by **where it runs**, giving each layer a different promise.
 ## Three layers, three promises
 
 **The language layer knows no engine.** Parsing, name resolution, types, diagnostics, elaboration
-into [the operator algebra](/docs/design/algebra), and the language server that surfaces all of it.
+into [the operator algebra](/docs/design/algebra), and the editor functions that surface all of it.
 It has no dependency on any execution engine, and that single negative fact is what buys two positive
 ones: it starts in milliseconds, and it compiles to wasm. The checker in a browser tab is the same
 checker, not a reduced imitation of it.
+
+**The language SERVER is not in that layer**, and this line used to put it there. `fossil-ide` is —
+the free functions every handler adapts, wasm-clean, engine-free. `fossil-lsp` is a host, which is
+what the section at the foot of this page already calls it, and hosts pay for capabilities. It pays
+for one: a source column's type comes from an engine's CSV sniffer, and without it the editor was
+silent on every diagnostic whose evidence is that type while `fossil check` reported it and exited 1.
+Measured on the `--release` binary: **6.49 → 47.46 MB, and 3.2 → 8.3 ms from spawn to `initialize`**.
+It still starts in milliseconds, which is the promise that governs it, and **the per-keystroke cost
+did not move at all — 0.07 ms before and after**, because the freshness table makes a re-check a hash
+lookup and opens no connection.
 
 **The compiler layer has a disk.** It takes the elaborated program and the sources and produces the
 corpus. *No ceiling* lives here and only here, because the promise is a budget plus spill and spill
