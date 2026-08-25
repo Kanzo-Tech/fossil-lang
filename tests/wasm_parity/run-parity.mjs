@@ -45,13 +45,19 @@ const CORPUS_SQL_PATH = resolve(
   "tests/wasm_parity/corpus_sql.json",
 );
 
-// The io/csv + io/json + io/parquet parity tier. Written by
-// crates/fossil-layout/tests/io_parity_corpus.rs (the native side) — a mapping
-// reading all three source formats + clean/parse/seq ops (sources end-to-end;
-// the ops are reachable only by direct MIR/Expr::Call construction, since no
-// surface syntax lowers to them). This
-// harness registers the three fixture inputs in the WASM VFS and re-runs the
-// identical SQL, diffing the digests against the io baseline.
+// The io/csv + io/json + io/parquet parity tier — a mapping reading all three
+// source formats + clean/parse/seq ops (sources end-to-end; the ops are
+// reachable only by direct MIR/Expr::Call construction, since no surface syntax
+// lowers to them). This harness registers the three fixture inputs in the WASM
+// VFS and re-runs the identical SQL, diffing the digests against the io
+// baseline.
+//
+// THE PRODUCER IS NOT IN THE TREE. This named
+// `crates/fossil-layout/tests/io_parity_corpus.rs` and no such file exists —
+// `ls crates/fossil-layout/tests/` is builtin_smoke, corpus_exec and
+// layout_renumber. The committed fixtures under `fixtures/` were produced by
+// something that is gone, so the io tier can be re-checked and cannot be
+// re-generated: a fixture nobody can rebuild is a fixture nobody can correct.
 const IO_BASELINE_PATH = resolve(
   ROOT,
   "tests/wasm_parity/io_parity_baseline.json",
@@ -170,9 +176,9 @@ async function main() {
   const corpusBaseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
   const corpusSql = JSON.parse(readFileSync(CORPUS_SQL_PATH, "utf8"));
 
-  // The io tier is optional at load time only so the corpus tier still runs
-  // if the io baseline has not been produced yet; in a full run the native
-  // io_parity_corpus.rs test writes it first.
+  // The io tier is optional at load time so the corpus tier still runs without
+  // it. Do not read that as "run the producer first": there is no producer (see
+  // IO_BASELINE_PATH above). If these files are missing they cannot be made.
   let ioBaseline = [];
   let ioSql = {};
   try {
@@ -180,7 +186,9 @@ async function main() {
     ioSql = JSON.parse(readFileSync(IO_SQL_PATH, "utf8"));
   } catch {
     console.warn(
-      "WARN: io_parity_baseline.json not found — run `cargo test -p fossil-layout --test io_parity_corpus` first to produce the io tier.",
+      "WARN: io_parity_baseline.json not found, and nothing in this tree can regenerate it — " +
+        "the test that wrote it, crates/fossil-layout/tests/io_parity_corpus.rs, no longer exists. " +
+        "Running the io tier again means writing that producer first.",
     );
   }
 

@@ -589,6 +589,22 @@ means the host cannot bump past its pinned tag until it stops asking for it.
 the contract at *its* build time rather than at its deserialize time — which is a real thing to want,
 and is a different argument from the one that put three unrelated contracts in one crate.
 
+### Foldering the crates into `core/`, `extensions/` and `corpus/`
+
+**The idea.** Group the workspace members into three directories so the shape of the tree is legible
+from `ls` rather than from a manifest.
+**Why it is attractive.** Two dozen sibling directories show nothing, and the grouping the site draws
+in its dependency diagram would become the grouping on disk.
+**The evidence against it.** A folder cannot hold a boundary. Every candidate for `core/` is already
+separated by something real — a cycle, a `cfg`, an orphan rule — so the directory would restate an
+edge that already exists; and `fossil-base`, the one crate whose *contents* are wrong, would be
+filed rather than fixed, which is the failure mode a taxonomy has and a rule does not. `extensions/`
+fails the same way: `fossil-shex` sits outside the descriptors because of a cycle, and a folder does
+not dissolve a cycle. The only grouping that is real today is *compiles to wasm32 or does not*, and
+seven `compile_error!` already enforce that one without a directory.
+**What would bring it back.** A grouping that is not already implied by an edge — one a reader could
+not derive from `cargo metadata`.
+
 ### An unmaintained language-server framework
 
 **The idea.** Use the ergonomic framework rather than the low-level protocol library.
