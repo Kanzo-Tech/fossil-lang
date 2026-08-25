@@ -766,10 +766,14 @@ encuentra `fossil-engine` ni `fossil-df-wasm`, `fossil check` da lo mismo, **y s
 después** — la medición cuenta ejecuciones, no milisegundos, así que el −52 % de Apollo es una
 estimación prestada hasta que sea nuestra.
 
-**F7 · el escritor de Parquet. Medida el 15, y la medición la revierte.** El arnés vive en
-`spikes/f7-writer-bench/` (`./run.sh`, más `--inspect` sobre un Parquet ya escrito), fuera del
-workspace, y `crates/fossil-df/examples/tile_layout.rs` reproduce cada cifra por su cuenta: dos
-arneses, los mismos números. 5M filas, las mismas filas en el mismo orden por los dos caminos.
+**F7 · el escritor de Parquet. Medida el 15, y la medición la revierte.** El arnés vivía en
+`spikes/f7-writer-bench/`, fuera del workspace, y **está borrado**: `crates/fossil-df/examples/tile_layout.rs`
+reproducía cada cifra por su cuenta —dos arneses, los mismos números, 5M filas en el mismo orden por
+los dos caminos— y su otra mitad, el `--inspect` sobre un Parquet ya escrito, es hoy
+`apps/corpus/guards/inspect.mjs`, que hace el mismo `DESCRIBE SELECT * FROM read_parquet(…)` y **corre
+en CI**, cosa que el spike nunca hizo. Lo que se borró no era la medición: era la copia que había que
+mantener a mano. El renombrado de `fossil-runtime` a `fossil-layout` tuvo que editarlo en tres sitios
+el 2026-08-23 — ése fue su último uso, y no era un uso.
 
 **El titular: `arrow-rs` no compensa. Lo que compensa es el tamaño de row group, y DuckDB lo da con
 una palabra de SQL.**

@@ -356,8 +356,10 @@ fn repo_root() -> std::path::PathBuf {
 /// Every file under `root` whose extension is `ext`, skipping build outputs and
 /// the scratch trees that are not the repository.
 fn files_with_extension(root: &std::path::Path, ext: &str) -> Vec<std::path::PathBuf> {
-    // `spikes/` carries its own un-ignored `target/`, which is why it is named
-    // here rather than left to the `target` arm below.
+    // `spikes/` used to carry its own un-ignored `target/`, which is why it is
+    // named here rather than left to the `target` arm below. The spike that had
+    // one is deleted; the name stays because the directory is outside the
+    // workspace by design and the next spike will build the same way.
     const SKIP: &[&str] = &[
         "target",
         "node_modules",
