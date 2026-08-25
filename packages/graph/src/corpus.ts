@@ -502,6 +502,71 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     return candidates[0]?.adjacency(direction) ?? null;
   };
 
+  /**
+   * Where each tile is, read from the footers **once per corpus**.
+   *
+   * The arithmetic says which tiles exist; only the boxes say which ones a rectangle intersects,
+   * and the boxes are Parquet statistics. Without them the only correct read is every tile with a
+   * `WHERE`, and DuckDB prunes the rows but still opens each footer — `ceil(vertex_count /
+   * chunk_size)` of them per window, which is 2,442 at ten million and made a window that answers
+   * 3,152 vertices take 4.7 s. Measured from kanzo-ui, 2026-08-25: the same one-percent rectangle
+   * cost 75.6 ms at a million and 1,000.8 at five, out of one tile either way.
+   *
+   * So it is read once and kept: a few thousand rows of metadata, no column data, and every window
+   * after it opens only the tiles it names. `Corpus.extent` still scans every tile because its
+   * answer is about every tile.
+   */
+  interface TileBox {
+    readonly tile: bigint;
+    readonly x0: number;
+    readonly x1: number;
+    readonly y0: number;
+    readonly y1: number;
+  }
+
+  const boxes = new Map<string, Promise<readonly TileBox[]>>();
+
+  const tileBoxes = (type: string): Promise<readonly TileBox[]> => {
+    const cached = boxes.get(type);
+    if (cached) return cached;
+    const urls = tileUrls.get(type)!;
+    const index = new Map(urls.map((url, k) => [url, BigInt(k)]));
+    const loading = (async (): Promise<readonly TileBox[]> => {
+      // `min_value`/`max_value`, never `min`/`max`: Parquet's original statistics fields compare
+      // bytes as signed, which is meaningless for an unsigned column, so a writer that gets it
+      // right leaves them empty and a reader that only knows the deprecated pair concludes the
+      // footer carries no box at all. `coalesce` reads either.
+      const rows = await query(
+        `SELECT file_name AS file, ` +
+          `min(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS x0, ` +
+          `max(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS x1, ` +
+          `min(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS y0, ` +
+          `max(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS y1 ` +
+          `FROM parquet_metadata(${list(urls)}) WHERE path_in_schema IN ('x', 'y') GROUP BY 1`,
+      );
+      const out: TileBox[] = [];
+      for (const row of rows) {
+        const tile = index.get(String(row['file']));
+        const [x0, x1, y0, y1] = ['x0', 'x1', 'y0', 'y1'].map((k) => Number(row[k]));
+        // A tile whose name did not come back verbatim, or whose footer carries no statistics for
+        // x or y, has no box — and a tile with no box is one this cannot exclude. Keeping it is
+        // the conservative answer: the read stays correct and only loses the pruning.
+        if (tile === undefined || ![x0, x1, y0, y1].every(Number.isFinite)) continue;
+        out.push({ tile, x0: x0!, x1: x1!, y0: y0!, y1: y1! });
+      }
+      return out;
+    })();
+    boxes.set(type, loading);
+    return loading;
+  };
+
+  /**
+   * The tiles a rectangle can touch. Pure, and the box is half-open on the far edge exactly as
+   * {@link boxOf} is, so a tile the `WHERE` would empty is never opened.
+   */
+  const intersecting = (all: readonly TileBox[], { x, y, w, h }: Box): readonly TileBox[] =>
+    all.filter((b) => b.x1 >= x && b.x0 < x + w && b.y1 >= y && b.y0 < y + h);
+
   const boxOf = ({ x, y, w, h }: Box): string =>
     `x >= ${x} AND x < ${x + w} AND y >= ${y} AND y < ${y + h}`;
 
@@ -706,9 +771,16 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         );
       }
 
-      const rows = await query(
-        `SELECT * FROM read_parquet(${list(tileUrls.get(address.type)!)}) WHERE ${boxOf(box)}`,
-      );
+      const all = await tileBoxes(address.type);
+      // Every tile carries a box, or the cache would have dropped it and this would read the whole
+      // set — which is what it did before the cache existed, and is still the correct answer.
+      const candidates = all.length === tileUrls.get(address.type)!.length
+        ? intersecting(all, box).map((b) => address.tileUrl(b.tile))
+        : [...tileUrls.get(address.type)!];
+      const rows =
+        candidates.length === 0
+          ? []
+          : await query(`SELECT * FROM read_parquet(${list(candidates)}) WHERE ${boxOf(box)}`);
       const vertices = rows.map((row) => vertexOf(address.type, row));
       const tiles = [...new Set(vertices.map((v) => address.tileOf(v.denseId)))].sort(ascending);
 
