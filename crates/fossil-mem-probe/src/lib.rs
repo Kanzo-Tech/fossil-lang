@@ -32,6 +32,20 @@
 //! Off, it is a bool test per phase. On, it shells out to `ps` per phase — which is fine at this
 //! granularity (a dozen calls per run) and is the honest number, because it includes the
 //! allocator's fragmentation where a counting allocator would not.
+//!
+//! # And on `wasm32-unknown-unknown` there is no clock at all
+//!
+//! `Instant::now()` there is `unimplemented!()` in `std` — it panics with «time not implemented on
+//! this platform», which under `panic = "abort"` reaches JS as a bare `RuntimeError: unreachable`
+//! naming nothing. [`Probe::new`] took the clock unconditionally, before consulting the switch, so
+//! every browser run of `fossil_df::execute_graph` aborted on its first line. Nothing caught it:
+//! `cargo xtask wasm-check` compiles and does not run, and the executor's JS suite loads a
+//! `packages/executor/pkg/` that is gitignored, so it was testing a two-and-a-half-month-old
+//! artefact built before this crate existed.
+//!
+//! So the probe is **off on wasm32**, and an off probe now holds no clock — which is the same fix
+//! from both sides: it cannot read a clock it never took, and there was nothing for it to report
+//! anyway ([`rss_bytes`] is `0` there, and there is no `ps` to ask).
 
 /// A phase-by-phase RSS report over one pass of work. See the module docs.
 #[derive(Debug)]
@@ -39,16 +53,23 @@ pub struct Probe {
     enabled: bool,
     peak: u64,
     last: u64,
-    started: std::time::Instant,
-    phase_started: std::time::Instant,
+    /// `None` exactly when the probe is off. An off probe must not read a clock — see the module
+    /// docs for the platform where reading one is a panic.
+    started: Option<std::time::Instant>,
+    phase_started: Option<std::time::Instant>,
 }
 
 impl Probe {
     /// Reads the environment once. A run that does not ask pays a bool.
+    ///
+    /// Never on wasm32: there is no resident set to sample and no clock to sample it against, and
+    /// taking the clock anyway is what aborted the browser executor. The switch is consulted
+    /// first and the clock second, in that order, on every platform.
     #[must_use]
     pub fn new(label: &str) -> Self {
-        let enabled = asked_for(std::env::var("FOSSIL_MEM_PROBE").ok().as_deref());
-        let now = std::time::Instant::now();
+        let enabled = !cfg!(target_arch = "wasm32")
+            && asked_for(std::env::var("FOSSIL_MEM_PROBE").ok().as_deref());
+        let now = enabled.then(std::time::Instant::now);
         let rss = if enabled { rss_bytes() } else { 0 };
         if enabled {
             eprintln!("mem probe: {label}");
@@ -78,12 +99,12 @@ impl Probe {
         eprintln!(
             "  {:<28} {:>9.1} {:>9.2}G {:>+9.2}G",
             phase,
-            self.phase_started.elapsed().as_secs_f64(),
+            elapsed(self.phase_started),
             gib(rss),
             gib(rss) - gib(self.last)
         );
         self.last = rss;
-        self.phase_started = std::time::Instant::now();
+        self.phase_started = Some(std::time::Instant::now());
     }
 
     /// Final line. Kept separate from [`Self::mark`] so the total is visible even when the last
@@ -97,11 +118,18 @@ impl Probe {
         eprintln!(
             "  {:<28} {:>9.1} {:>9.2}G  peak {:.2}G",
             "total",
-            self.started.elapsed().as_secs_f64(),
+            elapsed(self.started),
             gib(rss),
             gib(self.peak)
         );
     }
+}
+
+/// Seconds since a mark was taken, and `0.0` for a probe that took none. Unreachable with the
+/// second value — every caller is behind the `enabled` early-return — and written as a total
+/// function anyway, because the alternative is an `unwrap` inside a diagnostic.
+fn elapsed(since: Option<std::time::Instant>) -> f64 {
+    since.map_or(0.0, |t| t.elapsed().as_secs_f64())
 }
 
 /// Did the run ask for a report? Unset, empty and `0` are the three ways to say no; every other
@@ -148,16 +176,14 @@ fn rss_bytes() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     fn off() -> Probe {
-        let now = Instant::now();
         Probe {
             enabled: false,
             peak: 0,
             last: 0,
-            started: now,
-            phase_started: now,
+            started: None,
+            phase_started: None,
         }
     }
 
@@ -184,6 +210,26 @@ mod tests {
         assert_eq!(p.last, 0);
     }
 
+    /// **An off probe holds no clock**, and that is the property, not an optimisation: the one
+    /// platform where the probe is always off is the one where `Instant::now()` panics, so «off»
+    /// and «took no clock» have to be the same state. Asserted as the invariant rather than
+    /// against a fixed answer, because `FOSSIL_MEM_PROBE` may be set in the ambient environment.
+    ///
+    /// What it cannot prove is the wasm half. This is a native test and there is no wasm one:
+    /// `cargo xtask wasm-check` compiles without running, so the thing that would actually have
+    /// caught the abort is `packages/executor`'s JS suite — and only after its gitignored `pkg/`
+    /// is rebuilt.
+    #[test]
+    fn a_probe_holds_a_clock_exactly_when_it_is_on() {
+        let p = Probe::new("the invariant");
+        assert_eq!(p.started.is_some(), p.enabled);
+        assert_eq!(p.phase_started.is_some(), p.enabled);
+        assert!(
+            !cfg!(target_arch = "wasm32") || !p.enabled,
+            "there is no clock and no `ps` on wasm32; the probe cannot be on"
+        );
+    }
+
     /// The number comes from the OS, and it comes back parseable. `ps -o rss= -p <pid>` is a
     /// string contract with a program outside this repo: if the flags or the output shape ever
     /// stop matching, `rss_bytes` silently returns 0 and every report reads `0.00G`.
@@ -205,7 +251,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_peak_is_a_high_water_mark() {
-        let now = Instant::now();
+        let now = Some(std::time::Instant::now());
         let mut p = Probe {
             enabled: true,
             peak: u64::MAX,
