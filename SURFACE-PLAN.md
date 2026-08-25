@@ -430,15 +430,25 @@ Ni teselas, ni `dense_id`, ni Morton, ni `by_source`, ni prefijos, ni footers.
    `conformance/reader.mjs` y `conformance/writer.mjs` lo apunta a bytes que escribió `fossil run`,
    con cinco roturas probadas en rojo. Falta lo que ese trabajo dejó dicho: no está en CI (construir
    fossil no cabe en el presupuesto de `corpus.yml`), y una de las cinco **pasó en silencio al
-   principio** porque ningún manifiesto lleva el número de vértices — un corpus truncado era
-   invisible, y hubo que cerrarlo por los extremos de las aristas.
+   principio** porque entonces ningún manifiesto llevaba el número de vértices — un corpus truncado
+   era invisible, y hubo que cerrarlo por los extremos de las aristas. (Ya lo lleva: `vertex_count`.
+   Esto es historia de por qué la rotura pasó, no una descripción del formato de hoy.)
 
-Además, cinco cosas que un consumidor todavía tiene que aportar de su cosecha y que la API debe
-absorber o declarar: **qué contenedor** (fichero por tesela o row-groups — tres artefactos del árbol
-tienen tres defaults distintos y el ganador medido es el que fossil no sabe escribir), **cuántas
-teselas** (ningún manifiesto lleva el número de vértices), **las cajas** `x`/`y`, **el vocabulario del
-payload**, y **la identidad del corpus** — no hay forma de nombrar un vértice que sobreviva a un
-relayout, que es el hueco 5 del traspaso y sigue sin dueño.
+~~Además, cinco cosas que un consumidor todavía tiene que aportar de su cosecha.~~ **Cuatro
+absorbidas y la quinta declarada, medido el 2026-08-25 contra `packages/graph/src/corpus.ts`.** Lo
+que la lista pedía y lo que hay:
+
+| | entonces | hoy |
+|---|---|---|
+| **cuántas teselas** | no derivable | `ceil(vertex_count / chunk_size)`, un `read_text` |
+| **el vocabulario del payload** | de la cosecha del consumidor | un `DESCRIBE` por tipo de vértice |
+| **las cajas `x`/`y`** | de la cosecha del consumidor | `Corpus.extent`, de los footers, y **creída** no verificada |
+| **la identidad del corpus** | «sin dueño» | el IRI del sujeto, y desde `55f573e`/`2e66ca9`/`0f861e0` además **buscable** |
+| **qué contenedor** | de la cosecha del consumidor | **no absorbida, y rechazada por su nombre**: lee fichero-por-tesela, refuta el otro y nunca hace glob |
+
+La quinta es la que sigue abierta de verdad, y en el sentido que el plan ya midió: row groups de
+4.096 le gana a fichero-por-tesela por 5,6 peticiones por ventana contra 22,3, y es el contenedor que
+fossil no sabe escribir.
 
 ~~**Lo primero que hay que corregir es la premisa de la sección de arriba: la arista NO es una.** Son
 tres, y las lleva `fossil-mcp` (`→ fossil-graph`, `→ fossil-runtime`, `→ fossil-resolver`), y
@@ -855,13 +865,22 @@ avisara. Comprobado contra el árbol el 19:
   adyacencias por `ordered_by` y escribe `by_target/tile{k}.parquet` cortado por `dst_dense` con el
   desplazamiento del tipo destino. `fossil-engine/tests/conformance.rs:379-410` afirma las dos
   orientaciones, y los guards de `apps/corpus` comprueban las dos.
-- **El manifiesto SÍ se autodescribe.** `fossil-sinks/src/manifest.rs:163-188` — `AdjList` lleva
+- **El manifiesto SÍ se autodescribe.** `AdjList` (en `fossil-sinks/src/manifest.rs`) lleva
   `prefix` (`by_source/`, `by_target/`), afirmado en `edge_yaml_carries_graphar_v1_field_names`. Un
   lector tercero **puede** derivar la URL de una tesela de aristas:
   `<prefix de arista><prefix de adj>tile{dense >> shift(src|dst_chunk_size)}.parquet`.
-- **Lo que sí queda del manifiesto** es otra cosa y más pequeña: **ningún manifiesto lleva el número
-  de vértices**, así que `tile_count = ceil(V / chunk_size)` —que la página de lectura afirmaba— no
-  se puede calcular. La respuesta honesta hoy es la sonda `HEAD` doblando y bisecando.
+
+  **Esta línea citaba `manifest.rs:163-188` y la cita murió el 25 de agosto**, cuando `55f573e`
+  insertó 73 líneas por encima: `AdjList` está en la 320 y el rango 163-188 apunta ahora al docblock
+  de `VertexIndex`. La cita la mató un commit de esta misma sesión, que es exactamente lo que la
+  línea 356 de este documento se reprocha. Por eso ahora cita **por nombre**: un nombre se mueve con
+  su símbolo y un número de línea no.
+- ~~**Lo que sí queda del manifiesto**: ningún manifiesto lleva el número de vértices.~~
+  **CADUCADO, y llevaba tiempo.** `VertexInfo::vertex_count` es `u64` y no `Option<u64>` —su
+  docblock argumenta por qué—, `resolveCorpus` lo exige, `declared-count` lo sostiene contra el
+  disco, y `tile_count = ceil(V / chunk_size)` se calcula en un `read_text`. La sonda `HEAD`
+  doblando y bisecando no es la respuesta honesta de hoy: es la que no hace falta. Esta afirmación
+  aparecía **tres veces** en este documento.
 
 Lo que **no** ha caducado son las cifras: 19.892 aristas por ventana a grado 4 y 39.849 a grado 8
 tienen destino dibujado y origen fuera de la ventana. Eso ya no es un hueco del escritor —hay tesela
@@ -902,12 +921,16 @@ exige y porque `CLAUDE.md` no admite una segunda referencia. Sus peticiones 1, 2
 direccionamiento salió a `@fossil-lang/graph`, hay corpus de conformidad en `apps/corpus`, y el
 contrato de completitud es `Window.complete` + `gaps[]`. Lo que queda:
 
-- **No hay forma duradera de nombrar un vértice.** Rehacer el layout renumera, no leemos `subject`, y
-  el corpus no publica versión que un cliente pueda comparar. **Es nuestro y no tiene sitio todavía**
-  — un cliente que guarde una selección no puede volver a ella tras un relayout.
-- **Ningún manifiesto lleva el número de vértices**, así que `tile_count = ceil(V / chunk_size)` no se
-  puede calcular y la respuesta honesta es sondear con `HEAD` doblando y bisecando. Escrito como
-  pregunta de diseño en `reading/without-fossil.mdx`, no encodado.
+- ~~**No hay forma duradera de nombrar un vértice.**~~ **CERRADO el 2026-08-25.** La identidad es el
+  IRI del sujeto, que es lo que en RDF ya era: no se inventó una segunda forma de nombrar algo que ya
+  tiene nombre. `dense_id` se rechazó como identidad por la razón que `corpus.ts` argumenta —*el
+  orden espacial ES el espacio de ids*, así que una dirección guardada fuera del corpus nombra otro
+  vértice tras la siguiente escritura— y lo que faltaba no era la elección sino **poder buscar por
+  ella**: `node(iri)` era un escaneo de la columna `subject` de todas las teselas, ~40 MB por
+  búsqueda a cinco millones. El corpus publica ahora un índice de identidad (`55f573e`), los dos
+  lectores lo usan (`2e66ca9`) y `fossil run` lo escribe (`0f861e0`).
+- ~~**Ningún manifiesto lleva el número de vértices.**~~ **CADUCADO** — ver arriba. Es la segunda de
+  las tres apariciones de esta afirmación en este documento.
 - **Avisar a kanzo-ui cuando aterrice la disposición de un fichero con row groups de 4.096**: su
   lector deja de sondear footers y la caché de cajas que tenían pensada se vuelve innecesaria.
 - **Suyos, anotados para no volver a medirlos:** el `fetch` global y no inyectable en su lector —sin
