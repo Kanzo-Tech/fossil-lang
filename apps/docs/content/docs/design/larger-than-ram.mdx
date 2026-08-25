@@ -28,6 +28,16 @@ manager, and operators that ask before they allocate. The form is always **the o
 before it allocates and knows what to do when it is told no.** A pool is not a limit checked after
 the fact; it is a conversation the operator has to be able to hold up its end of.
 
+They are worth naming, because "the three references" said the shape and left the reader to take it
+on trust:
+
+- **DataFusion** — `MemoryPool`, in greedy and fair-spill variants, with a disk manager.
+- **DuckDB** — `memory_limit` together with `temp_directory`, and out-of-core hash join and sort.
+- **Velox** — a memory pool with arbitration and spilling.
+
+The agreement across three engines built by different people for different workloads is the argument;
+one of them could be a preference.
+
 Two consequences follow, and both are the sort found by measuring rather than by reading.
 
 **A budget with nowhere to spill turns slowness into an error.** The limit and the temporary

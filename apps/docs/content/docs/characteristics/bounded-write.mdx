@@ -31,6 +31,19 @@ parameter of the job, and nothing about a run's result depends on it.
 
 It is what turned "seventeen gigabytes go somewhere" into a table, and it is why four plausible
 hypotheses about where the memory went could each be killed by a number rather than an argument.
+Here are the four, because a page that says the numbers exist and does not show them is asking to be
+believed:
+
+| candidate | why it looked right | what killed it |
+| --- | --- | --- |
+| per-community hash maps | a vector of maps, one per community, k in the millions | the whole core is **53 B/edge** |
+| the layout core | it had been predicted explicitly | **3.94 GiB** in isolation, of 17 |
+| the database during layout | no limit by default | capped at 2 GB: same total, **0 B spilled** |
+| the data generator | it had a 12 GB heap | the writer alone reaches the same peak |
+
+Three of the four are refutations by *scale* — the suspect is real and an order of magnitude too
+small — and the third is the only one that could have been settled by argument and was not: capping
+DuckDB proves the pass did not silently spill, which no reasoning about defaults could establish.
 
 The finding that mattered: **RSS was already 14.61 GiB when `enrich_layout` executed its first
 statement**, and the entire layout pass added 0.13 GiB net. The memory was spent before the pass
