@@ -168,9 +168,17 @@ target *count*. The closed set is a discipline, argued in
 
 <Callout type="warn" title="Nothing answers a camera today">
 `viewport` was deleted **before its replacement existed** — `c6c87fa` records the breakage as
-expected and accepted. There is still no tile store, no tile index and no tile emission anywhere in
-`crates/`, and none of the six verbs answers a camera. **Decided:** the camera is addressed, not
-queried. **Undone:** the tiles that addressing reads.
+expected and accepted, and **none of the six verbs answers a camera** — which is the decision, and
+it holds: the camera is addressed, not queried.
+
+What used to stand here beside it was that there is no tile emission and no tile index anywhere in
+`crates/`, and **both stopped being true**. `fossil run` writes `vertex/<Type>/chunk{k}.parquet`,
+`edge/<E>/by_source/tile{k}.parquet` in both orientations, and an identity index at
+`vertex/<Type>/index/tile{k}.parquet` that the manifest declares under `index:` — verified by
+reproducing a corpus and listing it, and now held by `crates/fossil-engine/tests/conformance.rs`,
+which asserts the index exists, that the prefix the manifest declares is the one the writer used,
+and that it is tiled by the same shift as the vertices it addresses. There is still no tile
+**store**, which is a different noun.
 </Callout>
 
 ## Conformance is round-trip, and the third leg is missing
