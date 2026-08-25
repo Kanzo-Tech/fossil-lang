@@ -1,117 +1,48 @@
 ---
 title: fossil
-description: A mapping language and a corpus compiler, organised by where the code runs.
+description: A statically typed mapping language that turns tables and RDF into a graph, and the compiler that writes that graph to disk.
 ---
 
-fossil is two things, and not having decided that is part of the problem it is now solving. It is a
-**mapping language** — you declare how tabular and RDF sources become a property graph, and it type
-checks, diagnoses and lowers that declaration. And it is a **corpus compiler** — it executes the
-mapping and writes a graph corpus you can address by byte range from anywhere, with no server in
+fossil is a **mapping language**: you declare how tabular and RDF sources become a graph, and it
+type checks that declaration against the shapes the output has to satisfy. It is also a **corpus
+compiler**: it runs the mapping and writes a graph anyone can read by byte range, with no server in
 the path.
 
-This site documents where that is going. Every page keeps two registers apart and marks which one
-it is in:
+This is a whole program. Three rows of CSV go in and three `Person` nodes come out.
+
+<Program src="hello/hello.fossil" title="hello.fossil" />
+
+`User.name` is a column the compiler read off the CSV while compiling; `name` is a predicate the
+shape document declares. Those two meeting is the type check — so `User.nmae` is a squiggle in your
+editor rather than a null in the graph.
+
+```bash
+fossil run hello.fossil --dest file:///tmp/hello
+```
+
+```
+wrote 1 vertex type(s), 0 edge type(s) to file:///tmp/hello
+```
+
+Under `/tmp/hello` is the corpus: Parquet files and a manifest, three `Person` nodes in them, one
+per row.
+
+## Start here
 
 <Cards>
-  <Card title="Where this is going" description="The destination, and the page here that argues for it — the prior art it was read against, the measurement, and the observation that would reverse it. Written before the code gets there; that is the point of writing it." />
-  <Card title="True today" description="What holds right now, with the file that would go red if it stopped holding. Or the word `unmeasured`, which is the honest alternative." />
+  <Card
+    href="/docs/book/getting-started"
+    title="Getting started"
+    description="Install the binary, run the program above against the three rows it reads, and open what it wrote."
+  />
 </Cards>
 
-Never both in one sentence. A target restated as a fact is the failure this site exists to avoid,
-and `apps/docs/content.test.ts` fails the build rather than trust anyone to remember.
+Then [your first program](/docs/book/first-program) accounts for every token in those seven lines,
+and [the anatomy of a fossil program](/docs/book/anatomy) grows a larger one — two sources, a join
+and an edge — a section at a time.
 
-## Three layers, and the axis is what a piece of code may know
+## The rest of the site
 
-The organising axis is not subject matter. It is **what a piece of code is allowed to know**, and
-the sharpest version of that constraint is where the code runs, because that is the only axis on
-which the hard requirements actually conflict.
-
-Three destinations have to work — a native command, wasm in a browser, and a product embedding the
-language — and the corpus has to be writable with no ceiling on size. Those demands contradict each
-other the moment they are read as *"run the engine here"*: wasm32 has roughly 4 GB of address space
-and **nowhere to spill**. A browser cannot be larger-than-RAM. That is the substrate, not the code.
-
-So each layer gets a different promise. [Three hosts](/docs/design/three-hosts) is the argument;
-this is the shape.
-
-<Steps>
-
-<Step>
-
-### The language layer knows no engine
-
-Parsing, types, name resolution, diagnostics, elaboration into the operator algebra, and the
-language server that surfaces all of it.
-
-**No dependency on an execution engine.** That single negative fact is what lets the language server
-start in milliseconds and compile to wasm without dragging a database behind it — and it is what
-makes the checker in a browser tab the same checker rather than a reduced imitation of it.
-
-</Step>
-
-<Step>
-
-### The compiler layer has a disk, and it declares a budget
-
-Takes the elaborated program and the sources and produces the corpus. **"No ceiling" lives here and
-only here**, and it is reachable precisely because this layer has a disk: a declared memory budget,
-and spill when the budget bites. A layer without a disk cannot promise that, which is why the
-promise must not live in a layer the browser shares.
-
-</Step>
-
-<Step>
-
-### The reader addresses bytes, and does not run programs
-
-Reads the manifest, works out which byte ranges the camera is asking for, hands Arrow to the canvas.
-**No dependency on an execution engine** here either. Compiling the engine into the browser is a
-claim that the browser runs programs, and [the camera is addressed, not
-queried](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws).
-
-</Step>
-
-</Steps>
-
-### The rule, and its guard
-
-> A crate may depend on its own layer and on the ones beneath it. Never upward, and never on an
-> engine its layer does not declare.
-
-Checked, not agreed — a `cargo-deny` `wrappers` entry banning `duckdb` outside the compiler layer,
-and `datafusion` outside it too.
-
-<Callout title="True today: the guard is on, and it is green">
-`deny.toml` carries it — `duckdb` denied workspace-wide with `fossil-introspect`, `fossil-mcp`,
-`fossil-engine`, `fossil-layout` and `fossil-cli` named as wrappers, and `datafusion` denied with
-`fossil-df` and `fossil-df-wasm`. `cargo deny check bans` answers **bans ok**, and CI runs it on
-every PR.
-
-Getting there corrected the belief the page was written on. This callout said the reader reaches the
-engine transitively through `fossil-ide → fossil-engine`; measured with
-`cargo tree -e normal -i duckdb --workspace`, that edge runs the other way and the reader layer was
-already clean. What the list actually got wrong was the opposite mistake — it named three crates
-that had demoted `duckdb` to a dev-dependency and did **not** name `fossil-introspect`, the one
-crate that links it. The check was red for a day for that reason and nothing said so, because
-nobody runs `cargo deny` locally.
-
-Two things it still does not prove. It is a check on *engines*, not on the layering rule above it: a
-`fossil-ide → fossil-cli` edge would be upward and this would not see it. And a name on the wrappers
-list is a declaration that the crate is native, reviewed once when it went on — `fossil-df-wasm` is
-there because it exists, not because compiling the executor into a browser agrees with anything else
-on this page.
-</Callout>
-
-The rule holding is not the same as the boundaries being drawn on it. They were drawn by **topic** —
-`fossil-mcp` is tooling and carries an engine; so does `fossil-cli`, through `fossil-introspect` and
-`fossil-df` — when what separates them is what each one may know. That did not happen because of a
-bad decision. It happened because of a decision nobody took, and the guard is now what keeps the
-next one from being taken by accident.
-
-## Where to read next
-
-<Cards>
-  <Card href="/docs/design/corpus" title="The corpus" description="Columnar files addressable with no service in the path, where borrowing from GraphAr stops, and the six verbs the seventeen collapsed into — none of which draws." />
-  <Card href="/docs/design/streaming" title="Streaming and the budget" description="Ten million vertices at 8.39 GiB against roughly 21, the pass after the budget that it does not reach, and three seams named on structure: one landed, one was refuted by measurement, one still collects." />
-  <Card href="/docs/design/discarded" title="What was discarded" description="Every alternative that was rejected, with the evidence against it and the observation that would bring it back. An entry that cannot state its last field does not go on the page." />
-</Cards>
+[What fossil is](/docs/design) is the thesis and the argument behind it: types arriving from the
+data and from the shape document, and made to meet. [What a corpus is](/docs/format) is the format
+on disk — plain Parquet, read by code that was never compiled against the code that wrote it.

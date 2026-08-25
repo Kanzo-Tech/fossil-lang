@@ -1,628 +1,246 @@
 ---
 title: What was discarded
-description: The alternatives that were considered and rejected, each with why it is attractive, the evidence against it, and the observation that would bring it back — grouped by the argument each one is the shadow of.
+description: Every rejected alternative in one table — the idea, why it is attractive, the evidence against it, and the observation that would bring it back.
 ---
 
-Every design decision has a shadow: the thing that was not done. A decision recorded without its
-shadow is unfalsifiable, and a shadow recorded without **what would reverse it** is a graveyard.
+Every decision has a shadow: the thing that was not done. A shadow recorded without what would
+reverse it is a graveyard, so every row here carries four fields, and an entry that cannot state the
+last one does not go on the page. That is the admission rule, and it is what stops this becoming a
+list of things somebody once disliked.
 
-So every entry here has four fields and no more — **the idea**, **why it is attractive**, **the
-evidence against it**, and **what would bring it back**. An entry that cannot state its last field
-does not go on the page; that is the admission rule, and it is what stops this from becoming a list
-of things somebody once disliked.
+This is the one page here you are expected to search rather than read. Where the evidence is a
+paragraph rather than a number it sits in an accordion under the table, titled with its row.
 
-This is the one page here you are expected to search rather than read.
+## The algebra and the checker
 
-## Shadows of the algebra and the checker
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Rewriting the operator tree before it is lowered — filters pushed down, redundant projections eliminated, constants folded | It is what a compiler middle-end is *for*, and each rule is individually correct | It optimises twice, in the layer with less information: the engine underneath sees the whole plan plus statistics the middle does not have | A transformation that depends on something only the type layer knows and the engine cannot recover from the SQL it is handed |
+| Typing a join's `on` condition by running the body checker over it and requiring `Bool` | One rule rather than two, and it catches every malformed condition rather than only the equality | An ordering: the row algebra runs before the body checker and produces its input, so the synthesiser would need its own output as its input. Building it means a second expression typer, over a scope rather than a row. The plan builder already destructures the condition into `equality of two column references` and refuses everything else structurally | A join condition that is legitimately not a single equality — a range join, a conjunction of two keys, a function call on one side |
+| Width subtyping on records | What most structural type systems do, and projections compose without ceremony | None was needed: no program required it, and the invariant rule is simpler to explain and to check. A decision to stay narrow, not a rejected argument | Partial-row projections flowing through the standard library, where a caller legitimately holds a wider row than the signature asks for |
 
-### Rewriting the operator tree before it is lowered
+## Type providers
 
-**The idea.** A set of algebraic rewrite rules in the middle of the compiler — pushing filters down,
-eliminating redundant projections, folding constants — before anything is emitted.
-**Why it is attractive.** It is what a compiler middle-end is *for*, and the rules are individually
-correct.
-**The evidence against it.** They competed with an optimiser that is already underneath, in the
-engine that runs the query, and they lost by definition: the engine sees the whole plan plus
-statistics the middle does not have. Removing them is not declining to optimise; it is declining to
-optimise **twice**, in the layer with less information.
-**What would bring it back.** A transformation that depends on something only the type layer knows
-and the engine cannot recover from the SQL it is handed.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Declaring the source's schema outside the program — a flag, an attached file, a host setting | A schema feels operational, and one program can be pointed at several environments | The documented damage in that family is liveness, not location, and the systems that moved the declaration out did not come out better: one needs a live database at build time and fixes it by committing an anchor, another keeps a generated schema file in the repository and pays for two sources of truth. Decisive on its own: a program whose meaning changes with an external flag is not self-contained | A host that must compile one unmodified program against two schema revisions and legitimately cannot express that as two programs |
+| Disambiguating a derived name automatically — a numeric suffix, a singular/plural heuristic | The build never breaks on a naming accident | The most mature implementation of derived names published the criterion that condemns it: avoid anything that lets a small change in the sample cause a large change in the provided types. Its own collision scheme was a numeric suffix, so a member's name depended on which other members existed; its singulariser produced `Purchasis` and `Sourcis`; and a minor version bump renamed members and broke a production application | A real vocabulary where collisions are the norm rather than the exception — at which point the short name has stopped being the name, and the scheme needs rethinking rather than patching |
+| Resolving an unknown namespace prefix over the network at compile time | The public registry exists for exactly that, and it removes a declaration | That registry served an expired certificate for seven months while every IRI it abbreviates continued to answer. IRIs are durable; the abbreviation layer over them rots, and a compile that depends on it inherits its uptime | Nothing, at compile time. As an editor suggestion — offered, ignorable, never load-bearing — it is a different thing and was never rejected |
 
-### Typing a join's `on` condition by running the body checker over it
+## Inference from shapes
 
-**The idea.** The join condition is an expression and the algebra already demands `Bool` of a
-`Filter` predicate, so type the `on` predicate the same way: synthesise it against the joined row and
-require `Bool`. That closes the untyped-join-key gap as a special case of a general rule instead of
-as a special case.
-**Why it is attractive.** It is one rule rather than two, it is the rule the algebra page already
-states, and it catches every malformed condition rather than only the equality.
-**The evidence against it.** An ordering, and it is structural rather than a matter of taste. The row
-algebra runs **before** the body checker and produces its input: the scope a join hands on is what
-every subsequent expression is synthesised against, so the pipeline cannot call the synthesiser
-without the synthesiser's own input being the thing it is trying to compute. Building it means a
-second expression typer over a scope rather than a row, which is a duplicate of the one that exists —
-and duplicating a type checker to close a gap that one comparison closes is the wrong size of change.
-The narrow rule is also the one the backend already needs: the plan builder destructures the
-condition into exactly `equality of two column references` and refuses everything else structurally,
-so the typed check is the earlier, better-worded twin of a refusal that already happens.
-**What would bring it back.** A join condition that is legitimately **not** a single equality — a
-range join, a conjunction of two keys, a condition with a function call on one side. The narrow rule
-has nothing to say about any of them, and the first program that wants one is the program that makes
-the general rule cheaper than the exceptions.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Making SHACL the language the contract is written in | SHACL is a W3C Recommendation with an active working group; ShEx's standardisation moved elsewhere. On standards-body health alone it is the safer bet | The axis is expressiveness, not prestige: the available SHACL path carries neither the one-versus-one-or-more distinction nor closure's three states — see below | Three conditions, none of them an argument — see below |
+| Deriving the shape document from the mapping | It is free, it never disagrees with the mapping, and it produces a document where there was none | It never disagrees *because it was computed from the mapping*: an after-the-fact description of whatever the mapping happened to do, typos included. A contract that cannot contradict you is not checking anything | A workflow where nobody has a shape and the produced graph really is the specification — where the generated document is documentation rather than a contract, and is labelled as such |
 
-### Width subtyping on records
+<Accordions>
+<Accordion title="Making SHACL the language the contract is written in">
+A contract that does not distinguish **one** from **one or more** is not the contract being asked
+for, and closure has three states rather than two. The available SHACL path could carry neither,
+while the ShEx path already is a contract end to end: it types the input side, it is read by the
+checker, and the same document describes the output.
 
-**The idea.** Let a record with more fields be accepted where one with fewer is expected — the
-ordinary structural-subtyping rule.
-**Why it is attractive.** It is what most structural type systems do, and it makes projections
-compose without ceremony.
-**The evidence against it.** None was needed: no program required it, and the invariant rule is
-strictly simpler to explain and to check. It is a decision to stay narrow, not a rejected argument.
-**What would bring it back.** A demand signal, named in advance: partial-row projections flowing
-through the standard library, where a caller legitimately holds a wider row than the signature asks
-for.
+What brings it back, in three:
 
-## Shadows of type providers
+1. A client arriving with a shape document that already exists and that nobody is going to rewrite.
+2. SHACL reaching Recommendation with the triple-term node kind in it **at the same time as** a real
+   RDF 1.2 producer in the corpus — both, because the node kind without the producer checks nothing.
+3. A shape that needs a disjunction, where the current advice to split it into several mappings is
+   going to sound absurd the day the shape was written by somebody else.
+</Accordion>
+</Accordions>
 
-### Declaring the source's schema outside the program
+## The standard library
 
-**The idea.** Attach the schema — or the shape document — to the *invocation* rather than to the
-program: a command-line flag, an attached file, a setting in the host.
-**Why it is attractive.** A schema feels operational, and keeping it out of the program lets one
-program be pointed at several environments.
-**The evidence against it.** An adversarial reading went looking for the retrospective that regrets
-putting providers in the program and could not find one. What it found is that the documented damage
-in that family is about **liveness, not location** — invisible drift, an invalidation signal the
-batch compiler ignores — and that the systems which moved the declaration *out* did not come out
-better: one requires a live database at build time and fixes it by committing an anchor rather than
-by relocating the declaration; another keeps a generated schema file in the repository and pays for
-two sources of truth. And the decisive criterion is independent of all of that: **a program whose
-meaning changes with an external flag is not self-contained.**
-**What would bring it back.** A host that must compile one unmodified program against two schema
-revisions and legitimately cannot express that as two programs.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Growing the catalogue ahead of the programs | Cheaper to design the general case once than to generalise later | One error repeated at nine scales in this project's own history: the abstraction was written before the second implementation existed — extension points with one implementation and no dispatch, operators defined and mostly unreachable, catalogue entries no program could call. The aggravating factor is that it was documented as finished, so intent stopped being distinguishable from state | The second implementation. That is the whole rule, and it is a condition rather than a judgement |
+| Plugins, as wasm modules or dynamic libraries | The standard answer to extensibility, and it scales past the maintainers | Measured in three projects that did it: one editor maintains ten simultaneous ABI versions; one database maintains a signed matrix of six platforms per release; one compiler paid for openness with `Unknown` variants in every enum of its syntax tree, permanently. An in-tree registration list delivers the entire benefit at zero ABI cost | A consumer who genuinely cannot merge into the tree. It is a door that opens later, and opening it later costs nothing that opening it now would have saved |
+| Moving the standard library into `catalogue.bnf`, where the `io.` rows already live | The consistent answer, and the file already has a parser, five projections and a drift check waiting | Swift's `.def` files carried 1,364 rows with no generator at all before anyone reached for TableGen, and Clang left `.def` at around 6,000; the stdlib is fifty-one, two orders of magnitude below where a file starts paying (`crates/xtask/src/reference.rs:17`). That same file already generates a page from the Rust table with no `.bnf` in the path, which is the proof in the tree that generation does not need the file. And the one justification a data file has that a table does not is a second authoring audience: it is why `rust.ungram` exists, `catalogue.bnf` never claims one, and fossil has none | That second audience appearing. Not row count on its own, and not consistency with the `io.` half, which is in a file for a different reason: its BEHAVIOUR half is linked by a host that may not have it |
+| A uniform `HirSourceOp { op, args }` instead of typed variants | Thirteen declared verbs against three constructible variants is an asymmetry, and the uniform shape makes `lower_source_stage` end without a `match` at all | It trades a compile-time guarantee for a runtime unwrap: `args[0]` expecting a predicate is checked by nobody, where `Where(HirExpr)` cannot hold a column list (`crates/fossil-hir/src/lower.rs:118`). It is the fork rustc and rust-analyzer took opposite ways over the same table — rustc's `[Option<DefId>; N]` costs it a discriminant coupling, a `from_u32` its own comment calls *"clumsy"* and a `panic!`-enforced bijection, where rust-analyzer's one typed field per row has none of the three. The surviving `match` is construction rather than dispatch: three arms, exhaustive | Enough lowered verbs that the typed variants stop being writable by hand — the constructible set overtaking the declared one, which is the opposite of today's ten declared and not lowered |
 
-### Disambiguating a derived name automatically
+## The surface
 
-**The idea.** When two labels produce the same short name, generate distinct ones — a numeric suffix,
-or a singular/plural heuristic — instead of stopping.
-**Why it is attractive.** The build never breaks on a naming accident.
-**The evidence against it.** The most mature implementation of derived names published the criterion
-that condemns it: the algorithm must avoid anything that lets **a small change in the sample cause a
-large change in the provided types**. Their own collision scheme was a numeric suffix, so a member's
-name depended on which *other* members existed; their singulariser produced `Purchasis` and
-`Sourcis`; and a minor version bump renamed members and broke a production application. The argument
-does not have to be made from first principles — their criterion makes it.
-**What would bring it back.** A real vocabulary where collisions are the norm rather than the
-exception, at which point the short name has stopped being the name and the whole scheme needs
-rethinking rather than patching.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Borrowing the comprehension binder for the source binding | Instantly familiar, and it reads as "drawn from" | In the languages it would be borrowed from, the specification defines the left side as an element and the right side as the collection. Here the left side names the relation, so the borrowed glyph would say the opposite of what it means. It already means assignment in one widely-read language and channel receive in another, no language was found in which it means "produced once per element of", and it flows right-to-left in a program whose pipelines flow the other way | A form where the left-hand side really does denote one element rather than the relation — an iteration construct, if one is ever needed |
+| The anonymous row: drop the receiver's name and write bare `.field` against an implicit current row | The shortest possible spelling of the most common expression in the language, and several query languages start there | A table with no counterexamples, and a failure mode that is silent and triggered by data rather than by code — see below | A source model with genuine hierarchy to descend, where the context item earns its cost. An implicit context item optimises for hierarchical navigation rather than for joins, and tabular sources are all joins |
+| Renaming silently when a join collides — suffix the shared column, as the mainstream data frame libraries do | The join always succeeds and nobody has to think about it | The same failure mode as the anonymous row — triggered by the data, invisible in the code — and the libraries that do it by default only raise when the suffixes are turned off by hand | The other defensible option was never rejected on merit: flatten and require qualification, which is what SQL does. It becomes the answer the day a row carrying two `id` columns is what readers expect to see rather than something to be protected from |
+| Letting a program omit its shape document and checking only the source side | The gentler on-ramp, and for a while it was the rule — a program with no shape was explicitly not an error | It stopped being coherent the moment a property key became a bare name. A bare key takes its name from a predicate a shape declares, so with no shape there is no name for a property to have: `TypeckOutput.predicates` is empty (`crates/fossil-hir/src/check.rs:94`), every property fails to lower, and the program reports success having written nothing | A second source of predicate names — a vocabulary the program names directly rather than through a shape. Until it exists, the permissive reading is not a relaxation but a program that silently produces nothing |
+| The outer join, and the rest of the variants | The ordinary set, and their absence looks like an omission | An outer join fabricates nulls, and a corpus whose contract asserts that a property is present is a corpus into which a fabricated null must not be written | Its nullability story, and it arrives with one or it does not arrive: a rule that lets a fabricated null land only where `Occurs` does not demand one or more (`crates/fossil-hir/src/check.rs:609`), so the corpus never asserts a property it invented |
+| The RDF 1.2 triple term — `<< s p o >>` as a value, with a reifier as an ordinary mapping | The standards-track answer to annotating a statement, and the corpus already writes the edge row a triple term would have to name | Nothing in RDF 1.2 is a Recommendation: Concepts and Semantics are Candidate Recommendations, every concrete syntax is still a Working Draft, Turtle 1.2 in its fourth. The surface did not fail to arrive, it left — `<<` is not a token and `grammar.bnf` carries the retired rule's tombstone rather than a pending one. `rdfs:Proposition` appears nowhere under `crates/`, and the one place a triple term is handled reduces it to its surface form because it has no identity to key a row by (`crates/fossil-df/src/rdf.rs:154`). That the Turtle parser accepts one on the way in was never decided either: `oxttl`'s `rdf-12` arrived by feature unification, and since 2026-08-07 it is declared instead of inherited, with a literal carrying a base direction refused at the pivot rather than flattened into text a host lays out backwards. Both are guards over what arrives; neither is a step towards a surface | Turtle 1.2 reaching Recommendation, and a program that wants to annotate an edge and cannot |
 
-### Resolving a prefix over the network at compile time
+**Retired, not rejected.** *A join whose two keys have different names* sat here with the criterion
+*"the first real mapping whose two keys do not share a name — not an argument, a program somebody
+wants to write and cannot."* It was met. The MIR carries the binding, so a column reference says
+which side it is, and two differently-named keys plan as an ordinary equi-join
+(`crates/fossil-df/tests/pipeline.rs:272`). Measuring it also turned up what nobody had seen: under
+the algebra as declared, two ordinary tables could not be joined **even with a qualified condition**,
+because they share a primary-key column name and any shared name was an error — an unmeasured
+consequence prohibiting the join of any two tables with primary keys.
 
-**The idea.** Look up an unknown namespace prefix in the public registry that exists for exactly
-that.
-**Why it is attractive.** The registry exists, it is well known, and it removes a declaration.
-**The evidence against it.** That registry served an **expired certificate for seven months** while
-every IRI it abbreviates continued to answer. IRIs are durable; the abbreviation layer over them
-rots, and a compile that depends on it inherits its uptime.
-**What would bring it back.** Nothing, at compile time. As an *editor* suggestion — offered,
-ignorable, never load-bearing — it is a different thing and was never rejected.
+<Accordions>
+<Accordion title="The anonymous row">
+Every system that started with an implicit receiver had to add a naming mechanism the moment two
+rows were in scope — a context function, an explicit binding form, a variable binder, a pair of role
+keywords, a marker annotation, named bindings replacing positional ones — and **not one went the
+other way**.
 
-## Shadows of inference from shapes
+Worse, the failure is silent and triggered by data rather than by code: a path degrades quietly when
+the implicit receiver is shadowed, and one language's implicit-scope construct is documented as
+having changed the meaning of surrounding code because a record *gained a field*. In a language
+whose job is surviving schema drift, that is the worst available failure mode.
+</Accordion>
+</Accordions>
 
-### Making SHACL the language the contract is written in
+## Identity
 
-**The idea.** Take the checker's constraint table from SHACL rather than from ShEx.
-**Why it is attractive.** SHACL is a W3C Recommendation with an active working group; ShEx's
-standardisation moved elsewhere. On standards-body health alone it is the safer bet, and this is said
-plainly because it is the cost of the choice.
-**The evidence against it.** The axis being decided is not prestige, it is what the contract can
-express. A contract that does not distinguish **"one"** from **"one or more"** is not the contract
-being asked for, and closure has three states rather than two. The available SHACL path could not
-carry either distinction, while the ShEx path already is a contract end to end: it types the input
-side, it is read by the checker, and the same document describes the output.
-**What would bring it back.** Three things, and none of them is an argument. **(1)** A client
-arriving with a shape document that already exists and that nobody is going to rewrite. **(2)** SHACL
-reaching Recommendation with the triple-term node kind in it **at the same time as** a real RDF 1.2
-producer in the corpus — both, because the node kind without the producer checks nothing. **(3)** A
-shape that needs a disjunction, where the current advice to split it into several mappings is going
-to sound absurd the day the shape was written by somebody else.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Identity as an argument to an attribute above the mapping | It is metadata, and attributes are where metadata goes | Seven languages, no exception: none admits a per-instance expression in an attribute argument, and one specification calls the restriction a deliberate syntactic device. The control experiment is the language that does evaluate expressions in attributes — the per-row form compiles, produces one frozen value for every row, and costs its documentation a paragraph warning about a mistake the other languages cannot express | The rule that decides it: if the attribute can be omitted it is forbidden, because omission implies a derived fallback; if it cannot be omitted it is not an attribute but syntax with brackets, and the spelling is then irrelevant. Make it mandatory in every declaration and this becomes a spelling question |
+| Letting each mapping mint its own identity, so two mappings producing one type declare different templates | What every mapping language does, and the one federation system that checked it removed the check and published its reasons | The federation case does not transfer: its two keys are alternative ways to locate one entity rather than two identities, and its subgraphs deploy separately so nobody ever holds the whole set — the check here is available precisely because the topology is the opposite. The same property is silently assumed by the academic work, detected but wired only to an optimiser by the one engine that computes it, and guaranteed by construction in the one W3C mapping that derives identity from the table's key rather than from a free template | In order: (1) a legitimate case of disagreement — disjoint populations of one type with no common identity scheme, where one real instance demotes the error to a warning; (2) a topology where fossil composes mappings from independent authorities, at which point the federation argument becomes ours; (3) invertibility, since virtual access over a live source needs the inverse expression and one template per type is not enough for it |
 
-### Deriving the shape document from the mapping
+## Streaming, memory and scale
 
-**The idea.** Generate the shape from the mapping, which is what most tooling in this space does.
-**Why it is attractive.** It is free, it never disagrees with the mapping, and it produces a document
-where there was none.
-**The evidence against it.** It never disagrees with the mapping *because it was computed from it*.
-The result is an after-the-fact description of whatever the mapping happened to do, typos included,
-and a contract that cannot contradict you is not checking anything.
-**What would bring it back.** A workflow in which nobody has a shape and the produced graph really is
-the specification — where the generated document is documentation rather than a contract, and is
-labelled as such.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Distributing the writer across machines | The reflexive answer to "no ceiling" | At the measured density one machine reaches far past the scale that has been measured, and the two mechanisms that extend it — memory mapping and spill — are not exhausted. Distributing first trades a measured problem for a larger unmeasured one | A corpus that exhausts one machine's **disk** rather than its memory |
+| Tuning the constants inside the layout — a tighter representation, a bitset instead of a map | The numbers are right there and the change is local | One such attempt regressed by seven gigabytes. And with *no ceiling* as the goal, fifty-three bytes per edge down to thirty does not change the category of the problem; it moves the point where it bursts | A goal that is a ceiling rather than the absence of one: a fixed target machine, where a constant factor is the difference between fitting and not |
+| Adopting a community-detection library instead of the hand-written clustering | Nobody should hand-roll a graph algorithm, and one candidate is actively developed | Three independent reasons — flat partitions, 32-bit indices, and re-measurement against code carrying four measurements — see below | A layered-label-propagation implementation with 64-bit indices, a memory-mapped graph and spill to a working directory, written by the algorithm's own author. Its costs are equally specific — see below |
+| Adopting a space-filling-curve library instead of writing twenty-one lines | The archetype of what should be a dependency | The most-downloaded candidate is a signature-for-signature copy of the local implementation capped at 16-bit two-dimensional coordinates — exactly the ceiling one would adopt it to escape, and the easy mistake precisely because it ranks first. Adopting is not a speed play either: the measured cost in this area is memory and network, not arithmetic | The day the interleaving stops being a detail of the writer and becomes the contract between two repositories — when a reader has to compute the same address the writer wrote. The well-made candidate for that day is generic in the number of dimensions with the output width as an associated type, which is the shape a flat identifier would need |
+| Adopting a layout library | Layout is a solved problem with decades of literature | There is nothing to adopt, and that is the finding: no crate implements the placement used here, there is no port of the standard multilevel force layouts, and no layout crate publishes a benchmark above ten thousand nodes. There is a hard licence ceiling independent of technical merit — the best-known force implementation is licensed incompatibly with this workspace, and the only compatible one has a lifetime download count in the dozens | A maintained implementation with a compatible licence publishing a benchmark at the size where this work *starts* |
+| Replacing the curve with a better-behaved one | The textbook improvement, and the best-maintained crate in the whole search implements it | Measured on this corpus the hypothesis is false: the improvement did not appear. Adopting anyway would be replacing measured code with code to be measured, against a hypothesis already refuted here | A corpus with a different shape, measured — the refutation is about this data, not about the curves |
+| Unifying the two execution engines | Two engines mean two SQL dialects, two configuration surfaces and two sets of behaviour to keep in step | The margin does not pay: the SQL is a small fraction of the slice it sits in, and unifying means rewriting roughly nine hundred lines of query construction as plan construction, adding several megabytes to the read path, and losing the range-request file system that makes reading a corpus over HTTP work at all | The read path no longer needing range requests over plain HTTP — which would be a different product |
 
-## Shadows of the standard library
-
-### Growing the catalogue ahead of the programs
-
-**The idea.** Add the operation, the trait, the abstraction now, because it will obviously be wanted.
-**Why it is attractive.** It is cheaper to design the general case once than to generalise later.
-**The evidence against it.** One error, repeated at nine different scales in this project's own
-history: **the abstraction was written before the second implementation existed** — extension points
-with one implementation and no dispatch, operators defined and mostly unreachable, catalogue entries
-that no program could call. The aggravating factor is what makes it worth recording: it was
-**documented as finished**, so intent stopped being distinguishable from state, and the only way to
-learn which was which was to read the code.
-**What would bring it back.** The second implementation. That is the whole rule, and it is a
-condition rather than a judgement.
-
-### Plugins, as wasm modules or dynamic libraries
-
-**The idea.** Let third parties add providers and functions without merging into the tree.
-**Why it is attractive.** It is the standard answer to extensibility and it scales past the
-maintainers.
-**The evidence against it**, measured in three projects that did it: one editor maintains **ten
-simultaneous ABI versions**; one database maintains a signed matrix of six platforms per release; one
-compiler paid for openness with `Unknown` variants in every enum of its syntax tree, permanently. An
-in-tree registration list delivers the entire benefit at zero ABI cost.
-**What would bring it back.** A consumer who genuinely cannot merge into the tree. It is a door that
-opens later, and opening it later costs nothing that opening it now would have saved.
-
-### Moving the standard library into `catalogue.bnf`
-
-**The idea.** The `io.` rows are a data file the compiler reads; the other fifty-one rows are the
-same shape, so they belong in the same file. Adding `str.slugify` over `regexp_replace` would stop
-touching Rust.
-**Why it is attractive.** It is the consistent answer, `catalogue.bnf` names it as the shape the
-stdlib would take, and the file already has a parser, five projections and a drift check waiting.
-**The evidence against it.** Three measurements, none of them about tidiness. Swift's `.def` files
-carried **1,364** rows with no generator at all before anyone reached for TableGen, and Clang left
-`.def` at around **6,000**; the stdlib is **fifty-one**, two orders of magnitude below where a file
-starts paying. `crates/xtask/src/reference.rs` already generates a page from the Rust table with no
-`.bnf` in the path, which is the proof in the tree that generation — the thing the proof actually
-comes from — does not need the file. And the one justification a data file has that a table does not
-is a **second authoring audience**, somebody who must add a row without touching the Rust chain: it
-is why `rust.ungram` exists, `catalogue.bnf` never claims one, and fossil has none.
-**What would bring it back.** That second audience appearing. Nothing else — not row count on its
-own, and not consistency with the `io.` half, which is in a file for a different reason: its
-BEHAVIOUR half is linked by a host that may not have it.
-
-### A uniform `HirSourceOp { op, args }` instead of typed variants
-
-**The idea.** With every relation verb declaring its parameters, the lowered stage could be one
-shape — the operator plus a vector of bound arguments — and the three typed variants could go.
-**Why it is attractive.** Thirteen declared verbs against three constructible variants is an
-asymmetry, and the uniform shape makes `lower_source_stage` end without a `match` at all.
-**The evidence against it.** It trades a compile-time guarantee for a runtime unwrap: `args[0]`
-expecting a predicate is checked by nobody, where `Where(HirExpr)` cannot hold a column list. It is
-the same fork rustc and rust-analyzer took opposite ways over the same table — rustc's
-`[Option<DefId>; N]` costs it a discriminant coupling, a `from_u32` its own comment calls *"clumsy"*
-and a `panic!`-enforced bijection, while rust-analyzer's one typed `Option<TraitId>` field per row
-has none of the three. fossil is on the IDE side of that line. The `match` that survives is
-CONSTRUCTION rather than dispatch: three arms of three lines, exhaustive, with the unimplemented
-verbs named.
-**What would bring it back.** Enough lowered verbs that the typed variants stop being writable by
-hand — the constructible set overtaking the declared one, which is the opposite of today's ten
-declared and not lowered.
-
-## Shadows of the surface
-
-### Borrowing the comprehension binder
-
-**The idea.** Write the source binding with the arrow that comprehensions use, as several functional
-languages do.
-**Why it is attractive.** It is instantly familiar and it reads as "drawn from".
-**The evidence against it.** In the languages it would be borrowed from, the specification defines the
-left side as an **element** and the right side as the **collection**. Here the left side names the
-relation, so the borrowed glyph would say the opposite of what it means. It already means assignment
-in one widely-read language and channel receive in another, and no language was found in which it
-means "produced once per element of". It also flows right-to-left in a program whose pipelines flow
-the other way.
-**What would bring it back.** A form where the left-hand side really does denote one element rather
-than the relation — an iteration construct, if one is ever needed.
-
-### The anonymous row
-
-**The idea.** Drop the receiver's name inside a mapping body and write bare `.field` against an
-implicit current row.
-**Why it is attractive.** It is the shortest possible spelling of the most common expression in the
-language, and several query languages start there.
-**The evidence against it** is a table with no counterexamples: every system that started with an
-implicit receiver had to add a naming mechanism the moment two rows were in scope — a context
-function, an explicit binding form, a variable binder, a pair of role keywords, a marker annotation,
-named bindings replacing positional ones — and **not one went the other way.** Worse, the failure is
-**silent and triggered by data rather than by code**: a path degrades quietly when the implicit
-receiver is shadowed, and one language's implicit-scope construct is documented as having changed the
-meaning of surrounding code because a record *gained a field*. In a language whose job is surviving
-schema drift, that is the worst available failure mode.
-**What would bring it back.** A source model with genuine hierarchy to descend, where the context
-item earns its cost — the observation from that literature is that an implicit context item optimises
-for hierarchical navigation rather than for joins, and tabular sources are all joins.
-
-### Renaming silently when a join collides
-
-**The idea.** When two joined relations share a column name, suffix them automatically, as the
-mainstream data frame libraries do.
-**Why it is attractive.** The join always succeeds and nobody has to think about it.
-**The evidence against it.** It is the same failure mode as the anonymous row — triggered by the data,
-invisible in the code — and the libraries that do it by default only raise when the suffixes are
-turned off by hand.
-**What would bring it back.** The other defensible option was never rejected on merit: flatten and
-require qualification, which is what SQL does. It becomes the answer the day a row carrying two `id`
-columns is what readers expect to see rather than something to be protected from.
-
-### A join whose two keys have different names
-
-**The idea.** Let the join condition relate two columns that are not spelled the same — the ordinary
-`ON left.person_id = right.id`.
-**Why it is attractive.** It is what every join in every query language does, and the restriction
-below looks arbitrary from outside.
-**The evidence against it.** Not evidence, a dependency: the condition is an equality with the key
-named **once**, which is the same thing `USING (k)` is, and it is spelled that way because a
-qualified condition needs both sides of the join addressable in one expression. That is a property
-of the surface, not of the join. Taking the general form first would have meant designing the
-qualified reference to satisfy a join rather than the language.
-**What would bring it back**, and it is a condition rather than a judgement: **the first real mapping
-whose two keys do not share a name.** Not an argument — a program somebody wants to write and
-cannot. The qualified reference that makes it expressible is the same one everything else on the
-surface needs, so this reopens by being unblocked rather than by being reconsidered.
-
-### Letting a program omit its shape document
-
-**The idea.** Let a program compile without naming a shape document, and check only what can be
-checked from the source side.
-**Why it is attractive.** It is the gentler on-ramp, and for a while it was the rule — a program with
-no shape was explicitly *not an error*.
-**The evidence against it.** It stopped being coherent the moment a property key became a bare name.
-A bare key takes its name from a predicate that a shape **declares**, so without a shape there is no
-name for a property to have — a program with no shape document cannot write a single property, and
-what it produces is not a smaller check but an empty mapping. The failure mode is the bad one:
-`TypeckOutput.predicates` is empty, every property fails to lower, and the program reports success
-having written nothing.
-**What would bring it back.** A second source of predicate names — a vocabulary the program names
-directly rather than through a shape. That is a different feature, and until it exists the
-permissive reading is not a relaxation, it is a program that silently produces nothing.
-
-### The outer join
-
-**The idea.** Support the other join variants, not only the inner one.
-**Why it is attractive.** It is the ordinary set, and their absence looks like an omission.
-**The evidence against it.** An outer join **fabricates nulls**, and a corpus whose contract asserts
-that a property is present is a corpus into which a fabricated null must not be written. The
-capability arrives with its nullability story or it does not arrive.
-**What would bring it back**, written as a criterion rather than an opinion: *the first real mapping
-whose keys do not share a name — not an argument, a program somebody wants to write and cannot.* The
-criterion was met, and measuring it turned up something nobody had seen: under the algebra as
-declared, two ordinary tables could not be joined **even with a qualified condition**, because they
-share a primary-key column name and any shared name was an error. That was not a decision; it was an
-unmeasured consequence prohibiting the join of any two tables with primary keys.
-
-### The RDF 1.2 triple term
-
-**The idea.** `<< s p o >>` as a value assignable only where a shape declares `rdfs:Proposition`,
-with a reifier as an ordinary mapping the sugar desugars to — and in the corpus, a reifier as a
-vertex and the triple term as the edge row it annotates.
-**Why it is attractive.** It is the standards-track answer to annotating a statement, and the corpus
-already writes the edge row a triple term would have to name.
-**The evidence against it.** Nothing in RDF 1.2 is a Recommendation: Concepts and Semantics are
-Candidate Recommendations, and every concrete syntax is still a Working Draft — Turtle 1.2 in its
-fourth. The surface did not fail to arrive, it **left**: `<<` is not a token, and `grammar.bnf`
-carries the retired rule's tombstone rather than a pending one. Nothing under `crates/` mentions a
-triple term or `rdfs:Proposition` at all. And what the tree does have here was never decided — the
-Turtle parser accepts a triple term on the way in because rudof enables `oxttl`'s `rdf-12` by
-feature unification, which is a property of a dependency graph rather than of a design. Since
-2026-08-07 that feature is declared instead of inherited, and a literal carrying a base direction is
-refused at the pivot instead of being flattened into text a host lays out backwards. Both are guards
-over what arrives; neither is a step towards a surface.
-**What would bring it back.** Turtle 1.2 reaching Recommendation, and a program that wants to
-annotate an edge and cannot.
-
-## Shadows of identity
-
-### Identity as an argument to an attribute
-
-**The idea.** Write the identity template inside an attribute above the mapping.
-**Why it is attractive.** It is metadata, and attributes are where metadata goes.
-**The evidence against it.** Seven languages, no exception: none admits a per-instance expression in
-an attribute argument, and in one of them the specification calls the restriction a deliberate
-syntactic device. The control experiment is the language that *does* evaluate expressions in
-attributes — where the per-row form compiles, produces **one frozen value for every row**, and costs
-its documentation a paragraph warning about a mistake other languages cannot express.
-**What would bring it back.** The rule that decides it: *if the attribute can be omitted it is
-forbidden, because omission implies a derived fallback; if it cannot be omitted it is not an
-attribute but syntax with brackets, and the spelling is then irrelevant.* Make it mandatory in every
-declaration and this stops being the rejected option and becomes a spelling question.
-
-### Letting each mapping mint its own identity
-
-**The idea.** Allow two mappings that produce one type to declare different identity templates.
-**Why it is attractive.** It is what every mapping language does, and the one federation system that
-checked it removed the check and published its reasons.
-**The evidence against it.** The federation case does not transfer: its two keys are alternative ways
-to **locate** one entity rather than two identities, and its subgraphs deploy separately so nobody
-ever holds the whole set — the check here is available precisely because the topology is the
-opposite. Meanwhile the same property is silently assumed by the academic work, detected but wired
-only to an optimiser by the one engine that computes it, and guaranteed by construction in the one
-W3C mapping that derives identity from the table's key rather than from a free template.
-**What would bring it back**, in order. **(1)** A legitimate case of disagreement — disjoint
-populations of one type with no common identity scheme; one real instance demotes the error to a
-warning. **(2)** A topology where fossil composes mappings from **independent authorities**, at which
-point the federation argument becomes ours. **(3)** Invertibility: virtual access over a live source
-needs the inverse expression, and one template per type is not enough for it.
-
-## Shadows of streaming, memory and scale
-
-### Distributing the writer across machines
-
-**The idea.** When one machine is not enough, use several.
-**Why it is attractive.** It is the reflexive answer to "no ceiling".
-**The evidence against it.** At the measured density, one machine reaches far past the scale that has
-been measured, and the two mechanisms that extend it — memory mapping and spill — are not exhausted.
-**Distributing before they are is trading a measured problem for a larger unmeasured one.**
-**What would bring it back.** A corpus that exhausts one machine's **disk** rather than its memory.
-
-### Tuning the constants inside the layout
-
-**The idea.** Shrink the per-edge and per-vertex state — a tighter representation, a bitset instead of
-a map.
-**Why it is attractive.** The numbers are right there and the change is local.
-**The evidence against it.** One such attempt regressed by seven gigabytes. And with *no ceiling* as
-the goal, going from fifty-three bytes per edge to thirty does not change the category of the problem
-— **it moves the point where it bursts.**
-**What would bring it back.** A goal that is a ceiling rather than the absence of one: a fixed target
-machine, where a constant factor is the difference between fitting and not.
-
-### Adopting a community-detection library
-
-**The idea.** Replace hand-written clustering with a maintained crate.
-**Why it is attractive.** Nobody should hand-roll a graph algorithm, and one candidate is actively
-developed.
-**The evidence against it**, three independent reasons. **Functionality**: the hierarchy — every level
-of it — is what earns this structure its place, and every candidate returns a *flat* partition, which
-would leave the functions that consume it with nothing. **Scale**: the maintained ones are capped at
-32-bit indices, and one candidate's own published table does not improve on what is already measured
-here; swapping one resident implementation for another **moves the point where it bursts rather than
-removing it**. **Re-measurement**: adopting means trading measured code carrying four separate
-measurements for something whose memory profile on this corpus is unknown — and the failure mode is
-already on record, since a correct rewrite in this exact area passed every parity test and regressed
-seven gigabytes.
-**What would bring it back**, named specifically: a layered-label-propagation implementation with
-64-bit indices, a memory-mapped graph and spill to a working directory, written by the algorithm's
-own author. Its costs are equally specific and are why it is a **measurement to schedule rather than a
-dependency to add**: it is label propagation rather than modularity, so the compactness that
-justified keeping the hierarchy has to be re-measured from zero; it requires a symmetric loopless
-graph; it still needs roughly twenty-five bytes per node resident, which is twenty-five gigabytes at
-a billion; and it wants a **second on-disk format**, which collides with "Parquet and nothing else".
-
-### Adopting a space-filling-curve library
-
-**The idea.** Take the interleaving from a crate instead of writing twenty-one lines.
-**Why it is attractive.** It is the archetype of what should be a dependency.
-**The evidence against it.** The most-downloaded candidate is a signature-for-signature copy of the
-local implementation **capped at 16-bit two-dimensional coordinates** — which is exactly the ceiling
-one would adopt it to escape — and it is the easy mistake precisely because it ranks first. And
-adopting is not a speed play at all: the measured cost in this area is memory and network, not
-arithmetic.
-**What would bring it back**, stated exactly: the day the interleaving stops being a detail of the
-writer and becomes **the contract between two repositories** — when a reader has to compute the same
-address the writer wrote, and a shared, third-party-tested implementation is worth more than twenty-one
-lines on each side. The well-made candidate for that day is generic in the number of dimensions with
-the output width as an associated type, which is the shape a flat identifier would need.
-
-### Adopting a layout library
-
-**The idea.** Use an existing graph-layout crate.
-**Why it is attractive.** Layout is a solved problem with decades of literature.
-**The evidence against it.** There is nothing to adopt, and that *is* the finding: no crate implements
-the placement used here, there is no port of the standard multilevel force layouts, and **no layout
-crate publishes a benchmark above ten thousand nodes**. There is also a hard licence ceiling
-independent of any technical merit — the best-known force implementation is licensed incompatibly
-with this workspace, and the only compatible one has a lifetime download count in the dozens.
-**What would bring it back.** A maintained implementation with a compatible licence publishing a
-benchmark at the size where this work *starts*.
-
-<Callout title="The thread through the last three">
-In all three cases **the ecosystem ends almost exactly where these sizes begin.** No layout crate
-benchmarks above ten thousand nodes; no maintained community-detection crate exceeds 32-bit indices;
-the most popular curve crate stops at 16-bit coordinates. The small corpus here is ten million. That
-is not a preference for local code — it is that the frontier of what can be bought falls below the
-starting point, which is why what *is* bought is always small and verifiable and never large.
+<Callout title="The thread through the three adoption rows">
+The ecosystem ends almost exactly where these sizes begin. No layout crate benchmarks above ten
+thousand nodes; no maintained community-detection crate exceeds 32-bit indices; the most popular
+curve crate stops at 16-bit coordinates. The small corpus here is ten million. That is not a
+preference for local code — it is that the frontier of what can be bought falls below the starting
+point, which is why what *is* bought is always small and verifiable and never large.
 </Callout>
 
-### Replacing the curve with a better-behaved one
+<Accordions>
+<Accordion title="Adopting a community-detection library">
+**Functionality.** Every level of the hierarchy is what earns this structure its place, and every
+candidate returns a *flat* partition, which would leave the functions that consume it with nothing.
 
-**The idea.** Use a curve with better locality than the one in use — a well-known and genuinely
-superior ordering in the general case.
-**Why it is attractive.** It is the textbook improvement, and the best-maintained crate in the whole
-search implements it.
-**The evidence against it.** Measured on this corpus, the hypothesis is **false**: the improvement did
-not appear. Adopting anyway would be replacing measured code with code to be measured, against a
-hypothesis already refuted here.
-**What would bring it back.** A corpus with a different shape, measured — the refutation is about this
-data, not about the curves.
+**Scale.** The maintained ones are capped at 32-bit indices, and one candidate's own published table
+does not improve on what is already measured here; swapping one resident implementation for another
+moves the point where it bursts rather than removing it.
 
-### Unifying the two execution engines
+**Re-measurement.** Adopting means trading measured code carrying four separate measurements for
+something whose memory profile on this corpus is unknown — and the failure mode is on record, since
+a correct rewrite in this exact area passed every parity test and regressed seven gigabytes.
 
-**The idea.** One engine everywhere instead of two.
-**Why it is attractive.** Two engines mean two SQL dialects, two configuration surfaces and two sets
-of behaviour to keep in step.
-**The evidence against it.** The margin does not pay: the SQL is a small fraction of the slice it sits
-in, and unifying would mean rewriting roughly nine hundred lines of query construction as plan
-construction, adding several megabytes to the read path, and **losing the range-request file system
-that makes reading a corpus over HTTP work at all**.
-**What would bring it back.** The read path no longer needing range requests over plain HTTP — which
-would be a different product.
+The named candidate is a measurement to schedule rather than a dependency to add: it is label
+propagation rather than modularity, so the compactness that justified keeping the hierarchy has to
+be re-measured from zero; it requires a symmetric loopless graph; it still needs roughly twenty-five
+bytes per node resident, which is twenty-five gigabytes at a billion; and it wants a second on-disk
+format, which collides with "Parquet and nothing else".
+</Accordion>
+</Accordions>
 
-## Shadows of the corpus
+## The corpus
 
-### Conforming to an existing graph interchange specification
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Conforming to an existing graph interchange specification instead of a bespoke layout | Interoperability, for free, with a specification somebody else maintains | It gave vocabulary and stopped giving contract, and conformance was not kept in practice either — see below | A second reader that is not ours, that already speaks it |
+| One file per tile, so a request is a file | The addressing is trivial and every request is exactly one object | Measured against the alternative: four times the requests and not one byte saved. A request against a single file is a maximal run of consecutive row groups, and the tiles a window needs merge into a handful of runs — the file boundary is the only thing that prevents the merge | A store where opening a file is cheaper than a range request into a large one |
+| A materialised tile tree, with each edge stored at the deepest tile containing both endpoints | The classical answer: it removes the cross-tile case, and interior nodes look like the natural home for it | An interior node earns its existence only by containing something a leaf cannot, and the only candidate costs more to lift than it saves — see below | Nothing declared, but the hole in the measurement is named — see below |
+| Capability negotiation for the artifact: a monotonic version plus an unordered set of named capabilities, split into read and write | The mechanism the mature table formats have, and retrofitting it is expensive | There is no problem to solve. Nothing is published and there are no older readers, so a negotiation mechanism answers a question nobody has asked — and then has to be maintained until somebody asks it | The day a corpus leaves this machine towards somebody who cannot regenerate it. The same boundary as publishing the arithmetic test vectors, for the same reason: the enduring cost in this space is files that can no longer be withdrawn |
 
-**The idea.** Emit an established columnar graph format instead of a bespoke layout.
-**Why it is attractive.** Interoperability, for free, with a specification somebody else maintains.
-**The evidence against it.** It **gave vocabulary and stopped giving contract**: its specification
-defines no count and no data-file path, so derivability had to be invented anyway — and two questions
-that were declared blocking existed *only* because of conformance. As an
-interchange format it does not pay either, since a recipient would have to learn an incubating
+**A second writer** is not a rejection but a standing reversal condition, recorded because it flips a
+decision rather than adjusting one. If anybody produces this corpus without using this
+implementation, the priority inverts: the specification becomes the contract and the implementation
+becomes one implementation among several. One writer is what makes the library half safe; two
+writers is what turned a widely-used columnar format into a reference implementation that became
+normative by accident. And the clock runs one way — if the corpus reaches third parties before the
+arithmetic is published, the option is gone.
+
+<Accordions>
+<Accordion title="Conforming to an existing graph interchange specification">
+The specification defines no count and no data-file path, so derivability had to be invented anyway
+— and two questions that were declared blocking existed *only* because of conformance. As an
+interchange format it does not pay either: a recipient would have to learn an incubating
 specification, where self-explaining file names are more interoperable than a specification nobody
-has read. And conformance is not something that was given up in principle and kept in practice:
-every vertex manifest fossil writes declares `dense_id` as `uint32`
-(`crates/fossil-df/src/lib.rs`, `vertex_info`), and the built-in list GraphAr's `types.cc` parses
-has no unsigned type at all — so its own C++ reader would refuse the first property of the first
-vertex type.
-What survives as an internal invariant is the good part: **the manifest's field names**, both
-adjacency orientations, dense identifiers, and edges aligned to the source's chunk. The full
-enumeration — eight divergences, each one the same rule applied once — is in [what is borrowed from
-GraphAr, and where borrowing
-stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
-**What would bring it back.** A second reader that is not ours, that already speaks it.
+has read.
 
-### One file per tile
+Nor was conformance given up in principle and kept in practice. Every vertex manifest fossil writes
+declares `dense_id` as `uint32` (`crates/fossil-df/src/lib.rs:1792`, `vertex_info`), and the
+built-in list GraphAr's `types.cc` parses has no unsigned type at all — so its own C++ reader would
+refuse the first property of the first vertex type.
 
-**The idea.** Give every tile its own file, so a request is a file.
-**Why it is attractive.** The addressing is trivial and every request is exactly one object.
-**The evidence against it.** Measured against the alternative: **four times the requests and not one
-byte saved.** A request against a single file is a maximal run of consecutive row groups, and the
-tiles a window needs merge into a handful of runs — the file boundary is the only thing that prevents
-the merge.
-**What would bring it back.** A store where opening a file is cheaper than a range request into a
-large one.
-
-### A materialised tile tree, holding the edges that cross tiles
-
-**The idea.** A pyramid of tiles, with each edge stored at the deepest tile containing both of its
-endpoints.
-**Why it is attractive.** It is the classical answer, it removes the cross-tile case, and interior
-nodes look like the natural home for it.
-**The evidence against it.** An interior node earns its existence only by **containing** something a
-leaf cannot, and the only candidate is the crossing edge — which is measured to cost more to lift
-than it saves. The reads diverge sharply: one placement stays flat as the corpus grows fifty-fold and
-the other grows with it, and it loses on request count at the same time. The structural cause is
-that near the root there is **no branching left to prune with**, so every window touches nearly every
-high tile — and every window pays the root whether or not anything in it is drawn, because a reader
-cannot know what a tile holds without reading it. That is what addressing *means*. With nothing to
-put in them, the interior nodes are empty, and the addressing that replaces the tree is arithmetic on
-identifiers.
-**What would bring it back.** Nothing declared — but the hole in the measurement is named: an edge
-with one endpoint off-screen has a visible segment and **neither placement brings it**. Measuring
-that needs the other adjacency orientation, and it duplicates the addressing rather than the
-argument.
-
-### Capability negotiation for the artifact
-
-**The idea.** A monotonic version plus an unordered set of named capabilities a reader must
-understand, split into read and write.
-**Why it is attractive.** It is the mechanism the mature table formats have, and retrofitting it is
-expensive.
-**The evidence against it.** *There is no problem to solve.* Nothing is published and there are no
-older readers, so a negotiation mechanism answers a question nobody has asked — and then has to be
-maintained until somebody asks it.
-**What would bring it back**, written so nobody has to remember it: **the day a corpus leaves this
-machine towards somebody who cannot regenerate it.** That is the same boundary as publishing the
-arithmetic test vectors, for the same reason — the enduring cost in this space is files that can no
-longer be withdrawn.
-
-### A second writer
-
-Not a rejection but a standing reversal condition, recorded because it flips a decision rather than
-adjusting one. **If a second writer appears — anybody producing this corpus without using this
-implementation — the priority inverts**: the specification becomes the contract and the
-implementation becomes one implementation among several. *One writer is what makes the library half
-safe; two writers is what turned a widely-used columnar format into a reference implementation that
-became normative by accident.* And the clock runs one way: if the corpus reaches third parties before
-the arithmetic is published, the option is gone.
-
-## Shadows of the tooling
-
-### Removing the incremental core from the batch path
-
-**The idea.** The batch path builds an empty dependency database on every invocation and never gets a
-cache hit across runs, so remove the machinery and take the saving.
-**Why it is attractive.** The diagnosis is correct — there really is no reuse between invocations —
-and a borrowed figure from a comparable project reported a 52% improvement from exactly this change.
-**The evidence against it.** The borrowed figure does not transfer, and measuring locally says why:
-that project is a **library whose entire work is compilation**, so its percentage of compilation *is*
-its percentage of the process. Here compilation is two thousandths of a command dominated by process
-start-up and opening a database connection. The ceiling on the saving is **under four percent of that
-two thousandths, falling to under half a percent as the program grows** — and the same measurement
-found the real cost, which is quadratic behaviour in one lowering step, entirely unrelated. Two
-structural blocks came with it: the memoised core is the type through which the whole internal API
-passes, so replacing it is a rewrite of thousands of signatures; and the browser artifact reaches it
-through the executor regardless of whether the database is built.
-**What would bring it back**, and half of it is already measured against: *a profile where compilation
-stops being microseconds — a file with hundreds of mappings, or a check called in a loop inside a
-long-lived process.* The first of those is measured and points the wrong way. What is **not** measured
-is the cost in bytes of the browser artifact, which would be a different argument from the one about
+What survives as an internal invariant is the good part: the manifest's field names, both adjacency
+orientations, dense identifiers, and edges aligned to the source's chunk. The full enumeration —
+eight divergences, each one the same rule applied once — is in [what is borrowed from GraphAr, and
+where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
+</Accordion>
+<Accordion title="A materialised tile tree, holding the edges that cross tiles">
+The only thing an interior node could contain that a leaf cannot is the crossing edge, and it is
+measured to cost more to lift than it saves. The reads diverge sharply: one placement stays flat as
+the corpus grows fifty-fold and the other grows with it, and it loses on request count at the same
 time.
 
-### A subprocess as the embedding surface
+The structural cause is that near the root there is no branching left to prune with, so every window
+touches nearly every high tile — and every window pays the root whether or not anything in it is
+drawn, because a reader cannot know what a tile holds without reading it. That is what addressing
+*means*. With nothing to put in them the interior nodes are empty, and the addressing that replaces
+the tree is arithmetic on identifiers.
 
-**The idea.** A product embeds the language by spawning the binary and reading JSON off its stdout.
-Each capability it needs becomes a verb with a machine-readable flag.
-**Why it is attractive.** It is the cheapest possible integration — no linking, no version skew in the
-build, no wasm toolchain — and it works on day one for any host that can start a process.
-**The evidence against it.** It makes the *binary* the API, and the binary is the one host that cannot
-be embedded where the product actually runs. Measured on 2026-08-16: the product that this surface was
-built for spawns no fossil binary anywhere, and both of its images declare that they contain none —
-`run`, `refs`, `providers` and `check` all execute in the browser. The verbs and their wire types
-outlived their only consumer, and while they lived a second implementation of each grew beside them,
-which is how the serializer divergence on this page's parent got in. The subprocess is not wrong as a
-*transport*; it is wrong as the definition of what fossil offers.
-**What would bring it back.** A host that cannot run wasm at all, or a corpus whose run genuinely
-needs facilities `wasm32` does not have — a disk to spill to being the concrete one, since the
-compiler layer's promise of no ceiling is stated on this page's parent as living only where there is a
-disk. Neither is a reason to keep a second copy of a capability the browser already performs; both are
-reasons for the command line to remain a client.
+The hole in the measurement: an edge with one endpoint off-screen has a visible segment, and
+**neither placement brings it**. Measuring that needs the other adjacency orientation, and it
+duplicates the addressing rather than the argument.
+</Accordion>
+</Accordions>
 
-### A linked Rust type as the contract between fossil and a host
+## The tooling
 
-**The idea.** The host depends on a small, dependency-light, wasm-clean crate holding the wire structs,
-so both sides deserialize the same Rust definition and the contract cannot skew.
-**Why it is attractive.** It is genuinely one source of truth, it is checked by the compiler on both
-sides, and it costs the host a single lightweight dependency.
-**The evidence against it.** The crate accumulates contracts that have nothing to do with each other —
-the run result, the provider registry and the typed lineage arrived in one crate named for the first
-of them — and it accumulates build machinery belonging to the consumer, which is how an optional
-schema-derive feature whose own comment read "Host-only" came to live in a compiler crate. Measured:
-of the three contracts, only the run result is referenced from the host's Rust at all; the other two
-are consumed from TypeScript through the wasm package, so the linked crate is carrying two contracts
-for a language that never links it. A linked type also pins the host to a tag: dropping that feature
-means the host cannot bump past its pinned tag until it stops asking for it.
-**What would bring it back.** A host in the same workspace, or one that wants the compiler to enforce
-the contract at *its* build time rather than at its deserialize time — which is a real thing to want,
-and is a different argument from the one that put three unrelated contracts in one crate.
+| The idea | Its attraction | The evidence against | What brings it back |
+| --- | --- | --- | --- |
+| Removing the incremental core from the batch path, which builds an empty dependency database on every invocation | The diagnosis is correct — there is no reuse between invocations — and a borrowed figure from a comparable project reported a 52% improvement from exactly this change | The borrowed figure does not transfer, and there are two structural blocks besides — see below | A profile where compilation stops being microseconds. Half of it is already measured against — see below |
+| A subprocess as the embedding surface: a product spawns the binary and reads JSON off its stdout | The cheapest possible integration — no linking, no version skew in the build, no wasm toolchain — and it works on day one for any host that can start a process | It makes the *binary* the API, and the binary is the one host that cannot be embedded where the product actually runs — measured 2026-08-16, see below | A host that cannot run wasm at all, or a corpus whose run genuinely needs facilities `wasm32` does not have — a disk to spill to being the concrete one. Neither is a reason to keep a second copy of a capability the browser already performs; both are reasons for the command line to remain a client |
+| A linked Rust type as the contract between fossil and a host: a small, wasm-clean crate holding the wire structs | Genuinely one source of truth, checked by the compiler on both sides, and one lightweight dependency for the host | The crate accumulates unrelated contracts and build machinery belonging to the consumer, and two of its three contracts are consumed from a language that never links it — see below | A host in the same workspace, or one that wants the compiler to enforce the contract at *its* build time rather than at its deserialize time — a real thing to want, and a different argument from the one that put three unrelated contracts in one crate |
+| Foldering the crates into `core/`, `extensions/` and `corpus/` | Two dozen sibling directories show nothing, and the grouping the site draws in its dependency diagram would become the grouping on disk | A folder cannot hold a boundary. Every candidate for `core/` is already separated by something real — a cycle, a `cfg`, an orphan rule — so the directory would restate an edge that exists; and `fossil-base`, the one crate whose *contents* are wrong, would be filed rather than fixed. `extensions/` fails the same way: `fossil-shex` sits outside the descriptors because of a cycle, and a folder does not dissolve a cycle. The only grouping that is real today is *compiles to wasm32 or does not*, and six `compile_error!` already enforce it without a directory | A grouping that is not already implied by an edge — one a reader could not derive from `cargo metadata` |
+| An unmaintained language-server framework, rather than the low-level protocol library | The obvious choice by search ranking and by API pleasantness | Roughly three years without maintenance, and all three reference implementations in this space use the low-level library instead | Maintenance resuming — and until then the ban is explicit rather than tacit, so reintroducing it takes a decision rather than an import |
+| An editor client that consumes semantic tokens | Exactly the missing piece, and two candidates advertise the area | Obtained by probing the packages rather than reading their prose: of twenty-seven exports and seventeen prototype methods in the leading candidate, none matches semantic tokens; the other candidate's semantic-sounding strings are initialisation options passed through to the server, not consumers of a response. The generic request escape hatch does exist and does return the payload | A client that consumes the response rather than forwarding an option — and the transferable part is the technique: probe a package by its exports and its prototype before adopting it |
 
-### Foldering the crates into `core/`, `extensions/` and `corpus/`
+<Accordions>
+<Accordion title="Removing the incremental core from the batch path">
+The borrowed 52% does not transfer, and measuring locally says why: that project is a library whose
+entire work is compilation, so its percentage of compilation *is* its percentage of the process.
+Here compilation is two thousandths of a command dominated by process start-up and opening a
+database connection. The ceiling on the saving is under four percent of that two thousandths,
+falling to under half a percent as the program grows — and the same measurement found the real cost,
+quadratic behaviour in one lowering step, entirely unrelated.
 
-**The idea.** Group the workspace members into three directories so the shape of the tree is legible
-from `ls` rather than from a manifest.
-**Why it is attractive.** Two dozen sibling directories show nothing, and the grouping the site draws
-in its dependency diagram would become the grouping on disk.
-**The evidence against it.** A folder cannot hold a boundary. Every candidate for `core/` is already
-separated by something real — a cycle, a `cfg`, an orphan rule — so the directory would restate an
-edge that already exists; and `fossil-base`, the one crate whose *contents* are wrong, would be
-filed rather than fixed, which is the failure mode a taxonomy has and a rule does not. `extensions/`
-fails the same way: `fossil-shex` sits outside the descriptors because of a cycle, and a folder does
-not dissolve a cycle. The only grouping that is real today is *compiles to wasm32 or does not*, and
-seven `compile_error!` already enforce that one without a directory.
-**What would bring it back.** A grouping that is not already implied by an edge — one a reader could
-not derive from `cargo metadata`.
+Two structural blocks came with it: the memoised core is the type through which the whole internal
+API passes, so replacing it is a rewrite of thousands of signatures; and the browser artifact
+reaches it through the executor regardless of whether the database is built.
 
-### An unmaintained language-server framework
+What would bring it back is a file with hundreds of mappings, or a check called in a loop inside a
+long-lived process. The first is measured and points the wrong way. What is **not** measured is the
+cost in bytes of the browser artifact, which would be a different argument from the one about time.
+</Accordion>
+<Accordion title="A subprocess as the embedding surface">
+Measured on 2026-08-16: the product this surface was built for spawns no fossil binary anywhere, and
+both of its images declare that they contain none — `run`, `refs`, `providers` and `check` all
+execute in the browser. The verbs and their wire types outlived their only consumer, and while they
+lived a second implementation of each grew beside them, which is how the serializer divergence got
+in.
 
-**The idea.** Use the ergonomic framework rather than the low-level protocol library.
-**Why it is attractive.** It is the obvious choice by search ranking and by API pleasantness.
-**The evidence against it.** Roughly three years without maintenance, and all three reference
-implementations in this space use the low-level library instead.
-**What would bring it back.** Maintenance resuming — and until then the ban is explicit rather than
-tacit, so reintroducing it takes a decision rather than an import.
+The subprocess is not wrong as a *transport*; it is wrong as the definition of what fossil offers.
+</Accordion>
+<Accordion title="A linked Rust type as the contract between fossil and a host">
+The crate accumulates contracts that have nothing to do with each other — the run result, the
+provider registry and the typed lineage arrived in one crate named for the first of them — and it
+accumulates build machinery belonging to the consumer, which is how an optional schema-derive
+feature whose own comment read "Host-only" came to live in a compiler crate.
 
-### An editor client that consumes semantic tokens
-
-**The idea.** Adopt an existing browser editor language-client that handles semantic highlighting.
-**Why it is attractive.** It is exactly the missing piece and two candidates advertise the area.
-**The evidence against it**, obtained by probing the packages rather than reading their prose: of
-twenty-seven exports and seventeen prototype methods in the leading candidate, **none** matches
-semantic tokens; the other candidate's semantic-sounding strings are initialisation options passed
-through to the server, not consumers of a response. The generic request escape hatch does exist and
-does return the payload.
-**What would bring it back.** A client that consumes the response rather than forwarding an option —
-and the transferable part is the technique: probe a package by its exports and its prototype before
-adopting it.
+Measured: of the three contracts, only the run result is referenced from the host's Rust at all; the
+other two are consumed from TypeScript through the wasm package, so the linked crate carries two
+contracts for a language that never links it. A linked type also pins the host to a tag — dropping
+the feature means the host cannot bump past its pinned tag until it stops asking for it.
+</Accordion>
+</Accordions>

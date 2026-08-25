@@ -153,7 +153,7 @@ lowest common ancestor of the two ids, which with a fixed tile size is their com
 per window while LCA goes from 404k to 2.70M, at 2.5×–3.5× the requests. Near the root the tree has no
 branching left to prune with, so a window touches nearly every high tile and pays the root whether or
 not anything in it is drawn. The alternative is recorded, with what would bring it back, on
-[design/discarded](/docs/design/discarded#a-materialised-tile-tree-holding-the-edges-that-cross-tiles).
+[design/discarded](/docs/design/discarded#the-corpus).
 
 **One column of it is open**: "drawable" there means both endpoints on screen, and an edge with one
 endpoint outside has a visible segment neither placement brings. What would settle it is the same six

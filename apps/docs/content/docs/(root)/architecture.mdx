@@ -19,7 +19,8 @@ graph LR
   C["<b>corpus</b> · 4 crates<br/>graph · graph-wasm · mcp · layout"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
-  E -->|16| L
+  E -->|17| L
+  E -->|1| M
   M -->|22| L
   M -->|1| C
   C -->|3| M
@@ -28,9 +29,13 @@ graph LR
   C -->|1| X
 ```
 
-Twenty-five crates, forty-five cross-group edges, and **one pair still runs both ways**. Measured
-2026-08-23 from `cargo metadata`, `[dependencies]` only — a test may depend on whatever it likes, so
+Twenty-five crates, forty-seven cross-group edges, and **one pair still runs both ways**. Measured
+2026-08-25 from `cargo metadata`, `[dependencies]` only — a test may depend on whatever it likes, so
 dev edges are out of scope here for the same reason they are in `content.test.ts`.
+
+The single `editor → engine` edge is `fossil-lsp → fossil-introspect`, and it is deliberate: without
+the columns a `DESCRIBE` finds, the editor is silent on every diagnostic whose evidence is a source's
+schema.
 
 The mutual arrow is `engine ↔ corpus`, and naming the four edges is the whole of the finding:
 
@@ -43,21 +48,14 @@ The mutual arrow is `engine ↔ corpus`, and naming the four edges is the whole 
 
 That mutual arrow is the whole of the complaint that opened this page — *"it feels like we have two
 cores"*. There are two, and they are still stitched together in the wrong place. **But the stitch is
-now three named functions rather than a crate boundary in the wrong place**, and each has a stated
-price: `batches_to_parquet` stays where it is because moving it would put `arrow` + `parquet` into
-`fossil-graph-wasm`'s browser bundle, which has neither (the argument is in
-`crates/fossil-layout/src/lib.rs`); `fossil-sinks` and `fossil-resolver` are filed under the engine
-by history rather than by subject, and `/docs/design/one-engine` is where that gets settled.
+now three named functions rather than a crate boundary**, and each has a stated price:
+`batches_to_parquet` stays where it is because moving it would put `arrow` + `parquet` into
+`fossil-graph-wasm`'s browser bundle, which has neither; `fossil-sinks` and `fossil-resolver` are
+filed under the engine by history rather than by subject, and `/docs/design/one-engine` is where that
+gets settled.
 
-<Callout title="What this diagram said a day ago, and why the numbers moved">
-It said twenty-four crates and forty-three edges, and drew the mutual arrow as
-`fossil-runtime → fossil-graph` plus `fossil-mcp → fossil-runtime`. **Neither edge exists**: the
-first left with `graph_exec.rs` in `d6f957f` and the second went with it. It also omitted
-`fossil-introspect` and `fossil-mem-probe` entirely. What put the mutual arrow back is a
-*reclassification*, not a new dependency — `fossil-runtime` is `fossil-layout` now and it sits with
-the corpus, because the crate IS the layout pass and "native execution runtime" was false in both
-words.
-</Callout>
+What has **not** happened is everything below this diagram: `fossil-base` still holds a `tracked`
+query and the `@conn` locator, and `fossil-engine` is still a sack.
 
 ## Nobody cuts by deployment target
 
@@ -87,19 +85,25 @@ ring a *feature* like the language server belongs to — and there is no good an
 under the CLI, rust-analyzer puts it *inside* the binary, Gluon puts it in a different repository.
 
 What survives of the rings is not a ring. It is two crates with a `cfg` and a written reason:
-`crates/fossil-lsp/src/lib.rs:14`, because `lsp-server` uses crossbeam and stdio, and
-`crates/fossil-resolver/src/lib.rs:50`, because credential material is deliberately kept off the wasm
-boundary.
+`crates/fossil-lsp/src/lib.rs:98-100`, because `lsp-server` uses crossbeam and stdio, and
+`crates/fossil-resolver/src/lib.rs:48-51`, because credential material is deliberately kept off the
+wasm boundary.
 
 ## The rule is written first and checked second, in that order
 
-> `duckdb` and `datafusion` each appear in exactly one crate, and neither is reachable from a wasm
-> shell.
+> `duckdb` and `datafusion` are each reachable only from crates that declare themselves native.
 
-It goes in `deny.toml`. But the order of importance is the one stated: **none of the three references
+It goes in `deny.toml`, which today names six wrappers for `duckdb` and five for `datafusion`
+(measured 2026-08-25). But the order of importance is the one stated: **none of the three references
 checks its architecture with a test.** rust-analyzer's most-cited rule — that `ide` depends only on
 the top-level `hir` — is held up by a comment in a `Cargo.toml`, repeated verbatim in two files. What
 does the work is a document that states the invariant *and its reason*.
+
+And a list is not a check. `cargo deny check bans` matches `wrappers` against the **direct** parents
+of a banned crate, so a crate that reaches an engine one hop further away is invisible to it —
+measured with `fossil-lsp` linking a bundled database and `cargo deny` printing `bans ok`.
+`crates/xtask/tests/engine_reach.rs` is what closes that, and it derives both halves: the policy from
+`deny.toml`, the truth from `cargo metadata`.
 
 ## `base` means two opposite things, and one of them has to be ours
 
@@ -115,66 +119,56 @@ And two of `base-db`'s own invariants point straight at us: *"base-db knows noth
 *"base-db doesn't know about file system and file paths"* — its VFS is **another crate**, and the
 operating-system implementation is **a third**.
 
-`fossil-base` today holds the salsa `Db` trait, the filesystem abstraction, the diagnostics, a `Files`
-struct that is empty, and the provider catalogue. And it knows a concrete type from a concrete
-provider: `crates/fossil-base/src/system.rs` imports `InferredDescriptor` for `System::descriptors`,
-so the crate that exists in order to know nothing knows something.
-
-Two things it held and does not any more, both measured against the same rule:
-
-- **The memory probe.** `FOSSIL_MEM_PROBE` shells out to `ps` and reads `Instant::now()` — I/O
-  outside the very abstraction this crate exists to own, and it went around `System` to do it. It is
-  `fossil-mem-probe` now, a leaf with no dependencies. That one `use` was **`fossil-layout`'s only
-  edge to `fossil-base`**, so a native execution runtime no longer links the compiler substrate in
-  order to time a phase: `cargo tree -p fossil-layout -e normal` reaches `fossil-base` on no path.
-- **The wording of a provider's refusal.** `Provider::decline_capability` and `decline_extension`
-  composed English Fossil compiler errors, asserted verbatim by `providers.rs`'s own tests, under a
-  module doc that opened *«nothing here decides anything about a program»*. They are
-  `fossil_hir::refusals`, beside the checker that raises them, and the catalogue keeps the
-  predicates — `provides` and `accepts` — that the sentences were built from. The comment that
-  used to make the claim is now `crates/fossil-base/tests/substrate_has_no_prose.rs`, which reads
-  `providers.rs` and fails on a string literal with a space in it.
+`fossil-base` holds the salsa `Db` trait, the filesystem abstraction and the diagnostics together,
+and it knows a concrete type from a concrete provider: `crates/fossil-base/src/system.rs` imports
+`InferredDescriptor` for `System::descriptors`, so the crate that exists in order to know nothing
+knows something.
 
 > **If a crate called `base` contains the substrate *and* the file abstraction, it is two crates that
 > have not been separated yet.**
 
-The fix used to be invented two crates away: the output side hung its accessor off the **descriptor**
-crate as an extension trait, so `fossil-base` never heard about it, and the input direction used the
-opposite pattern for no recorded reason. That example is gone — `b675fe5` deleted the extension trait
-outright, because nothing read what it carried. The asymmetry was resolved by subtraction rather than
-by the input side adopting it, so the tree no longer holds a worked example of the direction that
-would let `base` know nothing.
+The prose half of that rule is now a test — `crates/fossil-base/tests/substrate_has_no_prose.rs`
+reads `providers.rs` and fails on a string literal with a space in it, because a crate that decides
+nothing about a program has no business composing an English sentence about one.
 
 ### The remaining edge stays, and this is what would move it
 
-`fossil-base → fossil-descriptors-input` exists for **one trait method**, `System::descriptors`, and
-it is the edge that closes a cycle:
+`fossil-base → fossil-descriptors-input` exists for **one trait method**, `System::descriptors`. Four
+crates, and the arrows nearly meet:
 
-```text
-descriptors-input → shex        descriptors-output → shex, base        base → descriptors-input
+```mermaid
+graph LR
+  B["fossil-base"] -->|System::descriptors| DI["fossil-descriptors-input"]
+  DI --> S["fossil-shex"]
+  DO["fossil-descriptors-output"] --> S
+  DO --> B
 ```
 
-So `fossil-shex` cannot be folded into `fossil-descriptors-output` while it stands. Three ways out
-were costed, and none of them is worth paying for today:
+Acyclic, but only just. Fold `fossil-shex` into `fossil-descriptors-output` — the obvious
+simplification, one crate fewer — and the two remaining arrows close on themselves:
+
+```mermaid
+graph LR
+  B["fossil-base"] --> DI["fossil-descriptors-input"]
+  DI --> DO["fossil-descriptors-output"]
+  DO --> B
+```
+
+So the fold is blocked while that edge stands. Three ways out were costed:
 
 1. **A generic or associated type on `System`.** Impossible, not merely expensive: the trait is used
-   as `Arc<dyn System>` in `FossilDb` and as `&dyn System` on `Db::system`. Either shape is
-   object-safety's own counterexample.
+   as `Arc<dyn System>` and as `&dyn System`. Either shape is object-safety's own counterexample.
 2. **The types down into `fossil-graph-schema`,** the leaf both sides already see. It costs no new
-   crate — and it puts a `Mutex<HashMap>` of host-owned mutable state inside the crate whose module
-   doc spends a section on why it depends on nothing but `serde`. That is the mistake this page is
-   about, committed in a second place.
+   crate — and it puts a `Mutex<HashMap>` of host-owned mutable state inside the crate that depends
+   on nothing but `serde`. That is the mistake this page is about, committed in a second place.
 3. **A new leaf holding `DescriptorCache` + `InferredDescriptor`.** It works, and it is the only one
    that does. It also costs a 26th crate, changes an import path in nine crates, and — the reason it
-   is not done — **removes nothing from `fossil-base`.** The accessor, the `NativeSystem` field and
-   the three tests about a descriptor cache all stay exactly where they are. `fossil-base` would
-   still import a concrete input-descriptor type; only the crate it came from would be spelled
-   differently. Zero lines leave, and the complaint two paragraphs up is unchanged.
+   is not done — **removes nothing from `fossil-base`.** Only the crate the concrete type came from
+   would be spelled differently.
 
 **What reverses this:** somebody actually folding `fossil-shex` into `fossil-descriptors-output`.
 That fold removes a crate, so (3) nets zero on the count and the cycle goes with it — the cost
-becomes free at the moment there is a reason to pay it. Until then the edge is one line in a
-manifest, and cutting it buys a property nothing is waiting on.
+becomes free at the moment there is a reason to pay it.
 
 ## `lsp-types` in exactly one `Cargo.toml`
 
@@ -191,31 +185,9 @@ It costs 3,180 lines of `to_proto.rs` — 0.8% of the codebase — and buys a gu
 Note the asymmetry: 3,180 lines out against 156 in. Translating *inwards* is trivial; the work is all
 on the way out.
 
-**`fossil-ide` returns `lsp_types` structs directly** —
-`crates/fossil-ide/src/completion.rs:69`. We made Gleam's mistake, which has `use lsp_types::Position`
-inside the crate its own documentation calls *"entirely pure"*, rather than rust-analyzer's choice.
-
-And that relocated one crate rather than renaming it. `fossil-run-status` held three unrelated wire
-contracts — the output of `run`, of `providers`, and of `refs`. They were not a crate: **they were the
-outbound half of a protocol**, and in rust-analyzer they would live in the binary. Six crates depended
-on it and it depended on nothing, which is not being foundational — it is being the place where types
-that did not fit were left.
-
-**It is gone** (`0d04c27`), and so is the largest of its three contracts (`8d33cee`).
-`ProviderInfo` and `SourceRefInfo` went back to `fossil-lineage`, which had been importing its own
-output types back from it. `RunStatus` moved to `fossil-df` and was then deleted outright: seven of
-its nine fields were a second spelling of `graph.yaml`, and the two that were not — the row counts —
-are declared in the manifest now. What survives is `fossil_df::report`, carrying only what the corpus
-cannot say about itself: where it was written, and how many input rows named an endpoint no vertex
-carries. None became a method of the LSP — `run` is not an editor operation, `providers` is a
-constant, and `refs` is called once per launch.
-
-What the dissolution turned up is the better argument for it. The crate's declared reason was that
-hosts depend on it, which `publish = false` makes impossible; keasy re-wrote the shape by hand, and
-the hand copy is **still wrong in this repo**: `packages/executor/src/index.ts` declares
-`version: number` as a required field, `3db248e` deleted that field from the Rust on 2026-08-20, and
-`fossil-df-wasm` serialises the Rust struct straight to JS. A TypeScript consumer reading
-`runStatus.version` gets `undefined` against a type that says it cannot.
+**`fossil-ide` returns `lsp_types` structs directly** — `crates/fossil-ide/src/completion.rs:64`. We
+made Gleam's mistake, which has `use lsp_types::Position` inside the crate its own documentation
+calls *"entirely pure"*, rather than rust-analyzer's choice.
 
 ## The verdict, which is not the crate count
 
@@ -234,8 +206,9 @@ is the set of LSP functions, and exists only because `fossil-lsp` does not compi
 `fossil-sinks` writes nothing — it is the manifest model, borrowing GraphAr's field names without
 conforming to GraphAr ([where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops)),
 and half its dependents are readers.
-`fossil-engine` is credential resolution and pre-introspection, not a façade — and less of it than
-this page has said since `fbd1102` moved the pre-introspection out to `fossil-introspect`.
+`fossil-engine` is the native host: it supplies the `System` the compiler runs against, does the
+pre-compile jobs (register the shape documents, install the secrets a `@conn` needs, call
+`fossil-introspect`) and drives compile→run. Not an engine, and not a façade either.
 
 <Callout title="Deliberately absent">
 **No numbered layers.** A rule that needs a number to explain itself is a taxonomy, not a rule.
@@ -244,39 +217,47 @@ this page has said since `fbd1102` moved the pre-introspection out to `fossil-in
 boundary is `proc-macro-srv-cli`, and it exists because procedural macros segfault — fault isolation,
 not a ring.
 
-**No crate that exists by imitation.** `fossil-ide-db` was created citing rust-analyzer's `ide-db`,
-which is ~20k lines shared by five crates; here there was one consumer, and it has since been folded
-back in. A crate earns its boundary from a cycle, a `cfg`, an orphan rule or a publishing frontier.
+**No crate that exists by imitation.** A crate earns its boundary from a cycle, a `cfg`, an orphan
+rule or a publishing frontier.
 </Callout>
 
 ## There are two cores, and the second is one landed decision from having none
 
-<Callout title="A recognition, not a proposal">
-The split below is not a refactor anyone has to be argued into. It is what the tree will look like the
-moment a decision already taken is executed.
-</Callout>
-
-Three facts, in order:
+The split below is not a refactor anyone has to be argued into. It is what the tree will look like
+the moment a decision already taken is executed. Three facts, in order:
 
 1. **`fossil-graph` has exactly one fossil dependency: `fossil-sinks`.** It does not know the language
    — grepping its `src` for `fossil_hir|fossil_syntax|fossil_mir|fossil_base|fossil_descriptors|fossil_lineage`
    returns zero — and it does not touch the disk. It declares two ports instead:
    `ManifestSource::fetch` and `DuckExecutor::query_json`, **the only two real extension points in the
    entire workspace.**
-2. **That dependency is used on one production line**: `crates/fossil-graph/src/manifest.rs:16`. The
-   other two occurrences are a `#[cfg(test)]` module and an example.
+2. **That dependency is used on one production line**: `crates/fossil-graph/src/manifest.rs:16`.
+   Everything else is a `#[cfg(test)]` module.
 3. **The corpus is Parquet and nothing else.** Conforming to an existing graph interchange
-   specification is a [discarded alternative](/docs/design/discarded) — it gave vocabulary and
-   stopped giving contract — and that manifest is exactly what the dependency in (2) models. The
-   seam between the two cores is made of the one thing the design has already ruled out.
+   specification is a [discarded alternative](/docs/design/discarded), and that manifest is exactly
+   what the dependency in (2) models. The seam between the two cores is made of the one thing the
+   design has already ruled out.
 
-So: **when the manifest goes, `fossil-graph` will have no fossil dependencies at all.** Not a small
-one — zero.
+```mermaid
+graph LR
+  subgraph today
+    A["fossil-graph<br/>the read surface"] -->|the manifest model| B["fossil-sinks"]
+  end
+  subgraph "when the manifest goes"
+    C["fossil-graph<br/>no fossil dependency at all"]
+    D["fossil-sinks"]
+  end
+```
 
-The other half of the confirmation is measured rather than assumed: `kanzo-ui` reads corpora written
-by fossil with **no dependency on `@fossil-lang/*`**, and three languages that do not know fossil
-exists read the same tree on 2026-08-04. The seam between the two halves is the corpus on disk. It was
-never an API.
+Not a small number of dependencies — zero. And the other half of the confirmation is measured rather
+than assumed: `kanzo-ui` reads corpora written by fossil with **no dependency on `@fossil-lang/*`**,
+and three languages that do not know fossil exists read the same tree on 2026-08-04. The seam between
+the two halves is the corpus on disk. It was never an API.
+
+That claim is a build failure rather than a sentence somebody measured once: `apps/docs/content.test.ts`
+reads `crates/fossil-graph/Cargo.toml` and fails if that crate's fossil dependencies are ever anything
+other than `fossil-sinks` alone — including when the manifest goes and the answer becomes none, at
+which point this page owes a rewrite.
 
 <Callout type="warn" title="A name that misleads, corrected here too">
 `fossil-graph` is **not** an implementation of GraphAr, and neither is `fossil-sinks`. Nothing here
@@ -284,54 +265,14 @@ writes a corpus a GraphAr reader can open: the manifest borrows GraphAr's YAML f
 where GraphAr stops specifying, which is
 [stated once with the divergences measured](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
 `fossil-graph` is the read surface over a corpus somebody else already wrote: a closed enum of
-[six verbs](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws). The crate that writes
-is `fossil-df`; the crate that models
-the manifest is `fossil-sinks`.
+[six verbs](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws). The crate that writes is
+`fossil-df`; the crate that models the manifest is `fossil-sinks`.
 </Callout>
-
-## One repository
-
-Five projects that have already been through this were compared, and **none of them puts the
-specification in its own repository.**
-
-- **dbt** separates **the schema, not the implementation** — `schemas.getdbt.com` is its own repo with
-  versioned URLs, while the compiler stays in `dbt-core`. Its Rust engine was recently folded *back*
-  into `dbt-core`.
-- **Delta shows that co-location does not prevent drift**: CheckpointV2 diverged from its own
-  specification while living in the same repository. What fixed it was a **process** —
-  `protocol_rfcs/`, where the specification PR lands before the implementation PR. Lance arrived at
-  the same rule independently.
-- **Lance** is two years ahead of us and still has an open, unanswered question about *what constitutes
-  the specification* — the protobufs, the docs, or some of the code.
-- **Malloy is the counterexample**, and it is our scenario if this goes wrong: its interfaces package
-  was created, killed within three months by a maintainer's issue titled *"malloy-interfaces cannot
-  have a copy of malloy_types in it"* — still open — and revived seventeen months later. Twenty-five
-  satellite repositories held in lockstep by a script, one of them frozen **159 releases** behind.
-
-> **What buys correctness is not the boundary. It is the process.** The specification lands before the
-> implementation, and conformance is round-trip.
 
 ## What is on this page and what is not
 
-The page is the shape. [Three hosts](/docs/design/three-hosts) is the argument, and what is
-deliberately left off here goes to the pages that own it: the measurement that reordered the whole
-priority — a compiler that reports success and writes a corpus with a property missing — is
-[the expression cliff](/docs/design/expressions); the scope of the incremental system is
-[tooling for humans](/docs/design/tooling-for-humans); and the extension mechanism is a
-[discarded alternative](/docs/design/discarded) with a named condition that would reopen it.
-
-<Callout title="Three of them are done, and the rest is not">
-This callout said "the crate count is twenty-four today and nothing below the first diagram has been
-executed", and by 2026-08-24 both halves were false. Three of the moves argued below have happened:
-`fossil-run-status` was dissolved into the crates that produce its contracts, `fossil-runtime` became
-`fossil-layout` and moved to the corpus group, and `fossil-introspect` was extracted from
-`fossil-engine`. Twenty-five crates, and the count moved in both directions to get there.
-
-What has NOT happened is everything else — `fossil-base` still holds a `tracked` query and the
-`@conn` locator, `fossil-engine` is still a sack, and the engine↔corpus arrow above is the price of
-the third move rather than a leftover. The
-measurement backing the sentence at the top of this page is the manifest assertion in
-`apps/docs/content.test.ts`: it reads `crates/fossil-graph/Cargo.toml` and fails if that crate's
-fossil dependencies are ever anything other than `fossil-sinks` alone — including when the manifest
-goes and the answer becomes none, at which point this page owes a rewrite rather than a quiet edit.
-</Callout>
+The page is the shape; [three hosts](/docs/design/three-hosts) is the argument. The measurement that
+reordered the whole priority — a compiler that reports success and writes a corpus with a property
+missing — is [the expression cliff](/docs/design/expressions); the scope of the incremental system is
+[tooling for humans](/docs/design/tooling-for-humans); and whether the specification belongs in its
+own repository was settled against five projects in [prior art](/docs/design/prior-art).

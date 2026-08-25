@@ -1,166 +1,94 @@
 ---
 title: Identity
-description: Why the subject's identity is a slot the language owns rather than an attribute argument, why it is unique per type, and why the one system that shipped this check and then removed it does not apply here.
+description: Why the subject's identity is a slot the language owns rather than an attribute argument, and why every mapping that produces a type has to mint the same one.
 ---
 
 Every node in an RDF graph is an IRI, and an IRI is not in your CSV. Somebody has to mint it. Where
-that instruction lives is the single hardest question in the language's surface, and it is the one
-place where the two documents a program is written against — the source and the shape — are both
-silent.
+that instruction lives is the hardest question in the language's surface, and it is the one place
+where both documents a program is written against — the source and the shape — are silent.
 
 ## The shape document cannot declare it
 
 A shape document describes the predicates of a node. In RDF the subject **is** the node, not one of
 its properties, so there is no slot in the document to assign an identity to. That is not an
-oversight in ShEx or in SHACL, and it is not fixed by choosing the other one.
+oversight in ShEx or in SHACL, and choosing the other one does not fix it.
 
 The comparison that makes it clear is with the schema languages that *do* declare identity —
-`identifier: true` in LinkML, `@id` in Prisma, `@key` in GraphQL. All three describe property
-graphs, and in a property graph identity is **signalled**: one of the fields you already have is the
-one that identifies. In RDF identity is **constructed**: the identifier is an IRI that exists
-nowhere in the source and has to be built out of the row.
+`identifier: true` in LinkML, `@id` in Prisma, `@key` in GraphQL. All three describe property graphs,
+and in a property graph identity is **signalled**: one of the fields you already have is the one that
+identifies. In RDF identity is **constructed**, out of a row, as an IRI that exists nowhere in the
+source.
 
-So the instruction has to live in the program, and the question is what shape it takes there.
+So the instruction lives in the program, and the question is what shape it takes there.
 
-## Not an attribute argument, and the prior art is unanimous
+## Not an attribute argument
 
 The attractive form is an attribute — `@subject(iri = "…/{User.email}")` — because an attribute is
-where metadata goes and this is metadata. It does not survive contact with the prior art. Seven
-languages were examined and there is **not one exception**:
+where metadata goes and this is metadata. It does not survive contact with the prior art: seven
+languages, no exception, none of which admits a per-instance expression in an attribute argument, and
+one of which calls the restriction a deliberate device in its own specification. The seven and the
+control experiment are the [identity table in prior art](/docs/design/prior-art#identity); the
+alternative and what would bring it back are [discarded](/docs/design/discarded).
 
-- **Java** does not merely lack expressions in annotation arguments; the specification says it is a
-  deliberate device. JLS §9.7.1 calls the restriction *"a syntactic trick to prevent assignment
-  expressions as element values"*.
-- **JPA**'s `@Id` is literally empty — `public @interface Id {}` — and expresses the identity **by
-  where it is written**, not by what it carries.
-- **Prisma** has no expression language at all in this position: nine function names, closed,
-  implemented in the engine.
-- **Ecto is the control experiment, and it is the most valuable item in the set.** Elixir *does*
-  evaluate expressions in module attributes, so the per-row form compiles — and is wrong.
-  `default: DateTime.utc_now` produces **one frozen value for every row**, and Ecto spends a
-  paragraph of documentation warning about a mistake that in Java cannot be written. Given the full
-  power, it ended up routing per-row generation through an indirection of inert data anyway.
-
-The prior art also prescribes the exit when a per-row expression is genuinely needed, and it is
-never *widen the attribute slot*: it is **give the thing its own named construct** — SQL's
-`GENERATED ALWAYS AS`, Django's `GeneratedField`. And the failure mode to avoid has a name too:
-Spring's `@PreAuthorize("…")`, where the expression comes back as an unchecked string and every
-guarantee the surrounding type system offered is lost at the quotation mark.
-
-That yields a rule sharp enough to apply mechanically:
-
-> **If the attribute can be omitted, it is forbidden** — because an omissible attribute implies a
-> derived fallback, and a derived identity is one nobody wrote down. **If it cannot be omitted, it is
-> not an attribute; it is syntax with brackets**, and then the spelling does not matter.
-
-RDFBeans demonstrates the second half by accident: its annotations are *required*, and without them
-the class is not recognised at all. That is a grammar wearing an annotation's clothes.
+The prior art also prescribes the exit, and it is never *widen the attribute slot*: give the thing
+its own named construct, as SQL does with `GENERATED ALWAYS AS` and Django with `GeneratedField`. The
+rule behind that is sharp enough to apply mechanically — an attribute that can be omitted implies a
+derived fallback, and a derived identity is one nobody wrote down; an attribute that cannot be
+omitted is syntax with brackets, and then the spelling does not matter.
 
 ## The slot, and why `@`
 
-fossil takes the prescribed exit. Identity is a slot the language owns, written as an assignment, on
+fossil takes the prescribed exit. Identity is a slot the language owns, written as an assignment on
 the first line of a mapping body:
 
 <Program src="shop/shop.fossil" region="identity" title="shop.fossil" />
 
-It is an ordinary assignment and its right-hand side is the ordinary expression grammar — the same
-expressions, the same checking, the same completion. There is no second mini-language to keep in
-sync with the first, which is the whole reason the string-in-an-attribute form is dangerous.
+Its right-hand side is the ordinary expression grammar — the same expressions, the same checking, the
+same completion. There is no second mini-language to keep in sync with the first, which is the whole
+reason the string-in-an-attribute form is dangerous.
 
-The `@` marks the **language's own namespace**, against the bare names a shape document declares.
-That is not decoration. Property keys are the last segment of a predicate IRI, and a vocabulary is
-free to declare a predicate called `subject`; without a reserved marker, the language and the user's
-vocabulary compete for the same word. JSON-LD reserves `@`-prefixed keywords for exactly this
-reason, and states it exactly this way: the user's keys are arbitrary, so you cannot appropriate
-`id`. Django gives the criterion for what belongs in that space — *model metadata is anything that
-is not a field*.
+The `@` marks the language's own namespace against the bare names a shape document declares. Property
+keys are the last segment of a predicate IRI, and a vocabulary is free to declare a predicate called
+`subject`; without a reserved marker the language and the user's vocabulary compete for the same
+word. JSON-LD reserves `@`-prefixed keywords for exactly this reason. The mechanism generalises: a
+second language-owned slot, the named graph a triple belongs to for instance, enters through the same
+door instead of opening another.
 
-The mechanism generalises rather than being a one-off. A second language-owned slot — the named
-graph a triple belongs to, for instance — enters through the same door instead of opening a second
-one.
-
-(`#` was the other candidate for the marker and is disqualified three times over: it is the comment
-character in both Turtle and SPARQL, the two languages a fossil reader already has in their head; it
-is the fragment separator in half the RDF vocabularies in existence; and a bare `#` is not lexable in
-this grammar at all.)
+(`#` was the other candidate and is disqualified three times over: it is the comment character in
+both Turtle and SPARQL, it is the fragment separator in half the RDF vocabularies in existence, and a
+bare `#` is not lexable in this grammar at all.)
 
 ## Two obligations no other property has
 
-Because an IRI *denotes* — because writing one is a claim that this node is that thing — the identity
-slot carries two rules that no ordinary property carries.
+Because an IRI *denotes*, the identity slot carries two rules no ordinary property carries.
 
 **It is deterministic and bounded to the row.** An identity that depends on anything that is not the
 data is not reproducible, and a corpus you cannot regenerate is not a corpus. This is a check, not a
 style guide.
 
 **Every mapping that produces a type writes the same one.** Two mappings producing `Person` with
-different identity templates is an **error**, and the diagnostic names both mappings and both
-templates:
+different identity templates is an error, and the diagnostic names both mappings and both templates:
 
 <Program src="errors/two-identities/expected/diagnostic.txt" title="fossil check program.fossil" />
 
-Error rather than warning, and the reason is what happens when the warning is ignored: two entities
-in the graph where there was one, discovered by whoever queries it. A warning is an appropriate
-response to something the user might have meant. Nobody means this.
+Error rather than warning, because of what happens when the warning is ignored: two entities in the
+graph where there was one, discovered by whoever queries it. A warning is an appropriate response to
+something the user might have meant. Nobody means this.
 
-## The uniqueness check has no precedent, and one live counterexample
+Nothing else in the mapping world checks it, and the one system that shipped the check removed it —
+both of those are answered in [discarded](/docs/design/discarded), where the reversal conditions live
+too. The short version is that the removal is correct there for a reason that argues *for* the check
+here: those subgraphs deploy separately and nobody ever holds the whole set, while fossil compiles a
+whole program at once.
 
-**Nothing in the mapping world checks this.** Not R2RML, not RML, not their mappers, not the mapping
-quality literature; the community closed the request as out of scope. One system has the detector and
-does not use it as one: Ontop derives incompatible-template information and wires it **only to the
-optimiser**, as a way to prune a branch. And the academic work simply assumes the property — Xiao et
-al. (ESWC 2018) write *"it is desired that each IRI can be constructed by at most one IRI template,
-and we make such assumption here"*.
-
-The W3C provides the contrast inside its own house. **Direct Mapping** derives identity from the
-table and its primary key, so agreement holds **by construction** and there is nothing to check.
-**R2RML §9.1.1** opened the free per-mapping template — and that is precisely where the problem is
-born, unchecked, and has stayed.
-
-**The counterexample that has to be answered rather than ignored: Apollo Federation shipped this
-check and then removed it.** `KEY_NOT_SPECIFIED` existed in v1; v2 deleted it and published the
-reason — *"Each subgraph can declare a key independently of any other subgraph"*. Verified live: two
-subgraphs declaring disjoint keys compose with **"COMPOSED OK — no errors, no hints"**, while a
-merely divergent documentation comment does raise a hint.
-
-Two things make it not apply.
-
-**Their two keys are two ways to *locate* one entity**, not two identities. They are alternative
-keys, like two `UNIQUE` constraints on a table — the entity is one, and either key finds it. What
-fossil rejects is two mappings *minting* different identifiers, which is not an alternative key but a
-contradiction.
-
-**And Apollo could not check it even if it wanted to.** Its subgraphs deploy separately; nobody ever
-has the whole set in front of them at one moment. fossil is write-once/read-many and compiles a whole
-program at once, so **the global check is available precisely because the topology is the opposite.**
-The removal is correct there for a reason that argues *for* the check here.
-
-## The rigidity, paid
+## The cost
 
 Two sources describing **disjoint populations of the same type with different identity schemes** stop
 being expressible. A legacy export keyed by account number and a current export keyed by email cannot
-both produce `Person` in one program without agreeing on how a `Person` is named.
+both produce `Person` in one program without agreeing on how a `Person` is named. That is a real
+restriction, accepted knowingly.
 
-That is a real restriction and it is accepted knowingly, not overlooked.
-
-There is also a piece of guidance from the Linked Data literature that plays against this design, and
-it should be said rather than omitted: *"Agents making use of URIs SHOULD NOT attempt to infer
-properties of the referenced resource"* — and the unit of minting policy in that literature is the
-**publisher**, not the type. fossil chooses the type because the compiler is the single authority
-over a program, which is an argument from topology rather than from that literature.
-
-## What would reverse this, in order
-
-1. **A legitimate case of disagreement.** Two mappings of one type that genuinely *must* mint
-   differently — disjoint populations with no common identity scheme. **One real instance demotes the
-   check from error to warning.**
-2. **The distinction with Federation failing to hold** — that is, a topology in which fossil composes
-   mappings from **independent authorities**. There, their argument becomes ours.
-3. **Invertibility.** If virtual access over a live source is ever wanted, one template per type is
-   not enough; that use needs the inverse expression, and the design would have to grow a place to
-   put it.
-
-And two things that were **not** verified, said rather than glossed: two R2RML mapping-quality
-taxonomies sit behind paywalls and are the most likely place a named category for "inconsistent IRI
-template" already exists; and **no published study measures how often a real mapping set mints two
-IRIs for one entity.** The damage is documented in teaching material, not in a failure report.
+One piece of Linked Data guidance plays against the design and should be said rather than omitted:
+its unit of minting policy is the **publisher**, not the type. fossil chooses the type because the
+compiler is the single authority over a program, which is an argument from topology rather than from
+that literature.
