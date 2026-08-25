@@ -3,259 +3,163 @@ title: Adjacency
 description: Both orientations on disk and both tiled, and an edge lives in the tile of the endpoint its file is ordered by. A hop is two addressed reads; the recursive alternative did not return in 45 seconds.
 ---
 
-Every edge type is stored **twice, in one relation**:
-
-- `by_source.parquet` — ordered by `src_dense`. This is CSR on disk.
-- `by_target.parquet` — ordered by `dst_dense`. This is CSC on disk.
-
-Verified on a ten-million-vertex corpus: `by_source.parquet` has **zero out-of-order rows** by
-`src_dense` across 71,024,690 rows, and `by_target.parquet` likewise by `dst_dense`.
+Every edge type is stored **twice, in one relation**: `by_source` ordered by `src_dense`, which is
+CSR on disk, and `by_target` ordered by `dst_dense`, which is CSC. Verified on a ten-million-vertex
+corpus: **zero out-of-order rows** in either, across 71,024,690 rows.
 
 ## Why the order is worth a convention
 
-Because a reader that trusts it gets **wrong answers rather than slow ones** if it is not there.
+A sorted adjacency file is not merely convenient to scan — it **is** the CSR structure a graph
+algorithm wants, offsets and values, already laid out:
 
-A sorted adjacency file is not merely convenient to scan — it *is* the CSR structure a graph
-algorithm wants, offsets and values, already laid out. Reading it as the CSR it claims to be needs
-no degree-counting pre-pass, no scatter, and no intermediate bag of pairs. A file that claims the
-order and does not have it does not fail: it builds a different graph, silently, and lays the corpus
-out by it.
+```
+by_source/tile10.parquet, ordered by src_dense    the CSR a reader already has
 
-That is not hypothetical arithmetic. In the write path, taking the file as the CSR it already is
-removed a `Vec<(u32, u32)>` of every edge (568 MB at ten million), a degree-counting pre-pass and an
-80 MB cloned cursor scattering random writes over the 568 — **−1.71 GiB of process peak**, with the
-corpus byte-identical. None of the three was ever asked for by the algorithm.
+ row   src_dense   dst_dense                      offsets[41000] = 0  first row of 41000
+   0       41000        8300  ┐                   offsets[41001] = 3  one past its last
+   1       41000      912004  │ 41000, degree 3
+   2       41000        4118  ┘                   offsets[41002] = 3  41001 has no out-edges
+   3       41002          77  ┐ 41002, degree 2   offsets[41003] = 5
+   4       41002       66051  ┘
+   5       41003      130998  ] 41003, degree 1   offsets[41004] = 6
 
-They existed because of a type. A constructor taking **offsets and targets cannot need a counting
-pass**, because its signature already asserts the order; one taking a **bag of pairs has to rebuild
-it**, because the bag asserts nothing. The write path took the bag, so the ordering the file already
-had could not be passed through it. **An invariant lives in a type or it lives in a comment**, and
-here the file is the type.
+                              targets = the dst_dense column, read as it lies
+```
 
-And the order is the expensive half, which is why it is worth spending a convention on rather than
-leaving to whoever reads the file. Edge-centric streaming systems are built on one observation:
-walking edges in sequence while holding only per-vertex state beats random access over a resident
-adjacency, because sequential bandwidth is orders of magnitude larger than random. **X-Stream** and
-**GraphChi**'s parallel sliding windows spend their machinery on *producing* that sequence — it is
-the difficulty their designs exist to answer. Here it is not machinery: it is the convention this
-page opens with, and the count at the top of the page is a corpus being held to it. A consumer
-starts where those systems finish.
-
-Guard: `csr-and-csc`. What it does not fix is the secondary order — rows sharing a `src_dense` may
-appear in any order, and no reader may depend on which.
+The offsets are the run boundaries and the values are the `dst_dense` column: no degree-counting
+pre-pass, no scatter, no intermediate bag of pairs. And a file that claims the order and does not
+have it does not fail — it builds a different graph, silently, and lays the corpus out by it.
+**Wrong answers rather than slow ones**, which is what makes it worth a convention. What the order
+does not fix is the secondary one: rows sharing a `src_dense` may appear in any order, and no reader
+may depend on which. Guard: `csr-and-csc` — and every guard named on this page is specified in full,
+with what it cannot prove, in [the guard index](/docs/format#the-guards).
 
 ## One relation, stored twice
 
-The two orientations carry the same edge set. The manifest carries **one** `edge_count` for the
-relation rather than one per orientation, and that is the shape of the claim: each orientation
-separately has to add up to that number. What it does not say is that the two hold the same *rows* —
-same size and different contents is a reader answering a neighbourhood query from one and a count
-from the other, and silently disagreeing with itself.
-
-Guard: `one-relation-twice`, checked as a symmetric difference in both directions, so neither a
-missing edge nor an extra one survives. What it cannot prove is that either orientation is the
-*whole* relation: both being wrong identically passes the difference, and both being truncated by
-the same amount passes the count.
-
-And every endpoint addresses a vertex that exists, in its own type's dense space. That is the
-corruption a renumbering can introduce and that no row count would reveal — the edge counts still
-match, both orientations still agree, and the graph is wrong. Guard: `no-dangling-endpoint`.
+The manifest carries **one** `edge_count` for the relation, so each orientation separately has to add
+up to that number. What it does not say is that the two hold the same *rows*: same size and different
+contents is a reader answering a neighbourhood query from one and a count from the other, and
+silently disagreeing with itself. And every endpoint addresses a vertex that exists, in its own
+type's dense space — the corruption a renumbering introduces where the counts match, the orientations
+agree, and the graph is wrong. Guards: `one-relation-twice`, `no-dangling-endpoint`.
 
 ## An edge lives in the tile of the endpoint its file is ordered by
 
 Both orientations are tiled, and each is keyed by **the same range as the vertices** of the endpoint
-it is ordered by: tile `k` under `by_source/` holds every edge whose `src_dense` is in vertex tile
-`k` of the source type, and tile `k` under `by_target/` every edge whose `dst_dense` is in vertex
-tile `k` of the *destination* type. On a cross-type edge those are two different `dense_id` spaces,
-which is why `src_chunk_size` and `dst_chunk_size` are two fields.
+it is ordered by, so one edge is written into two tiles that have nothing to do with each other:
 
-A tile's row count is the total degree of those 4,096 vertices, not 4,096 — **`chunk_size` on an
-edge is an addressing unit and never a row count.** A tile with no rows is not written, so a 404 is
-the answer "these 4,096 vertices have no edges in this direction", and it costs nothing to give.
+```mermaid
+graph LR
+  E["edge <b>41000 → 8300</b>"]
+  E -->|"src_dense 41000 >> 12 = <b>10</b>"| S["<b>by_source/tile10</b>.parquet<br/>every edge out of<br/>vertices 40960–45055"]
+  E -->|"dst_dense 8300 >> 12 = <b>2</b>"| T["<b>by_target/tile2</b>.parquet<br/>every edge into<br/>vertices 8192–12287"]
+```
 
-**A 404 is that answer and also "this tile was never uploaded", and nothing in the address separates
-them.** The manifest's `edge_count` is what does: a reader sums the tiles it found against the
-declared number, and a short sum is a corpus that is missing rows rather than a graph that is
-sparse. The same hole exists on the vertex side and is closed the same way, with `vertex_count`
-([Identity](/docs/format/conventions/identity)). Guard: `declared-count`, which checks each orientation
-against the declared number on its own, because `one-relation-twice` compares the two to each other
-and passes on both being truncated identically.
+On a cross-type edge those are two different `dense_id` spaces, which is why `src_chunk_size` and
+`dst_chunk_size` are two fields. A tile's row count is the total degree of those 4,096 vertices, not
+4,096 — **`chunk_size` on an edge is an addressing unit and never a row count.**
+
+An empty tile is not written, so a 404 is the answer "these 4,096 vertices have no edges in this
+direction" — and also "this tile was never uploaded", and nothing in the address separates them. The
+manifest's `edge_count` is what does: a reader sums the tiles it found against the declared number,
+and a short sum is a corpus missing rows rather than a graph that is sparse. The vertex side closes
+the same hole with `vertex_count` ([Identity](/docs/format/conventions/identity)). Guard:
+`declared-count`, taken per orientation.
 
 ### Given a `dense_id`, where its edges are
 
-This is the whole of what a reader needs, and every part of it comes out of the edge type's
-manifest — nothing is agreed between a writer and a reader out of band:
-
-| you want | read | at | filter |
-| --- | --- | --- | --- |
-| the out-edges of `v` | `<edge prefix>by_source/tile{k}.parquet` | `k = v >> shift(src_chunk_size)` | `src_dense = v` |
-| the in-edges of `v` | `<edge prefix>by_target/tile{k}.parquet` | `k = v >> shift(dst_chunk_size)` | `dst_dense = v` |
-
-The manifest carries it as two `adj_lists` entries, each saying which endpoint column addresses it
-and where its tiles are:
+Every part of this comes out of the edge type's manifest — nothing is agreed out of band. `prefix`
+is the URL, the one part a reader cannot compute; `aligned_by` is the arithmetic, and the shift comes
+from `src_chunk_size` for the source-aligned list and `dst_chunk_size` for the target-aligned one.
 
 ```yaml
 prefix: edge/Person_knows_Person/
 src_chunk_size: 4096
 dst_chunk_size: 4096
 adj_lists:
-- ordered: true
-  aligned_by: src
-  prefix: by_source/
-  file_type: parquet
-- ordered: true
-  aligned_by: dst
-  prefix: by_target/
-  file_type: parquet
+- { ordered: true, aligned_by: src, prefix: by_source/, file_type: parquet }
+- { ordered: true, aligned_by: dst, prefix: by_target/, file_type: parquet }
 ```
 
-`aligned_by` is the arithmetic — `src` means the rows in tile `k` are those whose `src_dense >>
-shift` is `k` — and `prefix` is the URL, which is the one part a reader cannot compute. The shift
-comes from `src_chunk_size` for the source-aligned list and `dst_chunk_size` for the target-aligned
-one. A **hop** is therefore two reads: the tile `v` addresses in each direction, filtered to `v`'s
-rows, far ends collected. The work follows the frontier and never the corpus.
+So the **out-edges and in-edges of `v`** are two addressed reads, and the work follows the frontier
+and never the corpus:
 
-### Why the target half is tiled, when drawing does not need it
+```mermaid
+sequenceDiagram
+  participant R as reader
+  participant S as by_source/
+  participant T as by_target/
+  R->>S: GET {prefix}by_source/tile{v >> shift(src_chunk_size)}.parquet
+  S-->>R: filter src_dense = v → the far ends v points at
+  R->>T: GET {prefix}by_target/tile{v >> shift(dst_chunk_size)}.parquet
+  T-->>R: filter dst_dense = v → the far ends that point at v
+```
 
-It was not, and the reason it was not was sound for the question being asked: an edge with one
-endpoint off screen has a visible segment that CSR does not bring, and that is a different question
-from *drawing a window*, which CSR answers exactly ([below](#csr-not-lca)).
+### Why the target half is tiled, when a window only reads `by_source`
 
-What reopened it is a second question with a measurement behind it. A **neighbourhood** — one hop
-from a seed — was implemented in a reader the obvious way, as an undirected adjacency
-(`src → dst UNION ALL dst → src`) under a `WITH RECURSIVE`. On 6.9M edges it **did not return**: one
-hop from a single seed was still running after 45 seconds, and because that reader funnels every
-query through one connection in FIFO, it took the page with it. The adjacency term materialises
-13.8M rows before the recursion starts, and no `limit` on the answer bounds the cost of *finding*
-it.
+A **neighbourhood** — one hop from a seed — was implemented in a reader the obvious way, as an
+undirected adjacency under a `WITH RECURSIVE`:
 
-The shape is wrong rather than the tuning, and the right shape is the one this page already
-describes — except that it needs both directions. **Following only the out-edges is a wrong answer
-rather than a partial one:** "the papers by this author" is an in-edge from the author, and a
-traversal that skips it reports a smaller graph rather than a slower one.
+```sql
+-- On 6.9M edges this did not return: still running after 45 seconds, one hop, one seed.
+WITH RECURSIVE reach(id) AS (
+      SELECT :seed
+  UNION SELECT e.dst
+          FROM (SELECT src_dense AS src, dst_dense AS dst FROM edges
+                UNION ALL SELECT dst_dense, src_dense FROM edges) AS e
+          JOIN reach ON e.src = reach.id)
+SELECT * FROM reach;
+```
+
+The adjacency term materialises 13.8M rows before the recursion starts, and no `limit` on the answer
+bounds the cost of *finding* it. The right shape is the two reads above — and it needs both
+directions, because **following only the out-edges is a wrong answer rather than a partial one**:
+"the papers by this author" is an in-edge from the author.
 
 ### What a hop costs, measured
 
-Written by `apps/corpus/guards/fixture.mjs` at three sizes (`--layout files`, one file per tile, a
-ring plus one chord per vertex, so two edges per vertex), and read with the `duckdb` CLI. Twelve
-seeds spread evenly across the id space; the addressed and scanned answers are compared row for row
-at every seed, so the two columns are the same answer arrived at differently.
+Written by `apps/corpus/guards/fixture.mjs` at three sizes (`--layout files`, a ring plus one chord
+per vertex), read with the `duckdb` CLI. Twelve seeds across the id space, compared row for row
+against the scan at every seed; medians, all queries inside **one** process, since a process start is
+10–40 ms here.
 
-**Bytes a hop reads** — the number that transfers, because it is what a reader over HTTP pays:
+| N | edges | bytes: the two tiles the id names | bytes: both relation files | ms: addressed | ms: scan | ms: `WITH RECURSIVE` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 250,000 | 500k | **113.0 kB** | 6.9 MB | 8 | 5 | 4 |
+| 1,000,000 | 2.0M | **113.0 kB** | 27.5 MB | 2 | 5 | 7 |
+| 4,000,000 | 8.0M | **113.0 kB** | 110.2 MB | **1** | 16 | 23 |
 
-| N | edges | the two tiles the seed's id names | both relation files |
-| --- | --- | --- | --- |
-| 250,000 | 500k | **113.0 kB** | 6.9 MB |
-| 1,000,000 | 2.0M | **113.0 kB** | 27.5 MB |
-| 4,000,000 | 8.0M | **113.0 kB** | 110.2 MB |
-
-**The addressed hop is flat in N and the relation is not**, which is the whole claim: 61× less at a
-quarter million, 975× at four million, and the gap is the corpus growing.
-
-**Wall clock**, medians over the twelve seeds, all queries issued inside **one** `duckdb` process
-because a process start is 10–40 ms on this machine and would otherwise be most of what is timed:
-
-| N | addressed | scan the relation | `WITH RECURSIVE`, one hop |
-| --- | --- | --- | --- |
-| 250,000 | 8 ms | 5 ms | 4 ms |
-| 1,000,000 | 2 ms | 5 ms | 7 ms |
-| 4,000,000 | **1 ms** | 16 ms | 23 ms |
+**The addressed hop is flat in N and the relation is not** — 61× fewer bytes at a quarter million,
+975× at four million, and the gap is the corpus growing.
 
 <Callout type="warn" title="What this measurement is not">
-**At a quarter million the addressed hop is the slowest of the three.** There is nothing to win on a
-corpus a native engine reads in five milliseconds, and reporting only the four-million row would
-hide that.
-
-**And native DuckDB is the easy case for the other two.** It has every core of the machine and a
-local file; the reader this was tiled for is single-threaded WASM over HTTP, which is where the same
-recursive shape did not return in 45 seconds on 6.9M edges. So the milliseconds here are the
-*floor* of the difference, and the byte column is the part that carries over.
-
-**The graph is a ring with chords.** Every vertex has degree two, so no seed is a hub, and a
-neighbourhood that fans out to a million rows is not measured at all.
+**At a quarter million the addressed hop is the slowest of the three** — nothing to win on a corpus a
+native engine reads in five milliseconds. **Native DuckDB is the easy case for the other two**: every
+core and a local file, where the reader this was tiled for is single-threaded WASM over HTTP, so the
+milliseconds are the *floor* of the difference and the bytes are what carries over. **And the graph
+is a ring with chords**, so no seed is a hub and a fan-out to a million rows is not measured at all.
 </Callout>
 
-The second tiling is the edge relation on disk a fourth time. At four million vertices it is
-57.2 MiB against a corpus of 247.1 MiB without it — **+23%** — and it costs a drawing reader
-nothing: a window still asks only `by_source`, and the target tiles are fetched by the traversal
-that wants them.
-
-Guards: `tile-of`, which checks each orientation's tiles against its own column and its own declared
-chunk size; `declared-tiling`, which checks that an edge type's `src_chunk_size` equals its source
-type's `chunk_size` and its `dst_chunk_size` its destination type's — a different number there would
-address nothing — and that every declared `adj_list` carries a prefix; and `not-empty`, which is the
-one that notices an orientation with a relation and no tiles, since every other guard here skips
-what is not on disk.
+The second tiling is the edge relation on disk a fourth time — at four million vertices 57.2 MiB
+against a corpus of 247.1 MiB without it, **+23%** — and it costs a drawing reader nothing. Guards:
+`tile-of`, `declared-tiling` and `not-empty`, the last being the one that notices an orientation with
+a relation and no tiles, since every other guard skips what is not on disk.
 
 ### CSR, not LCA
 
 The alternative placement is to hoist an edge to the deepest tile containing both endpoints — the
 lowest common ancestor of the two ids, which with a fixed tile size is their common prefix. It is
-the natural thing to reach for, and it is **dominated on both curves at once**.
+**dominated on both curves at once**: over a fifty-fold growth in corpus, CSR reads 346k to 453k edges
+per window while LCA goes from 404k to 2.70M, at 2.5×–3.5× the requests. Near the root the tree has no
+branching left to prune with, so a window touches nearly every high tile and pays the root whether or
+not anything in it is drawn. The alternative is recorded, with what would bring it back, on
+[design/discarded](/docs/design/discarded#a-materialised-tile-tree-holding-the-edges-that-cross-tiles).
 
-Where the edges fall, by level. Level 0 is "both endpoints in the same leaf"; the root is the tile
-every id shares:
-
-| N | leaves | depth | in level 0 | in the root |
-| --- | --- | --- | --- | --- |
-| 200,000 | 49 | 6 | 88.51% | 24,942 |
-| 1,000,000 | 245 | 8 | 80.72% | 98,429 |
-| 5,000,000 | 1,221 | 11 | 74.42% | 292,410 |
-| 10,000,000 | 2,442 | 12 | 73.33% | 621,102 |
-
-**The root grows with N and the fraction that fits in a leaf shrinks.** And the root is paid by
-every window, whether or not anything inside it is drawn, because a reader cannot know what it holds
-without reading it — which is the definition of addressing.
-
-What a window costs, mean of six:
-
-| N | drawable | CSR reads | LCA reads | tiles CSR | tiles LCA | over-read CSR | LCA |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 200,000 | 184,282 | 347,975 | 403,848 | 11.8 | 29.7 | 1.95× | 2.29× |
-| 1,000,000 | 133,301 | 373,789 | 556,267 | 14.0 | 39.2 | 2.87× | 4.26× |
-| 5,000,000 | 122,556 | 345,988 | 1,659,809 | 13.0 | 44.3 | 2.89× | 13.84× |
-| 10,000,000 | 174,583 | 452,979 | 2,699,960 | 17.2 | 60.7 | 2.59× | 15.86× |
-
-**CSR is flat and LCA is not.** CSR reads 346k to 453k edges while the corpus multiplies by fifty;
-LCA goes from 404k to 2.70M. LCA also loses on requests, at 2.5×–3.5× the tiles.
-
-Why, in one table — the first window at five million, level by level:
-
-| level | tiles fetched | edges inside | of them drawable |
-| --- | --- | --- | --- |
-| 0 | 14 | 318,043 | 108,036 |
-| 1–2 | 15 | 31,048 | 5,793 |
-| 3–8 | 19 | 511,345 | 2,422 |
-| 9–11 | 4 | 977,000 | 3,852 |
-
-The four high tiles move **53% of everything an LCA reader downloads and draw 0.39% of what they
-contain**. That is not bad luck in one corpus: **near the root, the tree has no branching left to
-prune with.** At five million there exist only three tiles at level 9, two at level 10 and one at
-level 11, so any window touches almost all of them. The root at ten million is 621,102 edges of
-which a window draws **1,170**.
-
-Grouping levels in pairs — the quadrant, which is the natural move on a Morton order — merges
-adjacent rows of that table without moving a single edge downward. The ceiling does not drop.
-
-**And CSR needs no second request.** Every drawable edge has its source on screen, therefore in a
-leaf the window already fetched: reading the window's leaves is an **exact superset** of what can be
-drawn, with 1.1×–1.3× over-read at run granularity and 1.9×–2.9× at tile granularity.
-
-<Callout title="What that comparison does not cover">
-**"Drawable" means both endpoints on screen.** An edge with one endpoint outside has a visible
-segment and neither placement brings it. Measuring that needs the CSC half, which is tiled — but it
-is tiled for the traversal and not for this, and no figure on this page is a window that fetches
-both. The number that would settle it is the same table one column wider: over-read and tiles per
-window with `by_target` added, against the same six windows at each size.
-
-**Six windows per size, not a distribution**, all at one zoom, square and centred on the median
-vertex. **And the comparison is in rows, not bytes on the wire** — a high tile compresses *worse*
-than a leaf, since its ids span a wider range and delta and RLE yield less, so the LCA figure is
-optimistic if anything.
-</Callout>
+**One column of it is open**: "drawable" there means both endpoints on screen, and an edge with one
+endpoint outside has a visible segment neither placement brings. What would settle it is the same six
+windows per size, measured with `by_target` fetched too.
 
 ## The tiles are the relation
 
 Splitting a file is where rows are silently dropped or written twice, and both survive every count
-that is not a symmetric difference. `exactly-once` asserts that the tiles hold exactly the relation
-they cut — the same count, and nothing on either side of the difference.
+that is not a symmetric difference. Guard: `exactly-once`.

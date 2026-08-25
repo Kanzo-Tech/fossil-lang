@@ -1,39 +1,45 @@
 ---
 title: Reading one without fossil
-description: A Parquet reader and the column names. What a third party needs, in the order they need it, and the SQL that answers each step.
+description: A Parquet reader and the column names — the request sequence, the arithmetic between the requests, and the same read through @fossil-lang/graph for a caller who would rather not compose a URL.
 ---
 
-Reading a corpus needs a Parquet reader and this page. No fossil crate, no `@fossil-lang/*` package,
-no wasm module, no service.
+Reading a corpus needs a Parquet reader and the conventions below — no fossil crate, no
+`@fossil-lang/*` package, no wasm module, no service. That is how it is already read: `kanzo-ui`
+reimplements this shape against DuckDB and Mosaic with no `@fossil-lang/*` dependency at all. The
+SQL is DuckDB because that is the shortest way to write it down; nothing in it is DuckDB-specific
+except the syntax.
 
-This is not an aspiration about the format — it is how it is already read. `kanzo-ui` reads
-fossil-written corpora with no `@fossil-lang/*` dependency at all, reimplementing the read shape
-against DuckDB and Mosaic, and three languages that do not know fossil exists read the same tree.
-The examples below use DuckDB because it is the shortest way to write them down; nothing in them is
-DuckDB-specific except the syntax.
+## The sequence
 
-## 1. Start at the index
-
-A reader over HTTP cannot list a directory, so nothing is discovered by listing. One file is named
-in advance:
-
+```mermaid
+sequenceDiagram
+  participant R as reader
+  participant O as origin
+  R->>O: GET graph.graph.yml
+  O-->>R: every per-type manifest, by name
+  R->>O: GET vertex/Person.vertex.yml
+  O-->>R: prefix · chunk_size · vertex_count · index?
+  Note over R: <b>no request</b><br/>tile = dense_id >> log2 chunk_size<br/>tiles = ceil vertex_count / chunk_size<br/>every URL of the corpus is now composable
+  R->>O: GET the Parquet footers
+  O-->>R: per-tile x/y bounding boxes
+  Note over R: <b>no request</b><br/>keep the tiles whose box meets the window
+  R->>O: GET N byte ranges, issued together
+  O-->>R: the vertex tiles, and by_source/by_target at the same k
 ```
-graph.graph.yml
-```
 
-It names every per-type manifest. Each vertex manifest carries a `type`, a `vertex_count`, a
-`prefix` and a `chunk_size`, and may carry an `index:` block — step 7, and the one field on this
-page whose absence costs speed rather than an answer. Each edge manifest carries `src_type`,
-`edge_type`, `dst_type`, an `edge_count`, a `prefix`, and the `src_chunk_size` and `dst_chunk_size`
-that tie each orientation's tiles to its own endpoint type's.
+**Two round trips settle where everything is, and neither of them is a query.** The footers narrow
+that set with one more, and the N reads after it are all composed before the first is emitted, so
+they go out at once.
 
-The manifests are small and flat. Reading them with a line scan rather than a YAML library is a
-legitimate choice and the checker makes it — `apps/corpus/guards/manifest.mjs` is that scan, and it
-refuses what it cannot parse rather than guessing at it.
+## The manifests, and the arithmetic over them
 
-## 2. Everything else is arithmetic
-
-From `chunk_size` and the declared count:
+A reader over HTTP cannot list a directory, so nothing is discovered by listing: `graph.graph.yml`
+is the one name known in advance and it names every per-type manifest. A vertex manifest carries a
+`type`, a `vertex_count`, a `prefix`, a `chunk_size` and optionally an `index:` block; an edge
+manifest carries `src_type`, `edge_type`, `dst_type`, an `edge_count`, a `prefix`, and the
+`src_chunk_size` and `dst_chunk_size` that tie each orientation's tiles to its own endpoint type's.
+They are small and flat, so `apps/corpus/guards/manifest.mjs` reads them with a line scan and no
+YAML library, refusing what it cannot parse instead of guessing at it.
 
 ```
 shift       = log2(chunk_size)          # 12
@@ -43,96 +49,54 @@ tiles        = ceil(vertex_count / chunk_size)
 tail rows    = vertex_count − (tiles − 1)·chunk_size
 ```
 
-No index file, no manifest of tiles, nothing to fetch. A reader knows where any id lives, and how
-many there are of them, from two numbers in a document it fetched anyway — which is what lets it
-compute every URL before it emits the first request. `chunk_size` is a power of two so that the
-address is a shift; it is 4,096 in a corpus fossil writes, and a reader takes it from the manifest
-rather than from that sentence.
+`chunk_size` is a power of two so the address is a shift; it is 4,096 in a corpus fossil writes, and
+a reader takes it from the manifest and not from that sentence. **The count is the one field a
+truncated corpus fails**: a hole in the middle breaks the address of everything after it, a missing
+tail breaks nothing, and its borders are published as vectors —
+[the `declared_count` table](/docs/format/conventions/addressing#the-published-vectors), where
+`count = 4096` at `chunk_size = 4096` is **one** tile and the off-by-one addresses a
+`chunk1.parquet` that is not there.
 
-**The count is not decoration, and it is the only field a truncated corpus fails.** Tiles are
-addressed and never listed, so a tree holding `chunk0…chunk16` is indistinguishable from a corpus
-that has seventeen tiles: a hole in the middle breaks the address of everything after it and is
-caught, and **a missing tail breaks nothing**. Without the field the answer was to probe — `HEAD`
-`chunk{k}.parquet`, doubling `k` until one misses, then bisecting — which is a dozen requests that
-still cannot tell a short corpus from a complete one.
+## Which tiles intersect the window
 
-The count is declared rather than optional for the same reason. A count a reader may skip is a count
-a reader may not depend on, and a reader that may not depend on it is exactly the one that cannot
-detect the failure the field exists for. Its borders are published beside the addressing ones —
-[the `declared_count` table](/docs/format/conventions/addressing#the-published-vectors) — and the row worth
-copying first is `count = 4096` at `chunk_size = 4096`: that is **one** tile, and the off-by-one
-addresses a `chunk1.parquet` that is not there.
-
-## 3. Ask the footer which tiles intersect the window
-
-Arithmetic gives the tiles that *exist*. The footer gives the ones that *intersect* — the row-group
-statistics on `x` and `y` are bounding boxes, they arrive with the footer, and selecting on them is
-the whole of viewport culling.
-
-**Which file holds a tile is the second question, and there are two answers.** A corpus fossil
-writes puts one tile in one file, `chunk{k}.parquet`, with the address in the name; the other
-container is one file whose row groups are the tiles, addressed by row-group ordinal. The examples
-here are the first, which is what the corpus under `apps/corpus/conformance/` is; against the second
-one, drop the glob and the `file_name` column and read `row_group_id` as the tile number.
+Arithmetic gives the tiles that *exist*; the footer gives the ones that *intersect*. The row-group
+statistics on `x` and `y` are bounding boxes, and selecting on them is the whole of viewport
+culling.
 
 ```sql
-SELECT file_name, row_group_id,
-       min(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS x0,
-       max(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS x1,
-       min(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS y0,
-       max(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS y1
+SELECT file_name, row_group_id, path_in_schema,
+       coalesce(stats_min_value, stats_min) AS lo,
+       coalesce(stats_max_value, stats_max) AS hi
   FROM parquet_metadata('vertex/Person/chunk*.parquet')
- WHERE path_in_schema IN ('x', 'y')
- GROUP BY file_name, row_group_id;
+ WHERE path_in_schema IN ('x', 'y');
 ```
 
-Keep the tiles whose box intersects the window. Note `min_value`/`max_value` before `min`/`max` —
-the deprecated pair is signed-comparison only and is empty for an unsigned column, which is every
-addressing column there is.
+Take `min_value`/`max_value` before `min`/`max`: the deprecated pair is signed-comparison only and
+is empty for an unsigned column, which is every addressing column there is. Keep the tiles whose box
+meets the window and **hand them over as a set of files, never as a `WHERE` over the ranges** —
+pruning is a choice of what to read, and written as a predicate it is measured slower than not
+pruning at all ([Addressing](/docs/format/conventions/addressing#why-the-camera-does-not-ask)).
 
-The two containers are not equally cheap, and the arithmetic above is the reason: inside one file,
-contiguous tiles are a **single** byte range, and one footer covers all of them. Measured on five
-million vertices in 1,221 tiles, that is 5.6 requests per window against 22.3, for the same bytes —
-[Addressing](/docs/format/conventions/addressing) has the table. A glob over `chunk*.parquet` is also a
-listing, which is the thing an HTTP reader cannot do; over an origin, compose the names from the
-count and the shift instead.
+The glob above is a listing, which is the thing an HTTP reader cannot do; over an origin, compose
+the names from the count and the shift. It also assumes one tile per file — against the container
+whose row groups are the tiles, drop the glob and the `file_name` column and read `row_group_id` as
+the tile number, which is the cheaper of the two
+([two containers, one address](/docs/format/conventions/addressing#two-containers-one-address)).
 
-<Callout type="warn" title="Select the tiles; do not write the window as a predicate">
-Handing the ranges to the query planner as a `WHERE` is the intuitive move and it is measured to be
-slower than not pruning at all: a range join against 179 runs costs 237 ms and 179
-`BETWEEN … OR …` predicates cost 189 ms wall and 2.3 s of CPU, against 5 ms for a plain join,
-because the engine evaluates ranges per row instead of skipping row groups.
+## The tiles
 
-**Pruning is not a predicate. It is a choice of what to read.**
-</Callout>
-
-## 4. Read the vertices
-
-```sql
--- tile 10 is the dense_id range [40960, 45056), and it is a file
-SELECT dense_id, x, y, cluster_id
-  FROM read_parquet('vertex/Person/chunk10.parquet');
-```
-
-Or, over HTTP, fetch the byte ranges the footer named and decode them directly. `x` and `y` come out
-as separate arrays, which is what Parquet stores and what leaves the choice to the reader — a
-consumer that wants them apart gets them apart, and one that wants a single interleaved
-`[x0, y0, x1, y1, …]` buffer pays one pass. **The layout does not remove that pass, it moves it**;
-see [Payload](/docs/format/conventions/payload).
-
-## 5. Read the edges of those tiles
+Tile 10 is the `dense_id` range `[40960, 45056)` and it is a file, so the vertices are
+`read_parquet('vertex/Person/chunk10.parquet')` — or, over HTTP, the byte ranges the footer named,
+decoded directly. `x` and `y` arrive as separate arrays, which is what Parquet stores, and a
+consumer wanting one interleaved buffer pays a pass: **the layout does not remove that pass, it
+moves it** ([Addressing](/docs/format/conventions/addressing#encoding-is-chosen-per-column)).
+`dense_id` is an address and changes when the layout is redone, so anything held outside the corpus
+keys on `subject`.
 
 An edge lives in its **source's** tile, so the tiles a window already fetched are an exact superset
-of the edges it can draw. No second round of addressing:
-
-```sql
-SELECT src_dense, dst_dense
-  FROM read_parquet('edge/Person_knows_Person/by_source/tile10.parquet');
-```
-
-`by_source` is ordered by `src_dense` and `by_target` by `dst_dense` — CSR and CSC — and **both are
-tiled the same way**, each by the endpoint it is ordered by. So a hop out of one vertex is two files
-whose names are arithmetic, and nothing scans:
+of the edges it can draw and there is no second round of addressing. `by_source` is ordered by
+`src_dense` and `by_target` by `dst_dense` — CSR and CSC — both tiled by the endpoint they are
+ordered by, so a hop out of one vertex is two files whose names are arithmetic:
 
 ```sql
 -- everything vertex 41000 touches: 41000 >> 12 = 10, in both directions
@@ -143,103 +107,75 @@ SELECT src_dense FROM read_parquet('edge/Person_knows_Person/by_target/tile10.pa
  WHERE dst_dense = 41000;
 ```
 
-Which prefix is which direction is in the edge type's manifest, as an `adj_lists` entry per
+Which prefix is which direction is in the edge type's manifest, one `adj_lists` entry per
 orientation: `aligned_by` names the column that addresses it, `prefix` names the directory. Do not
 follow only `by_source` — in a knowledge graph "the papers by this author" is an in-edge, and half
-the directions is a wrong answer rather than a partial one. A `WITH RECURSIVE` over the whole edge
-relation is the thing this replaces: measured on 6.9M edges, one hop from one seed had not returned
-after 45 seconds.
+the directions is a wrong answer and not a partial one. The `WITH RECURSIVE` over the whole relation
+that these two files replace did not return in 45 seconds
+([Adjacency](/docs/format/conventions/adjacency)).
 
-## 6. Name things by the subject IRI
+## Finding one by its identity
 
-```sql
-SELECT v.subject
-  FROM read_parquet('vertex/Person/chunk10.parquet') v
- WHERE v.dense_id = 41000;
+An IRI in hand and its address wanted is the one question the payload's order cannot answer: the
+rows are in Morton order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
+every other's, the footer prunes nothing, and the read is the identity column of the whole type.
+**A vertex manifest may declare a second copy of itself that does answer it** — an `index:` block
+with a `prefix`, an `ordered_by` and its own `chunk_size` — and a reader that never looks for the
+block scans without knowing it did not have to.
+
+The tiles are `<vertex prefix><index prefix>tile{k}.parquet` — the same spelling and the same
+`ceil(vertex_count / chunk_size)` count as everything else, over the **index's own** `chunk_size`.
+Each holds two columns, `ordered_by` and the `dense_id` it names, sorted with **disjoint ranges**,
+which is what lets the footers prune to the one tile a value can be in. A lookup is then two reads
+and no scan of either table: the index tiles for the address, then the payload tile that address
+*names*.
+[Identity](/docs/format/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column)
+has why it is a second table and not a second sort of the first.
+
+Its absence is legal — the scan returns the row the index would have found, so a reader may report
+the cost and not refuse the corpus. A `prefix` with no `ordered_by` is the case to refuse
+instead: it names files whose sort has to be guessed, and a wrong guess returns a stranger and not
+nothing.
+
+## The same read through the package
+
+`@fossil-lang/graph` composes all of it, and none of the arithmetic reaches the caller: no tiles, no
+`dense_id`, no Morton codes, no `by_source`, no prefixes, no footers.
+
+```ts
+import { openCorpus } from '@fossil-lang/graph/corpus';
+const corpus = await openCorpus('https://cdn.example.org/kg/2026-08', { query });
+
+corpus.types                                   // what is inside
+await corpus.extent('Person')                  // where it is, in coordinates
+await corpus.window({ x, y, w, h })            // vertices + edges in a rectangle
+await corpus.node('http://example.org/p/17')   // one vertex by identity
+await corpus.neighbours([id], { depth: 2 })    // everything within N hops
 ```
 
-`dense_id` is an address and changes when the layout is redone. Anything stored outside the corpus —
-a selection, a bookmark, a foreign key — keys on `subject`.
+The one capability a host brings is `query`, a callback that runs SQL and hands back rows: the
+package has **zero runtime dependencies**, bundling a Parquet decoder would make it a driver, and
+the engine already prunes row groups off the footer statistics. Nothing a separate `fetch` could
+reach is out of its reach either — it has to see the tiles or it cannot answer a window.
+Cancellation, parameter binding and streaming are what the seam does not carry, each because a host
+would have to lie to provide it, and `query.ts` says so.
 
-## 7. Find one by its identity
+**An answer knows what it is missing.** `complete` means one narrow thing: every edge incident to a
+vertex in this answer is in this answer. `gaps` names an orientation that was not read — the
+caller did not ask, or the corpus publishes no address for it — and `frontier` names the vertices a
+depth bound stopped at, whose edges were never opened, without which a `depth: 1` result *looks*
+whole. **Every edge appears once**, too: the corpus stores one relation twice, so an answer that
+concatenates both orientations counts a self-type relation double — 1,192 edges against the 596
+the conformance manifest declares, which draws identically.
 
-The other direction — an IRI in hand, its address wanted — is the one question the payload's order
-cannot answer. The rows are in Morton order and subjects are not, so every tile's `min`/`max` for
-`subject` overlaps every other's, the footer prunes nothing, and this reads the identity column of
-the whole type:
+It refuses four things: a corpus declaring no `vertex_count`; the row-group container, refused **by
+name** and never globbed; an edge label incident twice to one vertex type, which the addressing
+cannot name unambiguously; and an `index:` with a `prefix` and no `ordered_by`.
 
-```sql
--- the scan: every tile of the type, and only two of its columns
-SELECT subject, dense_id
-  FROM read_parquet(['vertex/Person/chunk0.parquet', 'vertex/Person/chunk1.parquet', …])
- WHERE subject = 'http://example.org/p/17';
-```
-
-**A vertex manifest may declare a second copy of itself that does answer it**, and a reader that
-does not look for the block scans without knowing it did not have to:
-
-```yaml
-index:
-  prefix: index/
-  ordered_by: subject
-  chunk_size: 4096
-```
-
-The tiles are `<vertex prefix><index prefix>tile{k}.parquet` — the same `tile{k}` spelling and the
-same `ceil(vertex_count / chunk_size)` count as everything else, over the **index's own**
-`chunk_size` and not the payload's. Each holds two columns, `ordered_by` and the `dense_id` it
-names, and they are sorted with **disjoint ranges**, which is what lets the footers prune to the one
-tile a value can be in. So a lookup is two reads and no scan of either table:
-
-```sql
--- 1. the index: sorted, disjoint, so the footers name one tile out of the list
-SELECT dense_id
-  FROM read_parquet(['vertex/Person/index/tile0.parquet', 'vertex/Person/index/tile1.parquet', …])
- WHERE subject = 'http://example.org/p/17';
-
--- 2. the payload, at the tile that address NAMES: 41000 >> 12 = 10
-SELECT * FROM read_parquet('vertex/Person/chunk10.parquet') WHERE dense_id = 41000;
-```
-
-The block is optional and its absence is legal: the scan returns exactly the row the index would
-have found, which is why a reader may report the cost rather than refuse the corpus. A `prefix` with
-no `ordered_by` is the case to refuse instead — it names files whose sort has to be guessed, and a
-wrong guess returns a stranger rather than nothing.
-[Identity](/docs/format/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) has
-why it is a second table rather than a second sort of the first.
-
-## Prove your own writer
-
-If you produce corpora rather than only consume them, the guards are the contract in executable
-form:
-
-```bash
-node apps/corpus/guards/check.mjs /path/to/your/corpus
-```
-
-It needs `node` and the `duckdb` binary, and nothing else — no pnpm install, no Rust toolchain, no
-part of this repository beyond the `guards/` directory, which is written to be copied. `--explain`
-prints what each guard proves and, more usefully, what it cannot.
-
-[The guards](/docs/format/guards) has the full list and the honest limits.
-
-## Prove your own reader
-
-The composition on this page — prefix, shift, orientation, and which of them a window may use — is
-also published as code, and the two are checked against one table of addresses rather than against
-each other's prose. `apps/corpus/conformance/` holds it: a corpus small enough to read by hand, four
-manifest sets carrying the cases a whole corpus cannot, and `expected.json` naming every address
-that must compose and every one that must be refused.
-
-```bash
-node apps/corpus/conformance/verify.mjs
-```
-
-That harness runs `reader.mjs`, which has no npm, no build and no fossil in it — the position this
-page is written for. `resolveCorpus` in `@fossil-lang/graph` is the same table executed by the
-published module, for a reader that would rather take the dependency than copy the arithmetic.
-Neither is the authority; `expected.json` is.
-
-`expected.json` is not the whole authority either, because nothing in it was written by the writer.
-`writer.mjs` is the harness that closes that: it runs `fossil run` and checks the same reader against
-the bytes, which is the only check here that would notice fossil and this page disagreeing.
+And it declares two costs. **`extent` is believed, not verified** — it comes from the footers, a
+box wider than its rows costs a read, a box narrower than its rows **loses vertices**, and only
+re-reading every page tells them apart. **`node(id)` scans a corpus that publishes no index**: at
+five million vertices one lookup reads about 40 MB. Both answers are correct and only one is fast,
+so which one a caller gets is a property of the **type**, readable once as
+`corpus.types.vertices.find((t) => t.type === 'Person')?.indexed` and not a difference discovered by
+timing it.

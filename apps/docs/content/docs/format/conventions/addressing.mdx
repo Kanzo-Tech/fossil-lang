@@ -1,25 +1,112 @@
 ---
 title: Addressing
-description: A tile is 4,096 rows of dense_id and its address is a shift. There is no tile tree and no index to discover — the reader computes every URL before it emits the first request.
+description: A tile is 4,096 rows of dense_id ordered by Morton code, its address is a shift, and the Parquet footer turns that address into a byte range. There is no tile tree and no index to discover.
 ---
 
 **A tile is a fixed range of 4,096 rows of `dense_id`**, and tile `i` *is* the range
-`[i·4096, (i+1)·4096)`. Its address is arithmetic:
+`[i·4096, (i+1)·4096)`. Its address is a cut in the id:
 
 ```
-tile = dense_id >> 12
+   63        53        31       12 11         0
+  ┌───────────────────────────────┬────────────┐
+  │     tile = dense_id >> 12     │ row in tile│
+  └───────────────────────────────┴────────────┘
+             ▲         ▲           └ 12 bits  ┘
+             │         └ 2^31 — a shift read as signed gives a negative tile
+             └ 2^53 — a JavaScript Number stops being exact
 ```
 
-That is the entire index. There is no directory to fetch, no tile tree to walk, no listing to
-perform. The tile of a vertex is a shift; the tile of its ancestor at level `L` is
-`dense_id >> (12+L)`; the lowest common ancestor of two vertices is the common prefix of their ids,
-which is an `XOR` and a count of leading zeros. **A reader computes every URL it wants before it
-emits the first request.**
+That is the entire index: no directory to fetch, no tile tree to walk, no listing to perform. The
+ancestor at level `L` is `dense_id >> (12+L)`; the lowest common ancestor of two vertices is the
+common prefix of their ids, an `XOR` and a count of leading zeros. **A reader computes every URL it
+wants before it emits the first request.**
+
+The cut is a shift because `chunk_size` is a power of two. Anything else forces a division and the
+two marked bits stop being positions in one diagram. `chunk_size` is a power of two or the corpus
+does not have an address. Guard: `declared-tiling`.
+
+## The order that makes an interval mean something
+
+**`dense_id` ascends with the Morton code of the vertex's position.** The id space *is* the spatial
+order. Without it `dense_id >> 12` still names a tile, and that tile holds 4,096 vertices scattered
+across the whole canvas.
+
+A rectangle over a Morton order breaks into **O(√n) contiguous segments** — a property of the curve,
+not of the data. On an 8×8 quantised grid, window `x ∈ [2,5], y ∈ [1,4]` bracketed:
+
+```
+  y
+  7 │ 42  43  46  47  58  59  62  63
+  6 │ 40  41  44  45  56  57  60  61
+  5 │ 34  35  38  39  50  51  54  55
+  4 │ 32  33 [36][37][48][49] 52  53
+  3 │ 10  11 [14][15][26][27] 30  31
+  2 │  8   9 [12][13][24][25] 28  29
+  1 │  2   3 [ 6][ 7][18][19] 22  23
+  0 │  0   1   4   5  16  17  20  21
+    └────────────────────────────────
+       0   1   2   3   4   5   6   7  x
+```
+
+Sixteen ids, six runs, nothing over-read:
+`6·7 │ 12·13·14·15 │ 18·19 │ 24·25·26·27 │ 36·37 │ 48·49`. At five million vertices a window of 20,000 is **179 runs covering exactly 20,007 ids** — 0.4% of the
+corpus, zero over-read at run granularity. At tile granularity nine windows select **11–25 tiles
+where 10–21 are needed: 1.10×–1.20×, mean 1.14×**.
+
+The community hierarchy does not produce those runs: `community` is eight groups of 625,000 vertices
+each broken into **5,461 runs** of `dense_id`, and `cluster_id` is 15,310 groups with a median of 1
+vertex. The hierarchy gives the levels of *aggregation*; the curve gives the ranges of *bytes*.
+
+**A new placement produces a new numbering**, so `dense_id` cannot also be the identity — that is
+[the subject IRI](/docs/format/conventions/identity#the-identity-is-the-subject-iri). Positions moved
+by hand are a layer on top; mutating a tile means rebuilding it.
+
+## The arithmetic
+
+**Quantise** each coordinate to 16 bits over the bounding box of **that vertex type's own
+positions** — each type is laid out and renumbered independently. A degenerate axis maps to 0.
+
+```
+q = round(clamp((v − lo) / (hi − lo), 0, 1) × 65535)
+```
+
+<VectorTable of="quantize" />
+
+**Interleave** the quantised coordinates into a 32-bit code, `x` in the even bits, `y` in the odd.
+
+```
+morton = spread(x) | (spread(y) << 1)
+```
+
+<VectorTable of="morton2" />
+
+`x = 0, y = 32768` is the row that matters most: `spread(y) << 1` reaches bit 31, so in a signed
+32-bit accumulator the result is negative and a port that does not coerce it back to unsigned sorts
+the top half of the plane first. That corpus satisfies every count-based check ever written and
+addresses nothing.
+
+<Callout type="warn" title="The quantisation is binary32, and the width is part of the contract">
+The subtraction, the division, the multiply by 65535 and the rounding are all single-precision. Two
+implementations that agree on the formula and disagree on the width differ by one at the boundaries,
+and one unit is a different Morton code and a different order.
+
+`v = 147, hi = 167` is what says so: **57687 in binary32, 57686 in binary64**. The other four rows are
+exact in both widths, so a table without it passes against a binary64 port — and the table is checked
+to still contain a row that separates them. Both sides execute it: `guards/arithmetic.mjs` wraps
+every step in `Math.fround`, and the engine asserts against the same `vectors.json` in a Rust test
+rather than restating it. Neither reaches the `::FLOAT` half of the contract inside the engine's own
+SQL, or the bounding box the layout derives before quantising.
+</Callout>
+
+Two guards ask different questions of the result. `morton-order` recomputes the code from the
+corpus's own `x` and `y` and asserts it **never decreases** as `dense_id` increases — non-decreasing,
+because two vertices can quantise to the same cell. `spatial-tiles` asks what the order was *for*,
+using only the footer: the average tile's box covers at most half the corpus extent. On the fixture,
+70,000 vertices in 18 tiles, Morton-ordered measures **12.4%** and the same vertices renumbered at
+random measure **99%**. It separates having a spatial order from not having one, and is not a quality
+target.
 
 ## Two questions, one arithmetic
-
-The shift answers both things a reader asks for, and the second one is why the corpus carries the
-adjacency twice:
 
 | the question | the address |
 | --- | --- |
@@ -28,61 +115,33 @@ adjacency twice:
 | the out-edges of `v` | `by_source/tile{v >> shift}.parquet`, filtered to `src_dense = v` |
 | the in-edges of `v` | `by_target/tile{v >> shift}.parquet`, filtered to `dst_dense = v` |
 
-The last two are a **hop**, and they are the reason both orientations are tiled. The alternative —
-asking the edge relation for a neighbourhood with a recursive query — was measured in a reader at a
-million vertices and **did not return in 45 seconds**, because the adjacency term materialises the
-relation before the recursion starts and no `limit` on the answer bounds the cost of finding it. The
-directions are separate addresses rather than one undirected one for the same reason the camera is
-addressed at all: a union of two relations is a scan, and a pair of URLs is not.
+The last two are a **hop**, and they are why both orientations are tiled: asking the edge relation
+for a neighbourhood with a recursive query
+[did not return in 45 seconds](/docs/format/conventions/adjacency). Which prefix carries which
+direction is declared per edge type, never conventional.
 
-Which prefix carries which direction is [declared per edge type](/docs/format/conventions/adjacency), never
-conventional — `aligned_by` gives the column and `prefix` gives the URL.
+### A set of tiles says what it is complete for
 
-## A set of tiles says what it is complete for
+The second row is complete for **drawing** and incomplete for **incidence**, and the difference is
+invisible in the picture: an edge whose destination is drawn and whose source the window never
+selected is in none of the `by_source` tiles. On 20M and 40M edges that is **19,892 edges per window
+at degree 4 and 39,849 at degree 8**. So an answer carries which orientations it read and states
+completeness only for those — `src` for the drawable set, `dst` for every edge whose destination is
+in the window, both for every edge incident to it.
 
-The second row of that table is complete for **drawing** and incomplete for **incidence**, and the
-difference is invisible in the picture. Every drawable edge has its source on screen, so the
-`by_source` tiles of a window are an exact superset of what can be drawn — but an edge whose
-destination is drawn and whose source the window never selected is not in any of them. Measured on
-20M and 40M edges, that is **19,892 edges per window at degree 4 and 39,849 at degree 8**: a layer
-missing them renders identically to a complete one.
-
-So an answer built out of tiles carries **which orientations it read**, and a reader may state
-completeness only for the ones it has:
-
-| the orientations read | the answer is complete for |
-| --- | --- |
-| `aligned_by: src` | every edge whose **source** is in the window — the drawable set |
-| `aligned_by: dst` | every edge whose **destination** is in the window |
-| both | every edge **incident** to the window |
-
-And a missing orientation has two causes that are not the same fact, so they are not reported as
-one. *The caller did not ask* is a choice — a drawing read asks for the source half and pays for
-nothing else. *The corpus does not publish it* is a property of the artefact: an edge type with no
-`adj_lists` entry for a direction, or one declaring the direction with no `prefix`, has tiles nobody
-can address, and the answer that names it says so rather than composing a URL that 404s.
-
-**A vertex answer already works this way**, which is where the shape comes from: it carries how many
-rows matched as well as how many came back, so a truncated read cannot look like a complete one. An
-edge answer that carried neither was the asymmetry.
-
-The orientations that apply to a window are the ones whose **own `dense_id` space is that window's**.
-On a self-edge both apply. On `Author authored Paper`, `by_target` tile `k` addresses `Paper`'s tile
-`k` — a different set of vertices — so a window over `Author` that read it would answer a question
-nobody asked. Guard: `declared-tiling` for the addresses; conformance case `cross-type` for which of
-them a window may use.
+A missing orientation has two causes that are not one fact. *The caller did not ask* is a choice.
+*The corpus does not publish it* is a property of the artefact: an edge type with no `adj_lists`
+entry for a direction, or one declaring it with no `prefix`, has tiles nobody can address, and the
+answer says so rather than composing a URL that 404s. And an orientation applies to a window only if
+its **own `dense_id` space is that window's** — on `Author authored Paper`, `by_target` tile `k`
+addresses `Paper`'s tile `k`, a different set of vertices. Guard: `declared-tiling`; conformance case
+`cross-type`.
 
 ## Why the camera does not ask
 
-Pruning cannot be expressed as a predicate. That is measured, and it is the finding the whole
-addressing scheme comes from.
-
-A window of 20,000 vertices on a five-million corpus is **179 contiguous runs of `dense_id`
-covering exactly 20,007 ids** — 0.4% of the corpus, with zero over-read. Those runs contain
-**130,516 of 34,974,279 edges — 268× fewer** — and they return the same 120,103 visible edges. It is
-an exact superset, not an approximation.
-
-And no way of asking for it in SQL gets it:
+Pruning cannot be expressed as a predicate. The 179 runs of a 20,000-vertex window contain **130,516
+of 34,974,279 edges — 268× fewer** — and return the same 120,103 visible edges. No way of asking for
+them in SQL gets that:
 
 | how the runs are asked for | cost |
 | --- | --- |
@@ -92,18 +151,15 @@ And no way of asking for it in SQL gets it:
 
 Both attempts are **slower than not pruning at all**, because DuckDB evaluates the ranges per row
 instead of skipping row groups. A `WHERE` clause selects rows from a table; it does not select which
-bytes get read.
-
-So the camera is addressed and the algebra is queried, and they are two different surfaces. The
-camera computes a level and a set of tiles and asks for bytes — no bbox in flight, no SQL, no
-database on that path. The [verbs](/docs/format/reading/verbs) answer questions and return Arrow, and they
-do not draw. When a filter has to change the picture it returns **ids**, and the canvas applies them
-as a mask over the tiles it already holds.
+bytes get read. So the camera asks for bytes and the
+[verbs](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws) answer
+questions; when a filter has to change the picture it returns **ids**, and the canvas applies them as
+a mask over the tiles it holds.
 
 ## Why 4,096
 
-Measured on the five-million corpus served over a plain HTTP origin, counting every request that
-answers, against an ideal payload of 0.6–0.9 MB per window that is flat in N:
+Served over a plain HTTP origin at five million vertices, counting every request that answers,
+against an ideal payload of 0.6–0.9 MB per window that is flat in N:
 
 | `chunk_size` | requests | bytes | vs ideal |
 | --- | --- | --- | --- |
@@ -113,139 +169,165 @@ answers, against an ideal payload of 0.6–0.9 MB per window that is flat in N:
 | 32,768 | 25 | 4.61 MB | 7.20× |
 | 122,880 | 35 | 11.73 MB | 18.3× |
 
-The two curves have no common optimum — bytes bottom out at 1,024–2,048 and requests fall
-monotonically — so what chooses is `λ·β`, the bytes a link moves in the latency of one request:
-32,768 in series, 8,192 with six requests in flight, **4,096 fully multiplexed**. An addressed
-reader is fully multiplexed by construction, because it computes every URL before it emits the
-first.
+The curves have no common optimum — bytes bottom out at 1,024–2,048, requests fall monotonically — so
+what chooses is `λ·β`, the bytes a link moves in the latency of one request: 32,768 in series, 8,192
+with six in flight, **4,096 fully multiplexed**, which an addressed reader is by construction. The
+byte curve is flat from 1,024 to 8,192, so the emitter is not tuned inside that band. 122,880 is
+Pareto-dominated on both curves at once, because a 122,880-row edge tile crosses several row groups
+and costs 9.4 requests.
 
-**And the byte curve is flat from 1,024 to 8,192, so the emitter is not tuned inside that band.** A
-change there is not an improvement; it is noise with a `git blame` on it.
+## The footer is the index
 
-<Callout title="A power of two, and refused otherwise">
-122,880 is Pareto-dominated on both curves at once — more requests *and* four times the bytes,
-because a 122,880-row edge tile crosses several row groups and costs 9.4 requests. It is also not a
-power of two, which forces a division where a shift does. `chunk_size` is a power of two or the
-corpus does not have an address. Guard: `declared-tiling`.
-</Callout>
+Arithmetic says **which tiles exist**. It does not say **which tiles intersect the window**: the
+`dense_id` range of a rectangle needs the Morton range, and the Morton range is what the row-group
+boxes say. They live in the footer, and one request buys all of them.
 
-## There is no tile tree
+```
+chunk0.parquet                                5,000,000 rows
+┌──────┬────────┬────────┬─────┬─────────┬────────┐
+│ PAR1 │  rg 0  │  rg 1  │  …  │ rg 1220 │ footer │
+└──────┴────────┴────────┴─────┴─────────┴────┬───┘
+         4,096    4,096            2,880      │
+          rows     rows             rows      ▼
+        ┌─────────┬──────────────┬──────────────┬──────────────────────┐
+        │ rg 0    │ x [min,max]  │ y [min,max]  │ dense_id 0..4095     │
+        │ rg 1    │ x [min,max]  │ y [min,max]  │ dense_id 4096..8191  │
+        │ …       │              │              │                      │
+        │ rg 1220 │ x [min,max]  │ y [min,max]  │ dense_id 4997120..   │
+        └─────────┴──────────────┴──────────────┴──────────────────────┘
+          the row group ordinal is the tile is a range of dense_id
+          1,221 boxes, 406 B each — a 496,373 B footer, bought once
+```
 
-A tree of tiles would only earn its keep by **containing** something that does not fit in a leaf.
-The one candidate was the edge that crosses tiles — hoisting it to the deepest tile holding both
-endpoints — and that costs more than it saves by a wide margin
-([Adjacency](/docs/format/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior nodes are
-empty, and there is nothing to materialise.
+That footer is **the one thing a reader holds that follows N**, and it is worth stating rather than
+rounding away: one box per 4,096 vertices is a small constant, not a flat one. A reader's *queries*
+are flat in N; the index it holds to answer them is N divided by the tile size.
 
-**The level-of-detail pyramid is not that tree either.** Zoom does not filter; it reads a different
-relation. A tile at aggregation level 3 holds super-nodes that do not exist at level 0. So each
-level is its own relation, with its own `dense_id` space, its own Morton renumbering and its own
-flat tiling of 4,096 rows. It is not a tree of `k` levels; it is **`k` flat tilings**, and inside
-each one the address is a shift.
+The addressing unit and the storage unit are the same number, and a writer's default breaks that
+without failing anything:
+
+```
+  the same 5,000,000 rows at a default of 1,000,000 rows per group
+  ┌─────────┬─────────┬─────────┬─────────┬─────────┐  5 boxes,
+  └─────────┴─────────┴─────────┴─────────┴─────────┘  nothing to prune with
+```
+
+`tile-of` checks that a row group's ordinal is its address and that it never holds more rows than a
+tile. `footer-is-the-index` asserts a box for `x`, `y` and `dense_id` on every vertex row group, and
+on every edge tile a box for **the endpoint column that orientation is ordered by** — `src_dense`
+under `by_source`, `dst_dense` under `by_target`, never one standing in for the other. What it cannot
+prove is that the statistics are **true**: a box wider than its rows costs a request, a box narrower
+loses vertices, and only re-reading every page tells them apart.
+
+Two traps. Parquet's original `min`/`max` statistics were defined by **signed** byte comparison,
+meaningless for `dense_id`, so a writer that gets this right leaves them empty and fills
+`min_value`/`max_value`; a reader that knows only the deprecated pair concludes the footer carries no
+box for the column the whole address is built on. And the **page index** (`ColumnIndex`,
+`OffsetIndex`) is 179 kB no reader here opens: it prunes *inside* a row group, and a row group is the
+indivisible unit. It is the obvious reason to prefer one Parquet writer over another and it is the
+wrong one.
 
 ## Two containers, one address
 
-A tile is a range of rows. Which container carries it is a second question, and both answers are
-addressed by the same arithmetic:
+Which container carries a tile is a second question, and both answers are addressed by the same
+arithmetic: **one file per tile**, the address in the name, or **one file with one row group per
+tile**, the address as the row-group ordinal. Measured on five million vertices in 1,221 tiles:
 
-- **one file per tile** — `chunk{k}.parquet`, the address in the name;
-- **one file, one row group per tile** — the address is the row-group ordinal.
-
-They are not equally cheap, and the difference is measured on five million vertices in 1,221 tiles:
-
-| container | requests/window | bytes/window | total footer | index a reader must hold |
-| --- | --- | --- | --- | --- |
-| one file per tile | **22.3** | 1.40 MB | 1,150,490 B | 1.33 MB (1,221 footers) |
-| one file, row groups of 4,096 | **5.6** | 1.38 MB | **496,373 B** | 675.8 kB (1 footer) |
+```mermaid
+graph LR
+  subgraph A["one file per tile"]
+    direction TB
+    f7["chunk7.parquet<br/>+ footer"]
+    f8["chunk8.parquet<br/>+ footer"]
+    f9["chunk9.parquet<br/>+ footer"]
+  end
+  subgraph B["one file, one row group per tile"]
+    g["chunk0.parquet<br/>… rg 7 · rg 8 · rg 9 …<br/>+ one footer"]
+  end
+  f7 --> R1["3 requests<br/>a file boundary cannot be crossed"]
+  f8 --> R1
+  f9 --> R1
+  g --> R2["1 request<br/>rg 7–9 are one byte range"]
+  R1 --> T1["<b>22.3</b> requests/window · 1.40 MB<br/>1,150,490 B of footer in 1,221 pieces"]
+  R2 --> T2["<b>5.6</b> requests/window · 1.38 MB<br/><b>496,373 B</b> of footer in one"]
+```
 
 A request is one file when a tile is a file, and a **maximal run of consecutive row groups** when it
-is not: inside one file, contiguous tiles are asked for in a single byte range. The 22.3 selected
-tiles coalesce into **5.6 runs**, so the file boundary is the only thing preventing the merge.
-**One file per tile costs 4× the requests and does not save a byte.**
+is not. The file boundary is the only thing preventing the merge: **one file per tile costs 4× the
+requests and does not save a byte.** The checker reports which container it found and refuses *both
+at once*, because two ways to address the same rows is one too many and a reader that globs finds
+both. Guard: `tile-of`, in whichever form the corpus uses.
 
-The checker classifies rather than judges, and reports which container it found. What it refuses is
-*both at once*: two ways to address the same rows is one way too many, and a reader that globs finds
-both. Guard: `tile-of`, checked in whichever form the corpus uses.
+## There is no tile tree
+
+A tree of tiles would only earn its keep by **containing** something that does not fit in a leaf. The
+one candidate was the edge that crosses tiles, and hoisting it to the deepest tile holding both
+endpoints costs more than it saves by a wide margin
+([Adjacency](/docs/format/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior
+nodes are empty.
+
+**The level-of-detail pyramid is not that tree either.** Zoom reads a different relation rather than
+filtering one: a tile at aggregation level 3 holds super-nodes that do not exist at level 0, and each
+level has its own `dense_id` space, its own Morton renumbering and its own flat tiling of 4,096 rows.
+It is **`k` flat tilings**, not a tree of `k` levels.
+
+## Encoding is chosen per column
+
+Dictionary encoding is right for one of the four drawing columns and wrong for the others. Five
+million vertices, uncompressed pages:
+
+| | `cluster_id` | `dense_id` | `x` | `y` |
+| --- | --- | --- | --- | --- |
+| dictionary everywhere | 71.6 kB | 27.56 MB | 27.50 MB | 20.00 MB |
+| dictionary nowhere | 20.03 MB | 20.03 MB | 20.03 MB | 20.03 MB |
+| **dictionary per column** | **71.6 kB** | **20.03 MB** | **20.03 MB** | 20.03 MB |
+
+On `dense_id` and `x` — nearly unique within a tile — the dictionary and its indices cost **37% more
+than PLAIN**; on `cluster_id` it wins by **280×**. Off everywhere is worse than on everywhere (80.73
+MB against 75.81 MB) because it destroys `cluster_id`; per column lands at **60.78 MB**. The corpus
+mandates no encoding, only the consequence: one decision applied to every column costs a quarter of
+the bytes.
+
+The drawing tile carries geometry and nothing else: `dense_id, x, y, community` costs **3 requests
+and 36.0 kB** against **4 requests and 37.0 kB** for all six columns, from 68.8 kB stored. `x` and
+`y` are separate arrays, never interleaved, which is what Parquet stores anyway.
 
 ## The address is published, not described
 
-Everything above is arithmetic over four manifest fields — `prefix`, `chunk_size`, `aligned_by` and
-the adjacency's own `prefix` — and a reader that re-derives it from this page has copied a
-convention no compiler compares against the corpus. Change a prefix or a shift and the copy composes
-URLs that 404 at runtime, in a browser, with no type error and nothing red.
-
-So the composition ships as code, in `@fossil-lang/graph`, beside the verbs and sharing nothing with
-them but the manifest:
+All of the above is arithmetic over four manifest fields — `prefix`, `chunk_size`, `aligned_by` and
+the adjacency's own `prefix` — and a reader that re-derives it from this page has copied a convention
+no compiler compares against the corpus. Change a prefix or a shift and the copy composes URLs that
+404 at runtime, in a browser, with no type error and nothing red. So the composition ships as code,
+in `@fossil-lang/graph`, sharing nothing with the verbs but the manifest:
 
 ```ts
 const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
 const { vertexUrls, edgeUrls, complete, gaps } = corpus.window({ tiles, directions: ['src'] });
 ```
 
-It is **synchronous, and that is the claim rather than an omission** — no `fetch`, no connection, no
-promise. The camera is addressed, not queried, and a request between the camera moving and a URL
-being computable is the `viewport` verb this format does not have. It is also the whole of what
-moves: bytes, tile caches, debounce, supersede-cancellation and sampling stay in whatever draws.
-
-Three things it refuses to compose, each because the manifest does not say them:
-
-- **an orientation the corpus does not publish** — `adjacency('dst')` is `null`, never a string;
-- **a tile size that disagrees with the vertex type addressing it** — `src_chunk_size` against the
-  source's `chunk_size` is checked once, when the corpus is opened, because every URL still composes
-  and most of the files still exist;
-- **which tiles a rectangle touches** — that comes from the per-tile `x`/`y` boxes in the Parquet
-  footers, and reading a footer is a Parquet reader's job. The reader has one and hands the tile
-  numbers back.
-
-<Callout title="The alternative, and what would bring it back">
-**A schema instead of a module** — publish the manifest's shape as JSON Schema and let every reader
-generate its own composition. It is the smaller artefact and it is language-neutral, which is the
-whole reason the corpus is documented rather than typed.
-
-It is rejected because a schema constrains the *fields* and the failure is in the *arithmetic*: a
-schema that pins `prefix` to a string cannot say that the edge tile under it is
-`<prefix>tile{dense_id >> shift(src_chunk_size)}.parquet`, nor that the destination half is a
-different `dense_id` space, nor that a window over one orientation is incomplete. Those are the four
-things a re-derivation gets wrong.
-
-What brings it back is the same thing that would retire the module: the addresses becoming
-**derivable from the manifest by a rule a schema can carry**, so composing a URL stops being
-arithmetic and becomes substitution. Three things stood between here and there, and the manifest's
-declared row count is one of them delivered — `vertex_count` and `edge_count` are fields, so how far
-the corpus goes is read rather than probed. The two that remain are one container and one naming
-rule: nothing in the manifest distinguishes a tile that is a file from a tile that is a row group,
-and a schema that cannot say which cannot say what the URL is. The conformance corpus is the measure
-of the rest: while `expected.json` holds a case a schema cannot express, the schema is not the
-answer.
-</Callout>
+It is **synchronous, and that is the claim** — no `fetch`, no connection, no promise. Bytes, tile
+caches, debounce, supersede-cancellation and sampling stay in whatever draws. It refuses to compose
+three things the manifest does not say: an orientation the corpus does not publish (`adjacency('dst')`
+is `null`, never a string), a tile size that disagrees with the vertex type addressing it, and which
+tiles a rectangle touches, which comes from the footer boxes.
 
 The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
 same corpus with only what fossil publishes?** `apps/corpus/conformance/reader.mjs` is that reader —
-plain Node, no npm, no build. It has two harnesses: `verify.mjs` runs it against the same table of
-addresses the module does, and `writer.mjs` runs it against a corpus `fossil run` has just written.
-The second exists because the first cannot catch two readers being wrong *together*, which is what
-they are whenever the convention they both copied has moved.
+plain Node, no npm, no build. `verify.mjs` runs it against the same table of addresses the module
+does; `writer.mjs` runs it against a corpus `fossil run` has just written, because the first cannot
+catch two readers being wrong *together*.
 
 ## The published vectors
 
 The arithmetic ships as a formula **and a table of vectors**, because the vectors are what gets
-copied.
-
-Iceberg specifies its bucket transform as Murmur3 x86 32-bit with seed 0 — the formula, the widths,
-the sign — and a table of vectors by type, of which `34 → 2017239379` is one. Searching for that
-constant finds it in the tests of independent implementations that copied it. PMTiles dispatches its
-Hilbert curve with a link to Wikipedia, and every port re-derives it differently.
-
-Every value below is a border. They live in `apps/corpus/guards/vectors.json`, the guard
-`published-vectors` executes that file, and these tables are rendered from it — so the documented
-vectors and the executed ones are the same bytes.
+copied. Every value below is a border, they live in `apps/corpus/guards/vectors.json`, the guard
+`published-vectors` executes that file, and these tables are rendered from it.
 
 <VectorTable of="tile_of" />
 
-The last two rows are not decoration. `2^31` is where a port that took the shift as signed gives a
-negative tile; `2^53` is where a port that ran the id through a JavaScript `Number` stops being
-exact. Both exceed the width a `dense_id` column carries in any corpus that has been written, and
-they are published for exactly that reason — they are where a wrong implementation is still right.
+The last three rows are the marked bits of the diagram at the top of this page. All three exceed the
+width a `dense_id` column carries in any corpus that has been written, and that is why they are
+published: they are where a wrong implementation is still right.
 
 Which tile an id is in is one question; **how many tiles there are** is the other, and it is the
 manifest's declared count divided the same way:
@@ -253,6 +335,23 @@ manifest's declared count divided the same way:
 <VectorTable of="declared_count" />
 
 `count = 4096` at `chunk_size = 4096` is the row that catches ports: that is **one** tile, and an
-off-by-one addresses a `chunk1.parquet` nothing wrote. `count = 0` is the other — zero tiles, not
-one empty one, and a reader that assumed at least one pays a request to be told 404. Guard:
+off-by-one addresses a `chunk1.parquet` nothing wrote. `count = 0` is the other — zero tiles, not one
+empty one, and a reader that assumed at least one pays a request to be told 404. Guard:
 `declared-count`.
+
+## The payload format is open
+
+**This is a design question, not a settled convention.** A tile's payload is Parquet because the
+corpus is Parquet and one format is simpler than two. But a tile is read to be drawn, and drawing
+wants contiguous typed arrays that upload to a GPU without decoding. **Arrow IPC gives exactly that
+and Parquet does not** — Parquet's encodings are the reason its bytes are small, and decoding them is
+work a drawing path pays on every tile.
+
+What settles it is where the cost lands on a real link: Parquet moves fewer bytes and decodes them,
+Arrow IPC moves more and does not, and which wins depends on the link, which a corpus does not
+control. The addressing does not care — `tile = dense_id >> 12` is true of a row group, of a file and
+of an IPC record batch alike. What would change is the footer: an IPC file's metadata is not laid out
+to answer "which batches intersect this box", and replacing that is a design cost, not a swap. That
+the question stays open is why the guards split into the ones about addressing, which survive a
+format change untouched, and the ones about Parquet, which are named as such — and why these
+conventions are [a document and not a crate](/docs/format#why-a-format-and-not-a-library).
