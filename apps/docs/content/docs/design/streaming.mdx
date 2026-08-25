@@ -84,9 +84,13 @@ the layout stopped asking for two more (`97efc79`):
 | `community_hierarchy` | +2.09 GiB · 135.0 s | **+0.08 GiB** · 168.0 s |
 | process peak | 10.10 GiB | **8.39 GiB** |
 
-−1.71 GiB against the ≈ −1.7 GB predicted before it was attempted. The `community_hierarchy` row is
-the finding: the step cost +2.09 GiB because it built the CSR on entry, and the CSR already exists
-now. **The memory did not move somewhere else — it stopped being asked for.** The peak still grows
+−1.71 GiB against the ≈ −1.7 GB predicted before it was attempted, and the peak falling to 8.39 GiB
+is the result. **The reading drawn from the `community_hierarchy` row is not**: measured on its own
+through `examples/enrich_memory`, the same post-CSR path bills that step 0.41 GiB per million
+vertices, linear, and three to five times every other phase in the pass. An RSS delta only sees a
+phase that makes the process ask the OS for more, and by the time the layout runs there are
+gigabytes of freed pages in hand. The step did not stop asking; it stopped showing. See
+[the cost model](/docs/design/cost). The peak still grows
 with N, which is the gap to the direction above: on the pre-CSR binary under the same budget, ten
 times the corpus cost 4.1× the peak (2.43 → 9.87 GiB) and 10.3× the retained Arrow (0.16 → 1.64).
 

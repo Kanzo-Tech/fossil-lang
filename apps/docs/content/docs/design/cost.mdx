@@ -1,0 +1,131 @@
+---
+title: The cost model
+description: Every claim fossil makes about what something costs, as a shape rather than a number, with the measurement that decides it and what it says today. A correct answer looks exactly like a cheap one, which is why this page exists.
+direction:
+  summary: Every obligation below is asserted by something that runs, so a claim cannot go stale without going red.
+---
+
+A window that returns the right answer looks exactly like a window that returns it cheaply. That is
+not a figure of speech: `openCorpus` opened every tile in the corpus on every window for as long as
+it existed, answered correctly each time, and eighty-eight green tests never saw it. It was found by
+someone outside the repository timing the same rectangle against two corpus sizes.
+
+So the claims are collected here, and each one is written as a **shape** — a relationship to N —
+rather than a number. A pinned number would not have caught that defect, because the number was
+always correct; only the slope was wrong.
+
+## What the obligations are
+
+| # | obligation | shape | today |
+| --- | --- | --- | --- |
+| R1 | A window opens a bounded number of files | O(1) in N | **met warm, not cold** |
+| R2 | A window is one query per orientation | constant | met |
+| R3 | A window's cost follows its answer | O(rows) | met |
+| R4 | An answer names every gap in it | exact | met |
+| W1 | The write path's peak is independent of the corpus | O(1) in N | **not met** |
+| W2 | The declared budget encloses the whole write path | — | **not met** |
+| W3 | Every stage declares what it holds | — | partial |
+
+The reading half is nearly a system; the writing half is a budget around one stage of four.
+
+## R1 · A window opens a bounded number of files
+
+One rectangle covering 1% of the extent, best of three, warm, against corpora this writer produced
+at `chunk_size` 4,096 with both orientations tiled. Measured from kanzo-ui with DuckDB-WASM under
+`NODE_RUNTIME`, 2026-08-25.
+
+| corpus | answer | files, before | files, now | warm, before | warm, now |
+| --- | --- | --- | --- | --- | --- |
+| 1,000,000 | 812 v / 7,293 e | 245 | **1** | 75.6 ms | **13.6 ms** |
+| 5,000,000 | 771 v / 5,316 e | 1,221 | **1** | 1,000.8 ms | **15.2 ms** |
+| 10,000,000 | 3,152 v / 34,172 e | 2,442 | **2** | 4,738.5 ms | **64.7 ms** |
+
+Before, the vertex half was handed every tile URL and pruned with a `WHERE`; DuckDB skipped the rows
+and still opened each footer. The tiles are read once per corpus now and the boxes kept.
+
+**Cold, the obligation is still unmet**, and it should be stated rather than rounded off: the first
+window of a corpus pays the sweep — 112 ms at a million, 1,117 at five, **5,327 at ten**. Locally
+that is a footer read; over HTTP it is `ceil(vertex_count / chunk_size)` range requests before
+anything is drawn, which is the cost a page actually feels.
+
+**What would meet it:** the writer knows every tile's box when it cuts it. `tile, min_x, max_x,
+min_y, max_y` is 2,442 rows and about 100 kB at ten million. [Addressing](/docs/format/conventions/addressing)
+says a corpus has no index to discover; this would be one, and saying so is cheaper than the sweep.
+
+## R2, R3 · One query per orientation, and cost that follows the answer
+
+A window issues three statements: the vertices, then `by_source` and `by_target` addressed from the
+tiles the vertex answer reported. That was already true of the edge half before R1 was fixed, which
+is what said the addressing worked and one statement did not use it.
+
+With R1 met, the clock follows the answer rather than the corpus: 812 vertices cost 13.6 ms at a
+million and 771 cost 15.2 at five, while 3,152 cost 64.7 at ten — 4.7× the answer for 4.3× the time.
+
+## R4 · An answer names every gap
+
+`complete` is not "nothing was truncated", because nothing truncates. It means every edge incident
+to a vertex in the answer is in the answer, and `gaps` names the orientation that was not read. On a
+corpus whose `by_target` is not tiled, every window reports `dst: not-declared` and `complete: false`
+— correctly, and loudly enough that a viewer counted 19–32% fewer incident edges and could say so.
+
+## W1, W2 · The peak follows the corpus, and the budget does not reach it
+
+`--memory-gib` is a `FairSpillPool` around `execute_graph` and nothing after it. `enrich_layout`
+takes the run's `memory_bytes` and discards it, so three stages sit outside the pool.
+
+The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unbounded, 2026-08-25:
+
+| N | peak RSS | wall |
+| --- | --- | --- |
+| 200,000 | 0.56 GiB | 3.4 s |
+| 1,000,000 | 3.35 GiB | 20.7 s |
+| 5,000,000 | 11.91 GiB | 154.5 s |
+| 10,000,000 | **20.72 GiB** | 404.4 s |
+
+For 1.5 GB of corpus. The layout core measured on its own is linear to three digits — 0.280, 0.290,
+0.297, 0.299 and 0.290 GiB per million at one, two, four, eight and ten million — so the ceiling is
+arithmetic: about 0.9 GiB of resident set per million vertices for the whole pass, and a 48 GB
+machine walls between twenty and thirty million. There is no spill path in the pass, so exceeding the
+machine is a failed run rather than a slow one, which is the opposite of what
+[streaming](/docs/design/streaming) promises.
+
+**And it is not intrinsic.** Louvain's levels collapse at the first one: ten million vertices become
+22,171 communities, then 2,736, then 1,365. Every level above zero fits anywhere. The whole cost is
+level zero — and level zero is the graph already on disk as a sorted CSR, which the pass already
+reads in a phase of its own for +0.51 GiB at eight million. A level-zero pass that scanned it and
+kept only `community[u]` would hold O(V) of `u32`: 40 MB at ten million, against 0.41 GiB per
+million today.
+
+<Callout type="warn" title="One row of the streaming page does not reproduce">
+That page bills `community_hierarchy` at **+0.08 GiB** at ten million after the CSR landed, and
+concludes *"the memory did not move somewhere else — it stopped being asked for"*. Run through
+`examples/enrich_memory`, the same post-CSR code path bills it +0.39, +0.89, +1.79 and +3.30 GiB at
+one, two, four and eight million — 0.41 per million, linear, and three to five times every other
+phase in the pass.
+
+What reconciles them is the measurement rather than the code. An RSS *delta* only sees a phase that
+makes the process ask the OS for more, and in the full run the pass starts at 6.82 GiB with
+gigabytes of freed pages in hand. In the example it starts at 0.24 G and every byte shows. **The
+peak falling to 8.39 GiB is real; the sentence drawn from that row is not.**
+</Callout>
+
+## How a claim on this page stays true
+
+The one capability this package asks a host for is a `query` callback, so everything a reader does
+passes through one function and counting is a decorator around it rather than instrumentation
+inside anything:
+
+```ts
+const counted = counting(query);          // queries, parquet paths, rows, ms
+const corpus = await openCorpus(url, { query: counted });
+await corpus.window(box);
+counted.report();                         // { queries: 3, files: 2, rows: 3152, ms: 64.7 }
+```
+
+An obligation is then two corpora an order of magnitude apart and one comparison. R1 is
+`files(10N) === files(N)`; R3 is `ms per row` inside a band. Neither pins a number, and both would
+have gone red the day the vertex query started listing every tile.
+
+The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
+`fossil-layout` — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is
+red, and being red in public is the point of writing it down.
