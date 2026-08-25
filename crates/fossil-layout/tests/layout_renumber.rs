@@ -226,10 +226,39 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
         );
     }
     assert_eq!(found, 3);
+    // Chunk FILES, not directory entries. It counted entries and read 3 until the pass began
+    // emitting the identity index, which is a fourth entry and not a chunk — a `index/` directory
+    // beside the tiles. What the assertion is for has not moved: a stray `chunk4.parquet` is still
+    // a failure, and now it is the only thing that can cause one.
+    let emitted = fs::read_dir(&chunks)
+        .expect("read chunk dir")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("chunk") && name.ends_with(".parquet"))
+        })
+        .count();
+    assert_eq!(emitted, 3, "extra chunk files were emitted");
+
+    // And the index the pass now writes beside them, addressed the same way.
+    let index = chunks.join("index");
+    let index_tiles = fs::read_dir(&index)
+        .expect("the pass writes an identity index beside the tiles")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("tile") && name.ends_with(".parquet"))
+        })
+        .count();
     assert_eq!(
-        fs::read_dir(&chunks).expect("read chunk dir").count(),
-        3,
-        "extra chunk files were emitted",
+        index_tiles, 3,
+        "six vertices at a chunk_size of 2 is three payload tiles and, since the index is tiled at \
+         the same size over the SORTED order, three index tiles — unless the fixture's chunk_size \
+         differs, in which case this number is the one that has to move",
     );
 
     // 4. Both adjacency lists are sorted on the endpoint they declare. The

@@ -85,7 +85,7 @@ use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
     AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property, PropertyGroup,
-    VertexInfo, data_type_name,
+    VertexIndex, VertexInfo, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -1849,6 +1849,23 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
         }],
     );
     info.iri = node.iri.clone().unwrap_or_default();
+    // Every vertex this writer emits carries `subject`, so every one of them gets
+    // an identity index and the manifest says so. Declared here, beside the
+    // properties that make it possible, rather than after the layout pass that
+    // fills it — which is the same order `prefix` is already declared in: the
+    // manifest is the plan, and `apps/corpus`'s `index-agrees-with-the-payload`
+    // is what goes red if the pass does not deliver it.
+    //
+    // The same `chunk_size` as the payload because there is no reason yet for
+    // them to differ, and a separate field because tile `k` here is the `k`th
+    // slice of the SORTED order and has nothing to do with the `dense_id` range
+    // tile `k` of the payload holds. One number in two fields would read as an
+    // alignment that does not exist.
+    info = info.with_index(VertexIndex {
+        prefix: "index/".to_string(),
+        ordered_by: "subject".to_string(),
+        chunk_size: DEFAULT_CHUNK_SIZE,
+    });
     info
 }
 

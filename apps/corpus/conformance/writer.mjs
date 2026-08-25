@@ -216,6 +216,26 @@ try {
       continue;
     }
 
+    // The identity index, addressed the same way and for the same reason. It was written by the
+    // pass before this harness knew the field existed, and three tiles came back as bytes no URL
+    // reached — which is precisely the failure the orphan check below is for, arriving on its own
+    // artefact. A reader that cannot compose these has an index it can never open.
+    if (vertex.index !== null) {
+      const indexOnDisk = payloadFiles(dest)
+        .filter((p) => p.startsWith(vertex.index.prefix) && /tile\d+\.parquet$/.test(p))
+        .sort((a, b) => Number(/(\d+)\.parquet$/.exec(a)[1]) - Number(/(\d+)\.parquet$/.exec(b)[1]));
+      const indexAddressed = indexOnDisk.map((_, k) => vertex.index.tileUrl(k));
+      for (const url of indexAddressed) composed.add(url);
+      if (JSON.stringify(indexAddressed) !== JSON.stringify(indexOnDisk)) {
+        fail(
+          `${vertex.type}: the reader composes index ${JSON.stringify(indexAddressed)}, ` +
+            `disk holds ${JSON.stringify(indexOnDisk)}`,
+        );
+      } else if (indexOnDisk.length === 0) {
+        fail(`${vertex.type}: the manifest declares an index and the writer emitted no tile`);
+      }
+    }
+
     // The assertion the whole harness exists for: the rows fossil put in tile `k` are the
     // `dense_id` range the reader's shift says tile `k` is. A writer that re-tiled and a reader
     // that did not both stay green against a table; they cannot both stay green against this.

@@ -191,7 +191,9 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, UInt32Array};
+use arrow::array::{
+    Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, StringArray, UInt32Array,
+};
 use arrow::compute::{
     SortColumn, cast, concat_batches, interleave_record_batch, lexsort_to_indices,
     take_record_batch,
@@ -708,6 +710,31 @@ pub fn enrich_layout(
             )?;
         }
         probe.mark("gather + write vertex tiles");
+
+        // The identity index: the SAME rows a second time, ordered by `subject`
+        // instead of by position, carrying only the identity and the address it
+        // maps to.
+        //
+        // It cannot be a column of the tiles above and that is the whole reason
+        // it is a second table: one table has one sort, this one's is Morton
+        // because the spatial order IS the id space, and a lookup by identity
+        // needs the other one. Without it `node(iri)` reads the `subject` column
+        // of every tile of the type — the rows are in Morton order and subjects
+        // are not, so no footer prunes — which at five million vertices is about
+        // 40 MB per lookup.
+        //
+        // **Written here because the pass already holds everything it needs.**
+        // `gather` is the permutation and `new_dense` the addresses it produced;
+        // the subjects come out of the batches already in hand. A second pass
+        // over the corpus would cost a full read, and this costs a sort.
+        //
+        // Rewritten in full on every relayout, which is affordable for exactly
+        // the reason it is necessary: this pass already rewrites every tile.
+        if let Some(subjects) = subject_pairs(&batch_refs, &starts, &gather, &new_dense, vurl)? {
+            write_identity_index(&subjects, target)?;
+            probe.mark("write identity index");
+        }
+
         maps[index] = new_ids;
     }
 
@@ -885,6 +912,101 @@ pub fn enrich_layout(
 /// A plain path and `file://` are the two forms that resolve; anything else is
 /// [`LayoutError::Remote`]. See [`VertexLayoutTarget::vertex_parquet`] for why
 /// the type is still a URL.
+/// Every `(subject, dense_id)` pair of one vertex type, or `None` when the
+/// payload carries no `subject` column.
+///
+/// `None` is a legal corpus rather than a failure: where the identity lives when
+/// the drawing tile does not carry it is an open convention, and a type without
+/// one simply has no index. `apps/corpus`'s `identity-is-the-subject` reports the
+/// same absence and does not fail on it either.
+fn subject_pairs(
+    batches: &[&RecordBatch],
+    starts: &[u32],
+    gather: &[u32],
+    new_dense: &[u32],
+    url: &str,
+) -> Result<Option<Vec<(String, u32)>>, LayoutError> {
+    let Some(first) = batches.first() else {
+        return Ok(None);
+    };
+    if first.schema().index_of("subject").is_err() {
+        return Ok(None);
+    }
+
+    // Downcast once per batch rather than once per row: `column()` is cheap and
+    // `as_any().downcast_ref()` is not free, and this runs `n` times.
+    let columns: Vec<StringArray> = batches
+        .iter()
+        .map(|batch| {
+            let index =
+                batch
+                    .schema()
+                    .index_of("subject")
+                    .map_err(|_| LayoutError::MissingColumn {
+                        target: url.to_string(),
+                        column: "subject".to_string(),
+                    })?;
+            let column = batch.column(index);
+            let column = if column.data_type() == &DataType::Utf8 {
+                Arc::clone(column)
+            } else {
+                cast(column, &DataType::Utf8).map_err(arrow_err(url))?
+            };
+            Ok(column
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("a cast to Utf8 yields a StringArray")
+                .clone())
+        })
+        .collect::<Result<_, LayoutError>>()?;
+
+    let mut pairs: Vec<(String, u32)> = Vec::with_capacity(gather.len());
+    for (position, &row) in gather.iter().enumerate() {
+        let (batch, offset) = locate(starts, row);
+        pairs.push((
+            columns[batch].value(offset).to_string(),
+            new_dense[position],
+        ));
+    }
+    // Lexicographic, and it is the order a reader searches in. `sort_unstable_by`
+    // is safe here because subjects are unique — `identity-is-the-subject` is the
+    // guard that says so — and two equal keys would be a corpus defect either way.
+    pairs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    Ok(Some(pairs))
+}
+
+/// Write the identity index tiles for one vertex type.
+///
+/// Tiled with the same `chunk_size` and the same arithmetic as the payload, so a
+/// reader that can seek a chunk needs nothing new to seek this. Tile `k` is the
+/// `k`th slice of the SORTED order, which has nothing to do with the `dense_id`
+/// range tile `k` of the payload holds — the manifest declares the two sizes
+/// separately for that reason, and this emits the same number because there is
+/// no reason yet for them to differ.
+fn write_identity_index(
+    pairs: &[(String, u32)],
+    target: &VertexLayoutTarget,
+) -> Result<(), LayoutError> {
+    let prefix = format!("{}index/", target.chunk_prefix);
+    ensure_prefix(&prefix)?;
+
+    let tiles = (pairs.len() as u64).div_ceil(target.chunk_size);
+    for k in 0..tiles {
+        let lo = (k * target.chunk_size) as usize;
+        let len = (pairs.len() - lo).min(target.chunk_size as usize);
+        let slice = &pairs[lo..lo + len];
+        let subjects: StringArray = slice.iter().map(|(s, _)| Some(s.as_str())).collect();
+        let addresses = UInt32Array::from(slice.iter().map(|&(_, d)| d).collect::<Vec<_>>());
+        let batch = RecordBatch::try_from_iter(vec![
+            ("subject", Arc::new(subjects) as ArrayRef),
+            ("dense_id", Arc::new(addresses) as ArrayRef),
+        ])
+        .map_err(arrow_err(&prefix))?;
+        write_parquet(&format!("{prefix}tile{k}.parquet"), &batch)?;
+    }
+    Ok(())
+}
+
 fn local_path(url: &str) -> Result<PathBuf, LayoutError> {
     let path = url.strip_prefix("file://").unwrap_or(url);
     if path.contains("://") {
