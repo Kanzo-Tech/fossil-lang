@@ -11,20 +11,24 @@
 //!    does not cover. There is no auto-import edit and no `(native-only)` tag:
 //!    the first named a `use <ns>` line no program writes, and the second named
 //!    `WasmClass::NativeUdfOnly`, a class that no longer exists.
-//! 2. **shape properties** — when the cursor is in a mapping whose target `ShEx`
-//!    shape resolves (the program names its output document with
-//!    `type { … } := io.shex("…")`), the shape's `constraints[].predicate` names
-//!    are offered as `Field` completions.
+//! 2. **shape properties** — the output contract of the mapping the cursor is
+//!    in, offered in the ONE position a property key can be written: the left
+//!    of a property line ([`Scope::PropertyKey`]). Each is labelled
+//!    [`fossil_graph_schema::short_name`] of its predicate IRI — the `@rename`
+//!    the program addressed to it, else the last segment — because that is
+//!    what `PropertyLhs := IDENT` accepts and what the checker resolves a key
+//!    against. It offered the raw `constraints[].predicate` IRI, wherever the
+//!    cursor was inside a mapping whose shape resolved.
 //! 3. **source fields** — the columns of the row the mapping reads, when the
 //!    host has registered a descriptor for it AND the receiver is the name that
 //!    row is addressed by. It fired on every `.` inside a mapping instead, so
 //!    the columns were offered as the members of a string and of a name that
 //!    denotes nothing.
 //!
-//! Sources 1 and 3 read ONE [`Scope`], resolved once per request: the rows a
-//! catalogue has for a receiver and the columns a source row has are two
-//! answers to the same question, and asking it twice is how they came to
-//! disagree.
+//! All three read ONE [`Scope`], resolved once per request: the rows a
+//! catalogue has for a receiver, the columns a source row has and *whether a
+//! key can be written here at all* are answers to the same question — where
+//! the cursor is — and asking it three times is how they came to disagree.
 //!
 //! A source between the first and the second was **prefixes**: declared ones
 //! from the cross-file index plus a well-known set offered as auto-importable.
@@ -47,7 +51,7 @@
 
 use fossil_base::SourceFile;
 use fossil_graph_schema::Primitive;
-use fossil_hir::def_map::def_map;
+use fossil_hir::def_map::{MappingLoc, def_map};
 use fossil_hir::item_tree::{ItemHeader, item_tree};
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
@@ -62,9 +66,12 @@ use crate::position::{node_at_position, token_at_position};
 /// Compute completion items at an LSP position, merging the three sources.
 ///
 /// `files` is the host's open-file set (for cross-file prefix resolution);
-/// `file` is the file the cursor is in. A program that names no output shape
-/// document simply contributes no shape-property items — the stdlib + prefix
-/// sources are unconditional.
+/// `file` is the file the cursor is in. No source is unconditional — this
+/// sentence said the stdlib and prefix ones were, and there is no prefix source
+/// left and no position at which the whole catalogue is the honest answer to a
+/// dot. A program that names no output shape document contributes no
+/// shape-property items; a cursor outside a key position contributes none
+/// either.
 ///
 /// `line` / `character` are UTF-16 LSP coordinates.
 #[must_use]
@@ -88,25 +95,43 @@ pub fn completions(
     let scope = scope_at_cursor(db, file, line, character, &registry);
 
     stdlib_completions(&registry, &scope, &mut items);
-    shape_property_completions(db, file, line, character, &mut items);
+    shape_property_completions(db, &scope, &mut items);
     source_field_completions(db, &scope, &mut items);
 
     items
 }
 
-/// What the head to the left of the cursor's dot names.
+/// Where the cursor is — which is what decides both *which rows* are offered
+/// and *what they are labelled*, taken in one place.
 ///
-/// The whole of the receiver question, as an enum, so the two decisions —
-/// *which rows* and *what they are labelled* — are taken in one place. Both
-/// member-offering sources read it: the catalogue's rows and the source row's
-/// COLUMNS are two answers to one question, and while only the first asked it,
-/// the second fired on every `.` inside a mapping and offered the row's columns
-/// as the members of a string, of an unknown name, and of a call's result.
+/// It began as the receiver question alone («what does the head to the left of
+/// the dot name?») and every variant but one still answers it. All three
+/// sources read it: the catalogue's rows, the source row's COLUMNS and the
+/// shape's property KEYS are answers to one question, and each source that
+/// asked it separately got it wrong. The second fired on every `.` inside a
+/// mapping and offered the row's columns as the members of a string, of an
+/// unknown name, and of a call's result; the third asked only «is the cursor
+/// inside a mapping whose shape resolves», which is true of the header, of the
+/// right of an `=`, and of the member position after a dot.
 enum Scope<'db> {
     /// No dot: the cursor is not in a member position, so the catalogue is
     /// offered whole and spelled in full (`str.trim`). Nothing narrower is
     /// honest — there is no receiver to narrow by.
     Catalogue,
+    /// The left-hand side of a property line inside a mapping body — the one
+    /// position `PropertyLhs := IDENT` puts a property key, carrying the
+    /// mapping whose target shape declares which keys those are.
+    ///
+    /// It is a POSITION and not a receiver, which is why the shape source could
+    /// not be narrowed by the receiver question the other variants answer. The
+    /// CST is what says so: the cursor's token is an `IDENT` whose parent is a
+    /// `PROPERTY_LHS`. An `AT_ATTR` parented the same way is the identity line
+    /// (`SubjectAssign := AT_ATTR ASSIGN Expression`, a different production
+    /// sharing the node), and `@subject` is not a key.
+    ///
+    /// The catalogue is still offered here, unnarrowed — see
+    /// [`stdlib_completions`].
+    PropertyKey(MappingLoc<'db>),
     /// A head the catalogue classifies as a type: `str` → `Scalar(String)`,
     /// `seq` → `Relation`. Also what a `:=` binding resolves to, and what a
     /// COLUMN resolves to once its type is read off the row.
@@ -173,7 +198,16 @@ fn stdlib_completions(
     // decided while selecting rather than guessed afterwards from the name.
     let mut rows: Vec<(String, &fossil_hir::stdlib::RegistryEntry)> = match scope {
         Scope::Nothing => Vec::new(),
-        Scope::Catalogue => registry.iter().map(|e| (e.name.to_string(), e)).collect(),
+        // A key position takes the catalogue too, and `str.trim` is no more
+        // writable as a `PropertyLhs` than a raw IRI was — 51 items, measured
+        // and PINNED by `tests/completion_property_key.rs`'s
+        // `the_catalogue_is_still_offered_in_key_position`. Narrowing it is the
+        // same argument this commit makes about the shape source and a
+        // different measurement; it is not narrowed here so that the change
+        // that does it has a number to move.
+        Scope::Catalogue | Scope::PropertyKey(_) => {
+            registry.iter().map(|e| (e.name.to_string(), e)).collect()
+        }
         // A row binding is a relation as well as a row — see [`Scope::Row`].
         Scope::Row(_) => registry
             .members_of(Receiver::Relation)
@@ -229,11 +263,15 @@ fn stdlib_completions(
 
 /// Which rows the cursor's position selects.
 ///
-/// The head is the token before the dot, and there are two ways to be after
-/// one: the cursor is ON the dot (completion fired the moment `.` was typed),
-/// or it is inside the partial member that follows it (`users.wh|`). Both are
-/// handled, because an editor that re-requests on every keystroke produces the
-/// second on the very next character.
+/// The key position is decided first and structurally — the CST says whether
+/// the cursor is on a `PROPERTY_LHS` — because it is the one variant that is
+/// not a receiver, and because a key has no dot to reason from.
+///
+/// After that, the head is the token before the dot, and there are two ways to
+/// be after one: the cursor is ON the dot (completion fired the moment `.` was
+/// typed), or it is inside the partial member that follows it (`users.wh|`).
+/// Both are handled, because an editor that re-requests on every keystroke
+/// produces the second on the very next character.
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn scope_at_cursor<'db>(
     db: &'db dyn fossil_base::Db,
@@ -245,6 +283,11 @@ fn scope_at_cursor<'db>(
     let Some(token) = token_at_position(db, file, line, character) else {
         return Scope::Catalogue;
     };
+    if at_property_key(&token)
+        && let Some(mapping) = enclosing_mapping_loc(db, file, line, character)
+    {
+        return Scope::PropertyKey(mapping);
+    }
     let dot = if token.kind() == SyntaxKind::DOT {
         token
     } else {
@@ -310,6 +353,33 @@ fn scope_at_cursor<'db>(
         return Scope::Members(Receiver::Relation);
     }
     Scope::Nothing
+}
+
+/// Is the cursor's token the name on the left of a property line?
+///
+/// `PropertyLhs := IDENT` (`grammar.bnf`) — a bare name, and the only place one
+/// goes. The parser gives that name a `PROPERTY_LHS` node of its own, so this
+/// is a parent check and not a search: no scan for an `=` to the right, which
+/// is the condition that would also accept the header's `:` line and would
+/// answer wrongly for a key not yet followed by one.
+///
+/// Two positions a key COULD occupy answer `false`, and both are the CST
+/// declining to say rather than this function narrowing:
+///
+/// - a still-blank body line, whose indent the parser attaches to the PREVIOUS
+///   property's expression — indistinguishable from a value continued onto a
+///   second line;
+/// - the column immediately before a key's first character, which is the same
+///   whitespace token.
+///
+/// The first keystroke closes both. An `AT_ATTR` under the same node is
+/// `@subject`, a different production (`SubjectAssign`) sharing the node, and
+/// no property key can be written where it already stands.
+fn at_property_key(token: &SyntaxToken) -> bool {
+    token.kind() == SyntaxKind::IDENT
+        && token
+            .parent()
+            .is_some_and(|p| p.kind() == SyntaxKind::PROPERTY_LHS)
 }
 
 /// The token before `t`, skipping whitespace and comments.
@@ -421,16 +491,41 @@ const fn scalar_of(primitive: Primitive) -> Option<ScalarTy> {
     })
 }
 
-/// Source 3: shape predicate names, when the enclosing mapping's target `ShEx`
-/// shape resolves against the document the program names.
+/// Source 2: the mapping's output contract — its target shape's predicates,
+/// under the names a program can WRITE, in the one position it can write them.
+///
+/// It had two defects and they are independent.
+///
+/// **The label** was `constraint.predicate`, the raw predicate IRI, so every
+/// item it offered wrote a line the parser refuses: `PropertyLhs := IDENT`, and
+/// `https://shop.example/voc#email` is not one. The name is
+/// [`ResolvedShape::short_names`] — [`fossil_graph_schema::short_name`] over
+/// the `@rename` table off the `type` binding, else the IRI's last segment.
+/// That is the same table [`fossil_hir::check`] resolves a written key against
+/// and the same one `OutputShapes::to_graph_schema` emits the column under, so
+/// what is offered, what compiles and what ships are one name. [`local_name`]
+/// would have been the plausible wrong answer: it agrees on every predicate no
+/// `@rename` names, so it fails only on the one program the rename exists for,
+/// and it fails by offering a key the checker rejects.
+///
+/// [`local_name`]: fossil_graph_schema::local_name
+/// [`ResolvedShape::short_names`]: fossil_hir::shapes::ResolvedShape::short_names
+///
+/// **The position** was «the cursor is inside a mapping whose shape resolves»,
+/// which is also true of the header, of the right-hand side of an `=`, and of
+/// the member position after a dot. It is [`Scope::PropertyKey`] and nothing
+/// else.
+///
+/// A predicate dropped for a short-name COLLISION is not offered: `short_names`
+/// keeps the first and reports the rest, and a name that resolves to two IRIs
+/// is exactly the key the checker refuses. The repair — `@rename` — is what
+/// puts it back, under the name the program chose.
 fn shape_property_completions(
     db: &dyn fossil_base::Db,
-    file: SourceFile,
-    line: u32,
-    character: u32,
+    scope: &Scope<'_>,
     items: &mut Vec<CompletionItem>,
 ) {
-    let Some(mapping) = enclosing_mapping_loc(db, file, line, character) else {
+    let Scope::PropertyKey(mapping) = scope else {
         return;
     };
     // A document that is missing, undecodable or does not declare this shape is
@@ -438,23 +533,44 @@ fn shape_property_completions(
     // where it becomes a diagnostic the user reads. A completion list is not a
     // place to report it: the honest answer here is to offer no shape
     // properties, which is what a program with no output contract gets too.
-    let Ok(Some(shape)) = resolve_target_shape(db, mapping) else {
+    let Ok(Some(shape)) = resolve_target_shape(db, *mapping) else {
         return;
     };
-    for constraint in &shape.constraints {
-        let ty_str = constraint
-            .value_ty
+    let renames = shape_iri_of(db, *mapping).map_or_else(Vec::new, |iri| {
+        def_map(db, mapping.file(db)).renames_for_shape(db, &iri)
+    });
+    let (table, _collisions) = shape.short_names(&renames);
+    for (name, predicate) in table {
+        let ty_str = shape
+            .constraint_for(&predicate)
+            .and_then(|c| c.value_ty)
             .map_or_else(|| "Iri".to_string(), |ty| render_ty_kind(db, ty.kind(db)));
         items.push(CompletionItem {
-            label: constraint.predicate.to_string(),
+            // The IRI is what the key MEANS, so moving it out of the label must
+            // not lose it — it goes to the `detail`, bracketed, where the
+            // stdlib source keeps `str` for the label `trim`.
+            label: name.to_string(),
             kind: Some(CompletionItemKind::FIELD),
-            detail: Some(format!("shape property : {ty_str}")),
+            detail: Some(format!("shape property : {ty_str}  [{predicate}]")),
             ..Default::default()
         });
     }
 }
 
-/// Source 4: the COLUMNS of the row the receiver names.
+/// The fully-resolved shape IRI a mapping targets — the key a `@rename` is
+/// addressed by — or `None` when its header did not lower.
+///
+/// Mirrors `fossil_hir::check`'s own `shape_iri_of`, which is private to the
+/// checker. It adds no Salsa fan-out: `resolve_target_shape` has already
+/// evaluated `lower_to_hir` for this file on the line above.
+fn shape_iri_of(db: &dyn fossil_base::Db, mapping: MappingLoc<'_>) -> Option<SmolStr> {
+    fossil_hir::lower::lower_to_hir(db, mapping.file(db))
+        .mapping(db, mapping.index(db))
+        .map(|m| m.shape_iri.clone())
+        .filter(|iri| !iri.is_empty())
+}
+
+/// Source 3: the COLUMNS of the row the receiver names.
 ///
 /// It had no receiver. The trigger was `at_field_ref_context` — «the cursor is
 /// on a `DOT` and somewhere under a `MAPPING`» — so every dot in a body got the

@@ -122,27 +122,36 @@ fn file(db: &mut HostDb, src: &str) -> SourceFile {
 }
 
 /// (a) When the cursor's mapping resolves a target `ShEx` shape, the shape's
-///     predicate names appear as Field completions.
+///     predicates appear as Field completions — in key position, under the name
+///     a program writes.
 #[test]
 fn shape_property_names_are_offered_when_shape_resolves() {
     let mut db = HostDb::new();
     let f = file(&mut db, SRC);
     // Line 3 (`    name = users.name`) is inside the `User : Person` mapping
-    // whose target shape resolves to `http://example.org/Person`; column 14 is
-    // inside the body and is not the `.` that would trigger source fields.
-    let items = fossil_ide::completions(&db, &[f], f, 3, 14);
+    // whose target shape resolves to `http://example.org/Person`. Column 8 is
+    // the end of the KEY — the one position a property key can be written. The
+    // cursor sat at column 14 instead, inside `users` on the right of the `=`,
+    // and the item it found was labelled `http://example.org/name`: an
+    // expression position, and a label no `PropertyLhs := IDENT` accepts.
+    // `tests/completion_property_key.rs` is the whole of that measurement.
+    let items = fossil_ide::completions(&db, &[f], f, 3, 8);
 
     let shape_prop = items
         .iter()
         .find(|i| i.kind == Some(CompletionItemKind::FIELD))
         .expect("a resolved target shape must contribute Field (shape-property) completions");
     assert_eq!(
-        shape_prop.label, "http://example.org/name",
-        "the shape's `name` predicate IRI must be offered as a property; got {:?}",
+        shape_prop.label, "name",
+        "a property key is the predicate's short name, never its IRI; got {:?}",
         shape_prop.label,
     );
-    // Risk Register: the rendered detail must not leak internal type state.
     let detail = shape_prop.detail.as_deref().unwrap_or("");
+    assert!(
+        detail.contains("http://example.org/name"),
+        "the IRI is what the key means and stays readable in the detail; got {detail:?}",
+    );
+    // Risk Register: the rendered detail must not leak internal type state.
     assert!(
         !detail.contains("Unknown") && !detail.contains("InferenceId"),
         "shape-property detail leaked internal type state; got {detail:?}",
@@ -168,8 +177,12 @@ User : Person from users
 ";
     let mut db = HostDb::new();
     let f = file(&mut db, NO_DOCUMENT);
-    // One line shorter than `SRC` — the body is line 2 here.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 14);
+    // One line shorter than `SRC` — the body is line 2 here, and column 8 is
+    // the same KEY position case (a) asks from. Asking anywhere else would make
+    // this pass for the wrong reason: no position but that one offers a shape
+    // property at all now, so an expression position is silent whether the
+    // document resolves or not.
+    let items = fossil_ide::completions(&db, &[f], f, 2, 8);
 
     assert!(
         !items
