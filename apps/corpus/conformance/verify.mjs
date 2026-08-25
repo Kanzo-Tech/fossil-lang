@@ -1,11 +1,23 @@
 /**
  * The conformance corpus, executed.
  *
- * `expected.json` is a table of addresses: what a reader must compose from a manifest, and what it
- * must refuse to compose. This file is one of the two implementations that execute it. The other is
+ * `expected.json` is two tables. `cases` is the ADDRESSING: what a reader must compose from a
+ * manifest and what it must refuse to compose, and nothing in it opens a byte. `answers` is what
+ * the reference API returns over the one case that has bytes — the four members of `openCorpus`,
+ * whose numbers come from a **full scan**, every tile read with no addressing at all and filtered
+ * in SQL. That is a third thing neither implementation wrote, and it is what makes the block worth
+ * having: both readers PRUNE, and both must land where an unpruned read already is.
+ *
+ * This file is one of the two implementations that execute it. The other is
  * `packages/graph/tests/conformance.test.ts`, which runs `resolveCorpus` — the published module —
  * against the same table. Neither wrote it, and a change to either that moves an address moves it
  * away from the other.
+ *
+ * The `answers` half is executed here through `./answers.mjs` and, on the published side, by
+ * `openCorpus` itself. The first bug it caught was in this side: an adjacency tile filtered by
+ * `src_dense OR dst_dense` rather than by the column the orientation is aligned on, which read
+ * **153** edges where the scan says **152** — edges whose source was outside the window, dragged in
+ * by an `OR` that answered a question nobody asked.
  *
  * The reader itself is `./reader.mjs` — written from the conventions and from nothing else, and
  * sharing with `resolveCorpus` only the fact that both read the same four manifest fields. This
@@ -21,6 +33,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as answers from "./answers.mjs";
 import { resolve } from "./reader.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -166,6 +179,67 @@ for (const expected of table.cases) {
     .flatMap((t) => [t.tileUrl(3)])
     .find((u) => u.endsWith(path.slice(path.lastIndexOf("/") + 1)));
   if (got !== url) fail(`base_join: composed ${got}, not ${url}`);
+}
+
+// ---------------------------------------------------------------------------
+// The four members of the reference API, executed against the same table.
+//
+// Everything above this line is ADDRESSING: which URL a tile has, and nothing opens a byte. This
+// executes `answers`, which is what the API on top of that addressing returns. The numbers in the
+// table come from a full scan — no addressing at all — so this asks whether a reader that PRUNES
+// lands where an unpruned read already is.
+{
+  const expected = table.answers;
+  const target = table.cases.find((c) => c.name === expected.case);
+  const root = pathJoin(HERE, target.root);
+  const count = expected.vertex_count;
+  const at = (what) => `answers.${what}`;
+
+  const types = answers.types(root);
+  same(at("types"), types, { vertices: expected.types.vertices, edges: expected.types.edges });
+
+  for (const [i, want] of expected.window.entries()) {
+    const got = answers.window(root, count, { ...want.box, directions: want.directions });
+    same(at(`window[${i}]`), got, {
+      type: expected.types.vertices[0].type,
+      vertices: want.vertices,
+      tiles: want.tiles,
+      edges: want.edges,
+      complete: want.complete,
+      gaps: want.gaps,
+    });
+  }
+
+  for (const [i, want] of expected.node.entries()) {
+    const got = answers.node(root, count, want.id);
+    if (!want.found) {
+      if (got !== null) fail(`${at(`node[${i}]`)}: ${want.id} resolved to ${JSON.stringify(got)}`);
+    } else if (got === null) {
+      fail(`${at(`node[${i}]`)}: ${want.id} resolved to nothing`);
+    } else {
+      same(at(`node[${i}].id`), got.id, want.id);
+      same(at(`node[${i}].dense_id`), got.dense_id, want.dense_id);
+    }
+  }
+
+  for (const [i, want] of expected.neighbours.entries()) {
+    const got = answers.neighbours(root, count, want.ids, { depth: want.depth });
+    same(at(`neighbours[${i}]`), got, {
+      type: expected.types.vertices[0].type,
+      depth: want.depth,
+      seeds: want.seeds,
+      missing: want.missing,
+      vertices: want.vertices,
+      edges: want.edges,
+      frontier: want.frontier,
+      complete: want.complete,
+    });
+  }
+
+  notes.push(
+    `answers: ${expected.window.length} window(s), ${expected.node.length} node(s), ` +
+      `${expected.neighbours.length} neighbourhood(s) over ${expected.case}`,
+  );
 }
 
 for (const note of notes) console.log(`  ${note}`);

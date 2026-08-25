@@ -295,5 +295,85 @@
       "about": "The edge declares tiles of 8,192 against a vertex type cut at 4,096. Every URL still composes and most of the files it names still exist, which is why this is refused at resolve rather than at the first request. It lived as a comment in a reader — `src_chunk_size equals the source type's chunk_size` — and a comment is not a check.",
       "resolve_throws": "src_chunk_size 8192 against Person's chunk_size 4096"
     }
-  ]
+  ],
+  "answers": {
+      "about": "What the four members of the reference API answer over the `corpus` case, and where these numbers come from: a FULL SCAN. Every tile of every type read with no addressing at all and filtered in SQL, which is a third thing neither implementation wrote. Both of them prune — `openCorpus` in `@fossil-lang/graph` and `conformance/answers.mjs` — and both must land on what an unpruned read sees. A wrong shift, a doubled orientation, a hard-coded 4,096 or an adjacency filtered by the wrong column moves one of them off a number that was never computed by either. The last of those is not hypothetical: it was written, and it read 153 edges where the scan says 152.",
+      "case": "corpus",
+      "vertex_count": 300,
+      "types": {
+        "about": "What is inside, from the manifest and one DESCRIBE. `identity` is the column an id is read from and it is `subject`, not `dense_id`: the address does not survive a re-layout, and the guards' `identity-is-the-subject` holds the same line.",
+        "vertices": [
+          {
+            "type": "Person",
+            "chunk_size": 64,
+            "fields": ["dense_id", "subject", "x", "y", "cluster_id"],
+            "identity": "subject",
+            "geometry": true,
+            "payload": ["cluster_id"]
+          }
+        ],
+        "edges": [
+          { "edge_type": "knows", "src_type": "Person", "dst_type": "Person", "directions": ["src", "dst"] }
+        ]
+      },
+      "window": [
+        {
+          "about": "The lower-left quadrant, which spans two tiles of the five. `edges` counts every edge INCIDENT to a vertex in the box, not only the ones with both ends inside — an edge whose far endpoint is off-screen is still an edge of a vertex that was drawn. Read twice, once per orientation, and counted ONCE: the corpus stores one relation twice, and concatenating is how a self-type window doubles its own count.",
+          "box": { "x": -50, "y": -47, "w": 196, "h": 193 },
+          "directions": ["src", "dst"],
+          "vertices": 76,
+          "tiles": [0, 1],
+          "edges": 154,
+          "complete": true,
+          "gaps": []
+        },
+        {
+          "about": "The same box read as a DRAWING read — outgoing only. Two edges of the 154 have their destination in the box and their source outside, so they are not in this answer, and `complete` is false with the orientation that was not asked for named. The difference between 154 and 152 is the whole reason `gaps` is a field rather than a sentence.",
+          "box": { "x": -50, "y": -47, "w": 196, "h": 193 },
+          "directions": ["src"],
+          "vertices": 76,
+          "tiles": [0, 1],
+          "edges": 152,
+          "complete": false,
+          "gaps": ["not-requested"]
+        }
+      ],
+      "node": [
+        {
+          "about": "By subject IRI. The `dense_id` comes back because an adjacency tile holds addresses and a caller walking edges needs one, but it is never what is passed in.",
+          "id": "https://example.org/person/15",
+          "found": true,
+          "dense_id": 0
+        },
+        {
+          "about": "An IRI no vertex carries is `null`, not an error: an open-world graph may name a subject no mapping emitted.",
+          "id": "https://example.org/person/99999",
+          "found": false
+        }
+      ],
+      "neighbours": [
+        {
+          "about": "One hop from one seed. `frontier` is the four vertices the bound stopped at, whose own edges were never opened — without it the answer looks whole, because the edges BETWEEN two frontier vertices are exactly the ones missing.",
+          "ids": ["https://example.org/person/15"],
+          "depth": 1,
+          "seeds": 1,
+          "missing": 0,
+          "vertices": 5,
+          "edges": 4,
+          "frontier": 4,
+          "complete": false
+        },
+        {
+          "about": "Two hops from the same seed. Both numbers grow by more than the first hop's, which is what says the walk actually expanded rather than re-reading its own frontier.",
+          "ids": ["https://example.org/person/15"],
+          "depth": 2,
+          "seeds": 1,
+          "missing": 0,
+          "vertices": 13,
+          "edges": 16,
+          "frontier": 8,
+          "complete": false
+        }
+      ]
+    }
 }

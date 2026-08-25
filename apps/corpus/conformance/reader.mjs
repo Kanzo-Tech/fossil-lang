@@ -165,5 +165,43 @@ export function resolve(root, base = "") {
     };
   };
 
-  return { types, edges, vertexType, window };
+  /**
+   * The same URLs a window addresses, each with the column it is READ BY.
+   *
+   * A sibling of `window` rather than a field of its answer, because `edge_urls` would then be
+   * `edge_reads.map(u => u.url)` — one datum with two spellings in one object, which is the
+   * duplication this tree deletes on sight. `window`'s shape is also what `expected.json` pins and
+   * two implementations execute, and widening it to carry a derivable field would change that
+   * table for no question it answers.
+   *
+   * The pairing is not derivable from a URL and it is not the same for the two orientations:
+   * `by_source/tile{k}` holds the edges whose `src_dense` is in tile k, so filtering that file by
+   * `dst_dense` answers a question nobody asked and drags in edges whose source is outside the
+   * window. That was written here first, and it read **153** where a full scan says **152**.
+   */
+  const edgeReads = ({ type, tiles, directions = ["src"] }) => {
+    const wanted = new Set(directions);
+    const vertex = vertexType(type);
+    const reads = [];
+    for (const edge of edges) {
+      const applicable = [];
+      if (edge.srcType === vertex.type) applicable.push("src");
+      if (edge.dstType === vertex.type) applicable.push("dst");
+      for (const direction of applicable) {
+        const adjacency = edge.adjacency(direction);
+        if (adjacency === null || !wanted.has(direction)) continue;
+        reads.push(
+          ...tiles.map((k) => ({
+            url: adjacency.tileUrl(k),
+            column: adjacency.column,
+            direction,
+            edge_type: edge.edgeType,
+          })),
+        );
+      }
+    }
+    return reads;
+  };
+
+  return { types, edges, vertexType, window, edgeReads };
 }
