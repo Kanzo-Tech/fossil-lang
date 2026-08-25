@@ -1855,6 +1855,7 @@ dependencies = [
 name = "fossil-base"
 version = "0.1.0"
 dependencies = [
+ "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
  "salsa",

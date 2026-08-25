@@ -46,3 +46,8 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # and nothing else, which is exactly why the vocabulary lives there rather
 # than beside a parser.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+
+[dev-dependencies]
+# The eight crates that use `test_support` turn the feature on here; an
+# integration test of this crate links it the same way and owes the same line.
+fossil-base = { path = ".", features = ["test-support"] }
