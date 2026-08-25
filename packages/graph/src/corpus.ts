@@ -750,35 +750,37 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
      * and a row in somebody else's database all key on something, and an address is not something
      * to key on.
      *
-     * The corpus states this and the tree contradicts itself about it, which is worth naming rather
-     * than inheriting: `apps/corpus/guards/guards.mjs` says *"`dense_id` is an address and cannot
-     * also be an identity"*, the conformance corpus's own manifest marks `subject` `is_primary`,
-     * and `crates/fossil-df/src/lib.rs` marks `dense_id` `is_primary` on every vertex type it
-     * writes. Two writers, two answers, one field. This picks the one the guard and the artefact
-     * agree on.
+     * The tree used to contradict itself about this and no longer does. `apps/corpus/guards`'s
+     * `identity-is-the-subject` says *"`dense_id` is an address and cannot also be an identity"*
+     * and the conformance corpus marks `subject` `is_primary`; `crates/fossil-df/src/lib.rs` —
+     * `vertex_info`, the one writer — marked `dense_id` instead, on every corpus `fossil run`
+     * produced. One field, two answers, and what that resolved to in practice was that nothing
+     * read it. It marks `subject` now.
      *
-     * **The flag in the manifest is not consulted, because the two writers disagree about it.**
-     * `property_groups` carries `is_primary`, and it would be the obvious place to read this from:
-     * the conformance corpus marks `subject` primary, and `crates/fossil-df/src/lib.rs` —
-     * `vertex_info`, the writer with no second writer left to mirror — marks `dense_id` primary and
-     * `subject` not. Reading the flag would therefore pick the address on every corpus `fossil run`
-     * produces. The column name is the stable thing, so the column name is what this keys on, and
-     * the disagreement is a defect in the artefact rather than something to route around here.
+     * **The flag is still not consulted, and the reason is no longer the disagreement.** It is not
+     * reachable: `./manifest.ts` is a line scanner, `properties` is nested one level deeper than
+     * anything it addresses, and `scan` on the conformance corpus's own `Person.vertex.yml`
+     * returns `property_groups: [{ file_type: 'parquet', properties: '' }]` — the flag is not a
+     * value this reader has, it is a value this reader cannot see. Getting at it means a third
+     * shape in `ScannedManifest` (a sequence of mappings inside a mapping inside a sequence),
+     * which is exactly the nesting that module refuses by name, plus the same growth in
+     * `apps/corpus/guards/manifest.mjs`, which is a deliberate copy for a third party who has
+     * neither this repository nor npm.
      *
-     * **What it costs, measured rather than asserted.** There is no index from a subject to an
-     * address — no side table, no sorted copy, nothing in the manifest — so this is a scan of the
-     * `subject` column over every tile of the type. Parquet's footer statistics do not help: the
-     * rows are in Morton order and subjects are not, so the per-tile `min`/`max` overlap and the
-     * engine skips nothing. On the conformance corpus that is 5 tiles of 300 rows; at five million
-     * vertices the `subject` column is 8.016 compressed bytes per row, so a single lookup reads
-     * about 40 MB. Column pruning is the only thing that keeps it off the other five columns.
+     * Second reason, independent of the first: {@link openCorpus} already refuses to take the
+     * payload vocabulary off the manifest, and says why — the conformance corpus declares **one**
+     * property against **five** columns on disk. A flag on a property list that does not enumerate
+     * the payload would name the identity of some corpora and be silent about others, while
+     * `DESCRIBE` sees every one. The column name is the stable thing, so the column name is what
+     * this keys on.
      *
-     * **What would change it.** A `subject → dense_id` index in the corpus, tiled and addressed
-     * like everything else, would make this `O(1)` and would have to be rewritten by every layout
-     * pass — which is affordable exactly because the pass already rewrites every tile. Nothing in
-     * the format has one today, and adding one is a change to the artefact and not to this file.
-     * The other thing that would change it is a stable layout, and the format says there is not
-     * one.
+     * **What it costs, measured rather than asserted.** Where the type declares an `index:` this is
+     * a seek: two reads, no scan of either table, and see {@link Corpus.types} — `indexed` says
+     * which of the two a type gets. Where it does not, it is a scan of the `subject` column over
+     * every tile, because the rows are in Morton order and subjects are not, so every tile's
+     * `min`/`max` overlaps every other's and the footers prune nothing. At five million vertices
+     * that column is 8.016 compressed bytes per row, so one lookup reads about 40 MB. Both answers
+     * are the same row; only one is cheap.
      *
      * @throws {CorpusReadError} when no vertex type carries an identity column at all, or when two
      *   types claim the same IRI.

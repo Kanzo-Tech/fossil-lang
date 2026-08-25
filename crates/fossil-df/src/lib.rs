@@ -1803,16 +1803,34 @@ impl GraphArData {
 /// the whole of what the manifest could not say before: how far the corpus goes.
 fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     let mut properties = Vec::with_capacity(node.properties.len() + 5);
+    // `is_primary` marks the IDENTITY, and the identity is `subject`.
+    //
+    // This writer said `dense_id`, and it was the only thing in the tree that
+    // did: `apps/corpus/guards/guards.mjs`'s `identity-is-the-subject` says
+    // "`dense_id` is an address and cannot also be an identity", the
+    // conformance corpus's `vertex/Person.vertex.yml` marks `subject`, and
+    // `packages/graph`'s reader keys on the column name precisely because it
+    // could not trust the flag with two writers spelling it two ways. One
+    // field, two answers, and the way that resolves in practice is that
+    // nothing reads it — which is `RunStatus` again, in one boolean.
+    //
+    // The address cannot be the identity for the reason `fossil-layout`
+    // exists: the pass ranks every vertex by the Morton code of its new
+    // position and lets that rank be its `dense_id`, so a `dense_id` held
+    // anywhere outside the corpus names a different vertex after the next
+    // write. `subject` is what survives that, and since `55f573e` it is
+    // load-bearing rather than decorative — `index:` below declares a second
+    // copy of the type ordered by it.
     properties.push(Property {
         name: "dense_id".to_string(),
         data_type: "uint32".to_string(),
-        is_primary: true,
+        is_primary: false,
         is_nullable: Some(false),
     });
     properties.push(Property {
         name: "subject".to_string(),
         data_type: data_type_name(&DataType::Utf8),
-        is_primary: false,
+        is_primary: true,
         is_nullable: Some(false),
     });
     for p in &node.properties {

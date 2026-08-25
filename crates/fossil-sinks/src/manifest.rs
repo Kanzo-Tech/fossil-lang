@@ -8,7 +8,7 @@
 //! `vertex_types:`, `data_type: string`) was neither `GraphAr`'s nor anyone else's. **A fossil
 //! corpus is not a valid `GraphAr` corpus, and this module used to end that sentence the other
 //! way.** That is a description and not a policy: divergence 1 below is a `data_type` spelling
-//! the reference C++ throws on, and it is on the primary key of the first vertex type.
+//! the reference C++ throws on, and it is on the first property of the first vertex type.
 //!
 //! Eight divergences, each read out of `docs/specification/format.md` in
 //! `apache/incubator-graphar` and out of `cpp/src/graphar/` — not out of a summary of either.
@@ -19,8 +19,12 @@
 //!    dead.** `types.cc`'s `DataType::TypeNameToDataType` accepts exactly `bool`, `int32`,
 //!    `int64`, `float`, `double`, `string`, `date`, `timestamp` and five `list<…>` forms, and
 //!    `throw`s `"Unsupported data type"` on anything else. `fossil-df` declares `dense_id` as
-//!    `uint32` with `is_primary: true`, and `cluster_id` the same — so the reference reader
-//!    throws on the primary key of the first vertex type it opens. The specification's own type
+//!    `uint32`, and `cluster_id` the same — so the reference reader throws on the first property
+//!    of the first vertex type it opens. **It is not the primary key, and this said it was**:
+//!    `is_primary` marks `subject`, whose `string` that function does accept, and the two
+//!    sentences that had it the other way round were written when `fossil-df` marked the address.
+//!    Nothing about this divergence turns on the flag — the throw is on the spelling, and a
+//!    reader reaches it whether the property is a key or not. The specification's own type
 //!    list has no unsigned integer in it either. `time` and `binary` go out the same door: `time`
 //!    is in the specification's list and has no arm in the C++, and `binary` is in neither — see
 //!    [`data_type_name`], whose fallback it is.

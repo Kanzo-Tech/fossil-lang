@@ -79,6 +79,34 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     assert!(yaml.contains("type: Person"), "{yaml}");
     assert!(yaml.contains("name: dense_id"), "{yaml}");
 
+    // **`is_primary` marks exactly one property and it is `subject`.**
+    //
+    // Read back through the structs rather than by substring, because the
+    // question is which property carries the flag and a `contains` cannot say:
+    // `is_primary: true` is in this file either way. Asserted here because this
+    // is the test that holds the bytes a run wrote, and the flag is a claim
+    // about the artefact.
+    //
+    // Nothing in the tree READS it — `packages/graph`'s reader keys on the
+    // column name, and it says why: it could not trust a field two writers
+    // spelled two ways. So this is the only thing that goes red if `dense_id`
+    // takes the flag back, and it is deliberately the artefact's own manifest
+    // and not `vertex_info`'s return value.
+    let info: fossil_sinks::manifest::VertexInfo =
+        serde_yaml_ng::from_str(&yaml).unwrap_or_else(|e| panic!("Person.vertex.yml: {e}\n{yaml}"));
+    let primary: Vec<&str> = info
+        .property_groups
+        .iter()
+        .flat_map(|g| &g.properties)
+        .filter(|p| p.is_primary)
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(
+        primary,
+        ["subject"],
+        "the identity is the subject IRI; dense_id is an address a re-layout gives away\n{yaml}"
+    );
+
     // Edges round-trip: 4 orders → 4 CSR rows.
     let edges = read_parquet_rows(
         &dir.path()

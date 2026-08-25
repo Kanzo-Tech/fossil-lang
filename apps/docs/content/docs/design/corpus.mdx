@@ -129,12 +129,14 @@ project has already decided it will not do.
 None of these is a bug to be fixed. Each is the rule above applied once.
 
 1. **`data_type` spellings GraphAr's own reader refuses.** Every vertex manifest fossil writes
-   declares `dense_id` as `uint32` and marks it `is_primary`, and adds `cluster_id` as `uint32`
+   declares `dense_id` as `uint32`, and adds `cluster_id` as `uint32`
    (`crates/fossil-df/src/lib.rs`). The specification's built-in list is Boolean, Int32, Int64,
    Float, Double, String, Date, Timestamp, Time and List — no unsigned type. `TypeNameToDataType` in
    `cpp/src/graphar/types.cc` accepts eight spellings plus five `list<…>` and throws
-   `Unsupported data type` on everything else, so it throws on the primary key of the first vertex
-   type of every corpus fossil writes. Two more spellings leave by the same door: `time`, which the
+   `Unsupported data type` on everything else, so it throws on the first property of the first
+   vertex type of every corpus fossil writes — `dense_id`, which is the address. (`is_primary`
+   marks `subject`, a `string` that function accepts; the throw is on the spelling and does not
+   turn on the flag.) Two more spellings leave by the same door: `time`, which the
    specification lists and that function never implemented, and `binary`, fossil's fallback for an
    Arrow type with no mapping, which is in neither the specification's list nor the parser.
 2. **A count is a manifest field, not a file.** The reference writes three files — `vertex_count`

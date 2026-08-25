@@ -785,7 +785,11 @@ export const GUARDS = [
       "tile costs 1.87× the tile — 8.016 bytes per row against 9.23 for all four drawing columns " +
       "— so the measured default is that it does not, and the path a reader fetches it from " +
       "instead is an open convention, not a checked one. This guard reports its absence and does " +
-      "not fail on it.",
+      "not fail on it. It also never opens the manifest: `property_groups` carries an " +
+      "`is_primary` per property, and a corpus that marks `dense_id` with it passes here " +
+      "unremarked. That is how `crates/fossil-df` came to mark the address for months while this " +
+      "sentence said it could not be one — the flag is nested a level deeper than this scanner " +
+      "addresses, so checking it is a change to `manifest.mjs` and not to this run().",
     run(corpus) {
       const failures = [];
       const notes = [];
