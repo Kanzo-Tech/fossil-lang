@@ -48,7 +48,7 @@ systems and the environment survives into every child process; stdin is neither.
 **No memory budget.** A budget is an input of the command that declares it, and an MCP dataset call
 declares none. Reads over an existing corpus are bounded by the verbs themselves — `aggregate` is a
 constant-memory grouping, `read` carries a limit, `execute_sql` carries a row cap. The budget
-belongs to the [write path](/docs/scale/larger-than-ram), where a job either survives or does not.
+belongs to the [write path](/docs/scale), where a job either survives or does not.
 
 **Views come from the manifest, not from a convention re-derived here.** The reader asks
 `VertexInfo::prefix` for the directory the writer says it emitted into, rather than assembling a
