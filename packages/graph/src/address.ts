@@ -30,6 +30,7 @@
 
 import {
   CorpusManifestError,
+  mapping,
   GRAPH_INFO_PATH,
   join,
   mappings,
@@ -154,6 +155,42 @@ export interface VertexAddress {
    * there is no set to enumerate — that is the difference between addressing a tile somebody asked
    * for and knowing how many there are.
    */
+  tileUrls(): readonly string[];
+  /**
+   * The identity index, when the manifest declares one, and `null` otherwise.
+   *
+   * `null` is a legal corpus and not an incomplete one — a lookup by identity answers without it,
+   * by scanning — so a reader that finds none reports the cost rather than refusing. That is the
+   * opposite of {@link VertexAddress.count}, whose absence makes a question unanswerable.
+   */
+  readonly index: IndexAddress | null;
+}
+
+/**
+ * Where a vertex type's identity index lives, and how to address one of its tiles.
+ *
+ * A second copy of the type ordered by identity, tiled with the same `tile{k}` spelling as
+ * everything else. It cannot be a column of the payload: one table has one sort, the payload's is
+ * Morton because the spatial order IS the id space, and a lookup by identity needs the other one.
+ *
+ * Its tiles are sorted by {@link IndexAddress.orderedBy} with disjoint ranges, which is what lets a
+ * reader binary-search the footers to one tile — the thing the payload's own footers cannot do for
+ * `subject`, because Morton order and lexicographic order have nothing to do with each other and
+ * every tile's range overlaps every other's.
+ */
+export interface IndexAddress {
+  /** Where the index tiles are, resolved against the corpus base, with a trailing separator. */
+  readonly prefix: string;
+  /** The column the tiles are sorted by, and the one a lookup is keyed on. */
+  readonly orderedBy: string;
+  /** Rows per index tile. Unrelated to the payload's: tile `k` here is the `k`th slice of the
+   *  SORTED order, not a `dense_id` range. */
+  readonly chunkSize: number;
+  /** `ceil(count / chunkSize)`, or `null` when the manifest declares no `vertex_count`. */
+  readonly tiles: bigint | null;
+  /** `<prefix>tile{k}.parquet`. */
+  tileUrl(tile: number | bigint): string;
+  /** Every index tile, in order. Throws when the count is absent, like {@link VertexAddress.tileUrls}. */
   tileUrls(): readonly string[];
 }
 
@@ -316,6 +353,7 @@ function vertexAddress(base: string, path: string, yaml: ScannedManifest): Verte
     shift,
     count,
     tiles,
+    index: indexAddress(prefix, path, yaml, count),
     tileOf: (denseId) => tileOf(denseId, shift),
     tileUrl,
     tileUrls: () => {
@@ -323,6 +361,62 @@ function vertexAddress(base: string, path: string, yaml: ScannedManifest): Verte
         throw new CorpusManifestError(
           `${path} declares no vertex_count, so how many tiles ${type} has is not derivable — ` +
             `tiles are addressed and never listed, and HTTP gives no directory to fall back on`,
+        );
+      }
+      const urls: string[] = [];
+      for (let k = 0n; k < tiles; k += 1n) urls.push(tileUrl(k));
+      return urls;
+    },
+  };
+}
+
+/**
+ * The `index:` block of a vertex manifest, resolved, or `null` when there is none.
+ *
+ * Every field is required ONCE the block is present: a `prefix` with no `ordered_by` names files
+ * whose sort a reader would have to guess, and guessing it wrong returns a plausible stranger
+ * rather than nothing. A half-declared index is refused rather than ignored, because ignoring it
+ * would read exactly like a corpus that declares none — which is the failure the scanner already
+ * made once, before it could see a nested map at all.
+ */
+function indexAddress(
+  vertexPrefix: string,
+  path: string,
+  yaml: ScannedManifest,
+  count: bigint | null,
+): IndexAddress | null {
+  const declared = mapping(yaml, path, 'index');
+  if (declared === null) return null;
+
+  const need = (key: string): string => {
+    const value = declared[key];
+    if (value === undefined || value === '') {
+      throw new CorpusManifestError(
+        `${path} declares an index and no ${key}, so its tiles address nothing`,
+      );
+    }
+    return value;
+  };
+  const prefix = prefixOf(join(vertexPrefix, need('prefix')));
+  const orderedBy = need('ordered_by');
+  const chunkSize = Number(need('chunk_size'));
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+    throw new CorpusManifestError(
+      `${path} declares an index chunk_size of ${declared.chunk_size}, which is not a row count`,
+    );
+  }
+  const tiles = count === null ? null : tilesOf(count, BigInt(chunkSize));
+  const tileUrl = (tile: number | bigint): string => `${prefix}tile${BigInt(tile)}.parquet`;
+  return {
+    prefix,
+    orderedBy,
+    chunkSize,
+    tiles,
+    tileUrl,
+    tileUrls: () => {
+      if (tiles === null) {
+        throw new CorpusManifestError(
+          `${path} declares no vertex_count, so how many index tiles ${required(yaml, path, 'type')} has is not derivable`,
         );
       }
       const urls: string[] = [];

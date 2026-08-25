@@ -22,8 +22,18 @@
 /** Dataset-relative location of the aggregate index. The one path a reader is told. */
 export const GRAPH_INFO_PATH = 'graph.graph.yml';
 
-/** One scanned manifest file: scalars, one sequence of strings, one sequence of mappings. */
-export type ScannedManifest = Record<string, string | string[] | Array<Record<string, string>>>;
+/**
+ * One scanned manifest file: scalars, sequences of strings, sequences of mappings, and mappings.
+ *
+ * The last of those arrived late and the way its absence hid is worth keeping: a key with an empty
+ * value was always read as opening a SEQUENCE, so `index:` scanned to `[]` — truthy, carrying no
+ * `prefix` — and every reader concluded the corpus declares no index. **A manifest that says
+ * something the scanner cannot see reads exactly like one that does not say it.**
+ */
+export type ScannedManifest = Record<
+  string,
+  string | string[] | Array<Record<string, string>> | Record<string, string>
+>;
 
 /** Raised by everything in this module. Carries the file it was reading. */
 export class CorpusManifestError extends Error {
@@ -55,6 +65,8 @@ export function scan(path: string, text: string): ScannedManifest {
   const out: ScannedManifest = {};
   let sequence: string[] | Array<Record<string, string>> | null = null;
   let item: Record<string, string> | null = null;
+  /** A key whose value was empty and whose shape the next child line decides. */
+  let pending: string | null = null;
 
   const lines = text.split('\n');
   for (const [index, raw] of lines.entries()) {
@@ -74,12 +86,28 @@ export function scan(path: string, text: string): ScannedManifest {
       item[continuation[1]!] = unquote(continuation[2]!);
       continue;
     }
+    // The first child of a key with an empty value, and it is `k: v` rather than `- `: the key is
+    // a MAP. Decided here rather than at the key, because `property_groups:` and `index:` are
+    // written identically until this line arrives.
+    if (continuation && pending !== null) {
+      const map: Record<string, string> = { [continuation[1]!]: unquote(continuation[2]!) };
+      out[pending] = map;
+      sequence = null;
+      item = map;
+      pending = null;
+      continue;
+    }
     // Anything else indented belongs to a nested collection — a property list inside a property
     // group — and no address is composed from one. Skipped rather than refused: it is legal, it is
     // just not addressed by any convention, and refusing it would fail on a corpus this reads fine.
     if (/^ {2,}/.test(line)) continue;
 
     const element = /^- (.*)$/.exec(line);
+    if (element && pending !== null) {
+      sequence = [];
+      out[pending] = sequence;
+      pending = null;
+    }
     if (element && sequence) {
       const pair = /^(\w+):\s*(.*)$/.exec(element[1]!);
       if (pair) {
@@ -100,10 +128,14 @@ export function scan(path: string, text: string): ScannedManifest {
     }
     item = null;
     if (entry[2] === '') {
+      // Shape unknown until the first child line. A key with an empty value and no children stays
+      // a sequence, which is what `property_groups: []` has always been.
       sequence = [];
       out[entry[1]!] = sequence;
+      pending = entry[1]!;
     } else {
       sequence = null;
+      pending = null;
       out[entry[1]!] = unquote(entry[2]!);
     }
   }
@@ -171,4 +203,30 @@ export function join(...parts: Array<string | undefined>): string {
     .map((part, index) => (index === 0 ? part.replace(/\/+$/, '') : part.replace(/^\/+|\/+$/g, '')))
     .filter((part) => part !== '')
     .join('/');
+}
+
+/**
+ * A nested mapping under `key`, or `null` when the manifest has none.
+ *
+ * `null` covers both "the key is absent" and "the key is an empty collection", because those are
+ * the same fact to a reader: nothing to compose an address from. A key that is a SEQUENCE is not
+ * `null` and not a mapping either — that is a manifest saying something this cannot read, and it
+ * throws rather than degrading to "declares none", which is exactly how the index went invisible
+ * before the scanner could see a nested map.
+ */
+export function mapping(
+  manifest: ScannedManifest,
+  path: string,
+  key: string,
+): Record<string, string> | null {
+  const value = manifest[key];
+  if (value === undefined) return null;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    throw new CorpusManifestError(`${path} writes ${key} as a list, and it is a mapping here`);
+  }
+  if (typeof value === 'string') {
+    throw new CorpusManifestError(`${path} writes ${key} as a scalar, and it is a mapping here`);
+  }
+  return value;
 }

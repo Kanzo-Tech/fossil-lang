@@ -351,6 +351,15 @@
           "found": false
         }
       ],
+      "index": {
+        "about": "The one assertion that makes an index an OPTIMISATION rather than a second truth: the same corpus read with it and without it hands back the same vertex. Both harnesses run each id twice — once against the manifest as it is, once against a copy of the tree whose `index:` block has been stripped — and compare. Without this the block above proves nothing about the index at all, because both routes return the same answer by construction and neither harness can see which one ran. It is the gap `apps/corpus`'s `index-agrees-with-the-payload` names in its own `cannotProve`, closed from the reader's side instead of the artefact's.",
+        "indexed": true,
+        "same_either_way": [
+          "https://example.org/person/15",
+          "https://example.org/person/200",
+          "https://example.org/person/299"
+        ]
+      },
       "neighbours": [
         {
           "about": "One hop from one seed. `frontier` is the four vertices the bound stopped at, whose own edges were never opened — without it the answer looks whole, because the edges BETWEEN two frontier vertices are exactly the ones missing.",

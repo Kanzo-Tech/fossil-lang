@@ -420,7 +420,7 @@ describe('neighbours — a walk seeded by identity', () => {
     await expect(corpus.neighbours([], { depth: 0 })).rejects.toThrow(RangeError);
   });
 
-  it('resolves a batch of seeds without one scan per seed', async () => {
+  it('resolves a batch of seeds in a fixed number of reads, whatever the batch is', async () => {
     const seeds = await Promise.all([1, 2, 3, 4, 5].map(seedOf));
     let queries = 0;
     const counted = await openCorpus(CORPUS, {
@@ -431,9 +431,22 @@ describe('neighbours — a walk seeded by identity', () => {
     });
     const before = queries;
     await counted.neighbours(seeds, { depth: 1 });
-    // One scan for the whole batch, one adjacency read per orientation, one read of the reached
-    // tiles. A per-seed scan of the `subject` column is the cost this API is most able to multiply.
-    expect(queries - before).toBeLessThanOrEqual(4);
+    // The bound is FIVE and it was four, because this corpus carries an identity index and the
+    // seek path is two reads where the scan was one: the index, then the payload tiles those
+    // addresses name. That is a query more and a great deal less of every one of them — the scan
+    // reads the identity column of every tile, the seek reads two columns of the one tile a value
+    // can be in.
+    //
+    // What the bound is actually for has not moved: five seeds cost the same reads as one. The
+    // failure it exists to catch is a lookup per seed, which is the cost this API is most able to
+    // multiply, and neither route has ever paid it.
+    expect(queries - before).toBeLessThanOrEqual(5);
+  });
+
+  it('the type says whether a lookup on it is a seek or a scan', () => {
+    // Both answers are correct and only one is fast, so a consumer that cannot tell them apart
+    // finds out by measuring. This corpus has an index; `refuses` below covers one without.
+    expect(corpus.types.vertices.every((v) => v.indexed)).toBe(true);
   });
 });
 
@@ -505,6 +518,7 @@ describe('the conformance table, executed against the published API', () => {
         gaps: string[];
       }>;
       node: Array<{ id: string; found: boolean; dense_id?: number }>;
+      index: { indexed: boolean; same_either_way: string[] };
       neighbours: Array<{
         ids: string[];
         depth: number;
@@ -561,6 +575,32 @@ describe('the conformance table, executed against the published API', () => {
     expect(got).not.toBeNull();
     expect(got!.id).toBe(id);
     expect(got!.denseId).toBe(BigInt(dense_id!));
+  });
+
+  it('hands back the same vertex with the index and without it', async () => {
+    // The one assertion that makes the index an OPTIMISATION rather than a second truth. Nothing
+    // else here can see which route ran: both return the same answer by construction, which is
+    // exactly the gap `apps/corpus`'s `index-agrees-with-the-payload` names in its own
+    // `cannotProve`, closed from the reader's side.
+    const dir = mkdtempSync(join(tmpdir(), 'fossil-noindex-'));
+    scratch.push(dir);
+    cpSync(CORPUS, dir, { recursive: true });
+    const yml = join(dir, 'vertex/Person.vertex.yml');
+    writeFileSync(yml, readFileSync(yml, 'utf8').replace(/^index:\n(?: {2}.*\n)*/m, ''));
+
+    const scanning = await openCorpus(dir, { query });
+    // The comparison is worthless if the strip did not strip, and worthless the other way if the
+    // fixture never had one. Both are asserted.
+    expect(corpus.types.vertices[0]!.indexed).toBe(true);
+    expect(scanning.types.vertices[0]!.indexed).toBe(false);
+
+    for (const id of (table.answers as { index: { same_either_way: string[] } }).index
+      .same_either_way) {
+      const seek = await corpus.node(id);
+      const scan = await scanning.node(id);
+      expect(seek).not.toBeNull();
+      expect(scan).toEqual(seek);
+    }
   });
 
   it.each(table.answers.neighbours)(

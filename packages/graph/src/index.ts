@@ -62,6 +62,7 @@ export type {
   EdgeAddress,
   EdgeTiles,
   Gap,
+  IndexAddress,
   GapReason,
   ResolveCorpusOptions,
   ResolvedCorpus,

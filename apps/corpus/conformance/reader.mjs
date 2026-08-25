@@ -76,6 +76,25 @@ export function resolve(root, base = "") {
       shift: Number(shift),
       tileOf: (denseId) => tileOf(denseId, shift),
       tileUrl: (k) => `${withSlash(rel(prefix, need(info, "prefix")))}chunk${BigInt(k)}.parquet`,
+      // The identity index, or `null`. A half-declared one is refused rather than
+      // ignored: ignoring it reads exactly like a corpus that declares none, and
+      // guessing the sort of files whose `ordered_by` is missing returns a
+      // plausible stranger instead of nothing.
+      index: (() => {
+        const declared = info.index;
+        if (declared === undefined || declared === null || Array.isArray(declared)) return null;
+        const vertexPrefix = withSlash(rel(prefix, need(info, "prefix")));
+        const indexPrefix = withSlash(rel(vertexPrefix, need(declared, "prefix")));
+        const orderedBy = need(declared, "ordered_by");
+        const indexChunk = needRows(declared, "chunk_size");
+        return {
+          prefix: indexPrefix,
+          orderedBy,
+          chunkSize: indexChunk,
+          tiles: Math.ceil(needRows(info, "vertex_count") / indexChunk),
+          tileUrl: (k) => `${indexPrefix}tile${BigInt(k)}.parquet`,
+        };
+      })(),
     };
   });
 

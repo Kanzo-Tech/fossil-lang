@@ -88,6 +88,20 @@ export interface CorpusVertexType {
   readonly identity: string | null;
   /** Whether the payload carries `x` and `y`, without which no box can be answered. */
   readonly geometry: boolean;
+  /**
+   * Whether a lookup by identity on this type is a **seek** or a **scan**.
+   *
+   * `true` when the corpus publishes an identity index: {@link Corpus.node} and
+   * {@link Corpus.neighbours}'s seed resolution read one index tile and then the payload tiles
+   * those addresses name. `false` when it does not: the same call reads the identity column of
+   * every tile of the type, which at five million vertices is about 40 MB.
+   *
+   * It is a property of the TYPE and not of a call, because that is the shape of the fact: a
+   * consumer needs to know once whether its bookmarks are cheap, not to be told again on every
+   * click. Both answers are correct; only one of them is fast, and a caller with no way to tell
+   * them apart discovers the difference by measuring.
+   */
+  readonly indexed: boolean;
 }
 
 /** What one edge type is. `count` covers both orientations: they are one relation stored twice. */
@@ -439,6 +453,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       fields: fieldsOf(type.type),
       identity: has(type.type, IDENTITY) ? IDENTITY : null,
       geometry: has(type.type, 'x') && has(type.type, 'y'),
+      indexed: type.index !== null,
     })),
     edges: addressing.edges.map((edge) => ({
       edgeType: edge.edgeType,
@@ -530,10 +545,52 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     }
     const found: CorpusVertex[] = [];
     for (const type of candidates) {
-      const rows = await query(
-        `SELECT * FROM read_parquet(${list(tileUrls.get(type.type)!)}) ` +
-          `WHERE ${ident(IDENTITY)} IN (${ids.map(lit).join(', ')})`,
+      const index = type.index;
+      if (index === null) {
+        // **The scan**, and it is the whole cost this member has. There is no index from a
+        // subject to an address, and the payload's own footers do not help: the rows are in
+        // Morton order and subjects are not, so every tile's `min`/`max` for `subject` overlaps
+        // every other's and the engine skips nothing. At five million vertices the `subject`
+        // column is 8.016 compressed bytes per row, so one lookup reads about 40 MB — column
+        // pruning is the only thing keeping it off the other five columns.
+        const rows = await query(
+          `SELECT * FROM read_parquet(${list(tileUrls.get(type.type)!)}) ` +
+            `WHERE ${ident(IDENTITY)} IN (${ids.map(lit).join(', ')})`,
+        );
+        for (const row of rows) found.push(vertexOf(type.type, row));
+        continue;
+      }
+
+      // **The seek**, in two reads and no scan of either table.
+      //
+      // First the index: two columns over tiles that are sorted by the key with disjoint ranges,
+      // which is the arrangement that lets the engine prune to the one tile a value can be in.
+      // The payload cannot be arranged that way and keep the Morton order a window depends on,
+      // which is why the index is a second table rather than a second sort.
+      const hits = await query(
+        `SELECT ${ident(index.orderedBy)} AS id, dense_id ` +
+          `FROM read_parquet(${list(index.tileUrls())}) ` +
+          `WHERE ${ident(index.orderedBy)} IN (${ids.map(lit).join(', ')})`,
       );
+      if (hits.length === 0) continue;
+
+      // Then the payload, at the tiles those addresses NAME — not all of them. This is the half
+      // that turns a lookup into arithmetic: `tileOf` is a shift.
+      const addresses = hits.map((row) => idOf(row.dense_id, `${type.type}.dense_id`));
+      const tiles = [...new Set(addresses.map((d) => type.tileOf(d)))].sort(ascending);
+      const rows = await query(
+        `SELECT * FROM read_parquet(${list(tiles.map((k) => type.tileUrl(k)))}) ` +
+          `WHERE dense_id IN (${addresses.join(', ')})`,
+      );
+      // An index that names an address the payload does not have is a corpus defect, not a miss:
+      // `apps/corpus`'s `index-agrees-with-the-payload` is what catches it, and a reader that
+      // quietly returned fewer rows than the index promised would hide exactly that.
+      if (rows.length !== addresses.length) {
+        throw new CorpusReadError(
+          `${type.type}'s index names ${addresses.length} address(es) and the payload has ` +
+            `${rows.length} of them — the index disagrees with the tiles it indexes`,
+        );
+      }
       for (const row of rows) found.push(vertexOf(type.type, row));
     }
     return found;

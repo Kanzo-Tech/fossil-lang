@@ -30,7 +30,8 @@
  * Exit `0` when every address in the table reproduces, `1` when one does not.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as answers from "./answers.mjs";
@@ -220,6 +221,36 @@ for (const expected of table.cases) {
       same(at(`node[${i}].id`), got.id, want.id);
       same(at(`node[${i}].dense_id`), got.dense_id, want.dense_id);
     }
+  }
+
+  // The index is an optimisation, not a second truth: strip the declaration and the same id has
+  // to come back as the same vertex. Nothing else here can see which route ran.
+  {
+    const stripped = mkdtempSync(pathJoin(tmpdir(), "fossil-noindex-"));
+    cpSync(root, stripped, { recursive: true });
+    const yml = pathJoin(stripped, "vertex", "Person.vertex.yml");
+    writeFileSync(
+      yml,
+      readFileSync(yml, "utf8").replace(/^index:\n(?: {2}.*\n)*/m, ""),
+    );
+    // The comparison is worthless if the strip did not strip. Both halves are asserted, because
+    // the failure is silent in either direction: an index that survived compares the seek with
+    // itself, and one that was never there compares two scans.
+    const seeks = resolve(root).vertexType().index !== null;
+    const scans = resolve(stripped).vertexType().index === null;
+    if (!seeks) fail(`${at("index")}: the corpus declares no index, so there is no seek to compare`);
+    if (!scans) fail(`${at("index")}: stripping the manifest left an index behind`);
+    if (seeks !== expected.index.indexed) {
+      fail(`${at("index")}: the corpus is ${seeks ? "" : "not "}indexed and the table says otherwise`);
+    }
+
+    for (const id of expected.index.same_either_way) {
+      const withIndex = answers.node(root, count, id);
+      const withoutIndex = answers.node(stripped, count, id);
+      same(at(`index.same_either_way[${id}]`), withoutIndex, withIndex);
+      if (withIndex === null) fail(`${at("index")}: ${id} resolves to nothing either way`);
+    }
+    rmSync(stripped, { recursive: true, force: true });
   }
 
   for (const [i, want] of expected.neighbours.entries()) {
