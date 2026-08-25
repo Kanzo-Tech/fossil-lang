@@ -40,9 +40,17 @@
 //!   real, is deliberate, and this file is arranged to avoid it rather than to
 //!   measure it. A program whose document is only on disk is answered
 //!   differently by the two and nothing here says so.
-//! - **The `fossil/*` methods, or `didClose`.** They exist only on the worker
+//! - **The `fossil/*` methods.** They exist only on the worker
 //!   ([`WASM_ONLY_METHODS`]) and this checks only that the SET of extras is the
 //!   declared one — not what any of them does.
+//!
+//!   This bullet used to read «the `fossil/*` methods, or `didClose`», and the
+//!   file then contradicted itself: [`WASM_ONLY_METHODS`]'s own comment says
+//!   `didClose` is deliberately NOT in the table because both hosts have it, and
+//!   `fossil-lsp`'s `main_loop` handles `DidCloseTextDocument::METHOD`. The table
+//!   is the one that was right, and [`did_close_clears_the_buffer_on_both`] is
+//!   the test that holds it — so `didClose` is not an undertested extra, it is a
+//!   checked agreement.
 //! - **That the wasm worker's transport works.** `dispatch` is called directly;
 //!   `start_lsp_worker`, `postMessage` and `serde_wasm_bindgen` are wasm32-only
 //!   and untouched here. A defect in the Worker glue is invisible.
