@@ -72,16 +72,16 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 | --- | --- | --- |
 | `aggregate` | `(rows: Relation) -> Relation` | the `Aggregate` operator |
 | `count` | `(rows: Relation) -> Integer` | the `Count` operator |
-| `distinct` | `(rows: Relation) -> Relation` | the `Distinct` operator |
+| `distinct` | `(rows: Relation, on: Column…) -> Relation` | the `Distinct` operator |
 | `drop` | `(rows: Relation, n: Integer) -> Relation` | the `Drop` operator |
-| `flatten` | `(rows: Relation) -> Relation` | the `Flatten` operator |
-| `group_by` | `(rows: Relation) -> Relation` | the `GroupBy` operator |
-| `join` | `(rows: Relation, other: Relation, on: Predicate) -> Relation` | the `Join` operator |
+| `flatten` | `(rows: Relation, of: Column) -> Relation` | the `Flatten` operator |
+| `group_by` | `(rows: Relation, keys: Column…) -> Relation` | the `GroupBy` operator |
+| `join` | `(rows: Relation, right: Binding, on = Predicate) -> Relation` | the `Join` operator |
 | `map` | `(rows: Relation) -> Relation` | the `Map` operator |
-| `select` | `(rows: Relation) -> Relation` | the `Select` operator |
-| `sort` | `(rows: Relation) -> Relation` | the `Sort` operator |
+| `select` | `(rows: Relation, cols: Column…) -> Relation` | the `Select` operator |
+| `sort` | `(rows: Relation, by: Column…) -> Relation` | the `Sort` operator |
 | `take` | `(rows: Relation, n: Integer) -> Relation` | the `Take` operator |
-| `union` | `(rows: Relation, other: Relation) -> Relation` | the `Union` operator |
+| `union` | `(rows: Relation) -> Relation` | the `Union` operator |
 | `where` | `(rows: Relation, keep: Predicate) -> Relation` | the `Where` operator |
 
 </section>

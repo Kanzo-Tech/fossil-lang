@@ -1,0 +1,125 @@
+---
+title: The catalogue
+description: What names exist, said once. Which half of a row can live in a data file and which cannot, why the stdlib is not one, and the single condition that would make it one.
+---
+
+`grammar.bnf` says the SHAPE of a program. The catalogue says the NAMES one may write in it —
+`io.csv`, `str.trim`, `sort`. It is two files and one table, and this page is about why it is split
+that way and what holds the halves honest.
+
+## A row has two halves and only one of them can live in a file
+
+```
+row csv = extensions "csv" ; reads native read_csv_auto .
+```
+
+- **DATA** — the name written after `io.`, the extensions it accepts, which capabilities it
+  declares. All of it is in `catalogue.bnf`.
+- **BEHAVIOUR** — the function that turns bytes into rows or into types. A file cannot carry code,
+  so the implementing crate supplies it and the loader matches it **by name**.
+
+That split is rustc's `Providers`: the data says what exists, the code registers what it can do. It
+also buys a diagnostic the tree could not make while extensions alone chose the row — a host that
+cannot link SHACL simply lacks the row, so `io.shacl("x.ttl")` reported *"not an installed row"*,
+which is what a typo reports too. With the halves separate, **"declared but not linked here" and
+"no such name" are different answers.**
+
+Generation is what makes the second half provable. `decodes decode_shex` becomes a Rust *path* in
+the generated file, so the compiler resolves it: a row naming a decoder nobody wrote is a build
+failure, not a declared capability with nothing behind it.
+
+## The stdlib is not in that file, and that is not an oversight
+
+`fossil_hir::stdlib`'s `FunctionRegistry` is a table of `RegistryEntry { name, recv, member, sig,
+lowering }` — five fields, every one of them a value. It is DATA already. It is simply DATA written
+in Rust.
+
+The question that decides whether it should move to a file is not aesthetic, and it is not "which is
+tidier". It is: **is there a second authoring audience — somebody who must add a row without
+touching the Rust chain?** That is the reason `rust.ungram` exists. `catalogue.bnf` never claims
+one, and for fossil today there is none.
+
+Two measurements say the same thing from the other direction:
+
+- Swift's `.def` files carried **1,364** rows with no generator at all before anyone reached for
+  TableGen; Clang left `.def` at around **6,000**. The stdlib is **fifty-one**. Two orders of
+  magnitude below where a file starts paying for itself.
+- `crates/xtask/src/reference.rs` already generates a documentation page **from the Rust table, with
+  no `.bnf` in the path**. Whatever a file would buy, generation is what actually buys it, and
+  generation does not need the file.
+
+**What would reverse this:** a second authoring audience appearing. Then the argument flips
+entirely, and the shape it would take is the one `catalogue.bnf` already has.
+
+## What a row must declare: the parameters, all of them
+
+A signature that is incomplete does not stay incomplete. What it leaves out gets written down
+somewhere else, and the somewhere else is code that no page can read.
+
+Every relation verb used to declare exactly one parameter — the relation it is a verb *of*:
+
+```rust
+add_rows(e, "seq.select", vec![rows("rows")], L(P::Select));
+```
+
+`select` takes a relation **and one or more qualified column names**. That second half lived in a
+hand-written arm of the lowering, and two things followed from it:
+
+1. **The reference page invented parameters.** Measured before the generator existed: the page gave
+   `seq.sort` a `by`, `seq.distinct` a `key` and `seq.group_by` a `desc` — three parameters no row
+   had — because their signatures had nothing to print and prose filled the hole. A reader could not
+   tell those apart from the fifty-one that were real.
+2. **The lowering dispatched on the verb's text**, with one arm per implemented verb and a
+   catch-all. Somebody writing `pedidos.sort(pedidos.id)` was told `sort` *"is not a relation verb
+   fossil lowers"* — false: `sort` is catalogued, with a plan operator of its own, and what it lacks
+   is a lowering. The message even read its *count* from the registry and its *list* of implemented
+   verbs from a string literal, so half of it could rot while the other half stayed fresh.
+
+So a parameter declares what the grammar produces in its position, and the vocabulary is the
+grammar's own. Two of the kinds **name** rather than evaluate:
+
+| kind | what fills it | verbs |
+| --- | --- | --- |
+| `Scalar(T)` | an expression of that type | `take`, `drop` |
+| `Predicate` | a condition over the receiver's rows | `where`, a join's `on` |
+| `Column` | a qualified column reference — a NAME, not a value | `select`, `sort`, `distinct`, `group_by` |
+| `Binding` | the name of a source binding, with `AliasArg`'s `X as Y` | `join`, `union` |
+| `Rows` | the receiver relation itself | every verb's position 0 |
+
+Plus how many arguments fill the position, and whether it is written with its name — `on = …`. That
+last one is not decoration: without it the binder would fill `on` from the second positional slot,
+and `join(User, a == b)` would start compiling. **A language widened by accident is the failure this
+whole shape exists to make impossible.**
+
+## What the halves buy, once they are complete
+
+One datum, four readers, and none of them knows it a second way:
+
+| reader | what it takes from the row |
+| --- | --- |
+| the checker | the parameter types |
+| the lowering | how to read each argument off the syntax tree |
+| the reference page | the printed signature |
+| editor completion | what a value HAS, rather than the whole catalogue |
+
+And the dispatch stops being a dispatch. What is left in the lowering is *construction* — three arms
+of three lines, exhaustive over the plan operators, with the ten unimplemented verbs listed by name
+rather than swept into a wildcard. A fourteenth operator does not compile until somebody decides
+which group it belongs to.
+
+That last part is stolen, and the theft is worth naming. Swift's builtin lowering had a `default:`
+that turned an unimplemented builtin into a silent miscompile; the fix in `GenBuiltin.cpp` is an
+exhaustive switch with the unimplemented cases spelled out. The exhaustive `match` here is the same
+move, and the ten named verbs are the same list.
+
+## What none of this proves
+
+- **That the rows are right.** That `io.csv` should accept `.csv` and not `.tsv` is a decision, and
+  `catalogue.bnf`'s own commentary is where it is argued.
+- **That a `decodes` function does what its row claims.** The compiler proves the name resolves;
+  `decode_shex` returning nonsense is a `fossil-shex` test's problem.
+- **That a declared verb is implemented.** Ten of the thirteen relation verbs have no lowering, and
+  that is deliberate rather than pending. There is no guard for it, on purpose: rustc built exactly
+  such a check for its own symbol table, measured thirty-five false positives, and closed the pull
+  request as more maintenance than it was worth. The answer there is a periodic audit, and it is the
+  answer here.

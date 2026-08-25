@@ -69,7 +69,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use fossil_hir::stdlib::{LoweringKind, Receiver, RegistryEntry, ScalarTy, SigTy};
+use fossil_hir::stdlib::{Arity, LoweringKind, Receiver, RegistryEntry, ScalarTy, SigTy};
 
 use crate::catalogue::{Reads, Row};
 
@@ -106,6 +106,8 @@ const fn ty_name(t: SigTy) -> &'static str {
         SigTy::Scalar(ScalarTy::SeqString) => "Seq<String>",
         SigTy::Rows => "Relation",
         SigTy::Predicate => "Predicate",
+        SigTy::Column => "Column",
+        SigTy::Binding => "Binding",
     }
 }
 
@@ -117,12 +119,30 @@ const fn ty_name(t: SigTy) -> &'static str {
 /// so a page that called `str.replace`'s parameters `from` and `to` — as this
 /// one did — documented a call the checker rejects, the row spelling them
 /// `needle` and `replacement`.
+///
+/// The notation carries the two things a name and a type cannot: `…` for a
+/// position that repeats and `name =` for one written with its name. Both were
+/// unprintable while `Arity` and `ParamSpec::named` did not exist, and their
+/// absence is what let this page write `sort(by)`, `distinct(key)` and
+/// `group_by(desc)` — three parameters no row had. It now prints
+/// `sort(rows: Relation, by: Column…)`, which is the row.
 fn signature(entry: &RegistryEntry) -> String {
     let params: Vec<String> = entry
         .sig
         .params
         .iter()
-        .map(|p| format!("{}: {}", p.name, ty_name(p.ty)))
+        .map(|p| {
+            // `on = Predicate`, not `on: Predicate`. The separator is the one
+            // the call site writes, so a reader copying the signature copies a
+            // program that parses.
+            let sep = if p.named { " =" } else { ":" };
+            let repeat = match p.arity {
+                Arity::One => "",
+                Arity::OneOrMore => "…",
+                Arity::Optional => "?",
+            };
+            format!("{}{sep} {}{repeat}", p.name, ty_name(p.ty))
+        })
         .collect();
     format!("({}) -> {}", params.join(", "), ty_name(entry.sig.ret))
 }

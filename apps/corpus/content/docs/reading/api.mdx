@@ -1,0 +1,121 @@
+---
+title: Opening one with the API
+description: A URL, an engine, five members. What the reference API absorbs so a consumer does not have to know it, what it refuses rather than guesses, and the two costs it declares out loud.
+---
+
+[Reading one without fossil](/docs/reading/without-fossil) is the format: the arithmetic, the column
+names, the SQL. Everything on that page is true and a reader can stop there.
+
+This page is the other option — the same corpus through `@fossil-lang/graph`, where none of that
+arithmetic reaches the caller. **No tiles, no `dense_id`, no Morton codes, no `by_source`, no
+prefixes and no footers.**
+
+```ts
+import { openCorpus } from '@fossil-lang/graph/corpus';
+
+const corpus = await openCorpus('https://cdn.example.org/kg/2026-08', { query });
+```
+
+## The one thing a host brings is an engine
+
+`query` runs SQL and hands back rows. That is the whole capability, and it is a callback rather than
+a bundled Parquet decoder for a reason that is this package's rather than a preference: three of the
+four members have to decode Parquet, and the package has **zero runtime dependencies**. Bundling a
+decoder would make it a driver; injecting one makes it a seam.
+
+```ts
+const query = async (sql: string) => (await coordinator.query(sql)).toArray();
+```
+
+An engine also buys more than decoding. DuckDB prunes Parquet row groups off the footer statistics
+by itself, which is the one piece of the read path that would otherwise have to be written twice.
+
+**There is no separate `fetch` capability**, and that is not an omission: there is nothing a separate
+one could reach that the engine cannot. It has to see the tiles or it cannot answer a window.
+
+Three things the seam deliberately does not carry — no cancellation, no parameter binding, no
+streaming — each because a host would have to lie to provide it. The reasons are in `query.ts`.
+
+## Five members
+
+```ts
+corpus.types                                   // what is inside
+await corpus.extent('Person')                  // where it is, in coordinates
+await corpus.window({ x, y, w, h })            // vertices + edges in a rectangle
+await corpus.node('http://example.org/p/17')   // one vertex by identity
+await corpus.neighbours([id], { depth: 2 })    // everything within N hops
+```
+
+`extent` is a fifth member on a surface that names four, and it is here because without it
+`window` cannot be called at all: a caller holding only a URL has no coordinates to put in a box.
+
+## An answer knows what it is missing
+
+`complete` means one thing and it is narrow: **every edge incident to a vertex in this answer is in
+this answer.** Not "the answer is large", not "nothing was truncated" — neither member truncates.
+
+Two different things can make it false, and they are reported separately because they are different
+facts:
+
+```ts
+const w = await corpus.window({ x, y, w: width, h: height });
+if (!w.complete) {
+  for (const gap of w.gaps) console.warn(gap.reason);
+}
+
+const n = await corpus.neighbours(ids, { depth: 1 });
+n.frontier;   // the vertices the depth bound stopped at, whose edges were never opened
+```
+
+`gaps` names an orientation that was not read — either the caller did not ask for it, or the corpus
+publishes no address for it. `frontier` names where a depth bound cut. Without the second, a
+`depth: 1` result *looks* whole: the edges between two frontier vertices are missing, a count over
+`edges` under-reports, and nothing says which vertices the shortfall is around.
+
+**Every edge appears once.** The corpus stores one relation twice — `by_source` is CSR and
+`by_target` is CSC — so an answer that reads both and concatenates returns every edge of a
+self-type relation twice. It draws identically and counts wrongly, which is the failure worth
+naming: on the conformance corpus that is 1,192 edges against the 596 the manifest declares.
+
+## What it refuses rather than guesses
+
+- **A corpus that declares no `vertex_count`.** With `chunk_size` it settles how many tiles there
+  are in one `read_text`; without it there is no answer, because HTTP gives no directory and the
+  written alternative was to probe with `HEAD` until a 404.
+- **The row-group container.** This reads the file-per-tile layout, refuses the other **by name**,
+  and never globs.
+- **An edge label incident twice to one vertex type**, which the addressing cannot name
+  unambiguously.
+
+## Two costs it declares out loud
+
+**`extent` is believed, not verified.** It comes from the Parquet footers — one request per tile,
+then nothing. A box wider than its rows costs a read; a box narrower than its rows **loses
+vertices**; only re-reading every page tells them apart.
+
+**`node(id)` scans.** The identity is the subject IRI, and there is no index from a subject to an
+address — no side table, no sorted copy, nothing in the manifest. Parquet's footer statistics do not
+help, because the rows are in Morton order and subjects are not, so the per-tile `min`/`max` overlap
+and the engine skips nothing. On the conformance corpus that is five tiles of 300 rows; **at five
+million vertices a single lookup reads about 40 MB.** Column pruning is the only thing keeping it
+off the other five columns.
+
+The identity is the IRI anyway, and that is not negotiable for a bad reason: redoing the layout ranks
+every vertex by the Morton code of its new position and lets that rank be its id, so a `dense_id`
+held anywhere outside the corpus names a *different vertex* after the next write. A bookmark, a
+selection, a link from another system and a row in somebody else's database all key on something,
+and an address is not something to key on.
+
+What would change the cost is a `subject → dense_id` index in the corpus, tiled and addressed like
+everything else, rewritten by every layout pass — which is affordable precisely because that pass
+already rewrites every tile. Nothing in the format has one today.
+
+## One thing that is going to change
+
+The container. Measured over a five-million-vertex corpus: a single file with row groups of 4,096
+takes **5.6 requests per window against 22.3**, and the index a reader must acquire drops from
+494.9 kB in **1,221 requests** to 330.1 kB in **one**.
+
+When that lands, a consumer's reader stops probing footers and any cache of per-tile boxes it keeps
+becomes unnecessary. This is written before rather than after, because the whole point of a
+reference API is that the consumer is not the one tracking the layout.

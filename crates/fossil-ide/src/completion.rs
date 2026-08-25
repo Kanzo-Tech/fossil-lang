@@ -41,7 +41,7 @@
 //! # Domain + WASM boundary
 //!
 //! Returns `lsp_types::CompletionItem` directly; no stdio / JSON-RPC. The stdlib
-//! source needs only the static catalog (`stdlib_default()`, no db); the
+//! source needs only the static catalog (`fossil_hir::stdlib::stdlib()`, no db); the
 //! shape-property source calls `resolve_target_shape`, which reads the document
 //! the program names as a Salsa INPUT — through `file_at` and the tracked
 //! `shape_document`, which the HOST must have registered (see
@@ -94,10 +94,18 @@ pub fn completions(
     // ONE receiver question, asked once, read by the two sources that have a
     // receiver. It was asked by `stdlib_completions` alone and
     // `source_field_completions` did not ask at all — see [`Scope`].
-    let registry = FunctionRegistry::stdlib_default();
-    let scope = scope_at_cursor(db, file, line, character, &registry);
+    //
+    // `stdlib()` and not `stdlib_default()`: the second is the CONSTRUCTOR, so
+    // calling it here rebuilt the whole catalogue — every row, its signature and
+    // its lowering — on every completion request, which is the keystroke path.
+    // The `LazyLock` behind `stdlib()` exists for exactly this and was being
+    // walked past. The two names differ by eight characters and neither is a
+    // type error, which is why `is_static_catalogue_shared` below fails on the
+    // ADDRESS rather than on the contents.
+    let registry = fossil_hir::stdlib::stdlib();
+    let scope = scope_at_cursor(db, file, line, character, registry);
 
-    stdlib_completions(&registry, &scope, &mut items);
+    stdlib_completions(registry, &scope, &mut items);
     shape_property_completions(db, &scope, &mut items);
     source_field_completions(db, &scope, &mut items);
 
@@ -679,6 +687,12 @@ fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
         SigTy::Scalar(s) => scalar_name(s),
         SigTy::Rows => "Rows".to_string(),
         SigTy::Predicate => "Predicate".to_string(),
+        // A position that NAMES rather than evaluates, and completion says so:
+        // `select(Rows, Column)` tells a reader to write `User.id` and not an
+        // expression, which is the one thing the offer could not convey while
+        // the catalogue said every verb took a bare relation.
+        SigTy::Column => "Column".to_string(),
+        SigTy::Binding => "Binding".to_string(),
     }
 }
 

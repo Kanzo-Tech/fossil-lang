@@ -92,6 +92,23 @@ expression in an attribute argument. These are the languages, and the control ex
 | **rust-analyzer** | Cuts by **semantic richness**, with three declared API boundaries. Source of the invariant fossil copies hardest — one crate knows the protocol, and translating outward costs it ~3,180 lines against 156 inward — and of the caution that none of the three enforces its architecture with a test. |
 | **Kùzu (`SEMI_MASKER`) and Neo4j** | The justification for the `expand{into}` mode, which does not transfer to our engine — recorded on the mode itself rather than in a note, because the reasoning is what would otherwise be lost. |
 
+## A catalogue of names, and how one is kept honest
+
+Read against [the catalogue](/docs/design/catalogue), whose two decisions — the stdlib stays a Rust
+table, and a row declares every parameter it takes — each rest on one of these.
+
+| source | what it settles |
+| --- | --- |
+| **rustc's `symbols!`** (`compiler/rustc_span/src/symbol.rs`) | The shape of a generated name table, and its two admitted costs, both in its own source: *"There is currently no checking that all symbols are used; that would be nice to have"*, and an ordinal that is semantically load-bearing — keyword classification is a range comparison over generated indices, so reordering the list changes the language. fossil takes the generation and refuses the ordinal: a provider's identity is its own address, never its position. |
+| **rustc PR #110437**, *Add unused pre-interned symbols tidy check* (closed unmerged) | The reason there is no "declared but not lowered" guard. The author measured **35** unused symbols and closed it — *"I personally don't think it's worth having this extra maintenance burden"*; the reviewer agreed. The mechanism that replaced it is a periodic manual audit, and that is the mechanism here. |
+| **rustc's `Providers`** | The DATA/BEHAVIOUR split `catalogue.bnf`'s header names: the data says what exists, the code registers what it can do. Cited as lineage and not as implementation — its own detection of a missing registration is an ICE whose message says *"likely never assigned"*, because it cannot tell that apart from a genuine absence. |
+| **rust-analyzer's `language_item_table!`** (`crates/hir-def/src/lang_item.rs`) | Three choices fossil copies: **typed slots** rather than an untyped array indexed by discriminant; **no `require`** anywhere, so every accessor is `Option` and every consumer degrades, which is what an IDE that must answer over an incomplete program needs; and one table holding several *kinds* of row rather than several tables. The fourth thing it settles is the tier split — *the declaration is compile-time, the binding is a query, neither is an input* — against which `Registry` is the one input fossil genuinely has, because it models what a **host** installs. |
+| **rust-analyzer's `builtin_type.rs`** | The floor of the argument. Nineteen builtin types, a hand-written array, a linear scan reconstructing it on every lookup, and **not in the database at all** — because nineteen is small and the alternative buys nothing. Fifty-one is nearer nineteen than it is to anything that needs a file. |
+| **Swift's `.def` files; Clang's move off them** | The measurement that sizes the question: `.def` carried **1,364** rows with no generator before TableGen was considered, and Clang left the format at around **6,000**. |
+| **Swift's `GenBuiltin.cpp`** | The exhaustive switch with no `default:` and the unimplemented cases listed by name, forty lines from its own counter-example. It is the fix `lower_source_stage` copies, and the ten unlowered relation verbs are the same list. |
+| **PostgreSQL's catalogue** (`pg_proc` and its `.dat` files) | The strongest form of the design in the survey: a data file, a generator, and **a reference the linker has to resolve** — ~3,300 rows paying one file per addition for a link error as the guarantee. `catalogue.bnf`'s `decodes decode_shex` gets the identical property at six rows. |
+| **rust-analyzer's `xtask codegen --check`** | The ergonomics of a drift guard: rewrite in place locally with a red note on stderr, hard-fail only under CI, and name the exact command to re-run in the failure text. |
+
 ## Tooling
 
 | source | what it settles |

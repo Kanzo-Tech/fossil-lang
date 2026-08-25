@@ -21,6 +21,7 @@ use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use crate::def_map::def_map;
+use crate::stdlib::{Arity, ParamSpec, SigTy};
 
 #[salsa::tracked(debug)]
 pub struct HirFile<'db> {
@@ -971,7 +972,7 @@ fn lower_pipe_expr(
 
     let mut ops = Vec::with_capacity(stages.len());
     for (verb, call) in &stages {
-        match lower_source_stage(db, verb, call, &name, types) {
+        match lower_source_stage(db, verb, call, &name, &base, types) {
             Some(op) => ops.push(op),
             // **A stage that did not lower must not delete the binding.**
             // `Working := Row.where(not Row.faulty)` — `not` has no `HirExpr`
@@ -1037,25 +1038,45 @@ fn member_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 ///
 /// `verb` is the member the call names; `stage` is the call node, which is where
 /// the `ARG_LIST` hangs.
-fn lower_source_stage(
+/// The arguments of one stage, matched to the parameters the row declares.
+///
+/// Indexed from the parameter AFTER the receiver: every relation row's
+/// parameter 0 is `rows`, which the dot fills, so `arg(0)` is the first thing
+/// written inside the parentheses.
+struct BoundArgs<'a> {
+    /// One entry per declared parameter after the receiver, each with the CST
+    /// nodes filling it — several only where [`Arity::OneOrMore`] says so.
+    slots: Vec<(&'a ParamSpec, Vec<fossil_syntax::SyntaxNode>)>,
+    /// The `X as Y` of a self-join, which hangs off the `ARG_LIST` rather than
+    /// off any one argument.
+    alias: Option<(SmolStr, SmolStr)>,
+}
+
+/// Match a stage's written arguments against the parameters its row declares.
+///
+/// **This is the function the three hand-written arms turned into.** `where`,
+/// `select` and `join` each counted their own arguments, each phrased the
+/// failure differently, and the other ten verbs had nowhere to count from
+/// because their rows declared no parameters to count. Arity, named-argument
+/// resolution and the refusal of a name no parameter answers to now happen once
+/// here, for thirteen rows, out of [`SigSpec`] — which is what a signature was
+/// already for on the scalar side.
+fn bind_stage_args<'a>(
     db: &dyn fossil_base::Db,
-    verb: &SmolStr,
+    row: &'a crate::stdlib::RegistryEntry,
     stage: &fossil_syntax::SyntaxNode,
     pipe: &str,
-    types: &[SmolStr],
-) -> Option<HirSourceOp> {
+    base: &SmolStr,
+) -> Option<BoundArgs<'a>> {
     use fossil_syntax::SyntaxKind;
 
-    // Positional arguments, the `on = ...` named one and the `X as Y` alias,
-    // kept apart: the verbs read them differently and a positional `on` is not
-    // the same word.
     let args: Vec<fossil_syntax::SyntaxNode> = stage
         .children()
         .find(|c| c.kind() == SyntaxKind::ARG_LIST)
         .into_iter()
         .flat_map(|l| l.children())
         .collect();
-    let positional: Vec<fossil_syntax::SyntaxNode> = args
+    let mut positional: std::collections::VecDeque<fossil_syntax::SyntaxNode> = args
         .iter()
         .filter(|a| a.kind() == SyntaxKind::ARG)
         .filter_map(|a| a.children().next())
@@ -1071,112 +1092,340 @@ fn lower_source_stage(
             .and_then(|a| a.children().next())
     };
 
-    match verb.as_str() {
-        "where" => {
-            if positional.len() != 1 {
-                diagnose(
-                    db,
-                    stage,
-                    format!(
-                        "`where` takes one predicate, and `{pipe}` gives it {}. \
-                         e.g. `where(User.age >= 18)`.",
-                        positional.len()
-                    ),
-                );
-                return None;
-            }
-            Some(HirSourceOp::Where(lower_expr_inner(
-                db,
-                &positional[0],
-                types,
-            )?))
-        }
-        "select" => {
-            if positional.is_empty() {
-                diagnose(
-                    db,
-                    stage,
-                    format!(
-                        "`select` in `{pipe}` names no column. \
-                         e.g. `select(User.id, User.name)`."
-                    ),
-                );
-                return None;
-            }
-            let mut cols = Vec::with_capacity(positional.len());
-            for arg in &positional {
-                let Some(HirExpr::ColumnRef { binding, column }) = lower_expr_inner(db, arg, types)
-                else {
-                    diagnose(
-                        db,
-                        arg,
-                        format!(
-                            "`select` in `{pipe}` takes qualified column references and this is \
-                             not one. e.g. `select(User.id, User.name)`."
-                        ),
-                    );
-                    return None;
-                };
-                cols.push(SelectedColumn { binding, column });
-            }
-            Some(HirSourceOp::Select(cols))
-        }
-        "join" => {
-            // `Purchase.join(User, on = …)` and the self-join
-            // `Node.join(Node as Other, on = …)`. The alias is an `ALIAS_ARG`
-            // and not a positional argument, so the two are read apart.
-            let (right, alias) = if let Some((source, alias)) = alias_arg(&args) {
-                (source, Some(alias))
-            } else {
-                let Some(right) = positional.first().and_then(bare_name) else {
+    // Parameter 0 is the receiver and the dot fills it; the alias is a
+    // production of its own and not an argument.
+    let params = &row.sig.params[1..];
+    let alias = alias_arg(&args);
+    let mut slots: Vec<(&ParamSpec, Vec<fossil_syntax::SyntaxNode>)> =
+        Vec::with_capacity(params.len());
+
+    for param in params {
+        let nodes = if param.named {
+            // Reached only by its name, so a bare argument in this position is
+            // a different program. See `ParamSpec::named`.
+            match named(&param.name) {
+                Some(n) => vec![n],
+                None if param.arity == Arity::Optional => Vec::new(),
+                None => {
                     diagnose(
                         db,
                         stage,
                         format!(
-                            "`join` in `{pipe}` does not name the source binding it joins. \
-                             e.g. `join(User, on = Purchase.user_id == User.id)`."
+                            "`{}` in `{pipe}` needs `{} = <{}>`. e.g. `{}`.",
+                            row.member,
+                            param.name,
+                            describe(param.ty),
+                            example_call(row, base)
                         ),
                     );
                     return None;
-                };
-                (right, None)
-            };
-            // `on = <predicate>`, and the predicate form is the one that
-            // survived: `on = .k` needed a `FieldRef` to name a column of an
-            // anonymous row, and there is no `FieldRef` — a leading `.` starts
-            // nothing — so the `USING (k)` semantics, where the key is named
-            // once and both sides are assumed to spell it the same, has nothing
-            // left to write itself with. `on = Purchase.user_id == User.id` says which
-            // row each side belongs to, which is what qualification is for.
-            let Some(on) = named("on").and_then(|n| lower_expr_inner(db, &n, types)) else {
-                diagnose(
-                    db,
-                    stage,
-                    format!(
-                        "`join` in `{pipe}` needs `on = <predicate>`, a condition relating the \
-                         two sides by qualified column. \
-                         e.g. `join(User, on = Purchase.user_id == User.id)`."
-                    ),
-                );
-                return None;
-            };
-            Some(HirSourceOp::Join { right, alias, on })
-        }
-        other => {
+                }
+            }
+        } else {
+            match param.arity {
+                // Takes the rest, and leaves the deque empty so the
+                // too-many-arguments check below sees what it should.
+                Arity::OneOrMore => std::mem::take(&mut positional).into_iter().collect(),
+                Arity::One | Arity::Optional => positional.pop_front().into_iter().collect(),
+            }
+        };
+
+        // `alias` fills a `Binding` position on its own: `join(Node as Other)`
+        // writes no ARG at all.
+        let filled = !nodes.is_empty()
+            || (param.ty == SigTy::Binding && alias.is_some())
+            || param.arity == Arity::Optional;
+        if !filled {
             diagnose(
                 db,
                 stage,
                 format!(
-                    "`{other}` is not a relation verb fossil lowers. The catalogue has {}, \
-                     and the lowering implements `where`, `select` and `join`.",
-                    crate::stdlib::stdlib()
-                        .members_of(crate::stdlib::Receiver::Relation)
-                        .count()
+                    "`{}` in `{pipe}` needs {} and this call gives none. e.g. `{}`.",
+                    row.member,
+                    describe_position(param),
+                    example_call(row, base)
+                ),
+            );
+            return None;
+        }
+        slots.push((param, nodes));
+    }
+
+    if let Some(extra) = positional.pop_front() {
+        diagnose(
+            db,
+            &extra,
+            format!(
+                "`{}` in `{pipe}` takes {}, and this call gives more. e.g. `{}`.",
+                row.member,
+                describe_arity(params),
+                example_call(row, base)
+            ),
+        );
+        return None;
+    }
+
+    Some(BoundArgs { slots, alias })
+}
+
+impl BoundArgs<'_> {
+    /// The value at declared position `i`, lowered.
+    ///
+    /// The three readers below are the whole of what
+    /// [`SigTy::names_rather_than_evaluates`] buys: a `Column` is read as a name
+    /// and a `Predicate` as an expression, and which one applies is the row's to
+    /// say rather than the arm's.
+    fn value(&self, db: &dyn fossil_base::Db, i: usize, types: &[SmolStr]) -> Option<HirExpr> {
+        let (_, nodes) = self.slots.get(i)?;
+        lower_expr_inner(db, nodes.first()?, types)
+    }
+
+    /// The column names at declared position `i`, qualified by their bindings.
+    fn columns(
+        &self,
+        db: &dyn fossil_base::Db,
+        i: usize,
+        pipe: &str,
+        base: &SmolStr,
+        types: &[SmolStr],
+    ) -> Option<Vec<SelectedColumn>> {
+        let (param, nodes) = self.slots.get(i)?;
+        let mut cols = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let Some(HirExpr::ColumnRef { binding, column }) = lower_expr_inner(db, node, types)
+            else {
+                diagnose(
+                    db,
+                    node,
+                    format!(
+                        "`{}` in `{pipe}` takes qualified column references and this is not one. \
+                         e.g. `{base}.id`.",
+                        param.name
+                    ),
+                );
+                return None;
+            };
+            cols.push(SelectedColumn { binding, column });
+        }
+        Some(cols)
+    }
+
+    /// The binding named at declared position `i`, with its `X as Y` alias.
+    fn binding(
+        &self,
+        db: &dyn fossil_base::Db,
+        i: usize,
+        pipe: &str,
+    ) -> Option<(SmolStr, Option<SmolStr>)> {
+        if let Some((source, alias)) = self.alias.clone() {
+            return Some((source, Some(alias)));
+        }
+        let (param, nodes) = self.slots.get(i)?;
+        let node = nodes.first()?;
+        let Some(name) = bare_name(node) else {
+            diagnose(
+                db,
+                node,
+                format!(
+                    "`{}` in `{pipe}` is not the name of a source binding.",
+                    param.name
+                ),
+            );
+            return None;
+        };
+        Some((name, None))
+    }
+}
+
+/// The surface name of what a position takes — for a message, not for a type.
+const fn describe(ty: SigTy) -> &'static str {
+    match ty {
+        SigTy::Predicate => "predicate",
+        SigTy::Column => "column",
+        SigTy::Binding => "source binding",
+        SigTy::Rows => "relation",
+        SigTy::Scalar(_) => "value",
+    }
+}
+
+/// `one predicate`, `one or more columns` — a position said in words.
+fn describe_position(param: &ParamSpec) -> String {
+    match param.arity {
+        Arity::OneOrMore => format!("one or more {}s", describe(param.ty)),
+        Arity::One | Arity::Optional => format!("one {}", describe(param.ty)),
+    }
+}
+
+/// Every position of a row said in words, for the too-many-arguments message.
+fn describe_arity(params: &[ParamSpec]) -> String {
+    let each: Vec<String> = params.iter().map(describe_position).collect();
+    each.join(" and ")
+}
+
+/// An example call rendered from the row's own signature.
+///
+/// It names the binding the program actually wrote rather than a made-up
+/// `User`, which the hardcoded examples could not do — and those examples were
+/// the last thing in these messages not derived from the row.
+///
+/// The binding is the pipeline's BASE — `pedidos` in `pedidos.select(…)` — and
+/// not the first entry of `types`, which is what this reached for first. Those
+/// are the shape types a `type { Persona } := io.shex(…)` binding introduces,
+/// so the example came out `select(Persona.id, Persona.name)`: a name that is
+/// in scope, is not a relation, and would be refused if a reader copied it.
+/// Worse than the hardcoded `User`, which at least announced itself.
+fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
+    let b = base.as_str();
+    let args: Vec<String> = row.sig.params[1..]
+        .iter()
+        .map(|p| {
+            let one = match p.ty {
+                SigTy::Column => format!("{b}.id"),
+                SigTy::Binding => "Other".to_string(),
+                SigTy::Predicate => format!("{b}.id == 1"),
+                SigTy::Rows => b.to_string(),
+                SigTy::Scalar(_) => "10".to_string(),
+            };
+            let one = if p.arity == Arity::OneOrMore && p.ty == SigTy::Column {
+                format!("{b}.id, {b}.name")
+            } else {
+                one
+            };
+            if p.named {
+                format!("{} = {one}", p.name)
+            } else {
+                one
+            }
+        })
+        .collect();
+    format!("{}({})", row.member, args.join(", "))
+}
+
+/// One stage of a source pipeline — `where(...)`, `select(...)` or `join(...)`.
+///
+/// `verb` is the member the call names; `stage` is the call node, which is where
+/// the `ARG_LIST` hangs.
+///
+/// # Why there is no `match verb.as_str()` here any more
+///
+/// There was, with one arm per implemented verb and a catch-all, and the
+/// catch-all told a user writing `Employee.sort(…)` that `sort` *"is not a
+/// relation verb fossil lowers"* — which is false: `sort` is catalogued, and
+/// what it lacks is a lowering. The message even read its count from the
+/// registry and its list of implemented verbs from a string literal, so half of
+/// it was derived and half was prose that could go stale on its own.
+///
+/// Dispatching on the TEXT was the cause. A fourteenth [`PlanOp`] compiled
+/// clean, and the arms held what the rows failed to declare. Now the row is
+/// looked up, [`bind_stage_args`] fills its declared parameters, and what is
+/// left below is CONSTRUCTION: three arms of three lines, exhaustive over
+/// `PlanOp`, with the ten unlowered verbs named rather than swept into a
+/// wildcard. Adding a variant is a compile error here and nowhere else.
+fn lower_source_stage(
+    db: &dyn fossil_base::Db,
+    verb: &SmolStr,
+    stage: &fossil_syntax::SyntaxNode,
+    pipe: &str,
+    base: &SmolStr,
+    types: &[SmolStr],
+) -> Option<HirSourceOp> {
+    use crate::stdlib::{LoweringKind, PlanOp, Receiver, stdlib};
+
+    let Some(row) = stdlib().lookup_member(Receiver::Relation, verb) else {
+        diagnose(
+            db,
+            stage,
+            format!(
+                "`{verb}` is not a relation verb. The catalogue has `{}`.",
+                relation_verbs()
+            ),
+        );
+        return None;
+    };
+    let &LoweringKind::Op(op) = &row.lowering else {
+        // A `Receiver::Relation` row whose lowering is a scalar template is a
+        // defect of the table, not of the program in hand.
+        unreachable!("`{verb}` is a Relation row with a scalar lowering")
+    };
+
+    let bound = bind_stage_args(db, row, stage, pipe, base)?;
+
+    match op {
+        PlanOp::Where => Some(HirSourceOp::Where(bound.value(db, 0, types)?)),
+        PlanOp::Select => Some(HirSourceOp::Select(
+            bound.columns(db, 0, pipe, base, types)?,
+        )),
+        PlanOp::Join => {
+            let (right, alias) = bound.binding(db, 0, pipe)?;
+            let on = bound.value(db, 1, types)?;
+            Some(HirSourceOp::Join { right, alias, on })
+        }
+        // Catalogued, and `fossil-mir` has no lowering for them. Listed by name
+        // on purpose: the day one is implemented it moves up one group, and
+        // until then a user is told which of the two things is true about the
+        // verb they wrote.
+        PlanOp::Map
+        | PlanOp::Flatten
+        | PlanOp::Take
+        | PlanOp::Drop
+        | PlanOp::Distinct
+        | PlanOp::Sort
+        | PlanOp::Union
+        | PlanOp::GroupBy
+        | PlanOp::Aggregate
+        | PlanOp::Count => {
+            diagnose(
+                db,
+                stage,
+                format!(
+                    "`{verb}` is a relation verb the catalogue declares and the lowering does \
+                     not implement yet, so `{pipe}` cannot compile. Implemented today: `{}`.",
+                    lowered_verbs()
                 ),
             );
             None
         }
+        PlanOp::Source => {
+            diagnose(
+                db,
+                stage,
+                format!("`{verb}` constructs a source and is not a stage of `{pipe}`."),
+            );
+            None
+        }
     }
+}
+
+/// Every relation verb the catalogue declares, and the ones with a lowering.
+///
+/// Both read the registry. A list of verbs inside a format string is the same
+/// second copy the arms were, and it is the copy that goes stale: the message
+/// this replaced named `where`, `select` and `join` in prose beside a count it
+/// read from the table.
+fn relation_verbs() -> String {
+    verb_names(|_| true)
+}
+
+fn lowered_verbs() -> String {
+    verb_names(|op| {
+        matches!(
+            op,
+            crate::stdlib::PlanOp::Where
+                | crate::stdlib::PlanOp::Select
+                | crate::stdlib::PlanOp::Join
+        )
+    })
+}
+
+fn verb_names(f: impl Fn(crate::stdlib::PlanOp) -> bool) -> String {
+    use crate::stdlib::{LoweringKind, Receiver, stdlib};
+    let mut names: Vec<&str> = stdlib()
+        .members_of(Receiver::Relation)
+        .filter(|e| matches!(&e.lowering, LoweringKind::Op(op) if f(*op)))
+        .map(|e| e.member.as_str())
+        .collect();
+    names.sort_unstable();
+    names.join("`, `")
 }
 
 /// Is the thing left of the dot a VALUE, as opposed to a NAME?

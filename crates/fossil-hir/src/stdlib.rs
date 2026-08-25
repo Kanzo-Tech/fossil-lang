@@ -235,6 +235,44 @@ pub struct ParamSpec {
     pub name: SmolStr,
     /// What it takes.
     pub ty: SigTy,
+    /// How many arguments fill this position. See [`Arity`].
+    pub arity: Arity,
+    /// Whether this position is written WITH its name — `on = …` — rather than
+    /// by position.
+    ///
+    /// A property of the row because it is a property of the surface:
+    /// `grammar.bnf` spells a join `join(User, on = …)`, and a bare predicate in
+    /// the second slot is a different program. Without this the binder would
+    /// fill the position from either spelling and `join(User, a == b)` would
+    /// start compiling — a widening of the language arrived at by accident,
+    /// which is the failure this whole change exists to stop making possible.
+    ///
+    /// One row uses it. It is here rather than special-cased there because a
+    /// special case in the binder is the hand-written arm coming back.
+    pub named: bool,
+}
+
+/// How many arguments one parameter position takes.
+///
+/// A position was implicitly [`Self::One`] and nothing could say otherwise, so
+/// `seq.select`'s list of columns was unwritable in a signature and lived in a
+/// hand-written arm instead. It is also why `str.concat` is documented variadic
+/// while the row takes two: the page could write a repetition the row could not.
+///
+/// At most one position repeats and it is the last, because a repetition in the
+/// middle cannot be told from the position after it. That is a property of the
+/// table rather than of this type, so it is asserted where the table is built —
+/// see `stdlib_default`'s closing check — instead of made unrepresentable at the
+/// cost of a nested type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Arity {
+    /// Exactly one argument. Every scalar row's every position.
+    #[default]
+    One,
+    /// One or more, and it must be the last position: `select(User.id, User.name)`.
+    OneOrMore,
+    /// Zero or one. A named argument a row can do without.
+    Optional,
 }
 
 /// What a catalogue row's parameter takes, or what it gives back.
@@ -257,6 +295,25 @@ pub struct ParamSpec {
 /// and `DuckDB`'s function tables, and PRQL's `{arg:N}`. What none of them needed
 /// and this does is a parameter whose type depends on the RECEIVER's, which is
 /// why `Rows` and `Predicate` are variants and not two more scalars.
+///
+/// # The two that name rather than evaluate
+///
+/// [`Self::Column`] and [`Self::Binding`] are that same argument read once more.
+/// A `select`'s arguments are not values: `select(User.id)` does not evaluate
+/// `User.id`, it NAMES a column of the receiver's rows, and `join(User, …)`
+/// names a source binding. Both depend on the receiver exactly as `Predicate`
+/// does, so both are variants here for the reason the ones above are.
+///
+/// They were absent, and the absence is measurable rather than theoretical. A
+/// relation row's signature said only `rows("rows")` — one parameter, the
+/// receiver — so the rest of what a verb takes had to be written down
+/// somewhere else, and the somewhere else was one hand-written arm per verb in
+/// `crate::lower`. Two things followed. `crates/xtask/src/reference.rs` measured
+/// the first: the reference page INVENTED parameters for `seq.sort`,
+/// `seq.distinct` and `seq.group_by` — `by`, `key`, `desc` — because their
+/// signature had none to print and prose filled the hole. The second is that
+/// arity and named-argument resolution, which [`SigSpec`] exists to do once,
+/// were done a third time per arm in three different wordings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SigTy {
     /// A value of a scalar type.
@@ -265,18 +322,45 @@ pub enum SigTy {
     Rows,
     /// A condition over the receiver's rows.
     Predicate,
+    /// The NAME of a column of the receiver's rows, qualified by the binding
+    /// that owns it — `select(User.id)`, `sort(User.name)`, `group_by(User.city)`.
+    ///
+    /// Not a [`Self::Scalar`] of unknown type: the difference is not what it
+    /// evaluates to but that it is not evaluated. `crate::lower` reads it off
+    /// the CST as a [`crate::lower::SelectedColumn`], and open question 4 of
+    /// `grammar.bnf` decided the qualification travels with it.
+    Column,
+    /// The NAME of a source binding, with `X as Y` optional — the right side of
+    /// a join.
+    ///
+    /// The alias is part of this position and not a parameter of its own:
+    /// `AliasArg := IDENT 'as' IDENT` is one production, and a self-join's
+    /// second name is the only thing that can tell two sides apart once both
+    /// are the same binding.
+    Binding,
 }
 
 impl SigTy {
-    /// The scalar this position takes, or `None` when it takes a relation or a
-    /// condition — neither of which a `'static` tag can describe, because both
-    /// depend on the receiver.
+    /// The scalar this position takes, or `None` when it takes a relation, a
+    /// condition or a name — none of which a `'static` tag can describe,
+    /// because all of them depend on the receiver.
     #[must_use]
     pub const fn scalar(self) -> Option<ScalarTy> {
         match self {
             Self::Scalar(s) => Some(s),
-            Self::Rows | Self::Predicate => None,
+            Self::Rows | Self::Predicate | Self::Column | Self::Binding => None,
         }
+    }
+
+    /// Whether this position NAMES something instead of evaluating to a value.
+    ///
+    /// The single place the distinction is drawn, because three consumers need
+    /// it and each would otherwise draw it again: `crate::lower` reads the CST
+    /// differently, `crate::infer` has nothing to type-check here, and
+    /// `xtask::reference` renders `User.id` rather than an expression.
+    #[must_use]
+    pub const fn names_rather_than_evaluates(self) -> bool {
+        matches!(self, Self::Column | Self::Binding)
     }
 }
 
@@ -424,7 +508,7 @@ pub enum LoweringKind {
 /// operators and `crate::lower::lower_source_stage` implements three
 /// (`where`, `select`, `join`). Before the receiver, nothing could enumerate
 /// the members of a relation and so nothing could count the difference.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanOp {
     /// `seq.where` → `FilterOp` (`WHERE`).
     Where,
@@ -524,16 +608,46 @@ impl FunctionRegistry {
         let p = |name: &str, ty: ScalarTy| ParamSpec {
             name: SmolStr::new(name),
             ty: SigTy::Scalar(ty),
+            arity: Arity::One,
+            named: false,
         };
         // The relation a verb is a verb of, and a condition over its rows —
         // see [`SigTy`]. Every `seq/` row's parameter 0 is `rows`.
         let rows = |name: &str| ParamSpec {
             name: SmolStr::new(name),
             ty: SigTy::Rows,
+            arity: Arity::One,
+            named: false,
         };
         let pred = |name: &str| ParamSpec {
             name: SmolStr::new(name),
             ty: SigTy::Predicate,
+            arity: Arity::One,
+            named: false,
+        };
+        // `on = <predicate>`, the one position in the catalogue written with its
+        // name. See [`ParamSpec::named`].
+        let pred_named = |name: &str| ParamSpec {
+            name: SmolStr::new(name),
+            ty: SigTy::Predicate,
+            arity: Arity::One,
+            named: true,
+        };
+        // The two that NAME rather than evaluate, and the repetition that only
+        // they need. `cols` is `Arity::OneOrMore` because `select(a, b, c)` is
+        // the surface `grammar.bnf` gives, and until this existed the list lived
+        // in a hand-written arm of `crate::lower` where no page could read it.
+        let col = |name: &str, arity: Arity| ParamSpec {
+            name: SmolStr::new(name),
+            ty: SigTy::Column,
+            arity,
+            named: false,
+        };
+        let binding = |name: &str| ParamSpec {
+            name: SmolStr::new(name),
+            ty: SigTy::Binding,
+            arity: Arity::One,
+            named: false,
         };
 
         // Local insertion helper. `recv` and `member` come from
@@ -612,26 +726,45 @@ impl FunctionRegistry {
 
         // ── seq/ (13) — the relation verbs. Receiver::Relation ─────────────
         //
-        // Higher-order arguments collapse to scalar placeholders in v0.1; the
-        // `PlanOp` tag is the real datum. `filter` and `project` were renamed to
-        // `where` and `select` so that the catalogue spells what the surface
-        // spells — `members_of(Relation)` is what an IDE offers, and offering
-        // `User.filter(…)` for a language whose word is `where` is a completion
-        // that is confidently wrong.
-        // The three the surface reaches — `where`, `select`, `join` — carry the
-        // signature they always had and could not write down. The other ten are
-        // rows with no lowering in `crate::lower::lower_source_stage`, and they
-        // say so by their `PlanOp`; what they gain here is that the day one is
-        // implemented, its arguments are checked by the same code that checks
-        // `str.trim`'s.
+        // `filter` and `project` were renamed to `where` and `select` so that
+        // the catalogue spells what the surface spells — `members_of(Relation)`
+        // is what an IDE offers, and offering `User.filter(…)` for a language
+        // whose word is `where` is a completion that is confidently wrong.
+        //
+        // **Every one of the thirteen declares what it takes.** They did not,
+        // and the comment that stood here said why not — «higher-order
+        // arguments collapse to scalar placeholders in v0.1; the `PlanOp` tag is
+        // the real datum». There was nothing to collapse into, so what a verb
+        // took was written in a hand-written arm of
+        // `crate::lower::lower_source_stage` instead, one arm per verb, and two
+        // things followed. `xtask::reference` measured the first: the reference
+        // page invented `by`, `key` and `desc` for `sort`, `distinct` and
+        // `group_by`, because their signature had nothing to print. The second
+        // is that `lower_source_stage` dispatched on the verb's TEXT, so a
+        // fourteenth `PlanOp` compiled clean and the message a user got named
+        // three implemented verbs from a string literal.
+        //
+        // Ten of the thirteen still have no lowering. That is unchanged and
+        // deliberate; what changes is that their arguments are now checked by
+        // the same code that checks `str.trim`'s, and that the day one is
+        // implemented it is implemented and not also re-declared.
         add_rows(
             e,
             "seq.where",
             vec![rows("rows"), pred("keep")],
             L(P::Where),
         );
+        // `map`'s function argument is the higher-order position the surface
+        // does not spell yet (`grammar.bnf` has no lambda), so it declares the
+        // relation and stops. A parameter invented here would be the reference
+        // page's `by`/`key`/`desc` written one layer lower down.
         add_rows(e, "seq.map", vec![rows("rows")], L(P::Map));
-        add_rows(e, "seq.flatten", vec![rows("rows")], L(P::Flatten));
+        add_rows(
+            e,
+            "seq.flatten",
+            vec![rows("rows"), col("of", Arity::One)],
+            L(P::Flatten),
+        );
         add_rows(
             e,
             "seq.take",
@@ -644,28 +777,59 @@ impl FunctionRegistry {
             vec![rows("rows"), p("n", S::Integer)],
             L(P::Drop),
         );
-        add_rows(e, "seq.distinct", vec![rows("rows")], L(P::Distinct));
-        add_rows(e, "seq.sort", vec![rows("rows")], L(P::Sort));
-        // `select`'s columns are NAMES and not values, so they are not
-        // parameters: `crate::lower` reads them off the CST as
-        // `SelectedColumn`s. The signature says what the verb takes of the
-        // ALGEBRA, which is the relation.
-        add_rows(e, "seq.select", vec![rows("rows")], L(P::Select));
-        // A join's condition is a predicate over BOTH sides (ruling 17), which
-        // is the relation this row hands the checker once the right side is in.
+        // `distinct`, `sort` and `group_by` take COLUMN NAMES, and these three
+        // rows are the ones the reference page invented parameters for.
+        add_rows(
+            e,
+            "seq.distinct",
+            vec![rows("rows"), col("on", Arity::OneOrMore)],
+            L(P::Distinct),
+        );
+        add_rows(
+            e,
+            "seq.sort",
+            vec![rows("rows"), col("by", Arity::OneOrMore)],
+            L(P::Sort),
+        );
+        // `select`'s columns are NAMES and not values — `SigTy::Column`, which
+        // is what that distinction is for. The comment that stood here said the
+        // signature «says what the verb takes of the ALGEBRA, which is the
+        // relation», and that was the omission arguing for itself.
+        add_rows(
+            e,
+            "seq.select",
+            vec![rows("rows"), col("cols", Arity::OneOrMore)],
+            L(P::Select),
+        );
+        // The right side is a BINDING and not a relation value: `join(User, …)`
+        // names a source, and `Node.join(Node as Other, …)` names it twice. The
+        // condition is a predicate over BOTH sides (ruling 17) and is written
+        // with its name.
         add_rows(
             e,
             "seq.join",
-            vec![rows("rows"), rows("other"), pred("on")],
+            vec![rows("rows"), binding("right"), pred_named("on")],
             L(P::Join),
         );
+        // `union` declares only its receiver, and that is a refusal rather than
+        // an omission. Its right side is structurally a binding — the same shape
+        // as a join's — but nothing in the tree confirms it: `union` has no
+        // lowering, so no code reads a second parameter and no program writes
+        // one. Declaring `binding("other")` here would be a reasoned guess
+        // printed on the reference page as a fact, which is the failure that
+        // page's invented `by`, `key` and `desc` were.
+        //
+        // **What settles it is implementing the verb.** Whoever does writes the
+        // parameter and finds out in the same hour.
+        add_rows(e, "seq.union", vec![rows("rows")], L(P::Union));
         add_rows(
             e,
-            "seq.union",
-            vec![rows("rows"), rows("other")],
-            L(P::Union),
+            "seq.group_by",
+            vec![rows("rows"), col("keys", Arity::OneOrMore)],
+            L(P::GroupBy),
         );
-        add_rows(e, "seq.group_by", vec![rows("rows")], L(P::GroupBy));
+        // `aggregate`'s aggregations are calls over the grouped rows — the same
+        // unspelled higher-order position as `map`'s.
         add_rows(e, "seq.aggregate", vec![rows("rows")], L(P::Aggregate));
         // The one `seq/` row that is not a verb of the algebra: it takes a
         // relation and gives back a NUMBER.

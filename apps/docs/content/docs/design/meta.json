@@ -6,6 +6,7 @@
     "algebra",
     "types",
     "type-providers",
+    "catalogue",
     "shapes",
     "generic-functions",
     "the-dot",

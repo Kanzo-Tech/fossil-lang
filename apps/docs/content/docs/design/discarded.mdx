@@ -166,6 +166,43 @@ in-tree registration list delivers the entire benefit at zero ABI cost.
 **What would bring it back.** A consumer who genuinely cannot merge into the tree. It is a door that
 opens later, and opening it later costs nothing that opening it now would have saved.
 
+### Moving the standard library into `catalogue.bnf`
+
+**The idea.** The `io.` rows are a data file the compiler reads; the other fifty-one rows are the
+same shape, so they belong in the same file. Adding `str.slugify` over `regexp_replace` would stop
+touching Rust.
+**Why it is attractive.** It is the consistent answer, `catalogue.bnf` names it as the shape the
+stdlib would take, and the file already has a parser, five projections and a drift check waiting.
+**The evidence against it.** Three measurements, none of them about tidiness. Swift's `.def` files
+carried **1,364** rows with no generator at all before anyone reached for TableGen, and Clang left
+`.def` at around **6,000**; the stdlib is **fifty-one**, two orders of magnitude below where a file
+starts paying. `crates/xtask/src/reference.rs` already generates a page from the Rust table with no
+`.bnf` in the path, which is the proof in the tree that generation — the thing the proof actually
+comes from — does not need the file. And the one justification a data file has that a table does not
+is a **second authoring audience**, somebody who must add a row without touching the Rust chain: it
+is why `rust.ungram` exists, `catalogue.bnf` never claims one, and fossil has none.
+**What would bring it back.** That second audience appearing. Nothing else — not row count on its
+own, and not consistency with the `io.` half, which is in a file for a different reason: its
+BEHAVIOUR half is linked by a host that may not have it.
+
+### A uniform `HirSourceOp { op, args }` instead of typed variants
+
+**The idea.** With every relation verb declaring its parameters, the lowered stage could be one
+shape — the operator plus a vector of bound arguments — and the three typed variants could go.
+**Why it is attractive.** Thirteen declared verbs against three constructible variants is an
+asymmetry, and the uniform shape makes `lower_source_stage` end without a `match` at all.
+**The evidence against it.** It trades a compile-time guarantee for a runtime unwrap: `args[0]`
+expecting a predicate is checked by nobody, where `Where(HirExpr)` cannot hold a column list. It is
+the same fork rustc and rust-analyzer took opposite ways over the same table — rustc's
+`[Option<DefId>; N]` costs it a discriminant coupling, a `from_u32` its own comment calls *"clumsy"*
+and a `panic!`-enforced bijection, while rust-analyzer's one typed `Option<TraitId>` field per row
+has none of the three. fossil is on the IDE side of that line. The `match` that survives is
+CONSTRUCTION rather than dispatch: three arms of three lines, exhaustive, with the unimplemented
+verbs named.
+**What would bring it back.** Enough lowered verbs that the typed variants stop being writable by
+hand — the constructible set overtaking the declared one, which is the opposite of today's ten
+declared and not lowered.
+
 ## Shadows of the surface
 
 ### Borrowing the comprehension binder
