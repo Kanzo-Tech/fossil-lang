@@ -557,7 +557,10 @@ compilador escribe y el corpus lee. Su encabezado dice hoy *«Two contracts, one
   `open_db`. Cada uno se va con su grupo; lo que quede es la carcasa nativa.
 - **`fossil-run-status` no va a ningún grupo: desaparece.** Sus tres contratos vuelven a quien los
   produce — `RunStatus` a `fossil-df`, `ProviderInfo` y `SourceRefInfo` a `fossil-lineage`, que hoy
-  se los importa de vuelta a sí mismo. Ninguno se convierte en método del LSP: `run` no es una
+  se los importa de vuelta a sí mismo. **Hecho** (`0d04c27`), y `RunStatus` fue más allá: se borró
+  entero (`8d33cee`), porque siete de sus nueve campos eran una segunda ortografía de `graph.yaml` y
+  los dos que no —los conteos— entraron en el manifiesto (`c573e73`). Queda `fossil_df::report`, con
+  lo único que el corpus no puede decir de sí mismo. Ninguno se convierte en método del LSP: `run` no es una
   operación de editor, `providers` es una constante y `refs` se llama una vez por lanzamiento.
 - **`fossil-lsp` y `fossil-wasm/src/lsp_worker.rs` son el mismo servidor dos veces** — 838 y 619
   líneas (no «~600 cada uno»), doce handlers, cuatro derivas probadas bajo un docblock que se declara

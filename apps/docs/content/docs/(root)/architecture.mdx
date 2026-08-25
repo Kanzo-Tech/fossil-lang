@@ -204,9 +204,13 @@ outbound half of a protocol**, and in rust-analyzer they would live in the binar
 on it and it depended on nothing, which is not being foundational — it is being the place where types
 that did not fit were left.
 
-**It is gone** (`0d04c27`). Each contract went back to whoever produces it: `RunStatus` to `fossil-df`,
-`ProviderInfo` and `SourceRefInfo` to `fossil-lineage`, which had been importing its own output types
-back from it. None became a method of the LSP — `run` is not an editor operation, `providers` is a
+**It is gone** (`0d04c27`), and so is the largest of its three contracts (`8d33cee`).
+`ProviderInfo` and `SourceRefInfo` went back to `fossil-lineage`, which had been importing its own
+output types back from it. `RunStatus` moved to `fossil-df` and was then deleted outright: seven of
+its nine fields were a second spelling of `graph.yaml`, and the two that were not — the row counts —
+are declared in the manifest now. What survives is `fossil_df::report`, carrying only what the corpus
+cannot say about itself: where it was written, and how many input rows named an endpoint no vertex
+carries. None became a method of the LSP — `run` is not an editor operation, `providers` is a
 constant, and `refs` is called once per launch.
 
 What the dissolution turned up is the better argument for it. The crate's declared reason was that

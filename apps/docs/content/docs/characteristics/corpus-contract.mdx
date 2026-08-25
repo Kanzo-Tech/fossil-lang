@@ -120,7 +120,7 @@ to the seventh:
 | 2 | each adjacency file is ordered by the key its name claims — `by_source` is CSR, `by_target` is CSC |
 | 3 | the two orientations carry the same edge set; they are one relation stored twice and nothing else in the writer says so |
 | 4 | every endpoint addresses a vertex that exists — the corruption renumbering could introduce and no row count would reveal |
-| 5 | `RunStatus` agrees with what was written, because a corpus disagreeing with its own status is undetectable from either side alone |
+| 5 | the run report agrees with what was written, because a corpus disagreeing with its own status is undetectable from either side alone. It used to say `RunStatus`, and the reason that type is gone is this invariant taken seriously: a description that can disagree with the bytes is one that eventually does, and `ac2a742` is the time it did |
 | 6 | the staged single-file vertex Parquet is gone, not left behind as a stale second copy a reader would glob up |
 | 7 | the manifest declares the tiling that was emitted, and **the counts it declares are the rows on disk** — the size is read off the artefact and every later assertion derives from it, so the test cannot agree with the writer by sharing a constant |
 | 8 | every vertex is in the tile its own id names; a row in the wrong file is a vertex a reader will never fetch and never miss |

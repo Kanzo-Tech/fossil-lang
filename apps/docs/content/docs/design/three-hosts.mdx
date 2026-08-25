@@ -163,8 +163,8 @@ Measured, in the pair of exports built precisely to be one capability in two hos
 --output-json` writes its result with `serde_json`, and `fossil_wasm::refs` writes the same Rust value
 with `serde_wasm_bindgen::to_value`, whose `serialize_missing_as_null` defaults to `false`. A reference
 with no `@conn` alias is therefore `"connection": null` from the command and an **absent key** from the
-browser, because `undefined` does not survive `JSON.stringify`. The same default drops `count` from a
-`RunStatus` the browser produced and keeps it as `null` on the one the command produced.
+browser, because `undefined` does not survive `JSON.stringify`. The same default drops an absent
+count from a report the browser produced and keeps it as `null` on the one the command produced.
 
 Neither test over that capability can see it. `crates/fossil-cli/tests/refs.rs` asserts
 `plain["connection"] == Null` against parsed JSON — after the wire. `crates/fossil-wasm/tests/refs.rs`
