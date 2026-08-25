@@ -1,5 +1,4 @@
 {
-  "title": "fossil corpus",
-  "root": true,
+  "title": "The corpus format",
   "pages": ["index", "conventions", "reading", "scale", "guards"]
 }

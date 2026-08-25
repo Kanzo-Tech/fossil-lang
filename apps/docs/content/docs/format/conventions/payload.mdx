@@ -119,7 +119,7 @@ What makes it a real question rather than a preference:
   a corpus does not control.
 - The addressing does not care. `tile = dense_id >> 12` is arithmetic over a range of rows, and it
   is true of a row group, of a file, and of an IPC record batch alike. **Nothing in
-  [Addressing](/docs/conventions/addressing) or [Order](/docs/conventions/order) would change.**
+  [Addressing](/docs/format/conventions/addressing) or [Order](/docs/format/conventions/order) would change.**
 - What would change is the footer. Parquet's row-group statistics are the index; an IPC file's
   metadata is not laid out to answer "which batches intersect this box", and replacing that is a
   design cost, not a swap.

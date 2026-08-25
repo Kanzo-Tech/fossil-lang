@@ -77,7 +77,7 @@ the answer "these 4,096 vertices have no edges in this direction", and it costs 
 them.** The manifest's `edge_count` is what does: a reader sums the tiles it found against the
 declared number, and a short sum is a corpus that is missing rows rather than a graph that is
 sparse. The same hole exists on the vertex side and is closed the same way, with `vertex_count`
-([Identity](/docs/conventions/identity)). Guard: `declared-count`, which checks each orientation
+([Identity](/docs/format/conventions/identity)). Guard: `declared-count`, which checks each orientation
 against the declared number on its own, because `one-relation-twice` compares the two to each other
 and passes on both being truncated identically.
 

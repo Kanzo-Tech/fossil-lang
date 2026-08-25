@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { repoRoot } from "@/lib/repo";
 
 interface Table {
   formula: string;
@@ -19,7 +20,9 @@ interface Table {
  * So the page renders the file, and `published-vectors` executes the same file.
  */
 export function VectorTable({ of }: { of: "tile_of" | "declared_count" | "morton2" | "quantize" }) {
-  const path = join(process.cwd(), "guards", "vectors.json");
+  // Off the repo root, not off `process.cwd()`: the file lives with the checker that executes it,
+  // and this page renders it from there rather than keeping a copy on this side of the tree.
+  const path = join(repoRoot, "apps", "corpus", "guards", "vectors.json");
   const table = JSON.parse(readFileSync(path, "utf8"))[of] as Table;
   const columns = Object.keys(table.vectors[0]).filter((key) => key !== "why");
 

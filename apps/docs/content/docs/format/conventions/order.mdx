@@ -6,7 +6,7 @@ description: dense_id ascends with the Morton code of the position. That single 
 **`dense_id` ascends with the Morton code of the vertex's position.** The id space *is* the spatial
 order.
 
-Everything in [Addressing](/docs/conventions/addressing) is arithmetic over an interval. This is the
+Everything in [Addressing](/docs/format/conventions/addressing) is arithmetic over an interval. This is the
 convention that makes an interval mean something: without it, `dense_id >> 12` still names a tile,
 and that tile holds 4,096 vertices scattered across the whole canvas.
 
@@ -93,7 +93,7 @@ bounding box the layout derives before quantising, which no vector covers.
 A flattened id space only works if the id space *is* the spatial order, which is what the
 renumbering does. The consequence follows immediately: **a new placement produces a new numbering**,
 so `dense_id` cannot also be the identity. That is why the identity is
-[the subject IRI](/docs/conventions/identity#the-identity-is-the-subject-iri).
+[the subject IRI](/docs/format/conventions/identity#the-identity-is-the-subject-iri).
 
 It also means positions moved by hand are a layer on top and never a rewrite. Tiles are precomputed;
 mutating one means rebuilding them.

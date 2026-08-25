@@ -28,7 +28,7 @@ increasing order of weight:
    read from three languages that do not know fossil exists, and the point of a format is that the
    fourth needs no permission.
 3. **It assumes one output format by construction.** Whether a tile's payload stays Parquet is a
-   [live design question](/docs/conventions/payload#the-payload-format-is-open). A crate that models
+   [live design question](/docs/format/conventions/payload#the-payload-format-is-open). A crate that models
    *the* manifest cannot hold that question; a document and a set of guards can, and here they do —
    the addressing guards survive a format change untouched and the Parquet ones are named as such.
 

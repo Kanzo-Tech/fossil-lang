@@ -46,3 +46,26 @@
 .register__cite code {
   font-size: inherit;
 }
+
+/*
+ * And the same idea one level down, for a guard's own admission. `GuardIndex` renders every guard
+ * beside what it CANNOT prove, and that half has to be as visible as the claim — a reader who sees
+ * only the first half has been told half the contract. Dashed rather than solid, because the limit
+ * is not a second claim.
+ */
+.guard-limit {
+  border-inline-start: 3px dashed var(--color-fd-muted-foreground);
+  padding-block: 0.5rem;
+  padding-inline: 0.875rem;
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: color-mix(in oklab, var(--color-fd-muted-foreground) 6%, transparent);
+}
+
+.guard-limit__label {
+  display: block;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-fd-muted-foreground);
+  margin-block-end: 0.25rem;
+}

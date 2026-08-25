@@ -35,7 +35,7 @@ relation before the recursion starts and no `limit` on the answer bounds the cos
 directions are separate addresses rather than one undirected one for the same reason the camera is
 addressed at all: a union of two relations is a scan, and a pair of URLs is not.
 
-Which prefix carries which direction is [declared per edge type](/docs/conventions/adjacency), never
+Which prefix carries which direction is [declared per edge type](/docs/format/conventions/adjacency), never
 conventional — `aligned_by` gives the column and `prefix` gives the URL.
 
 ## A set of tiles says what it is complete for
@@ -96,7 +96,7 @@ bytes get read.
 
 So the camera is addressed and the algebra is queried, and they are two different surfaces. The
 camera computes a level and a set of tiles and asks for bytes — no bbox in flight, no SQL, no
-database on that path. The [verbs](/docs/reading/verbs) answer questions and return Arrow, and they
+database on that path. The [verbs](/docs/format/reading/verbs) answer questions and return Arrow, and they
 do not draw. When a filter has to change the picture it returns **ids**, and the canvas applies them
 as a mask over the tiles it already holds.
 
@@ -134,7 +134,7 @@ corpus does not have an address. Guard: `declared-tiling`.
 A tree of tiles would only earn its keep by **containing** something that does not fit in a leaf.
 The one candidate was the edge that crosses tiles — hoisting it to the deepest tile holding both
 endpoints — and that costs more than it saves by a wide margin
-([Adjacency](/docs/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior nodes are
+([Adjacency](/docs/format/conventions/adjacency#csr-not-lca)). With nothing to hoist, the interior nodes are
 empty, and there is nothing to materialise.
 
 **The level-of-detail pyramid is not that tree either.** Zoom does not filter; it reads a different

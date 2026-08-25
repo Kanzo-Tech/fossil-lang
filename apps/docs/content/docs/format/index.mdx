@@ -51,11 +51,11 @@ this site, and each one is a guard in `apps/corpus/guards/guards.mjs`.
 
 | | the convention | what it buys |
 | --- | --- | --- |
-| [Identity](/docs/conventions/identity) | `dense_id` is a gapless `0..V−1`; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
-| [Addressing](/docs/conventions/addressing) | a tile is 4,096 rows of `dense_id`; `tile = dense_id >> 12` | no index to fetch, no directory to list |
-| [Order](/docs/conventions/order) | `dense_id` ascends with the Morton code of the position | a rectangle in space is a few contiguous runs of ids |
-| [Adjacency](/docs/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, both tiled by the endpoint they are ordered by | every drawable edge is in a tile the window already fetched, and a hop is two addressed reads |
-| [Payload](/docs/conventions/payload) | plain Parquet, row-group statistics on the addressing columns | the footer is the index, bought in one request |
+| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1`; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
+| [Addressing](/docs/format/conventions/addressing) | a tile is 4,096 rows of `dense_id`; `tile = dense_id >> 12` | no index to fetch, no directory to list |
+| [Order](/docs/format/conventions/order) | `dense_id` ascends with the Morton code of the position | a rectangle in space is a few contiguous runs of ids |
+| [Adjacency](/docs/format/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, both tiled by the endpoint they are ordered by | every drawable edge is in a tile the window already fetched, and a hop is two addressed reads |
+| [Payload](/docs/format/conventions/payload) | plain Parquet, row-group statistics on the addressing columns | the footer is the index, bought in one request |
 
 ## Why a format rather than a library
 
@@ -88,9 +88,9 @@ asserted hand-written strings instead of resolving against the artifact.
 The conventions do not live in a shared crate. A crate would put the compiler between the writer and
 the reader, and it would also put a version between them, re-introducing the very edge the two-core
 split removes. It would additionally assume a single output format by construction, which is a
-[live design question](/docs/conventions/payload#the-payload-format-is-open).
+[live design question](/docs/format/conventions/payload#the-payload-format-is-open).
 
-What replaces it is this document plus [executable guards](/docs/guards). The price, stated where it
+What replaces it is this document plus [executable guards](/docs/format/guards). The price, stated where it
 is paid: **there is no type. A guard checks what it was asked to check and nothing more.** Every
 guard on this site therefore publishes what it cannot prove alongside what it can, and that second
 column is the one worth reading.

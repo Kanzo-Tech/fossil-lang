@@ -74,7 +74,7 @@ truncated. Text-to-SQL lives here. Bindings may hide it behind a permission flag
 **The camera.** Level-of-detail is not a filter — it reads a *different relation*, and a `WHERE`
 cannot change which table it reads. A tile at aggregation level 3 holds super-nodes that do not
 exist at level 0. So the camera computes a level and a set of tiles and asks for bytes, with no SQL
-and no database on that path, and [Addressing](/docs/conventions/addressing) is where that lives.
+and no database on that path, and [Addressing](/docs/format/conventions/addressing) is where that lives.
 
 When a filter has to change the picture, the algebra returns **ids** and the canvas applies them as
 a mask over the tiles it already holds. One mechanism, not a second renderer.

@@ -3,9 +3,10 @@
   "root": true,
   "pages": [
     "(root)/index",
-    "(root)/architecture",
     "book",
-    "design",
-    "characteristics"
+    "format",
+    "---For maintainers---",
+    "(root)/architecture",
+    "design"
   ]
 }

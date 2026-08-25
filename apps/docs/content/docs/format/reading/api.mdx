@@ -3,7 +3,7 @@ title: Opening one with the API
 description: A URL, an engine, five members. What the reference API absorbs so a consumer does not have to know it, what it refuses rather than guesses, and the two costs it declares out loud.
 ---
 
-[Reading one without fossil](/docs/reading/without-fossil) is the format: the arithmetic, the column
+[Reading one without fossil](/docs/format/reading/without-fossil) is the format: the arithmetic, the column
 names, the SQL. Everything on that page is true and a reader can stop there.
 
 This page is the other option — the same corpus through `@fossil-lang/graph`, where none of that
@@ -103,7 +103,7 @@ five tiles of 300 rows; **at five million vertices a single lookup reads about 4
 pruning is the only thing keeping it off the other five columns.
 
 Where the vertex type declares an [identity
-index](/docs/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) the same
+index](/docs/format/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) the same
 call is a **seek** — the index tiles, which are sorted with disjoint ranges and therefore prune to
 one, then the payload tiles the addresses they name — and no scan of either table. `neighbours`
 resolves its seeds through the same path, so the difference reaches both members.

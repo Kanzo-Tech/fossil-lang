@@ -59,7 +59,7 @@ still cannot tell a short corpus from a complete one.
 The count is declared rather than optional for the same reason. A count a reader may skip is a count
 a reader may not depend on, and a reader that may not depend on it is exactly the one that cannot
 detect the failure the field exists for. Its borders are published beside the addressing ones —
-[the `declared_count` table](/docs/conventions/addressing#the-published-vectors) — and the row worth
+[the `declared_count` table](/docs/format/conventions/addressing#the-published-vectors) — and the row worth
 copying first is `count = 4096` at `chunk_size = 4096`: that is **one** tile, and the off-by-one
 addresses a `chunk1.parquet` that is not there.
 
@@ -93,7 +93,7 @@ addressing column there is.
 The two containers are not equally cheap, and the arithmetic above is the reason: inside one file,
 contiguous tiles are a **single** byte range, and one footer covers all of them. Measured on five
 million vertices in 1,221 tiles, that is 5.6 requests per window against 22.3, for the same bytes —
-[Addressing](/docs/conventions/addressing) has the table. A glob over `chunk*.parquet` is also a
+[Addressing](/docs/format/conventions/addressing) has the table. A glob over `chunk*.parquet` is also a
 listing, which is the thing an HTTP reader cannot do; over an origin, compose the names from the
 count and the shift instead.
 
@@ -118,7 +118,7 @@ Or, over HTTP, fetch the byte ranges the footer named and decode them directly. 
 as separate arrays, which is what Parquet stores and what leaves the choice to the reader — a
 consumer that wants them apart gets them apart, and one that wants a single interleaved
 `[x0, y0, x1, y1, …]` buffer pays one pass. **The layout does not remove that pass, it moves it**;
-see [Payload](/docs/conventions/payload).
+see [Payload](/docs/format/conventions/payload).
 
 ## 5. Read the edges of those tiles
 
@@ -205,7 +205,7 @@ The block is optional and its absence is legal: the scan returns exactly the row
 have found, which is why a reader may report the cost rather than refuse the corpus. A `prefix` with
 no `ordered_by` is the case to refuse instead — it names files whose sort has to be guessed, and a
 wrong guess returns a stranger rather than nothing.
-[Identity](/docs/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) has
+[Identity](/docs/format/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) has
 why it is a second table rather than a second sort of the first.
 
 ## Prove your own writer
@@ -221,7 +221,7 @@ It needs `node` and the `duckdb` binary, and nothing else — no pnpm install, n
 part of this repository beyond the `guards/` directory, which is written to be copied. `--explain`
 prints what each guard proves and, more usefully, what it cannot.
 
-[The guards](/docs/guards) has the full list and the honest limits.
+[The guards](/docs/format/guards) has the full list and the honest limits.
 
 ## Prove your own reader
 

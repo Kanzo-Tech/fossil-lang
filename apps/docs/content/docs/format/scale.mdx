@@ -15,17 +15,17 @@ exception that has to be stated with them rather than after them.
 
 | what a read costs | why it does not follow N | measured |
 | --- | --- | --- |
-| the address of a tile | [a tile is a range of `dense_id`](/docs/conventions/addressing), so the address is a shift | nothing is fetched to compute it and no directory is listed |
-| the tiles a window needs | [the order](/docs/conventions/order) makes a rectangle a few contiguous runs of ids | at five million, a 20,000-vertex window is 179 runs covering 20,007 ids — 1.10×–1.20× over-read at tile granularity |
+| the address of a tile | [a tile is a range of `dense_id`](/docs/format/conventions/addressing), so the address is a shift | nothing is fetched to compute it and no directory is listed |
+| the tiles a window needs | [the order](/docs/format/conventions/order) makes a rectangle a few contiguous runs of ids | at five million, a 20,000-vertex window is 179 runs covering 20,007 ids — 1.10×–1.20× over-read at tile granularity |
 | a window | contiguous tiles coalesce into one byte range | 5.6 requests and 1.38 MB per window, on a corpus of 1,221 tiles |
-| a hop | [two addressed reads](/docs/conventions/adjacency), never the relation | **113.0 kB at a quarter million and 113.0 kB at four million**, against 6.9 MB and 110.2 MB |
+| a hop | [two addressed reads](/docs/format/conventions/adjacency), never the relation | **113.0 kB at a quarter million and 113.0 kB at four million**, against 6.9 MB and 110.2 MB |
 
 The hop row is the sharpest of the four: the addressed answer is the *same bytes* at sixteen times
 the corpus, so the gap against reading the relation goes from 61× to 975× purely because the corpus
 grew, and none of that growth is paid by the reader.
 
 **One thing a reader holds does follow N, and it is worth stating rather than rounding away.** The
-footer is [the index](/docs/conventions/payload), it arrives in one request, and it is **406 B per
+footer is [the index](/docs/format/conventions/payload), it arrives in one request, and it is **406 B per
 tile** — 496,373 B for the 1,221 tiles of a five-million corpus. One box per 4,096 vertices is a
 small constant, not a flat one. A reader's *queries* are flat in N; the index it holds to answer
 them is N divided by the tile size, and a corpus large enough makes that a number rather than a
@@ -38,7 +38,7 @@ That is the whole of the read side's exposure. Everything else is on the write s
 The corpus's own ordering bounds the **edges** the pass that lays it out reads. That pass walks them
 as the CSR they already are instead of rebuilding one, and the term went from **+2.09 GiB to
 +0.08 GiB** at ten million vertices under a declared 4 GiB budget — the same change that took
-**−1.71 GiB** off the process peak ([Adjacency](/docs/conventions/adjacency)).
+**−1.71 GiB** off the process peak ([Adjacency](/docs/format/conventions/adjacency)).
 
 It does not bound the **per-vertex state**. That is O(n) and resident — about **200 MB at ten
 million** — and it is what the algorithm genuinely needs rather than a structure standing in for an

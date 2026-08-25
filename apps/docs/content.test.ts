@@ -238,6 +238,72 @@ function pageFileForRoute(route: string): string | null {
 }
 
 /**
+ * Every `/docs/…` link resolves, and every `#anchor` names a heading that is there.
+ *
+ * This did not exist, and its absence was not theoretical: folding the corpus site into
+ * `content/docs/format/` moved twelve pages, and every cross-link between them — `/docs/conventions/…`,
+ * `/docs/reading/…` — kept pointing at routes that no longer existed. `next build` prerendered all
+ * 101 pages without a word. A dead internal link is invisible to the build by construction: the
+ * anchor is a string, the page renders, and the reader finds out.
+ *
+ * The fragment half is the one that matters more, because it is the one nobody can see coming.
+ * Renaming a `##` is an ordinary edit — it is prose — and five pages currently point at
+ * `design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops`. Nothing else in this
+ * repository would notice that heading being reworded.
+ *
+ * WHAT IT CANNOT PROVE: that the target says what the link claims, which is the same residue every
+ * citation guard on this site has. And it checks the slug that fumadocs derives from the heading
+ * text, so a heading rewritten to different words with the same slug passes — correctly, because
+ * the link still lands.
+ */
+const DOCS_LINK = /\]\((\/docs[^)\s]*)\)/g;
+
+/** fumadocs' heading slug: lowercase, punctuation dropped, runs of anything else become one dash. */
+function slug(heading: string): string {
+  return heading
+    .replace(/`/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+function anchorsOf(file: string): Set<string> {
+  const body = readFileSync(file, "utf8");
+  const headings = body.matchAll(/^#{2,6}\s+(.+?)\s*$/gm);
+  return new Set([...headings].map((m) => slug(m[1])));
+}
+
+describe("every internal link lands", () => {
+  const links = mdxUnder(CONTENT_ROOT).flatMap((file) =>
+    [...readFileSync(file, "utf8").matchAll(DOCS_LINK)].map(([, href]) => ({
+      id: `${relative(repoRoot, file)} → ${href}`,
+      from: file,
+      href,
+    })),
+  );
+
+  // Same vacuity trap as everywhere else: a glob that stops matching turns this into a green pass
+  // over nothing. There are ~170 of these; the floor is deliberately far below that and above zero.
+  it("finds links to check", () => {
+    expect(links.length).toBeGreaterThan(50);
+  });
+
+  it.each(links)("$id", ({ href }) => {
+    const [route, fragment] = href.split("#");
+    const target = pageFileForRoute(route);
+
+    expect(target, `${route} does not resolve to a page under content/docs/`).not.toBeNull();
+    if (!fragment) return;
+
+    expect(
+      anchorsOf(target as string),
+      `${route} has no heading whose slug is #${fragment}`,
+    ).toContain(fragment);
+  });
+});
+
+/**
  * `arguedIn` is optional, and the reason is structural rather than lenient.
  *
  * It existed because destinations and their arguments lived in different sections — a page said

@@ -32,7 +32,7 @@ Guard: `dense-ids`, and its mutation is deleting a single vertex.
 ## The identity is the subject IRI
 
 Redoing the layout renumbers every vertex. The spatial order *is* the id space
-([Order](/docs/conventions/order)), so a new placement produces a new numbering, and a `dense_id`
+([Order](/docs/format/conventions/order)), so a new placement produces a new numbering, and a `dense_id`
 stored anywhere outside the corpus names a different vertex after the next write.
 
 So the identity is the subject IRI, and the corpus carries it as a `subject` column: non-null,
@@ -65,7 +65,7 @@ guard reflects that: `identity-is-the-subject` asserts uniqueness and non-nullne
 ## Searching for one is a second table, not a second column
 
 The payload is in Morton order because the spatial order *is* the id space
-([Order](/docs/conventions/order)) — that is what makes a window a range and a tile a shift. A
+([Order](/docs/format/conventions/order)) — that is what makes a window a range and a tile a shift. A
 lookup by identity needs the other order, and **a table has one order**. Sorting the payload by
 `subject` as well is not on offer: the second key would break the first, and the first is the one
 every window depends on.
@@ -156,7 +156,7 @@ have to agree:
 | JavaScript, on a `Number` | **truncates to 32 bits, then shifts** |
 
 `apps/corpus/guards/arithmetic.mjs` therefore refuses a `Number` outright, and the
-[published vectors](/docs/conventions/addressing#the-published-vectors) include 2³¹ and 2⁵³ for no
+[published vectors](/docs/format/conventions/addressing#the-published-vectors) include 2³¹ and 2⁵³ for no
 other reason than that those are the two places a port that got this wrong gives a different answer.
 
 What goes to the GPU stays a typed array. What *identifies* does not.

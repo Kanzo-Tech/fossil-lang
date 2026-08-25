@@ -1,4 +1,4 @@
-import { GUARDS } from "../guards/guards.mjs";
+import { GUARDS } from "../../corpus/guards/guards.mjs";
 
 /**
  * The contract, rendered from the code that enforces it.
