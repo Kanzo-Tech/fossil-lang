@@ -7,14 +7,19 @@ description: Five programs that fail, the diagnostic each one produces, and the 
 that shows them.
 
 Five programs. Each one is a real file in this documentation's corpus, each one fails, and each
-diagnostic below is the one that program produces. Read them in order if you like; they are ordered
-by how early in a program's life you tend to meet them.
+diagnostic below is the one that program produces.
 
-Two things about the blocks below, so that running one yourself is not a surprise. They are
-committed artefacts, rendered by `crates/fossil-engine/tests/programs.rs` at a **fixed width of
-100** and compared byte for byte, so a `help:` line may wrap where your terminal would not. And
-`fossil check` puts a count in front of them — `× type-checking failed: 2 error(s)` — which the
-artefact does not carry, because the count is the CLI's and the diagnostics are the compiler's.
+| what you did | what you get |
+| --- | --- |
+| [misspelt a column](#1-a-field-that-is-not-in-the-source) | `` `nmae` is not a field of `User` ``, with the nearest field named |
+| [gave a property the wrong type](#2-a-value-the-shape-will-not-accept) | two spans — the expression, and the constraint in the shape document |
+| [left out a required property](#3-a-required-property-the-mapping-never-writes) | the mapping header, and the line in the document that required it |
+| [minted two identities for one type](#4-two-mappings-that-mint-different-identities) | both mappings and both `@subject` expressions |
+| [named a predicate two shapes share](#5-two-predicates-with-the-same-short-name) | both full IRIs, and `@rename` as the repair |
+
+One thing about the blocks below, so that running one yourself is not a surprise: `fossil check` puts
+a count in front of them — `× type-checking failed: 2 error(s)` — which the artefacts here do not
+carry, because the count is the CLI's and the diagnostics are the compiler's.
 
 ## 1. A field that is not in the source
 
@@ -105,13 +110,3 @@ The five above are different errors and they have the same anatomy.
 
 If a message ever leaves you without one of the three, that is worth reporting. A diagnostic that
 names one span and calls it a mismatch is not finished.
-
-## What a clean compile does not promise
-
-Worth being straight about. `fossil check` exiting zero says your program is type-correct against the
-shape document you named. It does not say the data in your CSV is what its header implies, and it does
-not say the graph means what you hoped — that `buyer` really is the buyer, that the vocabulary you
-chose is the right one, that the shape document describes the graph anybody wanted.
-
-It says the two ends meet. Which is a smaller claim than "correct", and it is the one that catches the
-errors that otherwise show up as an empty graph three weeks later.

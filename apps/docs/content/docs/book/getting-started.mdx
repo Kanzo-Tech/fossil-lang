@@ -3,26 +3,28 @@ title: Getting started
 description: Install fossil, run one seven-line program against three rows of CSV, and see the graph it writes.
 ---
 
-fossil is a small language for turning tables into a graph. You point it at the data you have and at
-a document describing the graph you want, and it writes the graph.
+fossil turns tables into a graph. You give it the data you have and a document describing the graph
+you want, and it writes the graph.
+
+```mermaid
+flowchart LR
+  CSV["<b>data/people.csv</b><br/>the rows you have"] --> RUN(["<b>fossil run</b>"])
+  SHEX["<b>hello.shex</b><br/>what a Person is"] --> RUN
+  PROG["<b>hello.fossil</b><br/>which column is which property"] --> RUN
+  RUN --> OUT["<b>a corpus</b><br/>Person 1 · Person 2 · Person 3"]
+```
 
 ## Install
 
-fossil is one binary, built from the repository:
+One binary, built from the repository. It puts `fossil` on your path.
 
 ```bash
 cargo install --git https://github.com/Kanzo-Tech/fossil-lang fossil-cli
 ```
 
-That puts `fossil` on your path. Check it:
+## The three files
 
-```bash
-fossil --version
-```
-
-## A program, and the two files beside it
-
-Make a directory and put three files in it.
+Make a directory and put them in it.
 
 <Program src="hello/hello.fossil" title="hello.fossil" />
 
@@ -30,9 +32,10 @@ Make a directory and put three files in it.
 
 <Program src="hello/data/people.csv" title="data/people.csv" />
 
-## Check it
+## Check it, then run it
 
-`fossil check` reads the program, the shape document and the CSV, and tells you whether they agree.
+`fossil check` reads all three and tells you whether they agree. If they do not you get a diagnostic
+pointing at the line — [when it does not compile](/docs/book/diagnostics) is worth reading early.
 
 ```bash
 fossil check hello.fossil
@@ -42,10 +45,7 @@ fossil check hello.fossil
 ok — no errors in hello.fossil
 ```
 
-One line and an exit code of zero mean they do. If they do not, you get a diagnostic pointing at the
-line — that is [When it does not compile](/docs/book/diagnostics), and it is worth reading early.
-
-## Run it
+Then write the graph:
 
 ```bash
 fossil run hello.fossil --dest file:///tmp/hello
@@ -55,12 +55,10 @@ fossil run hello.fossil --dest file:///tmp/hello
 wrote 1 vertex type(s), 0 edge type(s) to file:///tmp/hello
 ```
 
-Under `/tmp/hello` is a corpus: columnar files and a manifest, three `Person` nodes in them, one per
-row of `people.csv`. There is nothing between `run` and that directory — no build step, no
-intermediate object, nothing of fossil's own for you to keep.
+Under `/tmp/hello` is the corpus: columnar files and a manifest, three `Person` nodes in them, one
+per row of `people.csv`.
 
 ## Where to go next
 
-[Your first program](/docs/book/first-program) accounts for every token of the program above.
-[The anatomy of a fossil program](/docs/book/anatomy) is the one to read end to end: it takes a
-larger program and grows it a section at a time.
+[Your first program](/docs/book/first-program) accounts for every token above. [The anatomy of a
+fossil program](/docs/book/anatomy) takes a larger one and grows it a section at a time.

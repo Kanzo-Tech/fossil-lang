@@ -7,35 +7,29 @@ A source binding is one line:
 
 <Program src="shop/shop.fossil" region="sources" title="shop.fossil" />
 
-One file, one name — and fossil opens the file at that path while it is checking your program, to see
-what is in it. The columns become fields, and the values decide what kind each field holds. `age`
-holds whole numbers, so `User.age` is an `Integer`, and it is an `Integer` without anybody writing
-that down.
+fossil opens the file at that path while it is checking your program, to see what is in it. The
+columns become fields, and the values decide what kind each field holds. `age` holds whole numbers, so
+`User.age` is an `Integer`, and it is an `Integer` without anybody writing that down.
 
 ## One name, two jobs
 
-`User` is a type **and** a relation, and which one you get depends on what you ask for.
-
-As a type, its members are the columns:
-
-| | |
-| --- | --- |
-| `User.email` | `String` |
-| `User.age` | `Integer` |
-
-As a relation, its rows are the rows — `where` narrows them, and `from` reads them:
+```mermaid
+flowchart LR
+  F[("data/users.csv")] -->|"read while checking"| U["<b>User</b>"]
+  U --> T["<b>as a TYPE</b><br/>its fields are the columns<br/>User.email is a String<br/>User.age is an Integer"]
+  U --> R["<b>as a RELATION</b><br/>its rows are the rows<br/>from User · User.where …"]
+```
 
 <Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
 
 <Program src="shop/shop.fossil" region="header" title="shop.fossil" />
 
-They do not collide because they are never in the same position. After `from`, a name is a relation.
-After a dot, in an expression, a name is a type. One binding is one concrete file, so there is
-nothing to be gained by making you write the two separately.
+The two never collide, because they are never in the same position: after `from` a name is a relation,
+after a dot in an expression it is a type, and what the dot answers in each case is
+[values and expressions](/docs/book/expressions). One binding is one concrete file, so there is nothing
+to be gained by making you write the halves separately.
 
 ## The formats
-
-Each one is a member of `io`, and they are all the same shape of line.
 
 | what you have | how you bind it | where the field names come from |
 | --- | --- | --- |
@@ -44,44 +38,29 @@ Each one is a member of `io`, and they are all the same shape of line.
 | Parquet | `io.parquet("events.parquet")` | the file's own schema |
 | an RDF graph | `io.rdf("people.ttl")` | the predicates of its subjects |
 
-Here are two of them in one program. The stations are a CSV, the sightings are JSON, and neither one
-needs anything said about it beyond its path:
-
-<Program src="sightings/sightings.fossil" region="bindings" title="sightings.fossil" />
-
-<Program src="sightings/data/stations.csv" title="data/stations.csv" />
-
-<Program src="sightings/data/sightings.json" title="data/sightings.json" />
-
-`Site.elevation` is an `Integer` because the column holds integers; `Reading.count` is an `Integer`
-because the JSON numbers are whole. The shape document asks for `xsd:integer` on both, and that is
-the whole of what has to line up:
-
-<Program src="sightings/sightings.shex" title="sightings.shex" />
-
-<Program src="sightings/sightings.fossil" title="sightings.fossil" />
+Each one is a member of `io`, and nothing else is said about a source: no column list, no types, no
+schema file beside it. The file is the declaration.
 
 ## What this gets you
 
-Two things, and they are the reason a binding does its work up front rather than when the data goes
-past.
+Reading it up front, rather than when the data goes past, buys two things.
 
-**A misspelled column is a mistake you find now.** `User.nmae` is not a field of `User`, and the
-message says so, at the line, with a suggestion drawn from `User`'s own fields. Nothing is left to be
-discovered later in a graph with nothing in it.
+**A misspelled column is a mistake you find now**, at the line, with a suggestion drawn from `User`'s
+own fields rather than from everything the language knows — see
+[when it does not compile](/docs/book/diagnostics). Nothing is left to be discovered later in a graph
+with nothing in it.
 
 **And your editor can know the answer.** Type `User.` and the completion list is the columns of that
-file: not a guess, not a cached schema somebody wrote down in a config — the columns of the file the
-line names.
+file: not a guess, not a cached schema somebody wrote down in a config.
 
-Whether it does depends on the host, and today `fossil-lsp` is not one that introspects: after
-`User.` a native editor offers the relation's verbs and no columns. The browser playground reads the
-file with DuckDB-WASM and hands the columns in, so there it is the sentence above.
-[In your editor](/docs/book/editor) opens on that gap and measures it.
+The reading is the host's job, and every host does it: `fossil-cli` introspects before each `check` and
+each `run`, the browser playground reads the file with DuckDB-WASM, and `fossil-lsp` goes and looks at
+any source it can `stat` (`crates/fossil-lsp/src/lib.rs:183`). The gap left is a source that is not on
+disk — a CSV on `s3://`, or behind an `https://` — which the editor declines to fetch on its message
+loop, so there `fossil check` reports things your editor does not, and
+[in your editor](/docs/book/editor) measures it.
 
 ## Fields, not rows
 
-One thing to keep straight. A binding gives you the shape of a row, not the rows themselves. There is
-no way to ask a program what is in cell three, and no way for a value in the data to change what the
-program means. The file decides what fields exist; the mapping decides what happens to each row; the
-two never trade places.
+A binding gives you the shape of a row, not the rows themselves. There is no way to ask a program what
+is in cell three, and no way for a value in the data to change what the program means.

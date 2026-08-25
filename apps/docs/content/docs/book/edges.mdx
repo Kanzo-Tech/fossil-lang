@@ -1,13 +1,13 @@
 ---
 title: Edges
-description: Connect two entities by naming the target type and giving it the identity — why that is all the information required, why the checker lets an edge point at a node nothing emits, and why the write path then drops it.
+description: Connect two entities by naming the target type and giving it the identity — why that is all the information required, and what happens to an edge whose target nothing emits.
 ---
 
 Most properties hold a value. Some hold another entity, and the shape document says which:
 
 <Program src="shop/shop.shex" region="order" title="shop.shex" />
 
-`shop:buyer @shop:Person` — this one does not take a string. It takes a `Person`. So you write one:
+`shop:buyer @shop:Person` — this one does not take a string, it takes a `Person`. So you write one:
 
 <Program src="shop/shop.fossil" region="edge" title="shop.fossil" />
 
@@ -16,71 +16,42 @@ at and hand it the value its identity needs. That is the whole form.
 
 ## Why that is enough
 
-A `Person` in this program has exactly one identity, because
-[every mapping that produces one writes the same `@subject`](/docs/book/mappings#subject):
+A `Person` here has exactly one identity, because
+[every mapping that produces one writes the same `@subject`](/docs/book/mappings#subject). So
+`Person(User.email)` is not a guess at what the other mapping minted: there is one answer and the
+compiler has it. You never write the IRI twice, so the two copies cannot drift apart. The argument is
+checked too — hand `Person` something of the wrong kind and you hear about it at that line.
 
-<Program src="shop/shop.fossil" region="identity" title="shop.fossil" />
+## An edge may dangle
 
-So `Person(User.email)` is not a guess about what the other mapping might have minted. There is one
-answer and the compiler has it. You never write the IRI twice, which means the two copies can never
-drift apart — the failure that produces a graph full of nodes that almost join up.
+**The checker does not ask whether the node at the other end exists**, only that the IRI is well
+formed and built by the scheme that type uses. That is deliberate: in RDF an IRI denotes whether or
+not this corpus says anything about it.
 
-It also means the argument is checked. `Person` takes the thing its identity is built from, and if you
-hand it something of the wrong kind you hear about it at that line.
+Three reviews name an author by email, and the people file has two of them:
 
-## An edge may point outside the graph, and the checker will let you
+```mermaid
+graph LR
+  R1["<b>Review</b><br/>r1"] -->|author| A["<b>Person</b><br/>alice@shop.example"]
+  R2["<b>Review</b><br/>r2"] -->|author| C["<b>Person</b><br/>carol@shop.example"]
+  R3["<b>Review</b><br/>r3"] -.->|author| D["dora@shop.example<br/><i>no Person emitted</i>"]
+```
 
-This is the part worth being clear about, because the natural assumption is the other one, and
-because the two ends of the toolchain do not currently agree about it.
-
-**The checker does not ask whether the node at the other end exists.** The check it makes is that
-the IRI is the right one — well formed, and built by the scheme that type uses. Whether anything in
-this program emits that subject is a different question, and `fossil check` does not ask it.
-
-Here is a program where the two come apart:
-
-<Program src="reviews/reviews.shex" title="reviews.shex" />
-
-<Program src="reviews/reviews.fossil" title="reviews.fossil" />
-
-The reviews name three people by email:
-
-<Program src="reviews/data/reviews.csv" title="data/reviews.csv" />
-
-The people file has two of them:
-
-<Program src="reviews/data/users.csv" title="data/users.csv" />
-
-`r3` mints `author = Person("dora@shop.example")`, and `People` never emits that node. The program
-type-checks, and it should: in RDF an IRI denotes whether or not anything in this corpus says
-something about it, so the second half of the data arriving from somewhere else — or not arriving,
-with something downstream knowing what to do about that — is often the graph you meant.
-
-<Callout type="warn" title="True today: the write path drops that edge, and says nothing">
-The corpus does **not** get an edge to `https://shop.example/user/dora@shop.example`. Run the program
-above and the `Review` table has three rows, the `Person` table has two, and
-`edge/Review_author_Person/*.edge.yml` says `edge_count: 2`.
-
-An edge is written as a pair of dense ids, and a dense id is a row number in a vertex table, so an
-endpoint with no row has nothing to be. `execute_edge` in `crates/fossil-df/src/lib.rs` resolves both
-endpoints with an **inner** join and its own doc comment says what that costs: *dangling endpoints
-drop*. There is no warning, no diagnostic and no debug line — the summary reports the same
-`1 edge type(s)` either way.
-
-So the open-world reading holds of the language and not of the artefact. Until it holds of both, an
-edge whose target you do not also emit is an edge you do not get.
+<Callout type="warn" title="The dangling edge is dropped, and the run says so">
+An edge is a pair of dense ids and a dense id is a row number in a vertex table, so `execute_edge`
+resolves both endpoints with an inner join and the third review never becomes an edge. That is
+intended and it stays; what it no longer is, is silent. The run counts the drops per edge type — a
+summary line naming the edge and the number, and a `dropped` entry in `--output-json` present even as
+`0` (`crates/fossil-df/src/report.rs:100`, `crates/fossil-df/tests/dangling_edges.rs:90`).
 </Callout>
 
-The usual way to arrive here by accident is a filter upstream. In
-[the anatomy program](/docs/book/anatomy), `Orders` joins against `User` while `Users` maps from
-`Adults`, so an order placed by a seventeen-year-old would point at a `Person` nobody wrote — and,
-today, would simply not be in the corpus. If you want those edges to land inside your own graph, join
-against the same relation the mapping reads: `Purchase.join(Adults, ...)` rather than
-`Purchase.join(User, ...)`.
+The usual way to arrive here by accident is a filter upstream: a mapping reads from `Adults` while
+the join feeding the edge reads from `User`. If you want those edges inside your own graph, join
+against the same relation the mapping reads.
 
 ## Edges in both directions
 
-An edge lives on whichever entity the shape puts it on. There is nothing to declare on the other end,
-and no inverse to keep in step — `Order` has a `buyer`, and `Person` knows nothing about it. If you
-also want `Person` to have `orders`, the shape document declares that property and a mapping writes
-it, the same as any other.
+An edge lives on whichever entity the shape puts it on. There is nothing to declare at the other end
+and no inverse to keep in step — `Order` has a `buyer`, and `Person` knows nothing about it. For
+`Person` to have `orders`, the shape declares that property and a mapping writes it, as for any
+other.

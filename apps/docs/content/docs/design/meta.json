@@ -6,6 +6,7 @@
     "algebra",
     "expressions",
     "types",
+    "typing",
     "type-providers",
     "catalogue",
     "shapes",

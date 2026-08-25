@@ -1,15 +1,10 @@
 ---
 title: The anatomy of a fossil program
-description: One real program grown a section at a time — two shapes, two CSVs, a filter, a join and an edge — shown whole at the end, then broken on purpose.
+description: One real program grown a section at a time — two shapes, two CSVs, a filter, a join and an edge — shown whole at the end.
 ---
 
-This is the page to read end to end. It takes one program — a small shop, with people and the orders
-they placed — and builds it up a piece at a time, introducing each idea at the moment the program
-needs it. Nothing here assumes you have seen fossil before. It does assume you have seen a CSV and
-are willing to believe that a graph is a useful thing to have.
-
-At the end the program is shown whole, and then broken on purpose, because what the language
-promises is best seen in what it refuses.
+This is the page to read end to end. One program — a small shop, with people and the orders they
+placed — built up a piece at a time, each idea arriving where the program needs it.
 
 ## What we are starting from
 
@@ -21,178 +16,103 @@ And their orders, keyed back to them by `user_id`:
 
 <Program src="shop/data/orders.csv" title="data/orders.csv" />
 
-And a description of the graph we want out. It says a `Person` has an email and a name, and may have
-a phone; and an `Order` has a total and a buyer, and the buyer is a `Person`.
+And a description of the graph we want out: a `Person` has an email, a name and maybe a phone; an
+`Order` has a total and a buyer, and the buyer is a `Person`.
 
 <Program src="shop/shop.shex" title="shop.shex" />
 
-The program is the third thing: the piece that says *this column becomes that property*. It is a
-program, not a template — which is what the rest of this page is about.
+The program is the third thing — the piece that says *this column becomes that property*.
 
 ## 1. Declare what you are producing
 
 <Program src="shop/shop.fossil" region="shapes" title="shop.fossil" context />
 
-`io.shex(...)` reads the shape document. The braces on the left pull two shapes out of it and give
-them local names.
-
-The line reads as a destructuring, and **the names bind by position**. `Person` takes the first shape
-the document declares; `Order` takes the second. Rename `Person` to `Persona` in your program and
-nothing at all changes about the output — the IRI that gets written as the node's type comes from the
-document, never from the label you chose. Two documents that both declare something called `Person`
-therefore never collide: give them two different local names and carry on.
-
-<Program src="multi-document/multi-document.fossil" region="bindings" title="multi-document.fossil" />
-
-One consequence worth knowing before it surprises you: **a name past the end of the document binds
-nothing, and you hear about it where you use it.** Name three members of a document that declares
-two and the third is an error the first time a mapping names it — *`Extra` is declared and bound
-nothing: the binding names 3 shape(s) and the document declares 2* — not at the binding line, and
-not at all if you never use it. Naming fewer than the document declares is not an error either: you
-bind a prefix of it and leave the rest alone. And reordering the two shapes inside the `.shex`
-quietly rebinds the program. The document is a file you version, so this is a fair trade, but it is a
-trade.
+`io.shex(...)` reads the shape document, and the braces on the left pull two shapes out of it under
+local names. They bind **by position**, and the label you choose never reaches the output: rename
+`Person` to `Persona` and the graph is byte for byte the same, because the IRI written as the node's
+type comes from the document. See
+[naming what you produce](/docs/book/what-you-produce#binding-is-by-position).
 
 `io` is where the readers live: `io.shex`, `io.shacl`, `io.csv`, `io.json`, `io.parquet`, `io.rdf`.
 None of them take anything on the left, because they are what makes the thing.
-
-If your description of the output is SHACL rather than ShEx, the line is `io.shacl(...)` and the
-rest of the program does not change. See [naming what you produce](/docs/book/what-you-produce).
 
 ## 2. Declare what you are reading
 
 <Program src="shop/shop.fossil" region="sources" title="shop.fossil" context />
 
-The same mechanism, pointed the other way. `io.csv` reads the file at the path — the real file, and
-it reads it while it is checking your program, not while it is running one. It works out that `age`
-holds integers and `email` holds strings, and it builds a type for the row out of what it finds.
-Nobody declares `User`. Nobody writes down its fields. The type exists because the data does, and it
-exists early enough to catch a misspelled column while you are still typing it.
+The same mechanism, pointed the other way. `io.csv` reads the real file at that path, and reads it
+while it is checking your program rather than while it is running one: it works out that `age` holds
+integers and `email` holds strings, and builds a type for the row. Nobody declares `User`; nobody
+writes its fields down. The type exists because the data does, early enough to catch a misspelled
+column while you are still typing it.
 
 One line, one name, **two things**:
 
 - `User` is a **type**. `User.age` is one of its fields, and it is an `Integer`.
 - `User` is a **relation**. `from User` in a mapping header means *once per row*.
 
-The dot tells them apart by what you ask for, which brings us to the one idea this language leans on
-hardest.
-
-### The dot
-
-**`.` means "member of", and what is on the left decides what you get.**
-
-| on the left | what the dot gives you |
-| --- | --- |
-| a **reader** — `io` | the sources it can open |
-| a **type** — `User`, `Person`, `str` | its fields and its operations |
-| a **relation** — `User`, `Adults` | its operations: `where`, `select`, `join` |
-
-All three in one breath, which is the next line of the program:
-
-<Program src="shop/shop.fossil" region="derived" title="shop.fossil" context />
-
-`User.where(...)` — a relation on the left, so the dot offers relational operations. `User.age` — a
-type on the left, so the dot offers fields. One operator, two answers, each decided by something the
-compiler already knows.
-
-There is no second access operator. `User.age` on the left of a dot and `where` on the right of one
-are the same idea, so they get the same spelling.
+`.` means "member of", and what is on the left decides which of the two you get: `User.age` is a
+field because a type is on the left, `User.where(...)` is a relational operation because a relation
+is. One operator, two answers, and no second one to learn —
+[values and expressions](/docs/book/expressions#member-access) has the full table.
 
 ## 3. Narrow it
 
+<Program src="shop/shop.fossil" region="derived" title="shop.fossil" context />
+
 `Adults` is a relation, derived from `User` by a member function. Look at what the predicate names:
 not `.age`, which does not exist in this language, but `User.age`. **Every reference says which row
-it came from**, always, even here where there is only one row in scope and the qualification looks
-like noise. It stops looking like noise about four sections from now, when there are two.
+it came from**, even here where there is only one row in scope.
 
-`where` gives back something that itself has `.join(...)`, which gives back something that itself has
-`.select(...)`, and you can keep going as long as you like. Nothing in the language has a special
-rule for "the chain got longer".
-
-Note what `Adults` is **not**: it is not a new type. It is a relation of `User`s. Which is why, in
-the mapping body below, you will write `User.name` and not `Adults.name` — the fields belong to the
-type, and the type is still `User`.
+And `Adults` is not a new type. It is a relation of `User`s, which is why the mapping body below
+writes `User.name` and not `Adults.name`.
 
 ## 4. The first mapping
-
-<Program src="shop/shop.fossil" region="first-mapping" title="shop.fossil" context />
 
 ### The header
 
 <Program src="shop/shop.fossil" region="header" title="shop.fossil" context />
 
-*The mapping called `Users` produces `Person`s, one per row of `Adults`.*
-
-Two names, and both earn their place. `Person` is the type — the contract the body is checked
-against. `Users` is the mapping's own name, and it exists because two sources can produce the same
-type and a diagnostic has to be able to say which one it means. "Two mappings of `Person` disagree"
-is not an error message; "`Users` and `Legacy` disagree" is.
-
-Because the name stays, the header needs no colon at the end. The block is opened by the indentation.
+*The mapping called `Users` produces `Person`s, one per row of `Adults`.* `Person` is the type, the
+contract the body is checked against; `Users` is the mapping's own name, and
+[mappings](/docs/book/mappings#the-header-and-its-two-names) says why it needs one. No colon at the
+end — the block is opened by the indentation.
 
 ### The identity
 
 <Program src="shop/shop.fossil" region="identity" title="shop.fossil" context />
 
-The first line of any body is the identity, and it is the one thing you have to invent. An IRI is not
-in your CSV. In RDF the subject **is** the node rather than one of its properties, so a shape document
-has nowhere to declare it, which is why the language owns the slot instead.
+The identity is the one thing you have to invent, because an IRI is not in your CSV. It is an
+assignment, and its right-hand side is an ordinary
+[interpolated string](/docs/book/expressions#string-interpolation).
 
-`@subject` is an assignment. Its right-hand side is an ordinary expression, and the string is
-interpolated: `{...}` holds an expression, `{{` is a literal brace, and what is inside a hole is
-checked exactly like anything else, because it is exactly the same grammar.
-
-The `@` marks the language's own namespace. Everything else in a body is a bare name your shape
-declared, and your names are arbitrary — you might genuinely have a property called `subject`.
-
-An identity that reaches outside the row it is identifying is not reproducible, and the checker says
-so — but by the ordinary scope rule, the one every property line is held to as well. Two rules apply
-to `@subject` and to nothing else:
-
-- **It is the first line of the body.** Written anywhere else it is an error that says which line it
-  is on.
-- **One per type.** Every mapping that produces `Person` writes the same `@subject`. Two that
-  disagree is an error naming both mappings and both templates — see
-  [when it does not compile](/docs/book/diagnostics).
+Two rules apply here and nowhere else — it is the first line of the body, and there is one per type —
+and [`@subject`](/docs/book/mappings#subject) states both. The second is what makes the edge in
+section 6 as short as it is.
 
 ### The properties
 
 <Program src="shop/shop.fossil" region="properties" title="shop.fossil" context />
 
 The key is a plain name and nothing else: the last segment of the predicate IRI the shape declares.
-`https://shop.example/voc#email` in the document is `email` here.
+`https://shop.example/voc#email` in the document is `email` here, and the name depends on the label
+and nothing else — never on cardinality, never on the datatype, never on where the property sits.
 
-The name depends on **the label and nothing else** — never on cardinality, never on the datatype,
-never on where the property sits in the document. There is no plural-to-singular guesswork. Two
-predicates whose IRIs end in the same segment is an error naming both IRIs, and the repair is a
-rename you write above the binding; [naming what you produce](/docs/book/what-you-produce) shows it.
-
-The right-hand side is an expression. Here they are bare column references, but they can be anything
-the language can say: `User.email.trim().lower()` is a property line too.
+The right-hand side is any expression. Here they are bare column references, but
+`User.email.trim().lower()` is a property line too.
 
 ## 5. The second source, and the join
 
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" context />
 
-The orders live in their own file and the key back to a person lives with them, so the mapping's
-source is a join.
+The orders live in their own file and the key back to a person lives with them, so this mapping's
+source is a join. `join` is a member of a relation, the same way `where` is: it takes the other
+relation and an `on` that is an equality between qualified references, or several joined by `and`
+because compound keys are ordinary. Not a general condition — the `on` names keys.
 
-`join` is a member of a relation, the same way `where` is. It takes the other relation and an `on`
-that is an equality between qualified references — or several of them joined by `and`, because
-compound keys are ordinary. It is an equality, not a general condition: the `on` names keys.
-
-**The join does not flatten.** There is no merged row afterwards. Two rows are in scope — `Purchase`
-and `User` — and every reference in the body below says which one it came from. That is why the
-qualification was there from the first line of the program: nothing changes about how you write a
-reference when a second row arrives, and no column silently acquires a suffix because two sources
-happened to use the same word.
-
-It also means a self-join needs no special apparatus. There is no union of rows, so there is no
-collision to forbid, and `A.join(A as B, on = A.k == B.k)` is just a join.
-
-The price, and it is worth knowing in advance: names travel with the relation. Write
-`Recent := Purchase.join(User, on = ...)` and both `Purchase` and `User` are in scope inside every
-mapping that reads `Recent`, so renaming a source is a change its readers see.
+**The join does not flatten.** Two rows are in scope, `Purchase` and `User`, and every reference says
+which one it came from — which is why the qualification was there from the first line of the program.
+[Relations](/docs/book/relations#a-join-does-not-flatten) has what follows from that.
 
 ## 6. The edge
 
@@ -202,41 +122,37 @@ So you give it one:
 <Program src="shop/shop.fossil" region="edge" title="shop.fossil" context />
 
 Read it as *the `Person` whose identity is built from this email*. You name the type you are pointing
-at and hand it the value its identity needs. You do not build an IRI by hand and hope it matches the
-one the other mapping minted — and this works precisely because of the one-identity-per-type rule
-above. There is exactly one `@subject` for `Person` in the program, so naming `Person` is enough to
-know the IRI.
+at and hand it the value its identity needs — you never build an IRI by hand and hope it matches the
+one the other mapping minted, because there is exactly one `@subject` for `Person`.
 
-One thing to be clear about, because it is easy to assume otherwise: **an edge is a reference, and
-the checker does not ask whether the node at the other end exists.** `Orders` joins against `User`
-rather than `Adults`, so an order placed by a seventeen-year-old would mint a `buyer` pointing at a
-`Person` that `Users` never emitted, and the program would still type-check. Bob is seventeen and
-places no order in this data, so nothing here does it — but the arrangement that allows it is right
-there in the header. Whether such an edge survives into the corpus is a separate question with a
-different answer today, and [edges](/docs/book/edges) measures it.
+Here is the graph this program writes from that data, and the one arrow that is not in it:
+
+```mermaid
+graph LR
+  O100["<b>Order</b> 100"] -->|buyer| A["<b>Person</b><br/>alice@shop.example"]
+  O101["<b>Order</b> 101"] -->|buyer| A
+  O102["<b>Order</b> 102"] -->|buyer| C["<b>Person</b><br/>carol@shop.example"]
+  OX["<b>Order</b> by user 2<br/><i>no such row here</i>"] -.->|buyer| B["<b>Person</b><br/>bob@shop.example<br/><i>17, not in Adults</i>"]
+  classDef absent stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
+  class OX,B absent
+```
+
+The dashed pair is the arrangement, not the data. `Orders` joins against `User` while `Users` maps
+from `Adults`, so an order placed by a seventeen-year-old would mint a `buyer` pointing at a `Person`
+that `Users` never emitted — and **the checker does not ask whether the node at the other end
+exists**, so it would still type-check. [Edges](/docs/book/edges) settles that.
 
 ## The program, whole
 
 <Program src="shop/shop.fossil" title="shop.fossil" />
 
-Sixteen lines, and not one type written by hand. One IRI written by hand per type, inside the string
-where it is minted. Every name on a left-hand side came from the shape document; every name on a
-right-hand side came from the data; and the whole job of the checker is the space between them.
+Sixteen lines, not one type written by hand, and one IRI per type inside the string where it is
+minted. Every name on a left-hand side came from the shape document, every name on a right-hand side
+came from the data, and the whole job of the checker is the space between them.
 
-## And now break it
-
-Change one letter. `User.name` becomes `User.nmae`:
-
-<Program src="errors/unknown-field/program.fossil" title="program.fossil" />
-
-<Program src="errors/unknown-field/expected/diagnostic.txt" title="fossil check program.fossil" />
-
-That is the point of all of it. `User` is a type because a reader built one out of the actual CSV, so
-`nmae` is not an open question to be discovered later in a graph with zero instances — it is a name
-that is not there, and the suggestion comes from `User`'s own fields rather than from a dictionary.
-
-The same holds at the other end. Ask for a property the shape does not declare and it is the same
-kind of error, from the same kind of knowledge.
+Change one letter of one of those names and the diagnostic names the fields that do exist, because
+`User`'s fields are the columns of a file that was read — see
+[when it does not compile](/docs/book/diagnostics).
 
 Next, the ideas here on their own terms: [naming what you produce](/docs/book/what-you-produce),
 [naming what you read](/docs/book/what-you-read), [relations](/docs/book/relations),

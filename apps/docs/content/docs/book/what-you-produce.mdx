@@ -3,84 +3,59 @@ title: Naming what you produce
 description: Point a program at a ShEx or a SHACL document, learn what names you get from it, and rename one when two predicates end in the same word.
 ---
 
-Every fossil program begins by naming the document that describes its output. That is where the
-property names come from, so it is not an optional line: without it there is nothing to call a
-property.
-
-<Program src="shop/shop.fossil" region="shapes" title="shop.fossil" />
-
-Three things happen on that line. The document is read. Two of its shapes are pulled into scope under
-the names you chose. And from then on `Person` and `Order` are types, with a known set of properties,
-a known kind of value on each, and a known number of them allowed.
-
-## The two documents, side by side
-
-ShEx and SHACL are both first-class. The reader is a different one; the program is the same shape.
-
-### ShEx
+Every fossil program begins by naming the document that describes its output. Property names come
+from there, so it is not an optional line: without it there is nothing to call a property.
 
 <Program src="shop/shop.shex" title="shop.shex" />
 
 <Program src="shop/shop.fossil" region="shapes" title="shop.fossil" />
 
-### SHACL
+Three things happen on that line. The document is read; two of its shapes are pulled into scope under
+the names you chose; and from then on `Person` and `Order` are types, with a known set of properties, a
+known kind of value on each, and a known number of them allowed.
+
+SHACL is the other half of the same door — a different reader, the same program:
 
 <Program src="catalogue/catalogue.ttl" title="catalogue.ttl" />
 
 <Program src="catalogue/catalogue.fossil" title="catalogue.fossil" />
 
-The bare keys `label` and `price` come out of `sh:path shop:label` and `sh:path shop:price` exactly
-as `email` and `name` come out of a ShEx triple constraint. Whichever document you write, the type
-you get has the same three things on every property: a name, a kind of value, and a count.
+The bare keys `label` and `price` come out of `sh:path shop:label` and `sh:path shop:price` exactly as
+`email` and `name` come out of a ShEx triple constraint. Whichever document you write, every property
+of the type you get carries the same three things: a name, a kind of value, and a count.
 
 ## Binding is by position
 
 The names on the left are yours. They bind to the shapes **in the order the document declares them**,
-not by matching what they are called.
+never by matching what they are called. `Person` is the first shape in `shop.shex`, `Order` the
+second. Call them `Buyer` and `Sale` and the output is byte for byte the same, because the IRI written
+into the graph is the one in the document.
 
-<Program src="shop/shop.fossil" region="shapes" title="shop.fossil" />
+| what you write | what you get |
+| --- | --- |
+| as many names as the document declares | the Nth name takes the Nth shape |
+| **fewer** names than shapes | a prefix binds, the rest of the document is ignored, and that is not an error |
+| **more** names than shapes | the surplus binds nothing — *`Extra` is declared and bound nothing: the binding names 2 shape(s) and the document declares 1*, reported at the **use** of the name and silent if you never use it |
+| the same names, after the document is reordered | the program rebinds, quietly |
 
-`Person` is the first shape in `shop.shex`, `Order` is the second. Call them `Buyer` and `Sale` and
-the output is byte for byte the same, because the IRI written into the graph is the one in the
-document. What the local name is for is the rest of your program: the mapping header that says
-`from`, and the diagnostic that has to name something.
+The last row is the cost, and it is worth knowing the day you go and tidy a document up; shape
+documents are files you version and review, which is what makes it a fair trade.
 
-That is what lets two documents live in one program without arguing:
-
-<Program src="multi-document/multi-document.fossil" region="bindings" title="multi-document.fossil" />
-
-Two documents, two labels, no negotiation. Here is the whole of it — a Spanish register and an
-English one, each with its own vocabulary, in one program:
+What the local name buys is the rest of your program — the header that says `from`, and the diagnostic
+that has to name something — which is also what lets two documents live in one program without
+arguing. A Spanish register and an English one, each with its own vocabulary:
 
 <Program src="multi-document/multi-document.fossil" title="multi-document.fossil" />
-
-It also gives you a check, and it is worth knowing exactly which one. Name three members of a
-document that declares two and the third binds nothing — the Nth name takes the Nth shape, and there
-is no third shape to take. That is an error, reported at the **use** of the surplus name rather than
-at the binding line:
-
-```
-`Extra` is declared and bound nothing: the binding names 3 shape(s) and the
-document declares 2. Names bind by POSITION, so there is no shape 3 for it
-to take.
-```
-
-Which means a surplus name you never use is silent. The other direction is not an error at all:
-naming two members of a document that declares five binds the first two and ignores the rest.
-
-And it has a cost, stated plainly: reorder the shapes inside the document and the program rebinds.
-Shape documents are files you version and review, which is what makes that acceptable, but it is
-worth knowing the day you go and tidy one up.
 
 ## What a name looks like once you have it
 
 A property key in a mapping body is a bare word: **the last segment of the predicate IRI**.
 `https://shop.example/voc#email` is `email`. `http://xmlns.com/foaf/0.1/name` is `name`.
 
-The rule is narrow on purpose. The name depends on the label and nothing else — not on how many of
-the property there may be, not on what kind of value it holds, not on where it sits in the document.
-There is no plural-to-singular guesswork, and there is no numbered suffix. A small edit to a document
-never renames something you were already writing.
+The rule is narrow on purpose. The name depends on the label and nothing else — not on how many of the
+property there may be, not on what kind of value it holds, not on where it sits in the document — with
+no plural-to-singular guesswork and no numbered suffix, so a small edit to a document never renames
+something you were already writing.
 
 ## When two of them collide
 
@@ -93,14 +68,11 @@ number them. It stops, and it names both IRIs:
 
 <Program src="errors/colliding-name/expected/diagnostic.txt" title="fossil check program.fossil" />
 
-The repair goes above the binding, and it is all constants — an IRI and the word you want instead:
-
-<Program src="rename/rename.fossil" region="repair" title="rename.fossil" />
-
-Now both are writable, and which one you mean is on the page:
+The repair goes above the binding, and it is all constants — an IRI and the word you want instead.
+Both are then writable, and which one you mean is on the page:
 
 <Program src="rename/rename.fossil" title="rename.fossil" />
 
 The rename lives in your program rather than in the shape document for one plain reason: **the
-vocabulary may not be yours.** `foaf:` belongs to somebody else, and a local naming problem should
-not turn into an edit to a document other people share.
+vocabulary may not be yours.** `foaf:` belongs to somebody else, and a local naming problem should not
+turn into an edit to a document other people share.

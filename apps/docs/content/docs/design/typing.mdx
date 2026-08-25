@@ -11,7 +11,7 @@ work outstanding, not an error on this page.
 The conformance set is the same one the grammar names — the programs under `apps/docs/programs/`,
 the five under `errors/` being the ones expected to fail, each carrying the diagnostic it must
 produce. There is no count here on purpose: `crates/fossil-engine/tests/programs.rs` walks the
-directory, and the number this line used to carry was five behind the tree.
+directory.
 
 ## The commitment, stated once
 
@@ -72,10 +72,9 @@ and the catalogue. There is no separate row context. A row is reached through th
 introduced — `User := io.csv("data/users.csv")` puts `User` in `Γ` as both a type and a relation, so
 `User.age` is an ordinary member access and `from User` an ordinary use of the name.
 
-That is the whole of the reason there is no rule for synthesising a closure on this page. There used
-to be one: an argument containing free `.field` references was wrapped into a single-parameter
-lambda, because the row had no name to be reached by. With the row named, the free reference does
-not exist, and the rule it needed went with it.
+That is the whole of the reason there is no rule for synthesising a closure on this page. A closure
+rule exists to give a name to a row that has none; here the binding already named it, so the free
+reference the rule would have captured cannot be written.
 
 ## Rules
 
@@ -274,8 +273,7 @@ What is not, each with what happens instead:
 
 ## Where the numbers and the reading are
 
-This page is the specification. The evidence that any given rule is *implemented* is on the
-characteristic pages, which carry it per rule and mark plainly which of them are still ahead — start
-with [the type system](/docs/design/types) and [what an expression
-is](/docs/design/expressions). The published work this design is built on, named, is in
-[prior art](/docs/design/prior-art).
+This page is the specification. The evidence that any given rule is *implemented* is on the pages
+beside it, which carry it per rule and mark plainly which of them are still ahead — start with
+[the type system](/docs/design/types) and [what an expression is](/docs/design/expressions). The
+published work this design is built on, named, is in [prior art](/docs/design/prior-art).

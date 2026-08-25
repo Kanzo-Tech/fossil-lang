@@ -1,20 +1,17 @@
 ---
 title: Values and expressions
-description: Every expression fossil admits — literals, member access, the two ways to reach one function, string interpolation for identities, the operators and the conditional.
+description: Every expression fossil admits — literals, member access, the two ways to reach one function, string interpolation for identities, the operators and their precedence, and the conditional.
 ---
 
 An expression is the right-hand side of a property line, the inside of a `{...}` hole, and the
-argument of `where`. There is one grammar for all three, and it is small enough to read in a sitting.
-
-Everything on this page comes out of one program, shown whole at the bottom.
+argument of `where`. One grammar covers all three.
 
 ## Literals
 
 <Program src="expressions/expressions.fossil" region="literals" title="expressions.fossil" />
 
 A string is delimited by `"`. Whole numbers are `Integer`, numbers with a point are `Float`, and
-`true` and `false` are `Bool`. Inside a string, `{...}` holds an expression and `{{` is a literal `{`.
-Everything else is what it looks like.
+`true` and `false` are `Bool`.
 
 ## Member access
 
@@ -29,13 +26,10 @@ Everything else is what it looks like.
 
 <Program src="expressions/expressions.fossil" region="member-access" title="expressions.fossil" />
 
-There is no second access operator. Whether a name resolves to a field, an operation or a reader is a
-question about its type, and the type is known, so one spelling covers all of it.
-
-Every field reference is **qualified**: `Row.station`, never a bare `.station`. Even inside a `where`
-whose only row is `Row`. That is not ceremony — it is the same spelling you will still be writing
-after a join puts two rows in scope, which means nothing about how you name a column changes when the
-program grows.
+There is no second access operator: whether a name is a field, an operation or a reader is a question
+about its type, and the type is known. Every field reference is **qualified** — `Row.station`, never
+a bare `.station`, which is the spelling you will still be writing after a join puts two rows in
+scope.
 
 ## Two paths to the same function
 
@@ -44,12 +38,14 @@ value, or through the type:
 
 <Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
 
-`x.trim()` is `str.trim(x)`. They are the same catalogue entry reached two ways. Neither is the
-"real" one, neither means anything the other does not, and you will meet both in other people's
-programs — the same way `s.len()` and `str::len(&s)` in Rust, or `s.upper()` and `str.upper(s)` in
-Python, are one function with two spellings.
+`x.trim()` is `str.trim(x)` — one catalogue entry reached two ways, the way `s.len()` and
+`str::len(&s)` are one function in Rust. `where`, `select` and `join` are entries in that same
+catalogue rather than special forms. Arguments that would read as a puzzle carry a name:
 
-Chains read left to right, which is usually what you want when there are three of them.
+<Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
+
+A named argument is `name = value`, after the ones that do not need naming, and the name is the
+parameter's own as [the standard library](/docs/book/stdlib) prints it.
 
 ## String interpolation
 
@@ -57,37 +53,40 @@ This is how an identity gets built, and it is ordinary string syntax:
 
 <Program src="expressions/expressions.fossil" region="interpolation" title="expressions.fossil" />
 
-Inside `{...}` is an expression — any expression, checked exactly like the ones outside. There is no
-separate little language of format specifiers, which is why there is nothing here that can drift out
-of step with the rest of the checker.
-
-`{{` writes a literal `{`. A closing `}` outside a hole needs no escape, because outside a hole it has
-only one reading.
-
-Braces are safe as the delimiter for a reason specific to what is being built: `{` and `}` cannot
+Inside `{...}` is an expression — any expression, checked exactly like the ones outside, so there is
+no little language of format specifiers to drift out of step with the checker. `{{` writes a literal
+`{`; a closing `}` outside a hole needs no escape. Braces are safe here because `{` and `}` cannot
 appear in an IRI at all.
 
-## Comparison, and `and` / `or` / `not`
+## The operators
+
+Arithmetic is `+ - * / %`, comparison is `== != < <= > >=`, and `and`, `or` and `not` combine
+results. Tightest binding first (`grammar.bnf, § OPERATOR PRECEDENCE TABLE`):
+
+| operators | associativity |
+| --- | --- |
+| `.` member, `()` call | left |
+| unary `-`, `not` | right |
+| `* / %` | left |
+| `+ -` | left |
+| `== != < <= > >=` | **non-associative** |
+| `and` | left |
+| `or` | left |
+| `? :` | right |
+
+Parentheses override all of it. Comparison being non-associative is the row to notice: `a < b < c`
+is not an expression, and the parser refuses the second comparison rather than nesting it.
 
 <Program src="expressions/expressions.fossil" region="comparison" title="expressions.fossil" />
 
-`==` `!=` `<` `<=` `>` `>=` compare two things of the same type, and `and`, `or` and `not` combine
-the results. Arithmetic is `+` `-` `*` `/` `%`, with the precedence you expect, and parentheses where
-you want to be explicit.
+`null` is the one thing that compares with anything: a source may have no value for a column, and
+`Row.celsius != null` is how you ask. It compares and it does not assign — `celsius = null` is an
+error, because a column with no value and a property written from nothing are different things and
+only the first is a question. `!= ""` is not that question; it is a comparison against the empty
+string, and it worked for as long as nothing typed it.
 
-`null` is the one thing that compares with anything: a source is allowed to have no value for a
-column, and `Row.celsius != null` is how you ask. It compares and it does not assign — `celsius =
-null` is an error, because a column with no value and a property written from nothing are different
-things and only the first is a question.
-
-Do not reach for `!= ""` to mean this. It is a comparison against the empty string, it is only a
-test for absence on a text column, and it happened to work for as long as nothing typed it.
-
-`not` and `-` are also prefixes, and they bind tighter than everything above — `-Row.drift` negates
-the column, and `healthy = not Row.degraded` is an ordinary property value, not something only a
+`not` and `-` are prefixes, and what they build is an ordinary value rather than something only a
 `where` can hold:
-
-<Program src="negation/negation.fossil" region="minus" title="negation.fossil" />
 
 <Program src="negation/negation.fossil" region="not" title="negation.fossil" />
 
@@ -97,39 +96,17 @@ One value or another, decided per row:
 
 <Program src="ternary/ternary.fossil" region="simple" title="ternary.fossil" />
 
-`cond ? a : b`, and both branches have to be the same type — there is no coercion between them, and
-the widening between `Integer` and `Float` is the only exception anywhere in the language.
-
-It is right-associative, so a chain of them reads as a ladder without parentheses and each `:` pairs
-with the `?` to its left:
+`cond ? a : b`, and both branches have to be the same type — the widening between `Integer` and
+`Float` is the only coercion anywhere in the language. It is right-associative, so a chain reads as a
+ladder without parentheses and each `:` pairs with the `?` to its left:
 
 <Program src="ternary/ternary.fossil" region="chained" title="ternary.fossil" />
 
-That `:` is the same token a mapping header spells its shape with (`grammar.bnf`, `SHAPE_SEP`). One
-lexeme, two readings, and what tells them apart is the `?` — which is why there is nothing to escape
-and no second colon to learn.
-
-## Named arguments
-
-Some arguments read as a puzzle without a name, so they carry one:
-
-<Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
-
-A named argument is `name = value`, inside the parentheses, after the ones that do not need naming.
-
-## The whole program
-
-<Program src="expressions/expressions.fossil" title="expressions.fossil" />
-
-<Program src="expressions/expressions.shex" title="expressions.shex" />
-
-<Program src="expressions/data/readings.csv" title="data/readings.csv" />
+That `:` is the same token a mapping header spells its shape with. The `?` is what tells them apart.
 
 ## What there is not
 
-There is no way to define a function, no loop and no recursion. An expression is a function of one row
-and it terminates because there is nothing in it that could fail to. The library brings the generic,
-higher-order part — see [functions](/docs/book/functions) — and you supply the arguments.
-
-That is a smaller language than you might expect, and it is smaller on purpose: everything an
-expression can do, it can do to a whole column at once.
+There is no way to define a function, no loop and no recursion. An expression is a function of one
+row and it terminates because there is nothing in it that could fail to. The generic, higher-order
+part lives in [the standard library](/docs/book/stdlib) — which is why everything an expression can
+do, it can do to a whole column at once.

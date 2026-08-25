@@ -46,10 +46,9 @@ fossil run shop.fossil --dest s3://corpus/shop --memory-gib 4
 ```
 
 One number, and it bounds the whole run. Past it, work spills to disk rather than growing, so a
-corpus larger than the machine takes longer instead of failing.
-
-Leave it off and the run is unbounded, which is the right choice when you know the data fits and the
-wrong one when you are guessing.
+corpus larger than the machine takes longer instead of failing. Leave it off and the run is
+unbounded, which is the right choice when you know the data fits and the wrong one when you are
+guessing.
 
 ### `--creds-stdin`
 
@@ -59,10 +58,8 @@ cat creds.json | fossil run shop.fossil --dest s3://corpus/shop --creds-stdin
 
 A secret on a command line is visible to every process on the host, and a secret in the environment
 is inherited by every child. So credentials ride standard input, and there is no flag that takes one
-as a value.
-
-The payload is JSON, keyed by the destination or source it belongs to. Omit the flag for local paths
-and public URLs.
+as a value. The payload is JSON, keyed by the destination or source it belongs to; omit the flag for
+local paths and public URLs.
 
 ## `fossil refs`
 
@@ -77,12 +74,13 @@ Data	-	data/orders.csv
 
 Lists the **data** a program reads — one line per distinct source path or URL, with the `@conn` alias
 it hangs off or `-` for a direct path. It parses and stops: no data is opened, no credential is
-needed.
+needed. `refs` walks the source bindings, so what reaches the list is:
 
-The shape document is **not** on that list. `refs` walks the source bindings, so it names what
-`io.csv` and its siblings open; the `type { … } := io.shex("shop.shex")` binding is a different kind
-of item and does not reach it. The one exception is a document passed as a `schema =` argument to a
-source constructor, which is part of a source binding and is reported with the role `Schema`.
+| the binding | on the list |
+| --- | --- |
+| `io.csv("data/users.csv")` and its siblings | yes, with the role `Data` |
+| `type { … } := io.shex("shop.shex")` | no — a type binding is not a source binding |
+| a `schema =` argument to a source constructor | yes, with the role `Schema` |
 
 This is what to run when you want to know what data a program will touch before you let it touch
 anything. `--output-json` gives the same list as JSON.

@@ -1,58 +1,35 @@
 ---
 title: Relations
-description: Filter, narrow and join — the operations a relation has, why a derived relation gets a name, and what you write inside a mapping that reads from one.
+description: Filter, narrow and join — the operations a relation has, why a derived relation gets a name, and why a join puts two rows in scope instead of one merged row.
 ---
 
-A source binding gives you a relation. So does every operation on one. That is the whole idea: you
-start with the rows in a file and you build the set of rows you actually want, one named step at a
-time.
-
-<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
-
-`Adults` is a relation derived from `User`. It has the same operations `User` has, so you can keep
-going.
+A source binding gives you a relation. So does every operation on one: you start with the rows in a
+file and build the set of rows you actually want, one named step at a time.
 
 ## `where`
 
 <Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
 
-`where` takes a predicate — an expression that is true or false for a row — and gives back the rows
-where it holds.
-
-Look at what the predicate names: `User.age`, not `.age`. **Every reference says which row it came
-from.** With one row in scope that looks like more typing than the situation needs; it stops looking
-that way at the first join, and the point is that nothing about how you write a column reference
-changes in between.
-
-A predicate is an ordinary expression, so anything you can write on a property line you can write
-here — a call, a comparison, several of them joined by `and`:
-
-<Program src="expressions/expressions.fossil" region="comparison" title="expressions.fossil" />
+`where` takes a predicate — an ordinary expression, true or false for a row — and gives back the rows
+where it holds. `Adults` is a relation derived from `User`, with the same operations `User` has, so
+you can keep going.
 
 ## `select`
 
-`select` narrows a relation to the fields you are going to use.
-
 <Program src="projection/projection.fossil" region="chain" title="projection.fossil" />
 
-Two named steps: `Active` is the rows that survive the filter, `Minimal` is those rows carrying two
-of their four fields.
-
-## Naming things, and what happens in the body
-
-Notice what `Adults` and `Minimal` are **not**: they are not new types. `Adults` is a relation of
-`User`s. `Minimal` is a relation of `Employee`s. The fields belong to the type, and the type is the
-one the binding named — so inside a mapping that reads from `Minimal`, you write `Employee.name`:
+`select` narrows a relation to the fields you will use: `Active` is the rows that survive the filter,
+`Minimal` is those rows carrying two of their four fields. Neither is a new type — `Adults` is a
+relation of `User`s and `Minimal` a relation of `Employee`s. The fields belong to the type, and the
+type is the one the binding named, so inside a mapping that reads `Minimal` you write `Employee.name`:
 
 <Program src="projection/projection.fossil" title="projection.fossil" />
 
-This is the one thing about relations that catches people out, and it is worth saying twice: **the
-name after `from` says which rows; the name before a dot says which type.** They are different
-questions and they take different answers.
+**The name after `from` says which rows; the name before a dot says which type.**
 
-Give each step a name, or do not — `User.where(...).select(...)` in a header is a relation like any
-other. A name is worth it when the step means something you would otherwise re-explain, which is why
-`Adults` is called `Adults` and not `Filtered`.
+Naming a step is optional — `User.where(...).select(...)` in a header is a relation like any other. A
+name is worth it when the step means something you would otherwise re-explain, which is why `Adults`
+is `Adults` and not `Filtered`.
 
 ## `join`
 
@@ -60,53 +37,50 @@ Two files, and the key that connects them lives in one of them:
 
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" />
 
-`join` is a member of a relation, like `where`. It takes the other relation and an `on`.
-
-The `on` is an equality between qualified references, or several of them joined with `and`:
+`join` is a member of a relation, like `where`. It takes the other relation and an `on`, which is an
+equality between qualified references — or several joined by `and`, which is what a compound key
+needs:
 
 <Program src="compound-key/compound-key.fossil" region="on" title="compound-key.fossil" />
 
-Compound keys are ordinary, so `and` is ordinary. What it is not is a general condition —
-`on = A.date > B.since` is not a join, and it is refused rather than quietly becoming a nested loop
-over the product of two corpora.
-
-<Callout type="warn" title="True today: it is refused by `run`, not by `check`">
-`Purchase.join(User, on = Purchase.amount > User.age)` passes `fossil check` with `ok — no errors`,
-and fails at `fossil run`:
-
-```
-Error:   × execute: a join condition is an equality between columns
-         (`on = a.k == b.k`, or several joined by `and`); this one is a binary
-         operator that is not `==`
-```
-
-The rule lives in `join_equalities` (`crates/fossil-df/src/plan.rs:212`), which is the planner and
-runs after the checker has finished. So the message says the right thing, and it arrives without a
-span, at the wrong end of the loop, from a program the rest of this book would have told you was
-fine.
-</Callout>
+It is not a general condition. `on = A.date > B.since` is refused rather than quietly becoming a
+nested loop over the product of two corpora — today by `fossil run` rather than `fossil check`, so
+the message arrives late and without a span.
 
 ### A join does not flatten
 
-There is no merged row afterwards. **Two rows are in scope**, `Purchase` and `User`, and every
-reference in the body says which one it means:
+There is no merged row afterwards. **Two rows are in scope**, and every reference says which one:
+
+```mermaid
+graph LR
+  J["Purchase.join(User, on = Purchase.user_id == User.id)"]
+  J --> P["<b>Purchase</b> in scope<br/>id · user_id · amount"]
+  J --> U["<b>User</b> in scope<br/>id · email · name · age"]
+  P -->|"Purchase.amount"| B["the mapping body"]
+  U -->|"User.email"| B
+```
 
 <Program src="shop/shop.fossil" region="second-mapping" title="shop.fossil" />
 
-Nothing acquires a suffix. No column is renamed because two files happened to use the word `id`. And
-a self-join needs no special apparatus, because there is no union of rows for it to collide in. Name
-the second copy with `as` and you have two rows again, both of them `Node`s:
+Nothing acquires a suffix, and no column is renamed because two files used the word `id`. A self-join
+needs no special apparatus either, there being no union of rows to collide in: name the second copy
+with `as` and you have two rows again, both of them `Node`s.
 
 <Program src="self-join/self-join.fossil" title="self-join.fossil" />
 
 The price is that names travel with the relation. Once a join has a name, every mapping that reads it
-has both rows in scope — which is how `Other` reaches the body of `Categories` there. Rename a source
-and its readers see the change.
+has both rows in scope — which is how `Other` reaches the body of `Categories`. Rename a source and
+its readers see the change.
 
 ## The rest of them
 
-`where`, `select` and `join` are the three you will reach for constantly. The relation type has more
-— `union`, `distinct`, `sort`, `take`, `drop`, `count`, and grouping — and they are in
-[the standard library](/docs/book/stdlib), listed by what they attach to. They are not special forms:
-they are functions with a relation on the left, which is why they compose without anybody having
-written a rule that says they may.
+| verb | takes | gives back |
+| --- | --- | --- |
+| `where` | a predicate over a row | the rows where it holds |
+| `select` | columns | the same rows, narrower |
+| `join` | another relation and an `on` | both rows in scope |
+
+Those three reach the surface today. The catalogue holds ten more for a relation — `union`,
+`distinct`, `sort`, `take`, `drop`, `count`, `map`, `flatten`, `group_by`, `aggregate` — which the
+checker knows and the lowering does not yet handle; [the standard library](/docs/book/stdlib) lists
+them. None is a special form: they are functions with a relation on the left.

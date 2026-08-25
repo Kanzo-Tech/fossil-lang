@@ -104,7 +104,7 @@ No user type annotations. No global inference either, and "inferred" on the tin 
 ends are known before checking starts, so there is no type variable to solve for and the check is
 local to one mapping. There IS subtyping, five rules wide — reflexivity, lifting to `Optional`,
 covariance of `Optional` and of `Seq`, and `Integer <: Float`, all in
-[the typing rules](/docs/book/typing) — and `compatible` runs them on every property.
+[the typing rules](/docs/design/typing) — and `compatible` runs them on every property.
 </Callout>
 
 ## What is not settled

@@ -3,57 +3,37 @@ title: 'Reference: the standard library'
 description: Every function fossil ships, grouped by what it attaches to — the operations of a relation, of a string, of a number, and the readers under io.
 ---
 
-The catalogue, organised by **what is on the left of the dot**. That is how you look one up when you
-are mid-line: you have a value, you want to know what you can do to it.
+The catalogue, organised by **what is on the left of the dot** — which is how you look one up when
+you are mid-line: you have a value, you want to know what you can do to it.
 
-**Every table on this page is generated, and the prose between them is written.** The rows come out
-of the catalogue the checker itself resolves a call against — `crates/fossil-hir/src/stdlib.rs` for
-the functions, `catalogue.bnf` for the readers — through `cargo xtask catalogue`, which writes
-`apps/docs/content/generated/stdlib.mdx`, which each section below pulls in. That division is the
-whole point of the page: a sentence here can be wrong, and a row cannot be, because a row is not
-written down twice.
-
-<Callout title="What the hand-written tables cost">
-They carried 58 distinct rows. Fifty-one of them existed. `seq.filter` had been renamed `where`,
-`str.normalize_unicode` had been deleted from the language, and `io.sql` and `io.http` occurred
-nowhere in the repository but here — the page was their only existence. All 58 rendered
-identically, so nothing about the page told you which seven to distrust.
-</Callout>
-
-## How to read this page
-
-A **member of a type** is reachable two ways — through the value or through the type — and they are
-the same function:
-
-| through the value | through the type |
+| namespace | on the left of the dot |
 | --- | --- |
-| `Contact.email.trim()` | `str.trim(Contact.email)` |
-| `Adults.count()` | `seq.count(Adults)` |
+| [`seq`](#a-relation) | a relation — filter, project, join, aggregate |
+| [`str`](#a-string) | a string |
+| [`math`](#a-number) | a number |
+| [`core`](#core) | the two that belong nowhere else |
+| [`parse`](#parse) | text you want as something else |
+| [`validate`](#validate) | text that has to look like something |
+| [`anon`](#anon) | text you do not want to publish |
+| [`io`](#io) | nothing — the readers are what make the thing |
 
-A **member of a namespace** has only the one spelling, because a namespace is not a value:
+**Every table below is generated and the prose between them is written.** The rows come out of the
+catalogue the checker resolves a call against, through `cargo xtask catalogue`: a sentence here can
+be wrong, a row cannot, because a row is not written down twice.
 
-| | |
-| --- | --- |
-| `parse.integer(Row.qty)` | and there is no `Row.qty.integer()` |
-| `io.csv("data/users.csv")` | and there is nothing for `io` to be on the right of |
+## How to read a row
 
-That is why the first column of a table below is sometimes a bare member and sometimes a dotted
-name: it is the receiver that decides, and the table prints whichever spelling the row actually has.
+A member of a **type** is reachable through the value or through the type, and they are one function:
+`Contact.email.trim()` is `str.trim(Contact.email)`. A member of a **namespace** has only the one
+spelling, because a namespace is not a value: there is no `Row.qty.integer()`. That is why the first
+column below is sometimes a bare member and sometimes a dotted name.
 
-In a signature, the first parameter is the receiver — `(text: String, start: Integer) -> String` is
-what you call as `s.slice(start = 3)`. **Every parameter carries its name, and the name is
-load-bearing**: it is what a named argument writes to reach that position (`grammar.bnf, NamedArg`),
-so `str.replace(x, needle = "a", replacement = "b")` is a call and `from =` / `to =` is an error.
-
-`Relation` is the receiver's own relation, with whatever rows it carries, and `Predicate` is a
-condition over one of those rows. Neither is written more precisely than that because neither can
-be: both depend on the receiver. Everywhere else the type is a scalar one, and where you expected a
-polymorphic signature the catalogue is giving the scalar approximation it has today — see
-[functions](/docs/book/functions).
-
-The third column is **how the row compiles**: either a SQL expression with `%N` naming its
-zero-based argument, or the operator of the algebra the row names. It is on the page because it is a
-field of the row, read by the compiler and not restated for the reader.
+The first parameter is the receiver, so a row taking `(text: String, start: Integer)` is what you
+call as `s.slice(start = 3)`. **Every parameter carries its name, and the name is load-bearing**: it
+is what a named argument writes to reach that position (`grammar.bnf, NamedArg`), so
+`str.replace(x, needle = "a", replacement = "b")` is a call and `from =` / `to =` is an error.
+`Relation` and `Predicate` stand for the receiver's own relation and a condition over one of its
+rows; everywhere else the type is scalar, which is the approximation the catalogue has today.
 
 ## A relation
 
@@ -61,72 +41,47 @@ Everything here takes a relation and gives back a relation, so they chain.
 
 <include>../../generated/stdlib.mdx#seq</include>
 
-`where` filters. `select` narrows to the named fields. `join` takes an equality between qualified
-references, or several joined by `and`, and does not flatten the rows — both are in scope after it.
-`group_by` is consumed by `aggregate` and by nothing else.
+`where` filters. `select` narrows to the named fields, and it names one parameter because its columns
+are **names and not values** — the lowering reads them off the syntax. `join` takes an equality
+between qualified references, or several joined by `and`, and does not flatten the rows: both sides
+stay in scope after it. `group_by` is consumed by `aggregate` and by nothing else. There is no
+`filter` — it is spelled `where`, so that the catalogue spells what the surface spells.
 
-`select` names one parameter because its columns are **names and not values**: the lowering reads
-them off the syntax. The signature says what the verb takes of the algebra, which is the relation.
-
-`seq` is the receiver, so `Adults.count()` and `seq.count(Adults)` are one row. There is no `filter`
-— it is spelled `where`, so that the catalogue spells what the surface spells, and an IDE offering
-the members of a relation cannot offer a word the language does not have.
-
-Three of the thirteen reach the surface today: `where`, `select` and `join` are the ones
-`crates/fossil-hir/src/lower.rs` lowers. The other ten are rows the checker knows and the lowering
-does not yet handle; what the table gives them is that the day one is implemented, its arguments are
-checked by the same code that checks `str.trim`'s.
-
-<Program src="shop/shop.fossil" region="derived" title="shop.fossil" />
-
-<Program src="projection/projection.fossil" region="chain" title="projection.fossil" />
+**Three of the thirteen reach the surface today** — `where`, `select` and `join`. The other ten are
+rows the checker knows and the lowering does not handle yet.
 
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" />
 
 ## A string
 
-The operations of `str`. Reachable through the value or through the type.
-
 <include>../../generated/stdlib.mdx#str</include>
 
 `slug` lowercases, replaces anything that is not a letter or a digit with `-`, and collapses runs of
-them — the shape you want in an IRI. Its template is the one measured against the two Rust slug
-implementations the tree used to carry, and `crates/fossil-hir/src/stdlib.rs` records which one it
-reproduces exactly and which one it cannot reproduce at all.
-
-`slice` counts from zero and takes a `start`. There is no `end` parameter and this page claimed one.
-
-`concat` takes exactly two strings. The template notation has no variadic form, and there is no row
-that needs one.
-
-There is no `normalize_unicode`. `DuckDB` ships `nfc_normalize`, which is NFC and nothing else, so a
-row advertising a `form` argument would have been a function that lies about three of the four
-values it accepts; it was deleted from the language rather than quietly narrowed.
+them — the shape you want in an IRI. `slice` counts from zero and takes a `start`; there is no `end`.
+`concat` takes exactly two strings. There is no Unicode normalisation: NFC is the only form the
+engine offers, and a row taking a `form` argument would have accepted three values it could not
+honour.
 
 ## A number
 
 <include>../../generated/stdlib.mdx#math</include>
 
-`math.sum`, `math.avg`, `math.min` and `math.max` are the four that go inside `aggregate`. Nothing
-in the rows says so — the catalogue has no field for it, and the table above is the catalogue.
+`math.sum`, `math.avg`, `math.min` and `math.max` are the four that go inside `aggregate`. Nothing in
+the rows says so — the catalogue has no field for it, and the table above is the catalogue.
+`math.round` takes no `digits` argument, and it is the one row taking a `Float` and handing back an
+`Integer`.
 
-`math.round` takes no `digits` argument, and this page claimed one. It is the catalogue's one
-`Float -> Integer` row, and the cast in its template is what makes that true: `round` in DuckDB
-returns a `DOUBLE`, so without it the row declared `Integer` and handed back `2.0`.
-
-## `core` — the two that belong nowhere else
+## `core`
 
 <include>../../generated/stdlib.mdx#core</include>
 
-`core.lang("Bonjour", tag = "fr")` is a language-tagged literal. There is no `dir` argument and this
-page claimed one.
+`core.lang("Bonjour", tag = "fr")` is a language-tagged literal. There is no `dir` argument.
 
 A column the source declares as nullable is a `T?`, and a shape that requires a value will not take
-one. `require` is how you say the value is there. Its signature reads `(value: String) -> String`
-rather than `forall T. T? -> T` for the reason given above — the catalogue's types are scalar today
-— and its lowering is the one template on the whole page that reads its argument twice.
+one. `require` is how you say the value is there; it is written over `String` rather than over a type
+variable for the reason given above.
 
-## `parse` — text into something else
+## `parse`
 
 <include>../../generated/stdlib.mdx#parse</include>
 
@@ -134,71 +89,46 @@ rather than `forall T. T? -> T` for the reason given above — the catalogue's t
 
 <Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
 
-`parse.json` takes a `path` and gives back a `String`, not a schema and a `T`: schema-directed
-parsing has no surface syntax yet, so the row lowers to a scalar extract. `json_extract_string` and
-not `json_extract`, which is a difference in the **value** and not only in the type — on `{"a":"x"}`
-the second yields `"x"` with the quote characters inside your data. `parse.csv_row` takes the
-separator and a field index and gives back that one field.
+`parse.json` takes a path and gives back a `String`, not a schema and a `T` — schema-directed parsing
+has no surface syntax yet. It extracts the string rather than the JSON, so on `{"a":"x"}` you get
+`x`, without the quotes ending up inside your data. `parse.csv_row` takes a separator and a field
+index and gives back that one field. `parse.decimal` differs from `parse.float` in refusing what will
+not fit: `'1e400'` is an error there and an infinity here.
 
-The nested casts in the third column are load-bearing, not noise. `parse.date` casts `strptime`'s
-result to `DATE`, because `strptime` returns a `TIMESTAMP` whatever the format string asks for and
-without the cast this row was `parse.datetime` under a second name. `parse.decimal` casts back out to
-`DOUBLE`, because the row says `Float`; the inner `DECIMAL(38,18)` stays because it is the only thing
-separating this row from `parse.float` — it refuses `'1e400'` where a bare `DOUBLE` cast yields
-`inf`.
-
-## `validate` — text that has to look like something
+## `validate`
 
 Each one returns its input unchanged when the input is well formed.
 
 <include>../../generated/stdlib.mdx#validate</include>
 
-All five have exactly that shape — `CASE WHEN … THEN %0 ELSE error(…) END`, so the answer is the
-value or an error and never a null, and a `NULL` input passes through untouched. Four of the
-templates were measured against the Rust function each replaced, and
-`crates/fossil-hir/src/stdlib.rs` carries the hand corpus and the fuzz counts row by row.
+All five have exactly that shape — the value or an error, never a null — and a `NULL` input passes
+through untouched. That includes `validate.regex`, which hands the string back rather than answering
+whether the pattern matched: a `String` in and a `Bool` out is `str.contains`, and it already exists.
 
-The fifth is `validate.regex`, and it is the row that put the third column on this page.
-It lowered to a bare `regexp_matches` — a `BOOLEAN`, which answers whether the pattern matched
-rather than giving the input back — under a row declaring `String`. It was the first of eight rows
-found to return a type other than the one they declared. The template moved rather than the
-signature, because "the value or an error, never a null" is the only thing the five rows of
-`validate/` share, and a `String -> Bool` row is `str.contains` with a pattern.
-`crates/fossil-engine/tests/stdlib_return_types.rs` is what asks a real engine, row by row, and goes
-red if a template and its signature part company again.
-
-## `anon` — text you do not want to publish
+## `anon`
 
 <include>../../generated/stdlib.mdx#anon</include>
 
-`anon.hash` with a salt is the usual way to build an identity out of something you must not put in
-an IRI, and `salt` is a parameter rather than a convenience: a hash of an email with no salt is a
-rainbow-table lookup. There is no `algo` argument and this page claimed one — the row lowers to
-`sha256`, and a choice of digest is a thing to add when something needs it, not a parameter to
-describe first.
+`anon.hash` with a salt is the usual way to build an identity out of something you must not put in an
+IRI, and `salt` is a parameter rather than a convenience: a hash of an email with no salt is a
+rainbow-table lookup. There is no `algo` argument; the row hashes with SHA-256.
 
-## `io` — the readers
+## `io`
 
 These take nothing on the left, because they are what makes the thing.
 
 <include>../../generated/stdlib.mdx#io</include>
 
-This table is a different shape from the others because the datum is different. An `io.` row is a
-name, the extensions it accepts and what it does with them — it carries no signature, because what a
-call to it needs to know is that the name is a source and not a scalar expression. The rows live in
-`catalogue.bnf`, which is also where each one's argument is written.
+The table is a different shape because the datum is: an `io.` row is a name, the extensions it
+accepts and what it does with them. It carries no signature — what a call needs to know is that the
+name is a source. The rows live in `catalogue.bnf`, and a format that arrives later is a row there
+and nothing else, including on this page, which will show it without being edited.
 
-The first four read rows: one name, giving both a row type and a relation — see
+The first four read rows, one name giving both a row type and a relation — see
 [naming what you read](/docs/book/what-you-read). The last two read types and bind the output
 contract — see [naming what you produce](/docs/book/what-you-produce).
 
-`io.rdf` and `io.shacl` both accept `.ttl`, and that is not a conflict: the name decides.
+`io.rdf` and `io.shacl` both accept `.ttl`, and that is not a conflict: the name decides, so
 `io.rdf("g.ttl")` reads rows out of a graph and `io.shacl("s.ttl")` reads types out of a shapes
-graph. `io.shex` deliberately does not claim `.ttl`, which is the same rule read the other way —
+graph. `io.shex` does not claim `.ttl`, which is the same rule read the other way —
 `io.shex("catalogue.ttl")` is an error naming both the constructor and the extension.
-
-There is no `io.sql` and no `io.http`. This page listed both, and nothing else in the repository ever
-has.
-
-The list is a list, not a grammar. A format that arrives later is a row in `catalogue.bnf` and
-nothing else changes — including this page, which will show it without being edited.

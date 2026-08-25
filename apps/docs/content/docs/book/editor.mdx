@@ -1,269 +1,78 @@
 ---
 title: In your editor
-description: Completion, hover, go-to-definition, the two quick fixes and diagnostics as you type — what each one answers today, what it does not, and how to switch it on.
+description: Completion, hover, go-to-definition, the two quick fixes and diagnostics as you type — what each one answers, and how to switch it on.
 ---
 
-fossil ships a language server, and it runs the same compiler `fossil check` runs. Every handler is a
-thin adapter over a `fossil-ide` free function, and the browser calls the same functions, so nothing
-here is a second implementation of anything.
-
-<Callout title="The native server introspects now, and this callout used to say it did not">
-A host has to hand the compiler the columns of a CSV; the compiler does not open one. `fossil-cli`
-does that before every `check` and every `run`, the browser playground does it with DuckDB-WASM over
-`fossil/registerInferredDescriptor` — and **`fossil-lsp` did neither**, so `LspSystem` inherited the
-trait default and answered `None`. It overrides `System::descriptors` now
-(`crates/fossil-lsp/src/lib.rs:183`).
-
-Everything below that needs a source column's type is therefore absent in a native editor today.
-Measured, driving the binary over stdio on `apps/docs/programs/errors/unknown-field/program.fossil`
-— the program [when it does not compile](/docs/book/diagnostics) opens with:
-
-- `fossil check` reports ``  `nmae` is not a field of `User`  `` and exits 1;
-- `fossil-lsp` publishes **zero** diagnostics for the same buffer. The pipeline is not broken —
-  the same probe on `errors/two-identities` publishes its one diagnostic — it is that this
-  particular error cannot be reached without the row's type.
-- completion after `User.` offers the thirteen relation verbs and no columns.
-
-The rest of the page describes what the shared code does when a host has introspected. Read the
-paragraphs below with this one in front of them; where the two disagree, this one is what your
-editor is doing.
-</Callout>
-
-## Switching it on
-
-The server is one binary, `fossil-lsp`, installed alongside the compiler:
+The language server is one binary, installed alongside the compiler:
 
 ```bash
 cargo install --git https://github.com/Kanzo-Tech/fossil-lang fossil-lsp
 ```
 
-Then tell your editor to start it for files ending in `.fossil`. In Neovim that is an `lspconfig`
-entry naming the binary and the filetype; in Helix a `[[language]]` block with
-`language-servers = ["fossil-lsp"]`; in any editor that speaks the protocol, the equivalent. It reads
-the program on stdin and stdout and needs no configuration of its own.
+Then point your editor at it for files ending in `.fossil` — an `lspconfig` entry in Neovim, a
+`[[language]]` block with `language-servers = ["fossil-lsp"]` in Helix, the equivalent anywhere else
+that speaks the protocol. It reads stdin, writes stdout, and has no configuration of its own.
 
-It advertises hover, definition, completion, document symbols, semantic tokens and code actions.
+## What it answers
 
-## Completion
+Everything below is served by both hosts: the native binary, and the same compiler built to
+WebAssembly behind a browser playground.
 
-Three sources merge into one list (`crates/fossil-ide/src/completion.rs:78`), and it is worth knowing
-which of them looked at your cursor. Two of the three ask one question — what is to the LEFT of your
-dot — and they ask it once, of one `Scope` (`crates/fossil-ide/src/completion.rs:116`).
+| you ask for | native | browser | and it answers |
+| --- | --- | --- | --- |
+| a property key, in the body | the target shape's own predicates | same | under the name your program writes — a renamed predicate is offered under its rename, with the full IRI as the entry's detail |
+| a column, after `Source.` | columns of local files | columns, over DuckDB-WASM | the fields the provider read off the source, each with its inferred type |
+| a member, after any other dot | narrowed to the receiver | same | only the catalogue rows that receiver has, spelled bare: `where`, not `seq.where` |
+| a name, away from any dot | the whole catalogue | same | every row, spelled in full, because there is no receiver to narrow by |
+| hover, anywhere in a property | two type blocks | same | the type of what you wrote and where it came from, and the type the shape demands of that predicate |
+| go to definition | four positions | same | the shape document at the shape, the document at the predicate, a mapping, or the `:=` binding that introduced a name |
+| quick fix, on an unknown column | Replace with… | same | the nearest field of that row, swapped into exactly the span that was wrong |
+| quick fix, on a disjunctive shape | Split mapping… | same | one mapping per ShEx `OneOf` disjunct, as the checker already generated it |
+| diagnostics as you type | on every edit | same | the diagnostics of [when it does not compile](/docs/book/diagnostics), at the same spans, with `help:` folded onto the message |
 
-**The shape's properties**, when the enclosing mapping's target shape resolves — your program named
-its output document and the editor could read it. The entries are that shape's own
-`constraints[].predicate`, each with the value type the document declares, so the list is what
-`Person` requires and nothing else.
+It also advertises document symbols and semantic tokens. No code action fires on a clean file: both
+quick fixes hang off a diagnostic you can already see. And hover's second block appears only when the
+shape resolves — a program that names no output document gets the first block and no error, because
+the missing document is the checker's diagnostic and not the hover's.
 
-This source fires **only in key position** — an `IDENT` whose parent is a `PropertyLhs`
-(`crates/fossil-ide/src/completion.rs:523`), which is the one place the grammar lets a property key
-go. It labels each entry with the name a program writes, through `short_name`, so a renamed
-predicate is offered under its rename and the name you accept is the name the checker resolves and
-the column the corpus ships.
+Four things narrow the list further than you might expect, and each is deliberate:
 
-It used to ask nothing about your cursor beyond *which mapping am I in*, and it labelled each entry
-with the **whole predicate IRI** — `https://shop.example/voc#email`, not `email`. A property key is
-the last segment and never the IRI, so accepting one wrote a line that did not compile. Measured on
-the shop shape: three such entries, offered after `User.`, on the `@subject` line, in the header,
-and away from any dot alike. After the repair the same six positions measure `email`/`name`/`phone`
-in key position and **nothing** in the other five. The IRI did not disappear — it moved to the
-entry's detail, where a full predicate is information rather than a suggestion.
+- **A property key is offered only in key position** — an identifier the grammar lets a key go in.
+  `str.trim` cannot be a property key, so no catalogue row is offered there either.
+- **A receiver that is an expression resolves nothing.** `User.email.trim().` has a `)` to its left
+  and no name to ask about. Nor does a binding reached through a derivation, or a join alias.
+- **A source the editor cannot open is not introspected.** A local file that exists gets columns; an
+  `https://` source gets none, and an editor's message loop is the wrong place to fetch one.
+- **A shape document open beside your program is not checked as one.** A URI some `io.` row reads is
+  an input, and an input is not drained — without that rule the parser blames a perfectly good
+  `ShExJ` file for every complaint it has.
 
-<Callout title="The other source learned the same position">
-This said the 51 dotted catalogue rows were **still** offered in key position. They are not: the
-stdlib source learned the same position, and there it offers none of the 51.
-`the_catalogue_is_not_offered_in_key_position` pins the zero, and a second table pins the seven
-positions that KEPT their catalogue, so a later narrowing that takes one of them goes red.
-</Callout>
+## Two hosts, one set of answers
 
-**The source's columns**, when the name to the left of your dot is the one the mapping's `from`
-clause bound and that source has been introspected — which, per the callout above, is both hosts
-now:
+`fossil-lsp` is native — it is a stdio transport and it refuses to compile for `wasm32`. What
+compiles to WebAssembly is everything under it. Neither host implements a feature: both call the same
+`fossil-ide` free functions, over a different wire.
 
-```
-name = User.        →  id   email   name   age
-```
-
-Each entry carries the inferred type. With no introspection there are no entries at all — the editor
-says nothing rather than guessing column names.
-
-It fired on **every** dot inside a mapping body instead, and the columns were the same four whatever
-stood to the left of it: `str.` got them beside the thirteen string members, `orders.` got them and
-nothing else, and so did a leading `.` — a spelling the parser refuses by name. A column is a member
-of the row, so the row has to be what you named.
-
-**The standard library, narrowed to what is to the left of your dot.** Every row carries the receiver
-it hangs off — `Scalar(ScalarTy::String)` for `str.trim`, `Relation` for `seq.where`, `Namespace` for
-`io.csv` (`crates/fossil-hir/src/stdlib.rs:181`) — and the bare member name beside it
-(`crates/fossil-hir/src/stdlib.rs:186`), and `stdlib_completions`
-(`crates/fossil-ide/src/completion.rs:192`) asks the catalogue for the rows that receiver HAS rather
-than for all of them:
-
-```
-name = Adults.      →  aggregate  count  distinct  drop  flatten  group_by  join
-                       map  select  sort  take  union  where
-name = str.         →  concat  contains  ends_with  length  lower  replace  slice
-                       slug  split  starts_with  strip_html  trim  upper
-name = User.email.  →  concat  contains  ends_with  length  lower  replace  slice
-                       slug  split  starts_with  strip_html  trim  upper
+```mermaid
+sequenceDiagram
+  participant E as your editor
+  participant S as fossil-lsp over stdio<br/>— or the wasm worker over postMessage
+  participant C as the compiler<br/>fossil-ide, fossil-hir, fossil-mir
+  E->>S: didOpen / didChange
+  S->>S: introspect the sources the program binds
+  S->>C: set_text, then check
+  C-->>S: diagnostics, spans in both files
+  S-->>E: publishDiagnostics
+  E->>S: completion / hover / definition / codeAction
+  S->>C: the same free function either host calls
+  C-->>S: the answer
+  S-->>E: the response
 ```
 
-Thirteen after a `:=` binding, where there were fifty-one; and they are spelled `where`, not
-`seq.where`, because after a dot the member is what you are typing. The full dotted signature is
-still there as the entry's detail, so the type path is never hidden.
+Checking a program needs a parser, a shape document and the columns of a file. None of those needs a
+machine somewhere else, so all of it is available in a page with nothing on the other end of it.
 
-Five heads resolve (`crates/fossil-ide/src/completion.rs:276`): `str` and `seq`, which the catalogue
-classifies itself; a namespace like `io`, whose own rows are offered and not another namespace's; any
-name a `:=` binding introduces, which is a relation and so has the verbs; and — the third line above
-— a **column of the row you named**, whose members are the members of its own type. That last one is
-inference: `email` is a `String` because the descriptor the host introspected says so, and the
-catalogue is asked about a `String`. A column that is an `Integer` answers with nothing, because the
-catalogue hangs no row off one.
-
-A head that is none of the five — `orders.`, a column the row does not have, the result of a call
-(`User.email.trim().`) — gets nothing from either of those two sources, and nothing from the shape's
-properties either, because after a dot you are not in key position. That last clause used to read
-"the shape's properties are still in the list, because that source does not ask", and it was true
-until the source learned to ask. Away from any dot there is no receiver to narrow by, so the
-catalogue is offered whole and spelled in full: **fifty-one** items measured at the body positions
-that are not a key — right of an `=`, on a blank body line, in the column before a key. **In key
-position it is two**: the shape's own properties and no catalogue row, because `str.trim` cannot be a
-property key either. It was fifty-four — the three extra were the shape's
-predicates, offered as raw IRIs in a position no key can go.
-
-The list carries no `sortText`, so your editor orders it by label — and the list itself is now sorted
-by label before it leaves, because `FunctionRegistry` is a `HashMap` and three consecutive runs of the
-unsorted version printed three different orders.
-
-**Not resolved:** a receiver that is an *expression*. `User.email.trim().` has a `)` to its left, and
-naming its type needs an id the body arena does not mint — it holds one entry per property value, so
-a sub-expression has none. Nor does a binding a body reaches through a *derivation*: a mapping that
-draws `from Adults`, where `Adults := User.where(…)`, addresses its columns as `User`, and only the
-checker's row scope knows that. Completion cannot ask it — that resolution can emit a diagnostic, and
-a Salsa accumulator outside a tracked function panics by construction — so a derived binding and a
-join alias resolve no row. The argument for closing both is
-[tooling for humans](/docs/design/tooling-for-humans).
-
-## Hover
-
-Hover anywhere in a property line and you get two type blocks
-(`crates/fossil-ide/src/hover.rs:120`): the type of the expression you wrote, with where it came from
-— an input descriptor names the binding and the column — and, below it, the type the shape demands
-of the predicate that property's key names. Two blocks because a property is a meeting of two
-documents, and seeing only one of them is how you end up arguing with the checker.
-
-The second block appears only when the shape resolves. A program that names no output document, or
-one whose document the editor could not read, gets the first block and no error: the missing document
-is the checker's diagnostic to report, not the hover's.
-
-The **first** block is the half that needs the columns, so in a native editor today it is the one
-that is missing and the shape's side is the one you get — the mirror of the paragraph above, and the
-same cause as everything else in the callout at the top of this page.
-
-The cursor's exact column inside the property does not change the answer — hover resolves to the
-whole property, so the key and its right-hand side give the same two blocks. The predicate IRI is
-resolved to find the constraint and is not itself displayed, and neither is the constraint's
-cardinality; if you want either, go to the definition, which opens the document at the line that
-declares it.
-
-## Go to definition
-
-Four positions, and the first two leave the `.fossil` file entirely
-(`crates/fossil-ide/src/goto_def.rs:123`):
-
-- On the **shape name** in a mapping header, it opens the shape document, at the shape. When the
-  document is not registered it falls back to the `type { … } := io.shex("…")` line that introduced
-  the name — the honest degraded answer rather than nothing.
-- On a **property key**, it opens the same document at the predicate the key names. `@subject` is
-  deliberately not one of these: a shape declares a node's predicates, and in RDF the subject *is*
-  the node.
-- On a **mapping name**, it stays in the program and resolves through the open files. This is the one
-  position that never left the language.
-- On a **source name**, it stays in the program too. The index the third case reads walks `:=`
-  bindings as well as mappings (`crates/fossil-ide/src/symbol_index.rs:83`), so `User` in
-  `User := io.csv("data/users.csv")`, `Adults` in `Adults := User.where(…)`, and either of them where
-  a mapping's `from` or another binding's right-hand side names it, all resolve to the binding line.
-  It walked only `MAPPING` nodes before, and all four of those positions answered with nothing.
-
-A destructuring binding — `{ Person, Org } := io.rdf(…)` — puts each name in the index separately, so
-a jump to `Org` does not land on `Person`. A shape name is the one thing here that is not a `.fossil`
-definition, and it is handled by the first case above rather than by the index.
-
-## Quick fixes
-
-Two, and both hang off a diagnostic you can already see
-(`crates/fossil-ide/src/code_action.rs:53`) — there is no action that fires on a clean file.
-
-- **Did you mean.** A column that is not a field of the row a mapping reads carries its nearest
-  candidate as a structured field, not as prose in the message, so the fix replaces exactly the span
-  that was wrong with exactly the name that was meant. The candidates are that row's own fields,
-  which is what makes it a short list — see [when it does not compile](/docs/book/diagnostics). It is
-  offered only when the caret is on the name: where the compiler recorded no span finer than the
-  whole right-hand side, an edit would delete `User.` along with the typo, so none is generated.
-  It hangs off the one diagnostic a native editor never produces, so today this action is the
-  browser's.
-- **Split the mapping.** A value disjunction in the shape is not supported in v0.1, and the repair is
-  one mapping per branch. The diagnostic already carries that rewrite — the same header, the same
-  `from` clause, the same identity, one mapping per disjunct — so the action inserts what the
-  checker generated rather than regenerating it.
-
-### Not yet: the body, filled from the shape
-
-Write a mapping header and stop:
-
-<Program src="shop/shop.fossil" region="header" title="shop.fossil" />
-
-Everything needed to write the body's skeleton is already in the editor — the shape's properties and
-their cardinalities on one side, the fields of `Adults` on the other, both as types the checker
-already holds:
-
-<Program src="shop/editor/filled-body.txt" title="what such an action would insert" />
-
-**No such code action exists.** `code_actions` produces the two quick fixes above and nothing else.
-The argument for building it, and why this design makes it cheap where other mapping languages cannot
-have it at all, is [tooling for humans](/docs/design/tooling-for-humans).
-
-## Diagnostics as you type
-
-The squiggles are the diagnostics from
-[when it does not compile](/docs/book/diagnostics), at the same spans, with the same `help:` text —
-folded onto the end of the message, because LSP has no field for it
-(`crates/fossil-ide/src/diagnostics.rs:132`). A diagnostic's secondary labels travel too, as
-`relatedInformation`, so an error whose whole content is *these two spans disagree* arrives with both
-halves rather than as one underline with no context. A label pointing into the `.shex` gets that
-file's URI and that file's line, which is what makes the two-file report an editor feature and not
-only a terminal one.
-
-There is one implementation of all of that, and the file above is it. The two hosts each had their
-own, they disagreed, and the disagreement was invisible from either side: the browser published the
-labels under a `related` key of its own invention where the specification says `relatedInformation`,
-so a client that read the specification found none.
-`crates/fossil-lsp/tests/transport_parity.rs` drives both over the same buffers and is what notices
-next time.
-
-An edit republishes for the file you edited, and closing it publishes an empty list, so a buffer you
-are done with stops squiggling instead of staying in the server's file table for the session. A
-missing required property appears against the header the moment the body stops satisfying the shape;
-an unknown column appears as you finish typing it.
-
-A shape document you open beside your program is **not** checked as one. Which open files are
-programs is the provider catalogue's question and not a syntax question: a URI some `io.` row reads
-is an input, and an input is not drained. Without that rule the fossil parser ran over the document
-and blamed it for every complaint — twenty-one diagnostics, measured over the wire, for a `ShExJ`
-file with nothing wrong with it. A URI with no extension is claimed by nobody and is still checked,
-so an unrecognised file falls back to checking rather than to silence.
-
-## In a browser
-
-`fossil-lsp` itself is native — it is a stdio transport, and it refuses to compile for wasm32
-(`crates/fossil-lsp/src/main.rs:19`, and again on the lib target at
-`crates/fossil-lsp/src/lib.rs:99` — the server moved out of the binary so the latency gate could call it,
-and both targets carry the tripwire). What compiles to WebAssembly is everything under it:
-`fossil-ide` and the compiler crates it calls carry no engine, so the browser serves the same six
-requests — hover, definition, completion, document symbols, semantic tokens, code actions — by
-calling the same functions, dispatched in `crates/fossil-wasm/src/lsp_worker.rs:209` instead of over
-a pipe.
-
-Checking a program needs a parser, a shape document and the columns of a file — none of which needs a
-machine somewhere else — so what this page describes is available in a page, with nothing on the
-other end of it.
+A diagnostic's secondary labels travel as `relatedInformation`, and a label pointing into the `.shex`
+carries that file's URI and line — which is what makes the two-file report an editor feature and not
+only a terminal one. Closing a buffer publishes an empty list, so a file you are done with stops
+squiggling.
