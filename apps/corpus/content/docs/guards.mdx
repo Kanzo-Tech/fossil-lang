@@ -88,6 +88,7 @@ harness and never the authority for it.
 | `exactly-once` | the staged single-file vertex Parquet left beside the tiles |
 | `footer-is-the-index` | `x` nested in a struct, so the footer holds a box for `x, v` and none for `x` |
 | `identity-is-the-subject` | two vertices sharing a subject IRI |
+| `index-agrees-with-the-payload` | one index row names the wrong address, so a lookup returns a plausible stranger |
 | `not-empty` | the `by_target` tiles are not written, so a hop has one direction |
 | `tile-of` | the `by_target` tiles cut on `src_dense`, which is the source half again |
 

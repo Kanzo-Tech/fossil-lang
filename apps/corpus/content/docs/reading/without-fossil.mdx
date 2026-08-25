@@ -22,9 +22,10 @@ graph.graph.yml
 ```
 
 It names every per-type manifest. Each vertex manifest carries a `type`, a `vertex_count`, a
-`prefix` and a `chunk_size`; each edge manifest carries `src_type`, `edge_type`, `dst_type`, an
-`edge_count`, a `prefix`, and the `src_chunk_size` and `dst_chunk_size` that tie each orientation's
-tiles to its own endpoint type's.
+`prefix` and a `chunk_size`, and may carry an `index:` block — step 7, and the one field on this
+page whose absence costs speed rather than an answer. Each edge manifest carries `src_type`,
+`edge_type`, `dst_type`, an `edge_count`, a `prefix`, and the `src_chunk_size` and `dst_chunk_size`
+that tie each orientation's tiles to its own endpoint type's.
 
 The manifests are small and flat. Reading them with a line scan rather than a YAML library is a
 legitimate choice and the checker makes it — `apps/corpus/guards/manifest.mjs` is that scan, and it
@@ -159,6 +160,53 @@ SELECT v.subject
 
 `dense_id` is an address and changes when the layout is redone. Anything stored outside the corpus —
 a selection, a bookmark, a foreign key — keys on `subject`.
+
+## 7. Find one by its identity
+
+The other direction — an IRI in hand, its address wanted — is the one question the payload's order
+cannot answer. The rows are in Morton order and subjects are not, so every tile's `min`/`max` for
+`subject` overlaps every other's, the footer prunes nothing, and this reads the identity column of
+the whole type:
+
+```sql
+-- the scan: every tile of the type, and only two of its columns
+SELECT subject, dense_id
+  FROM read_parquet(['vertex/Person/chunk0.parquet', 'vertex/Person/chunk1.parquet', …])
+ WHERE subject = 'http://example.org/p/17';
+```
+
+**A vertex manifest may declare a second copy of itself that does answer it**, and a reader that
+does not look for the block scans without knowing it did not have to:
+
+```yaml
+index:
+  prefix: index/
+  ordered_by: subject
+  chunk_size: 4096
+```
+
+The tiles are `<vertex prefix><index prefix>tile{k}.parquet` — the same `tile{k}` spelling and the
+same `ceil(vertex_count / chunk_size)` count as everything else, over the **index's own**
+`chunk_size` and not the payload's. Each holds two columns, `ordered_by` and the `dense_id` it
+names, and they are sorted with **disjoint ranges**, which is what lets the footers prune to the one
+tile a value can be in. So a lookup is two reads and no scan of either table:
+
+```sql
+-- 1. the index: sorted, disjoint, so the footers name one tile out of the list
+SELECT dense_id
+  FROM read_parquet(['vertex/Person/index/tile0.parquet', 'vertex/Person/index/tile1.parquet', …])
+ WHERE subject = 'http://example.org/p/17';
+
+-- 2. the payload, at the tile that address NAMES: 41000 >> 12 = 10
+SELECT * FROM read_parquet('vertex/Person/chunk10.parquet') WHERE dense_id = 41000;
+```
+
+The block is optional and its absence is legal: the scan returns exactly the row the index would
+have found, which is why a reader may report the cost rather than refuse the corpus. A `prefix` with
+no `ordered_by` is the case to refuse instead — it names files whose sort has to be guessed, and a
+wrong guess returns a stranger rather than nothing.
+[Identity](/docs/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) has
+why it is a second table rather than a second sort of the first.
 
 ## Prove your own writer
 

@@ -86,6 +86,9 @@ naming: on the conformance corpus that is 1,192 edges against the 596 the manife
   and never globs.
 - **An edge label incident twice to one vertex type**, which the addressing cannot name
   unambiguously.
+- **A half-declared identity index** — an `index:` with a `prefix` and no `ordered_by` names files
+  whose sort a reader would have to guess, and guessing wrong returns a stranger rather than
+  nothing. Falling back to the scan would be the quiet option and it hides a broken manifest.
 
 ## Two costs it declares out loud
 
@@ -93,22 +96,35 @@ naming: on the conformance corpus that is 1,192 edges against the 596 the manife
 then nothing. A box wider than its rows costs a read; a box narrower than its rows **loses
 vertices**; only re-reading every page tells them apart.
 
-**`node(id)` scans.** The identity is the subject IRI, and there is no index from a subject to an
-address — no side table, no sorted copy, nothing in the manifest. Parquet's footer statistics do not
-help, because the rows are in Morton order and subjects are not, so the per-tile `min`/`max` overlap
-and the engine skips nothing. On the conformance corpus that is five tiles of 300 rows; **at five
-million vertices a single lookup reads about 40 MB.** Column pruning is the only thing keeping it
-off the other five columns.
+**`node(id)` scans a corpus that publishes no index.** The identity is the subject IRI and the
+payload is in Morton order, so Parquet's footer statistics offer nothing to prune on: the per-tile
+`min`/`max` for `subject` overlap and the engine skips no tile. On the conformance corpus that is
+five tiles of 300 rows; **at five million vertices a single lookup reads about 40 MB.** Column
+pruning is the only thing keeping it off the other five columns.
 
-The identity is the IRI anyway, and that is not negotiable for a bad reason: redoing the layout ranks
-every vertex by the Morton code of its new position and lets that rank be its id, so a `dense_id`
-held anywhere outside the corpus names a *different vertex* after the next write. A bookmark, a
-selection, a link from another system and a row in somebody else's database all key on something,
-and an address is not something to key on.
+Where the vertex type declares an [identity
+index](/docs/conventions/identity#searching-for-one-is-a-second-table-not-a-second-column) the same
+call is a **seek** — the index tiles, which are sorted with disjoint ranges and therefore prune to
+one, then the payload tiles the addresses they name — and no scan of either table. `neighbours`
+resolves its seeds through the same path, so the difference reaches both members.
 
-What would change the cost is a `subject → dense_id` index in the corpus, tiled and addressed like
-everything else, rewritten by every layout pass — which is affordable precisely because that pass
-already rewrites every tile. Nothing in the format has one today.
+**Both answers are correct and only one is fast**, which is why the difference is published rather
+than left to be timed:
+
+```ts
+corpus.types.vertices.find((t) => t.type === 'Person')?.indexed;  // true → bookmarks are cheap
+```
+
+`indexed` is a property of the **type**, not of the call. A consumer needs to know once whether its
+bookmarks are cheap, not to be told again on every click, and a caller with no way to tell the two
+apart discovers the difference by measuring it.
+
+The identity is the IRI either way, and that is not negotiable for a bad reason: redoing the layout
+ranks every vertex by the Morton code of its new position and lets that rank be its id, so a
+`dense_id` held anywhere outside the corpus names a *different vertex* after the next write. A
+bookmark, a selection, a link from another system and a row in somebody else's database all key on
+something, and an address is not something to key on. The index is what makes that key cheap to
+resolve; it does not make the address safe to hold.
 
 ## One thing that is going to change
 

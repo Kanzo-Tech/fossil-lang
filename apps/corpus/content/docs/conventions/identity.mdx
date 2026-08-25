@@ -62,6 +62,80 @@ guard reflects that: `identity-is-the-subject` asserts uniqueness and non-nullne
 `subject` column appears, and *reports* rather than fails when a payload has none.
 </Callout>
 
+## Searching for one is a second table, not a second column
+
+The payload is in Morton order because the spatial order *is* the id space
+([Order](/docs/conventions/order)) — that is what makes a window a range and a tile a shift. A
+lookup by identity needs the other order, and **a table has one order**. Sorting the payload by
+`subject` as well is not on offer: the second key would break the first, and the first is the one
+every window depends on.
+
+So a vertex type may carry the same rows a **second time**, sorted by identity, as its own tiled
+table beside the payload:
+
+```
+vertex/Person/chunk{k}.parquet        the payload — every column, in Morton order
+vertex/Person/index/tile{k}.parquet   the index — `subject` and `dense_id`, in lexicographic order
+```
+
+and the vertex manifest declares it:
+
+```yaml
+index:
+  prefix: index/
+  ordered_by: subject
+  chunk_size: 64
+```
+
+`ordered_by` is named rather than assumed, because a corpus whose identity is some other column
+indexes that column instead — and a `prefix` with no `ordered_by` names files whose sort a reader
+would have to guess, so it is refused rather than ignored. `chunk_size` is declared separately from
+the payload's because index tile `k` is the `k`th slice of the **sorted** order and has nothing to
+do with the `dense_id` range payload tile `k` holds; one number in two fields would read as an
+alignment that does not exist. A corpus fossil writes emits both with the same value, which is a
+convenience and not a rule.
+
+### Disjoint ranges are the whole mechanism
+
+The index tiles are sorted and their ranges do not overlap, so each footer's `min`/`max` for the key
+names a span no other tile holds and a search over the footers lands on the one tile a value can be
+in. A lookup is then two reads and no scan of either table: the index tiles, which prune to one,
+then the payload tile the address it returned *names* — `dense_id >> shift`, which is arithmetic.
+
+Nothing arranges the payload to do this by itself. Morton order and lexicographic order have nothing
+to do with each other, so every payload tile's `min`/`max` for `subject` overlaps every other's and
+`subject = ?` skips no tile at all: it reads the identity column of the whole type. At the 8.016
+compressed bytes per row measured above that is **about 40 MB at five million vertices**, and column
+pruning is the only thing keeping it off the other five columns.
+
+Tiled rather than one file for the reason every other table here is tiled: at five million vertices
+a single index is one object of tens of megabytes where the payload is 1,221 addressable ones, and a
+reader that already knows how to seek a tile needs nothing new to seek this.
+
+### It is optional, and `vertex_count` is not
+
+Two fields two lines apart in the same manifest, one required and one not, and the difference is not
+taste. A missing `vertex_count` leaves a question **unanswerable** — the missing tail above, which no
+reader can distinguish from a complete corpus and no amount of work recovers. A missing `index:`
+leaves the same question **answerable and slower**: `subject = ?` over every tile returns exactly the
+row the index would have found. Its absence is a cost a reader measures and reports, not a fact it
+cannot obtain, and every corpus written without the field stays readable.
+
+A type whose payload carries no `subject` has nothing to index and declares none. That is a corpus
+rather than a defect — the same absence `identity-is-the-subject` reports without failing on.
+
+Guard: `index-agrees-with-the-payload`. It holds every `(subject, dense_id)` pair both ways round,
+refuses a null key, and refuses overlapping tile ranges. Its mutation is not a deleted row — a scan
+would lose that one too — but a single row pointed at the **wrong address**, because an index that
+disagrees with the payload is worse than no index at all: a scan finds nothing, and a wrong index
+returns a vertex that is real and is not the one that was asked for.
+
+What the guard cannot prove is that a reader *uses* the index, because once it passes both routes
+return the same row by construction and no property of the artefact tells them apart. That gap is
+closed from the reader's side instead: `apps/corpus/conformance/expected.json` runs each id twice —
+against the manifest as it is, and against a copy of the tree with the `index:` block stripped — and
+requires the same vertex both ways.
+
 ## Sixty-four bits, and `number` is not one of them
 
 A `dense_id` is an unsigned integer that may carry more than 53 bits. At a language boundary it is a
