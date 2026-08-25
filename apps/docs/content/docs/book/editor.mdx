@@ -7,12 +7,12 @@ fossil ships a language server, and it runs the same compiler `fossil check` run
 thin adapter over a `fossil-ide` free function, and the browser calls the same functions, so nothing
 here is a second implementation of anything.
 
-<Callout type="warn" title="True today: the native server introspects nothing, and that is half this page">
-A host has to hand the compiler the columns of a CSV; the compiler does not open one.
-`fossil-cli` does that before every `check` and every `run`, and the browser playground does it with
-DuckDB-WASM and pushes the result in over `fossil/registerInferredDescriptor`. **`fossil-lsp` does
-neither** — `LspSystem` does not override `System::descriptors`, so the trait default answers `None`
-and there is no table (`crates/fossil-lsp/src/main.rs:106`).
+<Callout title="The native server introspects now, and this callout used to say it did not">
+A host has to hand the compiler the columns of a CSV; the compiler does not open one. `fossil-cli`
+does that before every `check` and every `run`, the browser playground does it with DuckDB-WASM over
+`fossil/registerInferredDescriptor` — and **`fossil-lsp` did neither**, so `LspSystem` inherited the
+trait default and answered `None`. It overrides `System::descriptors` now
+(`crates/fossil-lsp/src/lib.rs:183`).
 
 Everything below that needs a source column's type is therefore absent in a native editor today.
 Measured, driving the binary over stdio on `apps/docs/programs/errors/unknown-field/program.fossil`
@@ -69,16 +69,16 @@ and away from any dot alike. After the repair the same six positions measure `em
 in key position and **nothing** in the other five. The IRI did not disappear — it moved to the
 entry's detail, where a full predicate is information rather than a suggestion.
 
-<Callout title="One position is still wrong, and it is the other source">
-The 51 dotted catalogue rows — `str.trim` and its siblings — are **still offered in key position**,
-where they are no more writable than a raw IRI was. That is the stdlib source, not this one; it is
-measured and pinned by `the_catalogue_is_still_offered_in_key_position` so the number cannot move by
-accident.
+<Callout title="The other source learned the same position">
+This said the 51 dotted catalogue rows were **still** offered in key position. They are not: the
+stdlib source learned the same position, and there it offers none of the 51.
+`the_catalogue_is_not_offered_in_key_position` pins the zero, and a second table pins the seven
+positions that KEPT their catalogue, so a later narrowing that takes one of them goes red.
 </Callout>
 
 **The source's columns**, when the name to the left of your dot is the one the mapping's `from`
-clause bound and that source has been introspected — which, per the callout above, is the browser
-today and not `fossil-lsp`:
+clause bound and that source has been introspected — which, per the callout above, is both hosts
+now:
 
 ```
 name = User.        →  id   email   name   age
@@ -125,8 +125,10 @@ A head that is none of the five — `orders.`, a column the row does not have, t
 properties either, because after a dot you are not in key position. That last clause used to read
 "the shape's properties are still in the list, because that source does not ask", and it was true
 until the source learned to ask. Away from any dot there is no receiver to narrow by, so the
-catalogue is offered whole and spelled in full: **fifty-one** items measured inside a mapping body,
-which is the catalogue and nothing else. It was fifty-four — the three extra were the shape's
+catalogue is offered whole and spelled in full: **fifty-one** items measured at the body positions
+that are not a key — right of an `=`, on a blank body line, in the column before a key. **In key
+position it is two**: the shape's own properties and no catalogue row, because `str.trim` cannot be a
+property key either. It was fifty-four — the three extra were the shape's
 predicates, offered as raw IRIs in a position no key can go.
 
 The list carries no `sortText`, so your editor orders it by label — and the list itself is now sorted
