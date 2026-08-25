@@ -253,7 +253,9 @@ export interface SchemaResult {
 }
 export interface VertexTypeSummary {
   /**
-   * Vertex count from the manifest.
+   * How many vertices the type has.
+   *
+   * **Not from the manifest, despite what this said.** The executor answers it with `count_rows` — a `SELECT count(*)` over the type's tiles. The manifest carries a declared `vertex_count` now, so the query is a second way to ask one question and can go; what it buys until then is that it measures the bytes rather than trusting the declaration, which is the disagreement `apps/corpus`'s `declared-count` guard exists to catch.
    */
   count: number;
   /**
