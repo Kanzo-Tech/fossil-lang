@@ -117,17 +117,66 @@ impl LineIndex {
 
     /// Convert an LSP UTF-16 position to an absolute UTF-8 byte offset.
     ///
-    /// Returns `None` if `line` is past the end of the file. A `character`
-    /// column past the end of the line clamps to the line's end-of-content
-    /// (matching the LSP "position past line end" tolerance).
+    /// # The contract for a position that is not on the file
+    ///
+    /// Two halves, and they answer differently on purpose.
+    ///
+    /// - **`line` past the last line** — `None`. There is no line to be a
+    ///   column of, so there is no offset to name and no clamp that would not
+    ///   be an invention.
+    /// - **`character` past the end of its line** — clamped to that line's last
+    ///   CONTENT byte, the terminating `\n` excluded (the end of the file for
+    ///   the last line). The answer stays on the line that was asked about.
+    ///
+    /// This is rust-analyzer's split, taken at the layer it takes it:
+    /// `line-index`'s own `LineIndex::offset` adds the column to the line start
+    /// unchecked, and `rust-analyzer`'s `lsp::from_proto::offset` — the LSP
+    /// boundary, which is what this function is — does
+    /// `col.min(line_range.len())` over the line it looked up, erroring only
+    /// when the LINE does not resolve. It clamps to `line_range`, which spans
+    /// the `\n` too, so an over-long column there lands on the start of the
+    /// NEXT line; this one stops one byte earlier. A cursor is on the line it
+    /// was addressed to, and an offset that has silently changed line is a
+    /// wrong answer that reads like a right one — the caller gets the last
+    /// token of the wrong row and nothing says so.
+    ///
+    /// It clamped nothing at all until this was written, and this paragraph
+    /// claimed it did. `line_start + character` for a column past the end of a
+    /// blank line is an offset outside the text, which `rowan`'s
+    /// `token_at_offset` answers by panicking — see
+    /// `crate::position::token_at_position_past_the_end_of_a_line_does_not_panic`
+    /// for the reproducer and the abort it used to produce.
     #[must_use]
     pub fn offset(&self, pos: Utf16Position) -> Option<u32> {
         let line_start = *self.line_starts.get(pos.line as usize)?;
+        // `line_starts.get` succeeded, so `pos.line + 1` is in bounds as an
+        // index-or-one-past and cannot overflow `usize` on any target.
+        let line_end = self.line_content_end(pos.line as usize);
+        Some(self.unclamped_offset(line_start, pos).min(line_end))
+    }
+
+    /// The byte offset just past the last CONTENT byte of `line` — its
+    /// terminating `\n` excluded, or the end of the file for the last line.
+    ///
+    /// A `\r\n` line ends at its `\r`: nothing here reads the text, so the
+    /// carriage return is content as far as this table is concerned.
+    fn line_content_end(&self, line: usize) -> u32 {
+        self.line_starts
+            .get(line + 1)
+            .map_or(self.len, |next_start| next_start.saturating_sub(1))
+    }
+
+    /// `pos` as a byte offset, taking the UTF-16 column at face value.
+    ///
+    /// Exact for a column that is on the line; for one past its end it runs
+    /// past the line and possibly past the file, which is what [`Self::offset`]
+    /// clamps.
+    fn unclamped_offset(&self, line_start: u32, pos: Utf16Position) -> u32 {
         let wides = &self.wide_chars[pos.line as usize];
 
         // Fast path: an ASCII-only line — UTF-16 column == byte column.
         if wides.is_empty() {
-            return Some(line_start + pos.character);
+            return line_start.saturating_add(pos.character);
         }
 
         // Walk the line's wide chars, accumulating the UTF-16 column. For each
@@ -141,7 +190,7 @@ impl LineIndex {
             let ascii_run = wc.byte_col - byte_col;
             if pos.character <= utf16_col + ascii_run {
                 // Target lands inside the leading ASCII run.
-                return Some(line_start + byte_col + (pos.character - utf16_col));
+                return line_start + byte_col + (pos.character - utf16_col);
             }
             utf16_col += ascii_run;
             byte_col = wc.byte_col;
@@ -149,14 +198,16 @@ impl LineIndex {
             if pos.character < utf16_col + wc.utf16_len {
                 // Target points at (or inside) the wide char — snap to its
                 // start byte (no sub-character positions in v0.1).
-                return Some(line_start + byte_col);
+                return line_start + byte_col;
             }
             utf16_col += wc.utf16_len;
             byte_col += wc.utf8_len;
         }
 
         // Target is in the trailing ASCII run after the last wide char.
-        Some(line_start + byte_col + (pos.character - utf16_col))
+        line_start
+            .saturating_add(byte_col)
+            .saturating_add(pos.character - utf16_col)
     }
 
     /// Convert an absolute UTF-8 byte offset to an LSP UTF-16 position.
@@ -319,6 +370,55 @@ mod tests {
                 character: 0
             })
             .is_none()
+        );
+    }
+
+    /// **A column past the end of a line clamps to that line.** The two halves
+    /// of the contract, on the same fixture: an out-of-range LINE is `None`, an
+    /// out-of-range COLUMN is the line's last content byte.
+    ///
+    /// Before: `line_start + character`, unclamped — `Some(1_000_002)` for the
+    /// last row here, an offset four bytes of text could not hold.
+    #[test]
+    fn a_column_past_the_line_end_clamps_to_the_line() {
+        // "ab\ncd\n": line 0 is 0..2 (`\n` at 2), line 1 is 3..5, line 2 is the
+        // empty line after the final `\n`, starting at 6 == len.
+        let idx = index("ab\ncd\n");
+        let at = |line, character| idx.offset(Utf16Position { line, character });
+        assert_eq!(at(0, 2), Some(2), "the end of a line is not past it");
+        assert_eq!(
+            at(0, 3),
+            Some(2),
+            "the `\\n` is not a column a cursor takes"
+        );
+        assert_eq!(at(0, 1_000_000), Some(2));
+        assert_eq!(at(1, 1_000_000), Some(5));
+        assert_eq!(at(2, 1_000_000), Some(6), "the last line stops at EOF");
+        assert_eq!(at(3, 0), None, "a line that is not there is still `None`");
+    }
+
+    /// The clamp holds on the wide-char path too, which is a different branch:
+    /// the trailing-ASCII-run arm computes the offset and only then meets the
+    /// line's end.
+    #[test]
+    fn a_column_past_a_multibyte_line_clamps_to_the_line() {
+        // `# café\nname\n`: line 0 is 7 bytes of content (`é` is two of them)
+        // and 6 UTF-16 columns; line 1 is 8..12.
+        let idx = index("# café\nname\n");
+        assert_eq!(
+            idx.offset(Utf16Position {
+                line: 0,
+                character: 99
+            }),
+            Some(7),
+            "seven bytes of content, whatever the UTF-16 column says",
+        );
+        assert_eq!(
+            idx.offset(Utf16Position {
+                line: 1,
+                character: 99
+            }),
+            Some(12),
         );
     }
 }
