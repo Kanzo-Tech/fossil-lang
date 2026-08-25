@@ -247,8 +247,23 @@ impl fossil_base::Db for LspDb {
 
 impl LspDb {
     fn new() -> Self {
+        Self::with_storage(salsa::Storage::default())
+    }
+
+    /// The same database, with `callback` invoked for every `salsa::Event` the
+    /// runtime emits.
+    ///
+    /// It exists for `tests/didchange_revalidation.rs`, which counts
+    /// `EventKind::DidValidateMemoizedValue` — the REVALIDATION event — across
+    /// one keystroke. `fossil_base::FossilDb::with_event_callback` is the same
+    /// seam for the same reason, and neither is for production use.
+    fn with_event_callback(callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static>) -> Self {
+        Self::with_storage(salsa::Storage::new(Some(callback)))
+    }
+
+    fn with_storage(storage: salsa::Storage<Self>) -> Self {
         Self {
-            storage: salsa::Storage::default(),
+            storage,
             system: Arc::new(LspSystem::default()),
             files: Files::default(),
             catalogue: Catalogue::default(),
@@ -285,6 +300,22 @@ impl LspState {
     pub fn new() -> Self {
         Self {
             db: LspDb::new(),
+            files: HashMap::new(),
+        }
+    }
+
+    /// The same server, with `callback` invoked for every `salsa::Event`.
+    ///
+    /// The whole point is that it is the REAL server: the host, the provider
+    /// rows and the document registration are `LspState::new`'s, so the events
+    /// counted are the ones a keystroke really emits.
+    /// `tests/didchange_revalidation.rs` is the caller, and the only one.
+    #[must_use]
+    pub fn with_event_callback(
+        callback: Box<dyn Fn(salsa::Event) + Send + Sync + 'static>,
+    ) -> Self {
+        Self {
+            db: LspDb::with_event_callback(callback),
             files: HashMap::new(),
         }
     }
