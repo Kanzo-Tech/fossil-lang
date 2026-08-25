@@ -132,7 +132,12 @@ crates/
                            crate linking `DuckDB` on a normal edge — and it is native by that
                            edge and by `fossil-resolver`, without a tripwire of its own
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
-                           arrow-rs, linking no engine (`DuckDB` is a dev-dependency). It
+                           arrow-rs. It links no `DuckDB` (that is a dev-dependency) but it
+                           DOES link `DataFusion`, transitively through `fossil-df` for the
+                           one function `files::batches_to_parquet`. This line said "linking
+                           no engine" and `cargo tree -p fossil-layout -e normal -i
+                           datafusion` says otherwise; `crates/xtask/tests/engine_reach.rs`
+                           is the guard that now derives the real linkers. It
                            COMPILES for wasm32 and declares it with `[package.metadata.fossil]
                            wasm = true`, which is what puts it in the gate closure. It was
                            `fossil-runtime`, and it is not a runtime: the crate IS the pass
