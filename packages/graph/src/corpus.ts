@@ -703,29 +703,19 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     async extent(type) {
       const address = vertexType(type);
       if (extents.has(address.type)) return extents.get(address.type)!;
+      // The same footers a window needs, read once for both. This used to sweep
+      // `parquet_metadata` over every tile on its own, which made opening a corpus and framing it
+      // two O(N) passes over the same bytes — 2,450 range requests each at five million, measured
+      // over a plain HTTP origin. The boxes are per tile; the extent is their union.
       let answer: Extent | null = null;
       if (has(address.type, 'x') && has(address.type, 'y')) {
-        const urls = tileUrls.get(address.type)!;
-        const rows =
-          urls.length === 0
-            ? []
-            : await query(
-                `SELECT path_in_schema AS axis,
-                        min(CAST(stats_min_value AS DOUBLE)) AS lo,
-                        max(CAST(stats_max_value AS DOUBLE)) AS hi
-                   FROM parquet_metadata(${list(urls)})
-                  WHERE path_in_schema IN ('x', 'y') AND stats_min_value IS NOT NULL
-                  GROUP BY 1`,
-              );
-        const axis = new Map(rows.map((row) => [text(row, 'axis'), row]));
-        const x = axis.get('x');
-        const y = axis.get('y');
-        if (x && y) {
+        const boxed = await tileBoxes(address.type);
+        if (boxed.length > 0) {
           answer = {
-            minX: floatOf(x['lo'], 'x.min'),
-            maxX: floatOf(x['hi'], 'x.max'),
-            minY: floatOf(y['lo'], 'y.min'),
-            maxY: floatOf(y['hi'], 'y.max'),
+            minX: Math.min(...boxed.map((b) => b.x0)),
+            maxX: Math.max(...boxed.map((b) => b.x1)),
+            minY: Math.min(...boxed.map((b) => b.y0)),
+            maxY: Math.max(...boxed.map((b) => b.y1)),
           };
         }
       }

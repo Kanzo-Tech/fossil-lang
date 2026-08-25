@@ -18,7 +18,7 @@ always correct; only the slope was wrong.
 
 | # | obligation | shape | today |
 | --- | --- | --- | --- |
-| R1 | A window opens a bounded number of files | O(1) in N | **met warm, not cold** |
+| R1 | A window opens a bounded number of files | O(1) in N | **met; opening a corpus is not** |
 | R2 | A window is one query per orientation | constant | met |
 | R3 | A window's cost follows its answer | O(rows) | met |
 | R4 | An answer names every gap in it | exact | met |
@@ -43,14 +43,32 @@ at `chunk_size` 4,096 with both orientations tiled. Measured from kanzo-ui with 
 Before, the vertex half was handed every tile URL and pruned with a `WHERE`; DuckDB skipped the rows
 and still opened each footer. The tiles are read once per corpus now and the boxes kept.
 
-**Cold, the obligation is still unmet**, and it should be stated rather than rounded off: the first
-window of a corpus pays the sweep — 112 ms at a million, 1,117 at five, **5,327 at ten**. Locally
-that is a footer read; over HTTP it is `ceil(vertex_count / chunk_size)` range requests before
-anything is drawn, which is the cost a page actually feels.
+**Cold, the obligation is still unmet, and over HTTP that is the whole story.** Driven through the
+native `duckdb` CLI with httpfs against a plain file origin — ranges, a 206, no listing, no
+coalescing, which is what a bucket looks like from the reader's side:
+
+| corpus | tiles | opening it | one window |
+| --- | --- | --- | --- |
+| 2,000 | 1 | 10 req · 0.03 MB | 17 req · 0.21 MB |
+| 50,000 | 13 | 34 req · 0.23 MB | 22 req · 0.40 MB |
+| 200,000 | 49 | 106 req · 0.82 MB | 25 req · 0.39 MB |
+| 1,000,000 | 245 | 498 req · 4.03 MB | 28 req · 0.42 MB |
+| 5,000,000 | 1,221 | 2,450 req · 20.02 MB | 61 req · 0.89 MB |
+| 10,000,000 | 2,442 | **4,892 req · 40.03 MB** | **71 req · 0.97 MB** |
+
+**A window is bounded and opening a corpus is not.** Seventeen requests to seventy-one across a
+five-thousandfold range of corpus, against ten to 4,892 — two range requests and about 16 kB per
+tile, because reading a footer is a length read and then the footer. At ten million that is forty
+megabytes and nearly five thousand round trips before a single vertex can be drawn.
+
+Two O(N) sweeps became one on the way here: `extent` swept the same footers on its own, so opening a
+corpus and framing it each paid for every tile. It is the union of the boxes and now reads them.
 
 **What would meet it:** the writer knows every tile's box when it cuts it. `tile, min_x, max_x,
-min_y, max_y` is 2,442 rows and about 100 kB at ten million. [Addressing](/docs/format/conventions/addressing)
-says a corpus has no index to discover; this would be one, and saying so is cheaper than the sweep.
+min_y, max_y` is 2,442 rows and about 100 kB at ten million — one request instead of 4,892, and the
+only reason it is not already there is that nobody had counted.
+[Addressing](/docs/format/conventions/addressing) says a corpus has no index to discover; this would
+be one, and saying so is cheaper than the sweep.
 
 ## R2, R3 · One query per orientation, and cost that follows the answer
 
