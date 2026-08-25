@@ -2226,11 +2226,19 @@ impl<'db> Expr<'db> {
                 } else if subtypes(db, o, t) {
                     Some(t)
                 } else {
-                    let eg = self.error_at(expr_id, format!(
-                            "the branches of `? :` have different types: {} and {}.                              Both branches must have the same type — fossil does not coerce.",
+                    // The literal wrapped across two source lines without a
+                    // trailing `\`, so the indentation of the continuation went
+                    // out on the wire: the rendered message carried thirty
+                    // spaces between the full stop and «Both».
+                    let eg = self.error_at(
+                        expr_id,
+                        format!(
+                            "the branches of `? :` have different types: {} and {}. \
+                             Both branches must have the same type — fossil does not coerce.",
                             render_ty_kind(db, t.kind(db)),
                             render_ty_kind(db, o.kind(db)),
-                        ));
+                        ),
+                    );
                     Some(Ty::new(db, TyKind::Error(eg)))
                 }
             }
