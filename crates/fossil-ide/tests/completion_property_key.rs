@@ -1,7 +1,8 @@
 //! Where a property KEY can go, and what it is spelled.
 //!
 //! The shape-property source is the one that offers a mapping's output
-//! contract, and it had two independent defects. Both are measured here against
+//! contract, and it had two independent defects; the stdlib source had a third
+//! in the same position. All three are measured here against
 //! `tests/fixtures/shop.shex` — `shop:Person` declaring `shop:email` and
 //! `shop:name` — with the same host `fossil-lsp` installs.
 //!
@@ -28,14 +29,30 @@
 //! position, at the header, on the right of `=` and on a blank body line, and
 //! 15 / 13 / 2 after `User.`.
 //!
+//! **The stdlib source's turn**, measured against the same two-predicate
+//! fixture. It offered the catalogue whole wherever there was no dot to the
+//! left of the cursor, and a key position is one of those:
+//!
+//! | position                          | total before | total after | FUNCTION before → after |
+//! |-----------------------------------|--------------|-------------|-------------------------|
+//! | key position (`email`, cols 6, 9) | 53           | **2**       | 51 → **0**              |
+//! | the same, under an `@subject`     | 53           | **2**       | 51 → **0**              |
+//! | start of file                     | 51           | 51          | 51 → 51                 |
+//! | top level, outside the mapping    | 51           | 51          | 51 → 51                 |
+//! | the mapping header                | 51           | 51          | 51 → 51                 |
+//! | right of `=` (`User`)             | 51           | 51          | 51 → 51                 |
+//! | after `User.`                     | 13           | 13          | 13 → 13                 |
+//! | the column before the key         | 51           | 51          | 51 → 51                 |
+//! | a still-blank body line           | 51           | 51          | 51 → 51                 |
+//! | inside / just past `@subject`     | 51           | 51          | 51 → 51                 |
+//!
+//! [`the_catalogue_is_not_offered_in_key_position`] holds the first row and
+//! [`every_position_that_is_not_a_key_keeps_its_catalogue`] holds the rest,
+//! because the repair is a cut and a cut that took a position with it would be
+//! the same defect pointing the other way.
+//!
 //! # What these tests do NOT prove
 //!
-//! - **That the stdlib source knows where it is.** 51 dotted function names are
-//!   still offered in key position, and `str.trim` is no more writable there
-//!   than a raw IRI was. That is a third defect, measured
-//!   ([`the_catalogue_is_still_offered_in_key_position`] pins it) and not fixed:
-//!   it is the stdlib source's [`fossil_ide`] `Scope::Catalogue` arm, a separate
-//!   measurement and a separate commit.
 //! - **That a name collision is handled.** The table comes from
 //!   `ResolvedShape::short_names`, which drops the second of two predicates
 //!   sharing a short name; no fixture here declares one, so that path is
@@ -164,12 +181,16 @@ Users : Person from User
 ///
 /// The indent is written `\x20` because it is load-bearing and trailing
 /// whitespace does not survive being looked at: with the four spaces gone,
-/// `(4, 4)` is a column past the end of an empty line, and
-/// `position_to_offset` hands `token_at_position` an offset past the CST's
-/// range, which panics inside `rowan` («Bad offset: range 0..124 offset 127»).
-/// That is a live defect in `crate::position`'s UTF-16 conversion and not this
-/// file's subject; it is recorded here because this fixture is the shortest
-/// reproducer anyone will have.
+/// `(4, 4)` is a column past the end of an empty line, which used to reach
+/// `token_at_position` as an offset past the CST's range and panic inside
+/// `rowan` («Bad offset: range 0..124 offset 127»).
+///
+/// `LineIndex::offset` clamps a column to its line now, so the stripped fixture
+/// no longer aborts; `crate::position`'s own
+/// `token_at_position_past_the_end_of_a_line_does_not_panic` is the guard, and
+/// keeps this one. The indent still matters for what this file measures — four
+/// spaces are what an editor leaves after `Enter`, and the parser attaches them
+/// to the previous property's expression.
 const BLANK: &str = "\
 type { Person, Order } := io.shex(\"shop.shex\")
 User := io.csv(\"users.csv\")
@@ -373,17 +394,77 @@ fn the_detail_keeps_the_predicate_iri_and_leaks_no_type_state() {
     );
 }
 
-/// **Not fixed, and measured so.** The stdlib source is position-blind: it
-/// offers the whole catalogue, dotted, in key position — 51 items, none of
-/// which parses as a `PropertyLhs` either. Narrowing it is the same argument
-/// this file makes about the shape source and a different measurement, so it is
-/// pinned as-is rather than changed.
+/// **The third defect, closed.** The stdlib source was position-blind: it
+/// offered the whole catalogue, dotted, wherever there was no dot to the left
+/// of the cursor — and a key position is one of those. `str.trim` is no more
+/// writable as a `PropertyLhs` than `https://shop.example/voc#email` was, so
+/// the two sources were making the same mistake for the same reason.
+///
+/// Before: 51 FUNCTION items at both columns of the key, `str.trim` among them,
+/// beside the 2 FIELD ones. After: the shape's predicates are the whole list.
 #[test]
-fn the_catalogue_is_still_offered_in_key_position() {
+fn the_catalogue_is_not_offered_in_key_position() {
     let mut db = host();
     let f = program(&mut db, SHOP);
-    let items = fossil_ide::completions(&db, &[f], f, 3, 9);
-    let fns = labels(&items, CompletionItemKind::FUNCTION);
-    assert_eq!(fns.len(), 51, "the whole catalogue, dotted; got {fns:?}");
-    assert!(fns.contains(&"str.trim"));
+    // The boundary past the last keystroke of the name, and the cursor
+    // mid-name an editor re-requesting on every keystroke actually sends.
+    for character in [6, 9] {
+        let items = fossil_ide::completions(&db, &[f], f, 3, character);
+        let fns = labels(&items, CompletionItemKind::FUNCTION);
+        assert!(
+            fns.is_empty(),
+            "no catalogued row parses as a `PropertyLhs`; got {fns:?} at column {character}",
+        );
+        assert_eq!(
+            labels(&items, CompletionItemKind::FIELD),
+            vec!["email", "name"],
+            "the shape's predicates are the whole list at column {character}",
+        );
+        assert_eq!(items.len(), 2, "…and nothing else is offered");
+    }
+}
+
+/// **The narrowing is a narrowing.** `5be2de6`'s defect was the catalogue after
+/// any dot; this file's is the catalogue in key position. Both repairs are cuts,
+/// and a cut that took a position with it would be the same class of mistake
+/// pointing the other way — so every position that is NOT a key keeps the count
+/// it had, measured against the same fixture.
+///
+/// The last two rows are the two positions a key COULD occupy and the CST
+/// declines to resolve, which
+/// [`a_blank_body_line_is_not_a_position_this_resolves`] pins from the shape
+/// side. They read as [`Scope::Catalogue`] — the cursor's token is whitespace,
+/// with no dot to its left — so the catalogue is what they still offer. Closing
+/// them is a parser question, and the first keystroke closes both.
+///
+/// [`Scope::Catalogue`]: fossil_ide
+#[test]
+fn every_position_that_is_not_a_key_keeps_its_catalogue() {
+    let mut db = host();
+    let shop = program(&mut db, SHOP);
+    let blank = program(&mut db, BLANK);
+    // (fixture, line, character, expected FUNCTION count, what it is)
+    let cases: &[(SourceFile, u32, u32, usize, &str)] = &[
+        (shop, 0, 0, 51, "the start of the file"),
+        (shop, 1, 4, 51, "top level, outside any mapping"),
+        (shop, 2, 3, 51, "the mapping header"),
+        (shop, 3, 16, 51, "`User` on the right of `=`"),
+        (shop, 3, 17, 13, "`User.` — the relation verbs, untouched"),
+        (
+            shop,
+            3,
+            4,
+            51,
+            "the column before the key's first character",
+        ),
+        (blank, 4, 4, 51, "a still-blank body line"),
+    ];
+    for (f, line, character, expected, what) in cases {
+        let items = fossil_ide::completions(&db, &[*f], *f, *line, *character);
+        assert_eq!(
+            labels(&items, CompletionItemKind::FUNCTION).len(),
+            *expected,
+            "{what} at ({line}, {character})",
+        );
+    }
 }

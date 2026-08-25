@@ -4,11 +4,14 @@
 //! (the `lsp-types`-direct shape is WASM-clean, so the browser host and the LSP
 //! both consume it without a second conversion):
 //!
-//! 1. **stdlib functions**, narrowed to the cursor's RECEIVER. After `str.`
-//!    the list is what a string HAS, labelled `trim`; after a `:=` binding it
-//!    is the relation verbs; away from any dot it is the catalogue whole,
-//!    spelled `str.trim`. See [`stdlib_completions`] for what the narrowing
-//!    does not cover. There is no auto-import edit and no `(native-only)` tag:
+//! 1. **stdlib functions**, narrowed to the cursor's RECEIVER and to its
+//!    POSITION. After `str.` the list is what a string HAS, labelled `trim`;
+//!    after a `:=` binding it is the relation verbs; on the left of a property
+//!    line it is nothing, because `PropertyLhs := IDENT` and no catalogued row
+//!    is an `IDENT`; anywhere else with no dot to the left it is the catalogue
+//!    whole, spelled `str.trim`. See [`stdlib_completions`] for what the
+//!    narrowing does not cover. There is no auto-import edit and no
+//!    `(native-only)` tag:
 //!    the first named a `use <ns>` line no program writes, and the second named
 //!    `WasmClass::NativeUdfOnly`, a class that no longer exists.
 //! 2. **shape properties** — the output contract of the mapping the cursor is
@@ -129,8 +132,8 @@ enum Scope<'db> {
     /// (`SubjectAssign := AT_ATTR ASSIGN Expression`, a different production
     /// sharing the node), and `@subject` is not a key.
     ///
-    /// The catalogue is still offered here, unnarrowed — see
-    /// [`stdlib_completions`].
+    /// It is the one variant where the shape source speaks and the stdlib one
+    /// is silent: the catalogue is dotted and a key is a bare name.
     PropertyKey(MappingLoc<'db>),
     /// A head the catalogue classifies as a type: `str` → `Scalar(String)`,
     /// `seq` → `Relation`. Also what a `:=` binding resolves to, and what a
@@ -158,7 +161,8 @@ enum Scope<'db> {
     Nothing,
 }
 
-/// Source 1: the standard library, narrowed to the cursor's RECEIVER.
+/// Source 1: the standard library, narrowed to the cursor's RECEIVER — and,
+/// where there is no receiver to narrow by, to its POSITION.
 ///
 /// It was not narrowed at all: every row of `stdlib_default` was pushed
 /// wherever completion fired, so a `.` after a relation offered 51 items — 13
@@ -166,6 +170,17 @@ enum Scope<'db> {
 /// consecutive runs gave three different spellings of. `RegistryEntry` has
 /// carried `recv` and `member` since the receiver replaced dispatch-by-string,
 /// and nothing in this crate read either field.
+///
+/// **The position, which the receiver question cannot ask.** A property key is
+/// `PropertyLhs := IDENT` (grammar.bnf) — a bare name — and every catalogued row
+/// is dotted, so none of them is writable there and
+/// [`Scope::PropertyKey`] offers none. That was the last position left
+/// unnarrowed after the shape source was repaired: the two sources were
+/// offering different unwritable spellings of the same wrong thing in the same
+/// place, 51 rows and 2 raw IRIs. `tests/completion_property_key.rs` has both
+/// numbers and
+/// `every_position_that_is_not_a_key_keeps_its_catalogue` pins the six
+/// positions the cut must not reach.
 ///
 /// Two things follow from knowing the receiver, and both are here:
 ///
@@ -197,17 +212,14 @@ fn stdlib_completions(
     // `(label, entry)` — the label differs between the two shapes, so it is
     // decided while selecting rather than guessed afterwards from the name.
     let mut rows: Vec<(String, &fossil_hir::stdlib::RegistryEntry)> = match scope {
-        Scope::Nothing => Vec::new(),
-        // A key position takes the catalogue too, and `str.trim` is no more
-        // writable as a `PropertyLhs` than a raw IRI was — 51 items, measured
-        // and PINNED by `tests/completion_property_key.rs`'s
-        // `the_catalogue_is_still_offered_in_key_position`. Narrowing it is the
-        // same argument this commit makes about the shape source and a
-        // different measurement; it is not narrowed here so that the change
-        // that does it has a number to move.
-        Scope::Catalogue | Scope::PropertyKey(_) => {
-            registry.iter().map(|e| (e.name.to_string(), e)).collect()
-        }
+        // A key position is `PropertyLhs := IDENT` and no catalogued row is one:
+        // `str.trim` is no more writable there than the raw predicate IRI the
+        // shape source used to offer. Both sources were making the same
+        // mistake, and this arm shared `Scope::Catalogue`'s while the shape
+        // source was repaired alone — 51 items, dotted, offered where none of
+        // them parses.
+        Scope::Nothing | Scope::PropertyKey(_) => Vec::new(),
+        Scope::Catalogue => registry.iter().map(|e| (e.name.to_string(), e)).collect(),
         // A row binding is a relation as well as a row — see [`Scope::Row`].
         Scope::Row(_) => registry
             .members_of(Receiver::Relation)

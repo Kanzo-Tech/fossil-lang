@@ -191,13 +191,18 @@ User : Person from users
         "a program with no output contract must contribute no shape-property \
          (Field) completions",
     );
+    // The stdlib half is asked one line up, at the header. A key position
+    // offers no catalogued row either now — `PropertyLhs := IDENT` and every
+    // row is dotted — so asking here would prove the catalogue silent for the
+    // narrowing's reason and read as if the document were the reason.
+    let header = fossil_ide::completions(&db, &[f], f, 1, 3);
     assert!(
-        items.iter().any(|i| i.label == "str.trim"),
+        header.iter().any(|i| i.label == "str.trim"),
         "stdlib completions must still be offered; labels = {:?}",
-        items.iter().map(|i| &i.label).collect::<Vec<_>>(),
+        header.iter().map(|i| &i.label).collect::<Vec<_>>(),
     );
     assert!(
-        !items.iter().any(|i| i.label.ends_with(':')),
+        !header.iter().any(|i| i.label.ends_with(':')),
         "a `prefix:` completion is a form this language does not have",
     );
 }
@@ -328,14 +333,20 @@ User : Person from users
     );
 }
 
-/// Away from any dot the catalogue is offered whole, spelled in full — and
-/// SORTED. `FunctionRegistry` is a `HashMap`; without the sort this vector is a
-/// different vector on every call.
+/// Away from any dot, and outside a property key, the catalogue is offered
+/// whole, spelled in full — and SORTED. `FunctionRegistry` is a `HashMap`;
+/// without the sort this vector is a different vector on every call.
+///
+/// It asked at `(3, 6)`, inside the key `name`. That is the one dot-free
+/// position where the catalogue is NOT the answer — no dotted row parses as a
+/// `PropertyLhs` — so the ordering claim moved to the mapping header, which is
+/// dot-free for the reason this test is about.
 #[test]
 fn the_bare_catalogue_is_whole_and_sorted() {
     let mut db = HostDb::new();
     let f = file(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 3, 6);
+    // Line 2 is `User : Person from users`; column 3 is inside `User`.
+    let items = fossil_ide::completions(&db, &[f], f, 2, 3);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -349,7 +360,7 @@ fn the_bare_catalogue_is_whole_and_sorted() {
     sorted.sort_unstable();
     assert_eq!(fns, sorted, "ordered by label, always");
     // The same call twice is the same list. This is what was false.
-    let again: Vec<String> = fossil_ide::completions(&db, &[f], f, 3, 6)
+    let again: Vec<String> = fossil_ide::completions(&db, &[f], f, 2, 3)
         .into_iter()
         .map(|i| i.label)
         .collect();
