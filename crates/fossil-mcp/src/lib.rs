@@ -308,4 +308,82 @@ mod tests {
             "CREATE OR REPLACE VIEW \"Person_knows_Person\" AS SELECT * FROM read_parquet('s3://bucket/run/edge/Person_knows_Person/by_source.parquet')"
         ));
     }
+
+    /// **The glob is one star, and the difference between one and two is a
+    /// vertex type that reads its own index as payload.**
+    ///
+    /// Since `55f573e` a vertex type may publish an identity index, and it
+    /// lives INSIDE that type's own prefix — `vertex/Person/index/tile{k}.parquet`,
+    /// beside `vertex/Person/chunk{k}.parquet`. `*` matches one directory level
+    /// and `**` recurses, so a reader that reached for the recursive form would
+    /// union five payload tiles of five columns with five index tiles of two.
+    ///
+    /// The test above pins the SQL by string and would catch that as a diff,
+    /// but it would report it as *"vertex view did not glob the declared
+    /// prefix"* — which is not what went wrong, and the star is not the part of
+    /// that string a reader's eye stops on. Its own comment records that it
+    /// stayed green for months while every verb over a real corpus failed,
+    /// because a string it asserted was a path the writer deletes. So this one
+    /// asserts the NUMBER, against a corpus that actually has an index: the
+    /// view is exactly the payload, and `vertex_count` is what says so.
+    #[test]
+    fn the_vertex_view_does_not_read_the_identity_index_as_payload() {
+        use duckdb::Connection;
+        use std::path::Path;
+
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/corpus/conformance/corpus")
+            .canonicalize()
+            .expect("the conformance corpus is on disk");
+
+        // Read the real manifests rather than build fixtures: the point is a
+        // corpus whose `index:` block is the one `fossil run` writes.
+        let mut map = HashMap::new();
+        for rel in [
+            "graph.graph.yml",
+            "vertex/Person.vertex.yml",
+            "edge/Person_knows_Person/Person_knows_Person.edge.yml",
+        ] {
+            map.insert(
+                rel.to_string(),
+                std::fs::read(corpus.join(rel)).unwrap_or_else(|e| panic!("read {rel}: {e}")),
+            );
+        }
+        let manifest = Manifest::load(&MapSource(map)).expect("the conformance manifest loads");
+
+        // The fixture is only worth anything if it HAS one. A corpus that lost
+        // its index would make every assertion below pass on nothing.
+        assert!(
+            manifest.vertices()[0].index.is_some(),
+            "the conformance corpus declares no index, so this test proves nothing",
+        );
+
+        let conn = Connection::open_in_memory().expect("open duckdb");
+        conn.execute_batch(&register_views_sql(&manifest, corpus.to_str().unwrap()))
+            .expect("the views register over the corpus on disk");
+
+        let rows: u64 = conn
+            .query_row("SELECT count(*) FROM \"Person\"", [], |r| r.get(0))
+            .expect("the vertex view is readable");
+        let declared = manifest.vertices()[0].vertex_count;
+        assert_eq!(
+            rows, declared,
+            "the vertex view reads {rows} rows where the manifest declares {declared}; \
+             a recursive glob would add the index tiles to the payload",
+        );
+
+        // And the schema is the payload's. A union with a two-column index
+        // would show up here even if the row count happened to survive it.
+        let columns: u64 = conn
+            .query_row(
+                "SELECT count(*) FROM (DESCRIBE SELECT * FROM \"Person\")",
+                [],
+                |r| r.get(0),
+            )
+            .expect("describe the vertex view");
+        assert_eq!(
+            columns, 5,
+            "Person's payload is dense_id, subject, x, y, cluster_id"
+        );
+    }
 }
