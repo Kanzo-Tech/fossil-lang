@@ -47,7 +47,7 @@
 //!   This bullet used to read «the `fossil/*` methods, or `didClose`», and the
 //!   file then contradicted itself: [`WASM_ONLY_METHODS`]'s own comment says
 //!   `didClose` is deliberately NOT in the table because both hosts have it, and
-//!   `fossil-lsp`'s `main_loop` handles `DidCloseTextDocument::METHOD`. The table
+//!   `fossil-lsp`'s `handle_notification` handles `DidCloseTextDocument::METHOD`. The table
 //!   is the one that was right, and [`did_close_clears_the_buffer_on_both`] is
 //!   the test that holds it — so `didClose` is not an undertested extra, it is a
 //!   checked agreement.
