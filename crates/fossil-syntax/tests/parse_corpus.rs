@@ -9,14 +9,13 @@
 //! prefix.
 //!
 //! `|>` was the last retired spelling still written here, and it is gone too:
-//! step 6 of `SURFACE-PLAN.md` took the token out of the lexer, so `a |> f()`
-//! now arrives as an unlexable `|` and a `GT` and the parser answers
-//! `retired::PIPELINE`. Bucket 1 spells the member call the ruling kept —
-//! `User.filter(…)`, chained — and `no_fixture_spells_a_retired_form` reads
-//! `retired::PIPELINE` along with the other four, so the operator cannot come
-//! back through a regenerated snapshot. The bucket keeps its name because it
-//! keeps its subject: a pipeline is a chain, and the chain is now spelled with
-//! the dot every other postfix form already used.
+//! the token left the lexer, so `a |> f()` now arrives as an unlexable `|` and
+//! a `GT` and the parser answers `retired::PIPELINE`.
+//! `no_fixture_spells_a_retired_form` reads `retired::PIPELINE` along with the
+//! other four, so the operator cannot come back through a regenerated snapshot.
+//! Bucket 1 keeps its name because it keeps its subject: a pipeline is a chain,
+//! and the chain is spelled `User.filter(…)`, chained, with the dot every other
+//! postfix form already used.
 //!
 //! # The three that were deleted rather than rewritten
 //!
@@ -416,8 +415,8 @@ fn files_with_extension(root: &std::path::Path, ext: &str) -> Vec<std::path::Pat
 ///
 /// - **That a fixture is a form the language HAS.** A file that parses clean may
 ///   still be nonsense the checker refuses — `@subject = ?` in bucket 2 is a
-///   parse-recovery fixture on purpose. Only step 8's compilation of
-///   `apps/docs/programs/` proves that, and this crate has no checker to ask.
+///   parse-recovery fixture on purpose. Only compiling `apps/docs/programs/`
+///   proves that, and this crate has no checker to ask.
 /// - **That fossil written inside a Rust or TypeScript string literal is
 ///   live.** This is the real hole and it is deliberate, because a guard that
 ///   read those literals could not be right. `fossil-ide/src/completion.rs`

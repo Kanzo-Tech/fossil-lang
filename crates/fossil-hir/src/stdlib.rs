@@ -12,8 +12,8 @@
 //!
 //! # A row is DATA: receiver + name + signature + lowering
 //!
-//! Ruling 14 of `SURFACE-PLAN.md`. The catalogue is on its way to being a file
-//! the compiler reads, so a row carries nothing a file could not: four fields,
+//! The catalogue is on its way to being a file the compiler reads, so a row
+//! must carry nothing a file could not: four fields,
 //! all of them values. `grammar.bnf` then says the SHAPE of a program and this
 //! says WHICH NAMES EXIST — two data files and a compiler. Adding
 //! `str.slugify` over `regexp_replace` stops touching Rust.
@@ -44,13 +44,7 @@
 //!
 //! ## Two lowerings, and no third
 //!
-//! Ruling 15. `LoweringKind` had four variants and `InlineForm` another nine,
-//! and the nine were SQL templates whose text was already written in their own
-//! doc-comments — the datum existed, in a comment, where nothing could execute
-//! it. Two of them (`SplitPart`, `JsonExtract`) were literally what `Builtin`
-//! was: a call by name. The `Builtin`/`Inline` border was not semantic.
-//!
-//! What is left is the one border that is: `LoweringKind::Expr` is a scalar
+//! There is one border and it is semantic: `LoweringKind::Expr` is a scalar
 //! SQL expression and `LoweringKind::Op` names an operator of the algebra, a
 //! closed set of 14. `Udf` is gone — see `LoweringKind::Expr` for what
 //! that cost and bought.
@@ -287,8 +281,7 @@ pub enum Arity {
 /// - [`Self::Rows`] is the relation a verb is a verb OF, and every `seq/` row's
 ///   parameter 0;
 /// - [`Self::Predicate`] is an expression over that relation's row, yielding
-///   `Bool` — what `where` takes and what a `join`'s `on` condition is
-///   (ruling 17).
+///   `Bool` — what `where` takes and what a `join`'s `on` condition is.
 ///
 /// It is the shape five reference systems arrive at from different directions:
 /// `pg_proc`'s argument types over a catalogue, GHC's `primops.txt.pp`, Trino's
@@ -538,36 +531,21 @@ pub enum PlanOp {
     Count,
     /// An `io/` source constructor. **Which** reader it is is not written here.
     ///
-    /// It was `Source(SourceFormatTag)`, a registry-local three-variant mirror
-    /// of `fossil-mir::SourceFormat`, and it was write-only: constructed at the
-    /// three `io.` rows below and destructured nowhere — every reader of
-    /// [`LoweringKind`] matches `Expr` and takes `Op(_)` as a wildcard
-    /// (`fossil_df::lower_call`, `fossil_df::stdlib`). It was the reader half of
-    /// `fossil_base::providers` said a second time, which is the defect ruling
-    /// 13 collapsed one level up: `fossil-mir::lower::resolve_source` resolves
-    /// the format from the PROVIDER ROW (`Provider::reads_rows`) and has never
-    /// read this.
-    ///
-    /// So the row says what a `HirExpr::Call` needs it to say — *this name is a
-    /// source, not a scalar expression* — and the catalogue that owns readers
-    /// answers which one.
+    /// The format comes from the PROVIDER ROW —
+    /// `fossil-mir::lower::resolve_source` reads `Provider::reads_rows` — so
+    /// naming it here as well would be that table said a second time. This row
+    /// says only what a `HirExpr::Call` needs it to say: *this name is a source,
+    /// not a scalar expression*.
     Source,
 }
 
-// ── Source dispatch lived here, and it was HALF of one table ──────────────
+// ── Source dispatch is NOT here ───────────────────────────────────────────
 //
-// `SourceKind` / `SOURCE_KINDS` / `source_kind` are gone to
-// `fossil_base::providers`. They described a name, the extensions it accepts,
-// and what it does with them — the same three fields as `ShapeDecoder` in
-// `fossil-base`, modelled twice: this one dispatched by NAME, that one by
-// EXTENSION, and `def_map` threw away the constructor of a `type { … } :=`
-// binding because nothing read it. `io.shex("x.ttl")` and `io.shacl("x.ttl")`
-// were therefore the same program. Ruling 13 of `SURFACE-PLAN.md` collapses
-// them into `fossil_base::providers::Provider`, one lookup and one criterion.
-//
-// The table cannot live here any more even if it wanted to: a row that reads
-// TYPES carries a `fn` into a schema language, and `fossil-hir` may not link
-// one (`0e6898d`). It comes from the host, through `System::providers`.
+// A source's name, the extensions it accepts and what it does with them are
+// one table, `fossil_base::providers::Provider`, and it cannot live here even
+// if it wanted to: a row that reads TYPES carries a `fn` into a schema
+// language, and `fossil-hir` may not link one (`0e6898d`). It comes from the
+// host, through `System::providers`.
 //
 // `FunctionRegistry` below is NOT that table and does not merge into it: it
 // carries call SIGNATURES for the checker, and `io.csv` appears in both for the
@@ -579,15 +557,9 @@ impl FunctionRegistry {
     /// namespaces-and-types (`seq`/`core`/`parse`/`math`/`str`/`validate`/
     /// `anon`) plus the `io/` source constructors.
     ///
-    /// `clean/` is not among them any more, and that is ruling 16 of
-    /// `SURFACE-PLAN.md`: it held `trim`, `lower`, `upper`, `slug` and
-    /// `strip_html` while `str/` held eight operations on a string, with no
-    /// principle separating the two — `replace` could have been called cleaning
-    /// and `trim` could have been called a string operation. Five renames and
-    /// the namespace is gone. It also makes `str.lower(str.trim(x))` — the
-    /// canonical example of one entry reached two ways, and the one
-    /// `grammar.bnf, PostfixExpr` gives — name two rows that exist, which it did
-    /// not before.
+    /// There is no `clean/`: `trim`, `lower`, `upper`, `slug` and `strip_html`
+    /// are operations on a string and live in `str/` with the other eight, since
+    /// no principle separates cleaning a string from operating on one.
     #[must_use]
     #[allow(clippy::too_many_lines)] // a flat catalog table; one row per stdlib fn.
     pub fn stdlib_default() -> Self {
@@ -803,8 +775,7 @@ impl FunctionRegistry {
         );
         // The right side is a BINDING and not a relation value: `join(User, …)`
         // names a source, and `Node.join(Node as Other, …)` names it twice. The
-        // condition is a predicate over BOTH sides (ruling 17) and is written
-        // with its name.
+        // condition is a predicate over BOTH sides and is written with its name.
         add_rows(
             e,
             "seq.join",
@@ -837,9 +808,8 @@ impl FunctionRegistry {
 
         // ── str/ (13) — every operation on a string. Receiver::Scalar(String)
         //
-        // Eight were here and five arrived from `clean/` (ruling 16):
-        // `trim`, `lower`, `upper`, `slug`, `strip_html`.
-        // `clean.normalize_unicode` did NOT arrive: it is deleted from the
+        // `trim`, `lower`, `upper`, `slug` and `strip_html` are among them.
+        // `normalize_unicode` is NOT: it is deleted from the
         // language, because `DuckDB` has `nfc_normalize` and therefore NFC
         // only, and a `normalize_unicode(x, 'NFKD')` that silently gave NFC
         // would be a function that lies.

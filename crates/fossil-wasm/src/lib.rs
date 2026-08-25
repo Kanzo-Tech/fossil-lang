@@ -556,17 +556,6 @@ impl FossilPlayground {
     }
 }
 
-// `FnClassification` and `stdlib_classification()` lived here — one row per
-// stdlib function, carrying `"pure_sql"` or `"native_udf_only"`, so the browser
-// playground could render the native-only functions as disabled.
-//
-// Ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering kind, and with it
-// the `WasmClass` concept the manifest projected. Every catalogued function is
-// a pure SQL expression template now, so there is nothing to disable and a
-// manifest saying `"pure_sql"` fifty-one times says nothing at all. **The
-// language runs entirely in the browser**, which is what the manifest existed
-// to deny.
-
 impl Default for FossilPlayground {
     fn default() -> Self {
         Self::new()

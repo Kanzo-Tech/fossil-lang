@@ -29,7 +29,7 @@
 //!
 //! # The row is named `shex`, and that is not a lie about the format
 //!
-//! Dispatch is by NAME now (ruling 13), so a test program writing
+//! Dispatch is by NAME, so a test program writing
 //! `type { P } := io.shex("p.shex")` reaches whichever row is called `shex`. A
 //! row called `lines` would be unreachable from every program in the workspace's
 //! tests. The name is the CONSTRUCTOR, not the syntax; what the row actually

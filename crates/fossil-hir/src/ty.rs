@@ -145,9 +145,8 @@ impl<'db> Ty<'db> {
 /// binding into the same relation, and its columns stay under their own name:
 /// `Purchase.amount` and `User.email` are two rows of one relation, and two
 /// columns called `id` — one per side — are two distinct entries here even
-/// though the flattened [`Self::flat`] record can only find the first. Ruling 17
-/// of `SURFACE-PLAN.md` deleted the collision rule on the promise that
-/// qualification would do that work; this is where it does it.
+/// though the flattened [`Self::flat`] record can only find the first. This is
+/// what keeps a join from needing a name-collision rule.
 ///
 /// The row is an `Option` because a binding whose source declares no schema is
 /// still a row a body may name: `hello.fossil` addresses columns of a source

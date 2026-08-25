@@ -9,24 +9,6 @@
 //! builds it: it runs `cargo check --target wasm32-unknown-unknown` without
 //! `--all-targets`, so no `tests/` target is compiled for wasm32.
 //!
-//! # What this replaced, and why it is strictly stronger
-//!
-//! There were TWO guards here and neither checked what mattered.
-//! `DUCKDB_BUILTIN_ALLOWLIST` was a curated list of names a `Builtin` row was
-//! allowed to render to, and `fossil-hir/tests/stdlib_classification_gate.rs`
-//! asserted membership in it — a list checked against itself. This file then
-//! executed `SELECT <duckdb_name>(<dummy args>)` to prove the NAME was real.
-//! Between them they proved a function name existed, and they could not see the
-//! nine `InlineForm` variants at all, because those rendered no name: the SQL
-//! shape of `CAST(x AS BIGINT)` or `CASE WHEN x IS NULL THEN error(…) END` was
-//! written in a doc-comment, where nothing could execute it.
-//!
-//! Ruling 15 of `SURFACE-PLAN.md` made the template the datum. So this test
-//! executes THE TEMPLATE — every row, whole, with its arguments substituted —
-//! and both old guards fall out of it: a misspelt function name and a
-//! malformed expression are the same failure now, and the allowlist that had to
-//! be kept in step by hand is gone.
-//!
 //! # The pass criterion, and why it is not "returns a value"
 //!
 //! A template is fed dummy arguments typed from its own [`SigSpec`], and dummy

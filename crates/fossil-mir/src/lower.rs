@@ -620,12 +620,8 @@ fn lower_source_chain<'db>(
             }),
             HirSourceOp::Join { right, alias, on } => {
                 let right_chain = lower_source_chain(db, dm, file, right, span, ops, depth + 1)?;
-                // The condition is a PREDICATE now, not a key (ruling 17 of
-                // `SURFACE-PLAN.md`). It was `on = .k` — `USING (k)`, one
-                // equality synthesised here between the same column name on
-                // both sides — and the author writes the equality itself, so
-                // there is nothing left to synthesise: the predicate lowers
-                // like any other expression.
+                // The condition is a PREDICATE the author writes, so there is
+                // no key to synthesise: it lowers like any other expression.
                 //
                 // It is lowered in the LEFT relation's scope. Its column
                 // references are qualified (`Purchase.user_id`,
@@ -671,8 +667,7 @@ fn lower_source_chain<'db>(
 /// Reads the `(constructor, uri)` pair off the already-loaded [`DefMap`]
 /// (file-keyed — NO new per-mapping fan-out). The format is
 /// resolved by looking the constructor up in the provider registry
-/// ([`fossil_base::providers`], the one table since ruling 13 of
-/// `SURFACE-PLAN.md`) — no string-matching here. A
+/// ([`fossil_base::providers`]) — no string-matching here. A
 /// [`RowReader::Native`](fossil_base::RowReader::Native) maps exhaustively to a
 /// [`SourceFormat`] (a new reader variant is a compile error until handled); a
 /// [`RowReader::Materialised`](fossil_base::RowReader::Materialised) becomes

@@ -2,8 +2,8 @@
 //!
 //! # Why this exists
 //!
-//! Ruling 14 of `SURFACE-PLAN.md`: the catalogue is DATA and a compiler reads
-//! it. `crate::catalogue` already does that for the `io.` half —
+//! The catalogue is DATA and a compiler reads it. `crate::catalogue` already
+//! does that for the `io.` half —
 //! `catalogue.bnf` in, four projections out. The stdlib half never became a
 //! file, but it never needed to in order to be data: `fossil_hir::stdlib`'s
 //! `FunctionRegistry` is a table of `RegistryEntry { name, recv, member, sig,

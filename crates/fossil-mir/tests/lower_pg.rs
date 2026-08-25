@@ -193,7 +193,7 @@ Thing : Thing from filtered
 //
 // The dangling case is the one most likely to be lost: a reference the program
 // writes to a subject nothing constructs must still be well-formed and must not
-// become a property. Ruling 6 of 2026-08-11 says an edge is a reference and RDF
+// become a property. An edge is a reference and RDF
 // is open-world, so nothing checks that the target exists — which makes "it
 // silently became a column" the failure to guard against.
 

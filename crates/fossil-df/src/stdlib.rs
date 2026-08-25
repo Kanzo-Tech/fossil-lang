@@ -13,15 +13,6 @@
 //! is the engine every one of them was MEASURED against. Most of those names
 //! are also `DataFusion`'s; the ones that are not are listed in
 //! `datafusion_name`, the only place the two vocabularies are reconciled.
-//!
-//! # There are no UDFs any more
-//!
-//! A `UDFS` map lived here: `ScalarUDF`s for `fossil_slug` and
-//! `fossil_unicode_norm`, the two functions no engine ships, reimplemented in
-//! Rust so the compiler ring could run them without a database. Ruling 15 of
-//! `SURFACE-PLAN.md` deleted the `Udf` lowering kind, so no row names one.
-//! `str.slug` is a template both engines render; `clean.normalize_unicode`
-//! left the language.
 
 /// The `DataFusion` spelling of a catalogued builtin.
 ///

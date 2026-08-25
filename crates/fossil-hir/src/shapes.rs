@@ -29,12 +29,10 @@
 //! [`fossil_base::shape_document`], so an edit to the `.shex` invalidates every
 //! mapping checked against it.
 //!
-//! Naming no document is an ERROR now, and it used to be the one `None` this
-//! module defended: it was once a DECISION — the program writes its corpus and
-//! nothing is checked. The ruling of 2026-08-11 made it an error, because a
-//! property key is a bare name whose meaning is the last segment of a predicate
-//! IRI **the document declares**, so a program with no document cannot write a
-//! single property. [`TargetShapeError::NoDocument`] is that case.
+//! Naming no document is an ERROR: a property key is a bare name whose meaning
+//! is the last segment of a predicate IRI **the document declares**, so a
+//! program with no document cannot write a single property.
+//! [`TargetShapeError::NoDocument`] is that case.
 //!
 //! # Every failure is reported at the BINDING, and none of them here
 //!
@@ -366,12 +364,9 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
 pub enum TargetShapeError {
     /// The program names NO shape document at all.
     ///
-    /// This used to be `Ok(None)` — a decision: the program wrote its corpus
-    /// and nothing was checked. The ruling of 2026-08-11 made it an error, and
-    /// deliberately: a property key is a bare name whose meaning is the last
-    /// segment of a predicate IRI **the document declares**, so without a
-    /// document a program cannot write a single property. What was a silent
-    /// no-op is a message.
+    /// An error and not `Ok(None)`: a property key is a bare name whose meaning
+    /// is the last segment of a predicate IRI **the document declares**, so
+    /// without a document a program cannot write a single property.
     NoDocument,
 }
 
@@ -397,8 +392,8 @@ pub(crate) enum DocumentError {
     Unnamed,
     /// **The row the program named refused the job**, in the row's own words:
     /// it does not read types at all (`io.csv`), or it does not accept this
-    /// extension (`io.shex("catalogue.ttl")`). Ruling 13: the row checks and the
-    /// row words its own rejection; the core only carries it.
+    /// extension (`io.shex("catalogue.ttl")`). The row checks and the row words
+    /// its own rejection; the core only carries it.
     Mismatch(SmolStr),
     /// A decoder ran and rejected the document.
     Unparseable(SmolStr),
@@ -431,11 +426,10 @@ impl fmt::Display for DocumentError {
 /// # The row is chosen by NAME
 ///
 /// `constructor` is what the program wrote — `io.shex`, `io.shacl` — and it
-/// selects the row (ruling 13 of `SURFACE-PLAN.md`). The row is then asked two
+/// selects the row; the extension never does, or `io.shex("x.ttl")` and
+/// `io.shacl("x.ttl")` would be the same program. The row is then asked two
 /// questions it answers about itself, and each refusal comes back in the row's
-/// own words: does it read TYPES at all, and does it accept this extension. Both
-/// used to be unaskable, because the extension chose the row and the
-/// constructor was discarded in `def_map`.
+/// own words: does it read TYPES at all, and does it accept this extension.
 ///
 /// `constructor` is `None` only for a program that named a document without a
 /// provider, and that is [`DocumentError::Unnamed`] — not a fallback. The
@@ -723,11 +717,9 @@ User : Person from users
         );
     }
 
-    /// Naming no document was a DECISION: the program wrote its corpus and
-    /// nothing was checked. The ruling of 2026-08-11 made it an error, and this
-    /// test is that rule: a property key is the last segment of a predicate IRI
-    /// that a shape declares, so a program with no shape document cannot write
-    /// a property at all.
+    /// Naming no document is an error, and this test is that rule: a property
+    /// key is the last segment of a predicate IRI that a shape declares, so a
+    /// program with no shape document cannot write a property at all.
     ///
     /// **The message moved, and this is the test that says where to.** It used
     /// to be `TargetShapeError::NoDocument`, raised here. A header names a BARE
@@ -740,8 +732,8 @@ User : Person from users
     #[test]
     fn a_program_that_names_no_document_is_an_error_now() {
         let (db, file) = db_with_document(SRC_WITHOUT_DOCUMENT, "unused.shex", PERSON_DOCUMENT);
-        // `!Ok(Some(_))`, not `== Ok(None)`: what the rule of 2026-08-11 says
-        // is that such a program gets no output contract and is TOLD so, and
+        // `!Ok(Some(_))`, not `== Ok(None)`: the rule is that such a program
+        // gets no output contract and is TOLD so, and
         // both halves below hold whether this returns `Ok(None)` (what it does)
         // or is repaired to return an error again. Pinning the exact variant
         // would make this fixture decide which, and that is not a fixture's

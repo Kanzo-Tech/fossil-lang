@@ -82,10 +82,3 @@
 // on the read path of the format. It is `fossil-mcp`'s now, which was its only
 // caller and already depended on `fossil-graph`.
 pub mod layout;
-// `pub mod udf;` lived here — eight native Rust UDF trampolines
-// (`fossil_slug`, `fossil_validate_email`, `fossil_hmac`, …) registered on a
-// DuckDB connection. Ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering
-// kind: two of the eight functions left the language and the other six are SQL
-// expression templates in the catalogue, so there is nothing left to register.
-// The module went with them, and so did the `WasmClass` concept it was the
-// whole reason for.

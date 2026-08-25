@@ -132,13 +132,8 @@ pub enum HirSourceOp {
     /// nowhere left to live.
     Select(Vec<SelectedColumn>),
     /// `join(User, on = Purchase.user_id == User.id)` — an inner join whose
-    /// condition is a PREDICATE (ruling 17 of `SURFACE-PLAN.md`).
-    ///
-    /// It was `on = .k`, `USING (k)` semantics with the key named once. Two
-    /// things killed that and both are already decided elsewhere: `.k` needed a
-    /// `FieldRef`, and there is no `FieldRef`; and the body writes
-    /// `Purchase.amount` next to `User.email`, so the qualification that
-    /// `USING` existed to avoid is the thing the language now has.
+    /// condition is a PREDICATE over qualified columns, not a shared key name:
+    /// `USING (k)` cannot express a join whose two keys are spelled differently.
     ///
     /// `alias` is the `Node as Other` of a self-join — the second name for the
     /// same source, which is the only thing that can tell the two sides apart
@@ -612,10 +607,9 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
         let Some(shape_iri) = dm.lookup_type(db, r.type_name.as_str()) else {
             continue;
         };
-        // The PAIR, not the path. The constructor is what selects the row that
-        // reads the document (ruling 13), and `output_shape_binding` hands both
-        // over together precisely so no caller can take one and forget the
-        // other — which is how the two came apart in the first place.
+        // The PAIR, not the path: the constructor selects the row that reads
+        // the document, and `output_shape_binding` hands both over together so
+        // no caller can take one and forget the other.
         let Some((constructor, document)) = dm.output_shape_binding(db) else {
             continue;
         };
@@ -671,27 +665,22 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
 }
 
 /// **The provider a binding names, checked against what its POSITION asks of
-/// it** — ruling 13 of `SURFACE-PLAN.md`, with a real span.
+/// it.**
 ///
 /// The row declares its capabilities; where the binding is written decides which
 /// one is asked for. `User := io.csv(…)` asks for rows; `type { P } := io.shex(…)`
 /// asks for types. Asking a row for a capability it does not declare is an error
-/// that **names both**, and it is worded in
-/// [`crate::refusals::decline_capability`] — one sentence, shared with
-/// [`crate::shapes::decoded_document`] and with `fossil-engine`'s run path,
-/// which had each written their own until the three had drifted apart.
+/// that **names both**, and it is worded once in
+/// [`crate::refusals::decline_capability`], shared with
+/// [`crate::shapes::decoded_document`] and with `fossil-engine`'s run path.
 ///
-/// This is reported here and not in [`crate::shapes::resolve_target_shape`] for
-/// two reasons. The span: `node.text_range()` covers the binding the author
-/// wrote, and the per-mapping path has only the mapping header. And the trap
-/// this repo has already paid for once — `lower_property` ends in `return None`
-/// and `body.rs` skips it without a word, so properties disappear in silence. A
-/// provider mismatch that produced no diagnostic would be that failure in a new
-/// place.
+/// Reported here and not in [`crate::shapes::resolve_target_shape`] for the
+/// span: `node.text_range()` covers the binding the author wrote, and the
+/// per-mapping path has only the mapping header.
 ///
 /// # The extension is checked in TYPE position only
 ///
-/// A shape document's extension is what ruling 13 names
+/// A shape document's extension is checked against the row's `extensions` list
 /// (`io.shex("catalogue.ttl")`), and [`crate::shapes::decoded_document`] enforces
 /// it for every document however it was named. A DATA URI is not checked, and
 /// deliberately: nothing has ever required one to have an extension,
@@ -842,9 +831,8 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
 ///
 /// # The spine is a `POSTFIX_EXPR` chain, and it nests to the LEFT
 ///
-/// This walked a `PIPELINE_EXPR` spine until ruling 7 of 2026-08-11 retired
-/// `|>`; the member call is the spelling now, and it builds a different tree for
-/// the same shape. `User.where(p).select(c)` is
+/// The member call is the spelling — there is no `|>` — and it nests to the
+/// left. `User.where(p).select(c)` is
 ///
 /// ```text
 /// POSTFIX_EXPR(call)                       ← .select(c)
@@ -2036,12 +2024,6 @@ fn lower_expr_inner(
             .and_then(|grouped| lower_expr_inner(db, &grouped, types)),
         SyntaxKind::TERNARY_EXPR => lower_ternary(db, &inner, types),
         SyntaxKind::UNARY_EXPR => lower_unary(db, &inner, types),
-        // A `PIPELINE_EXPR` arm lived here. `|>` was a second spelling of the
-        // member call and ruling 7 of 2026-08-11 retired it; `|>` is not a
-        // token, and the parser refuses the operator by name now, so nothing
-        // builds the node.
-        // NOT MINE — step 6 of `SURFACE-PLAN.md`; removed here only because the
-        // kind is already gone from `SyntaxKind` and this file would not compile.
         // A `TEMPLATE_EXPR` arm lived here — a backtick literal the carve left
         // whole, lowered to one literal run. There is no TEMPLATE: the backtick,
         // `${` and `\$` are not tokens, so a string with no hole reaches the
@@ -3587,9 +3569,8 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
             panic!("expected one Select, got {:?}", pipes[1].ops);
         };
         // The BINDING survives the lowering. `select` names a qualified column
-        // (open question 4, decided 2026-08-14), and the refusal above it has
-        // always insisted on one — this is the assertion that the insistence
-        // buys something.
+        // and the refusal above it insists on one — this is the assertion that
+        // the insistence buys something.
         assert_eq!(
             cols.iter()
                 .map(|c| (c.binding.as_str(), c.column.as_str()))
@@ -3607,8 +3588,7 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
         };
         assert_eq!(right.as_str(), "Person");
         assert!(alias.is_none(), "no `as` was written");
-        // The condition is a PREDICATE relating two QUALIFIED columns — the
-        // whole of ruling 17's first half. It was a bare `on = .k`.
+        // The condition is a PREDICATE relating two QUALIFIED columns.
         let HirExpr::BinOp {
             op: BinOp::Eq,
             lhs,
@@ -3658,16 +3638,11 @@ Tree := Node.join(Node as Other, on = Node.parent == Other.id)
         );
     }
 
-    /// **THE PROGRAM WHOSE MEANING CHANGED**, and the only one in this phase.
+    /// Two sources with a column of the SAME NAME join without complaint: the
+    /// body writes `User.name` and `Person.name`, and each says which row it
+    /// means, so there is no ambiguity for a collision rule to guard.
     ///
-    /// Two sources with a column of the SAME NAME. This was rejected — the
-    /// message was «would give one row two columns called `name`… rename one
-    /// side before joining» — and it is legal now (ruling 17). The rule was
-    /// removed rather than relaxed, because it was standing in for an ambiguity
-    /// that qualification removes: the body writes `User.name` and
-    /// `Person.name`, and each says which row it means.
-    ///
-    /// The test asserts on the DIAGNOSTIC, not on the row type: what changed is
+    /// The test asserts on the DIAGNOSTIC, not on the row type: what it pins is
     /// that the program is accepted.
     #[test]
     fn two_sources_with_a_column_of_the_same_name_now_join() {

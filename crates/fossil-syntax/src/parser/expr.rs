@@ -18,8 +18,8 @@
 //!
 //! The specified table has EIGHT levels and this parser now implements exactly
 //! those eight. `|>` held a ninth at the tightest-binding end of the low side
-//! until ruling 7 of 2026-08-11 retired the pipeline (`a |> f()` was a second
-//! spelling of `a.f()`), and every level moved up one when it went
+//! until the pipeline was retired for being a second spelling of `a.f()`, and
+//! every level moved up one when it went
 //! (grammar.bnf, § OPERATOR PRECEDENCE TABLE). A citation of «L8 unary» or
 //! «L9 postfix» predates that renumbering.
 //!
@@ -167,7 +167,7 @@ fn peek_infix(p: &Parser) -> Option<(Bp, Bp, Assoc, SyntaxKind)> {
     let k = p.current()?;
     Some(match k {
         // There is no arm for `|>`, and there is no token for it either. It held
-        // L1; ruling 7 of 2026-08-11 retired it and every level moved up one
+        // L1; retiring it moved every level up one
         // (grammar.bnf, § OPERATOR PRECEDENCE TABLE). The binding powers below
         // did not change — only the level NAMES did, so `or` is L2 where it used
         // to be called L3. The

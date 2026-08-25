@@ -1,12 +1,9 @@
 //! goto-def integration test — the three positions, and the one that leaves the
 //! language.
 //!
-//! Ruling 12 of `SURFACE-PLAN.md`: **the shape document is the second file.**
-//! Goto-def used to prove "a name declared in file A resolves from file B" with
-//! a `prefix` declaration, and there is no `prefix` and no cross-`.fossil` name
-//! left to resolve. What crosses a file boundary now crosses a LANGUAGE
-//! boundary: a shape name and a property key are both defined in the `.shex`,
-//! and this test is what holds that.
+//! There is no import production, so no name a program writes resolves into
+//! another `.fossil`: the second file is the `.shex`, where a shape name and a
+//! property key are both defined, and this test is what holds that.
 //!
 //! It needs a HOST that has done its two jobs — installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the query

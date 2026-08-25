@@ -1,5 +1,5 @@
-//! **Ruling 13, end to end through the real host.** One registry, dispatch by
-//! name, and the two diagnostics a mismatch produces.
+//! **One registry, dispatch by name, end to end through the real host** — and
+//! the two diagnostics a mismatch produces.
 //!
 //! `fossil-engine` is the crate with the WHOLE host: it installs
 //! `fossil_descriptors_output::PROVIDERS` (`src/system.rs`) and registers the
@@ -11,14 +11,10 @@
 //! # What each test here is evidence for
 //!
 //! - `catalogue` is the conformance program whose type document is **not**
-//!   `ShEx`, and it exists to prove the shape-document seam is not ShEx-specific
-//!   (`SURFACE-PLAN.md` ruling 13). It was the only one of the eighteen failing
-//!   for that cause: nothing decoded SHACL, so `Product` bound no shape, and by
-//!   ruling 3 of 2026-08-11 no property in that mapping was writable.
-//! - The two mismatches were **unexpressible** before, not merely unreported.
-//!   `def_map` threw the constructor away and every dispatch went by extension,
-//!   so `io.shex("x.ttl")` and `io.shacl("x.ttl")` were the same program and
-//!   `type { P } := io.csv(…)` asked a question the table had no shape for.
+//!   `ShEx`, and it exists to prove the shape-document seam is not ShEx-specific.
+//! - Both mismatches need dispatch by NAME to be expressible at all: under
+//!   dispatch by extension `io.shex("x.ttl")` and `io.shacl("x.ttl")` are one
+//!   program, and `type { P } := io.csv(…)` asks a question a row cannot answer.
 //! - The run reads its shape document through the same rows the checker does,
 //!   so a `ShExC` document no longer type-checks and then fails the run.
 

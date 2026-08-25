@@ -2,8 +2,7 @@
    catalogue.bnf — WHAT NAMES EXIST.
 
    `grammar.bnf` says the SHAPE of a program; this says the NAMES one may
-   write. Ruling 14 of `SURFACE-PLAN.md`: «dos ficheros de datos y un
-   compilador». This is the second file.
+   write. Two data files and one compiler — this is the second file.
 
    Reference: rust-analyzer's `rust.ungram` — a data file beside the compiler,
    with a test that fails when the Rust drifts from it. Not invented here.
@@ -31,8 +30,7 @@
    `crates/fossil-base/src/providers/generated.rs` and
    `crates/fossil-descriptors-output/src/generated.rs` from this file, and
    `cargo xtask catalogue --check` fails when the checked-in output is stale.
-   A parity test used to catch the hand-written Rust drifting from these rows;
-   there is nothing left to drift.
+   No Rust states a row a second time, so there is nothing left to drift.
 
    Which of the two files a row lands in is DERIVED, not configured, and it is
    the DATA/BEHAVIOUR split above: a row with a `decodes` needs a crate that can
@@ -41,10 +39,10 @@
    also what makes `DATA` — the default of `System::providers` — exactly the
    `fossil-base` half.
 
-   Generation closed one thing the parity test named as beyond it: `decodes
-   decode_shex` is now a Rust PATH in the generated file, so the compiler
-   resolves it. A row that names a decoder nobody wrote is a build failure, not
-   a declared capability with no behaviour behind it.
+   Generating rather than comparing is what makes a row's BEHAVIOUR half
+   checkable: `decodes decode_shex` becomes a Rust PATH in the generated file,
+   so a row naming a decoder nobody wrote is a build failure, not a declared
+   capability with no behaviour behind it.
    ========================================================================== *)
 
 (* ---------------------------------------------------------------- io, data *)
@@ -55,10 +53,7 @@
    The `native <fn>` token is the ONLY spelling of which reader a row uses.
    `NativeReader`'s variant name is derived from it — strip `read_`, upper-camel
    the rest — and `NativeReader::table_function` gives the token back, so nothing
-   downstream re-states it. There were three hand-written derivations of this one
-   datum before generation: the enum, a `native_fn` inside the parity test that
-   mapped the variant back to the string written here, and a
-   `PlanOp::Source(SourceFormatTag)` in `fossil-hir` that nothing ever read.
+   downstream re-states it.
 
    `rdf`'s extension list is kept in lockstep with the RDF provider's own. *)
 
@@ -75,8 +70,7 @@ row rdf     = extensions "ttl" "nt" "n3" "rdf"    ; reads materialised          
    `rdf` and `shacl` both accept `.ttl` and that is not a conflict: the name
    decides. `io.rdf("g.ttl")` reads rows out of a graph, `io.shacl("s.ttl")`
    reads types out of a shapes graph — two capabilities over one syntax, told
-   apart by the name, which is the whole of ruling 13. Under the extension
-   dispatch this replaced, that pair was unexpressible.
+   apart by the name. Under dispatch by extension that pair is unexpressible.
 
    `shex` does NOT claim `.ttl`, and that is the same rule read the other way:
    `io.shex("catalogue.ttl")` is an error naming the constructor and the
@@ -87,14 +81,14 @@ row shex    = extensions "shex" "shexj" "shexc"   ; decodes decode_shex         
 row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        .
 
 (* ------------------------------------------------------------- NOT IN HERE *)
-(* The WRITE half of ruling 13's table is deliberately absent, not stubbed:
+(* The WRITE half of the table is deliberately absent, not stubbed:
    `grammar.bnf` says «`io` names only the INPUT», and where a program writes
    to has no syntax at all. A row for it here would be a name no program can
    write.
 
    The stdlib catalogue — `str.slug`, `parse.date`, the relation verbs — is NOT
-   here yet. It is the larger half of ruling 14 and this file is the shape it
-   would take.
+   here yet. It is the larger half of the catalogue and this file is the shape
+   it would take.
 
    It does not have to be here in order to be DATA, and that is what this
    paragraph used to get wrong: `fossil_hir::stdlib`'s `FunctionRegistry` is

@@ -103,17 +103,13 @@ parquet = "58"
 # read written Parquet back or to bring an engine to a test. `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 #
-# `vscalar` enables the scalar-UDF registration API (VScalar trait +
-# Connection::register_scalar_function). It was for the `native_udf_only` stdlib
-# functions, and ruling 15 of `SURFACE-PLAN.md` deleted the `Udf` lowering kind
-# and `fossil-layout/src/udf.rs` with it: `grep -rn 'VScalar\|register_scalar_function'
-# crates/` now finds nothing, so the feature has no user left.
+# `vscalar` (the scalar-UDF registration API) has no user left: nothing in
+# `crates/` names `VScalar` or `register_scalar_function`.
 duckdb = { version = "1.10502", features = ["bundled", "vscalar"] }
 
 # === Reference implementations for stdlib fidelity tests (NATIVE ONLY) ===
-# These were the UDF impl crates behind a `Udf` lowering kind that no longer
-# exists; what survives is `fossil-df`'s dev-dependency on them, which measures
-# the SQL template against the Rust behaviour it is meant to reproduce.
+# `fossil-df` dev-depends on these to measure its SQL templates against the Rust
+# behaviour they are meant to reproduce.
 # NEVER referenced by a WASM-gated crate.
 unicode-normalization = "0.1"           # the NFC/NFD/NFKC/NFKD reference
 slug = "0.1"                            # the URL-slugification reference

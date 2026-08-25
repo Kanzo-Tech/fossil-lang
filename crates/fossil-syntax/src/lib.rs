@@ -2,22 +2,8 @@
 //!
 //! # This parser and `grammar.bnf`
 //!
-//! `grammar.bnf` SPECIFIES the language; this crate implements it. What is left
-//! of the gap, after steps 2, 3, 5 and 6 of `SURFACE-PLAN.md`:
-//!
-//! - **Specified there, not implemented here** — `@rename(…)` over a type
-//!   binding and the `IDENT as IDENT` self-join alias, both step 7.
-//!
-//! A reader who finds one of those is looking at work outstanding, not at a
-//! bug. `SURFACE-PLAN.md` is the order it lands in.
-//!
-//! There is nothing in the other direction any more. `|>` was listed here as
-//! **accepted here, not specified there** — «step 6 removes it» — and step 6
-//! landed: the lexer has no rule for it, `parser::diag::retired::PIPELINE` names
-//! it, and `parser::expr`'s
-//! `pipe_is_retired_with_a_message_naming_the_member_call` pins the refusal and
-//! its span. The entry outlived the work it described, which is the failure a
-//! header like this one exists to avoid.
+//! `grammar.bnf` SPECIFIES the language; this crate implements it. The one
+//! difference left is stated and argued in [`parser`]'s own header.
 //!
 //! Everything the grammar retired is REFUSED BY NAME rather than accepted or
 //! dropped, and there are SIX: `prefix ex: <…>`, the CURIE `ex:Person`, the

@@ -164,10 +164,9 @@ pub struct TypeEntry {
     /// output shape: a program whose source is not RDF names a shape document
     /// nowhere else, and without one it has no output contract at all.
     pub document: Option<SmolStr>,
-    /// The constructor — `io.shex`, `io.shacl`. It was parsed and thrown away
-    /// (`let (_ctor, document) = …`) and every dispatch went by the document's
-    /// EXTENSION, which is why `io.shex("x.ttl")` and `io.shacl("x.ttl")` were
-    /// the same program. Ruling 13: the NAME selects the registry row.
+    /// The constructor — `io.shex`, `io.shacl`. It is the NAME that selects the
+    /// registry row; dispatching on the document's extension instead would make
+    /// `io.shex("x.ttl")` and `io.shacl("x.ttl")` the same program.
     pub constructor: Option<SmolStr>,
     /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` — the
     /// renames written above this binding and addressed to THIS name, as
@@ -204,12 +203,6 @@ pub struct DefMap<'db> {
     #[returns(ref)]
     pub types: Vec<TypeEntry>,
 }
-
-// `DefMap::lookup_prefix` lived here and had exactly one caller: its own unit
-// test. The free function of the same name in `crate::lower` had four
-// (`lower.rs` 568, 944, 1024, 1055) and WAS the language — and this tombstone
-// already said it was going with `prefix` at step 3. It has: both are gone, and
-// so is the `&[PrefixEntry]` slice the four threaded between them.
 
 impl<'db> DefMap<'db> {
     /// Look up the [`SourceLoc`] bound to a source name (e.g. `users`).
@@ -401,11 +394,10 @@ impl<'db> DefMap<'db> {
         self.output_shape_binding(db).map(|(_, document)| document)
     }
 
-    /// The `(constructor, document)` pair of that same first binding — what
-    /// ruling 13 needs, because the constructor is what selects the registry row
-    /// and the document is what it is asked to read. They come back together so
-    /// no caller can read one and forget the other, which is exactly how they
-    /// drifted apart.
+    /// The `(constructor, document)` pair of that same first binding: the
+    /// constructor selects the registry row and the document is what it is asked
+    /// to read. They come back together so no caller can read one and forget the
+    /// other.
     ///
     /// **This is the PROGRAM's output descriptor, not a mapping's contract.**
     /// The run writes one corpus and classifies its edges against one schema

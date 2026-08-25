@@ -9,8 +9,8 @@
 //!
 //! Nine kinds left in the same commit as the surface they named: `KW_PREFIX`,
 //! `ABS_IRI`, `TEMPLATE`, `PREFIX_DECL`, `TEMPLATE_EXPR`, `IRI_EXPR`,
-//! `FIELD_REF_EXPR`, and — with step 6 of `SURFACE-PLAN.md` — `PIPE` and
-//! `PIPELINE_EXPR`. Each is a tombstone in `grammar.bnf` — the file declares the
+//! `FIELD_REF_EXPR`, `PIPE` and `PIPELINE_EXPR`. Each is a tombstone in
+//! `grammar.bnf` — the file declares the
 //! form ABSENT and names no production for it — and none has a node to be built
 //! from any more.
 //! The `repr(u16)` values are an implementation detail of the rowan green
@@ -70,7 +70,7 @@ pub enum SyntaxKind {
     RPAREN,
     LBRACE,
     RBRACE,
-    // There was a `PIPE` here — `|>`, retired by ruling 7 of 2026-08-11.
+    // There was a `PIPE` here — `|>`, retired as a second spelling of `a.f()`.
     // `|` matches no lexer rule now, so the bytes reach the parser as an ERROR
     // token and are refused by name.
     EQ,
@@ -118,7 +118,7 @@ pub enum SyntaxKind {
     /// The binder is `:=` — one binder, and what is being bound is read off the
     /// left-hand side (grammar.bnf, DEFINE). Every `=` in the
     /// grammar is an ASSIGNMENT: a body property, `@subject`, a named argument.
-    /// Naming a shape document is MANDATORY (ruling 3 of 2026-08-11): a bare
+    /// Naming a shape document is MANDATORY: a bare
     /// property key takes its name from a predicate that a shape declares, so a
     /// program with no `type` binding cannot write a single property.
     ///

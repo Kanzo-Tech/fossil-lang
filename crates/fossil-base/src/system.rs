@@ -62,20 +62,13 @@ pub trait System: Send + Sync + std::fmt::Debug {
     /// Salsa input, and every query goes through
     /// [`crate::providers::installed`].
     ///
-    /// The old signature *was* the read path, and its `&'static` is what put
-    /// ruling 14 out of reach — a table that has to outlive the program cannot
-    /// be read from a file, and a table that is not an input cannot invalidate
-    /// anything downstream. Both are now possible without this method changing.
+    /// The rows stay `&'static` because a row's identity is its address, and a
+    /// `Vec<&'static Provider>` inside an input is exactly that. A table read
+    /// from a file at run time cannot be `&'static`, which is why the read path
+    /// moved to the input and this method stayed a declaration.
     ///
-    /// It sat beside [`Self::descriptors`] under the argument that one is a
-    /// table of DATA and the other a table of BEHAVIOUR. That distinction is
-    /// real and survives. What did not survive is the conclusion drawn from it —
-    /// that a table of behaviour must therefore be ambient and untracked. What
-    /// it must be is `&'static`, because a row's identity is its address, and a
-    /// `Vec<&'static Provider>` inside an input is exactly that.
-    ///
-    /// **This method is the seam that ruling 14 deletes.** Twelve of the
-    /// thirteen implementations return the identical
+    /// **This method is a seam that should close.** Twelve of the thirteen
+    /// implementations return the identical
     /// `fossil_descriptors_output::PROVIDERS`, so "the host chooses what is
     /// installed" is a choice nobody makes. When the catalogue is loaded from a
     /// file there is one loader, and these thirteen go with it.

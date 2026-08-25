@@ -15,18 +15,12 @@
 //!
 //! # The second file is the `.shex`, and goto-def is what proves it
 //!
-//! This test used to open TWO `.fossil` fixtures, because a `prefix` declared in
-//! one resolved from the other. There is no `prefix` and
-//! there is no import: a Fossil file is compiled alone, so **no name a program
-//! can write resolves into another `.fossil` file**. `canonical_200_b.fossil`
-//! was retired with the form it existed for.
-//!
-//! What crosses a file boundary now crosses a LANGUAGE boundary (ruling 12 of
-//! `SURFACE-PLAN.md`): a shape name in a header is declared in the `.shex`, and
-//! so is the predicate behind every property key. So case 2 below asserts a
-//! `Location` whose URI is `canonical_200.shex` — which additionally exercises
-//! the half a two-`.fossil` test never could, the server registering a document
-//! it was never asked to open.
+//! There is no import: a Fossil file is compiled alone, so **no name a program
+//! can write resolves into another `.fossil` file**. What crosses a file
+//! boundary crosses a LANGUAGE boundary — a shape name in a header is declared
+//! in the `.shex`, and so is the predicate behind every property key — so case
+//! 2 below asserts a `Location` whose URI is `canonical_200.shex`, which also
+//! exercises the server registering a document it was never asked to open.
 //!
 //! **The program is opened under its REAL path.** It used to be `file:///tmp/…`,
 //! and that was free when the fixture named no document. It is not free now:

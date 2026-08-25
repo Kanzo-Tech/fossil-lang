@@ -294,13 +294,11 @@ User : Person from users
 
     /// A program that names nothing registers nothing.
     ///
-    /// This used to read «the empty answer is a program with no output
-    /// contract, not a failure», which is the rule the ruling of 2026-08-11
-    /// replaced: naming a shape document is mandatory, and the refusal is
+    /// This loop's whole contract: it registers what the program NAMES, and
+    /// passes no judgment on a program that names none. Naming a shape document
+    /// is mandatory, but the refusal for omitting one is
     /// [`fossil_hir::shapes::TargetShapeError::NoDocument`], raised where the
-    /// mapping is checked. What is asserted here is unchanged and is this
-    /// loop's whole contract — it registers what the program NAMES, and passes
-    /// no judgment on a program that names none.
+    /// mapping is checked — not here.
     #[test]
     fn a_program_that_names_no_document_registers_nothing() {
         let dir = program_dir(DEMANDS_INTEGER);

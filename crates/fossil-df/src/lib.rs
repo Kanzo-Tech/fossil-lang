@@ -29,12 +29,6 @@ pub mod rdf;
 /// edges the join discarded. Built by [`report::RunReport::of`] and by nothing
 /// else.
 pub mod report;
-// `pub mod shacl` lived here: a SHACL shapes graph walked into a `GraphSchema`.
-// It has moved to `fossil-descriptors-output` and produces `OutputShapes`, the
-// neutral vocabulary the CHECKER reads — a `GraphSchema` is the output model,
-// one step past it, so SHACL could reach the executor and never the checker.
-// That is exactly why `apps/docs/programs/catalogue` had no output contract.
-// Ruling 13 of `SURFACE-PLAN.md`: a decoder lives beside the other decoder.
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and the UDFs no engine ships.
 pub mod stdlib;
@@ -56,8 +50,7 @@ pub use plan::plan_relation;
 /// JS. Named at the crate root because it is the crate's answer, not a detail
 /// of the module it is written in.
 pub use report::RunReport;
-/// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
-/// arm of the output model; ShEx's lives in `fossil-shex`).
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -1286,13 +1279,8 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
 ///
 /// # Why the template is INTERPRETED rather than pattern-matched
 ///
-/// Nine `InlineForm` variants used to be matched here, one arm each, and each
-/// arm rebuilt in `DfExpr` a SQL shape that was already written down in the
-/// variant's doc-comment. That is the duplication ruling 15 of
-/// `SURFACE-PLAN.md` deleted: the template is the datum, so the renderer reads
-/// the datum instead of knowing the same thing a second way. The gain is what
-/// the arms could never give — adding `str.slugify` over `regexp_replace` is a
-/// row, and neither this function nor any other Rust changes.
+/// The SQL shape is a field of the catalogue row, not a `match` arm here, so
+/// adding `str.slugify` over `regexp_replace` changes no Rust.
 ///
 /// # Why a hand-written reader and not a SQL parser
 ///

@@ -47,10 +47,9 @@
 //! # What replaces the `file:line` citation check
 //!
 //! `apps/docs/content.test.ts` scans every MDX page for `` `path/to/file.rs:12` ``
-//! and asserts the line exists. Its own docblock confesses the gap: **it checks
-//! that the line exists, not that it says what the page claims.** SURFACE-PLAN's
-//! step 8 deletes it, and this is the replacement — for the claims that are
-//! PROGRAMS. It is not a replacement for the ones that are not; see the report.
+//! and asserts the line exists — **that the line exists, not that it says what
+//! the page claims.** This file is the replacement for the claims that are
+//! PROGRAMS. It is not a replacement for the ones that are not.
 //!
 //! # The artefacts
 //!
@@ -141,30 +140,18 @@
 //! A red run is a map, and it is only a useful map if the reader can tell the
 //! three apart. Every finding below is prefixed with its stage for that reason:
 //!
-//! - `PARSE` / `SILENT-DROP` — **the parser has not landed the production.** The
-//!   surface migration (`SURFACE-PLAN.md`, steps 2/3/5/6/7) is the work.
-//! - `RUN` — ~~**the executor cannot read what the checker read.**~~ CLOSED by
-//!   ruling 13. `read_output_shape` parsed the output shape with
-//!   `ShExDescriptor::from_reader`, which is `ShExJ` (JSON) only, while every
-//!   `.shex` in this corpus is `ShExC`; the checker's path went through the
-//!   `shex` ROW → `from_shex_source`, which auto-detects both. So a program
-//!   type-checked against a document the run then refused to read, and neither
-//!   side was wrong on its own, which is why it survived. The run now selects
-//!   the same row by the same name and calls the same `fn`.
-//! - `SHAPE` — ~~**the document decodes to nothing.**~~ CLOSED by ruling 13.
-//!   `catalogue` names `io.shacl("catalogue.ttl")` and the only decoder row the
-//!   host installed claimed `shex` / `shexj` / `shexc`, so nothing decoded
-//!   SHACL, the binding resolved to no shape, and ruling 3 of 2026-08-11 made
-//!   every property in that mapping unwritable. There is a real `io.shacl` row
-//!   now (`fossil_descriptors_output::SHACL`), and
-//!   `tests/provider_registry.rs` is what holds it.
+//! - `PARSE` / `SILENT-DROP` — the parser has not landed the production, or it
+//!   landed and the lowering threw away what it produced.
+//! - `RUN` — the program compiled and the run refused it.
+//! - `SHAPE` — a type binding's document decoded to nothing, so the mapping got
+//!   no output contract and no property in it is writable.
 //!
 //! A fourth cause is not visible from here and is named so nobody hunts for it:
 //! nothing in the language produces a per-row `Iri`. `check.rs` types an
 //! interpolation as `IriTemplate` only in subject position, and the RDF term
 //! constructors were deleted from the catalogue — so an edge whose shape declares
-//! a shape-valued range reads as `expected Iri, got String`. It arrives with the
-//! edge constructor of step 7, and it is why `tests/conformance.rs` is red too.
+//! a shape-valued range reads as `expected Iri, got String`, which is why
+//! `tests/conformance.rs` is red too.
 //!
 //! # Five of the twenty-three exist because the grammar promised and nobody paid
 //!
@@ -213,10 +200,9 @@
 //! 4. The thirteen produce no error diagnostic; the five produce at least one.
 //! 5. Every `type { … }` binding in the thirteen resolves to a shape IRI. A
 //!    binding that resolved to nothing gives the mapping no output contract, and
-//!    a program with no contract can write no property at all (ruling 3 of
-//!    2026-08-11).
-//! 6. The thirteen `run` and produce at least one vertex type. That is «its
-//!    artefact» in the sense step 8 asks for.
+//!    a program with no contract can write no property at all.
+//! 6. The thirteen `run` and produce at least one vertex type — the artefact
+//!    each one is kept for.
 //!
 //! # It is red today, and the report is the point
 //!
@@ -722,11 +708,9 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
             ));
         }
 
-        // Every type binding must bind. `catalogue` names a SHACL document and
-        // the only decoder row installed claims `shex`/`shexj`/`shexc`; a
-        // document that decodes to nothing leaves the mapping with no output
-        // contract, and ruling 3 of 2026-08-11 makes a property unwritable
-        // without one.
+        // Every type binding must bind: a document that decodes to nothing
+        // leaves the mapping with no output contract, and without one no
+        // property is writable.
         if !program.must_fail {
             for t in &census.types {
                 if t.shape_iri.is_none() {

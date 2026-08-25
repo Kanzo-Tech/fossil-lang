@@ -21,21 +21,17 @@
 //!    from a [`SourceFile`] input instead — see [`crate::files`] for the registry
 //!    that turns a path into one.
 //!
-//! # The row is chosen by NAME, and that is the change
+//! # The row is chosen by NAME
 //!
-//! `decoder_for(decoders, uri)` lived here and picked a row by the document's
-//! **extension**. It is gone. Ruling 13 of `SURFACE-PLAN.md`: the name a program
-//! writes after `io.` selects the row, the row checks its own extension, and the
-//! two are checked against each other rather than one of them being decorative.
-//! See [`crate::providers`] for the whole argument.
+//! The name a program writes after `io.` selects the row and the row checks its
+//! own extension, so the two are checked against each other rather than one of
+//! them being decorative. See [`crate::providers`] for the whole argument.
 //!
-//! The consequence for this module is the query key. It was the document alone;
-//! it is now the document **and the name**, interned into [`TypeDocument`],
-//! because `io.shex("x.ttl")` and `io.shacl("x.ttl")` are two different
-//! questions about one file and used to be one memoized answer. The fan-out
-//! property that argument rested on survives: the key contains no mapping, so N
-//! mappings naming one document under one constructor still share ONE decode,
-//! and editing the PROGRAM re-runs none.
+//! Hence the query key is the document **and the name**, interned into
+//! [`TypeDocument`]: `io.shex("x.ttl")` and `io.shacl("x.ttl")` are two
+//! different questions about one file and must not share a memoized answer. The
+//! key contains no mapping, so N mappings naming one document under one
+//! constructor still share ONE decode, and editing the PROGRAM re-runs none.
 
 use fossil_graph_schema::OutputShapes;
 
@@ -203,9 +199,9 @@ mod tests {
 
     // -- the query -------------------------------------------------------
 
-    /// **The bug ruling 13 names, as a test.** One document, two constructors,
-    /// two answers. Until the name reached the dispatch these were one memoized
-    /// value and `io.shex` / `io.shacl` behaved identically.
+    /// **One document, two constructors, two answers.** Under a key that omits
+    /// the name these collapse into one memoized value and `io.shex` /
+    /// `io.shacl` behave identically.
     #[test]
     fn one_document_and_two_names_are_two_questions() {
         let db = FossilDb::new(Arc::new(DecodingHost));

@@ -28,12 +28,10 @@
 (*    through it and not productions, so a new one is a row and never  *)
 (*    a rule.                                                          *)
 (*                                                                     *)
-(*    `|>` DIES, and the member call is the spelling. It is the        *)
-(*    ruling of 2026-08-11 that reaches this file hardest. The two     *)
+(*    `|>` DIES, and the member call is the spelling. The two          *)
 (*    others that reach a production — naming a shape document is      *)
 (*    mandatory, and the user declares no functions — are stated at    *)
-(*    the production they bind. All of them are recorded, with their   *)
-(*    arguments, in SURFACE-PLAN.md.                                   *)
+(*    the production they bind.                                        *)
 (*                                                                     *)
 (*  THE CONFORMANCE SET is `apps/docs/programs/` — 23 programs with    *)
 (*  their shape documents and data, 5 of which are expected to fail    *)
@@ -177,10 +175,9 @@ COMMA          := ','
 LPAREN, RPAREN := '(' ')'
 LBRACE, RBRACE := '{' '}'
 
-(* There is no PIPE. `a |> f()` was a second spelling of `a.f()` and the ruling
-   of 2026-08-11 kills it: the member call is the spelling, and with member
-   resolution by receiver type the pipeline had nothing left that the dot could
-   not do. `|>` is not a token. *)
+(* There is no PIPE. `a |> f()` was a second spelling of `a.f()` and is dead:
+   the member call is the spelling, and with member resolution by receiver type
+   the pipeline has nothing left that the dot cannot do. `|>` is not a token. *)
 
 (* Attributes. `@` is the language's own namespace, against the bare names that
    the shape document declares — the criterion is Django's («model metadata is
@@ -260,7 +257,7 @@ MultiSourceDef      := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
    mapping header (`:`). That matters: `type` is a plausible column name in a
    language whose commonest predicate is `rdf:type`.
 
-   Naming a shape document is MANDATORY (the ruling of 2026-08-11). A bare
+   Naming a shape document is MANDATORY. A bare
    property key takes its name from a predicate that a shape declares, so
    without a shape you cannot write a single property, and a program with no
    `type` binding has no mapping. *)
@@ -593,7 +590,7 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*  WhileLoop/ForLoop — no imperative control flow                         *)
 (*  MutableBinding    — no mutation                                        *)
 (*  FunctionDecl      — the user declares no functions. Polymorphism lives *)
-(*                      in the library only (ruling 2 of 2026-08-11)       *)
+(*                      in the library only, never in a program            *)
 (*  TypeAnnotation    — no `f :: T -> U` over a value; nothing reads one   *)
 (*  ExportedDefinition— no `@export`; there is no module system to export  *)
 (*                      to, so the marker named nobody                     *)

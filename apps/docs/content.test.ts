@@ -97,11 +97,10 @@ describe("a declared direction is complete", () => {
     expect(pages.length).toBeGreaterThan(0);
   });
 
-  it.each(pages)("$id declares a summary and an argument", ({ data }) => {
+  it.each(pages)("$id declares a summary", ({ data }) => {
     const direction = data.direction as { summary?: string; arguedIn?: string } | undefined;
 
     expect(direction?.summary, "direction.summary: one sentence, where this is going").toBeTruthy();
-    expect(direction?.arguedIn, "direction.arguedIn: a /docs/… route on this site").toBeTruthy();
   });
 });
 
@@ -238,9 +237,24 @@ function pageFileForRoute(route: string): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
-describe("every argument is a page of this site", () => {
-  it.each(pages)("$id names an argument on this site", ({ path, data }) => {
-    const arguedIn = (data.direction as { arguedIn?: string } | undefined)?.arguedIn as string;
+/**
+ * `arguedIn` is optional, and the reason is structural rather than lenient.
+ *
+ * It existed because destinations and their arguments lived in different sections — a page said
+ * where it was going and pointed at the page that argued for it. Folding those together removes the
+ * pointer: a page that argues its own direction in its own body has nothing to name, and forcing it
+ * to name something would make it cite itself, which the assertion below rightly rejects.
+ *
+ * So the field survives for the case it was built for — the argument is somewhere else on this site
+ * — and when it is there it is held to exactly what it was held to before.
+ */
+describe("every argument that is named is a page of this site", () => {
+  const withArgument = pages.filter(
+    (p) => (p.data.direction as { arguedIn?: string } | undefined)?.arguedIn,
+  );
+
+  it.each(withArgument)("$id names an argument on this site", ({ path, data }) => {
+    const arguedIn = (data.direction as { arguedIn?: string }).arguedIn as string;
 
     expect(arguedIn.startsWith("/docs/"), `${arguedIn} must be a route on this site`).toBe(true);
 
@@ -312,9 +326,10 @@ describe("every argument is a page of this site", () => {
  *     is deliberate. Nothing mechanical compares the two — the 23 programs of `apps/docs/programs/`
  *     are the only check the file has.
  *
- * **What it does not scan, and why:** `SURFACE-PLAN.md`, which has an owner and still carries the
- * old spelling. Widening `CITED_TREES` is the whole of the change when that stops being true.
- * `decisions/` used to be named here too; it is gone.
+ * **What it does not scan:** nothing, now. This carried two exemptions and outlived both —
+ * `decisions/`, and then `SURFACE-PLAN.md`, which kept the old spelling on the grounds that it had
+ * an owner. Having an owner is not a property a grep can check, and the file is gone. Widening
+ * `CITED_TREES` is the whole of the change if a third tree ever needs citing.
  */
 const GRAMMAR = join(repoRoot, "grammar.bnf");
 

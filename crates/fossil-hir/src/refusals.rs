@@ -199,8 +199,7 @@ mod tests {
         );
     }
 
-    /// The extension refusal names the constructor and the extension — the
-    /// `io.shex("catalogue.ttl")` case ruling 13 leads with.
+    /// The extension refusal names both the constructor and the extension.
     #[test]
     fn an_extension_is_declined_in_the_rows_own_words() {
         assert_eq!(

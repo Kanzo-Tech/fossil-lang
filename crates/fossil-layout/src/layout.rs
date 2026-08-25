@@ -1324,9 +1324,9 @@ fn morton_ranks(morton: &[u32]) -> (Vec<u32>, Vec<u32>) {
 ///
 /// The gap is [`TYPE_GUTTER`], wide enough that the seam reads as a seam. This
 /// separates the types; it does not lay them out together — cross-type edges
-/// still pull on nothing, which is the `ForceAtlas2` slice (see `SURFACE-PLAN.md`,
-/// the layout slices). Separated is wrong in a way a reader can
-/// see and reason about; overlapped is wrong in a way that looks like data.
+/// still pull on nothing, and will not until a force-directed pass is seeded
+/// from these positions. Separated is wrong in a way a reader can see and
+/// reason about; overlapped is wrong in a way that looks like data.
 fn place_after(positions: &mut [(f32, f32)], origin_x: f32) -> f32 {
     let mut width = 0.0f32;
     for (x, _) in positions.iter_mut() {

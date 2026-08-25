@@ -252,12 +252,8 @@ fn stdlib_completions(
         // The receiver is the dotted prefix (`str` in `str.trim`).
         let namespace = entry.name.split('.').next().unwrap_or(&entry.name);
 
-        // A `WasmClass::NativeUdfOnly` entry was tagged DEPRECATED here with a
-        // `(native-only)` detail suffix, so the browser playground could gray
-        // it out. There is no such entry and no such class: ruling 15 of
-        // `SURFACE-PLAN.md` deleted the `Udf` lowering, and with it the only
-        // reason a catalogued function could fail to run in a browser. Every
-        // row runs everywhere, so nothing is grayed.
+        // No row is native-only — every catalogued function lowers to SQL and
+        // runs in a browser — so no item is tagged.
         let detail = render_sig(namespace, entry);
         let tags: Option<Vec<CompletionItemTag>> = None;
 

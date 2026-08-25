@@ -101,8 +101,8 @@ impl ParseDiagnostic {
 /// Each is a tombstone in `grammar.bnf` — a form the file declares ABSENT and
 /// names no production for, so there is nothing to cite. They live here
 /// rather than at the ten call sites so the wording is one thing: the corpus
-/// rewrite of step 8 reads these strings, and a message that drifts between two
-/// call sites is a message the corpus cannot pin.
+/// reads these strings, and a message that drifts between two call sites is a
+/// message the corpus cannot pin.
 pub mod retired {
     /// There is no `PrefixDecl`, and `prefix` is an ordinary identifier.
     pub const PREFIX_DECL: &str = "`prefix` declares a vocabulary, and there is no vocabulary \
@@ -133,8 +133,8 @@ pub mod retired {
          `\"…{expr}…\"` — one spelling, and the hole is an ordinary expression.";
 
     /// There is no `PIPE`: `|>` is not a token.
-    pub const PIPELINE: &str = "`|>` was a second spelling of the member call and ruling 7 of \
-         2026-08-11 retired it: with members resolved by the type of the receiver, the pipeline \
+    pub const PIPELINE: &str = "`|>` was a second spelling of the member call and it is retired: \
+         with members resolved by the type of the receiver, the pipeline \
          had nothing left that the dot could not do. Write `a.f(…)` — the receiver goes to the \
          left of the dot, where every other member call already puts it.";
 }

@@ -13,12 +13,9 @@
 //! which language produced it — the cut `0e6898d` made for `fossil-mir`, now
 //! made for the checker.
 //!
-//! Ruling 13 of `SURFACE-PLAN.md` is why the two rows are here rather than one
-//! here and one in `fossil-df`: a decoder lives beside its machinery, and both
-//! machineries are shape-document parsers. `fossil-df` is where the SHACL walk
-//! used to live, producing a `GraphSchema` — the OUTPUT model, one step past the
-//! vocabulary the checker reads — which is precisely why `catalogue.fossil` could
-//! type-check against nothing.
+//! Both rows are here rather than one here and one in `fossil-df` because a
+//! decoder lives beside its machinery, and both machineries are shape-document
+//! parsers.
 //!
 //! # What it stopped being
 //!
@@ -343,8 +340,8 @@ ex:Contact {
             assert!(SHEX.accepts(uri), "the shex row declined `{uri}`");
         }
         assert!(!SHEX.accepts("shapes.ttl"));
-        // `catalogue.ttl` is the case ruling 13 leads with, and the row's answer
-        // is a bool. The SENTENCE it turns into is
+        // `.ttl` is claimed by `io.shacl` and not by this row, and the row's
+        // answer is a bool. The SENTENCE it turns into is
         // `fossil_hir::refusals::decline_extension`, tested there and asserted
         // end-to-end over this very table in
         // `fossil-engine/tests/provider_registry.rs`.

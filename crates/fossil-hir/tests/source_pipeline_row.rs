@@ -7,45 +7,18 @@
 //! the pipeline never drew on) are exactly the ones an untyped source cannot
 //! raise.
 //!
-//! # The spelling, and the one assertion that did not survive it
+//! A join keeps its two sides as two entries, each under its own binding, so a
+//! joined row holds a shared column name TWICE — once per side — and `select`
+//! is what narrows to the one you meant, naming a QUALIFIED column.
 //!
-//! This file was written in four spellings the language no longer has — the
-//! `a |> f()` pipeline, the leading-dot `.id`, a shape as a CURIE against a
-//! `prefix` declaration, and a mapping body with no `@subject`. Three of them
-//! are a substitution: `a.f()`, `pedidos.id`, a name a `type { … } := io.shex(…)`
-//! binding introduced, and an identity on the body's first line.
+//! # What this file does NOT prove
 //!
-//! The fourth was not, and it is why the file waited. It asserted that the
-//! joined row holds `persona_id` ONCE, which came from `on = .persona_id` —
-//! `USING (k)`, the key named once because both sides were assumed to spell it
-//! the same. Ruling 17 of `SURFACE-PLAN.md` deleted that, and with it the
-//! collision rule, on the promise that qualification would do the work instead:
-//! `crate::infer`'s `RowScope` keeps a join's two sides as two entries, each
-//! under its own binding, and two columns called `persona_id` are two distinct
-//! columns. So the joined row holds it TWICE, once per side, and `select` is
-//! what narrows to the one you meant — which is the other half of the same
-//! ruling, decided as open question 4 of `grammar.bnf, § OPEN` on 2026-08-14:
-//! `select` may follow a `join`, and it names a QUALIFIED column.
-//!
-//! # What this file no longer proves, and nothing else does either
-//!
-//! Two of the old assertions went with the same ruling, and only one of them
-//! was replaced:
-//!
-//!   - «a name that would appear twice is refused» is the collision rule, and
-//!     it is DELETED. `two_sources_sharing_a_column_name_both_keep_it` below is
-//!     the opposite assertion, which is the thing that is true now.
-//!   - «the key must be the same type on both sides» has no test here any more,
-//!     and it has no CHECK any more. `crate::infer::apply_source_op` runs
-//!     `check_refs` over a `join`'s condition — which asks only that every
-//!     column it names exists under the binding that qualifies it — and nothing
-//!     types the condition. `on = .k` was a KEY, and one column compared with
-//!     itself is where "the same type on both sides" came from; ruling 17 made
-//!     it an ordinary predicate and the rule was not rewritten for the new
-//!     shape. So `pedidos.persona_id == personas.persona_id` with an `Integer`
-//!     on one side and a `String` on the other type-checks today. Asserting
-//!     that here would pin the gap as the contract, so it is written down
-//!     instead.
+//! **A join's condition is not TYPED.** `crate::infer::apply_source_op` runs
+//! `check_refs` over it — which asks only that every column it names exists
+//! under the binding that qualifies it — so
+//! `pedidos.persona_id == personas.persona_id` with an `Integer` on one side
+//! and a `String` on the other type-checks today. Asserting that here would pin
+//! the gap as the contract, so it is written down instead.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{Diagnostic, FossilDb, SourceFile};
@@ -140,9 +113,8 @@ fn row_of(db: &FossilDb, file: SourceFile) -> Result<Vec<String>, Vec<String>> {
 /// duplicate the flattening failed to notice: the two sides are two entries of
 /// the scope, `pedidos.persona_id` and `personas.persona_id` are two columns,
 /// and flattening them into one list is what the mapping body never does. The
-/// old spelling `on = .persona_id` meant `USING (k)` and identified them;
-/// ruling 17 replaced it with an equality that names both sides, and a
-/// predicate relating two columns does not merge them.
+/// condition is an equality naming both sides, and a predicate relating two
+/// columns does not merge them the way `USING (k)` would.
 #[test]
 fn the_three_verbs_compose_and_the_join_key_appears_once_per_binding() {
     let (db, file) = db_with(
@@ -166,11 +138,9 @@ fn the_three_verbs_compose_and_the_join_key_appears_once_per_binding() {
 /// `select` picks the SIDE as well as the column, so the two `persona_id`s of a
 /// joined row are two things a projection can ask for apart.
 ///
-/// This is the half of the row algebra that ruling 17 promised and open
-/// question 4 delivered. `HirSourceOp::Select` carried column names only, so a
-/// name was looked for in the rows in order and taken from the first that had
-/// it — which made `select(persona_id)` mean the left side's for a reason the
-/// author never wrote, and which is why `select` after a `join` was left open.
+/// `HirSourceOp::Select` carries the binding as well as the column for exactly
+/// this: a bare name would be looked for in the rows in order and taken from
+/// the first that had it, making `select(persona_id)` mean the left side's.
 #[test]
 fn select_after_a_join_names_the_side_it_keeps() {
     let joined = "unidas := pedidos.join(personas, on = pedidos.persona_id == personas.persona_id)";
@@ -223,14 +193,11 @@ fn a_column_the_row_does_not_have_is_an_error() {
 }
 
 /// A `join` whose condition names a row the pipeline does not carry is refused,
-/// and the message says which — the refusal that replaced the collision rule.
+/// and the message says which.
 ///
-/// Ruling 17 deleted "a name that would appear twice is an error" outright
-/// rather than relaxing it: the body writes `pedidos.nombre` next to
-/// `personas.nombre`, so a shared column name means nothing and two sources that
-/// share one now join. What is left to get wrong is the QUALIFIER, and
-/// `on = pedidos.persona_id == nadie.id` used to pass because "on either side,
-/// under any name" was the question being asked.
+/// A shared column name means nothing, so what is left to get wrong is the
+/// QUALIFIER: the question a condition must answer is not "does some side have
+/// this column" but "does the row it names carry it".
 #[test]
 fn a_join_condition_naming_a_row_the_pipeline_lacks_is_an_error() {
     let (db, file) = db_with(
@@ -244,13 +211,9 @@ fn a_join_condition_naming_a_row_the_pipeline_lacks_is_an_error() {
     );
 }
 
-/// Two sources that share a column name JOIN, and both columns survive — the
-/// program ruling 17 changed the meaning of, asserted from the row side.
-///
-/// The old test here refused this and its message named the colliding column.
-/// The rule it enforced existed to remove an ambiguity that the qualified
-/// reference removed instead, so it is deleted rather than relaxed, and what
-/// takes its place is the opposite assertion.
+/// Two sources that share a column name JOIN, and both columns survive: the
+/// qualified reference removes the ambiguity a collision rule would have
+/// guarded, so there is no collision rule.
 #[test]
 fn two_sources_sharing_a_column_name_both_keep_it() {
     let (db, file) = db_with(

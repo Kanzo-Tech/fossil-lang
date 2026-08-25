@@ -170,10 +170,9 @@ pub enum Token {
     #[token(">=")]
     Ge,
 
-    // There is no `Pipe`. `a |> f()` was a second
-    // spelling of `a.f()`, and ruling 7 of 2026-08-11 retired it: with members
-    // resolved by the type of the receiver, the pipeline had nothing left that
-    // the dot could not do. `|` now matches no rule, so it reaches the parser as
+    // There is no `Pipe`. `a |> f()` was a second spelling of `a.f()`: with
+    // members resolved by the type of the receiver, the pipeline had nothing
+    // left that the dot could not do. `|` matches no rule, so it reaches the parser as
     // an ERROR token carrying its text — which is what `parse_expression` pairs
     // with the `>` after it to refuse the form by name.
 

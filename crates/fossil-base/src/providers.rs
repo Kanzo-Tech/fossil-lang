@@ -1,29 +1,13 @@
 //! **The provider registry — one table.** A row is the name written after
 //! `io.`, the extensions it accepts, and the capabilities it declares.
 //!
-//! # There were two tables for one idea, and they dispatched by different
-//! criteria
-//!
-//! ```text
-//! fossil-hir/src/stdlib.rs   SourceKind  { short_name: "csv",  extensions: ["csv"],           lowering }
-//! fossil-hir/src/stdlib.rs   SourceKind  { short_name: "rdf",  extensions: ["ttl","nt","n3"], lowering }
-//! fossil-base/src/…          ShapeDecoder{ name:       "shex", extensions: ["shex","shexj"],  decode   }
-//! ```
-//!
-//! The same three fields — a name, the extensions it accepts, and what it does
-//! with them — modelled twice. The data table dispatched **by name**
-//! (`source_kind("io.csv")`); the schema table dispatched **by extension**
-//! (`decoder_for(table, uri)`). The measured consequence was that
-//! `fossil-hir/src/def_map.rs` wrote `let (_ctor, document) = parse_source_call(…)`
-//! and threw the constructor away, so `io.shex("x.ttl")` and `io.shacl("x.ttl")`
-//! behaved identically. Two places said the same thing and only one was read,
-//! which is how they disagreed in silence.
-//!
-//! Ruling 13 of `SURFACE-PLAN.md` collapses them: **one row, and dispatch is
-//! always by name.** The row checks its own extension ([`Provider::accepts`])
-//! and declares its own capabilities ([`Provider::provides`]). It does not word
-//! the refusal — that is a compiler diagnostic and lives with the checker that
-//! raises it, in `fossil_hir::refusals`.
+//! **This is the ONLY table, and dispatch is always by name.** The row checks
+//! its own extension ([`Provider::accepts`]) and declares its own capabilities
+//! ([`Provider::provides`]). Dispatching by extension instead makes the name
+//! decorative and `io.shex("x.ttl")` and `io.shacl("x.ttl")` indistinguishable;
+//! a second table alongside this one is the same bug with more steps. The row
+//! does not word the refusal — that is a compiler diagnostic, and it lives with
+//! the checker that raises it, in `fossil_hir::refusals`.
 //!
 //! # The direction is not one axis, it is two
 //!
@@ -90,12 +74,9 @@
 //! over it, the one lookup, and the Salsa input a host installs through — the
 //! machinery, none of which a data file can carry.
 //!
-//! `catalogue.bnf` had been the source of truth for the DATA half since ruling
-//! 14, with a parity test failing when the hand-written statics drifted from it;
-//! the file's own `# Status` named generating them as the step after, and this
-//! is that step. What it buys beyond "cannot drift": a row's `decodes` token is
-//! now a Rust path the compiler resolves, which is the one thing the parity test
-//! said it could not prove.
+//! `catalogue.bnf` is the source of truth for the DATA half, and the statics are
+//! GENERATED from it rather than compared against it — so a row's `decodes`
+//! token is a Rust path the compiler resolves, which no comparison could check.
 
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
@@ -178,7 +159,7 @@ pub struct Provider {
     pub reads_rows: Option<RowReader>,
     /// The `read types` capability, or `None` when the row does not have it.
     pub reads_types: Option<DecodeTypes>,
-    // The two `write` cells of ruling 13's table are deliberately absent, not
+    // The two `write` cells of the direction table above are absent, not
     // stubbed. `grammar.bnf`'s NOT-IN-MVP list: «`io` names only the INPUT.
     // Where a program writes to has no syntax at all, and inventing one here
     // before it is decided is how v0.1 got its ghosts.» The shape of this
@@ -307,12 +288,11 @@ pub fn claimed(table: &[&'static Provider], uri: &str) -> bool {
 
 /// The rows installed in this database.
 ///
-/// **An input, and that is the whole change.** It was
-/// `System::providers() -> &'static [&'static Provider]`, and a `&'static`
-/// cannot come from a file read at run time and cannot be a Salsa input — so
-/// the catalogue could not be declarative (ruling 14) and nothing invalidated
-/// when it changed. Thirteen `System` implementations wrote the method and
-/// twelve returned the same constant; seven places read it.
+/// **An input, and every query reads it through here.** Reading the rows
+/// straight off `System::providers()` instead makes them a `&'static` that
+/// cannot come from a file read at run time and cannot be a Salsa input, so the
+/// catalogue could not be declarative and nothing would invalidate when it
+/// changed.
 #[salsa::input(debug)]
 pub struct Registry {
     #[returns(ref)]

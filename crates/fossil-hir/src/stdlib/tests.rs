@@ -253,9 +253,8 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "math.max",
         "math.abs",
         "math.round",
-        // str/ (13) — the eight that were here plus the five from `clean/`
-        // (ruling 16). `clean.normalize_unicode` is NOT among them: it left
-        // the language with `Foreign`.
+        // str/ (13) — every operation on a string. `normalize_unicode` is NOT
+        // among them: it is not in the language.
         "str.length",
         "str.slice",
         "str.contains",
@@ -316,13 +315,13 @@ fn catalog_is_bidirectionally_complete() {
 fn the_deleted_names_are_gone() {
     let r = FunctionRegistry::stdlib_default();
     for gone in [
-        // Ruling 16: five renames and the namespace disappears.
+        // These five live in `str/`; the `clean/` namespace does not exist.
         "clean.trim",
         "clean.lower",
         "clean.upper",
         "clean.slug",
         "clean.strip_html",
-        // Ruling 15: these two cannot be done honestly in SQL.
+        // These two cannot be done honestly in SQL.
         "clean.normalize_unicode",
         "anon.hmac",
         // The old spellings of the two renamed verbs.

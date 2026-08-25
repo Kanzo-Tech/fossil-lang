@@ -532,20 +532,6 @@ fn did_you_mean_unrelated_no_suggestion() {
     ));
 }
 
-// ===== Bucket 6: gone, and it asserted nothing ===============================
-//
-// `accept_all_descriptor_skips_backward_check` claimed in four places — its
-// docblock, the fixture's assertion message, the snapshot header, and the
-// `assert_eq!` at the end — that a program which names no shape document
-// resolves `Ok(None)`, "accept anything". That has been false since ruling 3 of
-// 2026-08-11: `resolve_target_shape` answers `Err(TargetShapeError::NoDocument)`
-// and the checker reports it. Its own snapshot recorded the message.
-//
-// The assertion was vacuous besides. It counted diagnostics whose message
-// contains "target shape" or "disjunction"; the message that fires says
-// "names no shape document", which matches neither — so `assert_eq!(count, 0)`
-// passed because the filter did not recognise the thing it was meant to catch.
-
 // ===== SC#4 second-order check: the generated split suggestion compiles ======
 
 /// The suggestion is Fossil source the compiler emits, so the compiler has to

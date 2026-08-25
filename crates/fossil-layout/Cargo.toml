@@ -58,12 +58,6 @@ parquet = { workspace = true }
 # obstacle in this crate's way.
 fossil-df = { path = "../fossil-df" }
 
-# The six `native_udf_only` UDF impl crates (unicode-normalization, slug,
-# voca_rs, hmac, sha2, uuid) were here for `src/udf.rs`. Ruling 15 of
-# `SURFACE-PLAN.md` deleted the `Udf` lowering kind and the module with it, so
-# the language needs no native crate to run a catalogued function. `sha2`
-# survives as a DEV-dependency below, for the parity digest — a different job.
-
 # `fossil-sinks` and `fossil-resolver` stood here and NEITHER is named by a
 # single line of this crate any more. The comment they shared described a
 # materialiser that no longer exists — «this crate (native) runs the COPY

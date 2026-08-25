@@ -193,25 +193,15 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
 ///
 /// # Two places a program can name its output shape, and the order between them
 ///
-/// 1. **`type { … } := io.shex("shop.shex")`** — the binding ruling 3 of
-///    2026-08-11 makes MANDATORY. It is what the CHECKER reads
+/// 1. **`type { … } := io.shex("shop.shex")`** — naming a shape document is
+///    MANDATORY, so this binding always exists. It is what the CHECKER reads
 ///    ([`fossil_hir::def_map::DefMap::output_shape_document`]), and it is
-///    consulted FIRST.
+///    consulted FIRST: the document the run classifies edges with has to be the
+///    document the program compiled against, or a CSV program gets
+///    `ACCEPT_ALL_DEFAULT` and emits zero edges.
 /// 2. `io.rdf(schema = …)` — an RDF *input* whose `ShEx` doubles as the output
 ///    contract. It stays as the fallback for a program that reads a graph and
 ///    writes one back.
-///
-/// **Only (2) existed here, and that was a hole between step 4 and step 7 of
-/// `SURFACE-PLAN.md`.** A pure-`io.csv` program — every program in
-/// `apps/docs/programs/` bar one — got `ACCEPT_ALL_DEFAULT`, and
-/// `fossil_mir::apply_output_shape` against an empty schema returns the ops
-/// unchanged: **zero `Op::EmitEdge`, for every CSV program there is**. The
-/// tombstone `fossil-mir/src/lower.rs` left when `subject_skeletons` was deleted
-/// says the shape classifies edges «and since ruling 3 that path is always
-/// available»; it was available to the checker and not to the executor, so
-/// deleting the skeletons did not migrate the edge capability, it dropped it.
-/// This function is the other half of that ruling: the document a program is
-/// REQUIRED to name is the document the run classifies edges with.
 ///
 /// v1: one shape per program (a second, different `io.rdf` schema is rejected,
 /// not merged).
@@ -223,9 +213,9 @@ fn resolve_output_descriptor(
     // The `type { … } := io.shex(…)` binding, and it wins: it is the one the
     // checker resolved the mapping's target shape against, so preferring it is
     // what keeps «what compiled» and «what ran» the same document. The
-    // CONSTRUCTOR travels with it — ruling 13 — because it is what selects the
-    // row that reads it, and reading a document with a row the program did not
-    // name is how the run came to use a different parser from the check.
+    // CONSTRUCTOR travels with it, because it is what selects the row that
+    // reads it, and reading a document with a row the program did not name is
+    // how the run comes to use a different parser from the check.
     // The program's `@rename`s travel with the document, because they decide
     // the emitted column's name. Read off the same `def_map` — and read HERE
     // rather than inside the decode, so the one place that has the program is
@@ -271,36 +261,16 @@ fn resolve_output_descriptor(
 }
 
 /// Read and decode one shape document into the run's output descriptor,
-/// **through the registry row the program named** — the same seam the checker
-/// goes through.
+/// **through the registry row the program named** — the row is selected by the
+/// constructor the program wrote and its `reads_types` is the same `fn` the
+/// checker calls, so «what compiled» and «what ran» are one decode of one set of
+/// bytes by construction. Parsing the document any other way here is how a
+/// document comes to type-check and then fail the run.
 ///
-/// # What this was, and why it was a bug nobody could see from one side
-///
-/// ```ignore
-/// let desc = fossil_shex::ShExDescriptor::from_reader(text.as_bytes())?;   // was
-/// ```
-///
-/// `from_reader` is **`ShExJ` (JSON) and only `ShExJ`**. Every `.shex` in
-/// `apps/docs/programs/` is `ShExC`. The checker's path goes
-/// `decoded_document` → `shape_document` → the `shex` row → `from_shex_source`,
-/// which auto-detects both. So a document that **type-checked** made the `run`
-/// fail on the same bytes, and neither side was wrong on its own — which is
-/// exactly how it survived (`SURFACE-PLAN.md` §B′).
-///
-/// It also meant the run had a hard-coded language: a program naming
-/// `io.shacl("catalogue.ttl")` was handed to a `ShEx` parser.
-///
-/// Both are one fix. The row is selected by the constructor the program wrote,
-/// its `reads_types` is the same `fn` the checker calls, and what comes back is
-/// [`fossil_graph_schema::OutputShapes`] — so «what compiled» and «what ran»
-/// are now the same decode of the same bytes by construction, not by two
-/// implementations agreeing.
-///
-/// The descriptor is [`OutputDescriptorKind::Lowered`] whatever the language —
-/// the variant was called `Shacl`, and the rename is part of this: it never
-/// meant SHACL, it meant "the decode already happened". The rich `ShEx`
-/// resolved table it replaces was only ever read by the checker, which does not
-/// come through here; the executor reads `to_graph_schema` and nothing else.
+/// The descriptor is [`OutputDescriptorKind::Lowered`] whatever the language: it
+/// means "the decode already happened". The rich `ShEx` resolved table it
+/// replaces was only ever read by the checker, which does not come through here;
+/// the executor reads `to_graph_schema` and nothing else.
 fn read_output_shape(
     constructor: Option<&str>,
     document: &str,

@@ -330,10 +330,9 @@ fn resolve_leaf_row<'db>(
 /// algebra whose errors say "column not found" and stop is a row algebra nobody
 /// can debug from the message.
 ///
-/// It took a `Ty` and gave one back. The scope is what a `join` needs to hand
-/// on: two sides that stay addressable under their own binding names is exactly
-/// what ruling 17 promised when it deleted the collision rule, and a flat
-/// `Record` cannot carry it.
+/// It takes a scope and not a `Ty`, because a `join` has to hand on two sides
+/// that stay addressable under their own binding names, and a flat `Record`
+/// cannot carry that.
 fn apply_source_op<'db>(
     db: &'db dyn fossil_base::Db,
     file: fossil_base::SourceFile,
@@ -373,17 +372,14 @@ fn apply_source_op<'db>(
         }
         // `select` restricts, and it restricts EACH ROW: `Employee.id` stays a
         // column of `Employee` after `Active.select(Employee.id, …)`, because
-        // the binding is what a body writes. The payload CARRIES the binding
-        // (`HirSourceOp::Select` holds `SelectedColumn`s since open question 4
-        // was decided on 2026-08-14), so the row is chosen by the name the
-        // author wrote and the column is looked for in that row alone.
+        // the binding is what a body writes. The payload CARRIES the binding —
+        // `HirSourceOp::Select` holds `SelectedColumn`s — so the row is chosen
+        // by the name the author wrote and the column is looked for in that row
+        // alone. A bare name looked up in the rows in order would make
+        // `select(id)` mean the left side's after a join.
         //
-        // It used to look a bare name up in the rows in order and take the
-        // first that had it. After a join that made `select(id)` mean «the left
-        // side's id» for a reason nobody wrote, and it was the one place a
-        // qualified reference could not be told apart from a bare one. There
-        // are therefore two refusals here and not one: an unknown BINDING and
-        // an unknown COLUMN of a known binding are different mistakes, and a
+        // There are therefore two refusals here and not one: an unknown BINDING
+        // and an unknown COLUMN of a known binding are different mistakes, and a
         // single "its input does not have it" cannot say which.
         HirSourceOp::Select(cols) => {
             let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> =
@@ -433,28 +429,11 @@ fn apply_source_op<'db>(
                     .collect(),
             ))
         }
-        // The join. **The flattening died and so did the collision rule**
-        // (ruling 17 of `SURFACE-PLAN.md`).
-        //
-        // This used to compute `fila(izq) ⊎ fila(der)` — one FLAT record — and
-        // treat any shared name other than the key as an error whose message was
-        // "rename one side before joining". That rule existed to remove an
-        // ambiguity that no longer exists: the body writes
-        // `Purchase.amount` and `User.email`, so both sides stay addressable
-        // under their binding's name and a shared column name means nothing.
-        // The rule is therefore DELETED, not relaxed — qualification is exactly
-        // what it was standing in for.
-        //
-        // **This is the one change in this phase that alters the meaning of a
-        // program that is accepted today**: two sources with a column of the
-        // same name go from rejected to legal.
-        //
-        // The seam this note used to leave open — «the result is still a flat
-        // `Record`, so it can now HOLD two fields of the same name but a lookup
-        // by bare name still finds the first» — is closed by the scope: the two
-        // sides are two entries, `Purchase.id` and `User.id` land on different
-        // ones, and only a BARE name (which the surface no longer has a spelling
-        // for) still flattens into finding the first.
+        // The join does NOT flatten, and there is no name-collision rule: the
+        // body writes `Purchase.amount` and `User.email`, so the two sides stay
+        // two entries and a shared column name means nothing. `Purchase.id` and
+        // `User.id` land on different entries; only a BARE name — which the
+        // surface has no spelling for — would flatten into finding the first.
         HirSourceOp::Join { right, alias, on } => {
             let right = right_scope(db, file, right, alias.as_ref(), depth)?;
             let Some(_) = right.fields(db) else {
@@ -824,15 +803,10 @@ mod tests {
     }
 
     /// **The trap, measured in the one place it can bite.** Two sources with a
-    /// column of the same name and a DIFFERENT TYPE: ruling 17 made that legal
-    /// and left the seam open, because the joined row was one flat `Record` and
-    /// a lookup by name found the first entry.
-    ///
-    /// So `Right.id` resolving to `Left.id`'s type would be the failure that is
-    /// worse than the bug this whole change fixes — a program that compiles and
-    /// writes the other row's column. The two sides are typed `integer` and
-    /// `string` here for exactly that reason: the assertion cannot pass by
-    /// accident.
+    /// column of the same name and a DIFFERENT TYPE. `Right.id` resolving to
+    /// `Left.id`'s type would be a program that compiles and writes the other
+    /// row's column, so the two sides are typed `integer` and `string` here:
+    /// the assertion cannot pass by accident.
     #[test]
     fn a_qualified_reference_resolves_against_its_own_side_of_a_join() {
         #[salsa::tracked]

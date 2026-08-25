@@ -374,10 +374,9 @@ impl Checker<'_> {
     /// The key is a bare name, so there is a resolution step in front of the
     /// check: `name` means the predicate of this shape whose IRI ends in
     /// `name`, and a name no predicate ends in is an error with a did-you-mean
-    /// over the ones that do. That is not a lookup failure to swallow — under a
-    /// mandatory shape document (ruling 3 of 2026-08-11) a key the shape does
-    /// not declare is a property that would be written into a corpus nothing
-    /// describes.
+    /// over the ones that do. That is not a lookup failure to swallow: the shape
+    /// document is mandatory, so a key it does not declare is a property that
+    /// would be written into a corpus nothing describes.
     pub fn check_property(&mut self, expr_id: ExprId, prop: &HirProperty) {
         // The identity is not a shape predicate: a `.shex` describes the
         // predicates of a node, and in RDF the subject IS the node. A key the
@@ -1714,9 +1713,9 @@ impl<'db> Expr<'db> {
     ///    already knows why and carries it as a `ShapeBindError`.
     /// 2. **No mapping in this file produces that type**, so there is no
     ///    template to fill. It is NOT an error for an edge to POINT at a type
-    ///    nothing emits — RDF is open-world and ruling 6 of `SURFACE-PLAN.md`
-    ///    says so — but it is an error to CONSTRUCT one, because construction
-    ///    needs the template.
+    ///    nothing emits — RDF is open-world, and an edge is only a reference —
+    ///    but it is an error to CONSTRUCT one, because construction needs the
+    ///    template.
     /// 3. **The arity is wrong**: the template has N holes and the call passed
     ///    M. Both numbers are named, and so is the mapping that declared the
     ///    template, because a reader who mis-counted needs to see the identity

@@ -33,10 +33,8 @@
 //! above: the grammar says `MappingBody := SubjectAssign Property+` and this
 //! parser accepts `(SubjectAssign | Property)*`, because the obligations on the
 //! identity are facts about a mapping rather than about its spelling and
-//! `fossil_hir::body` is what checks them. The two differences that used to
-//! stand here are closed: `@rename` / `AliasArg` are implemented (step 7 of
-//! `SURFACE-PLAN.md`) and `|>` is refused rather than parsed (step 6).
-//! Everything else in the table above is the specification verbatim.
+//! `fossil_hir::body` is what checks them. Everything else in the table above
+//! is the specification verbatim.
 //!
 //! # What this parser REFUSES, by name
 //!

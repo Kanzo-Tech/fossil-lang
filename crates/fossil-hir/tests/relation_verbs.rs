@@ -16,10 +16,10 @@
 //!
 //! # What this file does NOT prove
 //!
-//! - **That the ten unlowered verbs should stay unlowered.** They are
-//!   deliberate: `SURFACE-PLAN.md` records that the day one is implemented, its
-//!   arguments are checked by the same code that checks `str.trim`'s. This
-//!   pins the message, not the gap.
+//! - **That the ten unlowered verbs should stay unlowered.** The gap is
+//!   deliberate — the catalogue already carries their signatures, so the day one
+//!   gains a lowering its arguments are checked by the code that checks
+//!   `str.trim`'s. This pins the message, not the gap.
 //! - **That a fourteenth `PlanOp` is impossible.** That is the compiler's, not
 //!   this file's: the `match` in `lower_source_stage` is exhaustive and has no
 //!   wildcard, so a new variant fails to build. A test cannot assert a

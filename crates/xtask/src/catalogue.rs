@@ -2,35 +2,18 @@
 //!
 //! # Why this exists
 //!
-//! `catalogue.bnf` says WHAT NAMES EXIST, and it has said so since ruling 14 of
-//! `SURFACE-PLAN.md` — the name written after `io.`, the extensions the row
-//! accepts, and which capabilities it declares. What the tree did with that file
-//! until now was *check* the Rust against it: a parity test parsed the rows and
-//! failed when the hand-written statics drifted. The file's own `# Status`
-//! section named the step after, in as many words:
+//! `catalogue.bnf` says WHAT NAMES EXIST — the name written after `io.`, the
+//! extensions the row accepts, and which capabilities it declares. The statics
+//! are GENERATED from it rather than checked against it, because a generated
+//! file writes `decodes decode_shex` as a Rust PATH the compiler resolves: a row
+//! naming a decoder nobody wrote is a build failure, where a parity test could
+//! only compare strings and a `fn` pointer has no name at run time. Everything a
+//! row implies comes off its tokens for the same reason — `NativeReader`'s
+//! variant name and its `table_function` are both derived from `native <fn>`.
 //!
-//! > Generating those statics from this file — so the Rust cannot drift at all
-//! > rather than being caught drifting — is the step after.
-//!
-//! This is that step. The reference is rust-analyzer's `rust.ungram`, which
-//! `catalogue.bnf` already cites: a data file beside the compiler, a generator,
-//! and a checked-in output that a `--check` mode proves current.
-//!
-//! # What generation closes that the parity test could not
-//!
-//! The parity test said what it could not prove, and it was this: *«that
-//! `decodes decode_shex` names the function actually installed. A `fn` pointer
-//! has no name at run time.»* A generated file writes `decode_shex` as a Rust
-//! PATH, so the compiler resolves it. A row that names a decoder nobody wrote is
-//! now a build failure rather than a row whose capability is declared and whose
-//! behaviour is somebody else's.
-//!
-//! It also collapses two hand-written derivations of one datum. `NativeReader`'s
-//! variants and the `DuckDB` table function each names were two spellings of the
-//! `native <fn>` token — the enum in `fossil-base`, and a `native_fn` in the
-//! parity test that mapped it back to the string the file had written in the
-//! first place. Both come off the token now: the variant name is derived from
-//! it and `NativeReader::table_function` gives it back.
+//! The reference is rust-analyzer's `rust.ungram`, which `catalogue.bnf` already
+//! cites: a data file beside the compiler, a generator, and a checked-in output
+//! that a `--check` mode proves current.
 //!
 //! # Where a row goes, and why that is derivable
 //!
