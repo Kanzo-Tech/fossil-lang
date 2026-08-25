@@ -46,21 +46,35 @@ It advertises hover, definition, completion, document symbols, semantic tokens a
 
 ## Completion
 
-Three sources merge into one list (`crates/fossil-ide/src/completion.rs:71`), and it is worth knowing
+Three sources merge into one list (`crates/fossil-ide/src/completion.rs:78`), and it is worth knowing
 which of them looked at your cursor. Two of the three ask one question — what is to the LEFT of your
-dot — and they ask it once, of one `Scope` (`crates/fossil-ide/src/completion.rs:105`).
+dot — and they ask it once, of one `Scope` (`crates/fossil-ide/src/completion.rs:116`).
 
 **The shape's properties**, when the enclosing mapping's target shape resolves — your program named
 its output document and the editor could read it. The entries are that shape's own
 `constraints[].predicate`, each with the value type the document declares, so the list is what
 `Person` requires and nothing else.
 
-This is the source that asks nothing about your cursor beyond *which mapping am I in*
-(`crates/fossil-ide/src/completion.rs:426`). It fires at every position inside a body, including
-after a dot, and it labels each entry with the **whole predicate IRI** —
-`https://shop.example/voc#email`, not `email`. A property key is the last segment and never the IRI,
-so accepting one of these writes a line that does not compile. Measured on the shop shape: three
-such entries, present in the list after `User.` and in the list away from any dot alike.
+This source fires **only in key position** — an `IDENT` whose parent is a `PropertyLhs`
+(`crates/fossil-ide/src/completion.rs:523`), which is the one place the grammar lets a property key
+go. It labels each entry with the name a program writes, through `short_name`, so a renamed
+predicate is offered under its rename and the name you accept is the name the checker resolves and
+the column the corpus ships.
+
+It used to ask nothing about your cursor beyond *which mapping am I in*, and it labelled each entry
+with the **whole predicate IRI** — `https://shop.example/voc#email`, not `email`. A property key is
+the last segment and never the IRI, so accepting one wrote a line that did not compile. Measured on
+the shop shape: three such entries, offered after `User.`, on the `@subject` line, in the header,
+and away from any dot alike. After the repair the same six positions measure `email`/`name`/`phone`
+in key position and **nothing** in the other five. The IRI did not disappear — it moved to the
+entry's detail, where a full predicate is information rather than a suggestion.
+
+<Callout title="One position is still wrong, and it is the other source">
+The 51 dotted catalogue rows — `str.trim` and its siblings — are **still offered in key position**,
+where they are no more writable than a raw IRI was. That is the stdlib source, not this one; it is
+measured and pinned by `the_catalogue_is_still_offered_in_key_position` so the number cannot move by
+accident.
+</Callout>
 
 **The source's columns**, when the name to the left of your dot is the one the mapping's `from`
 clause bound and that source has been introspected — which, per the callout above, is the browser
@@ -82,7 +96,7 @@ of the row, so the row has to be what you named.
 it hangs off — `Scalar(ScalarTy::String)` for `str.trim`, `Relation` for `seq.where`, `Namespace` for
 `io.csv` (`crates/fossil-hir/src/stdlib.rs:181`) — and the bare member name beside it
 (`crates/fossil-hir/src/stdlib.rs:186`), and `stdlib_completions`
-(`crates/fossil-ide/src/completion.rs:167`) asks the catalogue for the rows that receiver HAS rather
+(`crates/fossil-ide/src/completion.rs:192`) asks the catalogue for the rows that receiver HAS rather
 than for all of them:
 
 ```
@@ -98,7 +112,7 @@ Thirteen after a `:=` binding, where there were fifty-one; and they are spelled 
 `seq.where`, because after a dot the member is what you are typing. The full dotted signature is
 still there as the entry's detail, so the type path is never hidden.
 
-Five heads resolve (`crates/fossil-ide/src/completion.rs:238`): `str` and `seq`, which the catalogue
+Five heads resolve (`crates/fossil-ide/src/completion.rs:276`): `str` and `seq`, which the catalogue
 classifies itself; a namespace like `io`, whose own rows are offered and not another namespace's; any
 name a `:=` binding introduces, which is a relation and so has the verbs; and — the third line above
 — a **column of the row you named**, whose members are the members of its own type. That last one is
@@ -107,10 +121,13 @@ catalogue is asked about a `String`. A column that is an `Integer` answers with 
 catalogue hangs no row off one.
 
 A head that is none of the five — `orders.`, a column the row does not have, the result of a call
-(`User.email.trim().`) — gets nothing from either of those two sources; the shape's properties are
-still in the list, because that source does not ask. Away from any dot there is no receiver to
-narrow by, so the catalogue is offered whole and spelled in full: fifty-four items measured inside a
-mapping body, the fifty-one catalogue rows plus the shape's three.
+(`User.email.trim().`) — gets nothing from either of those two sources, and nothing from the shape's
+properties either, because after a dot you are not in key position. That last clause used to read
+"the shape's properties are still in the list, because that source does not ask", and it was true
+until the source learned to ask. Away from any dot there is no receiver to narrow by, so the
+catalogue is offered whole and spelled in full: **fifty-one** items measured inside a mapping body,
+which is the catalogue and nothing else. It was fifty-four — the three extra were the shape's
+predicates, offered as raw IRIs in a position no key can go.
 
 The list carries no `sortText`, so your editor orders it by label — and the list itself is now sorted
 by label before it leaves, because `FunctionRegistry` is a `HashMap` and three consecutive runs of the
