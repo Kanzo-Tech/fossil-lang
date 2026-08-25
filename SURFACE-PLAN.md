@@ -778,6 +778,20 @@ el 2026-08-23 — ése fue su último uso, y no era un uso.
 **El titular: `arrow-rs` no compensa. Lo que compensa es el tamaño de row group, y DuckDB lo da con
 una palabra de SQL.**
 
+**`spikes/` ya no existe, y con él se va una pregunta que sigue abierta.** El último que quedaba,
+`lca-vs-csr`, eran sesenta líneas de SQL que medían **dónde vive una arista: en la tesela de su
+origen (CSR) o en la más profunda que contiene ambos extremos (LCA)**. Su cabecera decía por qué
+existía: *«el modelo de teselado afirmaba lo primero en un sitio y lo segundo en otro; esto lo mide
+en vez de discutirlo»*. Lo hacía computable la definición de tesela — si una tesela es un rango fijo
+de 4.096 filas de `dense_id` y `dense_id` está en orden Morton, la tesela de un vértice es
+`dense_id >> 12` y el antepasado común más bajo de dos es el prefijo común de sus ids: un XOR y un
+conteo de ceros a la izquierda, con nivel 0 = ambos extremos en la misma hoja.
+
+**Corrió y nadie escribió la respuesta.** Sin README, sin conclusión, y sin una sola referencia en el
+árbol. Ésa es la razón por la que se borró y no la razón por la que debería haberse borrado: un
+spike vale su conclusión, y de éste no quedaba ninguna. La contradicción que iba a resolver sigue
+en pie, y quien la reabra necesita reescribir el SQL — está en el historial, en `7e4346e^`.
+
 - ~~(1) `arrow-rs` en vez de `COPY`, porque escribe el índice de páginas y DuckDB no.~~ **Falsa por
   la razón, no por el hecho.** El índice se escribe (179.419 B) y **salta 0 páginas y 0 bytes**: a
   4.096 filas por row group hay exactamente **1 página de datos por column chunk**, así que el
