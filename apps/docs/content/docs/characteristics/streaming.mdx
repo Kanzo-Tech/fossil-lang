@@ -53,6 +53,40 @@ This is the seam `backedBy` points at, and the citation is an **implementation f
 Nothing in CI measures the residency; it is a hand-run `arrow_gib` count, and if the value became a
 stream tomorrow no assertion anywhere would notice.
 
+**And the obvious fix does not fix it.** *Write each table and drop it* is what a boundary holding a
+list of tables invites, and on this corpus it frees nothing: the corpus is **one** vertex type and
+**one** edge type, and the six files the encode phase reports are one vertex Parquet, two edge
+orientations and three manifests. A boundary holding one of each is not an accumulation over the
+schema — it is one table, and per-table streaming has nothing to stream past.
+
+Where the 1.64 GiB is, from the published row counts and the Arrow width of the columns rather than
+from a probe: 71,024,690 edges in two orientations of two `u32`s is **1.06 GiB**, so the edges are
+roughly 65% of the boundary and the ten million vertices are the rest. That split is arithmetic and
+not a measurement, and it is worth taking as a direction rather than as a number.
+
+Which makes the shape of a real fix specific, and asymmetric. **The vertex half cannot be streamed
+away.** The edge phase joins against every vertex type registered as a `MemTable`
+(`crates/fossil-df/src/lib.rs:414`), and those are the same Arrow buffers the boundary holds rather
+than a second copy — which is why dropping the `SessionContext` before encoding
+[frees 0.00 GiB](/docs/characteristics/bounded-write). Nothing is released until the context is
+dropped, and the edge phase is over by then. **The edge half is pinned by nothing.** No
+`register_batches` call ever sees it; it is collected after the last join that needs it and its only
+reader is the encoder. Streaming it means the sink consuming a `RecordBatch` stream where it now
+consumes a `Vec` — and it is the half with the bytes in it.
+
+<Callout type="warn" title="A hypothesis with a shape, and what would say it is right">
+**No part of that fix has been attempted, so nothing about its cost has been measured.** The seam
+below this one on the page was *refuted* by the probe after exactly this kind of reasoning, and the
+one below that went the wrong way by seven gigabytes while three parity tests stayed green. So it is
+written in the register it has earned. **Reasoned:** the 65/35 split, and that the two halves are
+pinned differently — one from arithmetic, one from the code. **Unknown:** whether streaming the edge
+half moves the peak at all, and by how much.
+
+`FOSSIL_MEM_PROBE=1` on the ten-million corpus, before and after, is the acceptance criterion, and
+both numbers are owed: the `arrow_gib` count at the boundary *and* the process peak. It is written
+down so the next attempt starts from something sharper than *the boundary holds a value*.
+</Callout>
+
 ### 2. `to_files()` encodes every file before touching disk — measured, and refuted
 
 `crates/fossil-df/src/files.rs`
