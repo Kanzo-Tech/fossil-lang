@@ -24,9 +24,22 @@ out by it.
 That is not hypothetical arithmetic. In the write path, taking the file as the CSR it already is
 removed a `Vec<(u32, u32)>` of every edge (568 MB at ten million), a degree-counting pre-pass and an
 80 MB cloned cursor scattering random writes over the 568 — **−1.71 GiB of process peak**, with the
-corpus byte-identical. None of the three was ever asked for by the algorithm; they existed because a
-function signature took an unordered bag and so could not carry the order the file already had. **An
-invariant lives in a type or it lives in a comment**, and here the file is the type.
+corpus byte-identical. None of the three was ever asked for by the algorithm.
+
+They existed because of a type. A constructor taking **offsets and targets cannot need a counting
+pass**, because its signature already asserts the order; one taking a **bag of pairs has to rebuild
+it**, because the bag asserts nothing. The write path took the bag, so the ordering the file already
+had could not be passed through it. **An invariant lives in a type or it lives in a comment**, and
+here the file is the type.
+
+And the order is the expensive half, which is why it is worth spending a convention on rather than
+leaving to whoever reads the file. Edge-centric streaming systems are built on one observation:
+walking edges in sequence while holding only per-vertex state beats random access over a resident
+adjacency, because sequential bandwidth is orders of magnitude larger than random. **X-Stream** and
+**GraphChi**'s parallel sliding windows spend their machinery on *producing* that sequence — it is
+the difficulty their designs exist to answer. Here it is not machinery: it is the convention this
+page opens with, and the count at the top of the page is a corpus being held to it. A consumer
+starts where those systems finish.
 
 Guard: `csr-and-csc`. What it does not fix is the secondary order — rows sharing a `src_dense` may
 appear in any order, and no reader may depend on which.
