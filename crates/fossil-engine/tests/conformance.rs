@@ -185,6 +185,19 @@ fn manifest_number(path: &Path, key: &str) -> u64 {
         .unwrap_or_else(|e| panic!("`{key}` in {} is not a number: {e}", path.display()))
 }
 
+/// One `key: value` string out of a manifest, by the **whole** line prefix.
+///
+/// The indent is the discriminator and not decoration: a vertex manifest carries two `prefix` keys,
+/// its own at column zero and the index's nested under `index:`. Matching `prefix: ` anywhere would
+/// read the first and report that the index is where the tiles are.
+fn manifest_line(path: &Path, prefix: &str) -> Option<String> {
+    let text = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("read manifest {}: {e}", path.display()));
+    text.lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .map(|value| value.trim().to_string())
+}
+
 /// The count a manifest declares, checked against the rows that are on disk.
 ///
 /// This is where [`fossil_sinks::manifest::VertexInfo::vertex_count`] is
@@ -206,6 +219,24 @@ fn declared_count(manifest: &Path, key: &str, on_disk: i64) -> u64 {
         manifest.display()
     );
     declared
+}
+
+/// How many **tiles** a directory holds, by name.
+///
+/// [`files_in`] counts entries, and a vertex prefix stopped being only tiles when the identity
+/// index landed inside it: `vertex/<Type>/index/` is a directory the manifest declares, so a count
+/// of entries reads three tiles and an index as four tiles. That was red on this test, and it was
+/// red about the artefact being right.
+fn tiles_in(dir: &Path, stem: &str) -> u64 {
+    std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read dir {}: {e}", dir.display()))
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with(stem) && name.ends_with(".parquet")
+        })
+        .count() as u64
 }
 
 /// How many files a directory holds — the count the emitter is answerable for.
@@ -393,7 +424,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
          which has no boundary to get wrong"
     );
     assert_eq!(
-        files_in(&dest.join("vertex/Person")),
+        tiles_in(&dest.join("vertex/Person"), "chunk"),
         expected_tiles,
         "the vertex tiles are not the {expected_tiles} the manifest implies"
     );
@@ -404,6 +435,27 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
             "tile {k} is missing, so the ids it holds are not addressable"
         );
     }
+
+    // 7b. The identity index, which the manifest declares and nothing here read.
+    //     It is what turns a subject IRI back into an address, so it is the half
+    //     of the contract a bookmark, a link from another system and a selection
+    //     all depend on — and it is tiled by the same shift, one index tile per
+    //     vertex tile, or a reader cannot address it from an id it already holds.
+    let index_dir = dest.join("vertex/Person/index");
+    assert!(
+        index_dir.is_dir(),
+        "the manifest declares an identity index and the prefix it names is not there"
+    );
+    assert_eq!(
+        manifest_line(&dest.join("vertex/Person.vertex.yml"), "  prefix: "),
+        Some("index/".to_string()),
+        "the index prefix the manifest declares is not the one the writer used"
+    );
+    assert_eq!(
+        tiles_in(&index_dir, "tile"),
+        expected_tiles,
+        "the index is not tiled like the vertices it addresses, so a lookup cannot name its tile"
+    );
 
     // 8. Every vertex is in the tile its own id names. `dense_id >> shift` is the
     //    entire index — no table, no listing, no footer — so a row in the wrong
@@ -634,6 +686,73 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         ),
         0,
         "the in-edges of a vertex are not all in the by_target tile its dense_id names"
+    );
+
+    // 13. THE PAYLOAD HALF, and until this section nothing here read a value.
+    //     Every check above is about counts, addresses and ordering, so a corpus
+    //     that renumbered every vertex and then attached the wrong name to each of
+    //     them satisfies all twelve of them and the manifest as well.
+    //
+    //     What makes it statable is the fixture rather than a recorded build:
+    //     person `i` is named `person-i` and knows `(i+1) mod n`, so the whole
+    //     graph is one line of arithmetic and the corpus read back through its
+    //     tiles is compared against **what was asked for**.
+    //
+    //     The identity is the join key on purpose. `dense_id` is an address and
+    //     the layout pass reassigns it, so an assertion phrased in dense ids can
+    //     only say the corpus agrees with itself. `subject` is what a stranger
+    //     holds, and it is the thing that has to survive.
+    let ordinal = |column: &str| format!("regexp_extract({column}, '([0-9]+)$', 1)::BIGINT");
+    let i = ordinal("subject");
+
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!("SELECT count(*) FROM '{vertices}' WHERE name <> 'person-' || {i}::VARCHAR")
+        ),
+        0,
+        "a vertex carries a name that was not built from its own identity — the pass renumbered \
+         the rows and a property did not travel with the row it belongs to"
+    );
+
+    // The set, not the count. `n` above says ten thousand rows arrived; this says
+    // they are the ten thousand that were asked for, which a duplicate and a
+    // missing vertex satisfy together.
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM \
+                 ((SELECT {i} AS ord FROM '{vertices}' EXCEPT SELECT ord FROM range(0, {PEOPLE}) t(ord)) \
+                  UNION ALL \
+                  (SELECT ord FROM range(0, {PEOPLE}) t(ord) EXCEPT SELECT {i} AS ord FROM '{vertices}'))"
+            )
+        ),
+        0,
+        "the identities on disk are not the {PEOPLE} the mapping was given — one is duplicated, \
+         missing, or spelled differently from the template that built it"
+    );
+
+    // And the ring, which is the assertion the renumbering can actually break.
+    // Both endpoints are addresses; resolving each back to the identity it now
+    // names is the only way to ask whether the edge still connects the two
+    // vertices it connected before the corpus was reordered.
+    let src = ordinal("s.subject");
+    let dst = ordinal("d.subject");
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM '{by_source}' e \
+                   JOIN '{vertices}' s ON s.dense_id = e.src_dense \
+                   JOIN '{vertices}' d ON d.dense_id = e.dst_dense \
+                  WHERE {dst} <> ({src} + 1) % {PEOPLE}"
+            )
+        ),
+        0,
+        "an edge does not connect the two identities it was written from — the endpoints are \
+         dense ids, the pass reassigned them, and this is the half of that operation nothing else \
+         here can see"
     );
 
     // What 12 does not prove is that a hop is *cheap*, only that it is correct
