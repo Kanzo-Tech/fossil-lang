@@ -1,0 +1,110 @@
+---
+title: What an expression is
+description: A pure function of one row — literals, a qualified column reference, a call into the catalogue, arithmetic, comparison, negation, the ternary, and the edge constructor. Thirteen forms in the HIR, and every node the parser builds has one.
+direction:
+  summary: An expression is a total function of one row — a call into the value library, an operator, a conditional — so it compiles to exactly one SQL expression, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
+---
+
+`Γ, r ⊢ e : σ` is the judgement [the algebra](/docs/design/algebra)'s typing rules bottom out in, and
+this page is what `e` may be. Everything a property, an identity or a predicate may say is a pure
+function of the single row in scope. That is the whole of the design, and the rest follows from it:
+an expression terminates by construction, it carries no state between rows, and it compiles to
+exactly one SQL expression.
+
+<Callout title="Deliberately absent">
+There are no programs. No recursion, no loops, no user-defined functions — the last of those is a
+ruling and not an omission (`grammar.bnf, § NOT IN MVP`): polymorphism lives in the library, and the
+user declares no functions.
+</Callout>
+
+## The forms
+
+`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs:291`) — the ten below cover twelve
+between them, plus the bare-name column reference the surface is retiring. Each is spelled by a
+program in `apps/docs/programs/`, compiled by the production path and not transcribed here.
+
+| form | what it is for | spelled by |
+| --- | --- | --- |
+| interpolated string | the identity slot, and any text composed from a row | `shop`, region `identity` |
+| qualified column reference | `User.email` — a column, named by the row it belongs to | `shop`, region `properties` |
+| string, integer, float and boolean literals | a constant property | `expressions`, region `literals` |
+| `null` | comparable with everything, assignable to nothing | `contacts`, region `derived` |
+| call | the value library, reached as `str.trim(x)` or as `x.trim()` | `expressions`, region `two-paths` |
+| edge constructor | `Person(User.email)` — the `Person` whose identity is built from this email | `shop`, region `edge` |
+| arithmetic | `Row.gross - Row.discount`, left-associative | `arithmetic` |
+| comparison, `and`, `or` | a filter's predicate, and the condition of a conditional | `disjunction` |
+| unary minus and `not` | negation in either position | `negation` |
+| ternary | the conditional, both branches one type, no coercion | `ternary` |
+
+The access operator is the dot and there is only one of it (`grammar.bnf, PostfixExpr`): what is on
+[the left decides what the members are](/docs/design/the-dot).
+
+## Precedence
+
+Loosest first (`grammar.bnf, § OPERATOR PRECEDENCE TABLE`).
+
+| level | operators | associativity |
+| --- | --- | --- |
+| L1 | `? :` | right |
+| L2 | `or` | left |
+| L3 | `and` | left |
+| L4 | `==` `!=` `<` `<=` `>` `>=` | non-associative |
+| L5 | `+` `-` | left |
+| L6 | `*` `/` `%` | left |
+| L7 | `-` (unary), `not` | right |
+| L8 | `.` (member), `(…)` (call) | left |
+
+## One catalogue row, two ways to reach it
+
+`str.lower(str.trim(x))` and `x.trim().lower()` are the same row read twice, not two ideas — the way
+`s.len()` is `str::len(&s)` in Rust. The corpus contains both spellings, on purpose, so that the
+equivalence is demonstrated rather than asserted.
+
+<Program src="expressions/expressions.fossil" region="two-paths" title="expressions.fossil" />
+
+The catalogue is 51 rows: thirteen relation verbs, three source constructors, and **35 functions an
+expression may call**. Twenty-two of the 35 render on the DataFusion backend; the thirteen that do
+not are pinned in `crates/fossil-df/src/stdlib.rs:78` with the cause beside each — six because
+DataFusion has no way to raise from an expression, four because an aggregate is not a scalar call at
+all, two because the function lives in an optional package this crate does not register, and one
+because DataFusion ships no JSON extraction. **That list is measured, not guessed:** the test beside
+it plans each catalogued row's real template through the renderer and compares what fails against
+the list, so a function becoming reachable — or stopping — is a diff there and not a surprise in
+someone's program. A call *running* is a separate claim, and a narrower one
+(`crates/fossil-df/tests/expressions.rs:42` asserts the values, not the plan).
+
+## The drop is loud
+
+This is the failure mode the whole project exists to prevent, and it happened: the lowering read a
+handful of node kinds and dropped the rest, the checker raised nothing because the HIR never saw the
+expression, and the compiler declared success over a corpus with a property missing. The fallback
+arm is a diagnostic now — it quotes the source text, points at it, names the node kind the parser
+built — and every `*_EXPR` kind has an arm, so what still arrives there is the parser's own `ERROR`
+node. `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`
+(`crates/fossil-hir/src/lower.rs:3176`) pins the guarantee, which is the drop being **loud**, not any
+particular expression being unlowerable — its own fixture lowers fine today
+(`crates/fossil-hir/src/lower.rs:3222`).
+
+## What leaves
+
+**Anything the HIR does not need leaves the grammar**, because a token that never reaches the HIR is
+a promise the language does not keep — `|>`, the leading dot, the triple term, `&` shape
+intersection and the rest. No list here: `grammar.bnf` carries each as a tombstone, the never-built
+forms sit under `grammar.bnf, § NOT IN MVP`, six answer by name with a message saying what to write
+instead (`crates/fossil-syntax/src/parser/diag.rs:106`), and
+`crates/fossil-syntax/tests/parse_corpus.rs:481` fails if any fenced `fossil` block on this site
+spells one.
+
+## What this does not settle
+
+- **The bare name.** A property may still write `id` where it means `User.id`, and the lowering
+  builds the anonymous-row form for it. Two spellings for one idea, which this house does not keep:
+  the sequence ends by deleting the `FieldRef` variant.
+- **The thirteen functions the DataFusion backend cannot render.** `anon.hash` and `str.split` are
+  one `SessionContext` registration away and nothing else; the other eleven each need a decision,
+  and four (`math.sum`, `avg`, `min`, `max`) are not scalar calls at all but [a pipeline with a
+  group-by](/docs/design/algebra).
+- **Where the value library is written down.** The catalogue is Rust today and is meant to become a
+  file the compiler reads, so that adding a row stops touching the compiler. Nothing loads a file
+  yet, deliberately: what the catalogue owes a loader is a shape it can fill, not a parser it has to
+  agree with.

@@ -11,7 +11,7 @@ one another:
 - a **product embedding it**, which supplies credentials, storage and a job lifecycle and wants the
   language to be a component rather than a subprocess it has to understand.
 
-Add the promise that a corpus has [no ceiling on its size](/docs/design/larger-than-ram) and the four
+Add the promise that a corpus has [no ceiling on its size](/docs/design/streaming) and the four
 requirements contradict each other — but only under one reading. If "this destination works" means
 *run the whole engine here*, then the browser must be larger-than-RAM, and it cannot be: wasm32 has
 roughly four gigabytes of address space and nowhere to spill.

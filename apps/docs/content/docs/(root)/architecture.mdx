@@ -284,7 +284,8 @@ writes a corpus a GraphAr reader can open: the manifest borrows GraphAr's YAML f
 where GraphAr stops specifying, which is
 [stated once with the divergences measured](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops).
 `fossil-graph` is the read surface over a corpus somebody else already wrote: a closed enum of
-[six verbs](/docs/characteristics/verbs). The crate that writes is `fossil-df`; the crate that models
+[six verbs](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws). The crate that writes
+is `fossil-df`; the crate that models
 the manifest is `fossil-sinks`.
 </Callout>
 
@@ -315,7 +316,7 @@ specification in its own repository.**
 The page is the shape. [Three hosts](/docs/design/three-hosts) is the argument, and what is
 deliberately left off here goes to the pages that own it: the measurement that reordered the whole
 priority — a compiler that reports success and writes a corpus with a property missing — is
-[the expression cliff](/docs/characteristics/expressions); the scope of the incremental system is
+[the expression cliff](/docs/design/expressions); the scope of the incremental system is
 [tooling for humans](/docs/design/tooling-for-humans); and the extension mechanism is a
 [discarded alternative](/docs/design/discarded) with a named condition that would reopen it.
 

@@ -4,6 +4,7 @@
   "pages": [
     "index",
     "algebra",
+    "expressions",
     "types",
     "type-providers",
     "catalogue",
@@ -12,7 +13,6 @@
     "the-dot",
     "identity",
     "streaming",
-    "larger-than-ram",
     "one-engine",
     "tooling-for-humans",
     "tooling-for-machines",

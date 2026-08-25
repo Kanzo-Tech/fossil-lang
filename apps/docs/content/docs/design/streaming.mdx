@@ -1,113 +1,197 @@
 ---
-title: Streaming
-description: No stage boundary in the write path holds a whole value, so peak memory follows the working set rather than the corpus — which is what turns a memory budget into larger-than-RAM instead of a lower ceiling.
+title: Streaming and the budget
+description: A budget bounds the operators inside the pool; a stream bounds everything outside it. Three seams were named on structure — one landed, one was refuted by measurement, one still collects.
+direction:
+  summary: At ten million vertices a declared 4 GiB budget bounds the whole write path, process peak included, and not only the executor inside the pool.
 ---
 
-The promise is one sentence:
+"Efficient" is a comparison. **Larger than RAM is a guarantee**: exceeding the machine is a slower
+run, not a failed one, and the corpus that comes out is the same corpus. Two mechanisms produce it
+and neither suffices alone. **A budget bounds the operators inside the pool** — they reserve before
+they allocate and spill when told no. **A stream bounds everything outside it** — a batch arrives, is
+transformed, is handed on and is dropped, so peak memory follows the working set and not the corpus.
+A boundary that holds a whole value is memory the pool never sees, and the process dies with the
+budget honoured. One mechanism, two halves, one page.
 
-> **No stage boundary in the write path holds a whole value.** A batch arrives, is transformed, is
-> handed on and is dropped. Peak memory follows the working set — a batch, a window, the O(n) state
-> an algorithm genuinely needs — and not the size of the corpus.
+## The budget encloses the executor, and nothing after it
 
-It is worth being clear about why that is the *interesting* property, because "streams its input" is
-a thing every data tool claims.
+```mermaid
+graph LR
+  subgraph POOL["<b>--memory-gib</b> · a FairSpillPool, and this is its whole extent"]
+    X["<b>execute_graph</b><br/>DataFusion reserves,<br/>spills, releases"]
+  end
+  X --> G["<b>GraphArData</b><br/><i>seam 1 · still collects</i><br/>1.64 GiB of Arrow at ten million"]
+  G --> F["<b>try_for_each_file</b><br/><i>seam 2 · refuted by measurement</i><br/>0.02 GB, inside the noise"]
+  F --> W[("GraphAr tree on disk<br/>713 MB · 87 files")]
+  W --> E["<b>enrich_layout</b><br/><i>seam 3 · landed</i><br/>−1.71 GiB, reads the CSR it already is"]
+```
 
-## Why streaming is the boundary type
+The box is the finding. `enrich_written_layout` takes the run's `memory_bytes` and discards it —
+`let _ = memory_bytes;`, with a comment saying there is nothing left to cap and nothing enforcing the
+budget either. The run's peak is the pool's cap plus what the three stages outside the box add;
+[one engine](/docs/design/one-engine) tables the cost of the last of them. A probe settled that, not
+an argument: four explanations for seventeen gigabytes were each killed by a number, and **RSS was
+already 14.61 GiB when `enrich_layout` ran its first statement.**
 
-Streaming and [a memory budget](/docs/design/larger-than-ram) are usually presented as two features.
-They are one mechanism with two halves, and each half is useless without the other.
+## A budget is a protocol, not a flag
 
-A budget bounds the operators **inside** the pool: it tells them how much they may hold and requires
-them to spill when the answer is no. It says nothing about anything outside the pool. If a stage
-boundary in the pipeline holds a whole value — every batch collected into a list, an entire edge
-table read into an array, the whole output built before the first byte is written — then that memory
-is not the pool's to bound. The budget is honoured, and the process dies anyway.
+*Try, and die if it does not fit* is not a mode any serious engine offers. DataFusion, DuckDB and
+Velox all implement one shape — **the operator reserves before it allocates and knows what to do when
+told no** — and a pool without a temporary directory beside it turns a slow job into a failed one at
+exactly the size it was meant to help.
 
-**Everything outside the pool is bounded by being a stream.** That is the only way the two promises
-compose. Where they compose, exceeding the machine is a slower run; where they do not, the budget is
-a number that makes the failure harder to diagnose.
+**A budget only means something if the operators can honour it.** The first 4 GiB run died and
+`TrackConsumersPool` named the culprit:
 
-So streaming is not an optimisation applied to a pipeline. It is the property that makes the budget
-mean what it says, and a stage that holds a whole value is not slow — it is a hole in a guarantee.
+```text
+HashJoinInput[8]#125(can spill: false) consumed 387.7 MB, peak 387.7 MB,
+HashJoinInput[9]#126(can spill: false) consumed 291.9 MB, peak 291.9 MB,
+…five of them, on a ten-core machine: one reservation per partition
+```
 
-## The type at a boundary is the argument
+A hash join's build side declares `can spill: false`; told it may not allocate it has nothing to give
+back, so it dies. A sort-merge join spills. `bounded_context` therefore clears
+`datafusion.optimizer.prefer_hash_join` alongside the pool: a plan free to pick an operator that
+cannot obey is a budget in name.
 
-The place this becomes a design decision rather than an aspiration is the **type of the interface
-between two stages**, because a type is what makes a stage's obligation checkable.
+**The floor belongs to the machine, not the corpus.** Each sort partition reserves
+`sort_spill_reservation_bytes` (10 MB) and declares it non-spillable, so the smallest viable pool
+grows with `target_partitions`. On ten cores, 384 MiB dies with five `ExternalSorterMerge` holding
+10 MB each; 480 MiB runs and spills, and it still spills at 2 GiB. A hundred-megabyte budget is not
+viable at any corpus size.
 
-A lazy interface whose item is a *batch of columns* delivers exactly the boundary a columnar
-pipeline wants: offsets and values, in the representation both sides already use, one batch at a
-time. A lazy interface whose item is a *row converted to the host language's tuples* does not — it
-streams, technically, and it re-materialises the data in a second representation on the way through.
-The two look equally lazy in a signature and cost differently by an order of magnitude.
+So `crates/fossil-df/tests/spill.rs` asks for 64 MiB *per core*.
+`a_ridiculous_budget_spills_and_writes_the_same_corpus` writes one corpus twice, once unbounded as a
+control and once under the budget; the bounded run must open a spill directory and the two trees must
+come out byte-identical. The control is what makes it evidence — the default pool has no disk manager
+and cannot spill. It measures no RSS, so nothing below this line is in CI, and widening it is not
+cheap: spill files are deleted when the job ends and per-plan metrics do not outlive the execution.
 
-The same argument works in reverse and is sharper. A function that takes an adjacency structure —
-offsets and targets — **cannot need a counting pass**, because its parameter type already asserts the
-ordering that a counting pass would establish. A function that takes a bag of pairs must reconstruct
-that ordering, because its parameter type asserts nothing. That is *parse, don't validate* applied to
-memory rather than to correctness, and it is why the interfaces in a streaming pipeline are worth
-arguing about: **the type at the boundary is what decides whether the next stage is allowed to be
-lazy.**
+## The numbers, at ten million vertices
 
-The prior art here is a literature, not an intuition. Edge-centric streaming systems — X-Stream, and
-GraphChi's parallel sliding windows — are built entirely on the observation that walking edges in
-sequence while holding only per-vertex state beats random access over a resident adjacency, because
-sequential bandwidth is orders of magnitude larger than random. A corpus written by fossil is already
-in the order those systems work to construct, so the streaming shape is available rather than
-expensive.
-
-## The method, which is the transferable part
-
-Measuring this is where the interesting failures happen, and three lessons from doing it are worth
-more than any individual number.
-
-**A correctness test cannot see a cost regression.** One rewrite of a streaming boundary compiled,
-passed all three parity tests untouched, produced the right answer — and raised the peak by
-**seven gigabytes**, because the "lazy" interface it moved to materialised its result set in full,
-so two open statements meant two complete result sets resident where one array had been. Three green
-tests did not notice, and the reason is structural rather than an oversight: *they checked that the
-result was correct, and the cost was the entire objective.* The redone version carried a memory
-probe in its definition of done, not just parity.
-
-**Plausible causes are cheap and wrong.** A write path that asked for more than twenty times the
-memory of the corpus it produced had four obvious explanations, and measurement killed all four:
-
-| The candidate | Why it looked right | What killed it |
+| ten million | unbounded | 4 GiB + sort-merge |
 | --- | --- | --- |
-| per-community hash maps in the graph pass | one allocation per community, millions of them | the whole core measures ~53 bytes per edge |
-| the layout core | an earlier record predicted it explicitly | measured in isolation at a small fraction of the total |
-| the embedded database during layout | no limit by default | capped, and the total did not move — zero bytes spilled |
-| the generator that produced the input | it had a very large heap | the same peak without it |
+| RSS after `execute_graph` | 15.68 GiB | **5.56 GiB** |
+| RSS entering `enrich_layout` | 16.51 GiB | **6.82 GiB** |
+| process peak | ~21 GiB | **9.87 GiB** |
+| wall clock | 256.3 s | 290.9 s |
 
-None of the four was the cause. The cause was found by a probe reporting where memory already was
-before the suspected stage ran its first statement — which is the same lesson in a different shape:
-**a hypothesis about where memory goes is worth less than one reading of where it is.**
+Eleven gigabytes off the peak for 13% more wall clock, corpus byte-identical across 87 files. Then
+the layout stopped asking for two more (`97efc79`):
 
-**A refuted hypothesis is worth more than a confirmed one.** One of the boundaries examined here
-turned out not to be costing anything measurable, and the change was made anyway, for a reason that
-has to be stated *separately from the number*: holding N files in order to write them one at a time
-has no reader on that path — it is indefensible per file, and it is simply not worth any bytes at
-this size. Mixing the two would be how a refuted hypothesis quietly survives as a justification.
+| ten million, 4 GiB budget | before | with the CSR |
+| --- | --- | --- |
+| `community_hierarchy` | +2.09 GiB · 135.0 s | **+0.08 GiB** · 168.0 s |
+| process peak | 10.10 GiB | **8.39 GiB** |
 
-And the negative result is a genuine finding: it means the term was not where the structure suggested
-it would be, and a design that had "obviously" fixed it would have been wrong about its own cost
-model.
+−1.71 GiB against the ≈ −1.7 GB predicted before it was attempted. The `community_hierarchy` row is
+the finding: the step cost +2.09 GiB because it built the CSR on entry, and the CSR already exists
+now. **The memory did not move somewhere else — it stopped being asked for.** The peak still grows
+with N, which is the gap to the direction above: on the pre-CSR binary under the same budget, ten
+times the corpus cost 4.1× the peak (2.43 → 9.87 GiB) and 10.3× the retained Arrow (0.16 → 1.64).
 
-## Where the numbers live
+<Callout title="Two baselines, 0.23 GiB apart, and that is the resolution">
+The first table puts the pre-CSR peak at 9.87 GiB; the second measures the same binary at 10.10. Two
+runs of one build, on a machine other agents were also using. Nothing reconciles them and nothing
+should — **the spread between two identical runs is about 0.2 GiB, and no number on this page is
+finer than that.** It is also why seam 2 below reads as no result at all.
 
-There is a page called *Streaming* under [characteristics](/docs/characteristics/streaming) as well,
-and the two are not a duplicate of each other. **This page is the argument; that one carries the two
-registers** — where the write path is going, and which of the three named seams has landed, which was
-refuted by measurement and which still collects, each with the file that would go red. Its
-`arguedIn` points here, which is the whole relationship: a target with no argument behind it is one
-person's preference written in the voice of a plan, so the schema requires the argument to be a
-different page of this site.
+The wall clock moved the wrong way, 135 s to 168 s, and that is not clean either: the same previous
+binary measured 151 s on another pass. Walking two arrays per vertex instead of one has a locality
+cost that is structural, and it is owed a measurement on a quiet machine before anybody calls it free.
+</Callout>
 
-Peak figures per stage, and the instruments that produced them, belong to the artifact rather than to
-the language and are documented on the corpus site — `apps/corpus`, which covers the format, the
-scale work and the executable guards that check a corpus on disk.
+## Three seams, named on the same reasoning
 
-What belongs here is the design obligation the argument creates: **a new stage in the write path
-declares what it holds.** If the answer is "a batch", it composes with the budget. If the answer is
-"all of it", the budget stops being a promise for every consumer downstream, and the stage needs a
-different interface rather than a bigger machine.
+DataFusion already streams — it hands `RecordBatch`es out lazily and its operators reserve, spill and
+release against the pool. The unbounded half of the write path is the seams we wrote around it. **The
+three did not end the same way**, and the difference is the useful part.
+
+### 1. `GraphArData` holds every batch — still true
+
+`crates/fossil-df/src/lib.rs:406` collects each vertex projection before registering it as a
+`MemTable`, and both edge orientations are collected beside them, so the whole materialised graph is
+resident before the writer is called. 0.16 GiB of Arrow at one million, **1.64 at ten** — 10.3× for
+10×, exactly linear. The count is hand-run: if the value became a stream tomorrow no assertion would
+notice.
+
+From the row counts and the Arrow width, 71,024,690 edges in two orientations of two `u32`s is
+1.06 GiB, so the edges are about 65% of the boundary, and a fix is asymmetric. **The vertex half
+cannot be streamed away**: the edge phase joins against every vertex type registered as a `MemTable`,
+and those are the same Arrow buffers the boundary holds, not a second copy — which is why dropping
+the `SessionContext` before encoding frees 0.00 GiB. **The edge half is pinned by nothing**: no
+`register_batches` call sees it, its only reader is the encoder, and it holds the bytes.
+
+<Callout type="warn" title="A hypothesis with a shape, and what would say it is right">
+**No part of that fix has been attempted, so nothing about its cost has been measured.** Seam 2 was
+*refuted* by the probe after exactly this kind of reasoning, and seam 3 went the wrong way by seven
+gigabytes while three parity tests stayed green. So it is written in the register it has earned.
+**Reasoned:** the 65/35 split, and that the two halves are pinned differently — one from arithmetic,
+one from the code. **Unknown:** whether streaming the edge half moves the peak at all, and by how
+much.
+
+`FOSSIL_MEM_PROBE=1` on the ten-million corpus, before and after, is the acceptance criterion, and
+both numbers are owed: the Arrow count at the boundary *and* the process peak. It is written down so
+the next attempt starts from something sharper than *the boundary holds a value*.
+</Callout>
+
+### 2. `to_files()` encoded every file first — measured, and refuted
+
+`try_for_each_file` builds each file, hands it over and drops it before the next; `to_files()` is
+that with a `Vec` on the end, kept for the browser host, which genuinely needs a list. **Peak RSS at
+ten million moved from 10.60 GB to 10.58 GB.** Two identical runs differ by more than that, so the
+number is not small: it is absent. The +0.58 GiB the probe bills to the encode phase is the encoder's
+working memory — the output is 713 MB across six files, so holding six of them was never that figure.
+
+The change stayed, and the reason has to be stated separately from the number, because mixing them is
+how a refuted hypothesis quietly survives: holding N files in order to write them one at a time has
+**no reader on that path**. Indefensible per file, and saying so is not saying it saved megabytes.
+
+### 3. The layout read the whole edge list — landed 2026-08-05
+
+`enrich_layout` reads both adjacency Parquet files **as the CSR they already are**, one
+`RecordBatch` at a time, the two columns arriving as the `u32` slices `CsrBuilder::push` wants; no row
+is ever a Rust tuple. Gone with it: a `Vec<(u32, u32)>` of every edge (568 MB at ten million), a
+degree-counting pre-pass, and an 80 MB cloned cursor scattering random writes over the 568.
+
+**None of the three was asked for by the algorithm.** `local_moving` is a sequential CSR scan whose
+only random access is `community[u]`, which is O(n), and the files have been sorted since they were
+written — `by_source.parquet` has zero out-of-order rows by `src_dense` across 71,024,690, and
+`by_target.parquet` likewise by `dst_dense`. All three existed because of a type.
+`Weighted::from_edges(vertex_count, edges: &[(u32, u32)])` takes an unordered bag, so the ordering the
+file already had could not pass through it. **A parameter that is an adjacency cannot need a counting
+pass, because the type already asserts what the pass would establish.** The type at a boundary is
+what decides whether the next stage may be lazy.
+
+The same change had been implemented in full the day before, over `duckdb-rs`. It compiled, the three
+parity tests in `crates/fossil-layout/tests/layout_renumber.rs` passed untouched, and the process peak
+went from 17.0 GiB to **24.4**:
+
+| API | what it does |
+| --- | --- |
+| `Statement::query_map` | materialises the entire result. What was used, and what regressed |
+| `Statement::stream_arrow` | `execute_streaming` + `ArrowStream`, one `RecordBatch` per step |
+
+Two open statements were two full result sets resident where one `Vec` had been: one copy traded for
+two. **The definition of done was wrong** — three green parity tests did not see a seven-gigabyte
+regression, because they checked the result was correct when the cost *was the entire objective*. The
+redone change carried the probe in its acceptance criteria, which is why it is here as a result and
+not a second revert.
+
+## The state an algorithm genuinely needs
+
+Streaming everything is not achievable, and pretending otherwise is how a guarantee becomes a slogan.
+The honest answer is a bounded working set, and each step of the layout pass bounds a different one:
+
+| step | state it needs | how it is bounded |
+| --- | --- | --- |
+| connected components by union-find | one entry per vertex, O(V) | intrinsic, but edges are consumed in sequence and never resident |
+| placement by the golden angle (phyllotaxis) | a counter | closed-form in the index: no neighbourhood, no iteration, nothing to stream |
+| ordering by Morton code | the sort | arithmetic per point, and a sort is the operator class that spills |
+
+**wasm32 has roughly four gigabytes of address space and nowhere to spill**, so a browser tab cannot
+make this promise — cannot, the way a machine with no disk cannot promise durability. It lives in the
+layer that has a disk, which is what [three hosts](/docs/design/three-hosts) is about. The obligation
+is one line: **a new stage in the write path declares what it holds.** "A batch" composes with the
+budget; "all of it" makes the budget stop being a promise downstream, and needs a different
+interface, not a bigger machine.

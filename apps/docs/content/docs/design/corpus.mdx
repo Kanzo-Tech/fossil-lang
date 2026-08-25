@@ -1,75 +1,51 @@
 ---
 title: The corpus
-description: What a fossil program produces — a graph in columnar files, addressable by byte range with no service in the path — why write-once/read-many is the topology that makes whole-program checking available in the first place, and which of GraphAr's field names are borrowed and where borrowing stops.
+description: A graph in columnar files, addressable by byte range with no service in the path; which of GraphAr's field names are borrowed and where borrowing stops; and the six verbs that read one, none of which draws.
+direction:
+  summary: "`Operation` has six variants, none of them returns geometry, and every tile access goes through `address.ts` without reading a byte."
 ---
 
 A fossil program produces a **corpus**: a graph written to disk as columnar files with a manifest
 that names them. Not a database to connect to, not a stream to consume, not an endpoint. Files.
 
-The consequence that matters is what a reader has to do to use one. A reader that wants a slice of
-the graph works out which byte ranges hold it and fetches those ranges — from a local path, from an
-object store, from a plain web server. **There is no service in the path**, and therefore no query
-language between the reader and the data, no process to keep alive, and no version of the writer the
-reader has to match.
+A reader that wants a slice works out which byte ranges hold it and fetches those ranges — from a
+local path, an object store, or a plain web server. **There is no service in the path**, so no query
+language between reader and data, no process to keep alive, no writer version to match.
 
 ## Addressable, and what that buys
 
-"Addressable" is the load-bearing word, and it means something narrower than "readable".
-
-An address is computed, not discovered. Given the manifest, a reader derives the location of every
-piece it wants **before it issues a single request** — arithmetic on identifiers and sizes, not a
-lookup that has to be answered first. That property is what makes the corpus work over a plain
-origin, and the evidence for it is a constraint that catches people out: **you cannot list a
-directory over HTTP.**
-
-That is why the shape of a naïve reader is wrong in an interesting way. Expanding a wildcard over
-files *is* listing a directory. It works against a local filesystem, and it works against an object
-store whose API offers listing, and it fails in a browser against a plain origin — which is the
-worst possible distribution of a failure, because every environment a developer tests in succeeds and
-the deployment target does not. A corpus is therefore designed so that nothing is discovered by
-listing: what exists is derivable from what the manifest declares.
-
-The lineage here is explicit and worth naming, because this pattern was solved elsewhere first:
-**Cloud-Optimized GeoTIFF → GeoParquet → PMTiles.** One file or a small set, an embedded directory,
-data laid out in an order that makes spatial locality into byte locality, and a client that issues
-HTTP range requests with no server-side component at all. Copying that schema is cheaper and more
-correct than inventing one.
+An address is computed, not discovered: given the manifest, a reader derives the location of every
+piece it wants **before it issues a single request**. The constraint that forces it is that **you
+cannot list a directory over HTTP.** Expanding a wildcard over files *is* listing a directory — it
+works on a local filesystem and on an object store, and fails in a browser against a plain origin,
+which is the worst distribution of a failure a design can have. The lineage is explicit —
+**Cloud-Optimized GeoTIFF → GeoParquet → PMTiles** — and copying that schema beats inventing one.
 
 ## The artifact is the API
 
-The design stance follows the table formats — Iceberg, Delta Lake, Lance — where a manifest plus a
-set of files is the interface, *many* engines read the same table, and **none of them is the
-contract**. The specification is the contract; an implementation is one reader.
+The stance follows the table formats — Iceberg, Delta Lake, Lance — where a manifest plus a set of
+files is the interface, *many* engines read the same table, and **none of them is the contract**.
 
-That stance imposes obligations most projects discover late.
+**Arithmetic a reader must reproduce ships as arithmetic.** Iceberg publishes the hash function, the
+seed and a table of vectors per type, and those constants turn up in the tests of implementations
+that copied them; PMTiles dispatches its space-filling curve with a link to an encyclopedia article,
+and every port re-derives it. **And two implementations before a format change, not after** — the
+Arrow rule, which is why its gaps are skipped lines rather than wrong answers. Parquet is the
+warning: thirteen years of unwithdrawable files and a reference implementation that became normative
+without anyone deciding it.
 
-**Arithmetic that a reader must reproduce has to be published as arithmetic.** Iceberg is the good
-example: it publishes the hash function, the seed, and a table of test vectors per type — searching
-for one of those constants finds it in the tests of independent implementations that copied it.
-PMTiles is the counterexample: it dispatches its space-filling curve with a link to an encyclopedia
-article, and every port re-derives it. A reader that computes a different address from the same
-manifest is not a bug report; it is a divergence nobody notices until the data is wrong.
-
-**Two implementations before a format change, not after.** Arrow requires a second implementation
-and integration tests *before* a format change lands, which is why its gaps show up as skipped lines
-rather than as incorrect answers. A format whose test corpus does not round-trip through two
-independent readers is a format whose reference implementation is normative by accident.
-
-**And "by accident" is the specific fate to avoid.** Parquet's enduring problem is thirteen years of
-files that cannot be withdrawn, with a reference implementation that became normative without anyone
-deciding it and writer-version strings parsed against tables of known-bad releases. Every one of
-those is the cost of the same missing decision, taken too late.
-
-Which is why **capability negotiation is not built into a corpus that nobody else reads**, and why
-the trigger for building it is written down rather than left to judgement: *the day a corpus leaves
-this machine towards somebody who cannot regenerate it.* Before that day the mechanism answers a
-question nobody has asked. After it, it is late.
+<Callout type="warn" title="One clock, running one way">
+**If the corpus reaches third parties before the vectors do, the option is gone.** Nothing is
+published today, which is what makes this cheap exactly once. It is also why capability negotiation
+is not built: before a corpus leaves this machine towards somebody who cannot regenerate it the
+mechanism answers a question nobody has asked, and after that day it is late.
+</Callout>
 
 ## What is borrowed from GraphAr, and where borrowing stops
 
-The corpus did not invent its manifest vocabulary. **GraphAr's YAML field names are borrowed
-wholesale** — three files named the way GraphAr names them, `<name>.graph.yml`,
-`<label>.vertex.yml` and `<source>_<edge>_<destination>.edge.yml`, carrying GraphAr's own keys:
+**GraphAr's YAML field names are borrowed wholesale** — three files named the way GraphAr names
+them, `<name>.graph.yml`, `<label>.vertex.yml` and `<source>_<edge>_<destination>.edge.yml`, plus
+`version: gar/v1`, which is GraphAr's own string.
 
 | file | the keys, all of them GraphAr's |
 | --- | --- |
@@ -77,192 +53,167 @@ wholesale** — three files named the way GraphAr names them, `<name>.graph.yml`
 | vertex info | `type`, `chunk_size`, `prefix`, `property_groups`, `version`; per property `name`, `data_type`, `is_primary`, `is_nullable` |
 | edge info | `src_type`, `edge_type`, `dst_type`, `chunk_size`, `src_chunk_size`, `dst_chunk_size`, `directed`, `prefix`, `adj_lists`, `property_groups`, `version`; per adjacency `ordered`, `aligned_by`, `prefix`, `file_type` |
 
-And `version: gar/v1`, which is GraphAr's own string. Every one of those is in
-`docs/specification/format.md` in `apache/incubator-graphar`, and none of them was invented here.
-**Three keys are fossil's and are not in that document at all** — `iri`, `vertex_count` and
-`edge_count` — and each is an entry in the list below rather than a quiet addition.
-
 > **fossil follows GraphAr as far as GraphAr specifies, and no further** — because past that point
 > there is nothing left to follow but a C++ implementation.
 
-That is the rule, and it is worth stating as a rule because it answers questions nobody has asked
-yet. Is the thing in the specification? Then fossil spells it the way the specification spells it,
-and a difference is a defect. Is it only in that repository's `cpp/`? Then it is somebody's code: it
-binds nobody, it is not a contract fossil is failing to meet, and the decision is taken here on this
-project's own evidence. **This is not a GraphAr-conformant corpus and does not claim to be.**
+Is the thing in `docs/specification/format.md`? Then fossil spells it that way and a difference is a
+defect. Is it only in that repository's `cpp/`? Then it is somebody's code, it binds nobody, and the
+decision is taken here. **This is not a GraphAr-conformant corpus and does not claim to be.**
 
-### The count is why the rule is worded that way
+The count is the worked example. The specification never defines one — the word appears zero times —
+and the reference implementation stores one anyway, as raw native-endian bytes in a file with no
+declared width and no test vector. Here a count is a **manifest field**, required and not optional,
+checked against the rows on disk after the layout pass has re-read, renumbered and re-tiled them
+(`c573e73`). Required, because tiles are addressed and never listed: a hole in the middle is caught
+by the addressing, and **a missing tail is caught by nothing.**
 
-GraphAr's specification never defines a count. `docs/specification/format.md` contains the word
-"count" **zero times**: nothing it describes lets a reader learn how many vertices a type has.
+Eight divergences follow from that rule. None of them is a bug.
 
-The reference implementation stores one anyway, and *how* it does it is the argument.
-`cpp/src/graphar/graph_info.cc` puts it at a path the specification never names —
-
-```cpp
-Result<std::string> VertexInfo::GetVerticesNumFilePath() const {
-  return BuildPath({impl_->prefix_}) + "vertex_count";
-}
-```
-
-— and `cpp/src/graphar/filesystem.cc` writes it as raw memory:
-
-```cpp
-RETURN_NOT_ARROW_OK(ofstream->Write(&value, sizeof(T)));
-```
-
-The only explicit instantiation of that template is `WriteValueToFile<IdType>`, and `IdType` is
-`int64_t` (`cpp/src/graphar/fwd.h`); the three call sites are in `cpp/src/graphar/arrow/chunk_writer.cc`.
-So a count is **eight raw bytes in the writing machine's byte order**, in a file with no declared
-width, no declared endianness and no test vector. A corpus written on a big-endian machine is
-misread on a little-endian one, and nothing in the artefact says so.
-
-That is precisely the pathology [the corpus contract](/docs/characteristics/corpus-contract) names
-about somebody else, and it sits *below* the line that page draws: PMTiles documents its curve badly
-and every port re-derives it, while this documents nothing at all and is normative by accident —
-Parquet's `created_by`, with the thirteen irrevocable years still ahead of it rather than behind.
-Following it would mean copying a byte layout out of a C++ template, which is the one thing this
-project has already decided it will not do.
-
-### The divergences, each one pointing at something
-
-None of these is a bug to be fixed. Each is the rule above applied once.
-
-1. **`data_type` spellings GraphAr's own reader refuses.** Every vertex manifest fossil writes
-   declares `dense_id` as `uint32`, and adds `cluster_id` as `uint32`
-   (`crates/fossil-df/src/lib.rs`). The specification's built-in list is Boolean, Int32, Int64,
-   Float, Double, String, Date, Timestamp, Time and List — no unsigned type. `TypeNameToDataType` in
-   `cpp/src/graphar/types.cc` accepts eight spellings plus five `list<…>` and throws
-   `Unsupported data type` on everything else, so it throws on the first property of the first
-   vertex type of every corpus fossil writes — `dense_id`, which is the address. (`is_primary`
-   marks `subject`, a `string` that function accepts; the throw is on the spelling and does not
-   turn on the flag.) Two more spellings leave by the same door: `time`, which the
-   specification lists and that function never implemented, and `binary`, fossil's fallback for an
-   Arrow type with no mapping, which is in neither the specification's list nor the parser.
-2. **A count is a manifest field, not a file.** The reference writes three files — `vertex_count`
-   per vertex type, `vertex_count` per adjacency, and `edge_count{k}` per vertex chunk. fossil
-   writes none of them, because the specification asks for none of them. It declares
-   `vertex_count` and `edge_count` in the YAML instead, for the reasons in the callout below.
-3. **No offset table.** The specification does ask for this one: *"there would be an offset table
-   for **ordered_by_source** or **ordered_by_dest** edges… The first row of each offset chunk is
-   always 0."* fossil emits no offset table of any kind: there is no `offset/` anywhere under
-   `apps/corpus/conformance/corpus/edge/Person_knows_Person/`, which holds the edge info, the ten
-   tiles of `by_source/` and `by_target/`, and the two single-file containers of the same rows. A
-   vertex's run is found instead by filtering the tile that was fetched anyway on the endpoint
-   column that ordered it, which is a predicate rather than a second request. **This is a real
-   divergence from a specified thing**, and it is on this list rather than hidden in it.
-4. **`chunk_size` on an edge is not a row count.** The specification defines it as one — *"the
-   number of edges in an edge chunk"*, recommended 2²² — and pairs it with `src_chunk_size` so that
-   a sub-table splits again by rows. Here it *equals* `src_chunk_size` and is the addressing unit:
-   `by_source/tile{k}.parquet` holds every edge whose source is in vertex tile `k`, so its row count
-   is the total out-degree of those 4,096 vertices and nothing bounds it
-   (`crates/fossil-sinks/src/manifest.rs` says so on the field itself). Same key, different meaning
-   — the sharpest edge on this page, because a reader that takes the borrowed name at its borrowed
-   value gets a number instead of an error.
-5. **One flat tile per orientation, and a file naming rule that is ours because there is none to
-   borrow.** The reference composes `<prefix><property group prefix>chunk{k}` for vertices and
-   `<adjacency prefix>adj_list/part{vertex chunk}/chunk{edge chunk}` for edges, both extensionless.
-   fossil composes `<prefix>chunk{k}.parquet` and `<edge prefix><adjacency prefix>tile{k}.parquet`,
-   one level, extension in the name — and carries one property group holding every column rather
-   than the per-group directory the specification's prose implies. **The specification names no
-   data-file path anywhere**, which makes this the clearest case the rule decides: there is nothing
-   here to diverge from.
-6. **`chunk_size` is a power of two, and it is 4,096.** GraphAr requires nothing of the value and
-   recommends 2¹⁸ vertices and 2²² edges. The constraint is fossil's, because the address is
-   `dense_id >> 12` and not a division, and the number is measured rather than recommended — on
-   five million vertices over a plain HTTP origin, against requests and bytes at once, with the
-   table on the corpus site's own addressing page.
-7. **`iri` on the vertex info and the edge info.** The RDF type or predicate IRI, which GraphAr has
-   no field for; its one escape hatch, *"extra information for the graph"*, is on the graph info
-   only. It is omitted from the YAML when empty, so a non-RDF corpus is exactly the borrowed shape
-   and nothing more.
-8. **An `adj_lists` entry with no `prefix` has no address.** The specification's prose names a
-   per-adjacency prefix and **its own worked example omits it from all three entries**. fossil
-   reports such an orientation as absent rather than composing a URL from convention — conformance
-   case `unaddressable`. So the specification's own example manifest reads here as a corpus whose
-   adjacency nobody can address, which is the borrowing rule biting in the direction that costs us.
-
-<Callout title="The count is a declared field">
-**A row count is a field of the manifest** — `vertex_count` on the vertex info, `edge_count` on the
-edge info — a decimal integer in a YAML document the reader fetches anyway to learn the prefix. Both
-sit immediately before `chunk_size`, because `tiles = count.div_ceil(chunk_size)` reads in that
-order.
-
-The contrast with the thing it replaces is the whole reason it is a field and not a file. GraphAr's
-count is eight bytes with no name in any specification, no declared width, no declared byte order
-and nothing that checks it. A YAML integer has a width because YAML integers have one, has no byte
-order because the question cannot be asked of a decimal string, and is checked against the rows on
-disk — `conformance.rs` reads both declarations back off the tiles rather than off the value the
-writer computed.
-
-It is `u64` and not `Option<u64>`: **a count a reader may skip is a count a reader cannot depend
-on**, and a reader that cannot depend on it is exactly the one that cannot detect the failure the
-field exists for. Tiles are addressed and never listed, so a tree holding `chunk0…chunk16` is
-indistinguishable from a corpus that has seventeen tiles. A hole in the middle is caught by the
-addressing; **a missing tail is caught by nothing** — `apps/corpus/conformance/writer.mjs` reaches it
-only sideways, through edge endpoints that point at vertices no tile holds. With a declared count a
-reader knows how far the corpus goes before it opens a file. The border that makes the number worth
-anything is the conformance corpus's own shape — **300 vertices in five tiles of 64, the last of
-them holding 44** — because a count that divides the tile size exactly never exercises the boundary.
-
-Landed in `c573e73`, and the count survives the layout post-pass only because the pass writes one
-row out for every row it reads. That is why the check does not take the writer's word for it: the
-declaration is compared against the tiles **after** the pass has re-read, renumbered, re-tiled and
-deleted its input.
-</Callout>
+| key or artefact | GraphAr specifies | fossil does | why |
+| --- | --- | --- | --- |
+| `data_type` | ten built-ins, none unsigned; its parser accepts eight spellings and throws on the rest | `uint32` for `dense_id` and `cluster_id`, `binary` as the Arrow fallback (`crates/fossil-df/src/lib.rs`) | the address is a `u32`, so GraphAr's own reader throws on the first property of every corpus fossil writes |
+| a count | nothing; three files under `cpp/` that no specification names | `vertex_count` and `edge_count` in the YAML | a decimal integer has a width and cannot have a byte order |
+| offset table | required for `ordered_by_source`/`ordered_by_dest` edges | none emitted, anywhere | a vertex's run is a predicate on the tile already fetched, not a second request. **A real divergence from a specified thing** |
+| `chunk_size` on an edge | rows per edge chunk, recommended 2²² | equals `src_chunk_size` and is the addressing unit, so nothing bounds the row count (`crates/fossil-sinks/src/manifest.rs`) | `by_source/tile{k}.parquet` holds every edge out of vertex tile `k`. Same key, different meaning: a reader taking the borrowed name at its borrowed value gets a number instead of an error |
+| data-file paths | none, anywhere | `<prefix>chunk{k}.parquet` and `<edge prefix><adjacency prefix>tile{k}.parquet`, one level, one property group | there is nothing here to diverge from |
+| `chunk_size` on a vertex | any value; recommends 2¹⁸ | 4,096, and a power of two | the address is `dense_id >> 12`, not a division; the value is measured on five million vertices, not recommended |
+| `iri` | no field; its one escape hatch is on the graph info | on the vertex info and the edge info, omitted when empty | RDF type and predicate IRIs. A non-RDF corpus is exactly the borrowed shape |
+| an `adj_lists` entry with no `prefix` | prose names the prefix; the worked example omits it from all three entries | reported absent rather than composed from convention | conformance case `unaddressable`. The specification's own example reads here as a corpus nobody can address |
 
 <Callout type="warn" title="What would reverse all of this">
 GraphAr specifying what it presently leaves to `cpp/`: a data-file path, a count with a declared
-width and byte order, and a table of vectors. On that day the eight items above stop being decisions
-and become defects, and borrowing resumes where it stopped. The other trigger is the one
-[discarded alternatives](/docs/design/discarded) already records against conforming to a graph
-interchange format at all — **a second reader that is not ours and already speaks it** — and it is
-the stronger of the two, because a specification nobody reads is not interoperability.
+width and byte order, and a table of vectors. The stronger trigger is the one
+[discarded alternatives](/docs/design/discarded) records against conforming at all — **a second
+reader that is not ours and already speaks it** — because a specification nobody reads is not
+interoperability.
 </Callout>
 
 ## Why write-once/read-many is not an implementation detail
 
-A corpus is written once and read many times. That is a topology, and it is the reason two things
-elsewhere in this document are possible at all.
+[Identity is unique per type](/docs/design/identity) because a fossil program is compiled in one
+piece with every mapping in front of it — a check unavailable to any system whose parts deploy
+independently, which is why the one federation system that shipped an equivalent removed it. And
+atomic renames, lock files, visibility protocols and transaction logs exist to protect a reader from
+a half-written state; with no such reader they are cost without benefit.
 
-**The whole-program checks.** [Identity is unique per type](/docs/design/identity) because a fossil
-program is compiled in one piece, by one compiler, with every mapping in front of it. That check is
-unavailable to any system whose parts are deployed independently — which is exactly why the one
-federation system that shipped an equivalent check removed it. The check exists here because the
-topology is the opposite one, and the topology is a consequence of write-once.
+## The verb surface: six, and none of them draws
 
-**The absence of concurrency in the write path.** A dataset with no concurrent readers while it is
-being written does not need atomic renames, lock files, visibility protocols or a transaction log.
-Those mechanisms exist to protect a reader from seeing a half-written state; when there is no such
-reader, they are cost without benefit. Removing them is not a shortcut — it is declining to pay for a
-guarantee the topology already provides.
+`fossil-graph` defines the surface; MCP, HTTP, the CLI and the in-process TS package are bindings
+over it. **It closed at six on 2026-08-05**, and the six are the variants of `Operation`
+(`crates/fossil-graph/src/operations/mod.rs`).
 
-## What a corpus can carry
+| verb | what it answers |
+| --- | --- |
+| `read` | rows of one vertex type, filtered, ordered and capped |
+| `expand{into\|all}` | the neighbourhood of a *set* of vertices, one hop |
+| `path` | a route between two vertices |
+| `aggregate` | a grouped, bounded summary — over values or over ranges |
+| `schema` | what types, fields and relations exist, with field stats on request |
+| `execute_sql` | the escape hatch, which a binding may hide behind a permission |
 
-RDF terms, quads, and named graphs. A graph is not restricted to triples, and the container is not
-restricted to one graph — which is the difference between a corpus and a file of statements.
+The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
+out which level and which tiles it needs and asks for bytes, with no bbox in flight and no database
+on that path. Level-of-detail is not a filter but a different relation — a level-3 tile holds
+super-nodes that do not exist at level 0. A `where` selects rows from a table; zoom changes the
+table. Once that is settled, every verb whose job was to make a picture stops having one.
 
-It is worth being precise about the boundary, though, because a columnar layout imposes a real one.
-**A cell in a columnar file carries a value, not a term with its trimmings.** Everything that makes
-an RDF literal more than a lexical form — its language tag, and in RDF 1.2 its base direction — is
-information that has to be carried explicitly by the layout or it is gone at the pivot into columns.
+```mermaid
+graph LR
+  LVT["list_vertex_types"] --> SCH["schema"]
+  LET["list_edge_types"] --> SCH
+  DFI["describe_field"] --> SCH
+  DVT["describe_vertex_type"] --> SCH
+  GV["get_vertex"] --> RD["read"]
+  TK["top_k"] --> RD
+  FN["find_neighbors"] --> EX["expand"]
+  FP["find_path"] --> PA["path"]
+  HI["histogram"] --> AG["aggregate"]
+  AG0["aggregate"] --> AG
+  SQ0["execute_sql"] --> SQ["execute_sql"]
+  VP["viewport"] --> GONE["deleted: drawing is addressing, not a query"]
+  MG["materialize_graph"] --> GONE
+  SBL["search_by_label"] --> STUB["deleted: declared, never implemented"]
+  SUC["summarize_cluster"] --> STUB
+  AWC["answer_with_communities"] --> STUB
+  SEL["set_selection"] --> STUB
+  classDef gone stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
+  class GONE,STUB gone
+  classDef kept stroke-width:2
+  class SCH,RD,EX,PA,AG,SQ kept
+```
 
-And it is not a comfortable loss, which is why it is stated here rather than filed as a detail. Base
-direction exists precisely because the first strong character of a string does **not** determine how
-it should be laid out. A value returned without it is not an impoverished value; it is a value the
-host will render backwards, and there is nothing in the cell that lets a downstream consumer detect
-that it happened. Any part of the design that widens what a term can carry has to answer this
-question first, because the answer is what decides whether a round trip is lossless.
+Deleting the four stubs took `GraphError::NotImplemented` with them, so **the `match` is exhaustive
+and a verb can no longer be declared without being wired.**
 
-## Where the format lives
+<Callout title="The rule that keeps it at six">
+A new verb enters only if it serves a case the single path demonstrably cannot, and that
+demonstration is a measurement. Not an argument.
+</Callout>
 
-The corpus is documented as a format in its own right — the conventions, the measurement behind each
-one, and executable guards that check a corpus on disk against them — on its own site, in
-`apps/corpus`. That site is written for somebody implementing a reader, and it deliberately requires
-no knowledge of the language.
+### `read`'s `where` is SQL, and carries `execute_sql`'s authority
 
-The division is the same one this whole document rests on. **The language is one product and the
-corpus is another, and the seam between them is the artifact.** A reader with a Parquet
-implementation and the specification can read a fossil corpus without any part of fossil — which is
-the strongest available statement that the artifact really is the interface, rather than a
-serialisation of somebody's object graph that happens to be documented.
+This is the one thing here a binding can get wrong quietly. `read { vertex_type, where?, order_by?,
+descending, limit }` takes `where` as a **raw SQL fragment**, evaluated by the engine `execute_sql`
+reaches. It is not a parsed predicate language. So the permission travels with it: **a binding that
+gates `execute_sql` must gate `read`'s `where` with the same permission.** Gating the escape hatch
+and leaving `where` open is the same surface with a second door. The rule is written on the type in
+`crates/fossil-graph/src/operations/discovery.rs`, where a binding author reads it as they type.
+
+<Callout type="warn" title="Six is enumerated; nothing says six is right">
+The operation envelope snapshot is the wire contract every binding consumes and it enumerates
+exactly these six, so a seventh cannot land without it changing. What nothing on disk asserts is a
+target *count*. The closed set is a discipline, argued in
+[tooling for machines](/docs/design/tooling-for-machines).
+</Callout>
+
+<Callout type="warn" title="Nothing answers a camera today">
+`viewport` was deleted **before its replacement existed** — `c6c87fa` records the breakage as
+expected and accepted. There is still no tile store, no tile index and no tile emission anywhere in
+`crates/`, and none of the six verbs answers a camera. **Decided:** the camera is addressed, not
+queried. **Undone:** the tiles that addressing reads.
+</Callout>
+
+## Conformance is round-trip, and the third leg is missing
+
+Write with the writer, read back with every independent reader, diff the results. GraphAr ships a
+shared corpus with no round trip, and through that gap its fourth implementation landed having
+re-derived the path arithmetic differently from the other three *and* from the corpus on disk, green
+on both sides, because its tests asserted hand-written strings instead of resolving against the
+artefact.
+
+```mermaid
+graph LR
+  W["writer (Rust)"] --> C[("corpus on disk")]
+  C --> TS["TypeScript / DuckDB path"]
+  C -.-> WA["wasm reader"]
+  TS --> D{"diff"}
+  WA -.-> D
+  classDef absent stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
+  class WA absent
+```
+
+The dotted leg is not built, so the three-way diff is a two-way one. What does run lives in
+`apps/corpus/conformance/verify.mjs`, and the conventions it checks are documented for reader
+implementors on the corpus site rather than here.
+
+<Callout title="Checked for vacuity">
+Most assertions count violations, so **an empty corpus satisfies them all at once** — which is
+exactly how a conformance suite comes to pass vacuously and stops being evidence. The guard is a
+non-emptiness check numbered before the rest, repeated for the edge directories because an empty
+directory satisfies everything after it. And the ordering check is known to measure ordering rather
+than pass by construction because inverting its predicate over the published conformance corpus
+turns 0 disorders into 299 over 596 edge rows.
+</Callout>
+
+## What a corpus can carry, and where the format lives
+
+RDF terms, quads and named graphs — a graph is not restricted to triples and the container is not
+restricted to one graph. But **a cell in a columnar file carries a value, not a term with its
+trimmings**: a literal's language tag, and in RDF 1.2 its base direction, are gone at the pivot into
+columns unless the layout carries them explicitly. Base direction exists precisely because the first
+strong character of a string does **not** determine how it should be laid out, so a value returned
+without it is one the host renders backwards with nothing in the cell to say so.
+
+The format itself — the conventions, the measurement behind each, and executable guards — is
+documented in `apps/corpus`, for somebody implementing a reader and requiring no knowledge of the
+language. **The language is one product and the corpus is another, and the seam is the artifact.**

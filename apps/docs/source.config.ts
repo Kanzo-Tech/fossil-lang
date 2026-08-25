@@ -27,10 +27,12 @@ import { z } from "zod";
  */
 const direction = z.object({
   summary: z.string().min(1),
-  // A route on this site, not a path in the repository. The argument for a direction is prose —
-  // prior art, a measurement, and the observation that would reverse it — and prose that is not on
-  // this site is a second reference. `content.test.ts` resolves it to a page.
-  arguedIn: z.string().min(1),
+  // Optional, and only because a page may argue its own direction in its own body — which is now
+  // the common case, since the section that held destinations apart from their arguments folded
+  // into the pages it was pointing at. When it IS present it is a route on this site, never a path
+  // in the repository: an argument kept anywhere but here is a second reference, and
+  // `content.test.ts` resolves it to a page that is not this one.
+  arguedIn: z.string().min(1).optional(),
 });
 
 export const docs = defineDocs({

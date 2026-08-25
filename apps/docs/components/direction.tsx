@@ -15,8 +15,11 @@
 
 export interface Direction {
   summary: string;
-  /** A route on this site. The argument is a page here, never a record kept somewhere else. */
-  arguedIn: string;
+  /**
+   * A route on this site, when the argument is somewhere else. Absent when the page argues its own
+   * direction below — pointing at itself would be a restatement, not a citation.
+   */
+  arguedIn?: string;
 }
 
 export function DirectionNote({ direction }: { direction?: Direction }) {
@@ -27,9 +30,11 @@ export function DirectionNote({ direction }: { direction?: Direction }) {
       <div className="register">
         <span className="register__label">Where this is going</span>
         <p className="m-0">{direction.summary}</p>
-        <span className="register__cite">
-          The argument is in <a href={direction.arguedIn}>{direction.arguedIn}</a>
-        </span>
+        {direction.arguedIn ? (
+          <span className="register__cite">
+            The argument is in <a href={direction.arguedIn}>{direction.arguedIn}</a>
+          </span>
+        ) : null}
       </div>
     </div>
   );

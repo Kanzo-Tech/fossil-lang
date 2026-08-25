@@ -67,7 +67,7 @@ promise must not live in a layer the browser shares.
 Reads the manifest, works out which byte ranges the camera is asking for, hands Arrow to the canvas.
 **No dependency on an execution engine** here either. Compiling the engine into the browser is a
 claim that the browser runs programs, and [the camera is addressed, not
-queried](/docs/characteristics/verbs).
+queried](/docs/design/corpus#the-verb-surface-six-and-none-of-them-draws).
 
 </Step>
 
@@ -111,9 +111,7 @@ next one from being taken by accident.
 ## Where to read next
 
 <Cards>
-  <Card href="/docs/characteristics/verbs" title="The verb surface" description="Six verbs, landed on 2026-08-05. What the seventeen collapsed into, and the one that left before its replacement existed." />
-  <Card href="/docs/characteristics/bounded-write" title="The bounded write path" description="One flag, a spill test, and ten million vertices at 8.39 GiB against roughly 21 — and the pass that runs after it, which the budget does not reach." />
-  <Card href="/docs/characteristics/streaming" title="Streaming" description="Three seams named on structure: one landed, one was refuted by measurement, one still collects." />
-  <Card href="/docs/characteristics/corpus-contract" title="The corpus contract" description="Four obligations chosen on the evidence of nine formats, some of each on disk, and none of them finished. Plus which of GraphAr's field names it borrows without conforming." />
+  <Card href="/docs/design/corpus" title="The corpus" description="Columnar files addressable with no service in the path, where borrowing from GraphAr stops, and the six verbs the seventeen collapsed into — none of which draws." />
+  <Card href="/docs/design/streaming" title="Streaming and the budget" description="Ten million vertices at 8.39 GiB against roughly 21, the pass after the budget that it does not reach, and three seams named on structure: one landed, one was refuted by measurement, one still collects." />
   <Card href="/docs/design/discarded" title="What was discarded" description="Every alternative that was rejected, with the evidence against it and the observation that would bring it back. An entry that cannot state its last field does not go on the page." />
 </Cards>
