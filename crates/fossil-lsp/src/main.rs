@@ -52,9 +52,14 @@
 //!   the only copy of a document is a buffer somebody opened.
 //! - **Introspected descriptors.** The worker answers
 //!   `fossil/registerInferredDescriptor`, because the browser has to push in
-//!   what a `DESCRIBE` found. [`LspSystem`] has no descriptor table at all, so
-//!   every diagnostic that needs a source column's type is absent here. That is
-//!   a capability gap, not a translation difference.
+//!   what a `DESCRIBE` found. This server has a filesystem and goes and looks
+//!   itself ([`LspState::introspect`]) — but only at sources it can `stat`. A
+//!   program whose CSV lives on `s3://` is therefore still checked here without
+//!   its columns, so `fossil check` reports things this editor does not; that
+//!   gap is deliberate, it is the price of never blocking the message loop on
+//!   the network, and
+//!   `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`
+//!   is what keeps it from going quiet.
 //! - **`fossil/checkAll`.** A workspace-wide drain for a playground panel. An
 //!   editor already receives one `publishDiagnostics` per file.
 
@@ -70,7 +75,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System, register_file};
+use fossil_base::{
+    Catalogue, Files, FsError, Provider, SourceAnchor, SourceFile, System, register_file,
+};
+use fossil_descriptors_input::DescriptorCache;
 use lsp_server::{Connection, ErrorCode, ExtractError, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
@@ -91,19 +99,39 @@ use lsp_types::{
 
 /// The editor's [`System`].
 ///
-/// A filesystem, a clock, and the decoder rows for the shape documents a
-/// program can name. The LSP COMPILES programs, so it installs the same rows
-/// the native engine does: without them every program checks against no output
-/// contract, and the target-side halves of
-/// [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] go quietly
-/// empty for exactly the programs that declare a shape.
+/// A filesystem, a clock, the decoder rows for the shape documents a program can
+/// name, and the table of introspected input schemas. The LSP COMPILES
+/// programs, so it installs the same rows the native engine does: without them
+/// every program checks against no output contract, and the target-side halves
+/// of [`fossil_ide::hover_bidirectional`] / [`fossil_ide::completions`] go
+/// quietly empty for exactly the programs that declare a shape.
 ///
 /// It replaced `fossil_base::test_support::NativeSystem`, whose decoder table is the trait
 /// default — `&[]`, correct for a host that decodes nothing and wrong for this
-/// one. No descriptor table: the LSP introspects no sources yet, and `None` is
-/// a real answer rather than an empty table pretending to be one.
+/// one.
+///
+/// # The descriptor table was `None`, and that was a silent editor
+///
+/// It inherited the trait default and the docblock called it deliberate: «the
+/// LSP introspects no sources yet, and `None` is a real answer rather than an
+/// empty table pretending to be one». That was honest about a host that did
+/// nothing with sources, and it stopped being harmless the moment the checker
+/// started reporting on their columns. Measured 2026-08-23 over the real stdio
+/// transport: `fossil check apps/docs/programs/errors/unknown-field/program.fossil`
+/// reports ``nmae` is not a field of `User`` and exits 1, and the editor
+/// published **zero** diagnostics for the same bytes. Every diagnostic whose
+/// evidence is a source's schema was absent from the editor and present in the
+/// CLI and in the browser playground.
+///
+/// The table is `Mutex`-guarded and reached through `&self`, so this stays
+/// behind the `Arc<dyn System>` on [`LspDb`] and needs no mutable path.
+/// Reading it registers no Salsa dependency — see
+/// [`fossil_base::System::descriptors`] — which is why
+/// [`LspState::introspect`] runs BEFORE anything queries the db.
 #[derive(Debug, Default)]
-struct LspSystem;
+struct LspSystem {
+    descriptors: DescriptorCache,
+}
 
 impl System for LspSystem {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
@@ -119,6 +147,10 @@ impl System for LspSystem {
 
     fn providers(&self) -> &'static [&'static Provider] {
         fossil_descriptors_output::PROVIDERS
+    }
+
+    fn descriptors(&self) -> Option<&DescriptorCache> {
+        Some(&self.descriptors)
     }
 }
 
@@ -186,7 +218,7 @@ impl LspDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(LspSystem),
+            system: Arc::new(LspSystem::default()),
             files: Files::default(),
             catalogue: Catalogue::default(),
         }
@@ -221,11 +253,63 @@ impl LspState {
     /// edit reaches the checker, and the disk cannot express it. Then the
     /// documents THIS file names are read from disk if nobody has them yet.
     fn open(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
+        self.introspect(&text, &path);
         let file = SourceFile::new(&self.db, text, path.clone());
         register_file(&mut self.db, path, file);
         self.files.insert(uri.as_str().to_string(), file);
         self.register_named_documents(file);
         file
+    }
+
+    /// Read the columns of every source the buffer names that this host can
+    /// `stat`, and register them on [`LspSystem`]'s descriptor table.
+    ///
+    /// **The buffer, not the file on disk.** `fossil_introspect::introspect_program`
+    /// is the sibling that opens a path, and it is the wrong one here: a source
+    /// line the user has typed and not saved is exactly the line whose columns
+    /// the editor needs, and the disk does not have it.
+    ///
+    /// # Two things this must not become
+    ///
+    /// **It must not go on the network.** `main_loop` is one sequential loop
+    /// over one channel: a `didOpen` blocked on an `s3://` `DESCRIBE` is not one
+    /// slow file, it is hover and completion dead in every other buffer until
+    /// the read returns. `fossil_introspect::Reach::Local` is the whole of that
+    /// promise — a source this host cannot `stat` is skipped, no connection
+    /// opened, and the diagnostics that needed its columns stay absent. That
+    /// gap is pinned by
+    /// `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`.
+    ///
+    /// **It must not run per keystroke.** It is called on every `didOpen` and
+    /// `didChange`, and what makes that affordable is the freshness token: a
+    /// local source whose `mtime` and size have not moved is a hash lookup, and
+    /// no `DuckDB` connection is opened at all on a call where every source is
+    /// fresh or unreachable.
+    ///
+    /// # Ordering, and why it is before the db
+    ///
+    /// The descriptor table is ambient — reading it inside a tracked query
+    /// registers no Salsa dependency, so a write that lands after a query has
+    /// memoised its answer is invisible until something else invalidates it.
+    /// Introspecting first, before the text is interned or set, means no query
+    /// in this revision has looked yet.
+    ///
+    /// A URI this host cannot turn into a local path (an `untitled:` buffer, a
+    /// remote workspace) resolves nothing relative and is skipped whole.
+    fn introspect(&self, text: &str, path: &str) {
+        let Some(program) = local_path(path) else {
+            return;
+        };
+        let dir = program
+            .parent()
+            .map_or_else(PathBuf::new, Path::to_path_buf);
+        fossil_introspect::pre_introspect_and_register(
+            &*self.db.system,
+            text,
+            SourceAnchor::beside(&dir),
+            &HashMap::new(),
+            fossil_introspect::Reach::Local,
+        );
     }
 
     /// Register every shape document `file` names that the database does not
@@ -262,6 +346,11 @@ impl LspState {
     fn change(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
         use salsa::Setter as _;
         if let Some(&file) = self.files.get(uri.as_str()) {
+            // Before the revision bump, for the reason in `introspect`: the
+            // descriptor table is ambient, so it has to be right before any
+            // query in this revision looks at it. A keystroke that changed no
+            // source line costs a `stat` per source and no read.
+            self.introspect(&text, &path);
             file.set_text(&mut self.db).to(text);
             // The keystroke may have just written the `type { … } =
             // io.shex("…")` line that names a document. A no-op once the

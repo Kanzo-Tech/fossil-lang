@@ -3,13 +3,14 @@
 //! Measures the full per-keystroke analysis round-trip the LSP runs on every
 //! `didChange` over the canonical 200-line fixture:
 //!
-//!   `set_text` (Salsa Setter, revision bump) → [`fossil_mir::program_diagnostics`]
+//!   introspect the buffer's local sources → `set_text` (Salsa Setter, revision
+//!   bump) → [`fossil_mir::program_diagnostics`]
 //!
-//! That is the SAME work `fossil-lsp`'s `didChange` handler performs, and now it
-//! is the same *call* — the handler's body is one line and this is that line.
-//! The claim used to be made about a hand-rolled loop that did strictly less;
-//! see [`round_trip`]. Minus the JSON-RPC framing, which is negligible. It runs
-//! as a plain `#[test]` in `cargo test`, so it is the CI hard gate.
+//! That is the same work `fossil-lsp`'s `didChange` handler performs, step for
+//! step and in the same order. The claim used to be made about a hand-rolled
+//! loop that did strictly less; see [`round_trip`]. Minus the JSON-RPC framing,
+//! which is negligible. It runs as a plain `#[test]` in `cargo test`, so it is
+//! the CI hard gate.
 //!
 //! # Why a MARGINED budget, not a naked `< 100ms`
 //!
@@ -39,6 +40,27 @@
 //! [`RESOLVED_PREDICATES`] is checked before the clock starts, so a future edit
 //! that quietly stops resolving the contract fails here instead of producing a
 //! flattering millisecond count.
+//!
+//! # The handler grew a step and this file could not see it
+//!
+//! `LspState::change` now calls `LspState::introspect` before the `Setter`, so a
+//! keystroke also costs one source-ref scan of the buffer plus a `stat` per
+//! source. This file reimplements the handler's body rather than calling it —
+//! `LspState` is private to a binary target, so a test cannot — which means the
+//! new work was outside the clock the moment it was added, and a budget that
+//! cannot see a step is a budget that will not catch it regressing.
+//!
+//! [`round_trip`] therefore performs it, in the handler's order, and
+//! [`EditorSystem`] carries the descriptor table it writes into. What is
+//! measured is the STEADY-STATE branch and that is the honest one: none of the
+//! fixture's eight `io.csv` sources exists on disk, so every one of them is
+//! skipped by `Reach::Local` and no `DuckDB` connection is opened. That is what
+//! a keystroke costs, because typing does not change a source FILE — the
+//! expensive branch is a `didOpen` beside a real CSV, which happens once.
+//!
+//! The reimplementation is still a reimplementation. It is one function call out
+//! of date the next time the handler grows a line, and the only real repair is a
+//! library target for `fossil-lsp` so the two can be one call.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -46,7 +68,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
+use fossil_base::{Db as _, FossilDb, FsError, Provider, SourceFile, System};
 use salsa::Setter as _;
 
 /// The margined hard-gate budget. The design goal is < 100ms on dev hardware;
@@ -80,10 +102,18 @@ fn fixture() -> String {
     std::fs::read_to_string(fixture_path()).expect("read canonical_200.fossil")
 }
 
-/// The editor's `System`: a filesystem plus the rows that read shape documents,
-/// exactly as `fossil-lsp`'s `LspSystem` installs them.
+/// The editor's `System`: a filesystem, the rows that read shape documents, and
+/// the introspected-schema table — exactly as `fossil-lsp`'s `LspSystem`
+/// installs them.
+///
+/// The table is not decoration here. `pre_introspect_and_register` returns
+/// immediately when `System::descriptors` is `None`, so without it
+/// [`round_trip`] would time a call that does nothing and report that the
+/// handler's new step is free.
 #[derive(Debug, Default)]
-struct EditorSystem;
+struct EditorSystem {
+    descriptors: fossil_descriptors_input::DescriptorCache,
+}
 
 impl System for EditorSystem {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
@@ -94,6 +124,9 @@ impl System for EditorSystem {
     }
     fn providers(&self) -> &'static [&'static Provider] {
         fossil_descriptors_output::PROVIDERS
+    }
+    fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
+        Some(&self.descriptors)
     }
 }
 
@@ -117,6 +150,21 @@ impl System for EditorSystem {
 /// about `didChange` rather than about a loop that resembles it; there is now
 /// one function, so the two cannot drift again.
 fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
+    // Before the revision bump, in the handler's order and for the handler's
+    // reason: the descriptor table is ambient, so a write that lands after a
+    // query has memoised its answer is invisible until something else
+    // invalidates it.
+    fossil_introspect::pre_introspect_and_register(
+        db.system(),
+        &new_text,
+        fossil_base::SourceAnchor::beside(
+            fixture_path()
+                .parent()
+                .expect("the fixture has a directory"),
+        ),
+        &std::collections::HashMap::new(),
+        fossil_introspect::Reach::Local,
+    );
     file.set_text(db).to(new_text);
     fossil_mir::program_diagnostics(db, file).len()
 }
@@ -124,7 +172,7 @@ fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
 #[test]
 fn didchange_round_trip_under_margined_budget() {
     let base = fixture();
-    let system: Arc<dyn System> = Arc::new(EditorSystem);
+    let system: Arc<dyn System> = Arc::new(EditorSystem::default());
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(
         &db,

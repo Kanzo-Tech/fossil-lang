@@ -49,6 +49,35 @@ pub mod creds;
 
 pub use creds::{ConnectionCreds, RunCreds, SecretSpec};
 
+/// How far a host is willing to reach for a source's columns.
+///
+/// It is a question about **who is waiting**, not about the source. There are
+/// two hosts on this side of the seam and they answer it differently, so the
+/// answer is a parameter rather than a rule inside the loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// Every source the program names, including a locator whose `DESCRIBE` is
+    /// a network round trip. What a COMMAND does: `fossil check` and
+    /// `fossil run` are the thing the user is already waiting for, and a source
+    /// they cannot read is a source the answer would be wrong without.
+    Anywhere,
+    /// Only a source this host can `stat`: a local file that exists right now.
+    ///
+    /// What an EDITOR does. `fossil-lsp`'s `main_loop` is one sequential loop
+    /// over one channel, so a `didOpen` blocked on `s3://` is not one slow
+    /// file — it is hover and completion dead in every other buffer for as long
+    /// as the read takes. An editor may go and read a CSV beside the program; it
+    /// may not go on the network.
+    ///
+    /// The discriminator is [`freshness_token`] and not a scheme test, because
+    /// the two questions have one answer: a locator this host cannot `stat` is
+    /// exactly a locator whose freshness it cannot establish, which is already
+    /// the empty token. It also covers what a scheme test would miss — a
+    /// relative path that does not exist yet, and the half-typed one a keystroke
+    /// produces on the way to it.
+    Local,
+}
+
 /// Map a `DuckDB` column-type string onto the lattice — the native sibling of
 /// `@fossil-lang/introspect`'s `duckdbTypeToFossilPrimitive`. A vocabulary the
 /// engine reads and nobody else does, which is why it lives here and not on
@@ -149,7 +178,13 @@ fn freshness_token(resolved: &str) -> String {
     )
 }
 
-/// Pre-introspect every source the program names and register an
+/// Pre-introspect every source the program names — [`Reach::Anywhere`],
+/// because a host that reads the program off the disk is a COMMAND, and a
+/// command is allowed to wait. The editor does not come through here: its copy
+/// of the program is a buffer that may never have been saved, so it calls
+/// [`pre_introspect_and_register`] with the text it already holds.
+///
+/// Register an
 /// [`InferredDescriptor`] on the host's descriptor cache BEFORE typecheck,
 /// keyed by the URI the program writes rather than by the resolved locator —
 /// the written URI is the only string the host and the checker both see.
@@ -181,7 +216,7 @@ pub fn introspect_program(
     let text = std::fs::read_to_string(path)?;
     let program_dir = fossil_base::program_dir(&path.to_string_lossy());
     let anchor = SourceAnchor::new(&program_dir, connections);
-    pre_introspect_and_register(system, &text, anchor, &creds.connections);
+    pre_introspect_and_register(system, &text, anchor, &creds.connections, Reach::Anywhere);
     Ok(())
 }
 
@@ -193,12 +228,18 @@ pub fn introspect_program(
 ///
 /// Per-source failures are non-fatal — they log + skip; the compile may still
 /// succeed with no forward propagation for that source.
+///
+/// `reach` is the caller's answer to "may this block on the network?" — see
+/// [`Reach`]. It is a parameter and not a property of the source because the
+/// same `s3://` URI is a legitimate read for `fossil check` and a stalled
+/// editor for `fossil-lsp`.
 #[allow(clippy::implicit_hasher)] // as `introspect_program`.
 pub fn pre_introspect_and_register(
     system: &dyn System,
     source_text: &str,
     anchor: SourceAnchor<'_>,
     connections: &HashMap<String, ConnectionCreds>,
+    reach: Reach,
 ) {
     let Some(cache) = system.descriptors() else {
         tracing::debug!("host keeps no descriptor cache; skipping pre-introspection");
@@ -211,6 +252,18 @@ pub fn pre_introspect_and_register(
 
     for (source_name, constructor, raw_uri) in extract_source_refs(source_text) {
         let token = freshness_token(&anchor.locator(&raw_uri));
+        // An empty token means this host could not `stat` the locator — a
+        // scheme it does not own, or a path that is not there. Under
+        // `Reach::Local` that is the whole filter, and it is deliberately
+        // checked BEFORE `is_fresh`: an empty token is never fresh, so without
+        // this the editor would open a connection and attempt the read on every
+        // single keystroke.
+        if reach == Reach::Local && token.is_empty() {
+            tracing::debug!(
+                "`{raw_uri}` is not a file this host can stat; not reading it from here"
+            );
+            continue;
+        }
         if cache.is_fresh(&raw_uri, &token) {
             tracing::debug!("`{raw_uri}` is unchanged since it was introspected; reusing");
             continue;
@@ -417,6 +470,7 @@ mod tests {
             program,
             SourceAnchor::beside(dir.path()),
             &no_creds,
+            Reach::Anywhere,
         );
         assert_eq!(
             cache.registrations(),
@@ -430,6 +484,7 @@ mod tests {
             program,
             SourceAnchor::beside(dir.path()),
             &no_creds,
+            Reach::Anywhere,
         );
         assert_eq!(
             cache.registrations(),
@@ -443,6 +498,7 @@ mod tests {
             program,
             SourceAnchor::beside(dir.path()),
             &no_creds,
+            Reach::Anywhere,
         );
         assert_eq!(
             cache.registrations(),
@@ -471,10 +527,53 @@ mod tests {
             program,
             SourceAnchor::beside(dir.path()),
             &HashMap::new(),
+            Reach::Anywhere,
         );
 
         assert_eq!(cache.registrations(), 1);
         assert_eq!(cache.len(), 1);
+    }
+
+    /// [`Reach::Local`] reads the file beside the program and does not reach
+    /// for the URL — and, crucially, it does not reach for it AGAIN on the next
+    /// call.
+    ///
+    /// The second half is the one with teeth. An unreachable locator has an
+    /// empty freshness token and an empty token is never fresh, so under
+    /// `Reach::Anywhere` every call opens a connection and attempts the read.
+    /// That is right for a command and ruinous for an editor, where "every
+    /// call" is every keystroke. `registrations()` cannot see it — a failed
+    /// DESCRIBE registers nothing either way — so the assertion is on the local
+    /// source's count staying at 1 while the remote one never appears at all.
+    #[test]
+    fn the_local_reach_skips_what_it_cannot_stat_and_keeps_skipping_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("near.csv"), "id,name\n1,ada\n").expect("write csv");
+        let program = "near := io.csv(\"near.csv\")\n\
+                       far  := io.csv(\"https://example.invalid/far.csv\")\n";
+
+        let system = NativeSystem::default();
+        let cache = system.descriptors().expect("the host keeps a table");
+        for _ in 0..3 {
+            pre_introspect_and_register(
+                &system,
+                program,
+                SourceAnchor::beside(dir.path()),
+                &HashMap::new(),
+                Reach::Local,
+            );
+        }
+
+        assert_eq!(
+            cache.registrations(),
+            1,
+            "the CSV beside the program is read once and the URL is never read"
+        );
+        assert_eq!(cache.get("near.csv").expect("registered").columns.len(), 2);
+        assert!(
+            cache.get("https://example.invalid/far.csv").is_none(),
+            "an editor must not go on the network from its message loop"
+        );
     }
 
     /// A source this host cannot `stat` gets an empty token, and an empty token

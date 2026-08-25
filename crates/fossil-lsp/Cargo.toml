@@ -43,6 +43,62 @@ fossil-mir                = { path = "../fossil-mir" }
 # compiles programs, so it has to be able to decode the documents they name.
 # One const, no vtable (a table of `fn`).
 fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# `DescriptorCache` — the table `LspSystem::descriptors` hands out. It is the
+# element type of the seam, not a new capability.
+fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
+# THIS EDGE LINKS A DATABASE, and that is the review `deny.toml`'s `duckdb`
+# entry exists to force. It is taken deliberately:
+#
+# Without it the editor is SILENT on every diagnostic whose evidence is a source
+# column's type — measured over the real stdio transport on 2026-08-23, `fossil
+# check apps/docs/programs/errors/unknown-field/program.fossil` reports ``nmae`
+# is not a field of `User`` and exits 1 while the LSP published zero
+# diagnostics. The browser playground has had those diagnostics all along, over
+# DuckDB-WASM, through `fossil/registerInferredDescriptor`.
+#
+# There is no cheaper way to get them that is also RIGHT. The columns' types
+# come from DuckDB's CSV sniffer, and `packages/introspect/tests/rust-parity.test.ts`
+# exists precisely because «the browser and the CLI answer the same program
+# differently» is the bug worth preventing. A second sniffer written for the
+# editor would be a third answer, and the editor disagreeing with `check` is the
+# defect this dependency is here to fix.
+#
+# WHAT IT COSTS, measured 2026-08-25 over the real stdio transport, twelve runs,
+# minimum taken (`--release`, which is what ships):
+#
+#   binary                          6.49 MB -> 47.46 MB
+#   spawn -> initialize -> exit       3.2ms -> 8.3ms
+#   + didOpen of a program with two local CSVs
+#                                     4.2ms -> 17.0ms
+#   per didChange, steady state      0.07ms -> 0.07ms
+#
+# The last row is the one the ring rule is really about and it did not move at
+# all: a local source whose `mtime` and size have not shifted is a hash lookup
+# in the freshness table, so typing opens no connection. The DESCRIBE is paid
+# once, when the file is opened. `tests/didchange_budget.rs` performs the same
+# step in process and went 2ms -> 3ms worst against a 400ms gate.
+#
+# DEBUG IS MUCH WORSE AND IS NOT THE SHIPPED PROFILE: 30.0 MB -> 158.1 MB and
+# 4.2ms -> 157ms to start. That is unoptimised static init over a binary five
+# times the size, and the LSP integration tests pay it on every `drive()` spawn.
+# Do not quote the debug figure as the editor's startup, and do not read the
+# release figure as free either.
+#
+# A cold build of this crate now pays for `libduckdb-sys`.
+#
+# `cargo deny check bans` does NOT catch this edge: the `wrappers` list names
+# DIRECT parents of `duckdb` and this is transitive through `fossil-introspect`.
+# That hole is why `crates/xtask/tests/engine_reach.rs` now exists — it derives
+# every transitive linker from `cargo metadata` and requires each to be named in
+# `deny.toml`, so this edge IS reviewed by a gate, and so is the next one.
+#
+# `fossil-introspect` is native-only by its `fossil-resolver` edge and so is
+# this crate (the `wasm32` `compile_error!` at the top of `main.rs`), so nothing
+# here reaches a wasm shell: `cargo xtask wasm-check` walks down from the cdylib
+# roots and never enters a binary crate. The LANGUAGE layer is untouched —
+# `fossil-base`, `-syntax`, `-hir`, `-mir` and `-ide` are what has to start in
+# milliseconds and compile to wasm32, and none of them gained an edge here.
+fossil-introspect         = { path = "../fossil-introspect" }
 salsa              = { workspace = true }
 lsp-server         = { workspace = true }
 lsp-types          = { workspace = true }
@@ -75,12 +131,19 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # fossil_ide::hover::render_markdown — the exact rendering surface the LSP hover
 # handler invokes. It cannot go through JSON-RPC end to end, because the surface
 # syntax that would trigger synthesis does not exist yet: there is no
-# `seq.filter` / pipeline form, and no stub was added to fake one. serde_json and
-# fossil-hir are declared above as normal dependencies and the smoke test reuses
-# both; only fossil-descriptors-input + smol_str are dev-only, for that
-# in-process forward-propagation test.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-smol_str                 = { workspace = true }
+# `seq.filter` / pipeline form, and no stub was added to fake one.
+#
+# `fossil-descriptors-input` used to be listed HERE as well, and is not any
+# more: it became a normal dependency above when `LspSystem` grew a descriptor
+# table, and a normal dependency is already visible to every test. Two entries
+# for one crate is not an error to cargo, which is why it survived a day.
+smol_str = { workspace = true }
 # Criterion for the advisory didChange benchmark. No default
 # features → no rayon/plotters pull-in; native-only (fossil-lsp is native-only).
 criterion                = { version = "0.5", default-features = false }
+# `introspected_diagnostics.rs` writes a program naming an `https://` source and
+# asserts the editor does NOT go and read it. That program has to be on a real
+# disk — the server resolves a source relative to the program's own path — and it
+# must not be in the repository, or the absence being asserted would depend on a
+# checked-in file nobody would connect to this test.
+tempfile = { workspace = true }

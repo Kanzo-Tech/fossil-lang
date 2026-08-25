@@ -86,9 +86,11 @@ const WASM_ONLY_METHODS: &[(&str, &str)] = &[
         "fossil/registerInferredDescriptor",
         "the browser has no filesystem to DESCRIBE a CSV from, so the host \
          introspects with DuckDB-WASM and pushes the columns in. The native \
-         server has a filesystem and does not introspect through the wire — it \
-         has no descriptor table at all (`LspSystem` returns `None`), which is a \
-         real capability gap and not a transport difference.",
+         server has a filesystem and goes and looks itself, on `didOpen` and \
+         `didChange`, so there is nothing for a client to push. It answered «no \
+         descriptor table at all (`LspSystem` returns `None`)» until 2026-08-25, \
+         which was a capability gap and is now one method the worker needs \
+         because of where it runs.",
     ),
 ];
 
