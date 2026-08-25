@@ -75,8 +75,9 @@ fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 # The last row is the one the ring rule is really about and it did not move at
 # all: a local source whose `mtime` and size have not shifted is a hash lookup
 # in the freshness table, so typing opens no connection. The DESCRIBE is paid
-# once, when the file is opened. `tests/didchange_budget.rs` performs the same
-# step in process and went 2ms -> 3ms worst against a 400ms gate.
+# once, when the file is opened. `tests/didchange_budget.rs` runs the same step
+# in process — it CALLS the handler now rather than reimplementing it — and
+# measures 3.4ms average, 3.8ms worst, against a 400ms gate.
 #
 # DEBUG IS MUCH WORSE AND IS NOT THE SHIPPED PROFILE: 30.0 MB -> 158.1 MB and
 # 4.2ms -> 157ms to start. That is unoptimised static init over a binary five

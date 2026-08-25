@@ -1,16 +1,58 @@
 //! The HARD CI gate for the `didChange` round-trip budget.
 //!
-//! Measures the full per-keystroke analysis round-trip the LSP runs on every
-//! `didChange` over the canonical 200-line fixture:
+//! It calls [`fossil_lsp::handle_notification`] with a real
+//! `textDocument/didChange` notification over the canonical 200-line fixture,
+//! against a real [`fossil_lsp::LspState`]. That is not «the same work the
+//! handler performs» — it IS the handler, so the list of steps is not written
+//! down here and cannot go stale: whatever the handler does on a keystroke is
+//! inside the clock.
 //!
-//!   introspect the buffer's local sources → `set_text` (Salsa Setter, revision
-//!   bump) → [`fossil_mir::program_diagnostics`]
+//! The one thing left outside is the JSON-RPC FRAMING — the `Content-Length`
+//! header and the byte-level read off stdin. The params decode is not: the
+//! `Notification` is built before the clock starts and `handle_notification`
+//! deserialises it, which is a cost the server really pays per keystroke.
 //!
-//! That is the same work `fossil-lsp`'s `didChange` handler performs, step for
-//! step and in the same order. The claim used to be made about a hand-rolled
-//! loop that did strictly less; see [`round_trip`]. Minus the JSON-RPC framing,
-//! which is negligible. It runs as a plain `#[test]` in `cargo test`, so it is
-//! the CI hard gate.
+//! It runs as a plain `#[test]` in `cargo test`, so it is the CI hard gate.
+//!
+//! # This file used to reimplement the thing it gates
+//!
+//! `LspState` and every handler lived in `src/main.rs`, a binary target, and
+//! each took an `&Connection`. Nothing outside the binary could name them, and
+//! a handler needing a socket could not have been called anyway, so this file
+//! kept a private `round_trip` performing what it believed the handler
+//! performed. That copy went out of date twice without going red:
+//!
+//! - It was a hand-rolled `def_map` + `typecheck_mapping` loop while the handler
+//!   drained `lower_to_mir_pg`, so every lowering a keystroke pays for was
+//!   outside the clock. Repaired by editing the copy.
+//! - `LspState::change` grew a source-introspection call before the `Setter`,
+//!   and the new per-keystroke step was outside the clock the moment it was
+//!   added. Repaired by editing the copy again.
+//!
+//! Two copies patched twice is the argument that a budget which executes a
+//! DESCRIPTION of the handler is not a budget on the handler. `fossil-lsp`'s lib
+//! target and the response-returning seam
+//! (`handle_notification` returns the `publishDiagnostics` notifications rather
+//! than sending them) are what let this call the real one.
+//!
+//! **What the copy was missing, measured.** Both were run in the same process,
+//! alternating, three times, on 2026-08-25 (debug build, Apple silicon): the
+//! copy averaged **3.03 ms** per keystroke and the handler **3.45 ms**, worst
+//! case 3.37 ms against 3.82 ms. The copy was therefore about **14 % short**,
+//! and the extra is not a regression — it is work the old number never counted:
+//! `register_named_documents` on every keystroke, `fossil_ide::lsp_diagnostics`
+//! (the drain, the `claimed` guard, the `LineIndex` and the UTF-16 rendering)
+//! where the copy called `fossil_mir::program_diagnostics` and stopped, and the
+//! JSON in and out. Against a 400 ms gate neither number is close to failing;
+//! the point is which of them is a statement about `didChange`.
+//!
+//! **And the gate responds to the handler, which is the property being claimed.**
+//! Same session, same fixture: one line added to `LspState::change` — a
+//! `fossil_ide::semantic_tokens` call, a step the handler did not have — moved
+//! this test from 3.45 ms to **4.65 ms** average and 3.82 ms to **5.20 ms**
+//! worst, while the retired copy, run beside it in the same process, did not
+//! move at all (3.07 ms → 3.15 ms, inside its own run-to-run spread). A gate
+//! nobody has watched respond to the thing it gates is a gate nobody has tested.
 //!
 //! # Why a MARGINED budget, not a naked `< 100ms`
 //!
@@ -20,56 +62,38 @@
 //! margin ([`BUDGET_MS`]) that still catches algorithmic blow-up (an O(n²)
 //! regression on a 200-line file would blow well past it) without flaking. The
 //! tight `< 100ms` goal + the 20%-regression check live in the ADVISORY
-//! Criterion benchmark (`benches/lsp_didchange.rs`), reliable only on a pinned
-//! runner.
+//! Criterion benchmark (`benches/lsp_didchange.rs`), which calls the same
+//! function.
 //!
-//! # The host has to be the EDITOR's, and it was not
+//! # The host is the editor's, because it IS the editor's
 //!
 //! This built its db on `fossil_base::test_support::NativeSystem`, whose provider table is the
 //! trait default: **no row reads types**. Since ruling 3 of 2026-08-11 a program
 //! must name a shape document, and the fixture does; under `NativeSystem` that
 //! document decodes to nothing, `resolve_target_shape` fails per mapping, and
 //! the checker leaves by the shortest path it has. The number that came out was
-//! real and measured the wrong program — every property's constraint lookup, the
-//! backward check and the short-name resolution were all skipped, and those are
-//! the work a keystroke actually costs now.
+//! real and measured the wrong program.
 //!
-//! [`EditorSystem`] installs the same rows `fossil-lsp`'s own `LspSystem` does,
-//! and [`fixture`] opens the program under its REAL path so the document beside
-//! it resolves. What that buys is stated as an assertion rather than a comment:
+//! It was then a hand-written `EditorSystem` that copied `LspSystem`'s rows.
+//! `LspState::new()` builds the real one, so there is nothing left to copy.
+//! What the fixture buys is still stated as an assertion rather than a comment:
 //! [`RESOLVED_PREDICATES`] is checked before the clock starts, so a future edit
 //! that quietly stops resolving the contract fails here instead of producing a
 //! flattering millisecond count.
-//!
-//! # The handler grew a step and this file could not see it
-//!
-//! `LspState::change` now calls `LspState::introspect` before the `Setter`, so a
-//! keystroke also costs one source-ref scan of the buffer plus a `stat` per
-//! source. This file reimplements the handler's body rather than calling it —
-//! `LspState` is private to a binary target, so a test cannot — which means the
-//! new work was outside the clock the moment it was added, and a budget that
-//! cannot see a step is a budget that will not catch it regressing.
-//!
-//! [`round_trip`] therefore performs it, in the handler's order, and
-//! [`EditorSystem`] carries the descriptor table it writes into. What is
-//! measured is the STEADY-STATE branch and that is the honest one: none of the
-//! fixture's eight `io.csv` sources exists on disk, so every one of them is
-//! skipped by `Reach::Local` and no `DuckDB` connection is opened. That is what
-//! a keystroke costs, because typing does not change a source FILE — the
-//! expensive branch is a `didOpen` beside a real CSV, which happens once.
-//!
-//! The reimplementation is still a reimplementation. It is one function call out
-//! of date the next time the handler grows a line, and the only real repair is a
-//! library target for `fossil-lsp` so the two can be one call.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::path::PathBuf;
+use std::str::FromStr as _;
+use std::time::{Duration, Instant};
 
-use fossil_base::{Db as _, FossilDb, FsError, Provider, SourceFile, System};
-use salsa::Setter as _;
+use fossil_lsp::LspState;
+use lsp_server::Notification;
+use lsp_types::Uri;
+use lsp_types::notification::{
+    DidChangeTextDocument, DidOpenTextDocument, Notification as NotificationTrait,
+};
+use serde_json::json;
 
 /// The margined hard-gate budget. The design goal is < 100ms on dev hardware;
 /// this 400ms ceiling absorbs CI noise + debug-build overhead while still
@@ -80,8 +104,8 @@ const BUDGET_MS: u128 = 400;
 /// Warm-up + measured iterations. The first analysis primes Salsa's caches; we
 /// then measure steady-state per-`didChange` cost (the realistic editor case is
 /// an already-warm db being re-analysed after an edit).
-const WARMUP: usize = 2;
-const ITERS: usize = 10;
+const WARMUP: u32 = 2;
+const ITERS: u32 = 10;
 
 /// What the fixture's 15 mappings resolve between them — 60 properties, plus
 /// the 15 `@subject` lines, which are not predicates.
@@ -94,104 +118,94 @@ const RESOLVED_PREDICATES: usize = 60;
 /// The path the program is opened under. It has to be the REAL one: the shape
 /// document is resolved relative to the program, so a synthetic path resolves
 /// nothing and silently measures a program with no output contract.
+///
+/// Canonicalised, because the URI below is built out of it and a `..` component
+/// in a `file://` URI is a different registry key from the one the document
+/// would be read back under.
 fn fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/canonical_200.fossil")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/canonical_200.fossil")
+        .canonicalize()
+        .expect("canonicalise canonical_200.fossil")
+}
+
+/// The fixture as an editor would name it. The server keys buffers by URI and
+/// derives the program's directory from it, so a bare path would exercise a
+/// branch of `local_path` no editor takes.
+fn fixture_uri() -> Uri {
+    Uri::from_str(&format!("file://{}", fixture_path().display())).expect("a file:// URI")
 }
 
 fn fixture() -> String {
     std::fs::read_to_string(fixture_path()).expect("read canonical_200.fossil")
 }
 
-/// The editor's `System`: a filesystem, the rows that read shape documents, and
-/// the introspected-schema table — exactly as `fossil-lsp`'s `LspSystem`
-/// installs them.
-///
-/// The table is not decoration here. `pre_introspect_and_register` returns
-/// immediately when `System::descriptors` is `None`, so without it
-/// [`round_trip`] would time a call that does nothing and report that the
-/// handler's new step is free.
-#[derive(Debug, Default)]
-struct EditorSystem {
-    descriptors: fossil_descriptors_input::DescriptorCache,
-}
-
-impl System for EditorSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
-    }
-    fn now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
-    fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
-        Some(&self.descriptors)
+/// The `textDocument/didOpen` an editor sends when the file is first shown.
+fn did_open(uri: &Uri, text: &str) -> Notification {
+    Notification {
+        method: DidOpenTextDocument::METHOD.to_string(),
+        params: json!({
+            "textDocument": {
+                "uri": uri.as_str(), "languageId": "fossil", "version": 1, "text": text
+            }
+        }),
     }
 }
 
-/// One `didChange` round-trip: bump the revision via `set_text` (the real
-/// cancellation trigger), then run exactly what the handler runs. Returns the
-/// diagnostic count (kept so the optimiser cannot elide the work).
+/// The `textDocument/didChange` an editor sends per keystroke under
+/// `TextDocumentSyncKind::FULL` — the whole buffer, every time.
 ///
-/// # This measured a cheaper program than the handler ran, and the docblock
-/// said otherwise
-///
-/// It was a hand-rolled loop over `typecheck_mapping`, and the header above
-/// called it «the SAME work `fossil-lsp`'s `didChange` handler performs». It
-/// was not, in two directions at once. The handler drains **`lower_to_mir_pg`**
-/// — deliberately, because draining the typechecker alone shows the editor a
-/// clean file that `run` refuses — so every lowering the keystroke pays for was
-/// outside the clock. And the handler runs three FILE-level drains the loop had
-/// no equivalent of.
-///
-/// A budget is only a gate on the thing it executes. Calling
-/// [`fossil_mir::program_diagnostics`] is what makes the number a statement
-/// about `didChange` rather than about a loop that resembles it; there is now
-/// one function, so the two cannot drift again.
-fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
-    // Before the revision bump, in the handler's order and for the handler's
-    // reason: the descriptor table is ambient, so a write that lands after a
-    // query has memoised its answer is invisible until something else
-    // invalidates it.
-    fossil_introspect::pre_introspect_and_register(
-        db.system(),
-        &new_text,
-        fossil_base::SourceAnchor::beside(
-            fixture_path()
-                .parent()
-                .expect("the fixture has a directory"),
-        ),
-        &std::collections::HashMap::new(),
-        fossil_introspect::Reach::Local,
-    );
-    file.set_text(db).to(new_text);
-    fossil_mir::program_diagnostics(db, file).len()
+/// Built by the caller BEFORE the clock starts. Serialising the new text into
+/// the params is the client's cost, not the server's; deserialising it back out
+/// is the server's, and that half is inside [`fossil_lsp::handle_notification`].
+fn did_change(uri: &Uri, version: i64, text: &str) -> Notification {
+    Notification {
+        method: DidChangeTextDocument::METHOD.to_string(),
+        params: json!({
+            "textDocument": { "uri": uri.as_str(), "version": version },
+            "contentChanges": [ { "text": text } ]
+        }),
+    }
+}
+
+/// One `didChange` round-trip: the handler, called. Returns the number of
+/// diagnostics it published, so the optimiser cannot elide the work.
+fn round_trip(state: &mut LspState, notif: Notification) -> usize {
+    let published = fossil_lsp::handle_notification(state, notif).expect("didChange params decode");
+    published
+        .iter()
+        .filter_map(|n| n.params.pointer("/diagnostics")?.as_array())
+        .map(Vec::len)
+        .sum()
 }
 
 #[test]
 fn didchange_round_trip_under_margined_budget() {
     let base = fixture();
-    let system: Arc<dyn System> = Arc::new(EditorSystem::default());
-    let mut db = FossilDb::new(system);
-    let file = SourceFile::new(
-        &db,
-        base.clone(),
-        fixture_path().to_string_lossy().into_owned(),
+    let uri = fixture_uri();
+
+    let mut state = LspState::new();
+    // `didOpen` is the handler too: it interns the buffer, introspects the
+    // sources it can `stat`, and registers the shape documents it names off
+    // disk. Skipping that registration is what made an earlier number cheap.
+    let opened = fossil_lsp::handle_notification(&mut state, did_open(&uri, &base))
+        .expect("didOpen params decode");
+    assert_eq!(
+        opened.len(),
+        1,
+        "didOpen publishes exactly one notification"
     );
-    // The host's other half: the document the program names is a Salsa INPUT, so
-    // it has to be registered before any query looks for it. `fossil-lsp` does
-    // this on `didOpen`; skipping it here is what made the old number cheap.
-    fossil_ide::register_missing_documents(&mut db, file, &|key| std::fs::read_to_string(key).ok());
+    let file = state.get(&uri).expect("the buffer is open after didOpen");
 
     // The contract actually resolved — assert it BEFORE timing, so a budget that
     // stops measuring the checking path fails loudly instead of getting faster.
-    let mapping_count = fossil_hir::def_map::def_map(&db, file).mappings(&db).len();
-    let resolved: usize = fossil_hir::def_map::def_map(&db, file)
-        .mappings(&db)
+    let db = state.db();
+    let mapping_count = fossil_hir::def_map::def_map(db, file).mappings(db).len();
+    let resolved: usize = fossil_hir::def_map::def_map(db, file)
+        .mappings(db)
         .iter()
-        .filter_map(|m| fossil_hir::check::typecheck_mapping(&db, *m).ok())
-        .map(|out| out.predicates(&db).len())
+        .filter_map(|m| fossil_hir::check::typecheck_mapping(db, *m).ok())
+        .map(|out| out.predicates(db).len())
         .sum();
     assert_eq!(
         resolved, RESOLVED_PREDICATES,
@@ -207,36 +221,48 @@ fn didchange_round_trip_under_margined_budget() {
     // (A bare `#` used to hang the parser. It does not any more — see
     // `fossil-syntax/tests/recovery.rs` — but an unlexable byte still measures
     // the wrong path.)
-    let edit = |i: usize| format!("{base}\n// keystroke {i}\n");
+    let edit = |i: u32| format!("{base}\n// keystroke {i}\n");
 
     // Warm-up: prime Salsa's caches.
     for i in 0..WARMUP {
-        let _ = round_trip(&mut db, file, edit(i));
+        let notif = did_change(&uri, i64::from(i) + 2, &edit(i));
+        let _ = round_trip(&mut state, notif);
     }
 
-    // Measured: steady-state per-didChange cost.
+    // Measured: steady-state per-didChange cost. The notification is built
+    // outside the clock; everything the server does with it is inside.
     let mut worst = Duration::ZERO;
     let mut total = Duration::ZERO;
     for i in 0..ITERS {
-        let text = edit(WARMUP + i);
+        let notif = did_change(&uri, i64::from(WARMUP + i) + 2, &edit(WARMUP + i));
         let start = Instant::now();
-        let _ = round_trip(&mut db, file, text);
+        let published = round_trip(&mut state, notif);
         let elapsed = start.elapsed();
+        std::hint::black_box(published);
         worst = worst.max(elapsed);
         total += elapsed;
     }
 
-    let avg_ms = total.as_millis() / ITERS as u128;
-    let worst_ms = worst.as_millis();
+    // Microseconds as well as whole milliseconds: at ~6 ms the integer figure
+    // has one significant digit, which is not enough to see a handler step
+    // being added or removed — and «does this number move when the handler
+    // does» is the property this file exists to have.
+    let avg = total / ITERS;
     eprintln!(
-        "didChange round-trip over canonical_200.fossil: avg={avg_ms}ms worst={worst_ms}ms \
-         (design goal <100ms; hard-gate budget <{BUDGET_MS}ms)"
+        "didChange round-trip over canonical_200.fossil: avg={}ms ({}µs) worst={}ms ({}µs) \
+         (design goal <100ms; hard-gate budget <{BUDGET_MS}ms)",
+        avg.as_millis(),
+        avg.as_micros(),
+        worst.as_millis(),
+        worst.as_micros(),
     );
 
+    let worst_ms = worst.as_millis();
     assert!(
         worst_ms < BUDGET_MS,
         "didChange round-trip blew the margined budget: worst={worst_ms}ms >= {BUDGET_MS}ms \
-         (avg={avg_ms}ms). This margin tolerates CI noise but catches algorithmic blow-up — \
-         a real regression here means the analysis pipeline got asymptotically slower."
+         (avg={}ms). This margin tolerates CI noise but catches algorithmic blow-up — \
+         a real regression here means the analysis pipeline got asymptotically slower.",
+        avg.as_millis(),
     );
 }
