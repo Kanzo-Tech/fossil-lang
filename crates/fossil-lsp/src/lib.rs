@@ -80,12 +80,12 @@
 //! about the HOST rather than the wire:
 //!
 //! - **The filesystem.** This server reads an unopened shape document off disk
-//!   ([`LspState::register_named_documents`]); the worker has no disk, so there
+//!   (`LspState::register_named_documents`); the worker has no disk, so there
 //!   the only copy of a document is a buffer somebody opened.
 //! - **Introspected descriptors.** The worker answers
 //!   `fossil/registerInferredDescriptor`, because the browser has to push in
 //!   what a `DESCRIBE` found. This server has a filesystem and goes and looks
-//!   itself ([`LspState::introspect`]) — but only at sources it can `stat`. A
+//!   itself (`LspState::introspect`) — but only at sources it can `stat`. A
 //!   program whose CSV lives on `s3://` is therefore still checked here without
 //!   its columns, so `fossil check` reports things this editor does not; that
 //!   gap is deliberate, it is the price of never blocking the message loop on
@@ -482,7 +482,7 @@ pub fn server_capabilities() -> ServerCapabilities {
 /// Answer one request. Each arm decodes its params, calls the corresponding
 /// `fossil-ide` free function over `state.db` + the open-file set, and encodes
 /// the `lsp_types` result. Unhandled methods fall through to
-/// [`method_not_found`].
+/// `method_not_found`.
 ///
 /// `shutdown` never reaches here: `Connection::handle_shutdown` owns that
 /// exchange and it owns a channel, so it stays in `main.rs`.
