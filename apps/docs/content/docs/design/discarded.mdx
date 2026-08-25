@@ -295,6 +295,26 @@ declared, two ordinary tables could not be joined **even with a qualified condit
 share a primary-key column name and any shared name was an error. That was not a decision; it was an
 unmeasured consequence prohibiting the join of any two tables with primary keys.
 
+### The RDF 1.2 triple term
+
+**The idea.** `<< s p o >>` as a value assignable only where a shape declares `rdfs:Proposition`,
+with a reifier as an ordinary mapping the sugar desugars to — and in the corpus, a reifier as a
+vertex and the triple term as the edge row it annotates.
+**Why it is attractive.** It is the standards-track answer to annotating a statement, and the corpus
+already writes the edge row a triple term would have to name.
+**The evidence against it.** Nothing in RDF 1.2 is a Recommendation: Concepts and Semantics are
+Candidate Recommendations, and every concrete syntax is still a Working Draft — Turtle 1.2 in its
+fourth. The surface did not fail to arrive, it **left**: `<<` is not a token, and `grammar.bnf`
+carries the retired rule's tombstone rather than a pending one. Nothing under `crates/` mentions a
+triple term or `rdfs:Proposition` at all. And what the tree does have here was never decided — the
+Turtle parser accepts a triple term on the way in because rudof enables `oxttl`'s `rdf-12` by
+feature unification, which is a property of a dependency graph rather than of a design. Since
+2026-08-07 that feature is declared instead of inherited, and a literal carrying a base direction is
+refused at the pivot instead of being flattened into text a host lays out backwards. Both are guards
+over what arrives; neither is a step towards a surface.
+**What would bring it back.** Turtle 1.2 reaching Recommendation, and a program that wants to
+annotate an edge and cannot.
+
 ## Shadows of identity
 
 ### Identity as an argument to an attribute

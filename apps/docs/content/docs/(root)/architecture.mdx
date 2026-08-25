@@ -2,7 +2,7 @@
 title: The architecture
 description: One core and thin shells, because that is what every comparable compiler does. Why the rings are withdrawn, what `base` is supposed to mean, and the dependency graph fossil has today.
 direction:
-  summary: The tree is cut by what a piece of code is allowed to know rather than by where it runs, which collapses the deployment targets into shells thin enough to be uninteresting and takes twenty-five crates towards five to eight.
+  summary: The dependency graph over the five subject groups is acyclic — no pair of groups points at each other.
   arguedIn: /docs/design/three-hosts
 ---
 
@@ -316,9 +316,8 @@ The page is the shape. [Three hosts](/docs/design/three-hosts) is the argument, 
 deliberately left off here goes to the pages that own it: the measurement that reordered the whole
 priority — a compiler that reports success and writes a corpus with a property missing — is
 [the expression cliff](/docs/characteristics/expressions); the scope of the incremental system is
-[tooling for humans](/docs/design/tooling-for-humans); the extension mechanism is a
-[discarded alternative](/docs/design/discarded) with a named condition that would reopen it; and the
-design for statements is [RDF 1.2](/docs/characteristics/rdf12).
+[tooling for humans](/docs/design/tooling-for-humans); and the extension mechanism is a
+[discarded alternative](/docs/design/discarded) with a named condition that would reopen it.
 
 <Callout title="Three of them are done, and the rest is not">
 This callout said "the crate count is twenty-four today and nothing below the first diagram has been

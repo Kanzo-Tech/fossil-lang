@@ -4,7 +4,6 @@
     "expressions",
     "types",
     "pipeline",
-    "rdf12",
     "verbs",
     "bounded-write",
     "streaming",

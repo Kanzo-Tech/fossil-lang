@@ -2,7 +2,7 @@
 title: The relational half
 description: A source rarely arrives shaped the way a mapping needs it. That work lives in the language and gets typed by us — and planned by DataFusion, which is why this compiler has no optimizer of its own.
 direction:
-  summary: Sources compose through the verbs a relation carries — `User.where(User.age >= 18)` — which our checker types end to end, and the typed pipeline lowers to a DataFusion logical plan, so the fourteen MIR operators are the pipeline's vocabulary and this compiler never grows a planner beside the one underneath it.
+  summary: The relational verbs are six — `where`, `select`, `join`, `groupBy`, `distinct`, `union` — and the match that lowers them is exhaustive.
   arguedIn: /docs/design/algebra
 ---
 

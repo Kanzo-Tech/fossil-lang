@@ -94,9 +94,10 @@ the argument is on [the shapes page](/docs/design/shapes), and the variant that 
 `Shacl` is called `Lowered` for exactly that reason — it never meant SHACL, it meant the decode
 already happened (`crates/fossil-descriptors-output/src/kind.rs:48`). The one asymmetry that survives
 is about RDF 1.2 rather than about investment: SHACL 1.2 Core carries `sh:TripleTerm` as a node kind
-and a reifier-shape constraint component, so it can describe an
-[RDF 1.2](/docs/characteristics/rdf12) output, and ShEx has no working group and no mention of any of
-it. That is a reason a document might be SHACL. It is not a reason the compiler should prefer one.
+and a reifier-shape constraint component, so it can describe an RDF 1.2 output — which fossil does
+not produce and has [ruled out producing](/docs/design/discarded) — and ShEx has no working group
+and no mention of any of it. That is a reason a document might be SHACL. It is not a reason the
+compiler should prefer one.
 
 ## Job three — sensitivity is a type
 
