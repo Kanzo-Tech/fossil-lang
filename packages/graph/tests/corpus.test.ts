@@ -470,3 +470,109 @@ describe('what openCorpus refuses, and names', () => {
     await expect(openCorpus(dir, { query })).rejects.toThrow(/container/);
   });
 });
+
+/**
+ * The same table `apps/corpus/conformance/verify.mjs` executes, executed here.
+ *
+ * Everything above compares an answer to SQL **this file writes**, which catches the API being
+ * wrong about the bytes. This asks the other question, and it is the one a self-check cannot: has
+ * this reader drifted from the other one? `expected.json`'s `answers` block is a table neither
+ * implementation wrote — its numbers come from a full scan of every tile with no addressing at all
+ * — and `conformance/answers.mjs` executes it in plain Node over the `duckdb` binary, sharing no
+ * line of answer logic with `openCorpus`.
+ *
+ * It is the distinction the addressing half already draws and states in `verify.mjs`'s header: a
+ * table catches **drift between two readers**, and pointing a reader at bytes a writer just made
+ * catches **two readers agreeing while both disagree with the writer**. Neither replaces the other,
+ * and neither replaces the inline cross-checks above.
+ *
+ * The block has already earned it once, on the other implementation: an adjacency tile filtered by
+ * `src_dense OR dst_dense` instead of by the column its orientation is aligned on read 153 edges
+ * for a drawing read where the scan says 152.
+ */
+describe('the conformance table, executed against the published API', () => {
+  const table = JSON.parse(readFileSync(join(CONFORMANCE, 'expected.json'), 'utf8')) as {
+    answers: {
+      vertex_count: number;
+      types: { vertices: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+      window: Array<{
+        box: { x: number; y: number; w: number; h: number };
+        directions: Array<'src' | 'dst'>;
+        vertices: number;
+        tiles: number[];
+        edges: number;
+        complete: boolean;
+        gaps: string[];
+      }>;
+      node: Array<{ id: string; found: boolean; dense_id?: number }>;
+      neighbours: Array<{
+        ids: string[];
+        depth: number;
+        seeds: number;
+        missing: number;
+        vertices: number;
+        edges: number;
+        frontier: number;
+        complete: boolean;
+      }>;
+    };
+  };
+
+  it('is a table with something in it', () => {
+    // A renamed key or a moved file would otherwise make every case below vacuous, which is the
+    // classic way a shared contract stops being shared.
+    expect(table.answers.window.length).toBeGreaterThan(0);
+    expect(table.answers.neighbours.length).toBeGreaterThan(0);
+  });
+
+  it('what is inside is what the table says is inside', () => {
+    const declared = table.answers.types.vertices[0] as {
+      type: string;
+      fields: string[];
+      identity: string;
+      geometry: boolean;
+    };
+    const got = corpus.types.vertices.find((v) => v.type === declared.type);
+    expect(got).toBeDefined();
+    expect(got!.count).toBe(BigInt(table.answers.vertex_count));
+    expect(got!.fields.map((f) => f.name)).toEqual(declared.fields);
+    expect(got!.identity).toBe(declared.identity);
+    expect(got!.geometry).toBe(declared.geometry);
+  });
+
+  it.each(table.answers.window)(
+    'window $box.x,$box.y over $directions',
+    async ({ box, directions, vertices, tiles, edges, complete, gaps }) => {
+      const got = await corpus.window({ ...box, directions });
+      expect(got.vertices.length).toBe(vertices);
+      expect(got.tiles.map(Number)).toEqual(tiles);
+      expect(got.edges.length).toBe(edges);
+      expect(got.complete).toBe(complete);
+      expect(got.gaps.map((g) => g.reason).sort()).toEqual(gaps);
+    },
+  );
+
+  it.each(table.answers.node)('node $id resolves to found=$found', async ({ id, found, dense_id }) => {
+    const got = await corpus.node(id);
+    if (!found) {
+      expect(got).toBeNull();
+      return;
+    }
+    expect(got).not.toBeNull();
+    expect(got!.id).toBe(id);
+    expect(got!.denseId).toBe(BigInt(dense_id!));
+  });
+
+  it.each(table.answers.neighbours)(
+    'neighbours at depth $depth',
+    async ({ ids, depth, seeds, missing, vertices, edges, frontier, complete }) => {
+      const got = await corpus.neighbours(ids, { depth });
+      expect(got.seeds.length).toBe(seeds);
+      expect(got.missing.length).toBe(missing);
+      expect(got.vertices.length).toBe(vertices);
+      expect(got.edges.length).toBe(edges);
+      expect(got.frontier.length).toBe(frontier);
+      expect(got.complete).toBe(complete);
+    },
+  );
+});
