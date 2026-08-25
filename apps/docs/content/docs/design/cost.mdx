@@ -18,8 +18,8 @@ always correct; only the slope was wrong.
 
 | # | obligation | shape | today |
 | --- | --- | --- | --- |
-| R1 | A window opens a bounded number of files | O(1) in N | **met; opening a corpus is not** |
-| R2 | A window is one query per orientation | constant | met |
+| R1 | A window opens a bounded number of files | O(1) in N | met, asserted; opening a corpus is **not** |
+| R2 | A window is one query per orientation | constant | met, asserted |
 | R3 | A window's cost follows its answer | O(rows) | met |
 | R4 | An answer names every gap in it | exact | met |
 | W1 | The write path's peak is independent of the corpus | O(1) in N | **not met** |
@@ -140,9 +140,22 @@ await corpus.window(box);
 counted.report();                         // { queries: 3, files: 2, rows: 3152, ms: 64.7 }
 ```
 
-An obligation is then two corpora an order of magnitude apart and one comparison. R1 is
-`files(10N) === files(N)`; R3 is `ms per row` inside a band. Neither pins a number, and both would
-have gone red the day the vertex query started listing every tile.
+An obligation is then two corpora an order of magnitude apart and one comparison, which is what
+`packages/graph/tests/cost.test.ts` is. It writes both with the checker's own fixture — JavaScript
+against the published conventions, importing nothing of ours — at 20 and 196 tiles, and asks the
+same rectangle of each: fixed ground, ten times the density.
+
+Four assertions, and not one of them compares against a recorded figure:
+
+- the vertex statement **never names every tile in the corpus**
+- it opens the tiles its own answer landed in, and about one more — the overshoot is a tile whose
+  box meets the rectangle and whose rows do not, which is geometry and not a term in N
+- **the share of the corpus a window opens falls as the corpus grows**
+- a window is one statement for the vertices and one per orientation
+
+Three of the four go red when the defect is put back; the fourth does not, because it never changed
+the number of statements. That is worth stating: each assertion covers a different property, and a
+guard nobody has watched fail is a sentence rather than a guard.
 
 The write half has its probe already — `FOSSIL_MEM_PROBE=1` and the two examples under
 `fossil-layout` — and what it lacks is the same discipline: W1 is `peak(10N) === peak(N)`, and it is
