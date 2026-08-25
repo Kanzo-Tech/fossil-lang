@@ -54,3 +54,14 @@ packages/executor/pkg/
 !.changeset/README.md
 # TS incremental build state
 *.tsbuildinfo
+
+# DuckDB-WASM's spill directory. Under `NODE_RUNTIME` it defaults to `./.tmp` in
+# the PROCESS's cwd, not to the OS temp dir — a `@fossil-lang/graph` test run
+# left 29 GB there on 2026-08-25 before anyone noticed. `packages/graph`'s own
+# suite now points `temp_directory` at a scratch dir it cleans up, but the
+# default is the trap: any future test that boots DuckDB-WASM and touches the
+# filesystem writes here, and a run that dies mid-way leaves the spill behind.
+# Untracked is not enough on this repo — several sessions share one checkout and
+# one git index, and an untracked directory is exactly what a careless `git add`
+# sweeps up.
+.tmp/
