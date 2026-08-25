@@ -1,8 +1,6 @@
 ---
 title: What an expression is
 description: A pure function of one row — literals, a qualified column reference, a call into the catalogue, arithmetic, comparison, negation, the ternary, and the edge constructor. Thirteen forms in the HIR, and every node the parser builds has one.
-direction:
-  summary: An expression is a total function of one row — a call into the value library, an operator, a conditional — so it compiles to exactly one SQL expression, and anything the HIR does not need leaves the grammar rather than being parsed and dropped.
 ---
 
 `Γ, r ⊢ e : σ` is the judgement [the algebra](/docs/design/algebra)'s typing rules bottom out in, and
