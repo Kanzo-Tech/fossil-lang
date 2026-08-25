@@ -1502,9 +1502,14 @@ fn unbound_shape_message(
                  checked against nothing"
             ),
             ShapeBindError::Arity { declared, named } => format!(
+                // "no {named}th shape" printed «no 3th shape». English ordinals
+                // are irregular for 1, 2 and 3, and a suffix table for one
+                // message is a second way to write a number down; the sentence
+                // does not need an ordinal at all, because the count it wants is
+                // already the cardinal one two clauses earlier.
                 "`{shape_name}` is declared and bound nothing: the binding names {named} \
                  shape(s) and the document declares {declared}. Names bind by POSITION, \
-                 so there is no {named}th shape for it to take."
+                 so there is no shape {named} for it to take."
             ),
         };
     }
