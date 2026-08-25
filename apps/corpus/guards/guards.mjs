@@ -806,6 +806,83 @@ export const GUARDS = [
       return result(failures, notes);
     },
   },
+  {
+    id: "index-agrees-with-the-payload",
+    title: "An identity index names exactly the rows the payload has",
+    proves:
+      "Where a vertex type declares an `index:`, it is the SAME rows a second time — every " +
+      "`(subject, dense_id)` pair in the payload is in the index and nothing else is — its tiles " +
+      "are sorted by the column it declares, and their ranges are disjoint. Those three together " +
+      "are what let a reader binary-search the footers instead of scanning: a lookup lands in one " +
+      "tile, and the row it finds there is the row the payload has. **An index that disagrees " +
+      "with the payload is worse than no index at all**, because a scan finds nothing while a " +
+      "wrong index returns a vertex that is plausible.",
+    cannotProve:
+      "That a reader USES it. Once this passes, the index and a scan return the same row by " +
+      "construction, so a reader that ignores the index is correct and slow and no property of " +
+      "the artefact tells the two apart. It also says nothing about a type that declares no " +
+      "index: that is a legal corpus, and every one written before the field existed is one.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      for (const type of corpus.types) {
+        if (type.index === null) {
+          notes.push(`${type.name}: no index declared — a lookup by identity scans, which is legal`);
+          continue;
+        }
+        const idx = type.index;
+        if (idx.files.length === 0) {
+          failures.push(`${type.name}: declares an index at ${idx.prefix}/ and no tile is there`);
+          continue;
+        }
+        const key = idx.orderedBy;
+        if (!type.columns.has(key)) {
+          failures.push(`${type.name}: indexes ${key}, which the payload has no column for`);
+          continue;
+        }
+
+        // The same rows, both ways round. `EXCEPT` one way catches a short index
+        // and the other a stale one, and a corpus can be both at once.
+        const pair = `${key}, dense_id`;
+        const row = query(
+          `WITH pay AS (SELECT ${pair} FROM read_parquet(${fileList(type.files)})),
+                idx AS (SELECT ${pair} FROM read_parquet(${fileList(idx.files)}))
+           SELECT (SELECT count(*) FROM (SELECT * FROM pay EXCEPT SELECT * FROM idx)) AS missing,
+                  (SELECT count(*) FROM (SELECT * FROM idx EXCEPT SELECT * FROM pay)) AS stale`,
+        )[0];
+        failures.push(...violations(row.missing, `${type.name}: a payload row the index does not name`));
+        failures.push(...violations(row.stale, `${type.name}: an index row the payload does not have`));
+
+        // Disjoint BETWEEN tiles, which is what makes a footer search possible.
+        // Sorted tiles with overlapping ranges cannot be searched at all.
+        const bounds = query(
+          `SELECT filename, min(${key}) AS lo, max(${key}) AS hi, count(*) AS rows,
+                  count(*) FILTER (${key} IS NULL) AS nulls
+             FROM read_parquet(${fileList(idx.files)}, filename = true)
+            GROUP BY filename ORDER BY lo`,
+        );
+        failures.push(
+          ...violations(
+            bounds.reduce((n, b) => n + Number(b.nulls), 0),
+            `${type.name}: an index row has no ${key}`,
+          ),
+        );
+        for (let i = 1; i < bounds.length; i += 1) {
+          if (String(bounds[i - 1].hi) >= String(bounds[i].lo)) {
+            failures.push(
+              `${type.name}: index tiles overlap — one ends at ${bounds[i - 1].hi} and the next ` +
+                `starts at ${bounds[i].lo}, so no footer names the tile a lookup is in`,
+            );
+          }
+        }
+        notes.push(
+          `${type.name}: ${idx.files.length} index tile(s) over ${key}, ` +
+            `${bounds.reduce((n, b) => n + Number(b.rows), 0)} rows, ranges disjoint`,
+        );
+      }
+      return result(failures, notes);
+    },
+  },
 ];
 
 /** Run every guard, or the subset whose ids are given. */

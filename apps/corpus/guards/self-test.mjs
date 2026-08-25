@@ -279,6 +279,28 @@ const MUTATIONS = [
   // written on the wrong column. Both leave the source half perfect, and a
   // reader that only ever draws never notices either — which is how the in-edge
   // direction went untiled while every guard was green.
+  // The index, broken the way that matters: not by losing a row, which a scan
+  // would also lose, but by pointing one at the wrong address. A missing index
+  // makes a lookup slow; a wrong one makes it CONFIDENT, and the vertex it hands
+  // back is a real vertex with the wrong identity.
+  {
+    guard: "index-agrees-with-the-payload",
+    what: "one index row names the wrong address, so a lookup returns a plausible stranger",
+    layout: "files",
+    mutate: (dir) =>
+      rewrite(
+        join(dir, VERTEX_DIR, "index", "tile0.parquet"),
+        // The FIRST row of this tile by subject order, which is the one row that
+        // is certainly in it. `dense_id = 0` was written here first and did not
+        // fire: the index is sorted by SUBJECT, so the vertex at address zero is
+        // in whichever tile its IRI sorts into, and at fixture scale that is not
+        // tile zero. The mutation has to name a row by the index's own order.
+        `SELECT subject,
+                CASE WHEN subject = (SELECT min(subject) FROM m) THEN dense_id + 1 ELSE dense_id END
+                  AS dense_id
+           FROM m ORDER BY subject`,
+      ),
+  },
   {
     guard: "not-empty",
     what: "the `by_target` tiles are not written, so a hop has one direction",

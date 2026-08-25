@@ -41,7 +41,19 @@ const REFUSED = [
 ];
 
 /**
- * Scan one manifest file into `{ key: scalar | string[] | Array<Record<string, string>> }`.
+ * Scan one manifest file into
+ * `{ key: scalar | string[] | Array<Record<string, string>> | Record<string, string> }`.
+ *
+ * The last of those is new, and it arrived the way the comment below predicted it would not: a key
+ * with an empty value was always read as opening a SEQUENCE, and anything indented under it that
+ * was not a `- ` item was skipped as "a nested collection no guard reads". A guard reads one now —
+ * `index-agrees-with-the-payload` needs `index:`'s `prefix`, `ordered_by` and `chunk_size` — so the
+ * shape is decided by the first child line instead of assumed: `- ` makes it a sequence, `  k: v`
+ * makes it a map, and anything deeper is still skipped.
+ *
+ * The failure this replaces was silent and worth naming: `index:` scanned to `[]`, which is truthy,
+ * carries no `prefix`, and made every reader conclude the corpus declares no index. A manifest that
+ * says something the scanner cannot see reads exactly like one that does not say it.
  *
  * @param {string} path
  * @returns {Record<string, unknown>}
@@ -51,6 +63,8 @@ export function scan(path) {
   const out = {};
   let sequence = null;
   let item = null;
+  /** A key whose value was empty and whose shape the next child line decides. */
+  let pending = null;
 
   const lines = text.split("\n");
   for (const [index, raw] of lines.entries()) {
@@ -68,6 +82,19 @@ export function scan(path) {
       item[continuation[1]] = unquote(continuation[2]);
       continue;
     }
+    // The first child of a key with an empty value, and it is `k: v` rather than
+    // `- `: the key is a MAP. Committed here rather than guessed at the key,
+    // because `property_groups:` and `index:` are written identically until this
+    // line arrives.
+    if (continuation && pending !== null) {
+      const map = {};
+      map[continuation[1]] = unquote(continuation[2]);
+      out[pending] = map;
+      sequence = null;
+      item = map;
+      pending = null;
+      continue;
+    }
     // Anything else indented belongs to a nested collection — a property list inside a property
     // group — and no guard reads one. Skipped rather than refused: it is legal, it is just not
     // addressed by any convention here, and refusing it would make the checker fail on a corpus it
@@ -75,6 +102,11 @@ export function scan(path) {
     if (/^ {2,}/.test(line)) continue;
 
     const element = /^- (.*)$/.exec(line);
+    if (element && pending !== null) {
+      sequence = [];
+      out[pending] = sequence;
+      pending = null;
+    }
     if (element && sequence) {
       const pair = /^([\w]+):\s*(.*)$/.exec(element[1]);
       if (pair) {
@@ -91,10 +123,15 @@ export function scan(path) {
     if (!entry) throw new Error(`${path}:${index + 1} is not a key, an item or a continuation`);
     item = null;
     if (entry[2] === "") {
+      // Shape unknown until the first child line. A key with an empty value and
+      // NO children stays a sequence, which is what `property_groups: []` and an
+      // orientation with no entries have always been.
       sequence = [];
       out[entry[1]] = sequence;
+      pending = entry[1];
     } else {
       sequence = null;
+      pending = null;
       out[entry[1]] = unquote(entry[2]);
     }
   }

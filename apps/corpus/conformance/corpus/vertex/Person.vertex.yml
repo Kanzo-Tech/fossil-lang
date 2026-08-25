@@ -8,4 +8,8 @@ property_groups:
   - name: subject
     data_type: string
     is_primary: true
+index:
+  prefix: index/
+  ordered_by: subject
+  chunk_size: 64
 version: gar/v1

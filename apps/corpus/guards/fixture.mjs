@@ -85,6 +85,7 @@ function renumber(points) {
 export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups", chunkSize } = {}) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, "vertex", "Person"), { recursive: true });
+  mkdirSync(join(dir, "vertex", "Person", "index"), { recursive: true });
   mkdirSync(join(dir, "edge", "Person_knows_Person", "by_source"), { recursive: true });
   mkdirSync(join(dir, "edge", "Person_knows_Person", "by_target"), { recursive: true });
 
@@ -126,6 +127,27 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       : `COPY (SELECT * FROM v ORDER BY dense_id) TO '${lit(join(vertexPrefix, "tiles.parquet"))}'
            (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
 
+  // The identity index: the SAME rows a second time, ordered by `subject` instead
+  // of by position, carrying only the identity and the address it maps to.
+  //
+  // It cannot be a column of the payload, and that is the whole reason it is a
+  // second table: one table has one sort, the payload's is Morton because the
+  // spatial order IS the id space, and a lookup by identity needs the other one.
+  // Tiled with the same arithmetic so a reader that can seek a chunk can seek
+  // this, and written only for the file-per-tile layout, because the row-group
+  // container is the one this format refuses by name.
+  const indexPrefix = join(vertexPrefix, "index");
+  const indexCopy =
+    layout === "files"
+      ? Array.from(
+          { length: tiles },
+          (_, k) =>
+            `COPY (SELECT subject, dense_id FROM v ORDER BY subject
+                    LIMIT ${tileRows} OFFSET ${k * tileRows})
+               TO '${lit(join(indexPrefix, `tile${k}.parquet`))}' (FORMAT PARQUET);`,
+        ).join("\n")
+      : "";
+
   // Both orientations tiled, each on the column it is ordered by: the out-edges
   // of a vertex are in the `by_source` tile its id names and the in-edges in the
   // `by_target` one, and a fixture that only wrote the source half would leave
@@ -150,6 +172,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       SELECT src_dense::UINTEGER AS src_dense, dst_dense::UINTEGER AS dst_dense
         FROM read_csv('${lit(edgeCsv)}', header = true);
     ${vertexCopy}
+    ${indexCopy}
     COPY (SELECT * FROM e ORDER BY src_dense, dst_dense)
       TO '${lit(join(edgeDir, "by_source.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});
     COPY (SELECT * FROM e ORDER BY dst_dense, src_dense)
@@ -188,6 +211,13 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  - name: subject",
       "    data_type: string",
       "    is_primary: true",
+      // Declared only when it was written. A corpus without one is legal and
+      // readable — `subject = ?` over every tile returns the same row the index
+      // would have found — so its absence is a cost rather than a gap, and the
+      // reader is what says which of the two it paid.
+      ...(indexCopy === ""
+        ? []
+        : ["index:", "  prefix: index/", "  ordered_by: subject", `  chunk_size: ${tileRows}`]),
       "version: gar/v1",
       "",
     ].join("\n"),

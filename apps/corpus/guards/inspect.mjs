@@ -135,6 +135,27 @@ export function inspect(root) {
       count: files.length === 0 ? 0 : Number(scalar(`SELECT count(*) FROM read_parquet(${fileList(files)})`)),
       /** The staged single file the layout pass consumes. A reader that globs picks it up. */
       staged: join(root, `${prefix}.parquet`),
+      /**
+       * The identity index, when the manifest declares one, or `null`.
+       *
+       * `null` is a legal corpus rather than an incomplete one: a lookup by
+       * subject answers without it, by scanning, so its absence is a cost and
+       * not a gap. Every corpus written before the field existed reads this way.
+       */
+      index: (() => {
+        const declared = info.index;
+        if (declared === undefined || declared === null) return null;
+        const indexPrefix = String(declared.prefix ?? "").replace(/\/+$/, "");
+        if (indexPrefix === "") return null;
+        const tiles = payload(join(root, prefix, indexPrefix));
+        return {
+          prefix: indexPrefix,
+          orderedBy: String(declared.ordered_by ?? ""),
+          chunkSize: BigInt(declared.chunk_size ?? 0),
+          files: tiles,
+          layout: layoutOf(tiles),
+        };
+      })(),
     };
   });
 

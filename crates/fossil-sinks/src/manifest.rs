@@ -130,8 +130,70 @@ pub struct VertexInfo {
     pub prefix: String,
     /// Property groups (column groupings → one file per group per chunk).
     pub property_groups: Vec<PropertyGroup>,
+    /// **A second copy of this type, ordered by identity instead of by
+    /// position** — the index that turns a lookup by subject IRI from a scan
+    /// into a seek. See [`VertexIndex`].
+    ///
+    /// `Option`, and it is worth saying why when [`Self::vertex_count`] argues
+    /// at length that an optional count reproduces the gap it closes. The two
+    /// are not the same kind of field. A missing count leaves a question
+    /// **unanswerable** — a reader cannot tell a truncated corpus from a
+    /// complete one, and no amount of work recovers the answer. A missing index
+    /// leaves the same question answerable and **slower**: `subject = ?` over
+    /// every tile returns exactly the row the index would have found. So its
+    /// absence is a cost a reader can measure and report, which is what
+    /// `openCorpus` does, rather than a fact it cannot obtain.
+    ///
+    /// Every corpus written before this field existed has none, and each of
+    /// them stays readable. That is the other half of the same argument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<VertexIndex>,
     /// `GraphAr` format version — always [`GRAPHAR_VERSION`] (`gar/v1`).
     pub version: String,
+}
+
+/// Where a vertex type's identity index lives, and what it is ordered by.
+///
+/// # Why a tiled sibling rather than one file
+///
+/// The payload is `vertex/<Type>/chunk{k}.parquet` in Morton order, because the
+/// spatial order IS the id space and that is what makes a window a range. An
+/// index has to be in a different order — by identity — so it cannot be a
+/// column of that table: one table has one sort, and adding `subject_hash` as a
+/// second key would break the order the window depends on.
+///
+/// So it is a second table, and it is **tiled like the first one**, with the
+/// same `chunk_size` and the same `tile{k}` spelling under a prefix of its own.
+/// A single file would be simpler to write and to read, and it is the container
+/// this format refuses by name everywhere else: at five million vertices the
+/// index is one ~40 MB object where the payload is a hundred and twenty-two
+/// addressable ones. A reader that already knows how to seek a tile needs
+/// nothing new to seek this.
+///
+/// # What a reader does with it
+///
+/// The tiles are ordered by [`Self::ordered_by`], so the footer statistics of
+/// each one carry a disjoint `min`/`max` range of that column and a binary
+/// search over the footers names the one tile that can hold a given value —
+/// which is exactly what the payload's own footers cannot do for `subject`,
+/// because Morton order and lexicographic order have nothing to do with each
+/// other and every tile's range overlaps every other's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VertexIndex {
+    /// Path prefix for the index tiles, e.g. `"index/"`, relative to the vertex
+    /// type's own [`VertexInfo::prefix`]. Tile `k` is `<prefix>tile{k}.parquet`.
+    pub prefix: String,
+    /// The column the tiles are sorted by, and the one a lookup is keyed on.
+    /// `"subject"` today, and named rather than assumed because a corpus whose
+    /// identity is some other column would index that column instead.
+    pub ordered_by: String,
+    /// Rows per index tile. The same as [`VertexInfo::chunk_size`] when the
+    /// writer has no reason to differ, and declared separately because tile `k`
+    /// of the index holds the `k`th slice **of the sorted order**, which has
+    /// nothing to do with the `dense_id` range tile `k` of the payload holds.
+    /// Reusing the payload's number would read as an alignment that does not
+    /// exist.
+    pub chunk_size: u64,
 }
 
 /// `GraphAr` edge-info manifest (one per `(src_type, edge_type, dst_type)` triple).
@@ -356,8 +418,19 @@ impl VertexInfo {
             chunk_size,
             prefix: prefix.into(),
             property_groups,
+            // No index by default, and that is not a stub: writing one is a
+            // second pass over the rows in a different order, which the caller
+            // that HAS those rows decides to pay. `with_index` is how it says so.
+            index: None,
             version: GRAPHAR_VERSION.to_string(),
         }
+    }
+
+    /// Declare that this type carries an identity index. See [`VertexIndex`].
+    #[must_use]
+    pub fn with_index(mut self, index: VertexIndex) -> Self {
+        self.index = Some(index);
+        self
     }
 
     /// Serialize this vertex-info to `GraphAr` v1.0.0 YAML.
