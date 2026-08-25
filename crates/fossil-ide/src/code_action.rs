@@ -43,10 +43,17 @@ use crate::position::line_index;
 ///
 /// `diagnostics` is the set the LSP `textDocument/codeAction` request passes in
 /// the request params (the diagnostics the host already published for `file`);
-/// each is matched against the three action triggers by the STRUCTURED fields it
-/// carries (`did_you_mean`, the `undeclared prefix` message + span, and
-/// `suggestion_source`). Only diagnostics whose span intersects `range` are
-/// considered, mirroring the LSP "actions for the current selection" contract.
+/// each is matched against the two action triggers by the STRUCTURED fields it
+/// carries — `did_you_mean` and `suggestion_source`. Only diagnostics whose span
+/// intersects `range` are considered, mirroring the LSP "actions for the current
+/// selection" contract.
+///
+/// It said THREE, and named «the `undeclared prefix` message + span» as the
+/// middle one. Prefixes left the language — `grammar.bnf` carries the tombstone
+/// («`prefix` was a keyword and is gone with the CURIE») — and the action went
+/// with them; the two comments below are what is left of it. The stale third
+/// trigger was also the only one that was not a structured field, which is the
+/// other half of why it is gone: it parsed a message.
 ///
 /// `range` is a UTF-16 LSP range; all produced edits are UTF-16 too.
 #[must_use]
