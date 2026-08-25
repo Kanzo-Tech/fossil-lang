@@ -1,123 +1,113 @@
 ---
-title: The dot, and what it costs
-description: One access operator, one binder, and verbs as catalogue rows rather than grammar — with the one thing this design pays for stated as a cost and the three observations that would reverse it.
+title: The dot
+description: One access operator, and the type on the left decides the members. Why that single rule is what makes the standard library generic, why you declare no functions of your own, and the one cost it is paid for with.
 ---
 
 fossil has one access operator, and it means one thing.
 
 > **`.` means *member of*, and the type on the left decides what is on the right.**
 
-| On the left | Its members are |
+| On the left of a `.` | Its members are |
 | --- | --- |
 | a **namespace** — `io`, `str`, `parse`, `clean` | its functions |
 | a **type** — `User`, `Person` | its fields |
 | a **relation** — `Users`, `Adults` | its operations — `where`, `select`, `join` |
 
-That is the entire access story. `User.email` is a field of a type; `str.lower` is a function of a
-namespace; `Adults.where(…)` is an operation of a relation. Reading any fossil expression requires
-knowing what is on the left, and nothing else.
+Two more glyphs, and they are different acts rather than two spellings of one:
 
-## Why there is no second operator
+| | |
+| --- | --- |
+| `:=` | introduces a name — a shape, a source, a derived relation; the left-hand side says which |
+| `=` | fills a slot the shape declared — `name = User.name`, inside a mapping body |
 
-The obvious alternative is Rust's, where `::` walks a path known at compile time and `.` accesses a
-value at run time. It is a good distinction in Rust. It has **no referent here**.
-
-A fossil program does not execute. It is elaborated into
-[an operator tree](/docs/design/algebra) and lowered; `User.age` is not a field read at run time,
-it is a column reference that becomes SQL. There is no moment at which one side of that distinction
-is happening and the other is not, so importing the two operators would import a difference the
-language does not have — and a reader would have to learn a rule whose justification they can never
-observe.
-
-One operator, and the type answers.
+Reading any fossil expression needs the type on the left and nothing else. The obvious alternative is
+Rust's, where `::` walks a path known at compile time and `.` reaches into a value at run time; it
+has no referent here. A fossil program does not execute — it is elaborated into
+[an operator tree](/docs/design/algebra) and lowered, so `User.age` is a column reference that
+becomes SQL rather than a field read. There is no moment at which one side of that distinction is
+happening and the other is not, so the second operator would be a rule whose justification a reader
+can never observe.
 
 ## Verbs are rows, not grammar
 
 `where`, `select` and `join` are not keywords. They are catalogue entries whose receiver type is a
-relation, in exactly the way `lower` is a catalogue entry whose receiver type is a string. Nothing
-about them is special except what they operate on.
+relation, in exactly the way `lower` is an entry whose receiver is a string.
 
-The consequence is the point: **a new capability is a row, never a production.** Adding an operation
-over relations does not touch the grammar, the parser, the checker's dispatch or the editor's
-completion, because none of those know the names of verbs — they know how to ask a type what it has.
-That is the same property [the provider registry](/docs/design/type-providers) has, and the same one
-that lets [the standard library be generic](/docs/design/generic-functions), and it is not three
-properties. It is one, seen from three sides.
+> **A new capability is a row, never a production.**
 
-It also removes an ambiguity the language would otherwise have to carry. When a namespace is
-something that is not a value, `clean.slug` without parentheses has to mean "a named function, not
-applied", and that is a special case in the parser justified entirely by the namespace's oddity. With
-typed members, there is no such case to write.
+Adding an operation over relations touches neither the grammar, the parser, the checker's dispatch
+nor the editor's completion, because none of them knows the name of a verb — they know how to ask a
+type what it has. That is the same mechanism as [the provider registry](/docs/design/type-providers)
+and as completion after a dot: one property seen from three sides, not three properties.
 
-## `:=` binds, `=` assigns
+A row is enough only if it declares **everything** the verb takes, including whether an argument is
+written with its name. A join's condition is `on = …`; with the name missing from the signature the
+binder would fill `on` from the second positional slot and `join(User, a == b)` would start
+compiling. Five kinds fill a position and two of them name rather than evaluate
+(`crates/fossil-hir/src/stdlib.rs:311`):
 
-Two glyphs, and the distinction is real rather than decorative.
+| kind | what fills it | verbs |
+| --- | --- | --- |
+| `Rows` | the receiver relation itself | every verb's position 0 |
+| `Scalar(T)` | an expression of that type | `take`, `drop` |
+| `Predicate` | a condition over the receiver's rows | `where`, a join's `on` |
+| `Column` | a qualified column reference — a NAME, not a value | `select`, `sort`, `distinct` |
+| `Binding` | the name of a source binding, with `X as Y` | `join`, `union` |
 
-`:=` introduces a name — a shape binding, a source binding, a derived relation. What kind of thing is
-being bound is said by the left-hand side, not by the operator, so one binder suffices for all of
-them.
+## The alternative grows as *n · m*
 
-`=` is what it looks like everywhere else: an assignment inside a mapping body, including the
-identity slot. The line `name = User.name` puts a value into a slot the shape declared; it does not
-introduce a name.
+The established mapping languages spell an operation per shape of data: "filter" is not a function
+over a row type, it is a configuration construct with its own vocabulary, and everything new you
+might do to a source arrives as new vocabulary in the format.
 
-The rule to hold on to is that a binder appears where something enters scope and an assignment
-appears where a slot gets filled. Those are different acts, and a language that spells them the same
-way makes the reader work out which is happening from context.
+| *n* operations, *m* kinds of data | constructs needed |
+| --- | --- |
+| one construct per operation per shape | ***n · m*** |
+| one generic catalogue entry per operation | ***n*** |
 
-## The cost, stated as a cost
+A configuration format with no type system has no mechanism for generalising, so it tends towards the
+product: those surfaces grow monotonically and nothing is ever removed from one. Here `where` takes a
+relation of any row type and a predicate over that same row type, so the *m* dimension disappears
+into the receiver — and the predicate is an ordinary expression passed as an argument, which makes a
+filter comparing a string to a number a compile error where it is written.
 
-This design has one price, and it is paid in the corpus rather than in the compiler.
+## Why you declare no functions of your own
 
-**One catalogue entry is reachable by two paths.**
+A user-defined function has to survive the lowering. Admitting one means answering — permanently, and
+in the type system — what happens to recursion, to a function that closes over a relation, to a
+function used where the engine below has no corresponding construct. Every answer is either a
+restriction the user learns or a capability the engine grows.
 
-<Program src="contacts/contacts.fossil" region="two-paths" title="contacts.fossil" />
+Not having them keeps the promise checkable: everything callable has a signature, every signature has
+a known lowering, and *if it compiles, it runs* is a property of the whole language rather than of
+the fragment that happens to lower cleanly. What replaces them is composition of catalogue entries,
+which works because the entries are generic — and an entry lands when the second program that needs
+it arrives and not before, an admission rule that is
+[in the discard list](/docs/design/discarded) with the evidence that produced it.
 
-Those two lines call the same entries. `Contact.email.trim()` reaches `trim` through the value;
-`str.trim(Contact.name)` reaches the same `trim` through the type. Both are correct, both will
-appear in real programs, and anybody reading a corpus of fossil programs will see both spellings of
-the same idea.
-
-The house rule against two ways of saying one thing is a real rule, and this is a genuine exception
-to the letter of it. What makes it acceptable is that it is a **resolution rule** rather than two
-constructs: there is one entry, one signature, one implementation, and two ways to name the same
-member — which is precisely `s.len()` ≡ `str::len(&s)` in Rust and `s.upper()` ≡ `str.upper(s)` in
-Python, the two languages the largest number of programmers read. The cost is that it has to be
-explained once, and it is explained once, in
-[the book's page on expressions](/docs/book/expressions).
+This design has one price, paid in the corpus rather than in the compiler: **one entry is reachable
+by two paths.** `x.trim()` and `str.trim(x)` are both correct and both appear in real programs, so a
+corpus of fossil carries two spellings of one idea — a genuine exception to the house rule against
+exactly that. What makes it acceptable is that it is a **resolution rule** rather than two
+constructs: one entry, one signature, one implementation, which is `s.len()` ≡ `str::len(&s)` in Rust
+and `s.upper()` ≡ `str.upper(s)` in Python. It is spelled out once, in
+[one catalogue row, two ways to reach it](/docs/design/expressions#one-catalogue-row-two-ways-to-reach-it).
 
 ## What would reverse this
 
-Three observations, in the order they would arrive.
-
-**1. A type whose set of members cannot be decided statically.** The entire design rests on the
-receiver being known at compile time. A receiver whose members depend on data — a source format
-whose columns vary per row, a dynamically assembled record — would break not the syntax but the
-premise underneath it, and the answer would have to be a different one.
-
-**2. The two paths of the resolution rule being used for different things.** The moment an idiom
-appears where `str.lower(x)` means something `x.lower()` does not, they stop being one entry reached
-two ways and become two spellings — which is the thing the house rule actually prohibits. This is
-observable in the corpus rather than arguable: it is a question about what people wrote, and the
-corpus is where to look.
-
-**3. A real vocabulary whose short names collide so often that renaming becomes the norm.** Property
-keys are the last segment of a predicate IRI, and
-[the rename](/docs/design/type-providers) exists for the occasional collision between vocabularies.
-If a working program needs a rename on most of its properties, the short name has stopped being the
-name, and the argument for bare keys goes with it.
+1. **A type whose members cannot be decided statically** — a source whose columns vary per row, a
+   dynamically assembled record. That breaks the premise under the syntax rather than the syntax.
+2. **The two paths used for different things.** The moment `str.lower(x)` means something `x.lower()`
+   does not, they are two spellings rather than one entry. Observable in the corpus, not arguable.
+3. **A vocabulary whose short names collide so often that renaming is the norm.** Then the short name
+   has stopped being the name, and [the rename](/docs/design/type-providers) goes with it.
 
 ## What is still open
 
-Two questions this design raises and does not close, stated as questions rather than as gaps.
+**Where `select` lives when the relation came from a join.** A join's row type is the union of two
+schemas; which side qualifies, and whether the qualification survives into the mapping body, has more
+than one defensible answer.
 
-**Where `select` lives when the relation came from a join.** A join produces a relation whose row
-type is the union of two schemas; projecting from it is well defined, and *how it is written* — which
-side qualifies, and whether the qualification survives into the mapping body — is a surface question
-with more than one defensible answer.
-
-**Whether `io` should also name the destination.** Sources are named by a provider in the program;
-the destination is an input of the command that runs it. There is a real argument on each side — a
-destination is an operational decision belonging to whoever launches the job, and it is also the one
-part of a program's meaning that lives outside the program. What would settle it is a program whose
-output location is part of what makes it that program rather than another one.
+**Whether `io` should also name the destination.** A destination is an operational decision belonging
+to whoever launches the job, and it is also the one part of a program's meaning that lives outside
+the program. A program whose output location is part of what makes it that program would settle it.

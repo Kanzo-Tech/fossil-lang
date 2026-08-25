@@ -1,270 +1,91 @@
 ---
-title: One engine
-description: The language runs on DataFusion, and DuckDB leaves the compiler.
+title: One engine in the compiler
+description: The compiler runs on DataFusion and links no database. Why wasm32 is the reason rather than a preference, what holds it, and why the corpus read path keeps DuckDB on purpose.
 ---
 
-fossil compiles to relational algebra and something has to execute it. Two things
-did: DataFusion in `fossil-df`, and DuckDB — bundled, compiled from C++ — in
-`fossil-layout`, `fossil-engine`, `fossil-mcp` and `fossil-cli`.
+fossil compiles to relational algebra and something has to execute it. Two things did: DataFusion in
+`fossil-df`, and DuckDB — bundled, compiled from C++ — across the layout pass, the engine and the
+hosts. **The compiler runs on DataFusion; DuckDB leaves the compiler and stays in the hosts.** The
+argument is four sentences:
 
-**The language runs on DataFusion. DuckDB leaves the compiler.**
+1. **wasm32 is the reason, not taste.** *fossil is a compiler consumed as a WASM library* was true of
+   `fossil-wasm` and false of the layout pass and the engine, and one dependency is what made it half
+   true. Both `compile_error!` tripwires named bundled DuckDB.
+2. **Keeping it is not free.** `libduckdb-sys`'s build script is **98.14 s of a 165 s cold build**,
+   59 % of the wall clock, because `features = ["bundled"]` compiles DuckDB from C++.
+3. **`deny.toml` is the ratchet.** `cargo deny check bans` denies both engines workspace-wide and
+   names the crates permitted to wrap each, so adding a name is the review the rule exists to force.
+4. **The read side is untouched**, deliberately — the last section.
 
-## Why it is not a preference
+## Where each engine is reachable from
 
-`fossil-layout` and `fossil-engine` each carried a `compile_error!` for
-`wasm32`, and the reason named in both is bundled DuckDB. So the sentence this
-project is built on — *fossil is a compiler consumed as a WASM library* — is
-true of `fossil-wasm` and false of the layout pass and the engine. One
-dependency is what makes it half true.
+Measured 2026-08-25 with `cargo tree -e normal -i <engine> --workspace`, the authority here and never
+prose.
 
-**Both are discharged.** `fossil-layout`'s tripwire is gone. `fossil-engine`
-still has one and it no longer says DuckDB: what makes it native is that `run`
-writes files to a directory. See below.
+| crate | reaches `duckdb` | `wasm32` | what it is |
+| --- | --- | --- | --- |
+| `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
+| `fossil-mcp` | **directly** | no | the native binding for the corpus verbs |
+| `fossil-cli` | via `fossil-introspect` | no | a host: it introspects, then compiles |
+| `fossil-lsp` | via `fossil-introspect` | no | a host, for the reason `fossil check` is one |
+| `fossil-engine` | dev-dependency only | no — `run_to_dir` writes a directory | the native host |
+| `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
 
-Remove it and the whole compiler is WASM-capable. That is the decision; the rest
-is consequence.
+Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` was an
+unused edge carrying its own wasm32 refusal for an unrelated reason, and `cargo check` never reports
+an unused dependency. The crate still links `datafusion` transitively through `fossil-df`, which is
+not the same claim — what it takes from there is one Arrow → Parquet encoder.
 
-## What it costs, measured
+In `fossil-engine` the reason changed rather than the fact: `pre_introspect` and the credentials went
+to `fossil-introspect`, a crate a **host** takes, and `run` takes a map of connection URLs rather
+than a `RunCreds`, so the compiler cannot see a secret. One wasm32 error is left and it is the
+filesystem — `fossil_df::run_to_dir` writes a corpus to a local directory. **`check` is wasm-capable
+and `run` is not, in one crate**, and that does not contradict the sentence the project is built on
+the way bundling a database did, because writing files to a disk is what a native host does. None of
+it is the DataFusion rewrite either: **DuckDB is still the engine that `DESCRIBE`s, on both sides.**
 
-`libduckdb-sys`'s build script is **98.14 s of a 165 s cold build — 59 % of the
-wall clock**, because `features = ["bundled"]` compiles DuckDB from C++. It is
-one shared unit, not one per binary; the sixteen test binaries that link it link
-a static library already built. Removing it removes that unit.
+## What the layout pass paid for it
 
-## What has to be rewritten, and it is three things
-
-1. **The layout pass — done, and `fossil-layout` no longer links an engine at
-   all.** It reads and writes Parquet with `arrow-rs` and holds no connection. The finding is that **none of the algorithm was in SQL**:
-   Louvain and Morton were already Rust, and the SQL only read, applied arrays
-   that Rust had computed, sorted, and wrote. What replaced it is three Arrow
-   kernels — `concat_batches`, `lexsort_to_indices`, `take` — plus the encoder
-   `fossil-df` already had.
-2. **The corpus verbs' native executor.** `ConnectionExecutor` runs the verb SQL
-   `fossil-graph` produces. DataFusion reads Parquet natively. This one is
-   `fossil-mcp`'s, and it is the piece this page's last section argues should
-   NOT move: the host brings the engine there.
-3. **The assertions — done.** `fossil-cli` and `fossil-engine` open an in-memory
-   DuckDB to read the Parquet they just wrote. That is a test convenience, not a
-   dependency of the language, and it is a **dev**-dependency in both now.
-
-**Where the tripwire stands now.** `fossil-layout`'s is **gone** — the crate
-compiles for `wasm32`, and `cargo xtask wasm-check` covers it because the crate
-declares `[package.metadata.fossil] wasm = true` and the gate takes that as a
-second root beside the cdylib closure. Removing DuckDB from it was necessary and
-not sufficient: `fossil-resolver` was an unused edge carrying its own wasm32
-`compile_error!` for an unrelated reason, and `cargo check` never reports an
-unused dependency, so only building for the target found it.
-
-**`fossil-engine` links no database either, and the reason it is still native
-changed.** Its tripwire named `fossil-layout`, then named its own `DuckDB`.
-Neither is true now: `pre_introspect` and the credentials that let it reach a
-cloud source are `fossil-introspect`, a crate the HOST takes.
-
-That shape was not invented for this. **The browser has always done it**:
-`fossil-wasm` implements `System::descriptors`, `@fossil-lang/introspect`
-describes through the page's DuckDB-WASM, and the compiler reads the cache. The
-native side did the same job from inside the compiler, which is what made the
-compiler open a connection. `fossil-cli` now introspects and then compiles —
-the browser's order — and `fossil_engine::run` takes a map of connection URLs
-instead of a `RunCreds`, so the compiler cannot see a secret.
-
-It matters that this is not the DataFusion rewrite: **`DuckDB` is still the
-engine that DESCRIBES, on both sides**, so nothing about what the compiler
-infers changed and `rust-parity.test.ts` still compares two implementations of
-one capability. The three blockers below are all sidestepped rather than paid.
-
-### What is left is the filesystem, and it is a different sentence
-
-`cargo check --target wasm32-unknown-unknown -p fossil-engine` now reports
-exactly one error: `fossil_df::run_to_dir` is itself `cfg(not(wasm32))` because
-it writes a corpus to a local directory. `check` is wasm-capable; `run` is
-not, in one crate.
-
-And that does not contradict *fossil is a compiler consumed as a WASM library*
-the way bundling a database did. Writing files to a disk is what a native host
-DOES — the browser's host writes its bytes back over its own seam. Splitting
-`check` from `run` is a decision, not a cleanup, and nothing forces it today.
-
-### The three blockers, kept because they price the OTHER route
-
-If the native side ever should describe through DataFusion rather than `DuckDB`,
-this is what it costs — measured, and unchanged by the move above except in
-**which crate would pay**. They were written when the `DESCRIBE` was
-`fossil-engine`'s; it is `fossil-introspect`'s now, and the bill moved with it:
-
-1. **No runtime.** `fossil-introspect` names `tokio` nowhere, and neither does
-   `fossil-engine`. DataFusion's schema inference is async, so the crate that
-   describes would have to take one.
-2. **DataFusion cannot see a cloud source at all, natively — confirmed against a
-   real S3.** See *The cloud asymmetry* below; it is no longer a grep.
-3. **The browser introspects through DuckDB-WASM and that is not changing.** Two
-   engines disagree on CSV type sniffing, and `rust-parity.test.ts` exists
-   because «the browser and the CLI answer the same program differently» is a
-   bug. Its Rust side is `crates/fossil-introspect/src/lib.rs` — it followed the
-   code, and the crate carries a comment saying the test that reads it runs under
-   **pnpm**, because `cargo test` will not tell you.
-
-### Where `DuckDB` is now, and what keeps it there
-
-The whole decision is a ratchet over ground already held, so the thing that
-holds it is `deny.toml` rather than a habit. `cargo deny check bans` denies
-`duckdb` workspace-wide and names the crates permitted to wrap it, which makes
-adding a name to that list the review this rule exists to force. Measured
-2026-08-23 with `cargo tree -e normal -i duckdb --workspace`, which is the
-authority there and never prose: **two normal edges — `fossil-introspect` and
-`fossil-mcp`** — plus `fossil-engine`, `fossil-layout` and `fossil-cli` holding
-it as a dev-dependency, to read written Parquet back or to bring an engine to a
-test.
-
-The list said the opposite for a day. It carried four names, two of which had
-just demoted `duckdb` to a dev-dependency, and it did not carry
-`fossil-introspect` — the one crate that had taken over linking it. So
-`cargo deny check bans` exited 2 with *«direct parent `fossil-introspect` of
-banned crate `duckdb` was not marked as a wrapper»*, and CI's `cargo-deny` job
-went red with it, and nothing said so, because nobody runs it locally and the
-job's name does not say which of advisories / licenses / bans failed.
-
-## What the first piece cost, measured — and the mechanism was misattributed
-
-The memory budget no longer reaches the layout. `--memory` used to open the
-connection and cap it with `apply_memory_budget`, and DuckDB's sort spilled to
-`temp_directory` when it hit the cap; nothing in the Arrow pass spills.
-
-That much is confirmed. **Measured 2026-08-22**, one million nodes and ten
-million edges through `fossil run` with `FOSSIL_MEM_PROBE=1` — two vertex types
-(the nodes, and the ten million link vertices the edge mapping also produces),
-two adjacency targets, 847 MB of output in 5,376 Parquet files:
-
-| | no budget | `--memory-gib 2` |
-|---|---|---|
-| `execute_graph` peak | 7.42 G | **2.21 G** |
-| layout entry → peak | 7.93 → 9.25 G | 2.80 → **4.80 G** |
-| what the layout ADDS | +1.32 G | **+2.00 G** |
-
-**The budget works on the half it reaches and the post-pass walks through it.**
-Capped at 2 GiB the executor obeys — 7.42 G becomes 2.21 G — and then the layout
-adds two gigabytes on top, ending at 2.4× the cap. That is the valve that is
-missing, and it is now a number rather than an inference.
-
-**But the mechanism this section named is not where the memory goes.** It blamed
-the adjacency: `concat_batches` over the whole relation and `lexsort_to_indices`
-across it. Measured, `remap adjacencies + write edge tiles` is **+0.07 G**
-unbudgeted and **+0.17 G** capped, in 1.9 s — ten million edges is two `u32`
-columns, about 80 MB, and the arithmetic that produced "+2 GB" was applied to the
-wrong relation.
-
-Where it actually goes is the VERTEX half of the same pass: `read vertices`
-**+0.95 G** and `gather + replace` **+0.51 G** under the cap. `layout.rs` says so
-in its own comment at the read — *«It is the largest allocation this pass
-makes»* — so the pass knew and the design note did not. A ten-million-row vertex
-file carries a subject IRI and every property per row; an adjacency carries two
-integers.
-
-The figure «roughly +2 GB» survives to two significant figures and its
-explanation does not, which is the more useful half of the correction: a valve
-on the adjacency sort would buy 0.17 G. What needs one is the vertex read, and
-what it needs is chunking — the file is already emitted as tiles, and the pass
-reads it whole to re-order it.
-
-## The valve, fitted and measured
-
-**The pass held the vertex file three times over.** `read_parquet` gave a
-`Vec<RecordBatch>`; `concat_batches` made a second full copy beside it;
-`take_record_batch` over the whole permutation made a third. Nothing needed the
-relation to be contiguous — what follows wants **one tile at a time**, and
-`interleave_record_batch` gathers across batches, so the copy that was made to
-enable the gather is now the tile the gather produces. Three copies became one,
-and `gather + replace` and `write vertex chunks` became one phase because they
-are now one loop.
-
-Measured with `cargo run --release -p fossil-layout --example enrich_memory`,
-which exists for this and reproduces the shape of the real finding at a scale
-that fits on a laptop — wide rows (a subject IRI and two properties, ~124
-bytes/row) over a planted partition, so the gather is a real scatter:
-
-| | 1M / 117 MB, before | 1M, after | 2M / 236 MB, before | 2M, after |
-|---|---|---|---|---|
-| `read vertices` | +0.21 G | **+0.06 G** | +0.47 G | **+0.32 G** |
-| the gather | +0.11 G | **+0.00 G** | +0.25 G | **+0.00 G** |
-| **the vertex half** | **+0.32 G** | **+0.06 G** | **+0.72 G** | **+0.32 G** |
-| whole-pass peak | 1.14 G | **0.88 G** | 2.25 G | **1.86 G** |
-
-Total wall clock 30.4 s → 30.7 s at 2M, which is inside the run-to-run spread of
-`community_hierarchy` alone (27.6 s against 28.0 s in the same pair). The valve
-costs nothing measurable.
-
-**What is left is the read, and it is now the whole of it.** The +0.32 G at 2M is
-the file held ONCE, as Arrow. Getting below that means not holding it at all —
-reading the source in chunks and scattering into tiles that arrive out of order,
-which is a multi-pass spill and a different change from this one. The three-copy
-figure was the cheap two thirds.
-
-## The cloud asymmetry, run against a real S3
-
-**Measured 2026-08-23**, MinIO in Docker, a program reading `@sales/users.csv`:
+`--memory` used to cap the DuckDB connection and DuckDB's sort spilled; nothing in the Arrow pass
+spills. Measured 2026-08-22, one million nodes and ten million edges through `fossil run`:
 
 | | |
-|---|---|
-| introspection | **works** — `id: Integer`, `name: String` |
+| --- | --- |
+| `execute_graph` peak, capped at 2 GiB | **2.21 G** against 7.42 G uncapped — the executor obeys |
+| what the layout adds on top | **+2.00 G**, ending at 2.4× the cap |
+| where it goes | the **vertex** read, not the adjacency sort, which is +0.17 G |
+
+A vertex row carries a subject IRI and every property; an adjacency row carries two integers. The
+valve is fitted — `interleave_record_batch` gathers across batches, so the pass no longer holds the
+vertex file three times over — and the vertex half went from +0.32 G to +0.06 G at a million rows at
+no measurable time cost. What is left is the file held **once**, as Arrow.
+
+## What DataFusion still cannot do natively
+
+Measured 2026-08-23 against a real S3 (MinIO in Docker), reading `@sales/users.csv`:
+
+| | |
+| --- | --- |
+| introspection | **works** — `id: Integer`, `name: String`, through the host's DuckDB |
 | execution | `Internal error: No suitable object store found for s3://sales/users.csv` |
 
-So a program reading a cloud `@conn` source **type-checks against the columns it
-really has**, through the host's DuckDB and the connection's `CREATE SECRET`, and
-then cannot run. The half that works is not a fallback: the types come back from
-a `DESCRIBE` that reached the bucket.
+A cloud `@conn` source type-checks against the columns it really has and then cannot run. `run`
+refuses it explicitly now, naming the source; registering a native object store is a feature rather
+than a correction. `crates/fossil-engine/tests/cloud_source.rs` pins both halves and asserts the
+*introspection* too, because a test that only asserted the failure would pass with a wrong credential.
 
-`crates/fossil-engine/tests/cloud_source.rs` pins both halves and skips when no
-S3 answers, which is why it asserts the INTROSPECTION too — a test that only
-asserted the failure would pass just as well if the credential were wrong, and
-that is the opposite finding.
+## Why this does not reopen "unifying the two execution engines"
 
-**What changed, and what did not.** `run` now refuses a cloud source the way it
-already refused a cloud dest, naming the source and saying the confusing part
-out loud: *it type-checked because `check` introspects through DuckDB, which
-does read it*. That closes nothing — it stops the gap surfacing as a DataFusion
-API name in an operator's terminal. Registering a native object store is the
-fix, and it is a feature, not a correction.
+[Unifying the two execution engines](/docs/design/discarded) is a discarded alternative, and it is a
+different decision from this one rather than the same one taken twice.
 
-## The one measured gap, and it is closed
+That row is about the corpus **read** path, where `fossil-graph` builds verb SQL and a host executes
+it — `@fossil-lang/graph` through a host-provided DuckDB-WASM callback, `fossil-mcp` through a
+connection. Rewriting it as DataFusion plan construction costs roughly nine hundred lines, adds
+several megabytes to the read path, and loses the range-request file system that makes reading a
+corpus over plain HTTP work at all. Still rejected.
 
-**DataFusion's `read_json` is NDJSON only; DuckDB's reads arrays.** It was the
-`sightings` conformance program, failing with `Json error: Not valid JSON: EOF
-while parsing a list`, and the choice it forced was named here before it was
-made: either the program declares NDJSON, or something supplies an array reader.
-
-The program does not declare NDJSON. Letting the engine's reader decide what
-`io.json` MEANS is the accident redefining the design — a `.json` file
-ordinarily holds an array, and DuckDB, which still reads the corpus on the other
-side, reads one. So `read_json_source` sniffs the first non-whitespace byte and
-reads both shapes, and `a_json_array_and_ndjson_read_the_same` holds the two
-against each other.
-
-**An array materialises, and that is the format's property and not the
-reader's.** You cannot find the end of record N without parsing from the start,
-so any array reader is bounded by the file — which is why NDJSON exists and why
-it keeps the streaming path untouched. It is the one exception to
-`read_source`'s «never pre-materialised», and it is forced rather than chosen.
-
-## What is NOT affected, and it is the half that looks like it should be
-
-The corpus **read** side keeps DuckDB, and it is not our dependency there. In
-the browser `@fossil-lang/graph` delegates execution to a host-provided
-DuckDB-WASM callback: the host brings the engine, the binding brings the SQL.
-Native, `fossil-mcp` is the same shape. Nothing about this decision asks a
-consumer to stop using DuckDB to read a corpus — it asks the *compiler* to stop
-containing one.
-
-## The measurement that does not decide this, and why
-
-F7 measured `arrow-rs` against `COPY` in the layout post-pass and reverted: it
-did not pay. That was a **performance** measurement of a writer, taken when the
-goal was a faster writer. The goal here is one engine and a compiler that builds
-for `wasm32`, and a throughput number does not answer it. If the rewrite turns
-out to cost real time on a real corpus, that is a number worth having beside
-this page — it is not a reason not to try.
-
-## What it buys the catalogue
-
-One dialect. A function's lowering is one SQL template rather than one per
-engine, which is most of what makes a multi-dialect function catalogue (Malloy's,
-for instance) expensive to build and to keep honest.
+This page is the **write** path, and it asks the compiler to stop *containing* an engine rather than
+asking any consumer to stop using one. The host brings the engine to the read side, which is what the
+[host boundary](/docs/design/three-hosts) says everywhere else. What it buys the catalogue is one
+dialect: a function's lowering is one SQL template rather than one per engine.

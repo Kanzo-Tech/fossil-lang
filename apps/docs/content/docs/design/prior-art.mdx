@@ -94,8 +94,9 @@ expression in an attribute argument. These are the languages, and the control ex
 
 ## A catalogue of names, and how one is kept honest
 
-Read against [the catalogue](/docs/design/catalogue), whose two decisions — the stdlib stays a Rust
-table, and a row declares every parameter it takes — each rest on one of these.
+Two decisions rest on these. That the stdlib stays a Rust table rather than moving into
+`catalogue.bnf` is [a discarded alternative](/docs/design/discarded); that a row declares every
+parameter it takes is argued in [the dot](/docs/design/the-dot).
 
 | source | what it settles |
 | --- | --- |
