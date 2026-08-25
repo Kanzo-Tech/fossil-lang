@@ -1,10 +1,24 @@
 //! The ADVISORY Criterion benchmark for the `didChange` round-trip budget.
 //!
-//! Measures the SAME per-keystroke analysis round-trip as the hard-gate
-//! correctness test (`tests/didchange_budget.rs`): `set_text` (Salsa Setter,
-//! revision bump) → [`fossil_mir::program_diagnostics`], on the canonical
-//! 200-line fixture. It is the same *call*, not a resemblance — see
-//! [`round_trip`], which described a loop the budget test had already retired.
+//! It calls [`fossil_lsp::handle_notification`] with a real
+//! `textDocument/didChange` notification over the canonical 200-line fixture —
+//! the same function `tests/didchange_budget.rs` gates and the same function
+//! `src/main.rs` calls off the wire. There is no `round_trip` here any more, so
+//! there is nothing left to keep in sync.
+//!
+//! # There were two copies, and the docblock claimed they agreed
+//!
+//! This file carried its own `round_trip`, a hand-rolled `def_map` +
+//! `typecheck_mapping` loop, under a line reading «identical to the budget
+//! test's, kept in sync». It was not: the budget test had collapsed onto
+//! `fossil_mir::program_diagnostics`, which drains `lower_to_mir_pg`, so every
+//! lowering a keystroke pays for was outside this clock. That was repaired in
+//! `eccb7db` by editing the copy — the third time in these two crates a comment
+//! asserted an agreement nothing checked.
+//!
+//! Both copies existed because `LspState` and the handlers lived in a binary
+//! target and each took an `&Connection`. Neither is true now, and «call the
+//! same function» is the only mechanism that was ever going to hold.
 //!
 //! # Status: ADVISORY
 //!
@@ -19,70 +33,62 @@
 //! Run: `cargo bench -p fossil-lsp`. The first run writes the baseline under
 //! `target/criterion/`; subsequent runs compare against it.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::path::PathBuf;
+use std::str::FromStr as _;
+use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
-use salsa::Setter as _;
+use fossil_lsp::LspState;
+use lsp_server::Notification;
+use lsp_types::Uri;
+use lsp_types::notification::{
+    DidChangeTextDocument, DidOpenTextDocument, Notification as NotificationTrait,
+};
+use serde_json::json;
 
 /// The path the program is opened under — the REAL one, because the shape
 /// document is resolved relative to the program. See the hard gate's module
 /// docs: a synthetic path resolves no contract, and the benchmark then measures
 /// a program that checks nothing.
 fn fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/canonical_200.fossil")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/canonical_200.fossil")
+        .canonicalize()
+        .expect("canonicalise canonical_200.fossil")
+}
+
+fn fixture_uri() -> Uri {
+    Uri::from_str(&format!("file://{}", fixture_path().display())).expect("a file:// URI")
 }
 
 fn fixture() -> String {
     std::fs::read_to_string(fixture_path()).expect("read canonical_200.fossil")
 }
 
-/// The editor's `System` — the rows that read shape documents, as
-/// `fossil-lsp`'s own `LspSystem` installs them. It was
-/// `fossil_base::test_support::NativeSystem`, which reads no types; see the hard gate.
-#[derive(Debug, Default)]
-struct EditorSystem;
-
-impl System for EditorSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
-    }
-    fn now(&self) -> SystemTime {
-        SystemTime::now()
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
+fn did_open(uri: &Uri, text: &str) -> Notification {
+    Notification {
+        method: DidOpenTextDocument::METHOD.to_string(),
+        params: json!({
+            "textDocument": {
+                "uri": uri.as_str(), "languageId": "fossil", "version": 1, "text": text
+            }
+        }),
     }
 }
 
-/// One `didChange` round-trip: bump the revision via `set_text`, then run
-/// exactly what the handler runs. Returns the diagnostic count so the optimiser
-/// cannot elide the work.
-///
-/// # This said it was the budget test's function and had not been for a while
-///
-/// The line above read «identical to the budget test's, kept in sync». It was
-/// not. The budget test collapsed onto [`fossil_mir::program_diagnostics`] —
-/// the one function `fossil-lsp`'s `didChange` handler calls — and its own
-/// docblock closes with «there is now one function, so the two cannot drift
-/// again». This bench stayed on the hand-rolled `def_map` +
-/// `typecheck_mapping` loop that collapse replaced, so the advisory number and
-/// the hard gate measured different programs: the loop never drained
-/// `lower_to_mir_pg`, and had no equivalent of the three FILE-level drains.
-/// Every lowering a keystroke pays for was outside this clock.
-///
-/// «Kept in sync» is not a mechanism, and this is the third place in these two
-/// crates where a comment claimed an agreement nothing checked. Calling the
-/// same function is the mechanism.
-fn round_trip(db: &mut FossilDb, file: SourceFile, new_text: String) -> usize {
-    file.set_text(db).to(new_text);
-    fossil_mir::program_diagnostics(db, file).len()
+fn did_change(uri: &Uri, version: i64, text: &str) -> Notification {
+    Notification {
+        method: DidChangeTextDocument::METHOD.to_string(),
+        params: json!({
+            "textDocument": { "uri": uri.as_str(), "version": version },
+            "contentChanges": [ { "text": text } ]
+        }),
+    }
 }
 
 fn bench_didchange(c: &mut Criterion) {
     let base = fixture();
+    let uri = fixture_uri();
 
     let mut group = c.benchmark_group("lsp_didchange");
     // A handful of samples is enough for a 200-line file; keep wall time low.
@@ -90,27 +96,35 @@ fn bench_didchange(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(5));
 
     group.bench_function("canonical_200_round_trip", |b| {
-        // Build a warm db once; each iteration is a distinct edit so `set_text`
-        // genuinely bumps the revision (the realistic editor case).
-        let system: Arc<dyn System> = Arc::new(EditorSystem);
-        let mut db = FossilDb::new(system);
-        let file = SourceFile::new(
-            &db,
-            base.clone(),
-            fixture_path().to_string_lossy().into_owned(),
+        // Build a warm server once; each iteration is a distinct edit so
+        // `set_text` genuinely bumps the revision (the realistic editor case).
+        // `didOpen` is the handler too — it registers the shape document the
+        // program names, without which this would measure the error path.
+        let mut state = LspState::new();
+        let _ = fossil_lsp::handle_notification(&mut state, did_open(&uri, &base))
+            .expect("didOpen params decode");
+        let _ = fossil_lsp::handle_notification(
+            &mut state,
+            did_change(&uri, 2, &format!("{base}\n// warm\n")),
+        )
+        .expect("didChange params decode");
+        let mut i = 2i64;
+        b.iter_batched(
+            || {
+                i += 1;
+                // VALID-syntax edit (a `//` comment line — never a bare `#`).
+                // Built OUTSIDE the timed section: serialising the buffer into
+                // the params is the client's cost, not the server's.
+                did_change(&uri, i, &format!("{base}\n// edit {i}\n"))
+            },
+            |notif| {
+                std::hint::black_box(
+                    fossil_lsp::handle_notification(&mut state, notif)
+                        .expect("didChange params decode"),
+                )
+            },
+            criterion::BatchSize::SmallInput,
         );
-        // The document the program names is a Salsa INPUT: register it, or the
-        // contract never resolves and this measures the error path.
-        fossil_ide::register_missing_documents(&mut db, file, &|key| {
-            std::fs::read_to_string(key).ok()
-        });
-        let _ = round_trip(&mut db, file, format!("{base}\n// warm\n"));
-        let mut i = 0usize;
-        b.iter(|| {
-            i += 1;
-            // VALID-syntax edit (a `//` comment line — never a bare `#`).
-            std::hint::black_box(round_trip(&mut db, file, format!("{base}\n// edit {i}\n")))
-        });
     });
 
     group.finish();

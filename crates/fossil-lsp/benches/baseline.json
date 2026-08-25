@@ -1,6 +1,6 @@
 {
   "_comment": "ADVISORY committed baseline for the didChange round-trip benchmark. A REFERENCE point captured on an Apple M-series / macOS dev machine, --release. Criterion's live target/criterion/ baseline is gitignored and runner-local; the 20%-regression comparison is reliable only on a pinned/self-hosted runner. On shared CI the benchmark is informational. The HARD gate is tests/didchange_budget.rs (margined wall-clock).",
-  "_rebaselined": "2026-08-13, and the reason is not drift. The fixture was rewritten into the surface of grammar.bnf (no `prefix`, bare property keys, `@subject`, `str.*` after ruling 16) and it now NAMES a shape document, which the old one could not. More importantly the HOST changed: both this benchmark and the hard gate built their db on `fossil_base::NativeSystem`, whose provider table reads no types — so the shape document never decoded, `resolve_target_shape` failed for all 15 mappings, and what was being measured was the error path. Both now install `fossil_descriptors_output::PROVIDERS` and register the document, as `fossil-lsp`'s own `LspSystem` does. The old 120042 ns is not comparable to the new figure in either direction and is kept below only so nobody re-derives a regression from it.",
+  "_rebaselined": "2026-08-25, and the reason is that the benchmark stopped resembling the handler and started CALLING it. `fossil-lsp` gained a lib target and a seam that returns responses instead of sending them (`handle_notification` hands back the publishDiagnostics notifications), so both this file and the hard gate now invoke `fossil_lsp::handle_notification` with a real `textDocument/didChange`. The previous figure was a hand-rolled `def_map` + `typecheck_mapping` loop; it never drained `lower_to_mir_pg`, had no equivalent of the file-level drains, never registered shape documents per keystroke, never rendered a diagnostic to the LSP wire form, and never decoded params. It is not comparable to the new figure in either direction and is kept under `superseded` only so nobody re-derives a regression from it.",
   "benchmark": "lsp_didchange/canonical_200_round_trip",
   "fixture": "tests/fixtures/canonical_200.fossil",
   "fixture_lines": 181,
@@ -8,15 +8,15 @@
   "fixture_sources": 8,
   "shape_document": "tests/fixtures/canonical_200.shex",
   "resolved_predicates": 60,
-  "measures": "set_text (Salsa Setter, revision bump) -> def_map -> typecheck_mapping over every mapping (each resolving its target shape against the registered document) -> drain Diagnostic accumulator",
+  "measures": "fossil_lsp::handle_notification(state, <textDocument/didChange>) — the handler itself. There is deliberately no step list here any more: whatever the handler does is what is measured, and a list would be the next thing to go stale. Outside the clock: the JSON-RPC framing and the client-side serialisation of the new buffer into the notification params.",
   "warm_round_trip": {
-    "point_estimate_ns": 155010,
-    "point_estimate_ms": 0.155,
-    "confidence_interval_ns": [153920, 156270],
+    "point_estimate_ns": 236960,
+    "point_estimate_ms": 0.237,
+    "confidence_interval_ns": [234250, 241250],
     "unit": "nanoseconds (slope point estimate)"
   },
   "measuring_the_real_path_is_not_slower": {
-    "_comment": "Same machine, same fixture, same loop, only the host differs — 10 measured iterations after 2 warm-ups, --release. Resolving the contract COSTS NOTHING NET: the decode is memoised and keyed by the document's SourceFile, so editing the program re-runs it zero times, while the failing path was pushing 32 diagnostics through the accumulator on every keystroke.",
+    "_comment": "Same machine, same fixture, same loop, only the host differs — 10 measured iterations after 2 warm-ups, --release. Captured 2026-08-13 against the hand-rolled loop; kept because the CLAIM still holds and is what stops anyone reverting the host. Resolving the contract COSTS NOTHING NET: the decode is memoised and keyed by the document's SourceFile, so editing the program re-runs it zero times, while the failing path was pushing 32 diagnostics through the accumulator on every keystroke. The absolute nanoseconds are the old loop's and are not comparable to warm_round_trip above.",
     "native_system_no_type_reader_ns": 169000,
     "native_system_diagnostics_per_keystroke": 32,
     "native_system_resolved_predicates": 0,
@@ -24,14 +24,21 @@
     "editor_system_diagnostics_per_keystroke": 0,
     "editor_system_resolved_predicates": 60
   },
-  "superseded": {
-    "captured": "2026-05-22",
-    "fixture_lines": 190,
-    "point_estimate_ns": 120042,
-    "why_not_comparable": "different program, and a host that resolved no output contract"
-  },
+  "superseded": [
+    {
+      "captured": "2026-08-13",
+      "point_estimate_ns": 155010,
+      "why_not_comparable": "a hand-rolled def_map + typecheck_mapping loop, not the handler: no lowering drain, no file-level drains, no per-keystroke document registration, no LSP rendering, no params decode"
+    },
+    {
+      "captured": "2026-05-22",
+      "fixture_lines": 190,
+      "point_estimate_ns": 120042,
+      "why_not_comparable": "different program, and a host that resolved no output contract"
+    }
+  ],
   "design_goal_ms": 100,
   "hard_gate_budget_ms": 400,
   "advisory_regression_threshold_pct": 20,
-  "captured": "2026-08-13"
+  "captured": "2026-08-25"
 }
