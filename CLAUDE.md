@@ -8,18 +8,21 @@ Keep it under 200 lines, rules-not-context.
 - `grammar.bnf` — the syntax, normative, and ahead of the parser on purpose. A production
   written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
   the file.
-- `apps/docs/` — the language. `/docs/design` is where an argument lives (with
-  `design/discarded` for every rejected alternative and what would bring it back, and
-  `design/prior-art` for every source named); `/docs/book/typing` is the static semantics,
-  the grammar's sibling; `/docs/characteristics` is per-feature and carries both registers.
-- `apps/corpus/` — the artifact, with executable guards instead of prose about it.
+- `apps/docs/` — the whole of the documentation, and there is no second site. `/docs/book`
+  teaches the language and `/docs/format` specifies the corpus; behind a maintainers' divider,
+  `/docs/design` is where an argument lives, with `design/discarded` for every rejected
+  alternative and what would bring it back, and `design/prior-art` for every source named.
+- `apps/corpus/` — the artifact's contract, executable: `guards/` and `conformance/`. Its prose
+  is `/docs/format`; the two server components that render `guards.mjs` and `vectors.json` live
+  on the docs side and read across, so renaming either file breaks the docs build on purpose.
 - `apps/docs/programs/` — the conformance programs. Documentation transcludes them; nothing
   retypes a program into prose. No number here: `crates/fossil-engine/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
-- `apps/docs/CLAUDE.md` — the editorial rules for the docs app, including the two-register
-  discipline (where fossil is going / what is true today, never mixed in one sentence).
+- `apps/docs/CLAUDE.md` — the editorial rules for the docs app: which pages declare a
+  `direction:` and which simply describe what is there, and why evidence is transclusion
+  rather than a cited line number.
 
 **There is no second reference.** When a document disagrees with the tree, the tree wins,
 and the document is wrong and gets fixed — not annotated, not superseded by a record kept
@@ -175,10 +178,12 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
 apps/                      NOT published, and no RECURSIVE CI step reaches them (all are
                            filtered to `./packages/*` by path — see release.yml). Each gets its
                            own path-filtered workflow instead: `docs.yml`, `corpus.yml`.
-  docs/                    Next.js + fumadocs. Where fossil is GOING, with what is already
-                           true marked as such; `apps/docs/CLAUDE.md` has the editorial rules
-  corpus/                  the artifact: the format's conventions with executable guards, the
-                           conformance corpus, and a reader that shares no code with the guards
+  docs/                    Next.js + fumadocs, and ALL of the prose: the book, the corpus
+                           format, and the design argument behind a maintainers' divider.
+                           `apps/docs/CLAUDE.md` has the editorial rules
+  corpus/                  NOT a site — it was one, and it is now `docs/content/docs/format/`.
+                           What is left executes: the guards, the conformance corpus, and a
+                           reader that shares no code with them
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness

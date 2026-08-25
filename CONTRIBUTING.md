@@ -170,7 +170,7 @@ them repealed. A second reference does not stay true; it stays *cited*.
 So:
 
 - **The decision itself** is the page that states the rule. `apps/docs/content/docs/design/`
-  for the language, `apps/corpus/content/docs/` for the artifact, `grammar.bnf` for the
+  for the language, `apps/docs/content/docs/format/` for the artifact, `grammar.bnf` for the
   syntax, `apps/docs/content/docs/book/typing.mdx` for the static semantics.
 - **The alternative you rejected** goes to `design/discarded.mdx`, in its four fields —
   the idea, why it is attractive, the evidence against it, and **what would bring it
@@ -181,10 +181,14 @@ So:
   languages, no exception" is not a checkable claim until the seven are on the page.
 - **A number you measured** goes on the page that makes the claim, beside the claim.
 
-There is no `Status` field, because a page has no status: it says what is true, or it
-carries a `today:` register that says what is true *yet*, with the file that would go
-red. `apps/docs/content.test.ts` fails the build if a page claims either without
-naming something checkable.
+There is no `Status` field, because a page has no status. A page says what is true; one
+describing something not yet built carries a `direction:` — one sentence, plus the page
+here that argues for it — and that is the only mark. `apps/docs/content.test.ts` fails
+the build if a direction has no summary, or names an argument that is not a page of the
+site. There was a second register carrying a path to a file that would go red; it was
+retired after eight of forty-nine such citations were measured pointing at a line that
+said something else, with CI green. Evidence is transclusion now: a page reads the file
+at build time, and an absent region stops the build.
 
 ## RETURNING.md ritual
 
