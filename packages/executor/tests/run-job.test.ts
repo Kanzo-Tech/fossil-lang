@@ -15,23 +15,34 @@ import {
   type CompletePayload,
 } from '../src/index.js';
 
+// See `execute.test.ts` for why this program changed shape: bare header names
+// bound positionally against `graph.shex`, which is the language since ruling 3
+// of 2026-08-11.
 const PROGRAM = [
-  'prefix ex: <https://example.org/>',
+  'type { Person, Order } := io.shex("graph.shex")',
   '',
   'users := io.csv("https://data.example.com/users.csv")',
   'orders := io.csv("https://data.example.com/orders.csv")',
   '',
-  'Person : ex:Person from users',
-  '    iri = `${ex:}person/${.id}`',
-  '    ex:name = .name',
+  'Person : Person from users',
+  '    @subject = "https://example.org/person/{users.id}"',
+  '    name = users.name',
   '',
-  'Order : ex:Order from orders',
-  '    iri = `${ex:}order/${.order_id}`',
-  '    ex:placedBy = `${ex:}person/${.user_id}`',
+  'Order : Order from orders',
+  '    @subject = "https://example.org/order/{orders.order_id}"',
+  '    placedBy = "https://example.org/person/{orders.user_id}"',
+  '    total = orders.amount',
   '',
 ].join('\n');
 
+/** The output contract the program names — the same file the Rust tests use. */
+let SHEX: string;
+
 beforeAll(async () => {
+  SHEX = await readFile(
+    fileURLToPath(new URL('../../../crates/fossil-df/tests/fixtures/graph.shex', import.meta.url)),
+    'utf8',
+  );
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_df_wasm_bg.wasm', import.meta.url));
   await initFossilExecutor({ wasmUrl: (await readFile(wasmPath)) as unknown as URL });
 });
@@ -70,20 +81,20 @@ describe('runJob', () => {
     }) as unknown as typeof fetch;
 
     const exec = new FossilExecutor();
-    let runStatus;
+    let report;
     try {
-      runStatus = await runJob(exec, PROGRAM, transport, { dest: 'job-1', fetchImpl });
+      report = await runJob(exec, PROGRAM, transport, { dest: 'job-1', fetchImpl, shex: SHEX });
     } finally {
       exec.free();
     }
 
-    // Completed with the executor's RunStatus.
+    // Completed with the manifest the run wrote.
     expect(completed?.status).toBe('completed');
-    expect(completed?.manifest).toBeDefined();
-    const person = runStatus.vertices.find((v) => v.type === 'Person');
-    expect(person?.count).toBe(3);
-    const edge = runStatus.edges.find((e) => e.edge_type === 'placedBy');
-    expect(edge?.count).toBe(4);
+    expect(completed?.manifest).toEqual(report);
+    const person = report.vertices.find((v) => v.type === 'Person');
+    expect(person?.vertex_count).toBe(3);
+    const edge = report.edges.find((e) => e.edge_type === 'placedBy');
+    expect(edge?.edge_count).toBe(4);
 
     // Every GraphAr file was signed + uploaded.
     for (const need of [

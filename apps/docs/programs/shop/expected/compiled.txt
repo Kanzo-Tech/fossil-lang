@@ -19,6 +19,6 @@ Orders: 3 written, 3 lowered
     buyer
 
 ── run ──
-vertex Person (https://shop.example/voc#Person) × 2 — email, name
-vertex Order (https://shop.example/voc#Order) × 3 — total
+vertex Person (https://shop.example/voc#Person) × 2 — dense_id, subject, email, name, x, y, cluster_id
+vertex Order (https://shop.example/voc#Order) × 3 — dense_id, subject, total, x, y, cluster_id
 edge Order_buyer_Person × 3

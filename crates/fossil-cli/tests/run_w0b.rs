@@ -183,8 +183,13 @@ fn run_w0b_writes_graph_ar_under_dest() {
     );
 }
 
-/// `--output-json` emits a status object that keasy can parse via
+/// `--output-json` emits the manifest as one JSON object keasy can parse via
 /// `serde_json::from_str` after `Command::output()`.
+///
+/// **It is the manifest and not a second account of one.** Every key asserted
+/// below is a `fossil_sinks::manifest` field, spelled the way the YAML on disk
+/// spells it — `type`, `vertex_count`, `prefix`, `property_groups` — so a host
+/// that learns the format learns stdout for free, and the two cannot drift.
 #[test]
 fn run_w0b_output_json_is_parseable() {
     let bin = fossil_binary();
@@ -216,35 +221,43 @@ fn run_w0b_output_json_is_parseable() {
         panic!("--output-json must emit a single JSON object; got: {stdout:?} (parse error: {e})")
     });
     assert_eq!(parsed["dest"], serde_json::Value::String(dest_url));
-    assert!(
-        parsed["vertices"].is_array(),
-        "json.vertices must be an array; got: {parsed}"
+    assert_eq!(
+        parsed["graph"]["vertices"][0].as_str(),
+        Some("vertex/Person.vertex.yml"),
+        "the index names the per-type document; got: {parsed}"
     );
-    // Each vertex carries its type, file, row count, and property columns — the
-    // structure the keasy host consumes (it has no DuckDB to re-introspect with).
+
     let first = &parsed["vertices"][0];
     assert_eq!(
         first["type"].as_str(),
         Some("Person"),
         "vertex.type expected; got: {first}"
     );
-    assert!(
-        first["file"]
-            .as_str()
-            .is_some_and(|f| f.starts_with("vertex/")),
-        "vertex.file rel_path expected; got: {first}"
+    assert_eq!(
+        first["prefix"].as_str(),
+        Some("vertex/Person/"),
+        "the chunk prefix a reader addresses, not the staged file; got: {first}"
     );
     assert_eq!(
-        first["count"].as_i64(),
+        first["vertex_count"].as_u64(),
         Some(5),
         "hello.fossil writes 5 Persons (examples/users.csv); got: {first}"
     );
     assert!(
-        first["columns"]
+        first["property_groups"][0]["properties"]
             .as_array()
             .is_some_and(|c| c.iter().any(|col| col["name"] == "name")),
-        "vertex.columns must include the `name` property; got: {first}"
+        "the property group must declare the `name` column; got: {first}"
     );
+
+    // The JSON on stdout and the YAML on disk are the same values. That is the
+    // whole reason `RunStatus` is gone, and a string comparison of the two
+    // serialisations is the cheapest thing that would notice them parting.
+    let on_disk: serde_json::Value = serde_yaml_ng::from_str(
+        &std::fs::read_to_string(dest.join("vertex/Person.vertex.yml")).expect("read the document"),
+    )
+    .expect("the document is YAML");
+    assert_eq!(*first, on_disk, "stdout and the document disagree");
 }
 
 /// A workdir seeded with arbitrary `(rel_path, contents)` files (for the
@@ -351,12 +364,23 @@ ex:Order {
     let placed_by = edges
         .iter()
         .find(|e| e["src_type"] == "Order" && e["dst_type"] == "Person")
-        .unwrap_or_else(|| panic!("no Order→Person edge in status: {parsed}"));
+        .unwrap_or_else(|| panic!("no Order→Person edge in the report: {parsed}"));
     assert_eq!(
-        placed_by["count"].as_i64(),
+        placed_by["edge_count"].as_u64(),
         Some(3),
         "3 orders join to persons; got: {placed_by}"
     );
+
+    // And every one of the three resolved, so the drop beside it is zero —
+    // stated rather than omitted, because «no key» and «nothing dropped» are
+    // not the same answer.
+    let drops = parsed["dropped"]
+        .as_array()
+        .expect("dropped array")
+        .iter()
+        .find(|d| d["prefix"] == placed_by["prefix"])
+        .unwrap_or_else(|| panic!("no drop entry for the edge: {parsed}"));
+    assert_eq!(drops["dropped"].as_u64(), Some(0), "got: {drops}");
 
     // The literal `ex:amount` stayed a property on Order; `ex:placedBy` did NOT.
     let order_v = parsed["vertices"]
@@ -364,10 +388,10 @@ ex:Order {
         .expect("vertices array")
         .iter()
         .find(|v| v["type"] == "Order")
-        .expect("Order vertex in status");
-    let cols: Vec<&str> = order_v["columns"]
+        .expect("Order vertex in the report");
+    let cols: Vec<&str> = order_v["property_groups"][0]["properties"]
         .as_array()
-        .expect("columns array")
+        .expect("properties array")
         .iter()
         .filter_map(|c| c["name"].as_str())
         .collect();
@@ -381,34 +405,38 @@ ex:Order {
     );
 
     // #5a: the manifest carries the RDF output spec the governance layer (DCAT)
-    // consumes — full shape IRI per vertex, predicate IRI + XSD datatype per
-    // column — derived from the mapping alone (no ShEx, no host re-derivation).
+    // consumes — the full shape IRI per vertex type, derived from the mapping
+    // alone (no ShEx, no host re-derivation).
+    //
+    // **It used to carry more, and this is where the loss is visible.**
+    // `RunStatus` also gave a `rdf_uri` and an `xsd_datatype` per COLUMN, and
+    // `fossil_sinks::manifest::Property` has neither: it declares `name`,
+    // `data_type`, `is_primary` and `is_nullable`. `VertexInfo::iri` and
+    // `EdgeInfo::iri` exist and a property's predicate does not, which is an
+    // asymmetry in the format rather than a decision — the fix, if the DCAT
+    // projection needs it back, is a `Property::iri` beside the other two, not
+    // a second description of the corpus.
     let person_v = parsed["vertices"]
         .as_array()
         .expect("vertices array")
         .iter()
         .find(|v| v["type"] == "Person")
-        .expect("Person vertex in status");
+        .expect("Person vertex in the report");
     assert_eq!(
-        person_v["rdf_type"].as_str(),
+        person_v["iri"].as_str(),
         Some("https://example.org/Person"),
         "vertex carries its full RDF type IRI; got: {person_v}"
     );
-    let name_col = person_v["columns"]
+    let name_col = person_v["property_groups"][0]["properties"]
         .as_array()
-        .expect("columns array")
+        .expect("properties array")
         .iter()
         .find(|c| c["name"] == "name")
         .expect("name column on Person");
     assert_eq!(
-        name_col["rdf_uri"].as_str(),
-        Some("https://example.org/name"),
-        "column carries its full predicate IRI; got: {name_col}"
-    );
-    assert_eq!(
-        name_col["xsd_datatype"].as_str(),
-        Some("http://www.w3.org/2001/XMLSchema#string"),
-        "column carries its XSD datatype IRI; got: {name_col}"
+        name_col["data_type"].as_str(),
+        Some("string"),
+        "column carries its GraphAr storage spelling; got: {name_col}"
     );
 }
 

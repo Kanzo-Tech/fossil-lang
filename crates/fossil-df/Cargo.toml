@@ -1,7 +1,7 @@
 # DataFusion backend for the property-graph MIR: lowers `lower_to_mir_pg` to a
 # DataFusion plan and materialises the GraphAr graph (vertices + edges +
-# manifests + RunStatus). Compiles to wasm32 (browser executor); the native
-# Arrow→Parquet sink (`sink` module) is gated native-only.
+# manifests). Compiles to wasm32 (browser executor); the native Arrow→Parquet
+# sink (`sink` module) is gated native-only.
 [package]
 name = "fossil-df"
 version.workspace = true
@@ -30,7 +30,7 @@ fossil-mir = { path = "../fossil-mir" }
 # the GraphAr layout.
 fossil-sinks = { path = "../fossil-sinks" }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
-# manifest/RunStatus materialize from (the universal substrate's single source).
+# manifest materializes from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # The program-resident output descriptor (ShEx) that drives edge/cardinality
 # classification, threaded into execute_graph as an argument, never read off
@@ -68,12 +68,16 @@ datafusion = { version = "54", default-features = false, features = ["parquet"] 
 # write (`sink.rs`) is native-gated.
 parquet = { version = "58", default-features = false, features = ["arrow"] }
 
-# `src/run_status.rs` — the wire contract this backend emits. `serde` is the
-# (de)serialization the CLI writes to stdout and a host reads back; `schemars`
-# publishes the same shape as JSON Schema for TS codegen (the pipeline
-# `fossil-graph`'s verb result types use). Both pure Rust, WASM-clean.
+# `src/report.rs` — what a run tells its caller. The (de)serialization the CLI
+# writes to stdout and a host reads back; also what `serde-wasm-bindgen` hands
+# JS. Pure Rust, WASM-clean.
+#
+# `schemars` stood beside it and went with `RunStatus`: it derived a JSON Schema
+# for a shape nothing generated TypeScript from. The two crates that publish
+# schemas — `fossil-lineage` and `fossil-graph` — still do, and this one has
+# nothing to publish that `fossil-sinks`'s manifest structs do not already
+# define in YAML.
 serde = { workspace = true }
-schemars = { workspace = true }
 # The JSON array reader (`read_json_source`). `arrow-json` decodes a slice of
 # `serde_json::Value`, so the parse and the decode speak the same type; both are
 # pure Rust, so neither costs the wasm build anything.

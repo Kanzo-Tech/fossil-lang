@@ -11,5 +11,5 @@ Products: 3 written, 3 lowered
     price
 
 ── run ──
-vertex Product (https://shop.example/voc#Product) × 3 — label, price
+vertex Product (https://shop.example/voc#Product) × 3 — dense_id, subject, label, price, x, y, cluster_id
 NO EDGE TYPE was written

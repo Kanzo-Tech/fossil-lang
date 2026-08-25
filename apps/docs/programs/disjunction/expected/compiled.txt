@@ -12,5 +12,5 @@ Contacts: 3 written, 3 lowered
     priority
 
 ── run ──
-vertex Contact (https://shop.example/voc#Contact) × 3 — name, priority
+vertex Contact (https://shop.example/voc#Contact) × 3 — dense_id, subject, name, priority, x, y, cluster_id
 NO EDGE TYPE was written

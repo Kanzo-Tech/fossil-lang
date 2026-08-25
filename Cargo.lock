@@ -1876,6 +1876,7 @@ dependencies = [
  "insta",
  "miette",
  "serde_json",
+ "serde_yaml_ng",
  "thiserror 1.0.69",
  "tracing",
  "tracing-subscriber",

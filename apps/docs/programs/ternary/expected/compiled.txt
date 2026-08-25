@@ -11,5 +11,5 @@ Listings: 3 written, 3 lowered
     band
 
 ── run ──
-vertex Listing (https://shop.example/voc#Listing) × 4 — availability, band
+vertex Listing (https://shop.example/voc#Listing) × 4 — dense_id, subject, availability, band, x, y, cluster_id
 NO EDGE TYPE was written

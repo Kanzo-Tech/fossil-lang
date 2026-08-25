@@ -111,7 +111,7 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
 }
 
 #[tokio::test]
-async fn execute_graph_emits_manifests_and_run_status() {
+async fn execute_graph_emits_one_manifest_and_the_report_repeats_it() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
@@ -147,49 +147,50 @@ async fn execute_graph_emits_manifests_and_run_status() {
     assert!(person_yml.contains("name: dense_id"), "{person_yml}");
     assert!(person_yml.contains("version: gar/v1"), "{person_yml}");
 
-    // ── RunStatus: the wire contract keasy consumes for DCAT ──
-    let status = graph.run_status("s3://bucket/job-1");
-    assert_eq!(status.dest, "s3://bucket/job-1");
+    // ── The report: the same manifest, plus `dest` and the drops ──
+    //
+    // The point of the assertions below is not that the numbers are right — the
+    // YAML above already says that — it is that the JSON a host reads and the
+    // YAML a reader opens are ONE value. `RunStatus` was a second account of
+    // this, and a second account can disagree with the bytes.
+    let report = fossil_df::RunReport::of("s3://bucket/job-1", &graph);
+    assert_eq!(report.dest, "s3://bucket/job-1");
 
-    let person = &status.vertices[0];
+    let (graph_info, vertices, edges) = graph.manifest();
+    assert_eq!(report.graph, graph_info);
+    assert_eq!(report.vertices, vertices);
+    assert_eq!(report.edges, edges);
+    assert_eq!(
+        report.graph.vertices,
+        paths[1..3],
+        "the index names the per-type documents, in the order the lists carry them"
+    );
+
+    let person = &report.vertices[0];
     assert_eq!(person.vertex_type, "Person");
-    assert_eq!(person.file, "vertex/Person.parquet");
-    assert_eq!(person.count, Some(3));
-    assert_eq!(
-        person.rdf_type.as_deref(),
-        Some("https://example.org/Person")
-    );
-    let name = person
-        .columns
-        .iter()
-        .find(|c| c.name == "name")
-        .expect("Person has a name column");
-    assert_eq!(name.rdf_uri.as_deref(), Some("https://example.org/name"));
-    assert_eq!(
-        name.xsd_datatype.as_deref(),
-        Some("http://www.w3.org/2001/XMLSchema#string"),
-    );
+    assert_eq!(person.prefix, "vertex/Person/");
+    assert_eq!(person.vertex_count, 3);
+    assert_eq!(person.iri, "https://example.org/Person");
+    assert_eq!(report.vertices[1].vertex_count, 4);
 
-    let order = &status.vertices[1];
-    assert_eq!(order.file, "vertex/Order.parquet");
-    assert_eq!(order.count, Some(4));
-    assert!(
-        order.columns.iter().any(|c| c.name == "total"
-            && c.rdf_uri.as_deref() == Some("https://example.org/total")),
-        "Order carries the total property column with its predicate IRI",
-    );
-
-    let edge = &status.edges[0];
+    let edge = &report.edges[0];
     assert_eq!(edge.edge_type, "placedBy");
+    assert_eq!(edge.prefix, "edge/Order_placedBy_Person/");
+    assert_eq!(edge.edge_count, 4);
     assert_eq!(
-        edge.by_source,
-        "edge/Order_placedBy_Person/by_source.parquet"
+        edge.adj_lists
+            .iter()
+            .map(|a| a.prefix.as_str())
+            .collect::<Vec<_>>(),
+        ["by_source/", "by_target/"],
+        "both orientations, each saying where its tiles are",
     );
-    assert_eq!(
-        edge.by_target,
-        "edge/Order_placedBy_Person/by_target.parquet"
-    );
-    assert_eq!(edge.count, Some(4));
+
+    // Every `user_id` in `orders.csv` is a real person, so nothing dangled —
+    // and `0` is stated rather than omitted.
+    assert_eq!(report.dropped.len(), 1);
+    assert_eq!(report.dropped[0].prefix, edge.prefix);
+    assert_eq!(report.dropped[0].dropped, 0);
 }
 
 /// Flatten edge batches into `(src_dense, dst_dense)` pairs, in row order.

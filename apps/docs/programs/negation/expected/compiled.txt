@@ -12,5 +12,5 @@ Sensors: 3 written, 3 lowered
     healthy
 
 ── run ──
-vertex Sensor (https://lab.example/voc#Sensor) × 3 — offset, healthy
+vertex Sensor (https://lab.example/voc#Sensor) × 3 — dense_id, subject, offset, healthy, x, y, cluster_id
 NO EDGE TYPE was written

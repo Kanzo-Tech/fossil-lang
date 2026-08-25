@@ -88,10 +88,10 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         "merged + sorted by subject",
     );
 
-    // The single registered manifest/status reflects the merged count.
-    let status = graph.run_status("mem://x");
-    assert_eq!(status.vertices.len(), 1);
-    assert_eq!(status.vertices[0].count, Some(5));
+    // The single registered manifest reflects the merged count.
+    let report = fossil_df::RunReport::of("mem://x", &graph);
+    assert_eq!(report.vertices.len(), 1);
+    assert_eq!(report.vertices[0].vertex_count, 5);
     let paths: Vec<String> = graph
         .manifests()
         .expect("manifests")

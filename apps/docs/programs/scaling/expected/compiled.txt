@@ -13,5 +13,5 @@ Batches: 5 written, 5 lowered
     charged
 
 ── run ──
-vertex Batch (https://lab.example/voc#Batch) × 3 — subtotal, unit_cost, leftover, charged
+vertex Batch (https://lab.example/voc#Batch) × 3 — dense_id, subject, subtotal, unit_cost, leftover, charged, x, y, cluster_id
 NO EDGE TYPE was written

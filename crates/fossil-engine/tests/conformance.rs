@@ -228,7 +228,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // the directory of the program that wrote it, so the fixture means the same
     // thing from anywhere and the test does not have to move to read it.
     introspect(&dir.path().join("mapping.fossil"));
-    let status = fossil_engine::run(
+    let report = fossil_engine::run(
         &dir.path().join("mapping.fossil"),
         &format!("file://{}", dest.display()),
         &std::collections::HashMap::new(),
@@ -326,17 +326,22 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "an edge points at a dense_id no vertex has"
     );
 
-    // 5. What the run *told the caller* matches what it wrote. `RunStatus` is
-    //    the wire answer a host serves; a corpus that disagrees with its own
-    //    status is the failure a consumer cannot detect from either side alone.
-    let declared: i64 = status
+    // 5. What the run *told the caller* matches what it wrote. The report is
+    //    the manifest, so this is `vertex_count` a second time — once off the
+    //    document on disk (`declared_count` above) and once off stdout. They
+    //    come from one call now and cannot disagree; the assertion stays
+    //    because that is the property, not the implementation.
+    let declared = report
         .vertices
         .iter()
         .find(|v| v.vertex_type == "Person")
-        .expect("Person in RunStatus")
-        .count
-        .expect("RunStatus carries a vertex count");
-    assert_eq!(declared, n, "RunStatus disagrees with the vertex files");
+        .expect("Person in the report")
+        .vertex_count;
+    assert_eq!(
+        i64::try_from(declared).expect("a row count fits an i64"),
+        n,
+        "the report disagrees with the vertex files"
+    );
 
     // 6. The staged single-file vertex Parquet is gone. It is the layout pass's
     //    input, and leaving it behind is a second, stale copy of every vertex —

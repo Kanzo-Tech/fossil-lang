@@ -21,7 +21,7 @@ fossil-engine = { path = "../fossil-engine" }
 fossil-introspect = { path = "../fossil-introspect" }
 # `Diagnostic` / `Severity` for rustc-style `check` rendering.
 fossil-base       = { path = "../fossil-base" }
-# `RunStatus` — the shape `run` prints, named where it is produced. The binary
+# `RunReport` — the shape `run` prints, named where it is produced. The binary
 # already links this crate through the engine; what it adds here is the name.
 # (`refs` and `providers` print `Vec`s the engine hands back and this file never
 # names, so `fossil-lineage` is not an edge.)
@@ -45,6 +45,11 @@ tracing-subscriber = { workspace = true }
 insta = { workspace = true }
 duckdb = { workspace = true }
 fossil-layout       = { path = "../fossil-layout" }
+# `--output-json` prints the manifest, and `run_w0b.rs` reads the YAML document
+# the same run wrote to disk and compares the two values. Without this the test
+# could only compare strings it built itself, which is the drift it is there to
+# catch.
+serde_yaml_ng = { workspace = true }
 
 [[bin]]
 name = "fossil"

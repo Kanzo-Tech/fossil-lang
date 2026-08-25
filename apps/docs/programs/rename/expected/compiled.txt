@@ -11,5 +11,5 @@ People: 3 written, 3 lowered
     foaf_name
 
 ── run ──
-vertex Person (https://shop.example/voc#Person) × 3 — name, foaf_name
+vertex Person (https://shop.example/voc#Person) × 3 — dense_id, subject, name, foaf_name, x, y, cluster_id
 NO EDGE TYPE was written

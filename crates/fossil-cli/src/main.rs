@@ -2,7 +2,7 @@
 //!
 //! A thin shell over [`fossil_engine`]: it parses args, reads files/stdin, calls
 //! the engine, and renders the result — rustc-style miette diagnostics for
-//! `check`, machine `RunStatus`/list JSON (or a human summary) for the rest. ALL
+//! `check`, machine `RunReport`/list JSON (or a human summary) for the rest. ALL
 //! orchestration (the compile→run pipeline + the registry surface) lives in the
 //! engine crate; this binary owns only the CLI + presentation.
 //!
@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use fossil_base::{Diagnostic, Severity};
-use fossil_df::run_status::RunStatus;
+use fossil_df::RunReport;
 use fossil_introspect::RunCreds;
 use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource, SourceSpan};
 use tracing_subscriber::EnvFilter;
@@ -63,8 +63,11 @@ enum Commands {
         /// `s3://bucket/prefix`, …). Required.
         #[arg(long)]
         dest: String,
-        /// Emit a machine-readable `RunStatus` JSON on stdout instead of the
-        /// human summary. Used by keasy when invoking `fossil run` via subprocess.
+        /// Emit the manifest as JSON on stdout instead of the human summary —
+        /// a `RunReport`: `graph.graph.yml` plus every per-type document, the
+        /// `dest` the corpus cannot know about itself, and how many rows of each
+        /// edge's input resolved no endpoint. Used by keasy when invoking
+        /// `fossil run` via subprocess.
         #[arg(long)]
         output_json: bool,
         /// Read a JSON cloud-credentials payload from stdin. Secrets must not ride
@@ -250,7 +253,7 @@ fn gib_to_bytes(raw: &str) -> Result<u64, String> {
     Ok((gib * 1024.0 * 1024.0 * 1024.0) as u64)
 }
 
-/// `fossil run`: compile + execute, then report the resulting `RunStatus`.
+/// `fossil run`: compile + execute, then report the resulting `RunReport`.
 /// Fill the compiler's descriptor cache before asking it to compile — the one
 /// pre-compile job a native host owes, and the reason `fossil-engine` links no
 /// database.
@@ -295,25 +298,37 @@ fn cmd_run(
     // over a cloud `@conn` source authenticates, which happens here.
     let connections = fossil_introspect::connection_urls(&creds.connections);
     introspect(path, &connections, &creds)?;
-    let status = fossil_engine::run(path, dest, &connections, memory_bytes)?;
-    report(&status, output_json);
+    let run = fossil_engine::run(path, dest, &connections, memory_bytes)?;
+    report(&run, output_json);
     Ok(())
 }
 
-/// Emit a `RunStatus` as machine JSON (`--output-json`, for the keasy host) or a
-/// terse human summary.
-fn report(status: &RunStatus, output_json: bool) {
+/// Emit the [`RunReport`] as machine JSON (`--output-json`, for the keasy host)
+/// or a terse human summary.
+///
+/// **The summary names the drops, and the JSON is not the only place they
+/// appear.** An endpoint that resolved no vertex is discarded on purpose, and
+/// the whole point of counting it was that the discard used to be invisible; a
+/// count only a `--output-json` reader sees is invisible to the operator who ran
+/// the command. A run that dropped nothing says nothing extra.
+fn report(run: &RunReport, output_json: bool) {
     if output_json {
         println!(
             "{}",
-            serde_json::to_string(status).expect("RunStatus serialises")
+            serde_json::to_string(run).expect("RunReport serialises")
         );
-    } else {
+        return;
+    }
+    println!(
+        "wrote {} vertex type(s), {} edge type(s) to {}",
+        run.vertices.len(),
+        run.edges.len(),
+        run.dest,
+    );
+    for drops in run.dropped.iter().filter(|d| d.dropped > 0) {
         println!(
-            "wrote {} vertex type(s), {} edge type(s) to {}",
-            status.vertices.len(),
-            status.edges.len(),
-            status.dest,
+            "  {} — {} input row(s) named an endpoint no vertex carries, and are not edges",
+            drops.prefix, drops.dropped,
         );
     }
 }

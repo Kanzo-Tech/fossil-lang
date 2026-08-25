@@ -49,7 +49,8 @@ export class FossilExecutor {
    * `shex` is the optional output schema text.
    *
    * Returns the output files (Parquet + manifest YAML, as bytes) plus the
-   * `RunStatus`. The caller signed-PUTs each file and PATCHes the job.
+   * `RunReport` — the same manifest, already parsed. The caller signed-PUTs each
+   * file and PATCHes the job.
    */
   run(
     program: string,

@@ -62,8 +62,8 @@
 //!   it goes red the day that stops being true.
 //! - `compiled.txt` — what the compiler UNDERSTOOD. Type bindings and the shape
 //!   IRI each resolved to, source bindings, and per mapping the properties
-//!   written against the properties lowered. Then the run's `RunStatus`, for the
-//!   thirteen that are meant to produce one.
+//!   written against the properties lowered. Then the manifest the run wrote,
+//!   for the thirteen that are meant to produce one.
 //!
 //!   A source binding that DERIVES a relation carries its pipeline, rendered from
 //!   the HIR by `fossil_hir::display` — the join key, the filter predicate, the
@@ -503,38 +503,57 @@ fn render_diagnostics(
     out
 }
 
-/// The run's answer, rendered without a single machine-dependent byte. `dest` is
-/// a tempdir and is deliberately not here.
-fn render_run(status: &fossil_df::run_status::RunStatus) -> String {
+/// The manifest the run wrote, rendered without a single machine-dependent
+/// byte. `dest` is a tempdir and is deliberately not here.
+///
+/// The column list is the manifest's, so it carries `dense_id`, `subject` and
+/// the three layout columns beside the program's own properties — those are
+/// declared and a reader gets them, and the artefact used to show only the
+/// half the program wrote. What each mapping wrote is the section above this
+/// one; this section is what the corpus says.
+fn render_run(report: &fossil_df::RunReport) -> String {
     let mut out = String::from("\n── run ──\n");
-    if status.vertices.is_empty() {
+    if report.vertices.is_empty() {
         out.push_str("NO VERTEX TYPE was written\n");
     }
-    for v in &status.vertices {
+    for v in &report.vertices {
+        let columns: Vec<&str> = v
+            .property_groups
+            .iter()
+            .flat_map(|g| g.properties.iter().map(|p| p.name.as_str()))
+            .collect();
         let _ = writeln!(
             out,
             "vertex {} ({}) × {} — {}",
             v.vertex_type,
-            v.rdf_type.as_deref().unwrap_or("no rdf:type"),
-            v.count.map_or_else(|| "?".to_string(), |c| c.to_string()),
-            v.columns
-                .iter()
-                .map(|c| c.name.clone())
-                .collect::<Vec<_>>()
-                .join(", "),
+            if v.iri.is_empty() {
+                "no rdf:type"
+            } else {
+                &v.iri
+            },
+            v.vertex_count,
+            columns.join(", "),
         );
     }
-    if status.edges.is_empty() {
+    if report.edges.is_empty() {
         out.push_str("NO EDGE TYPE was written\n");
     }
-    for e in &status.edges {
+    for (e, drops) in report.edges.iter().zip(&report.dropped) {
         let _ = writeln!(
             out,
-            "edge {}_{}_{} × {}",
+            "edge {}_{}_{} × {}{}",
             e.src_type,
             e.edge_type,
             e.dst_type,
-            e.count.map_or_else(|| "?".to_string(), |c| c.to_string()),
+            e.edge_count,
+            // Silent on a clean run: an artefact that says «0 dropped» on every
+            // program stops being read, and the one program that drops a row is
+            // the whole reason the number exists.
+            if drops.dropped == 0 {
+                String::new()
+            } else {
+                format!(", {} input row(s) dropped", drops.dropped)
+            },
         );
     }
     out
@@ -756,9 +775,9 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
                     None,
                 );
                 match outcome {
-                    Ok(status) => {
-                        compiled.push_str(&render_run(&status));
-                        if status.vertices.is_empty() {
+                    Ok(report) => {
+                        compiled.push_str(&render_run(&report));
+                        if report.vertices.is_empty() {
                             findings.push(
                                 "  RUN it ran and wrote no vertex type — the artefact is empty"
                                     .to_string(),

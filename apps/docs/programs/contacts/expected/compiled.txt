@@ -12,5 +12,5 @@ Contacts: 3 written, 3 lowered
     name
 
 ── run ──
-vertex Person (https://shop.example/voc#Person) × 2 — email, name
+vertex Person (https://shop.example/voc#Person) × 2 — dense_id, subject, email, name, x, y, cluster_id
 NO EDGE TYPE was written

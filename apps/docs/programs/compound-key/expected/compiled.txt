@@ -13,5 +13,5 @@ Lines: 3 written, 3 lowered
     placed_on
 
 ── run ──
-vertex Line (https://shop.example/voc#Line) × 4 — quantity, placed_on
+vertex Line (https://shop.example/voc#Line) × 4 — dense_id, subject, quantity, placed_on, x, y, cluster_id
 NO EDGE TYPE was written

@@ -12,5 +12,5 @@ Staff: 2 written, 2 lowered
     name
 
 ── run ──
-vertex Person (https://shop.example/voc#Person) × 2 — name
+vertex Person (https://shop.example/voc#Person) × 2 — dense_id, subject, name, x, y, cluster_id
 NO EDGE TYPE was written

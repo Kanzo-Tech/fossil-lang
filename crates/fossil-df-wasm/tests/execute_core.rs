@@ -1,11 +1,11 @@
 //! Native gate for the browser executor core: a CSV program staged through the
 //! in-memory object-store seam runs end-to-end on `DataFusion` and yields the
-//! W0b `GraphAr` files + a `RunStatus`. The wasm node smoke (B2) re-runs this exact
+//! W0b `GraphAr` files + a `RunReport`. The wasm node smoke (B2) re-runs this exact
 //! flow through the `#[wasm_bindgen]` wrapper to prove `execute_graph().collect()`
 //! works under wasm-bindgen-futures.
 
-//! **One of these used to pass for the wrong reason, and `rdf_uri` is what says
-//! it no longer does.**
+//! **One of these used to pass for the wrong reason, and the shape IRI is what
+//! says it no longer does.**
 //!
 //! `fossil-df-wasm`'s `ExecutorSystem` installed no shape decoder and
 //! `build_program` registered no shape document — both deliberate, and both
@@ -19,10 +19,10 @@
 //! ```
 //!
 //! The column kept the bare name the author wrote and LOST its predicate IRI,
-//! and nothing here asserted `rdf_uri`, which is why it went green. Two things
-//! broke silently downstream: keasy's DCAT (`rdf_uri` is the wire contract's
-//! whole point) and every edge, because `apply_output_shape` classifies on
-//! `p.rdf_uri` and `None` matches no predicate. The `shex` ARGUMENT cannot
+//! and nothing here asserted it, which is why it went green. Two things broke
+//! silently downstream: keasy's DCAT and every edge, because
+//! `apply_output_shape` classifies on `p.rdf_uri` and `None` matches no
+//! predicate. The `shex` ARGUMENT cannot
 //! supply either: a bare property key means the last segment of a predicate IRI
 //! a shape declares, so the IRI comes from `TypeckOutput.predicates`, which
 //! comes from the REGISTERED document — and once the header stopped carrying its
@@ -30,9 +30,17 @@
 //! (`vertex/.parquet`).
 //!
 //! `build_program` now registers the one text it holds under the name the
-//! program writes. The assertion on `rdf_uri` below is the guard: it is the
-//! cheapest thing that distinguishes "the document was read" from "the mapping
-//! compiled anyway".
+//! program writes. The assertion on `VertexInfo::iri` below is the guard: it is
+//! the cheapest thing that distinguishes "the document was read" from "the
+//! mapping compiled anyway".
+//!
+//! **It is a weaker guard than the one it replaces, and that is a fact about
+//! the manifest, not about this file.** `RunStatus` carried a `rdf_uri` per
+//! COLUMN; `fossil_sinks::manifest::Property` carries `name`, `data_type`,
+//! `is_primary` and `is_nullable` and no predicate. So the empty shape IRI is
+//! what is checkable here, and a shape that resolved its type IRI while losing a
+//! property's would pass. The two came from the same registration and failed
+//! together when they failed; nothing enforces that they still would.
 
 #![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -90,31 +98,29 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
         .unwrap();
     assert!(!person.bytes.is_empty());
 
-    // RunStatus carries the vertex + its row count (3 users → 3 vertices).
-    assert_eq!(out.run_status.dest, "s3://jobs/run-1");
-    assert_eq!(out.run_status.vertices.len(), 1);
-    let v = &out.run_status.vertices[0];
+    // The report carries the vertex + its row count (3 users → 3 vertices).
+    assert_eq!(out.report.dest, "s3://jobs/run-1");
+    assert_eq!(out.report.vertices.len(), 1);
+    let v = &out.report.vertices[0];
     assert_eq!(v.vertex_type, "Person");
-    assert_eq!(v.count, Some(3));
+    assert_eq!(v.vertex_count, 3);
 
-    // The document was READ, not merely named: `name` is a bare key, so its
-    // predicate IRI exists only if `executor.shex` reached the checker. `None`
-    // here is what a run that skipped registration produced, and it is
-    // indistinguishable from success everywhere else in this file.
+    // The document was READ, not merely named: a bare header name is bound
+    // positionally against the shape document, so this IRI exists only if
+    // `executor.shex` reached the checker. The empty string is what a run that
+    // skipped registration produced, and it is indistinguishable from success
+    // everywhere else in this file.
     assert_eq!(
-        v.rdf_type.as_deref(),
-        Some("https://example.org/Person"),
+        v.iri, "https://example.org/Person",
         "the vertex's type IRI comes from the registered document"
     );
-    let name = v
-        .columns
-        .iter()
-        .find(|c| c.name == "name")
-        .expect("Person carries the name column");
-    assert_eq!(
-        name.rdf_uri.as_deref(),
-        Some("https://example.org/name"),
-        "a bare key's predicate IRI comes from the registered document"
+    assert!(
+        v.property_groups[0]
+            .properties
+            .iter()
+            .any(|p| p.name == "name"),
+        "Person carries the name column: {:?}",
+        v.property_groups,
     );
 }
 
@@ -196,11 +202,11 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     .await
     .expect("executor runs the @conn-aliased program");
     let person = out
-        .run_status
+        .report
         .vertices
         .iter()
         .find(|v| v.vertex_type == "Person");
-    assert_eq!(person.and_then(|v| v.count), Some(3));
+    assert_eq!(person.map(|v| v.vertex_count), Some(3));
 }
 
 fn empty_refs() -> std::collections::HashMap<String, String> {

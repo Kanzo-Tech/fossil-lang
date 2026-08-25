@@ -250,6 +250,7 @@ User : Person from users
             PROGRAM,
             fossil_base::SourceAnchor::beside(dir),
             &std::collections::HashMap::new(),
+            fossil_introspect::Reach::Anywhere,
         );
         SourceFile::new(
             db,

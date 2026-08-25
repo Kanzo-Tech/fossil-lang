@@ -21,10 +21,9 @@
 //!
 //! [`run`]'s layout post-pass re-derives `fossil-df`'s on-disk path convention
 //! (`vertex/<T>.parquet`, `vertex/<T>/`, `edge/<s>_<l>_<d>/by_{source,target}`)
-//! in order to find files `fossil-df` wrote, delete them, and repoint the
-//! [`RunStatus`] that names them. That is behavioural coupling with no
-//! compiler-visible signature, and it has already shipped one defect — see
-//! [`enrich_written_layout`].
+//! in order to find files `fossil-df` wrote and delete them. That is behavioural
+//! coupling with no compiler-visible signature, and it has already shipped one
+//! defect — see [`enrich_written_layout`].
 //!
 //! # What left, and why
 //!
@@ -58,7 +57,7 @@ use std::path::{Path, PathBuf};
 
 use fossil_base::{Diagnostic, SourceAnchor};
 use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_df::run_status::RunStatus;
+use fossil_df::RunReport;
 use fossil_lineage::{ProviderInfo, SourceRefInfo};
 use smol_str::SmolStr;
 
@@ -368,7 +367,8 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 }
 
 /// Compile + execute a `.fossil` file, materialising `GraphAr` `Parquet` to
-/// `dest_url`. Returns the [`RunStatus`] describing the output graph's structure.
+/// `dest_url`. Returns the [`RunReport`] — the manifest it wrote, plus `dest`
+/// and the edges the endpoint join discarded.
 /// The output descriptor is program-resident (invariant #1). `creds` carries the
 /// cloud config (empty ⇒ local / public-URL behaviour).
 ///
@@ -387,7 +387,7 @@ pub fn run(
     dest_url: &str,
     connections: &HashMap<String, String>,
     memory_bytes: Option<u64>,
-) -> miette::Result<RunStatus> {
+) -> miette::Result<RunReport> {
     tracing::debug!(?path, dest_url, "fossil run");
     let text = std::fs::read_to_string(path)
         .map_err(|e| miette::miette!("read {}: {e}", path.display()))?;
@@ -471,16 +471,16 @@ pub fn run(
     // WCC partition + deterministic placement, rewriting each vertex Parquet in
     // place (DuckDB — the one remaining native-runtime use on this path).
     //
-    // The status is built BEFORE the pass and repointed BY it, and that order is
-    // the fix: `run_status` names `vertex/<Type>.parquet`, which is the truth
-    // for `run_to_dir`'s own output and for the wasm host (which runs no layout
-    // pass) — and a file this pass deletes. `fossil run --output-json` was
-    // handing keasy a path to a file that no longer existed, and nothing here
-    // failed, because the deletion is the LAST thing the pass does.
-    let mut status = graph.run_status(dest_url);
-    enrich_written_layout(&graph, &dest_dir, memory_bytes, &mut status)?;
+    // **There is nothing to repoint any more, and that is the change.** A
+    // `RunStatus` was built here BEFORE the pass and patched BY it, because it
+    // named `vertex/<Type>.parquet` — the staged file whose deletion is the
+    // pass's last act — and `fossil run --output-json` was handing keasy a path
+    // to a file that had just stopped existing. The report is the manifest, and
+    // the manifest has always declared the chunk prefix the pass writes into, so
+    // the order of these two lines is no longer load-bearing.
+    enrich_written_layout(&graph, &dest_dir, memory_bytes)?;
 
-    Ok(status)
+    Ok(RunReport::of(dest_url, &graph))
 }
 
 /// Run the W3 layout enrichment over the just-written `GraphAr` tree: for each
@@ -496,7 +496,6 @@ fn enrich_written_layout(
     graph: &fossil_df::GraphArData,
     dest_dir: &Path,
     memory_bytes: Option<u64>,
-    status: &mut RunStatus,
 ) -> miette::Result<()> {
     // `memory_bytes` used to open a DuckDB connection here and cap it with
     // `apply_memory_budget` before handing it to the layout pass. The layout
@@ -585,20 +584,14 @@ fn enrich_written_layout(
     // afterwards: the manifest points at the chunk prefix, and leaving it would
     // be a second copy of every vertex, stale the moment anything is re-run.
     //
-    // Which is why the status is repointed in the same loop. The wire contract
-    // says where a host fetches a vertex type's rows, and after this pass that
-    // is the chunk prefix the manifest already declares
-    // (`VertexInfo::prefix`) — `vertex/<Type>/`, holding `chunk{k}.parquet`.
-    // The two are written from the same `format!`, one line apart, because the
-    // deletion and the promise are one fact and were two.
+    // A second loop stood here repointing a `RunStatus` at the prefix this pass
+    // had just filled, because the status carried its own answer to «where are
+    // this type's rows» and that answer was the deleted file. There is one
+    // answer now — `VertexInfo::prefix`, written before the run started — so the
+    // deletion is just a deletion.
     for target in &targets {
         std::fs::remove_file(&target.vertex_parquet)
             .map_err(|e| miette::miette!("remove staged {}: {e}", target.vertex_parquet))?;
-        for vertex in &mut status.vertices {
-            if vertex.vertex_type == target.type_name {
-                vertex.file = format!("vertex/{}/", target.type_name);
-            }
-        }
     }
     Ok(())
 }

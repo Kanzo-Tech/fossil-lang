@@ -25,9 +25,10 @@ pub mod files;
 /// sources it reads (`Filter` / `Project` / `Join`).
 pub mod plan;
 pub mod rdf;
-/// What a run tells its host it wrote: the `fossil run --output-json` wire
-/// contract, built by [`crate::GraphArData::run_status`] and by nothing else.
-pub mod run_status;
+/// What a run tells its caller: the manifest it wrote, the destination, and the
+/// edges the join discarded. Built by [`report::RunReport::of`] and by nothing
+/// else.
+pub mod report;
 // `pub mod shacl` lived here: a SHACL shapes graph walked into a `GraphSchema`.
 // It has moved to `fossil-descriptors-output` and produces `OutputShapes`, the
 // neutral vocabulary the CHECKER reads — a `GraphSchema` is the output model,
@@ -51,6 +52,10 @@ pub use fossil_mir::SourceFormat;
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
+/// What `fossil run --output-json` prints, and what the browser executor hands
+/// JS. Named at the crate root because it is the crate's answer, not a detail
+/// of the module it is written in.
+pub use report::RunReport;
 /// SHACL shapes graph → canonical [`fossil_graph_schema::GraphSchema`] (the SHACL
 /// arm of the output model; ShEx's lives in `fossil-shex`).
 use std::collections::HashMap;
@@ -83,15 +88,13 @@ use fossil_sinks::manifest::{
     VertexInfo, data_type_name,
 };
 
-use crate::run_status::{ColumnStatus, EdgeStatus, RunStatus, VertexStatus};
-
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
 /// data — vertex tables and edge tables (CSR + CSC) as in-memory `RecordBatch`es.
 ///
 /// This is the universal substrate made concrete: **relations + a graph-schema**
-/// (`fossil-universal-substrate-architecture.md`). The GraphAr view (manifests +
-/// `RunStatus` + Parquet) is materialized *from* this; the data carriers hold no
+/// (`fossil-universal-substrate-architecture.md`). The GraphAr view (the
+/// manifest + Parquet) is materialized *from* this; the data carriers hold no
 /// metadata of their own — it all lives in [`schema`](Self::schema).
 #[derive(Debug)]
 pub struct GraphArData {
@@ -113,6 +116,10 @@ pub struct EdgeTable {
     pub dst_type: String,
     pub by_source: Vec<RecordBatch>,
     pub by_target: Vec<RecordBatch>,
+    /// Rows of this edge's input that resolved no endpoint pair, and so are not
+    /// in either orientation. See [`execute_edge`] for why they are discarded
+    /// and [`report::EdgeDrops`] for where the number goes.
+    pub dropped: u64,
 }
 
 /// One emitted GraphAr manifest YAML + its dataset-relative path. Keasy serves
@@ -415,8 +422,8 @@ async fn finalize_vertex(
 }
 
 /// Build a schema [`Property`](NodeProp) for a vertex prop: peel its canonical
-/// type to a [`Primitive`] → the format-neutral [`Primitive`] (the manifest/
-/// `RunStatus` derive graphar/xsd spellings from it); the predicate IRI + shape
+/// type to a [`Primitive`] → the format-neutral [`Primitive`] (the manifest
+/// derives its `data_type` spelling from it); the predicate IRI + shape
 /// cardinality ride along. Falls back to `string` when the type carries no
 /// primitive (the legacy default).
 fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
@@ -549,9 +556,22 @@ async fn execute_edges<'db>(
 
 /// Materialise one edge type. Projects the edge op's input relation (`rows`) to
 /// `src_iri`/`dst_iri`, joins both against the registered vertex tables to
-/// resolve endpoint IRIs to dense ids (inner join — dangling endpoints drop,
-/// like the writer), then sorts the `(src_dense, dst_dense)` pairs into CSR
-/// (`by_source`) and CSC (`by_target`).
+/// resolve endpoint IRIs to dense ids, then sorts the `(src_dense, dst_dense)`
+/// pairs into CSR (`by_source`) and CSC (`by_target`).
+///
+/// # The join is inner, and the discard is counted
+///
+/// A row whose `src_iri` or `dst_iri` names a subject no vertex carries
+/// resolves nothing and does not become an edge. **That is intended and it
+/// stays** — a corpus cannot hold an edge to a vertex that is not there, and
+/// `fossil-engine`'s conformance assertion 4 reads every endpoint back and
+/// fails on a `dense_id` no vertex has.
+///
+/// What it stopped being is silent. It reported nothing at any log level, and
+/// the only trace was an [`EdgeInfo::edge_count`] smaller than the input's row
+/// count — a comparison nobody is obliged to make. [`EdgeTable::dropped`] is
+/// `candidates − resolved`: the extra `count()` is one more pass over the edge's
+/// input relation, which the run already scans twice (once per orientation).
 ///
 /// This used to say it mirrored `fossil-sinks`'s `writer.rs`. There is no
 /// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
@@ -593,6 +613,11 @@ async fn execute_edge(
         col("dense_id").alias("dst_dense"),
     ])?;
 
+    // Before the join, because the join is what consumes it: how many rows were
+    // offered as edges. Everything the two `select`s above did is preserved —
+    // this is the same relation the inner join reads, counted.
+    let candidates = edge_src.clone().count().await? as u64;
+
     let resolved = edge_src
         .join(
             src_v,
@@ -626,12 +651,20 @@ async fn execute_edge(
         .collect()
         .await?;
 
+    // `saturating_sub` because the subtraction is only exact while a subject
+    // identifies at most one vertex: a type materialised without dedup can hold
+    // two rows with the same `subject`, and then one candidate resolves to two
+    // edges. That corpus already violates `identity-is-the-subject`
+    // (`apps/corpus/guards/guards.mjs`), which is the guard that catches it.
+    let dropped = candidates.saturating_sub(count_rows(&by_source));
+
     Ok(EdgeTable {
         label: label.to_string(),
         src_type: src_type.to_string(),
         dst_type: dst_type.to_string(),
         by_source,
         by_target,
+        dropped,
     })
 }
 
@@ -793,7 +826,7 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
 /// `sample_size = -1`). DataFusion samples only the first ~1000 rows by default,
 /// which mis-types a column whose early values look numeric but later turn
 /// stringy (or vice-versa) — read every record so the inferred Arrow types (and
-/// thus the manifest/`RunStatus` `data_type`s) match the writer (design unknown
+/// thus the manifest's `data_type`s) match the writer (design unknown
 /// #4). Trade-off: inference reads the file once before execution reads it
 /// again; acceptable for parity, revisit if it bites large remote sources.
 fn csv_options<'a>() -> CsvReadOptions<'a> {
@@ -1049,7 +1082,7 @@ fn bounded_context(memory_bytes: Option<u64>) -> datafusion::error::Result<Sessi
 /// Native one-call orchestration the host (CLI/engine) drives: register every
 /// provider (RDF) source from host-read bytes, execute the whole program on
 /// DataFusion, and write the GraphAr tree under `dest_dir`. Returns the
-/// [`GraphArData`] so the caller can build a `RunStatus` and run any post-pass
+/// [`GraphArData`] so the caller can build a [`RunReport`] and run any post-pass
 /// (e.g. the layout enrichment).
 ///
 /// `connections` is the name→base-URL ref-map: `@conn/path` source aliases
@@ -1616,20 +1649,19 @@ fn unsupported_call(func: &str, why: &str) -> DfExpr {
         .alias(format!("__fossil_unsupported__{func}__{why}"))
 }
 
-// ── Phase 3: manifests + RunStatus (design §C4 phase 3) ─────────────────────
+// ── Phase 3: the manifest (design §C4 phase 3) ──────────────────────────────
 //
-// The paths follow the W0b single-file layout the discovery consumer expects
-// (OpenAPI `VertexStatus.file = vertex/<Type>.parquet`) and the manifest shape
-// the fossil-graph reader round-trips (`prefix = vertex/<Type>/`). Type-name
-// casing is preserved throughout.
+// One description of the dataset, in the shape the fossil-graph reader
+// round-trips (`prefix = vertex/<Type>/`). Type-name casing is preserved
+// throughout. There used to be a second one — a `RunStatus` the CLI printed —
+// and seven of its nine fields were this spelled again; see `report.rs`.
 
 /// The `<src>_<label>_<dst>` adjacency directory name (writer convention).
 fn edge_dir(src: &str, label: &str, dst: &str) -> String {
     format!("{src}_{label}_{dst}")
 }
 
-/// Total rows across a set of batches — the count the manifest declares and the
-/// `count` the wire status carries, which are the same number read twice.
+/// Total rows across a set of batches — the count the manifest declares.
 fn count_rows(batches: &[RecordBatch]) -> u64 {
     batches.iter().map(RecordBatch::num_rows).sum::<usize>() as u64
 }
@@ -1655,16 +1687,20 @@ impl GraphArData {
             / (1024.0 * 1024.0 * 1024.0)
     }
 
-    /// Build the three GraphAr manifest YAMLs (design §C4 phase 3) — the GraphAr
-    /// *materializer*, a pure function of the [`GraphSchema`]: the top-level
-    /// `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per node type, and
-    /// one `edge/<dir>/<dir>.edge.yml` per edge type. Reuses the WASM-clean
-    /// `fossil_sinks::manifest` structs.
+    /// The corpus's own description (design §C4 phase 3) — the GraphAr
+    /// *materializer*: the `graph.graph.yml` index, one [`VertexInfo`] per node
+    /// type and one [`EdgeInfo`] per edge type, in the order the index names
+    /// them. Reuses the WASM-clean `fossil_sinks::manifest` structs.
     ///
-    /// # Errors
-    /// Propagates `serde_yaml_ng` serialization errors (cannot fail for these
-    /// plain structs, but the signature is honest).
-    pub fn manifests(&self) -> Result<Vec<ManifestFile>, serde_yaml_ng::Error> {
+    /// **This is the single description of the dataset.** It is serialised to
+    /// YAML by [`Self::manifests`] and printed as JSON by `fossil run
+    /// --output-json` through [`RunReport`] — the same values, so stdout and the
+    /// disk cannot disagree without this function disagreeing with itself.
+    ///
+    /// `GraphInfo::vertices` / `GraphInfo::edges` are the rel-paths of the two
+    /// returned lists, positionally.
+    #[must_use]
+    pub fn manifest(&self) -> (GraphInfo, Vec<VertexInfo>, Vec<EdgeInfo>) {
         let vertex_paths: Vec<String> = self
             .schema
             .nodes
@@ -1680,105 +1716,78 @@ impl GraphArData {
                 format!("edge/{dir}/{dir}.edge.yml")
             })
             .collect();
-
-        let graph = GraphInfo::new("graph", "", vertex_paths.clone(), edge_paths.clone());
-        let mut out = vec![ManifestFile {
-            rel_path: "graph.graph.yml".to_string(),
-            yaml: graph.to_yaml()?,
-        }];
+        let graph = GraphInfo::new("graph", "", vertex_paths, edge_paths);
 
         // The counts come off the materialised batches and not off the schema,
         // because the schema knows what types there are and only the data knows
         // how many rows each one got. A declared type that materialised nothing
         // is `0`, which is the honest answer and the one that says «no tiles»
         // rather than «one empty tile».
-        for (node, rel_path) in self.schema.nodes.iter().zip(vertex_paths) {
-            let rows = self
-                .vertices
-                .iter()
-                .find(|v| v.label == node.label)
-                .map_or(0, |v| count_rows(&v.batches));
+        let vertices = self
+            .schema
+            .nodes
+            .iter()
+            .map(|node| {
+                let rows = self
+                    .vertices
+                    .iter()
+                    .find(|v| v.label == node.label)
+                    .map_or(0, |v| count_rows(&v.batches));
+                vertex_info(node, rows)
+            })
+            .collect();
+        let edges = self
+            .schema
+            .edges
+            .iter()
+            .map(|edge| {
+                // One orientation, because the two are one relation stored
+                // twice — and `by_source` because that is the one a reader sums
+                // the CSR tiles against.
+                let rows = self
+                    .edge_table(edge)
+                    .map_or(0, |e| count_rows(&e.by_source));
+                edge_info(edge, rows)
+            })
+            .collect();
+        (graph, vertices, edges)
+    }
+
+    /// The materialised [`EdgeTable`] for a schema edge, matched on the
+    /// `(src, label, dst)` triple that identifies it. `None` for a declared edge
+    /// type nothing wrote.
+    pub(crate) fn edge_table(&self, edge: &GraphEdge) -> Option<&EdgeTable> {
+        self.edges.iter().find(|e| {
+            e.src_type == edge.source && e.label == edge.label && e.dst_type == edge.destination
+        })
+    }
+
+    /// [`Self::manifest`] as the three YAML documents and the paths they go to:
+    /// the top-level `graph.graph.yml` index, one `vertex/<Type>.vertex.yml` per
+    /// node type, and one `edge/<dir>/<dir>.edge.yml` per edge type.
+    ///
+    /// # Errors
+    /// Propagates `serde_yaml_ng` serialization errors (cannot fail for these
+    /// plain structs, but the signature is honest).
+    pub fn manifests(&self) -> Result<Vec<ManifestFile>, serde_yaml_ng::Error> {
+        let (graph, vertices, edges) = self.manifest();
+        let mut out = vec![ManifestFile {
+            rel_path: "graph.graph.yml".to_string(),
+            yaml: graph.to_yaml()?,
+        }];
+        for (rel_path, info) in graph.vertices.iter().zip(&vertices) {
             out.push(ManifestFile {
-                rel_path,
-                yaml: vertex_info(node, rows).to_yaml()?,
+                rel_path: rel_path.clone(),
+                yaml: info.to_yaml()?,
             });
         }
-        for (edge, rel_path) in self.schema.edges.iter().zip(edge_paths) {
-            // One orientation, because the two are one relation stored twice —
-            // and `by_source` rather than `by_target` so the number agrees with
-            // the one the wire status has always reported.
-            let rows = self
-                .edges
-                .iter()
-                .find(|e| {
-                    e.src_type == edge.source
-                        && e.label == edge.label
-                        && e.dst_type == edge.destination
-                })
-                .map_or(0, |e| count_rows(&e.by_source));
+        for (rel_path, info) in graph.edges.iter().zip(&edges) {
             out.push(ManifestFile {
-                rel_path,
-                yaml: edge_info(edge, rows).to_yaml()?,
+                rel_path: rel_path.clone(),
+                yaml: info.to_yaml()?,
             });
         }
         Ok(out)
-    }
-
-    /// Build the [`RunStatus`] wire contract keasy consumes for DCAT (design
-    /// §A3/§E2) — the type/predicate metadata comes from the [`GraphSchema`], the
-    /// `count`s from the materialised batches (`num_rows()`).
-    #[must_use]
-    pub fn run_status(&self, dest: &str) -> RunStatus {
-        let vertices = self
-            .vertices
-            .iter()
-            .map(|v| {
-                let node = self.schema.node(&v.label);
-                VertexStatus {
-                    vertex_type: v.label.clone(),
-                    rdf_type: node.and_then(|n| n.iri.clone()),
-                    file: format!("vertex/{}.parquet", v.label),
-                    count: i64::try_from(count_rows(&v.batches)).ok(),
-                    columns: node
-                        .map(|n| n.properties.iter().map(column_status).collect())
-                        .unwrap_or_default(),
-                }
-            })
-            .collect();
-
-        let edges = self
-            .edges
-            .iter()
-            .map(|e| {
-                let dir = edge_dir(&e.src_type, &e.label, &e.dst_type);
-                EdgeStatus {
-                    edge_type: e.label.clone(),
-                    src_type: e.src_type.clone(),
-                    dst_type: e.dst_type.clone(),
-                    by_source: format!("edge/{dir}/by_source.parquet"),
-                    by_target: format!("edge/{dir}/by_target.parquet"),
-                    count: i64::try_from(count_rows(&e.by_source)).ok(),
-                }
-            })
-            .collect();
-
-        RunStatus {
-            dest: dest.to_string(),
-            vertices,
-            edges,
-        }
-    }
-}
-
-/// A wire `ColumnStatus` for a schema property: the GraphAr `data_type` spelling
-/// with the RDF predicate/xsd the governance layer (DCAT) reads, derived from
-/// the format-neutral [`Primitive`].
-fn column_status(p: &NodeProp) -> ColumnStatus {
-    ColumnStatus {
-        name: p.name.clone(),
-        data_type: graphar_spelling(p.datatype),
-        rdf_uri: p.iri.clone(),
-        xsd_datatype: Some(p.datatype.to_xsd_iri().to_string()),
     }
 }
 

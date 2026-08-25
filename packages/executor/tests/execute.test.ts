@@ -1,7 +1,7 @@
 /**
  * Integration smoke for @fossil-lang/executor — exercises the real wasm-bindgen
  * build (`--target web`) through the package's typed surface. Proves the full
- * vertex+edge path runs in WASM and emits valid Parquet + a RunStatus.
+ * vertex+edge path runs in WASM and emits valid Parquet + the manifest.
  *
  * The Rust core is covered by `crates/fossil-df-wasm/tests/execute_core.rs`;
  * this suite covers the wasm-bindgen + JS-marshalling boundary cargo can't reach.
@@ -15,20 +15,27 @@ import {
   type SourceInput,
 } from '../src/index.js';
 
+// The header names are BARE and bound positionally by the `type { … }` line
+// against `graph.shex`; every property key is the last segment of a predicate
+// that document declares. This program used to carry its own CURIEs
+// (`Person : ex:Person from users`, `iri = \`${ex:}person/${.id}\``) and passed
+// only because `pkg/` is gitignored and the artefact under test was built in
+// June — two and a half months of compiler ahead of it. Rebuilding it is what
+// said so.
 const PROGRAM = [
-  'prefix ex: <https://example.org/>',
+  'type { Person, Order } := io.shex("graph.shex")',
   '',
   'users := io.csv("https://data.example.com/users.csv")',
   'orders := io.csv("https://data.example.com/orders.csv")',
   '',
-  'Person : ex:Person from users',
-  '    iri = `${ex:}person/${.id}`',
-  '    ex:name = .name',
+  'Person : Person from users',
+  '    @subject = "https://example.org/person/{users.id}"',
+  '    name = users.name',
   '',
-  'Order : ex:Order from orders',
-  '    iri = `${ex:}order/${.order_id}`',
-  '    ex:placedBy = `${ex:}person/${.user_id}`',
-  '    ex:total = .amount',
+  'Order : Order from orders',
+  '    @subject = "https://example.org/order/{orders.order_id}"',
+  '    placedBy = "https://example.org/person/{orders.user_id}"',
+  '    total = orders.amount',
   '',
 ].join('\n');
 
@@ -39,7 +46,14 @@ async function fixture(name: string): Promise<Uint8Array> {
   return new Uint8Array(await readFile(p));
 }
 
+/** The output contract the program names — the same file the Rust tests use. */
+let SHEX: string;
+
 beforeAll(async () => {
+  SHEX = await readFile(
+    fileURLToPath(new URL('../../../crates/fossil-df/tests/fixtures/graph.shex', import.meta.url)),
+    'utf8',
+  );
   const wasmPath = fileURLToPath(
     new URL('../pkg/fossil_df_wasm_bg.wasm', import.meta.url),
   );
@@ -51,7 +65,7 @@ describe('FossilExecutor', () => {
   it('enumerates the program sources', () => {
     const exec = new FossilExecutor();
     try {
-      const srcs = exec.sources(PROGRAM);
+      const srcs = exec.sources(PROGRAM, {}, SHEX);
       expect(srcs.map((s) => s.uri).sort()).toEqual([
         'https://data.example.com/orders.csv',
         'https://data.example.com/users.csv',
@@ -71,7 +85,7 @@ describe('FossilExecutor', () => {
     const exec = new FossilExecutor();
     let result;
     try {
-      result = await exec.run(PROGRAM, sources, 's3://jobs/run-1');
+      result = await exec.run(PROGRAM, sources, 's3://jobs/run-1', {}, SHEX);
     } finally {
       exec.free();
     }
@@ -96,12 +110,23 @@ describe('FossilExecutor', () => {
       }
     }
 
-    expect(result.runStatus.dest).toBe('s3://jobs/run-1');
-    const person = result.runStatus.vertices.find((v) => v.type === 'Person');
-    expect(person?.count).toBe(3);
-    const edge = result.runStatus.edges.find((e) => e.edge_type === 'placedBy');
+    expect(result.report.dest).toBe('s3://jobs/run-1');
+    const person = result.report.vertices.find((v) => v.type === 'Person');
+    expect(person?.vertex_count).toBe(3);
+    expect(person?.prefix).toBe('vertex/Person/');
+    const edge = result.report.edges.find((e) => e.edge_type === 'placedBy');
     expect(edge?.src_type).toBe('Order');
     expect(edge?.dst_type).toBe('Person');
-    expect(edge?.count).toBe(4);
+    expect(edge?.edge_count).toBe(4);
+
+    // The report is the manifest the run just encoded — not a second account of
+    // it. Every document the index names is one of the files being uploaded.
+    for (const rel of [...result.report.graph.vertices, ...result.report.graph.edges]) {
+      expect(paths).toContain(rel);
+    }
+    // Every order names a real person, so nothing dangled — and `0` is stated.
+    expect(result.report.dropped).toEqual([
+      { prefix: 'edge/Order_placedBy_Person/', dropped: 0 },
+    ]);
   });
 });

@@ -21,5 +21,5 @@ Readings: 12 written, 12 lowered
     celsius
 
 ── run ──
-vertex Reading (https://lab.example/voc#Reading) × 2 — kit, revision, accuracy, verified, station, slug, code, label, operator, taken_on, celsius
+vertex Reading (https://lab.example/voc#Reading) × 2 — dense_id, subject, kit, revision, accuracy, verified, station, slug, code, label, operator, taken_on, celsius, x, y, cluster_id
 NO EDGE TYPE was written

@@ -13,8 +13,8 @@
  *   const sources = await Promise.all(srcs.map(async (s) => ({
  *     ...s, bytes: new Uint8Array(await (await fetch(signedUrlFor(s.uri))).arrayBuffer()),
  *   })));
- *   const { files, runStatus } = await exec.run(program, sources, jobDest, shex);
- *   // signed-PUT each file.path ← file.bytes, then PATCH the job with runStatus.
+ *   const { files, report } = await exec.run(program, sources, jobDest, shex);
+ *   // signed-PUT each file.path ← file.bytes, then PATCH the job with report.
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_df_wasm.js`) is imported ONLY from leaf
@@ -73,54 +73,117 @@ export interface GraphArFile {
   bytes: Uint8Array;
 }
 
-/** A vertex property's wire status (the governance/DCAT metadata). */
-export interface ColumnStatus {
+/**
+ * One column a vertex type's manifest declares — the wire shape of
+ * `fossil_sinks::manifest::Property`.
+ *
+ * **It carried `rdf_uri` and `xsd_datatype` and no longer does**, because the
+ * manifest never did: those two lived on the deleted `RunStatus` alone. The
+ * type IRI survives on {@link VertexInfo.iri} and {@link EdgeInfo.iri}; a
+ * property's predicate has no field in the format today.
+ */
+export interface Property {
   name: string;
+  /** The GraphAr storage spelling: `string`, `int64`, `double`, `bool`, … */
   data_type: string;
-  rdf_uri?: string | null;
-  xsd_datatype?: string | null;
+  is_primary: boolean;
+  is_nullable?: boolean;
 }
 
-/** One vertex type's wire status. */
-export interface VertexStatus {
+/** A group of columns stored together, one file per group per tile. */
+export interface PropertyGroup {
+  file_type: string;
+  properties: Property[];
+}
+
+/** One vertex type's manifest document (`vertex/<Type>.vertex.yml`). */
+export interface VertexInfo {
   type: string;
-  rdf_type?: string | null;
-  file: string;
-  count?: number | null;
-  columns: ColumnStatus[];
+  /** The RDF type IRI; absent for a non-RDF graph. */
+  iri?: string;
+  /** Rows across every tile under {@link prefix}. */
+  vertex_count: number;
+  /** Rows per tile; tile `k` is `dense_id` in `[k·chunk_size, (k+1)·chunk_size)`. */
+  chunk_size: number;
+  /** Where the tiles are, e.g. `vertex/Person/` — the trailing separator is part of it. */
+  prefix: string;
+  property_groups: PropertyGroup[];
+  version: string;
 }
 
-/** One edge type's wire status (CSR + CSC adjacency file paths). */
-export interface EdgeStatus {
-  edge_type: string;
+/** One orientation of an edge's adjacency, and how it is addressed. */
+export interface AdjList {
+  ordered: boolean;
+  /** `src` or `dst` — the endpoint column whose tile addresses this half. */
+  aligned_by: string;
+  /** Relative to {@link EdgeInfo.prefix}: `by_source/`, `by_target/`. */
+  prefix: string;
+  file_type: string;
+}
+
+/** One edge type's manifest document (`edge/<dir>/<dir>.edge.yml`). */
+export interface EdgeInfo {
   src_type: string;
+  edge_type: string;
+  /** The predicate IRI; absent for a non-RDF graph. */
+  iri?: string;
   dst_type: string;
-  by_source: string;
-  by_target: string;
-  count?: number | null;
+  /** Rows of ONE orientation — the two are one relation stored twice. */
+  edge_count: number;
+  chunk_size: number;
+  src_chunk_size: number;
+  dst_chunk_size: number;
+  directed: boolean;
+  prefix: string;
+  adj_lists: AdjList[];
+  property_groups: PropertyGroup[];
+  version: string;
+}
+
+/** The `graph.graph.yml` index — the one entry point, naming every other document. */
+export interface GraphInfo {
+  name: string;
+  prefix: string;
+  /** Rel-paths of the per-type vertex documents, positionally {@link RunReport.vertices}. */
+  vertices: string[];
+  /** Rel-paths of the per-type edge documents, positionally {@link RunReport.edges}. */
+  edges: string[];
+  version: string;
+}
+
+/** How many rows of one edge type's input resolved no endpoint pair. */
+export interface EdgeDrops {
+  /** The edge's manifest `prefix` — a pointer into {@link RunReport.edges}. */
+  prefix: string;
+  /** Always present, `0` included: «nothing dropped» is not «this writer does not count». */
+  dropped: number;
 }
 
 /**
- * The run report keasy turns into a DCAT catalog — the wire shape of
- * `fossil_df::run_status::RunStatus`.
+ * What a run tells its caller — the wire shape of `fossil_df::RunReport`.
  *
- * It carried a required `version: number`, and the Rust has had no such field
- * since `3db248e` deleted `WIRE_VERSION` and `is_compatible` as write-only.
- * `fossil-df-wasm` serialises the struct straight to JS, so every reader of
- * `runStatus.version` got `undefined` against a type that says it cannot be.
- * Nothing read it, which is why three days passed. Keep this interface derived
- * from the Rust by hand only until something generates it.
+ * **It is the manifest.** `graph`/`vertices`/`edges` are the same values as the
+ * YAML documents in {@link ExecutorResult.files}, already parsed. Only `dest`
+ * and `dropped` are not in the corpus: the caller chose the first, and the
+ * second is a fact about the write.
+ *
+ * This replaced a `RunStatus` that was a second account of the same dataset —
+ * seven of its nine fields respelled `graph.yaml`, and it named
+ * `vertex/<Type>.parquet`, a file the native layout pass deletes. Keep this
+ * interface derived from the Rust by hand only until something generates it.
  */
-export interface RunStatus {
+export interface RunReport {
   dest: string;
-  vertices: VertexStatus[];
-  edges: EdgeStatus[];
+  graph: GraphInfo;
+  vertices: VertexInfo[];
+  edges: EdgeInfo[];
+  dropped: EdgeDrops[];
 }
 
 /** The result of {@link FossilExecutor.run}. */
 export interface ExecutorResult {
   /** The W0b GraphAr tree as bytes — signed-PUT each `path` ← `bytes`. */
   files: GraphArFile[];
-  /** The run report to PATCH back to the job. */
-  runStatus: RunStatus;
+  /** The manifest that tree carries, plus `dest` and the drops. */
+  report: RunReport;
 }

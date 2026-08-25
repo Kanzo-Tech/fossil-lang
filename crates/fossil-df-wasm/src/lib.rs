@@ -5,8 +5,9 @@
 //! calls [`FossilExecutor::run`], which builds a `DataFusion` plan
 //! (`lower_to_mir_pg` → `execute_graph`), materialises the `GraphAr` graph, and
 //! returns the output files (Parquet + manifest YAML, as bytes) plus the
-//! `RunStatus`. JS then signed-`PUT`s the files and `PATCH`es the job. No
-//! mapping runtime on the server (design §E2).
+//! [`RunReport`] — the same manifest, as JSON, so the host does not have to
+//! parse back out of the bytes it is about to upload. JS then signed-`PUT`s the
+//! files and `PATCH`es the job. No mapping runtime on the server (design §E2).
 //!
 //! ## Source seam (design §C2)
 //! The executor reads sources through the [`SessionContext`]'s object stores.
@@ -40,9 +41,9 @@ use fossil_base::{FossilDb, FsError, Provider, RowReader, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 // The `ShEx` AST, named from its own crate: `fossil-descriptors-output` stopped
 // re-exporting it, so a consumer that wants it says so in its `Cargo.toml`.
+use fossil_df::RunReport;
 use fossil_df::SourceFormat;
 use fossil_df::files::GraphArFile;
-use fossil_df::run_status::RunStatus;
 use fossil_shex::ShExDescriptor;
 use object_store::memory::InMemory;
 use object_store::path::Path as ObjPath;
@@ -107,11 +108,16 @@ const fn is_materialised(row: &Provider) -> bool {
 }
 
 /// The executor result: the `GraphAr` output files (the bytes the host
-/// signed-PUTs) and the `RunStatus` keasy turns into DCAT.
+/// signed-PUTs) and the [`RunReport`] keasy turns into DCAT.
+///
+/// The report duplicates nothing in `files`: the three manifest YAMLs are in
+/// there as bytes, and this is the same values already parsed. A host that only
+/// wants to upload can ignore it; a host that wants to know what it uploaded
+/// would otherwise have to YAML-parse its own payload.
 #[derive(Debug)]
 pub struct ExecOutput {
     pub files: Vec<GraphArFile>,
-    pub run_status: RunStatus,
+    pub report: RunReport,
 }
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
@@ -161,7 +167,7 @@ impl System for ExecutorSystem {
 /// in the [`SessionContext`], executes the graph, and encodes the `GraphAr` output.
 ///
 /// `dest` is the dataset's logical location (e.g. the job's object-storage
-/// prefix) — it only labels the `RunStatus`, no IO happens against it here.
+/// prefix) — it only labels the [`RunReport`], no IO happens against it here.
 ///
 /// # Errors
 /// `ShEx` parse, URL parse, object-store staging, `DataFusion` execution, or
@@ -196,8 +202,8 @@ pub async fn execute_core(
         .map_err(|e| format!("execute_graph: {e}"))?;
 
     let files = graph.to_files().map_err(|e| format!("encode: {e}"))?;
-    let run_status = graph.run_status(dest);
-    Ok(ExecOutput { files, run_status })
+    let report = RunReport::of(dest, &graph);
+    Ok(ExecOutput { files, report })
 }
 
 /// Enumerate the program's sources as `(uri, row-name)` — the target-agnostic
@@ -240,8 +246,8 @@ pub fn program_sources_core(
 /// document — so with nothing registered the mapping still compiled (an
 /// unregistered document is informational, not fatal) and produced an empty
 /// predicate table and an empty shape IRI. Measured: `vertex/.parquet`, and a
-/// `RunStatus` column `("name", None)` where `None` is the `rdf_uri` that is the
-/// wire contract's whole point.
+/// `VertexInfo` whose `iri` was the empty string where the shape's type IRI
+/// belongs.
 ///
 /// The order is forced and it is `fossil-engine`'s: parse → ask the def-map what
 /// the program names → register → compile. Registering bumps the registry's
@@ -464,7 +470,7 @@ impl FossilExecutor {
     }
 
     /// Execute `program` against the host-fetched `sources` and return
-    /// `{ files: [{ path, bytes: Uint8Array }], runStatus }`.
+    /// `{ files: [{ path, bytes: Uint8Array }], report }`.
     ///
     /// `sources` is a JS array of `{ uri, format, bytes: Uint8Array }` (the `uri`
     /// being the RESOLVED one [`Self::sources`] returned); `format` is the
@@ -539,7 +545,7 @@ fn parse_sources(sources: &JsValue) -> Result<Vec<SourceInput>, String> {
     Ok(out)
 }
 
-/// Marshal [`ExecOutput`] to `{ files: [{ path, bytes: Uint8Array }], runStatus }`.
+/// Marshal [`ExecOutput`] to `{ files: [{ path, bytes: Uint8Array }], report }`.
 /// Bytes go out as `Uint8Array` (not a number array) so large Parquet payloads
 /// stay zero-copy-ish on the JS side.
 fn out_to_js(out: &ExecOutput) -> Result<JsValue, String> {
@@ -550,10 +556,10 @@ fn out_to_js(out: &ExecOutput) -> Result<JsValue, String> {
         set(&obj, "bytes", &js_sys::Uint8Array::from(f.bytes.as_slice()))?;
         files.push(&obj);
     }
-    let run_status = serde_wasm_bindgen::to_value(&out.run_status).map_err(|e| e.to_string())?;
+    let report = serde_wasm_bindgen::to_value(&out.report).map_err(|e| e.to_string())?;
     let result = js_sys::Object::new();
     set(&result, "files", &files)?;
-    set(&result, "runStatus", &run_status)?;
+    set(&result, "report", &report)?;
     Ok(result.into())
 }
 

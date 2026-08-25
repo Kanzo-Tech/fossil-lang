@@ -15,6 +15,6 @@ Humans: 2 written, 2 lowered
     name
 
 ── run ──
-vertex Persona (https://ayto.example/voc#Persona) × 2 — nombre
-vertex Person (https://council.example/voc#Person) × 2 — name
+vertex Persona (https://ayto.example/voc#Persona) × 2 — dense_id, subject, nombre, x, y, cluster_id
+vertex Person (https://council.example/voc#Person) × 2 — dense_id, subject, name, x, y, cluster_id
 NO EDGE TYPE was written

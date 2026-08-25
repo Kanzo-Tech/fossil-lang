@@ -17,6 +17,6 @@ Sightings: 3 written, 3 lowered
     count
 
 ── run ──
-vertex Station (https://birds.example/voc#Station) × 3 — name, elevation
-vertex Sighting (https://birds.example/voc#Sighting) × 4 — species, count
+vertex Station (https://birds.example/voc#Station) × 3 — dense_id, subject, name, elevation, x, y, cluster_id
+vertex Sighting (https://birds.example/voc#Sighting) × 4 — dense_id, subject, species, count, x, y, cluster_id
 NO EDGE TYPE was written

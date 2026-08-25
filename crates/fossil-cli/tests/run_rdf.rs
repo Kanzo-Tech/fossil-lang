@@ -140,17 +140,12 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         .iter()
         .find(|v| v["type"] == "KB")
         .expect("KB vertex");
-    assert_eq!(kb["count"].as_i64(), Some(1), "one KB; got: {kb}");
-    let kb_cols: Vec<&str> = kb["columns"]
-        .as_array()
-        .expect("kb columns")
-        .iter()
-        .filter_map(|c| c["name"].as_str())
-        .collect();
+    assert_eq!(kb["vertex_count"].as_u64(), Some(1), "one KB; got: {kb}");
+    let kb_cols = declared_columns(kb);
     assert_eq!(
         kb_cols,
-        vec!["label"],
-        "KB carries its own column; got: {kb_cols:?}"
+        ["dense_id", "subject", "label", "x", "y", "cluster_id"],
+        "KB carries its own column between the identity and the layout ones; got: {kb_cols:?}"
     );
 
     let project = vertices
@@ -158,25 +153,20 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         .find(|v| v["type"] == "Project")
         .expect("Project vertex");
     assert_eq!(
-        project["count"].as_i64(),
+        project["vertex_count"].as_u64(),
         Some(2),
         "two Projects; got: {project}"
     );
-    let proj_cols: Vec<&str> = project["columns"]
-        .as_array()
-        .expect("project columns")
-        .iter()
-        .filter_map(|c| c["name"].as_str())
-        .collect();
+    let proj_cols = declared_columns(project);
     assert_eq!(
         proj_cols,
-        vec!["title"],
+        ["dense_id", "subject", "title", "x", "y", "cluster_id"],
         "Project carries its own column; got: {proj_cols:?}"
     );
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB.
     assert!(
-        !kb_cols.contains(&"hasProject"),
+        !kb_cols.iter().any(|c| c == "hasProject"),
         "hasProject is an edge, not a KB column; got: {kb_cols:?}"
     );
     let edges = parsed["edges"].as_array().expect("edges array");
@@ -186,9 +176,20 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         .unwrap_or_else(|| panic!("no KB→Project edge: {parsed}"));
     // Multi-valued: kb/1 references two projects → the LIST UNNESTs to two edges.
     assert_eq!(
-        edge["count"].as_i64(),
+        edge["edge_count"].as_u64(),
         Some(2),
         "multi-valued hasProject unrolls to 2 edges; got: {edge}"
+    );
+    // Both objects named a Project the graph carries, so nothing was discarded.
+    assert_eq!(
+        parsed["dropped"]
+            .as_array()
+            .expect("dropped array")
+            .iter()
+            .find(|d| d["prefix"] == edge["prefix"])
+            .and_then(|d| d["dropped"].as_u64()),
+        Some(0),
+        "no endpoint dangled; got: {parsed}"
     );
 
     // The GraphAr edge Parquet pair + per-type vertex chunks exist on disk.
@@ -314,7 +315,7 @@ fn run_rdf_resolves_schema_through_a_connection() {
         vertices
             .iter()
             .find(|v| v["type"] == "KB")
-            .and_then(|v| v["count"].as_i64()),
+            .and_then(|v| v["vertex_count"].as_u64()),
         Some(1),
         "one KB; got: {parsed}"
     );
@@ -322,7 +323,7 @@ fn run_rdf_resolves_schema_through_a_connection() {
         vertices
             .iter()
             .find(|v| v["type"] == "Project")
-            .and_then(|v| v["count"].as_i64()),
+            .and_then(|v| v["vertex_count"].as_u64()),
         Some(2),
         "two Projects; got: {parsed}"
     );
@@ -333,7 +334,7 @@ fn run_rdf_resolves_schema_through_a_connection() {
         .find(|e| e["src_type"] == "KB" && e["dst_type"] == "Project")
         .unwrap_or_else(|| panic!("no KB→Project edge: {parsed}"));
     assert_eq!(
-        edge["count"].as_i64(),
+        edge["edge_count"].as_u64(),
         Some(2),
         "multi-valued hasProject via @conn refs; got: {edge}"
     );
@@ -413,7 +414,7 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
         .iter()
         .find(|v| v["type"] == "Tag")
         .unwrap_or_else(|| panic!("no Tag vertex: {parsed}"));
-    assert_eq!(tag["count"].as_i64(), Some(1), "one Tag; got: {tag}");
+    assert_eq!(tag["vertex_count"].as_u64(), Some(1), "one Tag; got: {tag}");
 
     // ...and the edge to it resolves to ITS row, not ZERO (the bug). Before the
     // fix, Tag's `subject` was a NULL placeholder so this inner-joined to 0.
@@ -424,8 +425,27 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
         .find(|e| e["src_type"] == "Item" && e["dst_type"] == "Tag")
         .unwrap_or_else(|| panic!("no Item→Tag edge: {parsed}"));
     assert_eq!(
-        edge["count"].as_i64(),
+        edge["edge_count"].as_u64(),
         Some(1),
         "edge to a property-less leaf shape must resolve (was 0 before the base-relation fix); got: {edge}"
     );
+}
+
+/// Every column one vertex type's manifest entry declares, in order — the
+/// identity pair the writer prepends, the program's own properties, and the
+/// three layout columns it appends. `RunStatus` listed only the middle group;
+/// the manifest declares all of them, and a reader gets all of them.
+fn declared_columns(vertex: &serde_json::Value) -> Vec<String> {
+    vertex["property_groups"]
+        .as_array()
+        .expect("property groups")
+        .iter()
+        .flat_map(|g| {
+            g["properties"]
+                .as_array()
+                .expect("properties")
+                .iter()
+                .filter_map(|c| c["name"].as_str().map(ToString::to_string))
+        })
+        .collect()
 }
