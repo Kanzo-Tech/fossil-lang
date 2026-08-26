@@ -16,6 +16,11 @@ workspace = true
 [dependencies]
 # All orchestration lives in the engine; the binary is a thin CLI + presentation shell.
 fossil-engine = { path = "../fossil-engine" }
+# The privacy policy a run is verified against. The host READS the document
+# (a file is a host's job, like a shape document) and hands the parsed value to
+# the write path, which refuses rather than sealing a corpus that misses the
+# bound.
+fossil-policy = { path = "../fossil-policy" }
 # The host half: DESCRIBE each source before the compile, and hold the
 # credentials that let it. See its module doc for why it is not in the engine.
 fossil-introspect = { path = "../fossil-introspect" }
@@ -26,6 +31,9 @@ fossil-base       = { path = "../fossil-base" }
 # (`refs` and `providers` print `Vec`s the engine hands back and this file never
 # names, so `fossil-lineage` is not an edge.)
 fossil-df         = { path = "../fossil-df" }
+# The manifest model, for `Privacy` — the run summary says what the corpus
+# claims, and «undeclared» is the outcome of forgetting `--policy`.
+fossil-sinks      = { path = "../fossil-sinks" }
 # Machine JSON on stdout (`--output-json`) for keasy subprocess consumption.
 serde_json = { workspace = true }
 

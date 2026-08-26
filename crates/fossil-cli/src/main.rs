@@ -24,6 +24,8 @@ use clap::{Parser, Subcommand};
 use fossil_base::{Diagnostic, Severity};
 use fossil_df::RunReport;
 use fossil_introspect::RunCreds;
+// What the corpus claims about itself, for the one line the operator reads.
+use fossil_sinks::manifest::Privacy;
 use miette::{GraphicalReportHandler, GraphicalTheme, NamedSource, SourceSpan};
 use tracing_subscriber::EnvFilter;
 
@@ -81,6 +83,15 @@ enum Commands {
         /// dies rather than slows down.
         #[arg(long, value_name = "GIB", value_parser = gib_to_bytes)]
         memory_gib: Option<u64>,
+        /// Path to the privacy policy the release is verified against — an ODRL
+        /// document in fossil's privacy profile. The run REFUSES rather than
+        /// writing a corpus that does not satisfy it.
+        ///
+        /// Omit and the corpus is sealed `privacy: undeclared`, which says on
+        /// the artifact that no bound was checked. It does not say the data is
+        /// public and no reader may take it that way.
+        #[arg(long, value_name = "PATH")]
+        policy: Option<PathBuf>,
     },
     /// List the data-source providers fossil supports (the `io.*` source
     /// constructors). The host reads this to populate its connector UI.
@@ -150,7 +161,15 @@ fn main() -> miette::Result<()> {
             output_json,
             creds_stdin,
             memory_gib,
-        } => cmd_run(&file, &dest, output_json, creds_stdin, memory_gib),
+            policy,
+        } => cmd_run(
+            &file,
+            &dest,
+            output_json,
+            creds_stdin,
+            memory_gib,
+            policy.as_deref(),
+        ),
         Commands::Providers { output_json } => cmd_providers(output_json),
         Commands::Refs { file, output_json } => cmd_refs(&file, output_json),
     }
@@ -286,6 +305,7 @@ fn cmd_run(
     output_json: bool,
     creds_stdin: bool,
     memory_bytes: Option<u64>,
+    policy_path: Option<&Path>,
 ) -> miette::Result<()> {
     let creds = if creds_stdin {
         RunCreds::from_stdin().map_err(|e| miette::miette!("{e}"))?
@@ -298,7 +318,18 @@ fn cmd_run(
     // over a cloud `@conn` source authenticates, which happens here.
     let connections = fossil_introspect::connection_urls(&creds.connections);
     introspect(path, &connections, &creds)?;
-    let run = fossil_engine::run(path, dest, &connections, memory_bytes)?;
+    // Read and parsed HERE, before the compile, so a malformed policy is a
+    // message about the policy rather than a run that gets most of the way and
+    // then cannot say what it was checking against.
+    let policy = policy_path
+        .map(|p| {
+            let text = std::fs::read_to_string(p)
+                .map_err(|e| miette::miette!("read policy `{}`: {e}", p.display()))?;
+            fossil_policy::parse(&text)
+                .map_err(|e| miette::miette!("policy `{}`: {e}", p.display()))
+        })
+        .transpose()?;
+    let run = fossil_engine::run(path, dest, &connections, memory_bytes, policy.as_ref())?;
     report(&run, output_json);
     Ok(())
 }
@@ -325,6 +356,27 @@ fn report(run: &RunReport, output_json: bool) {
         run.edges.len(),
         run.dest,
     );
+    // What the corpus claims, on the line the operator reads. A run that
+    // verified a bound and a run that did not are different outcomes, and
+    // «undeclared» is the one worth saying out loud — it is the outcome of
+    // forgetting `--policy`, and the whole reason forgetting is survivable is
+    // that it is visible.
+    match &run.graph.privacy {
+        Privacy::Undeclared => {
+            println!("  privacy: undeclared — no policy was given, so no bound was checked");
+        }
+        Privacy::KAnonymity(bound) => println!(
+            "  privacy: k-anonymity, k={} asked and k={} reached over {} record(s){}",
+            bound.k,
+            bound.reached,
+            bound.population,
+            if bound.suppressed == 0 {
+                String::new()
+            } else {
+                format!(", {} suppressed", bound.suppressed)
+            },
+        ),
+    }
     for drops in run.dropped.iter().filter(|d| d.dropped > 0) {
         println!(
             "  {} — {} input row(s) named an endpoint no vertex carries, and are not edges",

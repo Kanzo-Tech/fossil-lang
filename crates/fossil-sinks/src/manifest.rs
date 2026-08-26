@@ -1133,7 +1133,16 @@ version: gar/v1
             panic!("a bound");
         };
         assert!(bound.suppressed * 1_000_000 <= bound.population * bound.suppression_budget_ppm);
-        // And it bites: 1,401 of 70,000 is 20,014 ppm, which is over.
-        assert!(1_401_u64 * 1_000_000 > 70_000_u64 * 20_000);
+        // And it bites: 1,401 of 70,000 is 20,014 ppm, which is over. Read off a
+        // value rather than written as a constant expression, which the
+        // compiler folds away and clippy rightly calls an assertion about
+        // nothing.
+        let over = KAnonymity {
+            suppressed: 1_401,
+            ..bound
+        };
+        assert!(
+            over.suppressed * 1_000_000 > over.population * over.suppression_budget_ppm
+        );
     }
 }

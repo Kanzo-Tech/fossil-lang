@@ -766,6 +766,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
                     &url,
                     &std::collections::HashMap::new(),
                     None,
+                    None,
                 );
                 match outcome {
                     Ok(report) => {

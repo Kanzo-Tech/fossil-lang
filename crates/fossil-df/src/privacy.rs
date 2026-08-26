@@ -70,7 +70,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::Schema;
-use datafusion::common::ScalarValue;
+use datafusion::common::{Column, ScalarValue};
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{count, min, sum};
@@ -92,6 +92,20 @@ use crate::{GraphArData, VertexTable};
 /// reading to rescue it. Refusing is the honest answer, and the message names
 /// the cheaper one.
 const WILDCARD_CLASS_CAP: usize = 1 << 20;
+
+/// One quasi-identifier column, referenced **verbatim**.
+///
+/// Not `col(name)`. `col` parses its argument as SQL, so an unquoted
+/// identifier is folded to lower case — and a corpus column is whatever the
+/// shape called it, `birthYear` included. `render` in `lib.rs` carries the same
+/// note for the same reason and this is the second place it bites: the failure
+/// is `No field named birthyear` from inside the verifier, on a corpus that is
+/// otherwise fine, and `a_release_that_clears_the_bound_is_sealed_with_numbers_a_stranger_can_recompute`
+/// is what found it. A predicate whose local name has a capital in it is not
+/// unusual; it is what every camel-cased vocabulary produces.
+fn column(name: &str) -> DfExpr {
+    DfExpr::Column(Column::new_unqualified(name))
+}
 
 /// Why a corpus was refused, or why the bound could not be established.
 ///
@@ -490,7 +504,7 @@ async fn measure(
     // quasi-identifiers suppresses nothing and forms one class holding everyone.
     let any_null = columns
         .iter()
-        .map(|c| col(c).is_null())
+        .map(|c| column(c).is_null())
         .reduce(DfExpr::or)
         .unwrap_or_else(|| lit(false));
 
@@ -515,7 +529,7 @@ async fn measure(
     // population, which is exactly the right answer for a type publishing no
     // quasi-identifier at all.
     let classes = classified.aggregate(
-        columns.iter().map(String::as_str).map(col).collect(),
+        columns.iter().map(String::as_str).map(column).collect(),
         vec![count(lit(1)).alias("n")],
     )?;
 

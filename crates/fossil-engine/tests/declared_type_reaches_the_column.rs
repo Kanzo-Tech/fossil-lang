@@ -97,6 +97,7 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
         &format!("file://{}", dest.display()),
         &std::collections::HashMap::new(),
         None,
+        None,
     )
     .expect("fossil run");
 

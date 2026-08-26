@@ -125,6 +125,9 @@ fn run(program: &str, dest: &Path, memory_bytes: Option<u64>) {
         &std::collections::HashMap::new(),
         |uri| Err(format!("no RDF source expected: {uri}")),
         memory_bytes,
+        // No policy: this test is about the memory budget, and a run with no
+        // policy seals `privacy: undeclared` rather than refusing.
+        None,
     )
     .unwrap_or_else(|e| panic!("run_to_dir: {e}; {:#?}", support::diagnostics(&db, file)));
 }

@@ -80,8 +80,8 @@ use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
-    AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property,
-    PropertyGroup, VertexIndex, VertexInfo, data_type_name,
+    AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Privacy,
+    Property, PropertyGroup, VertexIndex, VertexInfo, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -97,6 +97,22 @@ pub struct GraphArData {
     pub schema: GraphSchema,
     pub vertices: Vec<VertexTable>,
     pub edges: Vec<EdgeTable>,
+    /// **What these bytes guarantee**, and the one field here that is not data.
+    ///
+    /// [`Privacy::Undeclared`] until [`privacy::verify`] has measured the
+    /// release against a policy and replaced it. It is carried on the value
+    /// rather than passed to [`Self::manifest`] so that the bound and the rows
+    /// it was measured over cannot be separated: a manifest built from this
+    /// value describes this corpus, and there is no call shape in which a
+    /// caller supplies a bound for rows it did not check.
+    ///
+    /// A run with no policy leaves it [`Privacy::Undeclared`], which is written
+    /// to `graph.graph.yml` as such. That is the whole mitigation for the
+    /// binding being a host argument today: forgetting it does not produce a
+    /// corpus that looks bounded, it produces one that says out loud that
+    /// nothing was checked, and `apps/corpus`'s `declared-privacy` says so
+    /// again to whoever receives it.
+    pub privacy: Privacy,
 }
 
 /// A materialised edge's adjacency data in both orientations — `by_source` (CSR,
@@ -205,6 +221,7 @@ pub async fn execute_graph<'db>(
         edges: edge_types,
     };
     Ok(GraphArData {
+        privacy: Privacy::Undeclared,
         schema,
         vertices,
         edges,
@@ -1110,6 +1127,7 @@ pub fn run_to_dir(
     connections: &HashMap<String, String>,
     read_uri: impl Fn(&str) -> Result<String, String>,
     memory_bytes: Option<u64>,
+    policy: Option<&fossil_policy::PrivacyPolicy>,
 ) -> datafusion::error::Result<GraphArData> {
     let mut probe = Probe::new("run_to_dir");
     let ctx = bounded_context(memory_bytes)?;
@@ -1123,7 +1141,7 @@ pub fn run_to_dir(
         .enable_all()
         .build()
         .map_err(|e| DataFusionError::Execution(format!("build tokio runtime: {e}")))?;
-    let graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor, connections))?;
+    let mut graph = runtime.block_on(execute_graph(&ctx, db, file, descriptor, connections))?;
     // What the boundary type itself holds, against what the process holds. The
     // gap between them is the executor's transient — sort buffers, and pages the
     // allocator has not returned — and the two want opposite fixes, so the mark
@@ -1139,6 +1157,20 @@ pub fn run_to_dir(
     // is the last moment they can be released rather than added to.
     drop(ctx);
     probe.mark("drop session context");
+
+    // The bound, measured HERE — after the corpus is a value and before any of
+    // it is a file. There is no read path to put a control on, so the only
+    // control there is is not writing the bytes; a refusal on this line leaves
+    // nothing on disk to leak.
+    //
+    // No policy leaves `Privacy::Undeclared`, which the manifest writes down as
+    // such rather than omitting.
+    if let Some(policy) = policy {
+        graph.privacy = runtime
+            .block_on(privacy::verify(policy, &graph))
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        probe.mark("verify privacy bound");
+    }
 
     graph
         .write_to_dir(dest_dir)
@@ -1719,7 +1751,12 @@ impl GraphArData {
         // is written down here, once, for every payload set of the corpus. What
         // fossil emits is the row-group one: `fossil-layout` cuts each set into
         // one Parquet whose row groups ARE its tiles.
-        let graph = GraphInfo::new("graph", "", Container::RowGroups, vertex_paths, edge_paths);
+        // The bound travels with the manifest because it is a property of the
+        // release the manifest describes. `with_privacy` is the only way to set
+        // it and only the verifier calls it, so a corpus cannot declare a bound
+        // that was not measured over these rows.
+        let graph = GraphInfo::new("graph", "", Container::RowGroups, vertex_paths, edge_paths)
+            .with_privacy(self.privacy.clone());
 
         // The counts come off the materialised batches and not off the schema,
         // because the schema knows what types there are and only the data knows

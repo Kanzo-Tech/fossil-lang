@@ -34,6 +34,11 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # → write_to_dir). Re-exports `OutputDescriptorKind`. DuckDB now serves only the
 # layout post-pass + CSV type pre-introspection.
 fossil-df           = { path = "../fossil-df" }
+# The privacy policy a run is verified against. The host READS the document
+# (a file is a host's job, like a shape document) and hands the parsed value to
+# the write path, which refuses rather than sealing a corpus that misses the
+# bound.
+fossil-policy = { path = "../fossil-policy" }
 # The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
 # after the write. It links no engine and it is not the «native runtime + secrets
 # + cloud-path resolver» this line used to call it: `materialize.rs` took the

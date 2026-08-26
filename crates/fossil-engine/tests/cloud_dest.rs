@@ -61,6 +61,7 @@ fn a_cloud_destination_is_refused_and_says_which() {
             dest,
             &std::collections::HashMap::new(),
             None,
+            None,
         )
         .expect_err("the write path is a local directory; a cloud dest must be refused");
         let message = format!("{err}");
@@ -96,6 +97,7 @@ fn the_refusal_does_not_depend_on_what_the_creds_payload_carries() {
         dest,
         &std::collections::HashMap::new(),
         None,
+        None,
     )
     .expect_err("refused");
 
@@ -115,7 +117,7 @@ fn the_refusal_does_not_depend_on_what_the_creds_payload_carries() {
         Some("s3://bucket/prefix"),
         "the projection keeps the URL"
     );
-    let with_creds = fossil_engine::run(&dir.path().join("prog.fossil"), dest, &urls, None)
+    let with_creds = fossil_engine::run(&dir.path().join("prog.fossil"), dest, &urls, None, None)
         .expect_err("still refused");
 
     assert_eq!(
@@ -144,6 +146,7 @@ fn both_spellings_of_a_local_destination_are_accepted() {
             &dir.path().join("prog.fossil"),
             &url,
             &std::collections::HashMap::new(),
+            None,
             None,
         )
         .unwrap_or_else(|e| panic!("a local dest spelt `{dest}` must run: {e}"));

@@ -69,6 +69,9 @@ fn corpus(props: &[&str], rows: &[Vec<Option<&str>>], batches: usize) -> GraphAr
     }
 
     GraphArData {
+        // Undeclared until measured, which is what `verify` returns rather than
+        // mutates: the value it is handed is one no bound has touched.
+        privacy: Privacy::Undeclared,
         schema: GraphSchema {
             nodes: vec![NodeType {
                 label: "Person".to_string(),

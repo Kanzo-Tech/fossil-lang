@@ -305,6 +305,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         &format!("file://{}", dest.display()),
         &std::collections::HashMap::new(),
         None,
+        None,
     )
     .expect("fossil run");
 

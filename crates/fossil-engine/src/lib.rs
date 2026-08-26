@@ -333,6 +333,22 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 /// The output descriptor is program-resident (invariant #1). `creds` carries the
 /// cloud config (empty ⇒ local / public-URL behaviour).
 ///
+/// `policy` is the privacy policy the release is verified against, and the run
+/// **refuses** rather than writing a corpus that does not satisfy it — the
+/// verification happens after the corpus is a value and before any of it is a
+/// file, because there is no read path to put a control on afterwards. `None`
+/// seals `privacy: undeclared` into the manifest, which is a claim a recipient
+/// can read rather than a silence they have to interpret.
+///
+/// It is an argument here and it should be a **document the program binds**,
+/// the way `type { Person } := io.shex(…)` binds a shape. `grammar.bnf` carries
+/// the production; nothing parses it yet. The gap matters because an obligation
+/// discharged by remembering a flag is one that can be forgotten, which is the
+/// same argument that keeps an anonymisation operator out of the language — and
+/// what stands in for it until then is that forgetting is VISIBLE: the corpus
+/// says `undeclared` on its face and `apps/corpus`'s `declared-privacy` repeats
+/// it to whoever receives the files.
+///
 /// `memory_bytes` is the run's declared memory budget, and it is one number for
 /// the whole run: the `DataFusion` pool the write path executes under and the
 /// `DuckDB` `memory_limit` of the layout pass that follows it. Two engines spend
@@ -348,6 +364,7 @@ pub fn run(
     dest_url: &str,
     connections: &HashMap<String, String>,
     memory_bytes: Option<u64>,
+    policy: Option<&fossil_policy::PrivacyPolicy>,
 ) -> miette::Result<RunReport> {
     tracing::debug!(?path, dest_url, "fossil run");
     let text = std::fs::read_to_string(path)
@@ -425,6 +442,7 @@ pub fn run(
         connections,
         read_uri,
         memory_bytes,
+        policy,
     )
     .map_err(|e| miette::miette!("execute: {e}"))?;
 
