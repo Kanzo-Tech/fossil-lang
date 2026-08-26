@@ -45,13 +45,16 @@
 //! # What the walk is, measured
 //!
 //! Over `tests/fixtures/canonical_200.fossil` (15 mappings), one steady-state
-//! keystroke: **60 memos revalidated, 22 executed**. The 60 are
-//! `body`, `spans`, `typecheck_mapping` and `lower_to_mir_pg` for the mappings
-//! the edit did not touch, plus three file-keyed ones (`check_identities`,
-//! `subject_templates`, `decode_shape_document`). That is four per mapping and
-//! a constant — the per-mapping invalidation barrier doing exactly what
-//! `invalidation_regression.rs` claims for it, seen from the other side. There
-//! is no waste in it to remove.
+//! keystroke: **60 memos revalidated, 22 executed**. Counted by query, the 60
+//! are `body`, `typecheck_mapping` and `lower_to_mir_pg` for the 14 mappings the
+//! edit did not touch, `spans` for all 15 — it validates for the touched one
+//! too, because appending a line moves no mapping's spans — and three file-keyed
+//! ones (`check_identities`, `subject_templates`, `decode_shape_document`).
+//! `4(m-1) + 1 + 3`, which is `4m` and is why the ceiling below has that shape.
+//! This paragraph read «four per mapping and a constant», which is `4m + 3` and
+//! does not come to 60; the arithmetic was never done. It is the per-mapping
+//! invalidation barrier doing exactly what `invalidation_regression.rs` claims
+//! for it, seen from the other side, and there is no waste in it to remove.
 //!
 //! # Why the bound is derived and not a constant
 //!
@@ -79,6 +82,16 @@
 //! mapping instead of running. That is the blind spot stated as a measurement,
 //! and it is the whole argument for counting the other event. The probe was
 //! reverted; the numbers are what stayed.
+//!
+//! # What this one does not cover, and where it went
+//!
+//! One buffer, one `didChange`. `workspace_revalidation.rs` is the other two
+//! conditions — several buffers open, and `didOpen` — and the answer there is a
+//! negative: the walk is `5m + 7` memos and does not move between 2 open buffers
+//! and 14. It also gates the SUM of the two events rather than this file's half,
+//! because the split is not stable: the keystroke after any `didOpen` walks the
+//! same 82 memos with as few as 7 of them validating, and a bound on
+//! `revalidated` alone goes GREENER when that happens.
 
 #![cfg(not(target_arch = "wasm32"))]
 
