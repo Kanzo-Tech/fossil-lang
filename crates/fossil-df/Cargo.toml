@@ -25,6 +25,13 @@ fossil-hir = { path = "../fossil-hir" }
 # neither half of the write path may depend on the other.
 fossil-mem-probe = { path = "../fossil-mem-probe" }
 fossil-mir = { path = "../fossil-mir" }
+# The policy document a corpus is verified against, and the vocabulary the
+# manifest records the verification in. A leaf (serde/serde_json/thiserror), so
+# `src/privacy.rs` costs the wasm build nothing beyond what is already here —
+# which it has to, because the browser host writes corpora too and a bound only
+# the native writer can establish is a bound with a second writer's worth of
+# hole in it.
+fossil-policy = { path = "../fossil-policy" }
 # Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
 # (arrow-schema / serde only) — the backend reuses them instead of re-deriving
 # the GraphAr layout.
@@ -132,6 +139,11 @@ tempfile = { workspace = true }
 # tests/pipeline.rs builds the op list by hand — the MIR operators, which no
 # `.fossil` reaches yet — so it spells `SmolStr` directly.
 smol_str = { workspace = true }
+# `tests/privacy.rs` builds a `PrivacyPolicy` by hand — a policy document is a
+# host's job to read, and the check under test takes the parsed value.
+fossil-policy = { path = "../fossil-policy" }
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+fossil-sinks = { path = "../fossil-sinks" }
 # tests/spill.rs asserts that a declared budget is honoured by spilling, and the
 # spill only announces itself through a `log` record from DataFusion.
 log = { workspace = true }

@@ -24,6 +24,9 @@ pub mod files;
 /// The relational operators executed: the walk from an emit op back to the
 /// sources it reads (`Filter` / `Project` / `Join`).
 pub mod plan;
+/// Write-time verification of a declared privacy bound: the check that runs
+/// after the corpus is a value and before any of it is a file.
+pub mod privacy;
 pub mod rdf;
 /// What a run tells its caller: the manifest it wrote, the destination, and the
 /// edges the join discarded. Built by [`report::RunReport::of`] and by nothing
