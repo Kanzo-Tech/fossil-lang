@@ -55,12 +55,31 @@
    the rest — and `NativeReader::table_function` gives the token back, so nothing
    downstream re-states it.
 
-   `rdf`'s extension list is kept in lockstep with the RDF provider's own. *)
+   `rdf`'s extension list is kept in lockstep with the RDF provider's own.
 
-row csv     = extensions "csv"                    ; reads native read_csv_auto  .
-row json    = extensions "json"                   ; reads native read_json_auto .
-row parquet = extensions "parquet"                ; reads native read_parquet   .
-row rdf     = extensions "ttl" "nt" "n3" "rdf"    ; reads materialised          .
+   `signature` is what a program gets if it writes the constructor in a VALUE
+   position — `io.csv("u.csv")` inside a mapping rather than as a binding. It
+   was stated twice: here, and again as a hand-written row in
+   `fossil_hir::stdlib`, and the two sets disagreed. The registry carried three
+   (`csv`, `json`, `parquet`) against this file's six, so `io.rdf` — a source a
+   program may bind like any other — had no signature at all and no diagnostic
+   when misused. One clause, one place.
+
+   `shex` and `shacl` below carry NO `signature`, and that is an answer rather
+   than an omission: they give back a shape document, and `SigTy` has no
+   spelling for one. Writing `-> Rows` for them to fill the column would be the
+   mistake this fold exists to undo, one level along — three constructors of
+   relations once declared that they returned a string, because the helper that
+   built them took a scalar type and nobody noticed the row was lying. *)
+
+row csv     = extensions "csv"                    ; reads native read_csv_auto
+            ; signature (uri: String) -> Rows ; op Source .
+row json    = extensions "json"                   ; reads native read_json_auto
+            ; signature (uri: String) -> Rows ; op Source .
+row parquet = extensions "parquet"                ; reads native read_parquet
+            ; signature (uri: String) -> Rows ; op Source .
+row rdf     = extensions "ttl" "nt" "n3" "rdf"    ; reads materialised
+            ; signature (uri: String) -> Rows ; op Source .
 
 (* --------------------------------------------------------------- io, types *)
 (* Rows that read TYPES. `decodes` names the function the implementing crate
@@ -86,15 +105,259 @@ row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        
    to has no syntax at all. A row for it here would be a name no program can
    write.
 
-   The stdlib catalogue — `str.slug`, `parse.date`, the relation verbs — is NOT
-   here yet. It is the larger half of the catalogue and this file is the shape
-   it would take.
+   The stdlib catalogue used to be named here as the larger half that had not
+   arrived. It is below. *)
 
-   It does not have to be here in order to be DATA, and that is what this
-   paragraph used to get wrong: `fossil_hir::stdlib`'s `FunctionRegistry` is
-   already a table of `RegistryEntry { name, recv, member, sig, lowering }`,
-   five fields and every one of them a value. `cargo xtask catalogue` reads it
-   directly — see `crates/xtask/src/reference.rs` — and generates the reference
-   page's tables from it beside the `io.` ones. What moving it into a file would
-   buy is what it bought the rows above: adding `str.slugify` over
-   `regexp_replace` would stop touching Rust. *)
+(* ========================================================================== *)
+(* THE STDLIB CATALOGUE — every function the language declares.
+   ==========================================================================
+
+   A `fn` row is four things and no more: a dotted NAME, a SIGNATURE, a RETURN
+   type and a LOWERING.
+
+   # What a row must NOT write
+
+   The RECEIVER. `str.trim` hangs off a string and `seq.where` hangs off a
+   relation, and both are DERIVED from the head of the dotted name by
+   `fossil_hir::stdlib::split_receiver` — the one place the rule lives. A field
+   a row fills by hand is a field that ends up disagreeing with the name beside
+   it, which is the defect dispatch-by-receiver exists to end, one level down.
+   So the grammar here cannot express a receiver at all.
+
+   # The signature
+
+     ( name: Type , name: Type+ , name = Type ) -> Type
+
+   `:` is a position written by ORDER; `=` is a position written WITH ITS NAME
+   (`grammar.bnf`, NamedArg). One row uses `=` today — `seq.join`'s `on` — and
+   it is a property of the surface, not a convenience: `join(User, a == b)` is a
+   different program from `join(User, on = a == b)`, and a binder that filled
+   the slot from either spelling would widen the language by accident.
+
+   `+` is one-or-more, `?` is zero-or-one, and bare is exactly one.
+
+   Twelve type spellings: seven scalars — String Integer Float Bool Date
+   DateTime SeqString — and five whose meaning depends on the RECEIVER, which is
+   why they are not scalars: Rows (the relation a verb is a verb of), Predicate
+   (a condition over its rows), Column and Binding (positions that NAME rather
+   than evaluate), and Aggregate (whose argument names are the PROGRAM's).
+
+   **The return type is independent of the lowering, and the grammar has to keep
+   it that way.** `seq.count` is an operator that gives back an Integer;
+   `io.csv` is an operator that takes a scalar and gives back Rows. A notation
+   that tied `-> Rows` to `op` could express neither.
+
+   # The lowering
+
+   `expr "<template>"` is a scalar SQL expression with `%N` holes, N zero-based.
+   The holes are INDEXED and not sequential because a hole may appear twice or
+   not at all, and a template therefore does NOT determine arity — the signature
+   does.
+
+   `op <Variant>` names one operator of the algebra. The token is emitted as the
+   Rust path `PlanOp::<Variant>`, so a row naming an operator nobody wrote is a
+   build failure — the same guarantee `decodes decode_shex` buys above. `PlanOp`
+   itself stays hand-written: `lower_source_stage` matches it exhaustively, and
+   each variant carries what it lowers to, which is prose a token has nowhere to
+   put.
+   ========================================================================== *)
+
+(* ------------------------------------------------------------------- core/ *)
+(* This was eight rows. Six were RDF term constructors — `iri`, `triple`,
+   `blank`, `literal`, `typed`, `emit` — and not one `.fossil` in the tree
+   called any of them; they took the variadic and the not-an-argument template
+   shapes with them, which is why the notation above needs neither.
+
+   `core.require` was the eighth and is gone from the language. It read its
+   argument twice around an `error()`, and `error()` has no DataFusion
+   equivalent at all — there is no way to raise from an expression, so «this
+   value or stop the run» had no spelling on the engine that writes a corpus. *)
+
+fn core.lang = (value: String, tag: String) -> String ; expr "%0" .
+
+(* -------------------------------------------------------------------- seq/ *)
+(* The relation verbs, and a new verb is a ROW rather than a grammar rule —
+   that is what having a receiver bought. `filter` and `project` are spelled
+   `where` and `select` because the catalogue must spell what the surface
+   spells: `members_of(Relation)` is what an IDE offers, and offering
+   `User.filter(…)` for a language whose word is `where` is a completion that is
+   confidently wrong.
+
+   `map`'s function argument is the higher-order position the surface does not
+   spell yet (`grammar.bnf` has no lambda), so the row declares the relation and
+   stops. A parameter invented here would be the reference page's old invented
+   `by`/`key`/`desc` written one layer lower down.
+
+   `distinct` takes NOTHING. A `DISTINCT ON` column list keeps one row per group
+   and chooses it arbitrarily without an `ORDER BY`, and `sort` has no lowering
+   yet, so there is no way to write the order that would settle it — a verb
+   whose corpus differs between two runs of the same program is not one this
+   language can admit.
+
+   `union`'s right side takes no `X as Y`, unlike a join's: the two sides become
+   ONE row under the pipeline's name, so an alias would name a side the verb
+   does not produce.
+
+   `group_by` is the one row with two `+` positions, and they do not collide.
+   The rule a repetition obeys is about POSITIONAL arguments — a repeating
+   position cannot be told from the position after it — and `aggregations` is
+   reached by NAME or not at all. `count` is the one `seq/` row that is not a
+   verb of the algebra: it takes a relation and gives back a number. *)
+
+fn seq.where    = (rows: Rows, keep: Predicate) -> Rows                 ; op Where    .
+fn seq.map      = (rows: Rows) -> Rows                                  ; op Map      .
+fn seq.flatten  = (rows: Rows, of: Column) -> Rows                      ; op Flatten  .
+fn seq.take     = (rows: Rows, n: Integer) -> Rows                      ; op Take     .
+fn seq.drop     = (rows: Rows, n: Integer) -> Rows                      ; op Drop     .
+fn seq.distinct = (rows: Rows) -> Rows                                  ; op Distinct .
+fn seq.sort     = (rows: Rows, by: Column+) -> Rows                     ; op Sort     .
+fn seq.select   = (rows: Rows, cols: Column+) -> Rows                   ; op Select   .
+fn seq.join     = (rows: Rows, right: Binding, on = Predicate) -> Rows  ; op Join     .
+fn seq.union    = (rows: Rows, other: Binding) -> Rows                  ; op Union    .
+fn seq.group_by = (rows: Rows, keys: Column+, aggregations: Aggregate+) -> Rows
+                                                                        ; op GroupBy  .
+fn seq.count    = (rows: Rows) -> Integer                               ; op Count    .
+
+(* -------------------------------------------------------------------- str/ *)
+(* Every operation on a string. There is no `clean/`: no principle separates
+   cleaning a string from operating on one, so `trim`, `lower`, `upper`, `slug`
+   and `strip_html` live here with the other eight.
+
+   `normalize_unicode` is NOT among them and is not in the language: DuckDB has
+   `nfc_normalize` and therefore NFC only, and a `normalize_unicode(x, 'NFKD')`
+   that silently gave NFC would be a function that lies. *)
+
+fn str.length      = (text: String) -> Integer                  ; expr "length(%0)" .
+fn str.slice       = (text: String, start: Integer) -> String   ; expr "substring(%0, %1)" .
+fn str.contains    = (text: String, needle: String) -> Bool     ; expr "contains(%0, %1)" .
+fn str.starts_with = (text: String, prefix: String) -> Bool     ; expr "starts_with(%0, %1)" .
+fn str.ends_with   = (text: String, suffix: String) -> Bool     ; expr "ends_with(%0, %1)" .
+fn str.replace     = (text: String, needle: String, replacement: String) -> String
+                                                                ; expr "replace(%0, %1, %2)" .
+fn str.split       = (text: String, separator: String) -> SeqString
+                                                                ; expr "string_split(%0, %1)" .
+fn str.concat      = (text: String, other: String) -> String    ; expr "concat(%0, %1)" .
+fn str.trim        = (text: String) -> String                   ; expr "trim(%0)" .
+fn str.lower       = (text: String) -> String                   ; expr "lower(%0)" .
+fn str.upper       = (text: String) -> String                   ; expr "upper(%0)" .
+
+(* `str.slug` replaced the `fossil_slug` UDF, and THE TEMPLATE IT WAS SPECIFIED
+   WITH MATCHED NEITHER RUST IMPLEMENTATION — measurement is the only reason we
+   know. The tree carried two slug functions: the `fossil_slug` UDF, which was
+   `slug::slugify`, and a hand-written one that kept `.`, lower-cased, and
+   collapsed every run of non-`\p{L}\p{N}.-` to a single `-`. Against a 16-case
+   hand corpus the specified `'[^a-z0-9.-]+'` form scored 8/16 against the first
+   and 7/16 against the second — it is a hybrid of the two. Worse, it maps `ÅÄÖ`
+   and `日本語` to the EMPTY STRING, which in a slug that ends up in an IRI is an
+   identity collision and not a formatting difference.
+
+   The form below is EXACT against that hand-written one: 16/16 by hand and 0
+   mismatches over 240,998 fuzzed inputs. `slug::slugify` cannot be reproduced
+   at all — it TRANSLITERATES (`Straße` → `strasse`, `€100` → `eur100`, `Москва`
+   → `moskva`) and DuckDB ships no transliteration function. The best available
+   approximation, over `strip_accents`, differs on 55.6% of Latin-accented
+   input, so this keeps the implementation whose behaviour is expressible and
+   says so. *)
+
+fn str.slug = (text: String) -> String
+            ; expr "trim(regexp_replace(lower(trim(%0)), '[^\p{L}\p{N}.-]', '-', 'g'), '-')" .
+
+(* `str.strip_html` replaced `voca_rs::strip::strip_tags`, and it is the ONE
+   template that is NOT exact: 27/29 by hand and 1,837 mismatches over 120,000
+   fuzzed inputs (1.5%). `voca_rs` is a parser and this is a regex, so the
+   residue is entirely MALFORMED markup — an unbalanced quote makes voca swallow
+   the rest of the string and a regex cannot. With a quote character present the
+   disagreement rate is 10.9%; without one it is 0.6%.
+
+   The naive `'<[^>]*>'` scored 17/29. What this adds is the two things voca
+   actually does: a bare `<` followed by whitespace is TEXT (`a < b` survives),
+   and a quoted attribute may contain `>` (`<a href="x>y">link</a>` → `link`).
+
+   It is also the template that ended the old line-scanning parser. It carries
+   double quotes of its own, so under «the odd segments are literals» every
+   later token on the line changed parity — a silently different catalogue
+   rather than a parse error. `\"` is the escape; see `xtask::catalogue::lex`. *)
+
+fn str.strip_html = (text: String) -> String
+                  ; expr "regexp_replace(%0, '<(?:>|$|[^\s](?:\"[^\"]*\"|''[^'']*''|[^>\"''])*(?:>|$))', '', 'g')" .
+
+(* ------------------------------------------------------------------ parse/ *)
+(* Casts, and `strptime` behind two rows that differ by one.
+
+   `decimal` returns Float and the OUTER cast is what makes that sentence true;
+   the template was `CAST(%0 AS DECIMAL(38,18))`, which returns a fixed-point
+   column while the row said `Float`. The INNER cast stays because it is the
+   only thing separating this row from `parse.float`: `CAST('1e400' AS
+   DECIMAL(38,18))` REFUSES the value where `CAST('1e400' AS DOUBLE)` yields
+   `inf`. Measured on DuckDB v1.5.3.
+
+   `strptime` returns a TIMESTAMP whatever the format string asks for, so a bare
+   call was `parse.datetime` under a second name. The cast on `date` is what
+   makes the two rows two things.
+
+   `parse.json` and `parse.csv_row` are gone. `json` lowered to
+   `json_extract_string`, which is DuckDB's — DataFusion ships no JSON
+   extraction in its default function set, so the row could not run on the
+   engine that writes a corpus. `csv_row` renders perfectly well and is simply
+   not wanted: splitting a field out of a line of CSV is what `io.csv` is for,
+   and a row that re-does the reader's job inside a mapping invites a program to
+   parse its own input twice. It was the only user of `split_part`. *)
+
+fn parse.integer  = (text: String) -> Integer                   ; expr "CAST(%0 AS BIGINT)" .
+fn parse.float    = (text: String) -> Float                     ; expr "CAST(%0 AS DOUBLE)" .
+fn parse.decimal  = (text: String) -> Float                     ; expr "CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)" .
+fn parse.date     = (text: String, format: String) -> Date      ; expr "CAST(strptime(%0, %1) AS DATE)" .
+fn parse.datetime = (text: String, format: String) -> DateTime  ; expr "strptime(%0, %1)" .
+
+(* ------------------------------------------------------------------- math/ *)
+(* SIX rows, and NO `ceil`/`floor`.
+
+   The four aggregates are NOT redundant with `seq.group_by`, and the shape of
+   that mistake is worth writing down because it was nearly made: `group_by`'s
+   aggregations are SPELLED with these rows —
+   `group_by(Order.customer, total = math.sum(Order.amount))` — and
+   `RegistryEntry::agg_fn` is the map from the row to the `AggFn` that
+   `fossil_mir::lower` reads. Delete them and `group_by` keeps its syntax and
+   loses its vocabulary: `aggregate_names()` returns nothing, every aggregation
+   is refused with a message listing no alternatives, and `AggFn`'s four
+   variants become states nothing can construct.
+
+   They are unrenderable as SCALAR calls on DataFusion, which is a different
+   claim and the one `UNREACHABLE_ON_DATAFUSION` makes: an aggregate in a
+   property position is a pipeline with a group-by, not an expression.
+
+   `round` is the only Float → Integer row, and the cast is what makes it one:
+   `round(DOUBLE)` is a DOUBLE in DuckDB, so the bare call returned `2.0` under
+   a row promising an integer. Rounding first and casting second is not a double
+   rounding — `round` has already made the value integral — and half-away-from-
+   zero survives it (`-1.5` → `-2`). Measured on DuckDB v1.5.3. *)
+
+fn math.sum   = (value: Float) -> Float     ; expr "sum(%0)" .
+fn math.avg   = (value: Float) -> Float     ; expr "avg(%0)" .
+fn math.min   = (value: Float) -> Float     ; expr "min(%0)" .
+fn math.max   = (value: Float) -> Float     ; expr "max(%0)" .
+fn math.abs   = (value: Float) -> Float     ; expr "abs(%0)" .
+fn math.round = (value: Float) -> Integer   ; expr "CAST(round(%0) AS BIGINT)" .
+
+(* ------------------------------------------------ validate/ and anon/, gone *)
+(* Neither namespace exists, and each left for its own reason.
+
+   `validate/` was five rows sharing one shape — the value or an error, never a
+   null — and that shape is `error()`, which DataFusion cannot express. There is
+   no way to raise from an expression, so every one of the five was unrenderable
+   on the engine that writes a corpus. `validate.regex` is the instructive one:
+   it lowered to a bare `regexp_matches`, which renders happily as a BOOLEAN
+   under a row declaring `String`, so a mapping that validated a code wrote the
+   literal `true` into it and nothing failed. Renderable and wrong is worse than
+   absent.
+
+   `anon/` was two rows and it is a change of design, not of engine.
+   Anonymisation is a DECLARED POLICY the writer applies, so the language names
+   no anonymisation operator: a policy can be stated once for a corpus and
+   audited, where `anon.hash(x, salt = "…")` puts the salt in the program text
+   at every call site and makes «is this column anonymised?» a question you
+   answer by reading every mapping. `anon.hmac` had already gone for a third
+   reason — HMAC needs a key schedule and DuckDB has `sha256` and no HMAC.
+
+   `anon.hash` was also the last consumer of `sha256`, which is why
+   `crates/fossil-df/Cargo.toml` leaves `crypto_expressions` off. *)

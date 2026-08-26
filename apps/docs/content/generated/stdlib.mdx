@@ -2,27 +2,16 @@
 
 Every section below is one table and nothing else. The prose that explains
 it — what a row does, why it takes what it takes, which four `math` rows go
-inside `aggregate` — is written by hand on `content/docs/book/stdlib.mdx`,
+inside `group_by` — is written by hand on `content/docs/book/stdlib.mdx`,
 which pulls each section in with `<include>`.
 
-Sources: `fossil_hir::stdlib`'s FunctionRegistry for every section but `io`,
-and `catalogue.bnf` for `io`. Change either and re-run the command. */}
-
-<section id="anon">
-
-| | signature | lowers to |
-| --- | --- | --- |
-| `anon.hash` | `(value: String, salt: String) -> String` | `sha256(%0 \|\| %1)` |
-| `anon.redact` | `(value: String) -> String` | `'[REDACTED]'` |
-
-</section>
+Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 
 <section id="core">
 
 | | signature | lowers to |
 | --- | --- | --- |
 | `core.lang` | `(value: String, tag: String) -> String` | `%0` |
-| `core.require` | `(value: String) -> String` | `CASE WHEN %0 IS NULL THEN error('core.require: value is null') ELSE %0 END` |
 
 </section>
 
@@ -56,13 +45,11 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 
 | | signature | lowers to |
 | --- | --- | --- |
-| `parse.csv_row` | `(text: String, separator: String, field: Integer) -> String` | `split_part(%0, %1, %2)` |
 | `parse.date` | `(text: String, format: String) -> Date` | `CAST(strptime(%0, %1) AS DATE)` |
 | `parse.datetime` | `(text: String, format: String) -> DateTime` | `strptime(%0, %1)` |
 | `parse.decimal` | `(text: String) -> Float` | `CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)` |
 | `parse.float` | `(text: String) -> Float` | `CAST(%0 AS DOUBLE)` |
 | `parse.integer` | `(text: String) -> Integer` | `CAST(%0 AS BIGINT)` |
-| `parse.json` | `(text: String, path: String) -> String` | `json_extract_string(%0, %1)` |
 
 </section>
 
@@ -102,17 +89,5 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 | `strip_html` | `(text: String) -> String` | `regexp_replace(%0, '<(?:>\|$\|[^\s](?:"[^"]*"\|''[^'']*''\|[^>"''])*(?:>\|$))', '', 'g')` |
 | `trim` | `(text: String) -> String` | `trim(%0)` |
 | `upper` | `(text: String) -> String` | `upper(%0)` |
-
-</section>
-
-<section id="validate">
-
-| | signature | lowers to |
-| --- | --- | --- |
-| `validate.email` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^[^@]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$') THEN %0 ELSE error('validate.email: not an email: ' \|\| %0) END` |
-| `validate.iso_date` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^[0-9]{4}-(0[1-9]\|1[0-2])-(0[1-9]\|[12][0-9]\|3[01])$') THEN %0 ELSE error('validate.iso_date: not a YYYY-MM-DD date: ' \|\| %0) END` |
-| `validate.regex` | `(value: String, pattern: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, %1) THEN %0 ELSE error('validate.regex: ' \|\| %0 \|\| ' does not match ' \|\| %1) END` |
-| `validate.url` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^[A-Za-z][A-Za-z0-9+.-]*://(?s).+$') THEN %0 ELSE error('validate.url: not a URL: ' \|\| %0) END` |
-| `validate.uuid` | `(value: String) -> String` | `CASE WHEN %0 IS NULL OR regexp_matches(%0, '^(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$\|^[0-9a-fA-F]{32}$\|^\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}$') THEN %0 ELSE error('validate.uuid: not a UUID: ' \|\| %0) END` |
 
 </section>

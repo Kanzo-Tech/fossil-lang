@@ -12,17 +12,21 @@ description = "Repository automation — run via `cargo xtask <command>`."
 
 [dependencies]
 serde_json = { workspace = true }
-# The stdlib half of the catalogue. `FunctionRegistry` is already a
-# table of values, so `cargo xtask catalogue` reads it directly rather than
-# parsing the Rust that writes it down.
-#
-# No cycle, and it is worth saying which direction was checked: nothing depends
-# on `xtask` — it is `publish = false`, it is nobody's dependency, and
-# `cargo xtask wasm-check` derives its crate set from the cdylib closure, which
-# this crate is not in. So `xtask -> fossil-hir` adds an edge to a leaf.
-fossil-hir = { path = "../fossil-hir" }
 
 [dev-dependencies]
+# **A DEV-dependency, and the distinction is the whole point.** `cargo xtask
+# catalogue` GENERATES `crates/fossil-hir/src/stdlib/generated.rs`. While this
+# was a normal dependency, a bad emit stopped `fossil-hir` compiling and
+# therefore stopped the tool that fixes it from building — the generator could
+# brick itself, and only a hand-edit of a file marked DO NOT EDIT could recover.
+#
+# Cargo does not build dev-dependencies for a plain `run -p xtask`, so the
+# binary now links none of it. The tests still do, which is what keeps the
+# round-trip PROVEN rather than assumed: `tests/catalogue_generated.rs` holds
+# the emitted table against the `FunctionRegistry` it becomes, and
+# `tests/receiver_agrees.rs` derives the receiver rule from `fossil_hir`
+# instead of leaving `is_namespace_head` to restate it.
+fossil-hir = { path = "../fossil-hir" }
 # `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring
 # policy — rather than a second copy of its list, so it needs a TOML parser.
 # Declared here and not in `[workspace.dependencies]` for the reason
