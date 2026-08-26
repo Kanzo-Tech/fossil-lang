@@ -81,11 +81,13 @@
 //! whole file. **Pruning is which bytes are read, and that is the tiles' job,
 //! not a verb's.**
 
+pub mod address;
 pub mod error;
 pub mod executor;
 pub mod manifest;
 pub mod operations;
 
+pub use address::{Container, Direction, ResolvedCorpus, resolve as resolve_corpus};
 pub use error::{GraphError, Result};
 pub use executor::{DuckExecutor, QueryResult, dispatch};
 pub use operations::Operation;
