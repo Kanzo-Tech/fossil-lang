@@ -70,6 +70,34 @@ export function shiftFor(rows) {
   return shift;
 }
 
+/** The payload file of a row-group container: one per payload set, its row groups the tiles. */
+export const TILES_FILE = "tiles.parquet";
+
+/**
+ * Where tile `k` of a payload set is, in whichever container the corpus declares.
+ *
+ * The manifest's `container` is what says which — `files`, one Parquet per tile with the address in
+ * the name, or `rowgroups`, one Parquet per set whose row groups are the tiles. A reader over HTTP
+ * has no directory to list, so this is the one thing about a corpus that cannot be worked out.
+ *
+ * `stem` is the manifest's own spelling: `chunk` for a vertex payload, `tile` for an identity index
+ * and for an adjacency orientation.
+ *
+ * **The tile is a `BigInt` and it stays one.** A tile number above 2^53 put through a `Number`
+ * composes a different filename — 2⁵³+1 prints as 2⁵³ — and the file it names is not there.
+ * `vectors.json` publishes that border.
+ *
+ * @param {string} prefix dataset-relative, with a trailing separator
+ * @param {"chunk" | "tile"} stem
+ * @param {"files" | "rowgroups"} container
+ * @param {bigint | number | string} tile
+ * @returns {string}
+ */
+export function tileUrl(prefix, stem, container, tile) {
+  if (container === "rowgroups") return `${prefix}${TILES_FILE}`;
+  return `${prefix}${stem}${BigInt(tile)}.parquet`;
+}
+
 /**
  * How many tiles a declared row count occupies — the arithmetic the count exists for.
  *

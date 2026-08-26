@@ -160,7 +160,7 @@ describe('openCorpus — what is inside', () => {
     const address = corpus.addressing.vertexType();
     expect(address.chunkSize).toBe(Number(CHUNK_SIZE));
     expect(address.tiles).toBe(TILES);
-    expect(address.tileUrls()).toHaveLength(Number(TILES));
+    expect(address.files()).toHaveLength(Number(TILES));
     // The tail tile: 300 = 4·64 + 44, the row `vectors.json` publishes for this corpus.
     expect(address.tileOf(VERTEX_COUNT - 1n)).toBe(TILES - 1n);
   });

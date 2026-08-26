@@ -20,8 +20,8 @@
  * nothing about the bytes on disk.
  */
 
-import { load } from "../guards/manifest.mjs";
-import { shiftFor, tileOf } from "../guards/arithmetic.mjs";
+import { GRAPH_INFO_PATH, load } from "../guards/manifest.mjs";
+import { shiftFor, tileOf, tileUrl } from "../guards/arithmetic.mjs";
 
 /** Join dataset-relative segments the way the manifest writes them: forward slashes, always. */
 export function rel(...parts) {
@@ -52,6 +52,37 @@ function needRows(info, key) {
 }
 
 /**
+ * Which container the corpus carries its tiles in — `graph.graph.yml`'s own `container`.
+ *
+ * Absent is `files`, and that is the one default in this file rather than a `need()`: a corpus
+ * written before the field existed is the file-per-tile container, so absence is a statement and
+ * not a gap. Anything else is refused, because a third spelling would compose a URL.
+ */
+function containerOf(index) {
+  const declared = index.container;
+  if (declared === undefined || declared === "") return "files";
+  if (declared !== "files" && declared !== "rowgroups") {
+    throw new Error(
+      `${GRAPH_INFO_PATH} declares container ${declared}; a tile is a file or a row group`,
+    );
+  }
+  return declared;
+}
+
+/**
+ * Where the tiles of one payload set are, bound to that set.
+ *
+ * One binding for the three sets that had three copies of the composition — the vertex payload, the
+ * identity index and each adjacency orientation — because the only thing that ever differed between
+ * them is the stem of the filename. `tileUrl` itself is in `guards/arithmetic.mjs`, with the rest
+ * of the arithmetic the published vectors execute.
+ */
+const tileUrlFor = (prefix, stem, container) => (k) => tileUrl(prefix, stem, container, k);
+
+/** Distinct, in order. In the row-group container every tile of a set names the same file. */
+const distinct = (urls) => [...new Set(urls)];
+
+/**
  * Resolve a corpus root into the addresses a reader composes URLs from.
  *
  * Throws on a manifest that cannot address itself: a `chunk_size` no shift addresses, an endpoint
@@ -62,6 +93,7 @@ function needRows(info, key) {
 export function resolve(root, base = "") {
   const manifest = load(root);
   const prefix = rel(base, typeof manifest.index.prefix === "string" ? manifest.index.prefix : "");
+  const container = containerOf(manifest.index);
 
   const types = manifest.vertices.map((info) => {
     const chunkSize = needRows(info, "chunk_size");
@@ -69,13 +101,15 @@ export function resolve(root, base = "") {
     if (shift === null) {
       throw new Error(`${info.rel} declares a tile of ${chunkSize} rows, which no shift addresses`);
     }
+    const typePrefix = withSlash(rel(prefix, need(info, "prefix")));
     return {
       type: need(info, "type"),
-      prefix: withSlash(rel(prefix, need(info, "prefix"))),
+      prefix: typePrefix,
+      container,
       chunkSize,
       shift: Number(shift),
       tileOf: (denseId) => tileOf(denseId, shift),
-      tileUrl: (k) => `${withSlash(rel(prefix, need(info, "prefix")))}chunk${BigInt(k)}.parquet`,
+      tileUrl: tileUrlFor(typePrefix, "chunk", container),
       // The identity index, or `null`. A half-declared one is refused rather than
       // ignored: ignoring it reads exactly like a corpus that declares none, and
       // guessing the sort of files whose `ordered_by` is missing returns a
@@ -83,16 +117,16 @@ export function resolve(root, base = "") {
       index: (() => {
         const declared = info.index;
         if (declared === undefined || declared === null || Array.isArray(declared)) return null;
-        const vertexPrefix = withSlash(rel(prefix, need(info, "prefix")));
-        const indexPrefix = withSlash(rel(vertexPrefix, need(declared, "prefix")));
+        const indexPrefix = withSlash(rel(typePrefix, need(declared, "prefix")));
         const orderedBy = need(declared, "ordered_by");
         const indexChunk = needRows(declared, "chunk_size");
         return {
           prefix: indexPrefix,
+          container,
           orderedBy,
           chunkSize: indexChunk,
           tiles: Math.ceil(needRows(info, "vertex_count") / indexChunk),
-          tileUrl: (k) => `${indexPrefix}tile${BigInt(k)}.parquet`,
+          tileUrl: tileUrlFor(indexPrefix, "tile", container),
         };
       })(),
     };
@@ -127,10 +161,11 @@ export function resolve(root, base = "") {
       declared.set(direction, {
         direction,
         prefix: tilePrefix,
+        container,
         column: direction === "src" ? "src_dense" : "dst_dense",
         chunkSize: vertex.chunkSize,
         shift: vertex.shift,
-        tileUrl: (k) => `${tilePrefix}tile${BigInt(k)}.parquet`,
+        tileUrl: tileUrlFor(tilePrefix, "tile", container),
       });
     }
     return {
@@ -155,6 +190,10 @@ export function resolve(root, base = "") {
    * Only the orientations whose own `dense_id` space is this window's: `by_target` tile `k` of a
    * cross-type edge addresses tile `k` of the *destination* type, which is a different set of
    * vertices. A window over the source type that read it would answer a question nobody asked.
+   *
+   * The URLs are **distinct**, which is a no-op in the file-per-tile container and the whole answer
+   * in the other: fifteen tiles of one type are one file, and a list that named it fifteen times
+   * would be fifteen scans of it.
    */
   const window = ({ type, tiles, directions = ["src"] }) => {
     const vertex = vertexType(type);
@@ -177,8 +216,8 @@ export function resolve(root, base = "") {
       }
     }
     return {
-      vertex_urls: tiles.map((k) => vertex.tileUrl(k)),
-      edge_urls: urls,
+      vertex_urls: distinct(tiles.map((k) => vertex.tileUrl(k))),
+      edge_urls: distinct(urls),
       complete: gaps.length === 0,
       gaps,
     };
@@ -197,11 +236,15 @@ export function resolve(root, base = "") {
    * `by_source/tile{k}` holds the edges whose `src_dense` is in tile k, so filtering that file by
    * `dst_dense` answers a question nobody asked and drags in edges whose source is outside the
    * window. That was written here first, and it read **153** where a full scan says **152**.
+   *
+   * One read per distinct URL, not per tile: in the row-group container every tile of an
+   * orientation is the same file, and a caller that ran one query per tile would read the whole
+   * relation once per tile and count every edge that many times.
    */
   const edgeReads = ({ type, tiles, directions = ["src"] }) => {
     const wanted = new Set(directions);
     const vertex = vertexType(type);
-    const reads = [];
+    const reads = new Map();
     for (const edge of edges) {
       const applicable = [];
       if (edge.srcType === vertex.type) applicable.push("src");
@@ -209,18 +252,17 @@ export function resolve(root, base = "") {
       for (const direction of applicable) {
         const adjacency = edge.adjacency(direction);
         if (adjacency === null || !wanted.has(direction)) continue;
-        reads.push(
-          ...tiles.map((k) => ({
-            url: adjacency.tileUrl(k),
-            column: adjacency.column,
-            direction,
-            edge_type: edge.edgeType,
-          })),
-        );
+        for (const k of tiles) {
+          const url = adjacency.tileUrl(k);
+          const key = `${edge.edgeType} ${direction} ${url}`;
+          if (!reads.has(key)) {
+            reads.set(key, { url, column: adjacency.column, direction, edge_type: edge.edgeType });
+          }
+        }
       }
     }
-    return reads;
+    return [...reads.values()];
   };
 
-  return { types, edges, vertexType, window, edgeReads };
+  return { container, types, edges, vertexType, window, edgeReads };
 }

@@ -34,8 +34,8 @@
  * - **Corpus identity** — the subject IRI, and this was the one with no owner. See
  *   {@link Corpus.node}: what it costs, what the tree contradicts itself about, and what would
  *   change it.
- * - **Which container** — **not** absorbed. This reads the file-per-tile container, refuses the
- *   other by name and never globs. See {@link openCorpus}.
+ * - **Which container** — from the manifest's `container`, because a reader over HTTP has no
+ *   directory to list. Both are read; neither is globbed. See {@link openCorpus}.
  *
  * And one shape of corpus it refuses rather than guesses at: **an edge label incident twice to one
  * vertex type**, which the addressing's `Window` cannot name unambiguously. See {@link Corpus.window}.
@@ -301,6 +301,17 @@ function list(urls: readonly string[]): string {
   return `[${urls.map(lit).join(', ')}]`;
 }
 
+/**
+ * Distinct, in order — what a set of tiles is a set of FILES.
+ *
+ * A no-op under the file-per-tile container and load-bearing under the other, where every tile of a
+ * type names one file: `read_parquet` over a list scans each element, so naming it once per tile
+ * would return every row once per tile.
+ */
+function distinct(urls: readonly string[]): string[] {
+  return [...new Set(urls)];
+}
+
 /** A quoted SQL identifier. Column names come from the payload, so they are not interpolated raw. */
 function ident(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
@@ -363,16 +374,14 @@ function text(row: QueryRow, column: string): string {
  * property list is a promise; the payload is the artefact, and this reads the artefact. The cost is
  * one round trip per vertex type at open.
  *
- * **Which container, and this one is not absorbed.** A tile is a range of rows; whether it is a
- * file (`chunk{k}.parquet`) or a row group inside one file is a second question, **and no manifest
- * field distinguishes them**. This reads the file-per-tile container, because that is the one with
- * a per-tile URL to compose and the one the conformance corpus is. Handed the other, `read_parquet`
- * over the derived URL list fails on the first name — `chunk0.parquet` is not there — and the error
- * names the file. It does not fall back and it does not glob: a reader that globbed would pick up
- * the staged single-file copy beside the tiles and count every row twice. The measured winner is
- * the row-group container (5.6 requests per window against 22.3, and 496 kB of footer against
- * 1.15 MB, at five million vertices), which is the container fossil does not write and this cannot
- * address until a field says which one it is looking at.
+ * **Which container, and it is read off the manifest.** A tile is a range of rows; whether it is a
+ * file (`chunk{k}.parquet`) or a row group inside one file (`tiles.parquet`) is a second question,
+ * and `graph.graph.yml`'s `container` is what answers it — a reader over HTTP has no directory to
+ * list, so this is not something to work out. Both are read here and neither is globbed: a reader
+ * that globbed would pick up a staged single-file copy beside the tiles and count every row twice.
+ * The row-group one is the measured winner (5.6 requests per window against 22.3, and 496 kB of
+ * footer against 1.15 MB, at five million vertices) and it is the container fossil does not write
+ * yet, which is why both are read and not one.
  *
  * @throws {CorpusManifestError} when the manifest cannot address itself, or declares no row count.
  */
@@ -407,27 +416,26 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
   const addressing = resolveCorpus({ manifestFiles, base: url });
 
-  // Every vertex type's tile set, derived once. `tileUrls` throws when the manifest declares no
+  // Every vertex type's payload files, derived once. `files()` throws when the manifest declares no
   // count, which is the corpus this API cannot open and the addressing layer still can.
-  const tileUrls = new Map<string, readonly string[]>();
+  const payloadFiles = new Map<string, readonly string[]>();
   const columns = new Map<string, readonly CorpusField[]>();
   for (const type of addressing.types) {
-    tileUrls.set(type.type, type.tileUrls());
-    const first = tileUrls.get(type.type)![0];
+    payloadFiles.set(type.type, type.files());
+    const first = payloadFiles.get(type.type)![0];
     let described: QueryRow[] = [];
     if (first !== undefined) {
       try {
         described = await query(`DESCRIBE SELECT * FROM read_parquet(${lit(first)})`);
       } catch (cause) {
-        // The container question, at the one place it bites. This does not diagnose the failure —
-        // a truncated corpus reaches here too — it states what was addressed and why nothing else
-        // was tried, because the tempting recovery is a glob and a glob is wrong: it would pick up
-        // a staged single-file copy beside the tiles and count every row twice.
+        // This does not diagnose the failure — a truncated corpus reaches here too — it states what
+        // was addressed and why nothing else was tried, because the tempting recovery is a glob and
+        // a glob is wrong: it would pick up a staged single-file copy beside the tiles and count
+        // every row twice.
         throw new CorpusReadError(
-          `${first} is the first tile of ${type.type} and it did not open. A tile is a range of ` +
-            `rows, and whether one is a file or a row group inside a single file is the container ` +
-            `question — no manifest field distinguishes them, so this reads the file-per-tile ` +
-            `container and neither falls back nor globs. (${(cause as Error).message})`,
+          `${first} is the first payload file of ${type.type} and it did not open. The manifest ` +
+            `declares the ${addressing.container} container, so that is what was addressed, and ` +
+            `this neither falls back to the other nor globs. (${(cause as Error).message})`,
         );
       }
     }
@@ -447,7 +455,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   const types: CorpusTypes = {
     vertices: addressing.types.map((type) => ({
       type: type.type,
-      // `tileUrls()` above threw if this were absent: a corpus whose extent is not derivable is the
+      // `files()` above threw if this were absent: a corpus whose extent is not derivable is the
       // one this API refuses to open, and it is also the only thing the manifest's count is for.
       count: type.count!,
       fields: fieldsOf(type.type),
@@ -529,32 +537,50 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   const tileBoxes = (type: string): Promise<readonly TileBox[]> => {
     const cached = boxes.get(type);
     if (cached) return cached;
-    const urls = tileUrls.get(type)!;
+    const address = addressing.vertexType(type);
+    const urls = payloadFiles.get(type)!;
+    // Which tile a footer row is about. Under `files` it is the file — one per tile, and the row
+    // groups inside it are one tile's worth however many there are. Under `rowgroups` it is the
+    // ordinal, and this is the one place in this file where that ordinal is the address: a vertex
+    // tile is exactly `chunk_size` gapless rows, so row group `k` IS tile `k`.
     const index = new Map(urls.map((url, k) => [url, BigInt(k)]));
+    const perGroup = address.container === 'rowgroups';
     const loading = (async (): Promise<readonly TileBox[]> => {
       // `min_value`/`max_value`, never `min`/`max`: Parquet's original statistics fields compare
       // bytes as signed, which is meaningless for an unsigned column, so a writer that gets it
       // right leaves them empty and a reader that only knows the deprecated pair concludes the
       // footer carries no box at all. `coalesce` reads either.
       const rows = await query(
-        `SELECT file_name AS file, ` +
+        `SELECT file_name AS file, row_group_id AS rg, ` +
           `min(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS x0, ` +
           `max(CASE WHEN path_in_schema = 'x' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS x1, ` +
           `min(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_min_value, stats_min)::DOUBLE END) AS y0, ` +
           `max(CASE WHEN path_in_schema = 'y' THEN coalesce(stats_max_value, stats_max)::DOUBLE END) AS y1 ` +
-          `FROM parquet_metadata(${list(urls)}) WHERE path_in_schema IN ('x', 'y') GROUP BY 1`,
+          `FROM parquet_metadata(${list(urls)}) WHERE path_in_schema IN ('x', 'y') GROUP BY 1, 2`,
       );
-      const out: TileBox[] = [];
+      const merged = new Map<bigint, TileBox>();
       for (const row of rows) {
-        const tile = index.get(String(row['file']));
+        const tile = perGroup ? BigInt(String(row['rg'])) : index.get(String(row['file']));
         const [x0, x1, y0, y1] = ['x0', 'x1', 'y0', 'y1'].map((k) => Number(row[k]));
         // A tile whose name did not come back verbatim, or whose footer carries no statistics for
         // x or y, has no box — and a tile with no box is one this cannot exclude. Keeping it is
         // the conservative answer: the read stays correct and only loses the pruning.
         if (tile === undefined || ![x0, x1, y0, y1].every(Number.isFinite)) continue;
-        out.push({ tile, x0: x0!, x1: x1!, y0: y0!, y1: y1! });
+        const held = merged.get(tile);
+        merged.set(
+          tile,
+          held === undefined
+            ? { tile, x0: x0!, x1: x1!, y0: y0!, y1: y1! }
+            : {
+                tile,
+                x0: Math.min(held.x0, x0!),
+                x1: Math.max(held.x1, x1!),
+                y0: Math.min(held.y0, y0!),
+                y1: Math.max(held.y1, y1!),
+              },
+        );
       }
-      return out;
+      return [...merged.values()];
     })();
     boxes.set(type, loading);
     return loading;
@@ -580,7 +606,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     const address = vertexType(type);
     const tiles = [...new Set(ids.map((id) => address.tileOf(id)))].sort(ascending);
     const rows = await query(
-      `SELECT * FROM read_parquet(${list(tiles.map((k) => address.tileUrl(k)))}) ` +
+      `SELECT * FROM read_parquet(${list(distinct(tiles.map((k) => address.tileUrl(k))))}) ` +
         `WHERE dense_id IN (${ids.join(', ')})`,
     );
     return rows.map((row) => vertexOf(type, row));
@@ -619,7 +645,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         // column is 8.016 compressed bytes per row, so one lookup reads about 40 MB — column
         // pruning is the only thing keeping it off the other five columns.
         const rows = await query(
-          `SELECT * FROM read_parquet(${list(tileUrls.get(type.type)!)}) ` +
+          `SELECT * FROM read_parquet(${list(payloadFiles.get(type.type)!)}) ` +
             `WHERE ${ident(IDENTITY)} IN (${ids.map(lit).join(', ')})`,
         );
         for (const row of rows) found.push(vertexOf(type.type, row));
@@ -634,7 +660,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // which is why the index is a second table rather than a second sort.
       const hits = await query(
         `SELECT ${ident(index.orderedBy)} AS id, dense_id ` +
-          `FROM read_parquet(${list(index.tileUrls())}) ` +
+          `FROM read_parquet(${list(index.files())}) ` +
           `WHERE ${ident(index.orderedBy)} IN (${ids.map(lit).join(', ')})`,
       );
       if (hits.length === 0) continue;
@@ -644,7 +670,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const addresses = hits.map((row) => idOf(row.dense_id, `${type.type}.dense_id`));
       const tiles = [...new Set(addresses.map((d) => type.tileOf(d)))].sort(ascending);
       const rows = await query(
-        `SELECT * FROM read_parquet(${list(tiles.map((k) => type.tileUrl(k)))}) ` +
+        `SELECT * FROM read_parquet(${list(distinct(tiles.map((k) => type.tileUrl(k))))}) ` +
           `WHERE dense_id IN (${addresses.join(', ')})`,
       );
       // An index that names an address the payload does not have is a corpus defect, not a miss:
@@ -762,11 +788,14 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       }
 
       const all = await tileBoxes(address.type);
-      // Every tile carries a box, or the cache would have dropped it and this would read the whole
-      // set — which is what it did before the cache existed, and is still the correct answer.
-      const candidates = all.length === tileUrls.get(address.type)!.length
-        ? intersecting(all, box).map((b) => address.tileUrl(b.tile))
-        : [...tileUrls.get(address.type)!];
+      // Every TILE carries a box, or the cache would have dropped it and this would read the whole
+      // set — which is what it did before the cache existed, and is still the correct answer. The
+      // comparison is against the tile count and not the file count: under the row-group container
+      // one file carries every tile, and comparing files would have made a corpus with two or more
+      // tiles look like one with boxes missing.
+      const candidates = BigInt(all.length) === address.tiles
+        ? distinct(intersecting(all, box).map((b) => address.tileUrl(b.tile)))
+        : [...payloadFiles.get(address.type)!];
       const rows =
         candidates.length === 0
           ? []

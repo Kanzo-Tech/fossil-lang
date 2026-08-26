@@ -53,6 +53,23 @@ export { CorpusManifestError, GRAPH_INFO_PATH } from './manifest.js';
  */
 export type Direction = 'src' | 'dst';
 
+/**
+ * Which container carries the tiles — `graph.graph.yml`'s own `container`.
+ *
+ * `files` is one Parquet per tile with the address in the name; `rowgroups` is one Parquet per
+ * payload set whose row groups are the tiles. Both are addressed by the same arithmetic and they
+ * cost differently: 22.3 requests per window against 5.6, and 1.15 MB of footer against 496 kB, at
+ * five million vertices. A file boundary is the only thing that stops contiguous tiles from being
+ * fetched in one range.
+ *
+ * It is a manifest field and not something a reader works out, because working it out means listing
+ * a directory and there is no listing over HTTP.
+ */
+export type Container = 'files' | 'rowgroups';
+
+/** The payload file of a row-group container: one per set, its row groups the tiles. */
+const TILES_FILE = 'tiles.parquet';
+
 /** How many bits a `dense_id` is shifted right by, for the default `chunk_size` of 4,096. */
 export const TILE_SHIFT = 12n;
 
@@ -140,22 +157,23 @@ export interface VertexAddress {
   readonly count: bigint | null;
   /** `ceil(count / chunkSize)`, or `null` when the manifest declares no count. */
   readonly tiles: bigint | null;
+  /** Which container carries this type's tiles. */
+  readonly container: Container;
   /** The tile holding `denseId`. */
   tileOf(denseId: bigint): bigint;
   /**
-   * `<prefix>chunk{k}.parquet`, the file-per-tile container fossil emits.
-   *
-   * The other container — one file, one row group per tile, where the address is the row-group
-   * ordinal — has no per-tile URL to compose, and no field in the manifest distinguishes the two.
-   * That is a live design question on `/docs/conventions/addressing`, not something this resolves.
+   * The file tile `k` is in: `<prefix>chunk{k}.parquet` under `files`, `<prefix>tiles.parquet`
+   * under `rowgroups`, where every tile of the type names the same file and the footer's box on
+   * `dense_id` is what says which row groups are the tile.
    */
   tileUrl(tile: number | bigint): string;
   /**
-   * Every tile of this type, in order. Throws when the manifest declares no count, because then
-   * there is no set to enumerate — that is the difference between addressing a tile somebody asked
-   * for and knowing how many there are.
+   * Every payload FILE of this type, in order and distinct — one per tile under `files`, one in
+   * total under `rowgroups`. Throws when the manifest declares no count, because then there is no
+   * set to enumerate: that is the difference between addressing a tile somebody asked for and
+   * knowing how many there are.
    */
-  tileUrls(): readonly string[];
+  files(): readonly string[];
   /**
    * The identity index, when the manifest declares one, and `null` otherwise.
    *
@@ -188,10 +206,12 @@ export interface IndexAddress {
   readonly chunkSize: number;
   /** `ceil(count / chunkSize)`, or `null` when the manifest declares no `vertex_count`. */
   readonly tiles: bigint | null;
-  /** `<prefix>tile{k}.parquet`. */
+  /** Which container carries the index tiles. The corpus's, never a second answer. */
+  readonly container: Container;
+  /** `<prefix>tile{k}.parquet`, or `<prefix>tiles.parquet` under `rowgroups`. */
   tileUrl(tile: number | bigint): string;
-  /** Every index tile, in order. Throws when the count is absent, like {@link VertexAddress.tileUrls}. */
-  tileUrls(): readonly string[];
+  /** Every index file, in order and distinct. Throws when the count is absent, like {@link VertexAddress.files}. */
+  files(): readonly string[];
 }
 
 /** One orientation of one edge type: declared by the manifest, or absent from it. */
@@ -212,8 +232,17 @@ export interface AdjacencyAddress {
    * URL past the fifth composes cleanly and 404s. `null` when the endpoint type declares no count.
    */
   readonly tiles: bigint | null;
+  /** Which container carries this orientation's tiles. The corpus's, never a second answer. */
+  readonly container: Container;
   tileOf(denseId: bigint): bigint;
-  /** `<edge prefix><adj prefix>tile{k}.parquet`. A 404 is "these vertices have no edges here". */
+  /**
+   * `<edge prefix><adj prefix>tile{k}.parquet`. A 404 is "these vertices have no edges here".
+   *
+   * Under `rowgroups` it is one file for the whole orientation, and the row-group ordinal is *not*
+   * the tile: an adjacency tile is however many edges its vertices happen to have, and a tile whose
+   * vertices have none contributes no row group to be numbered. What locates it is the footer's box
+   * on {@link AdjacencyAddress.column} over the tile's `dense_id` range.
+   */
   tileUrl(tile: number | bigint): string;
 }
 
@@ -255,7 +284,7 @@ export interface Gap {
   readonly reason: GapReason;
 }
 
-/** The URLs one edge type contributes to a window, in the orientation that addresses it. */
+/** The files one edge type contributes to a window, distinct, in the orientation that addresses it. */
 export interface EdgeTiles {
   readonly edgeType: string;
   readonly direction: Direction;
@@ -276,9 +305,15 @@ export interface Window {
   /** The vertex type the tile numbers are in the `dense_id` space of. */
   readonly type: string;
   readonly tiles: readonly number[];
+  /**
+   * The files those tiles are in, distinct and in order.
+   *
+   * Distinct is a no-op under `files` and the whole answer under `rowgroups`, where every tile of a
+   * type is the same file: a list that named it once per tile would be one scan per tile.
+   */
   readonly vertexUrls: readonly string[];
   readonly edges: readonly EdgeTiles[];
-  /** Every URL in {@link edges}, flattened, in declaration order. */
+  /** Every URL in {@link edges}, flattened and distinct, in declaration order. */
   readonly edgeUrls: readonly string[];
   /** `true` when every edge incident to a vertex in these tiles is in one of these files. */
   readonly complete: boolean;
@@ -302,6 +337,8 @@ export interface ResolveCorpusOptions {
 /** A corpus resolved to addresses. Every method is pure and synchronous. */
 export interface ResolvedCorpus {
   readonly base: string;
+  /** Which container the corpus declares. One answer for every payload set in it. */
+  readonly container: Container;
   readonly types: readonly VertexAddress[];
   readonly edges: readonly EdgeAddress[];
   /** One vertex type by name, or the first the index names when no name is given. */
@@ -333,7 +370,50 @@ function prefixOf(value: string): string {
   return `${value.replace(/\/+$/, '')}/`;
 }
 
-function vertexAddress(base: string, path: string, yaml: ScannedManifest): VertexAddress {
+/**
+ * Where the tiles of one payload set are, in whichever container the corpus declares.
+ *
+ * One function for the three sets that had a copy of it each — the vertex payload, the identity
+ * index and each adjacency orientation — because the only thing that ever differed between them is
+ * the stem of the filename. Under `rowgroups` even that goes: a set is one file.
+ */
+function tileUrlFor(
+  prefix: string,
+  stem: 'chunk' | 'tile',
+  container: Container,
+): (tile: number | bigint) => string {
+  return container === 'rowgroups'
+    ? () => `${prefix}${TILES_FILE}`
+    : (tile) => `${prefix}${stem}${BigInt(tile)}.parquet`;
+}
+
+/** Distinct, in order. Under `rowgroups` every tile of a set names the same file. */
+const distinct = (urls: readonly string[]): string[] => [...new Set(urls)];
+
+/**
+ * Which container the corpus declares, from `graph.graph.yml`.
+ *
+ * Absent is `files`, and it is the one field here with a default rather than a {@link required}: a
+ * corpus written before the field existed is the file-per-tile container, so absence is a statement
+ * and not a gap. A third spelling is refused, because it would compose a URL.
+ */
+function containerOf(index: ScannedManifest): Container {
+  const declared = index['container'];
+  if (declared === undefined || declared === '') return 'files';
+  if (declared !== 'files' && declared !== 'rowgroups') {
+    throw new CorpusManifestError(
+      `${GRAPH_INFO_PATH} declares container ${String(declared)}; a tile is a file or a row group`,
+    );
+  }
+  return declared;
+}
+
+function vertexAddress(
+  base: string,
+  path: string,
+  yaml: ScannedManifest,
+  container: Container,
+): VertexAddress {
   const type = required(yaml, path, 'type');
   const chunkSize = requiredNumber(yaml, path, 'chunk_size');
   const shift = shiftFor(chunkSize);
@@ -345,7 +425,7 @@ function vertexAddress(base: string, path: string, yaml: ScannedManifest): Verte
   const prefix = prefixOf(join(base, required(yaml, path, 'prefix')));
   const count = optionalCount(yaml, 'vertex_count');
   const tiles = count === null ? null : tilesOf(count, BigInt(chunkSize));
-  const tileUrl = (tile: number | bigint): string => `${prefix}chunk${BigInt(tile)}.parquet`;
+  const tileUrl = tileUrlFor(prefix, 'chunk', container);
   return {
     type,
     prefix,
@@ -353,10 +433,11 @@ function vertexAddress(base: string, path: string, yaml: ScannedManifest): Verte
     shift,
     count,
     tiles,
-    index: indexAddress(prefix, path, yaml, count),
+    container,
+    index: indexAddress(prefix, path, yaml, count, container),
     tileOf: (denseId) => tileOf(denseId, shift),
     tileUrl,
-    tileUrls: () => {
+    files: () => {
       if (tiles === null) {
         throw new CorpusManifestError(
           `${path} declares no vertex_count, so how many tiles ${type} has is not derivable — ` +
@@ -365,7 +446,7 @@ function vertexAddress(base: string, path: string, yaml: ScannedManifest): Verte
       }
       const urls: string[] = [];
       for (let k = 0n; k < tiles; k += 1n) urls.push(tileUrl(k));
-      return urls;
+      return distinct(urls);
     },
   };
 }
@@ -384,6 +465,7 @@ function indexAddress(
   path: string,
   yaml: ScannedManifest,
   count: bigint | null,
+  container: Container,
 ): IndexAddress | null {
   const declared = mapping(yaml, path, 'index');
   if (declared === null) return null;
@@ -406,14 +488,15 @@ function indexAddress(
     );
   }
   const tiles = count === null ? null : tilesOf(count, BigInt(chunkSize));
-  const tileUrl = (tile: number | bigint): string => `${prefix}tile${BigInt(tile)}.parquet`;
+  const tileUrl = tileUrlFor(prefix, 'tile', container);
   return {
     prefix,
     orderedBy,
     chunkSize,
     tiles,
+    container,
     tileUrl,
-    tileUrls: () => {
+    files: () => {
       if (tiles === null) {
         throw new CorpusManifestError(
           `${path} declares no vertex_count, so how many index tiles ${required(yaml, path, 'type')} has is not derivable`,
@@ -421,7 +504,7 @@ function indexAddress(
       }
       const urls: string[] = [];
       for (let k = 0n; k < tiles; k += 1n) urls.push(tileUrl(k));
-      return urls;
+      return distinct(urls);
     },
   };
 }
@@ -431,6 +514,7 @@ function edgeAddress(
   path: string,
   yaml: ScannedManifest,
   types: readonly VertexAddress[],
+  container: Container,
 ): EdgeAddress {
   const srcType = required(yaml, path, 'src_type');
   const dstType = required(yaml, path, 'dst_type');
@@ -488,8 +572,9 @@ function edgeAddress(
       chunkSize: vertex.chunkSize,
       shift: vertex.shift,
       tiles: vertex.tiles,
+      container,
       tileOf: (denseId) => tileOf(denseId, vertex.shift),
-      tileUrl: (tile) => `${tilePrefix}tile${BigInt(tile)}.parquet`,
+      tileUrl: tileUrlFor(tilePrefix, 'tile', container),
     });
   }
 
@@ -537,12 +622,17 @@ export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
   // `prefix` on the index is what the per-type paths are relative to; it is `''` in every corpus
   // fossil writes, and honoured rather than assumed because the field exists to be set.
   const root = join(base, typeof index['prefix'] === 'string' ? index['prefix'] : '');
+  const container = containerOf(index);
 
-  const types = paths(index, 'vertices').map((path) => vertexAddress(root, path, read(path)));
+  const types = paths(index, 'vertices').map((path) =>
+    vertexAddress(root, path, read(path), container),
+  );
   if (types.length === 0) {
     throw new CorpusManifestError(`${GRAPH_INFO_PATH} names no vertex type`);
   }
-  const edges = paths(index, 'edges').map((path) => edgeAddress(root, path, read(path), types));
+  const edges = paths(index, 'edges').map((path) =>
+    edgeAddress(root, path, read(path), types, container),
+  );
 
   const vertexType = (name?: string): VertexAddress => {
     if (name === undefined) return types[0]!;
@@ -560,6 +650,7 @@ export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
 
   return {
     base,
+    container,
     types,
     edges,
     vertexType,
@@ -594,7 +685,7 @@ export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
           edgeTiles.push({
             edgeType: edge.edgeType,
             direction,
-            urls: numbers.map((k) => adjacency.tileUrl(k)),
+            urls: distinct(numbers.map((k) => adjacency.tileUrl(k))),
           });
         }
       }
@@ -602,9 +693,9 @@ export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
       return {
         type: vertex.type,
         tiles: numbers,
-        vertexUrls: numbers.map((k) => vertex.tileUrl(k)),
+        vertexUrls: distinct(numbers.map((k) => vertex.tileUrl(k))),
         edges: edgeTiles,
-        edgeUrls: edgeTiles.flatMap((e) => e.urls),
+        edgeUrls: distinct(edgeTiles.flatMap((e) => e.urls)),
         complete: gaps.length === 0,
         gaps,
       };
