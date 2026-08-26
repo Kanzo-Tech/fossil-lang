@@ -169,10 +169,27 @@ fn try_split(dims: &[Dim], part: &Partition, d: usize, k: usize) -> Option<Vec<P
 ///
 /// A record whose value on this dimension is missing does not constrain the cut and is not counted
 /// into the median: it is compatible with both sides, which is exactly what
-/// [`crate::NullPolicy::Wildcard`] means. It is then counted into the k test of BOTH sides, because
-/// it will be published with a wildcard on this dimension and is therefore indistinguishable from
-/// the members of either. Where it physically lands is cosmetic — the smaller side, to keep the
-/// tree balanced.
+/// [`crate::NullPolicy::Wildcard`] means. It is *placed* on one of them, and it counts towards k
+/// only for the side it is placed on.
+///
+/// # A wildcard cannot be counted towards both sides, and the reason is subtle
+///
+/// This function first counted every wildcard towards the k test of BOTH sides — it will be
+/// published as `*` on this dimension, so it is indistinguishable from the members of either, so
+/// surely it enlarges both. The property test refuted it in nine rows: a wildcard is compatible
+/// with both children **at the moment of the cut**, and then the child it was placed in gets cut
+/// again on some other dimension, and it acquires that child's value there. Its compatibility with
+/// the *sibling* dies at that second cut, and nothing in the algorithm goes back to check the
+/// sibling that was allowed on the strength of it.
+///
+/// So the invariant is the plain one, and it is the one that survives recursion: **every partition
+/// holds at least k rows, counting only the rows actually in it.** Every pair of rows inside a
+/// partition is mutually compatible — they carry the class's published value except where one of
+/// them carries `*` — and children are subsets that each satisfy the same bound, so every row's
+/// anonymity set is at least the size of the partition it ends in.
+///
+/// The wildcards are still spent rather than wasted: they are dealt to the sides that need them to
+/// reach k, which lets a cut happen that neither side's real rows could have paid for alone.
 fn split_numeric(
     part: &Partition,
     d: usize,
@@ -223,9 +240,13 @@ fn split_numeric(
     let (left, right): (Vec<(u32, f64)>, Vec<(u32, f64)>) =
         reals.iter().partition(|&&(_, v)| v <= split_val);
 
-    // Strict: BOTH sides must already satisfy k, counting the wildcards that will be compatible
-    // with both. If either does not, the cut does not happen.
-    if left.len() + nulls.len() < k || right.len() + nulls.len() < k {
+    // Strict: BOTH sides must satisfy k once the wildcards have been dealt out. A wildcard can pay
+    // for one side or the other, never for both — see this function's docs.
+    let (need_l, need_r) = (
+        k.saturating_sub(left.len()),
+        k.saturating_sub(right.len()),
+    );
+    if need_l + need_r > nulls.len() {
         return None;
     }
 
@@ -242,10 +263,18 @@ fn split_numeric(
         right.iter().map(|&(r, _)| r).collect(),
     );
     let (lstate, rstate) = (span(&left), span(&right));
+
+    // Each side takes exactly what it needs to reach k; the remainder goes to the smaller side, to
+    // keep the tree balanced. Which side a spare wildcard lands on changes no guarantee — it
+    // publishes `*` here either way — so this is the only free choice in the function.
+    let mut deal = nulls.into_iter();
+    lrows.extend(deal.by_ref().take(need_l));
+    rrows.extend(deal.by_ref().take(need_r));
+    let rest: Vec<u32> = deal.collect();
     if lrows.len() <= rrows.len() {
-        lrows.extend(nulls);
+        lrows.extend(rest);
     } else {
-        rrows.extend(nulls);
+        rrows.extend(rest);
     }
     lrows.sort_unstable();
     rrows.sort_unstable();
@@ -269,6 +298,9 @@ fn split_numeric(
 ///
 /// A refinement that yields a single child is still performed. It separates nothing, and it
 /// publishes a strictly more informative value for the same class at no cost in k.
+///
+/// Every child must reach k counting only its own rows, for the reason given in [`split_numeric`]:
+/// a wildcard pays for one child, not for all of them.
 fn split_levelled(
     part: &Partition,
     d: usize,
@@ -294,20 +326,24 @@ fn split_levelled(
     if groups.is_empty() {
         return None;
     }
-    if groups.values().any(|g| g.len() + nulls.len() < k) {
-        return None;
-    }
 
     let mut children: Vec<Vec<u32>> = groups.into_values().collect();
-    // The wildcards are compatible with every child, so which one holds them changes no guarantee.
-    // The smallest, for balance, and deterministically the earliest on a tie.
+    let needs: Vec<usize> = children.iter().map(|g| k.saturating_sub(g.len())).collect();
+    if needs.iter().sum::<usize>() > nulls.len() {
+        return None;
+    }
+    let mut deal = nulls.into_iter();
+    for (child, need) in children.iter_mut().zip(&needs) {
+        child.extend(deal.by_ref().take(*need));
+    }
+    let rest: Vec<u32> = deal.collect();
     let smallest = children
         .iter()
         .enumerate()
         .min_by_key(|(i, g)| (g.len(), *i))
         .map(|(i, _)| i)
         .expect("non-empty by the check above");
-    children[smallest].extend(nulls);
+    children[smallest].extend(rest);
 
     Some(
         children

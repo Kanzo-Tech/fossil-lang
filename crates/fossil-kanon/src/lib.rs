@@ -168,9 +168,13 @@ pub struct QuasiIdentifier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NullPolicy {
     /// Publish the missing value as `*` and count the record into the anonymity set of every class
-    /// it is compatible with. The disclosure-control reading, and the one the strict cut test uses:
-    /// a wildcard counts towards k on **both** sides of a numeric cut and towards **every** child
-    /// of a hierarchy refinement, because it will be indistinguishable from all of them.
+    /// it is compatible with — the disclosure-control reading.
+    ///
+    /// A wildcard is placed on ONE side of a cut and pays towards k for that side only. It is
+    /// tempting to count it towards both, since it is compatible with both, and that is unsound:
+    /// the side it lands on is cut again on another dimension and takes the wildcard's cell with
+    /// it, so the compatibility the *other* side was allowed on the strength of does not survive.
+    /// See `mondrian::split_numeric`, and the nine-row counterexample the property test found.
     Wildcard,
     /// Withhold any record with a missing quasi-identifier before the search starts, and count it
     /// in [`Report::suppressed_by_null_policy`].
@@ -363,13 +367,12 @@ pub fn anonymize(qis: &[QuasiIdentifier], config: &Config) -> Result<Anonymized,
         warnings.push(Warning::EverythingSuppressed { input_rows: rows, k });
         return Ok(nothing_released(
             qis,
-            dims.len(),
+            &dims,
             rows,
             k,
-            suppressed_by_null_policy + live.len(),
             suppressed_by_null_policy,
+            live.len(),
             warnings,
-            &dims,
         ));
     }
 
@@ -507,6 +510,9 @@ pub fn anonymize(qis: &[QuasiIdentifier], config: &Config) -> Result<Anonymized,
         released_rows: released_rows.len(),
         suppressed_rows: rows - released_rows.len(),
         suppressed_by_null_policy,
+        // Zero on this path by construction: the search only runs on a table that already clears k,
+        // and the `live.len() < k` branch above returns before reaching it.
+        suppressed_below_k: 0,
         suppressed_by_safety_net,
         equivalence_classes: assessment.classes.len(),
         achieved_k: assessment.achieved_k,
@@ -546,14 +552,14 @@ fn presentation_of(h: &Hierarchy) -> NumericPresentation {
 )]
 fn nothing_released(
     qis: &[QuasiIdentifier],
-    ncols: usize,
+    dims: &[ingest::Dim],
     rows: usize,
     k: usize,
-    suppressed_rows: usize,
     suppressed_by_null_policy: usize,
+    suppressed_below_k: usize,
     warnings: Vec<Warning>,
-    dims: &[ingest::Dim],
 ) -> Anonymized {
+    let ncols = dims.len();
     let columns = (0..ncols)
         .map(|_| Arc::new(StringArray::from(vec![None::<String>; rows])) as ArrayRef)
         .collect();
@@ -585,8 +591,9 @@ fn nothing_released(
             k,
             input_rows: rows,
             released_rows: 0,
-            suppressed_rows,
+            suppressed_rows: suppressed_by_null_policy + suppressed_below_k,
             suppressed_by_null_policy,
+            suppressed_below_k,
             suppressed_by_safety_net: 0,
             equivalence_classes: 0,
             achieved_k: None,

@@ -1,0 +1,4 @@
+{
+  "kind": "date",
+  "levels": ["year", "month", "day"]
+}

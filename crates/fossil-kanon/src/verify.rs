@@ -40,6 +40,7 @@ use std::collections::HashMap;
 use arrow_array::Array;
 use arrow_array::cast::AsArray;
 use arrow_schema::DataType;
+use serde::Serialize;
 
 use crate::Error;
 
@@ -110,7 +111,7 @@ impl Cell {
 }
 
 /// An equivalence class of the published table.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EquivalenceClass {
     /// The published tuple, in the column order of the input. A wildcard renders as the policy's
     /// token.
@@ -124,7 +125,9 @@ pub struct EquivalenceClass {
 }
 
 /// The compliance answer for one released table.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Serialize`, so an auditor's answer is a file rather than a screenful.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Assessment {
     /// The k that was asked about.
     pub k: usize,

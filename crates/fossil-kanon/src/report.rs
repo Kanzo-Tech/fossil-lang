@@ -5,10 +5,15 @@
 //! reading of the same table. And [`ColumnLevels`] refuses to report a hierarchy level for a
 //! numeric column, because there isn't one — see its own docs.
 
+use serde::Serialize;
+
 use crate::hierarchy::NumericPresentation;
 
 /// The outcome of one [`crate::anonymize`] call.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Serialize`, because a compliance answer that cannot be written to a file beside the release it
+/// describes is one that has to be retyped into an email.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Report {
     /// The k that was asked for.
     pub k: usize,
@@ -16,12 +21,21 @@ pub struct Report {
     pub input_rows: usize,
     /// Rows in the published table.
     pub released_rows: usize,
-    /// Rows withheld. The sum of the two fields below, and the number that matters to a caller
+    /// Rows withheld. The sum of the three fields below, and the number that matters to a caller
     /// deciding whether the release is still worth publishing.
     pub suppressed_rows: usize,
     /// Rows withheld because they carried a missing quasi-identifier and
     /// [`crate::NullPolicy::Suppress`] was in force.
     pub suppressed_by_null_policy: usize,
+    /// Rows withheld because the table itself was smaller than k, so no equivalence class in it
+    /// could ever have reached the bound.
+    ///
+    /// A category of its own rather than a corner of one of the others, because it is the one
+    /// suppression that says nothing about the data and everything about how much of it there was:
+    /// the same rows in a larger table would have been released untouched. It is all-or-nothing —
+    /// either the table clears k and this is zero, or it does not and this is every surviving row.
+    /// [`Warning::EverythingSuppressed`] accompanies it.
+    pub suppressed_below_k: usize,
     /// Rows withheld because the published table did not satisfy k after partitioning.
     ///
     /// **This should always be zero, and it is reported because «should» is not «is».** Strict
@@ -48,7 +62,7 @@ pub struct Report {
 }
 
 /// How far one quasi-identifier was generalised.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ColumnReport {
     /// The column, named as the caller named it.
     pub name: String,
@@ -76,7 +90,8 @@ pub struct ColumnReport {
 /// [`NumericPresentation::EnclosingBucket`] is the way out: publishing the enclosing DECLARED
 /// bucket makes a numeric column behave like a levelled one, at a cost in span width. It is why
 /// that presentation exists.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ColumnLevels {
     /// A levelled hierarchy — prefix or date. The published values are declared hierarchy nodes and
     /// the levels are comparable across partitions, across runs, and across releases.
@@ -105,7 +120,8 @@ pub enum ColumnLevels {
 /// Something the caller should know, which was not severe enough to refuse the run.
 // No `Eq`: `BucketsDoNotCover` carries the `f64` that fell outside, and a float has no total
 // equality. `PartialEq` is what the tests and `Vec::contains` need and is all that is true.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Warning {
     /// More quasi-identifiers than any k-anonymous generalisation can serve.
