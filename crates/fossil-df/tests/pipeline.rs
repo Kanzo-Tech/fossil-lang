@@ -654,26 +654,30 @@ async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
     );
 }
 
-/// An operator that is defined and not executed fails as itself. `GroupBy`
-/// stands for the rest: it is the next verb of the six and it is not here yet,
-/// which is what makes it the honest stand-in rather than a retired one.
+/// An operator that is defined and not executed fails as itself.
+///
+/// It was `GroupBy`, «the next verb of the six and not here yet», and it is
+/// here. `Rename` takes over: no verb of the catalogue lowers to it, so it is
+/// the honest stand-in rather than a retired one — and when a verb does, this
+/// test moves again, which is the whole point of standing for the rest.
 #[tokio::test]
 async fn an_unexecuted_operator_fails_as_itself() {
     let db = db();
     let ops = vec![
         source(&db, "users.csv", "users", &["id", "name"]),
-        Op::GroupBy {
+        Op::Rename {
             input: 0,
-            keys: vec![SmolStr::from("name")],
+            old: SmolStr::from("name"),
+            new: SmolStr::from("who"),
         },
     ];
     let ctx = SessionContext::new();
     let err = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
         .await
-        .expect_err("GroupBy is defined and unreached")
+        .expect_err("Rename is defined and unreached")
         .to_string();
     assert!(
-        err.contains("GroupBy"),
+        err.contains("Rename"),
         "the error names the operator: {err}"
     );
 }
@@ -779,4 +783,131 @@ async fn collect_names(ops: &[Op<'_>], ctx: &SessionContext, index: usize) -> Ve
     let mut names: Vec<String> = batches.iter().flat_map(name_at).collect();
     names.sort();
     names
+}
+
+/// `group_by(orders.user_id, spent = math.sum(orders.amount))`, executed.
+///
+/// `orders.csv` is four rows over three users and one of them bought twice, so
+/// a grouping that works gives THREE rows and a `spent` of 550 for user 1.
+/// Asserting the row count alone would not tell it from a `distinct`, which
+/// also gives three; the sum is what says the rows were folded and not merely
+/// deduplicated.
+///
+/// The result carries the keys and the aggregate and NOTHING else — `order_id`
+/// has one value per row where the result has one per group — which is the
+/// schema rule `fossil_mir::schema_of` states.
+#[tokio::test]
+async fn a_group_by_folds_the_rows_of_each_group() {
+    let db = db();
+    let ops = vec![
+        source(
+            &db,
+            "orders.csv",
+            "orders",
+            &["order_id", "user_id", "amount"],
+        ),
+        group_by_spend(&db),
+    ];
+    let ctx = SessionContext::new();
+    let batch = one(fossil_df::plan_relation(&ctx, &ops, 1, anchor())
+        .await
+        .expect("a group_by plans")
+        .sort_by(vec![datafusion::prelude::col("orders.user_id")])
+        .expect("a stable order to assert on")
+        .collect()
+        .await
+        .expect("it runs"));
+
+    assert_eq!(
+        names(&batch),
+        ["user_id", "spent"],
+        "the aggregate is a column of the result and the input's other columns are not"
+    );
+    assert_eq!(ints(&batch, 0), [1, 2, 3], "one row per group, not per row");
+    assert_eq!(
+        ints(&batch, 1),
+        [550, 75, 100],
+        "user 1 bought twice — 250 and 300 — and a grouping that folded nothing would say 250"
+    );
+}
+
+/// The keys keep the relation they were written against; the aggregate answers
+/// to the op's, because it came from no side.
+///
+/// Proved the way the union's is, by REACHING for each: a `RecordBatch` carries
+/// no qualifier at all — `names` above reads bare `user_id` and `spent` — so a
+/// qualifier can only be asserted by a projection that resolves through it.
+/// That DataFusion drops the qualifier on an aggregate is measured here and not
+/// assumed; it is why `Op::GroupBy` names its relation instead of borrowing the
+/// input's, which is the same discovery `Op::Union` made.
+#[tokio::test]
+async fn a_group_bys_aggregate_answers_to_the_ops_own_relation() {
+    let db = db();
+    let ops = vec![
+        source(
+            &db,
+            "orders.csv",
+            "orders",
+            &["order_id", "user_id", "amount"],
+        ),
+        group_by_spend(&db),
+        Op::Project {
+            input: 1,
+            cols: vec![ProjectedColumn {
+                source: SmolStr::from("Spend"),
+                column: SmolStr::from("spent"),
+            }],
+        },
+    ];
+    let ctx = SessionContext::new();
+    let batches = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+        .await
+        .expect("`Spend.spent` resolves against the op's own relation")
+        .collect()
+        .await
+        .expect("it runs");
+    // Summed across batches rather than asserted on one: an aggregate leaves
+    // one partition per group, which the fixtures above never produced.
+    assert_eq!(
+        batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        3,
+        "one row per group"
+    );
+
+    let err = fossil_df::plan_relation(&ctx, &ops[..2], 1, anchor())
+        .await
+        .expect("the group_by plans")
+        .select(vec![datafusion::prelude::col(
+            datafusion::common::Column::new(
+                Some(datafusion::common::TableReference::bare("orders")),
+                "spent",
+            ),
+        )])
+        .expect_err("the input's name is not what the aggregate answers to")
+        .to_string();
+    assert!(
+        err.contains("orders.spent"),
+        "the refusal names the column nobody can reach: {err}"
+    );
+}
+
+/// `group_by(orders.user_id, spent = math.sum(orders.amount))` as an op.
+fn group_by_spend<'db>(db: &'db dyn fossil_base::Db) -> Op<'db> {
+    Op::GroupBy {
+        input: 0,
+        keys: vec![ProjectedColumn {
+            source: SmolStr::from("orders"),
+            column: SmolStr::from("user_id"),
+        }],
+        aggs: vec![fossil_mir::AggSpec {
+            out_field: SmolStr::from("spent"),
+            agg_fn: fossil_mir::AggFn::Sum,
+            column: ProjectedColumn {
+                source: SmolStr::from("orders"),
+                column: SmolStr::from("amount"),
+            },
+            ty: Ty::new(db, TyKind::Primitive(Primitive::Float)),
+        }],
+        relation: SmolStr::from("Spend"),
+    }
 }

@@ -79,6 +79,23 @@ static STDLIB: LazyLock<FunctionRegistry> = LazyLock::new(FunctionRegistry::stdl
 pub fn stdlib() -> &'static FunctionRegistry {
     &STDLIB
 }
+
+/// Every catalogue row that is an aggregate, spelled and sorted, for a message.
+///
+/// Derived, like `crate::lower::lowered_verbs` and for the same reason: the
+/// list a user is shown and the list the checker admits have to be one list, or
+/// the message goes stale on its own and nothing turns red.
+#[must_use]
+pub fn aggregate_names() -> Vec<String> {
+    let mut names: Vec<String> = STDLIB
+        .entries
+        .values()
+        .filter(|e| e.agg_fn().is_some())
+        .map(|e| format!("`{}`", e.name))
+        .collect();
+    names.sort();
+    names
+}
 use std::collections::HashMap;
 
 /// Registry of stdlib functions available to a Fossil program.
@@ -183,6 +200,29 @@ pub struct RegistryEntry {
     pub sig: SigSpec,
     /// How this row compiles: a scalar SQL expression, or an operator.
     pub lowering: LoweringKind,
+}
+
+impl RegistryEntry {
+    /// The aggregate this row is, if it is one.
+    ///
+    /// Beside [`LoweringKind`] rather than inside it: the template stays, and
+    /// `sum(%0)` IS the SQL a scalar rendering of this row emits, so the four
+    /// are still covered by the guards that bind every template against a real
+    /// `DuckDB`. What was missing is only which operator of the algebra a call
+    /// becomes when it is written inside a `group_by`.
+    ///
+    /// `stdlib::tests::every_aggregate_names_a_row` is why this cannot drift
+    /// into naming a row the catalogue does not have.
+    #[must_use]
+    pub fn agg_fn(&self) -> Option<AggFn> {
+        match self.name.as_str() {
+            "math.sum" => Some(AggFn::Sum),
+            "math.min" => Some(AggFn::Min),
+            "math.max" => Some(AggFn::Max),
+            "math.avg" => Some(AggFn::Avg),
+            _ => None,
+        }
+    }
 }
 
 /// A `'db`-free description of a function signature: the param scalar types and
@@ -331,6 +371,16 @@ pub enum SigTy {
     /// second name is the only thing that can tell two sides apart once both
     /// are the same binding.
     Binding,
+    /// `total = math.sum(Order.amount)` — an aggregate over the group, under
+    /// the name its column will answer to.
+    ///
+    /// The only position whose ARGUMENT NAMES are the program's rather than the
+    /// row's, and it is what a `group_by` needs that no other verb does: the
+    /// out-column of an aggregate has to be called something, and a signature
+    /// cannot declare a name a user is going to invent. So the binder collects
+    /// every named argument no other parameter claimed, and [`ParamSpec::name`]
+    /// here is the position's label for a message and not a key to reach it by.
+    Aggregate,
 }
 
 impl SigTy {
@@ -341,7 +391,7 @@ impl SigTy {
     pub const fn scalar(self) -> Option<ScalarTy> {
         match self {
             Self::Scalar(s) => Some(s),
-            Self::Rows | Self::Predicate | Self::Column | Self::Binding => None,
+            Self::Rows | Self::Predicate | Self::Column | Self::Binding | Self::Aggregate => None,
         }
     }
 
@@ -458,7 +508,7 @@ impl ScalarTy {
 ///
 /// # `Op` — an operator of the algebra
 ///
-/// [`PlanOp`] cuts at a real seam: it names one of a closed set of 14 operators
+/// [`PlanOp`] cuts at a real seam: it names one of a closed set of 13 operators
 /// that affect the PLAN, not a value. It used to be called `Plan`, after its
 /// effect, rather than after what it names.
 ///
@@ -479,6 +529,26 @@ pub enum LoweringKind {
     Op(PlanOp),
 }
 
+/// The aggregate a `math/` row becomes inside a `group_by`.
+///
+/// It lived in `fossil-mir`, as an enum with a `Count` variant nothing
+/// constructed, beside a `math/` half of this catalogue that said nothing about
+/// being aggregates at all — «`math.sum`, `math.avg`, `math.min` and `math.max`
+/// are the four that go inside `aggregate`. Nothing in the rows says so.»
+/// [`RegistryEntry::agg_fn`] is the row saying so, and this is what it answers.
+///
+/// There is no `Count`: no row of the catalogue is a per-group count.
+/// `seq.count` takes a whole relation and hands back an `Integer`, which is a
+/// verb and not an aggregation, and a variant nothing can build is what
+/// `Op::Distinct`'s `by` was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
+pub enum AggFn {
+    Sum,
+    Min,
+    Max,
+    Avg,
+}
+
 /// Operators of the algebra: the relation verbs plus the `io/` sources.
 ///
 /// They were said to "mirror the multi-input MIR ops", and this crate cannot
@@ -497,11 +567,11 @@ pub enum LoweringKind {
 /// `User.where(User.age >= 18)`, which `grammar.bnf, PostfixExpr` spells and the
 /// conformance programs use.
 ///
-/// The gap that is now VISIBLE rather than hidden: this enum has 13 relation
-/// operators and `crate::lower::lower_source_stage` implements five
-/// (`where`, `select`, `join`, `distinct`, `union`). Before the receiver,
-/// nothing could enumerate the members of a relation and so nothing could
-/// count the difference.
+/// The gap that is now VISIBLE rather than hidden: this enum has 12 relation
+/// operators and `crate::lower::lower_source_stage` implements six
+/// (`where`, `select`, `join`, `distinct`, `union`, `group_by`). Before the
+/// receiver, nothing could enumerate the members of a relation and so nothing
+/// could count the difference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanOp {
     /// `seq.where` → `FilterOp` (`WHERE`).
@@ -524,10 +594,8 @@ pub enum PlanOp {
     Join,
     /// `seq.union` → `UNION ALL`.
     Union,
-    /// `seq.group_by` → marks input for `GROUP BY`.
+    /// `seq.group_by` → `SELECT keys, aggs … GROUP BY keys`.
     GroupBy,
-    /// `seq.aggregate` → `SELECT keys, aggs ... GROUP BY keys`.
-    Aggregate,
     /// `seq.count` → `COUNT(*)`.
     Count,
     /// An `io/` source constructor. **Which** reader it is is not written here.
@@ -622,6 +690,18 @@ impl FunctionRegistry {
             arity: Arity::One,
             named: false,
         };
+        // `named` is false because the NAME is the program's, not this row's:
+        // see `SigTy::Aggregate`. `Arity::OneOrMore` is the second repeating
+        // position of the one row that has two, and it does not collide with
+        // the first — the rule a repetition has to obey is about POSITIONAL
+        // arguments, which cannot be told from the position after them, and
+        // this one is reached by name or not at all.
+        let agg = |name: &str| ParamSpec {
+            name: SmolStr::new(name),
+            ty: SigTy::Aggregate,
+            arity: Arity::OneOrMore,
+            named: false,
+        };
 
         // Local insertion helper. `recv` and `member` come from
         // `split_receiver` and from nowhere else, so the row's receiver cannot
@@ -697,14 +777,14 @@ impl FunctionRegistry {
             expr("CASE WHEN %0 IS NULL THEN error('core.require: value is null') ELSE %0 END"),
         );
 
-        // ── seq/ (13) — the relation verbs. Receiver::Relation ─────────────
+        // ── seq/ (12) — the relation verbs. Receiver::Relation ─────────────
         //
         // `filter` and `project` were renamed to `where` and `select` so that
         // the catalogue spells what the surface spells — `members_of(Relation)`
         // is what an IDE offers, and offering `User.filter(…)` for a language
         // whose word is `where` is a completion that is confidently wrong.
         //
-        // **Every one of the thirteen declares what it takes.** They did not,
+        // **Every one of the twelve declares what it takes.** They did not,
         // and the comment that stood here said why not — «higher-order
         // arguments collapse to scalar placeholders in v0.1; the `PlanOp` tag is
         // the real datum». There was nothing to collapse into, so what a verb
@@ -717,7 +797,7 @@ impl FunctionRegistry {
         // fourteenth `PlanOp` compiled clean and the message a user got named
         // three implemented verbs from a string literal.
         //
-        // Eight of the thirteen still have no lowering. That is deliberate;
+        // Six of the twelve still have no lowering. That is deliberate;
         // what changed is that their arguments are checked by the same code
         // that checks `str.trim`'s, and that the day one is implemented it is
         // implemented and not also re-declared.
@@ -795,15 +875,26 @@ impl FunctionRegistry {
             vec![rows("rows"), binding("other")],
             L(P::Union),
         );
+        // The keys are positional and the AGGREGATIONS are every named argument
+        // beside them: `group_by(Order.customer, total = math.sum(Order.amount))`.
+        //
+        // They are one row and not two because `group_by` alone is not a verb —
+        // a grouping with nothing aggregated has the rows of
+        // `select(keys).distinct()` and the language spells that already. That
+        // is also why `seq.aggregate` is gone: it declared its receiver and
+        // nothing else, over a comment reading «the same unspelled higher-order
+        // position as `map`'s», and there was never a program in which it could
+        // appear without `group_by` in front of it.
         add_rows(
             e,
             "seq.group_by",
-            vec![rows("rows"), col("keys", Arity::OneOrMore)],
+            vec![
+                rows("rows"),
+                col("keys", Arity::OneOrMore),
+                agg("aggregations"),
+            ],
             L(P::GroupBy),
         );
-        // `aggregate`'s aggregations are calls over the grouped rows — the same
-        // unspelled higher-order position as `map`'s.
-        add_rows(e, "seq.aggregate", vec![rows("rows")], L(P::Aggregate));
         // The one `seq/` row that is not a verb of the algebra: it takes a
         // relation and gives back a NUMBER.
         add(e, "seq.count", vec![rows("rows")], S::Integer, L(P::Count));
@@ -1364,7 +1455,7 @@ fn expr(template: &str) -> LoweringKind {
 }
 
 /// Helper: an operator of the algebra. Named for brevity in the catalogue table
-/// — thirteen `LoweringKind::Op(PlanOp::…)` in a column is a wall of noise.
+/// — twelve `LoweringKind::Op(PlanOp::…)` in a column is a wall of noise.
 #[allow(non_snake_case)]
 const fn L(op: PlanOp) -> LoweringKind {
     LoweringKind::Op(op)

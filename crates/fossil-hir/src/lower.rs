@@ -156,6 +156,36 @@ pub enum HirSourceOp {
     /// row, addressed by the pipeline. There is no `alias` field, because
     /// `X as Y` names a side that does not survive the verb.
     Union { right: SmolStr },
+    /// `group_by(Order.customer, total = math.sum(Order.amount))` — one row per
+    /// distinct combination of `keys`, carrying `aggs`.
+    ///
+    /// The one verb that can put a column into a relation that no source
+    /// declared, and the reason it is the expensive one: an aggregate's type is
+    /// the aggregate ROW's return type and not the column's, so the checker has
+    /// to say what the result carries rather than pass a row through.
+    ///
+    /// There is at least one aggregation, and that is a rule of the language
+    /// rather than of the parser — see [`lower_source_stage`].
+    GroupBy {
+        keys: Vec<SelectedColumn>,
+        aggs: Vec<HirAggregation>,
+    },
+}
+
+/// One `out = math.sum(Order.amount)` of a [`HirSourceOp::GroupBy`].
+///
+/// `func` is the catalogue row's full name (`math.sum`), because which
+/// aggregate it is is the CATALOGUE's answer —
+/// [`crate::stdlib::RegistryEntry::agg_fn`] — and a copy of that answer here
+/// would be the second table this crate exists to not have.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
+pub struct HirAggregation {
+    /// The column the result answers to — the program's name, not a row's.
+    pub out: SmolStr,
+    /// The catalogue row being aggregated with: `math.sum`, `math.avg`, …
+    pub func: SmolStr,
+    /// What it aggregates over, qualified by the binding that owns it.
+    pub column: SelectedColumn,
 }
 
 /// One column a [`HirSourceOp::Select`] keeps, under the binding that owns it.
@@ -1049,6 +1079,14 @@ struct BoundArgs<'a> {
     alias: Option<(SmolStr, SmolStr)>,
 }
 
+/// The name a `NAMED_ARG` writes — the `total` of `total = math.sum(x)`.
+fn named_arg_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
+    node.children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .find(|t| t.kind() == fossil_syntax::SyntaxKind::IDENT)
+        .map(|t| SmolStr::from(t.text()))
+}
+
 /// Match a stage's written arguments against the parameters its row declares.
 ///
 /// **This is the function the three hand-written arms turned into.** `where`,
@@ -1081,11 +1119,7 @@ fn bind_stage_args<'a>(
     let named = |want: &str| -> Option<fossil_syntax::SyntaxNode> {
         args.iter()
             .filter(|a| a.kind() == SyntaxKind::NAMED_ARG)
-            .find(|a| {
-                a.children_with_tokens()
-                    .filter_map(fossil_syntax::SyntaxElement::into_token)
-                    .any(|t| t.kind() == SyntaxKind::IDENT && t.text() == want)
-            })
+            .find(|a| named_arg_name(a).as_deref() == Some(want))
             .and_then(|a| a.children().next())
     };
 
@@ -1096,8 +1130,32 @@ fn bind_stage_args<'a>(
     let mut slots: Vec<(&ParamSpec, Vec<fossil_syntax::SyntaxNode>)> =
         Vec::with_capacity(params.len());
 
+    // Every NAMED_ARG a declared name claims. What is left over is either an
+    // aggregation, for the one row that takes them, or a name no parameter
+    // answers to — and both of those are decided below.
+    let claimed: Vec<SmolStr> = params
+        .iter()
+        .filter(|p| p.named)
+        .map(|p| p.name.clone())
+        .collect();
+    let unclaimed_named = || -> Vec<fossil_syntax::SyntaxNode> {
+        args.iter()
+            .filter(|a| a.kind() == SyntaxKind::NAMED_ARG)
+            .filter(|a| {
+                !claimed
+                    .iter()
+                    .any(|n| named_arg_name(a).as_ref() == Some(n))
+            })
+            .cloned()
+            .collect()
+    };
+
     for param in params {
-        let nodes = if param.named {
+        let nodes = if param.ty == SigTy::Aggregate {
+            // The NAMED_ARG node itself, not its value: the name is half the
+            // datum here and `BoundArgs::aggregations` reads both off it.
+            unclaimed_named()
+        } else if param.named {
             // Reached only by its name, so a bare argument in this position is
             // a different program. See `ParamSpec::named`.
             match named(&param.name) {
@@ -1207,6 +1265,76 @@ impl BoundArgs<'_> {
         Some(cols)
     }
 
+    /// The aggregations at declared position `i` — `total = math.sum(O.amount)`.
+    ///
+    /// Three refusals, and each names a different mistake: a value that is not
+    /// a call at all, a call that is not one of the catalogue's aggregates, and
+    /// an aggregate over something that is not a qualified column. The second
+    /// asks [`crate::stdlib::RegistryEntry::agg_fn`] rather than a list here,
+    /// so the day a fifth aggregate is catalogued this reads it.
+    fn aggregations(
+        &self,
+        db: &dyn fossil_base::Db,
+        i: usize,
+        pipe: &str,
+        base: &SmolStr,
+        types: &[SmolStr],
+    ) -> Option<Vec<HirAggregation>> {
+        let (_, nodes) = self.slots.get(i)?;
+        let reg = crate::stdlib::stdlib();
+        let mut out = Vec::with_capacity(nodes.len());
+        for node in nodes {
+            let name = named_arg_name(node)?;
+            let value = node.children().next()?;
+            let Some(HirExpr::Call { func, args, .. }) = lower_expr_inner(db, &value, types) else {
+                diagnose(
+                    db,
+                    &value,
+                    format!(
+                        "`{name}` in `{pipe}` is not an aggregation. It has to be a call over the \
+                         group — e.g. `{name} = math.sum({base}.amount)`."
+                    ),
+                );
+                return None;
+            };
+            let Some(agg) = reg
+                .lookup(func.as_str())
+                .and_then(|r| r.agg_fn().map(|_| r))
+            else {
+                diagnose(
+                    db,
+                    &value,
+                    format!(
+                        "`{func}` is not an aggregate, so it cannot be the `{name}` of a \
+                         `group_by` in `{pipe}`. The aggregates are: {}.",
+                        crate::stdlib::aggregate_names().join(", ")
+                    ),
+                );
+                return None;
+            };
+            let [HirExpr::ColumnRef { binding, column }] = args.as_slice() else {
+                diagnose(
+                    db,
+                    &value,
+                    format!(
+                        "`{func}` aggregates ONE qualified column of the group, and `{name}` in \
+                         `{pipe}` gives it something else. e.g. `{base}.amount`."
+                    ),
+                );
+                return None;
+            };
+            out.push(HirAggregation {
+                out: name,
+                func: agg.name.clone(),
+                column: SelectedColumn {
+                    binding: binding.clone(),
+                    column: column.clone(),
+                },
+            });
+        }
+        Some(out)
+    }
+
     /// The binding named at declared position `i`, with its `X as Y` alias.
     fn binding(
         &self,
@@ -1242,6 +1370,7 @@ const fn describe(ty: SigTy) -> &'static str {
         SigTy::Binding => "source binding",
         SigTy::Rows => "relation",
         SigTy::Scalar(_) => "value",
+        SigTy::Aggregate => "aggregation",
     }
 }
 
@@ -1289,6 +1418,10 @@ fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
                 SigTy::Predicate => format!("{b}.id == 1"),
                 SigTy::Rows => b.to_string(),
                 SigTy::Scalar(_) => "10".to_string(),
+                // The out-name is the program's, so an example has to invent
+                // one; `total` is the only made-up word left in these messages
+                // and there is nothing in the row to derive it from.
+                SigTy::Aggregate => format!("total = math.sum({b}.amount)"),
             };
             let one = if p.arity == Arity::OneOrMore && p.ty == SigTy::Column {
                 format!("{b}.id, {b}.name")
@@ -1364,6 +1497,16 @@ fn lower_source_stage(
             Some(HirSourceOp::Join { right, alias, on })
         }
         PlanOp::Distinct => Some(HirSourceOp::Distinct),
+        // The keys are read as NAMES and the aggregations as calls, and both
+        // readers are the row's to choose — the arm constructs and does not
+        // parse. `bind_stage_args` has already refused a call with no
+        // aggregation at all, which is the rule that keeps this verb from
+        // being a second spelling of `select(…).distinct()`.
+        PlanOp::GroupBy => {
+            let keys = bound.columns(db, 0, pipe, base, types)?;
+            let aggs = bound.aggregations(db, 1, pipe, base, types)?;
+            Some(HirSourceOp::GroupBy { keys, aggs })
+        }
         PlanOp::Union => {
             let (right, alias) = bound.binding(db, 0, pipe)?;
             if let Some(alias) = alias {
@@ -1388,8 +1531,6 @@ fn lower_source_stage(
         | PlanOp::Take
         | PlanOp::Drop
         | PlanOp::Sort
-        | PlanOp::GroupBy
-        | PlanOp::Aggregate
         | PlanOp::Count => {
             diagnose(
                 db,
@@ -1432,6 +1573,7 @@ fn lowered_verbs() -> String {
                 | crate::stdlib::PlanOp::Join
                 | crate::stdlib::PlanOp::Distinct
                 | crate::stdlib::PlanOp::Union
+                | crate::stdlib::PlanOp::GroupBy
         )
     })
 }

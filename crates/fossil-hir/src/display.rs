@@ -206,6 +206,21 @@ pub fn pipe_text(pipe: &HirSourcePipe) -> String {
                 out.push(')');
             }
             HirSourceOp::Distinct => out.push_str(".distinct()"),
+            HirSourceOp::GroupBy { keys, aggs } => {
+                out.push_str(".group_by(");
+                let mut parts: Vec<String> = keys
+                    .iter()
+                    .map(|k| format!("{}.{}", k.binding, k.column))
+                    .collect();
+                parts.extend(aggs.iter().map(|a| {
+                    format!(
+                        "{} = {}({}.{})",
+                        a.out, a.func, a.column.binding, a.column.column
+                    )
+                }));
+                out.push_str(&parts.join(", "));
+                out.push(')');
+            }
             HirSourceOp::Union { right } => {
                 let _ = write!(out, ".union({right})");
             }

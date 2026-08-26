@@ -369,6 +369,10 @@ fn apply_source_op<'db>(
             // schema, and the two sides' names do not survive it: the pipeline
             // is the only thing a body can address the result by.
             HirSourceOp::Union { .. } => Ok(scope.rename_to(db, &pipe.name)),
+            // A `group_by` REPLACES the row whether or not the input declared
+            // one: what survives is the keys and the aggregates, and an
+            // aggregate is a column no source ever had.
+            HirSourceOp::GroupBy { keys, aggs } => Ok(grouped_scope(db, pipe, &scope, keys, aggs)),
             HirSourceOp::Where(_) | HirSourceOp::Select(_) | HirSourceOp::Distinct => Ok(scope),
         };
     };
@@ -395,40 +399,10 @@ fn apply_source_op<'db>(
             let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> =
                 scope.bindings().map(|b| (b.clone(), Vec::new())).collect();
             for col in cols {
-                let (binding, column) = (&col.binding, &col.column);
-                let Some((_, out)) = kept.iter_mut().find(|(b, _)| b == binding) else {
-                    return Err(pipe_error(
-                        db,
-                        pipe,
-                        format!(
-                            "`select` in `{}` names `{binding}.{column}`, and `{}` carries no row \
-                             called `{binding}`. It draws on: {}",
-                            pipe.name,
-                            pipe.name,
-                            scope
-                                .bindings()
-                                .map(|b| format!("`{b}`"))
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                        ),
-                    ));
-                };
-                let Some(f) = scope
-                    .fields_of(db, binding)
-                    .and_then(|fs| fs.into_iter().find(|f| &f.name == column))
-                else {
-                    return Err(pipe_error(
-                        db,
-                        pipe,
-                        format!(
-                            "`select` in `{}` names `{binding}.{column}`, which `{binding}` does \
-                             not have. It has: {}",
-                            pipe.name,
-                            column_list(&scope.fields_of(db, binding).unwrap_or_default()),
-                        ),
-                    ));
-                };
-                out.push(f);
+                let f = column_of(db, pipe, &scope, col, "select")?;
+                if let Some((_, out)) = kept.iter_mut().find(|(b, _)| b == &col.binding) {
+                    out.push(f);
+                }
             }
             Ok(Rows::of(
                 kept.into_iter()
@@ -481,6 +455,17 @@ fn apply_source_op<'db>(
         // `distinct` keeps rows, not columns, and names none of them: the row
         // type is its input's, and there is nothing to check.
         HirSourceOp::Distinct => Ok(scope),
+        // The one verb that puts a column no source declared into a relation,
+        // and the whole of why it is the expensive one. Two refusals, and they
+        // are `select`'s two, because a key and an aggregated column are both
+        // qualified names of the input: an unknown BINDING and an unknown
+        // COLUMN of a known binding are different mistakes.
+        HirSourceOp::GroupBy { keys, aggs } => {
+            for col in keys.iter().chain(aggs.iter().map(|a| &a.column)) {
+                column_of(db, pipe, &scope, col, "group_by")?;
+            }
+            Ok(grouped_scope(db, pipe, &scope, keys, aggs))
+        }
         // The one verb whose two inputs must agree rather than combine.
         // `Op::Union`'s schema rule is `left`, asserted equal to `right`, and
         // `fossil-df` unions BY POSITION — so equal names in equal order with
@@ -530,6 +515,112 @@ fn apply_source_op<'db>(
             Ok(scope.rename_to(db, &pipe.name))
         }
     }
+}
+
+/// One qualified column of a scope, or the refusal that says which half is
+/// wrong.
+///
+/// Two refusals and not one: an unknown BINDING and an unknown COLUMN of a
+/// known binding are different mistakes, and a single "its input does not have
+/// it" cannot say which. `verb` is the word the message opens with, because
+/// `select` and `group_by` ask this same question of the same scope.
+fn column_of<'db>(
+    db: &'db dyn fossil_base::Db,
+    pipe: &crate::lower::HirSourcePipe,
+    scope: &Rows<'db>,
+    col: &crate::lower::SelectedColumn,
+    verb: &str,
+) -> Result<RecordField<'db>, fossil_base::ErrorGuaranteed> {
+    let (binding, column) = (&col.binding, &col.column);
+    let Some(fields) = scope.fields_of(db, binding) else {
+        return Err(pipe_error(
+            db,
+            pipe,
+            format!(
+                "`{verb}` in `{}` names `{binding}.{column}`, and `{}` carries no row called \
+                 `{binding}`. It draws on: {}",
+                pipe.name,
+                pipe.name,
+                scope
+                    .bindings()
+                    .map(|b| format!("`{b}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+        ));
+    };
+    fields
+        .iter()
+        .find(|f| &f.name == column)
+        .cloned()
+        .ok_or_else(|| {
+            pipe_error(
+                db,
+                pipe,
+                format!(
+                    "`{verb}` in `{}` names `{binding}.{column}`, which `{binding}` does not \
+                     have. It has: {}",
+                    pipe.name,
+                    column_list(&fields),
+                ),
+            )
+        })
+}
+
+/// The rows a `group_by` hands on: the keys under the bindings that own them,
+/// and the aggregates under the PIPELINE's name.
+///
+/// The aggregates answer to the pipeline for the reason a `union`'s row does —
+/// a group's total belongs to no side, so there is nothing to qualify it with.
+/// The keys are not touched: each one is still a column of the source that
+/// declared it, which is what the body writes.
+///
+/// Nothing else of the input survives. A column that is neither grouped nor
+/// aggregated has one value per row where the result has one per group, so
+/// there is nothing for it to be.
+fn grouped_scope<'db>(
+    db: &'db dyn fossil_base::Db,
+    pipe: &crate::lower::HirSourcePipe,
+    scope: &Rows<'db>,
+    keys: &[crate::lower::SelectedColumn],
+    aggs: &[crate::lower::HirAggregation],
+) -> Rows<'db> {
+    let reg = crate::stdlib::stdlib();
+    let mut rows: Vec<crate::ty::NamedRow<'db>> = Vec::new();
+    for binding in scope.bindings() {
+        let fields: Vec<RecordField<'db>> = keys
+            .iter()
+            .filter(|k| &k.binding == binding)
+            .filter_map(|k| {
+                scope
+                    .fields_of(db, binding)
+                    .and_then(|fs| fs.into_iter().find(|f| f.name == k.column))
+            })
+            .collect();
+        rows.push(crate::ty::NamedRow {
+            binding: binding.clone(),
+            row: Some(Ty::new(db, TyKind::Record(Record::new(db, fields)))),
+        });
+    }
+    // The aggregate's type is the ROW's return type and not the column's:
+    // `math.sum` takes a `Float` and gives one, so summing an `Integer` column
+    // produces a `Float`. That is the type change a checker has to make and a
+    // syntax cannot.
+    let agg_fields: Vec<RecordField<'db>> = aggs
+        .iter()
+        .filter_map(|a| {
+            let out_ty = reg.lookup(a.func.as_str())?.sig.ret.scalar()?;
+            Some(RecordField {
+                name: a.out.clone(),
+                ty: out_ty.to_ty(db),
+            })
+        })
+        .collect();
+    rows.push(crate::ty::NamedRow {
+        binding: pipe.name.clone(),
+        row: Some(Ty::new(db, TyKind::Record(Record::new(db, agg_fields)))),
+    });
+    Rows::of(rows)
 }
 
 /// The right-hand side of a join, under the name the body will address it by.

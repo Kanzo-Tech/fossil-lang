@@ -105,10 +105,12 @@ fn the_message_lists_the_implemented_verbs_from_the_registry() {
     let m = one_about("derived := pedidos.sort(pedidos.id)", "Implemented today");
     // Alphabetical because `verb_names` sorts, and all five because the filter
     // is over the table rather than over a literal. It read `join`, `select`,
-    // `where` until `distinct` and `union` gained lowerings and moved this line
-    // on its own — which is the whole reason the list is derived.
+    // `where` until `distinct` and `union` gained lowerings, and then `group_by`
+    // arrived and moved it again — which is the whole reason the list is
+    // derived. Six of them is the whole of the direction `design/algebra`
+    // declares.
     assert!(
-        m.contains("Implemented today: `distinct`, `join`, `select`, `union`, `where`"),
+        m.contains("Implemented today: `distinct`, `group_by`, `join`, `select`, `union`, `where`"),
         "the list must come from the registry, not from a format string: {m}"
     );
 }
@@ -123,10 +125,12 @@ fn a_name_the_catalogue_does_not_have_is_a_different_answer() {
         m.contains("`slugify` is not a relation verb"),
         "an uncatalogued name is refused by name: {m}"
     );
-    // And it is told what there IS, from the table — thirteen names, not a
-    // count and not three of them.
+    // And it is told what there IS, from the table — twelve names, not a count
+    // and not three of them. It named `aggregate` until `group_by` took the
+    // aggregations into itself and that row was deleted; `count` is the
+    // catalogued-and-unlowered one it stands for now.
     assert!(
-        m.contains("`sort`") && m.contains("`where`") && m.contains("`aggregate`"),
+        m.contains("`sort`") && m.contains("`where`") && m.contains("`count`"),
         "the catalogue's own list is what a reader needs here: {m}"
     );
 }
@@ -170,5 +174,54 @@ fn a_union_refuses_the_alias_a_join_takes() {
     assert!(
         m.contains("alias `otras`") && m.contains("`derived`"),
         "the refusal names the alias and the name the result does answer to: {m}"
+    );
+}
+
+/// **A `group_by` with nothing aggregated is refused.**
+///
+/// This is the rule that keeps the sixth verb from being a third spelling of
+/// something the language has: `group_by(keys)` alone has exactly the rows of
+/// `select(keys).distinct()`, and both of those lower already. So the
+/// aggregations are not an optional position — the row declares them
+/// `Arity::OneOrMore`, and `bind_stage_args` refuses the call out of the
+/// signature, before any arm of the lowering sees it.
+///
+/// Proved red by declaring the position `Arity::Optional`: the program compiles
+/// CLEAN, 0 passed and 1 failed, and the count of diagnostics containing
+/// `group_by` goes 1 to 0. That zero is the shape of the defect — not a wrong
+/// message, no message.
+///
+/// A hand-written emptiness check stood here first and was deleted for being
+/// the second refusal of one mistake: removing it left the count at 1, because
+/// the binder's own too-few-arguments arm had it covered.
+#[test]
+fn a_group_by_with_nothing_aggregated_is_refused() {
+    let m = one_about("derived := pedidos.group_by(pedidos.id)", "group_by");
+    assert!(
+        m.contains("needs one or more aggregations and this call gives none"),
+        "the position is named as the row declares it: {m}"
+    );
+    assert!(
+        m.contains("total = math.sum(pedidos.amount)"),
+        "and the example shows an aggregation, rendered from the row: {m}"
+    );
+}
+
+/// An aggregation has to be an AGGREGATE, and the four are read from the
+/// catalogue rather than listed here — the same derivation
+/// `the_message_lists_the_implemented_verbs_from_the_registry` pins for verbs.
+#[test]
+fn a_group_by_refuses_a_call_that_is_not_an_aggregate() {
+    let m = one_about(
+        "derived := pedidos.group_by(pedidos.id, n = str.length(pedidos.id))",
+        "is not an aggregate",
+    );
+    assert!(
+        m.contains("`str.length` is not an aggregate"),
+        "the call is refused by name: {m}"
+    );
+    assert!(
+        m.contains("`math.avg`") && m.contains("`math.sum`"),
+        "and the aggregates come from the table: {m}"
     );
 }

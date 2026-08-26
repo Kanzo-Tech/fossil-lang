@@ -108,6 +108,7 @@ const fn ty_name(t: SigTy) -> &'static str {
         SigTy::Predicate => "Predicate",
         SigTy::Column => "Column",
         SigTy::Binding => "Binding",
+        SigTy::Aggregate => "Aggregate",
     }
 }
 
@@ -141,6 +142,14 @@ fn signature(entry: &RegistryEntry) -> String {
                 Arity::OneOrMore => "…",
                 Arity::Optional => "?",
             };
+            // An aggregation's name is the PROGRAM's — see `SigTy::Aggregate` —
+            // so printing the position's own label with an `=` in front of it
+            // would document `aggregations = …` as a call, which is the class
+            // of invention that put `sort(by)` and `group_by(desc)` on this
+            // page. The placeholder says whose the name is.
+            if p.ty == SigTy::Aggregate {
+                return format!("<name> = {}{repeat}", ty_name(p.ty));
+            }
             format!("{}{sep} {}{repeat}", p.name, ty_name(p.ty))
         })
         .collect();

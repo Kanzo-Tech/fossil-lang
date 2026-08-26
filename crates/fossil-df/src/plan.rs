@@ -9,10 +9,10 @@
 //! This module is that walk, and it is the only place that turns a relational
 //! operator into a [`DataFrame`].
 //!
-//! Five operators are executable here — [`Op::Filter`], [`Op::Project`],
-//! [`Op::Distinct`], [`Op::Union`] and [`Op::Join`] (`Inner` only). The rest
-//! stay unreachable, and reaching one is an error that names it rather than a
-//! plan that quietly drops it.
+//! Six operators are executable here — [`Op::Filter`], [`Op::Project`],
+//! [`Op::Distinct`], [`Op::Union`], [`Op::GroupBy`] and [`Op::Join`] (`Inner`
+//! only). The rest stay unreachable, and reaching one is an error that names it
+//! rather than a plan that quietly drops it.
 
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr as DfExpr, JoinType, LogicalPlanBuilder};
 use datafusion::prelude::{DataFrame, SessionContext};
 use fossil_hir::BinOp;
-use fossil_mir::{Expr, JoinKind, JoinSide, Op};
+use fossil_mir::{AggFn, Expr, JoinKind, JoinSide, Op};
 
 use fossil_base::SourceAnchor;
 
@@ -130,9 +130,37 @@ async fn build(
             right: r,
             relation,
         } => qualify(input(*l)?.union(input(*r)?)?, relation),
+        // `group_by(Order.customer, total = math.sum(Order.amount))`: one
+        // DataFusion `aggregate` call, which is why the MIR carries one
+        // operator and not the `GroupBy`+`Aggregate` pair it used to.
+        //
+        // The keys keep the qualifier they were written with. The aggregate
+        // columns have none to keep — DataFusion names a field after the
+        // expression, `sum(Order.amount)`, and an `alias` is unqualified — so
+        // each is aliased UNDER the relation the op names, which is what makes
+        // the body's `Totals.total` resolve.
+        Op::GroupBy {
+            input: i,
+            keys,
+            aggs,
+            relation,
+        } => input(*i)?.aggregate(
+            keys.iter()
+                .map(|k| column(&k.source, &k.column))
+                .collect::<Vec<_>>(),
+            aggs.iter()
+                .map(|a| {
+                    agg_call(a.agg_fn, column(&a.column.source, &a.column.column)).alias_qualified(
+                        Some(TableReference::bare(relation.as_str())),
+                        a.out_field.as_str(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ),
         other => Err(DataFusionError::Plan(format!(
             "`{}` is defined in the operator algebra and this engine does not execute it \
-             (it executes `Filter`, `Project`, `Distinct`, `Union` and `Join`/`Inner`)",
+             (it executes `Filter`, `Project`, `Distinct`, `Union`, `GroupBy` and \
+             `Join`/`Inner`)",
             op_name(other)
         ))),
     }
@@ -332,6 +360,20 @@ fn qualify(df: DataFrame, name: &str) -> datafusion::error::Result<DataFrame> {
 /// hand-built op list). A bare reference resolves against whichever relation
 /// carries the name, and is ambiguous if two do; that is DataFusion's rule and
 /// its error names both candidates.
+/// One [`AggFn`] as the DataFusion aggregate it is.
+///
+/// Total on purpose: the catalogue decides which rows are aggregates and a
+/// fifth one added there stops compiling here rather than losing its column.
+fn agg_call(f: AggFn, arg: DfExpr) -> DfExpr {
+    use datafusion::functions_aggregate::expr_fn::{avg, max, min, sum};
+    match f {
+        AggFn::Sum => sum(arg),
+        AggFn::Avg => avg(arg),
+        AggFn::Min => min(arg),
+        AggFn::Max => max(arg),
+    }
+}
+
 fn column(source: &str, column: &str) -> DfExpr {
     DfExpr::Column(if source.is_empty() {
         datafusion::common::Column::new_unqualified(column)
@@ -381,7 +423,6 @@ fn inputs(op: &Op<'_>) -> Vec<usize> {
         | Op::Rename { input, .. }
         | Op::Filter { input, .. }
         | Op::GroupBy { input, .. }
-        | Op::Aggregate { input, .. }
         | Op::Distinct { input, .. }
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
@@ -402,7 +443,6 @@ fn op_name(op: &Op<'_>) -> &'static str {
         Op::Join { .. } => "Join",
         Op::Union { .. } => "Union",
         Op::GroupBy { .. } => "GroupBy",
-        Op::Aggregate { .. } => "Aggregate",
         Op::Distinct { .. } => "Distinct",
         Op::EmitVertex { .. } => "EmitVertex",
         Op::EmitEdge { .. } => "EmitEdge",

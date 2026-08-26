@@ -236,7 +236,6 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "seq.join",
         "seq.union",
         "seq.group_by",
-        "seq.aggregate",
         "seq.count",
         // parse/ (7)
         "parse.integer",
@@ -303,10 +302,11 @@ fn catalog_is_bidirectionally_complete() {
         missing.is_empty() && extra.is_empty(),
         "catalog must equal the declared set exactly.\n  MISSING: {missing:?}\n  EXTRA: {extra:?}"
     );
-    // 2 + 13 + 7 + 6 + 13 + 5 + 2 = 48 surface functions.
-    assert_eq!(catalog.len(), 48);
+    // 2 + 12 + 7 + 6 + 13 + 5 + 2 = 47 surface functions. `seq/` went from 13
+    // to 12 with `seq.aggregate`, whose aggregations `seq.group_by` took.
+    assert_eq!(catalog.len(), 47);
     // The three io/ constructors on top.
-    assert_eq!(r.iter().count(), 48 + 3);
+    assert_eq!(r.iter().count(), 47 + 3);
 }
 
 /// `clean/` does not exist, and neither do the two functions that were deleted

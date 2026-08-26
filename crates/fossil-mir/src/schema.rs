@@ -47,8 +47,7 @@ use crate::op::{Expr, Op};
 ///   names, and the qualifier that does break the tie lives on the `ColRef`
 ///   that reads them, not in this list.
 /// - `Union` → left schema (asserted equal to right in debug builds)
-/// - `GroupBy` → `keys`
-/// - `Aggregate` → input schema ∪ agg `out_field`s
+/// - `GroupBy` → `keys` ++ the agg `out_field`s, and nothing else of the input
 /// - `EmitVertex` / `EmitEdge` / `Sink` → input schema unchanged (terminal-ish)
 /// - `Empty` → its declared `schema`
 ///
@@ -108,9 +107,13 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
             );
             left_schema
         }
-        Op::GroupBy { keys, .. } => keys.clone(),
-        Op::Aggregate { input, aggs } => {
-            let mut schema = schema_of(db, ops, *input);
+        // The keys, then the aggregates — and NOT the input's other columns:
+        // a column that is neither grouped nor aggregated has one value per
+        // row and the result has one row per group, so there is nothing for it
+        // to be. This list was `keys` alone, with the aggregates added by a
+        // second operator that read the input's whole schema back in.
+        Op::GroupBy { keys, aggs, .. } => {
+            let mut schema: Vec<SmolStr> = keys.iter().map(|k| k.column.clone()).collect();
             for agg in aggs {
                 if !schema.contains(&agg.out_field) {
                     schema.push(agg.out_field.clone());

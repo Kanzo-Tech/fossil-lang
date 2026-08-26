@@ -1,8 +1,10 @@
 //! Typed operator algebra — the complete typed operator set.
 //!
-//! `Op<'db>` carries the nine operators of Min Oo & Hartig's construction
-//! algebra (arXiv 2503.10385; ESWC 2025) — `Source`, `Project`, `Extend`,
-//! `Rename`, `Filter`, `Join`, `Union`, `GroupBy`+`Aggregate`, `Distinct` —
+//! `Op<'db>` carries the eight relational operators of Min Oo &
+//! Hartig's construction algebra (arXiv 2503.10385; ESWC 2025) — `Source`,
+//! `Project`, `Extend`, `Rename`, `Filter`, `Join`, `Union`, `Distinct` — with
+//! their `GroupBy` and `Aggregate` as ONE operator, for the reason written on
+//! [`Op::GroupBy`] —
 //! plus the typed-emission refinements this compiler adds in place of their
 //! combined serializer/target step (`EmitVertex`, `EmitEdge`, `Sink`) and an
 //! [`Op::Empty`] node, the empty relation that is the identity of `Union` and
@@ -34,6 +36,7 @@
 use fossil_hir::BinOp;
 use fossil_hir::Ty;
 use fossil_hir::UnOp;
+use fossil_hir::stdlib::AggFn;
 use smol_str::SmolStr;
 
 /// One node of the MIR DAG. The complete typed operator algebra: the nine
@@ -111,13 +114,31 @@ pub enum Op<'db> {
         relation: SmolStr,
     },
 
-    /// `GroupByOp(input, keys)` — group rows by the key columns.
-    GroupBy { input: usize, keys: Vec<SmolStr> },
-
-    /// `AggregateOp(input, aggs)` — aggregate grouped rows.
-    Aggregate {
+    /// `GroupByOp(input, keys, aggs, relation)` — one row per distinct
+    /// combination of the key columns, carrying the aggregates of each group.
+    ///
+    /// **It was two operators and neither could stand alone.** `GroupBy {
+    /// input, keys }` with nothing aggregated is [`Op::Project`] followed by
+    /// [`Op::Distinct`], which the surface already spells twice over;
+    /// `Aggregate { input, aggs }` with no grouping has no groups. `schema_of`
+    /// had to read the pair to describe either, `DataFusion` takes both halves in
+    /// one `aggregate(group_expr, aggr_expr)` call, and nothing in the
+    /// workspace ever constructed either of them.
+    ///
+    /// `keys` are QUALIFIED, like [`Op::Project`]'s columns. They were bare
+    /// `SmolStr`s, from before the join stopped flattening its two sides: after
+    /// a join, a bare `id` names whichever side `DataFusion` finds first, and the
+    /// ambiguity is the one the qualified `select` was decided against on
+    /// 2026-08-14.
+    ///
+    /// `relation` is what the AGGREGATE columns answer to, for the reason
+    /// [`Op::Union`] carries one: a group's total came from no side, so there
+    /// is nothing to borrow a qualifier from. The keys keep their own.
+    GroupBy {
         input: usize,
+        keys: Vec<ProjectedColumn>,
         aggs: Vec<AggSpec<'db>>,
+        relation: SmolStr,
     },
 
     /// `DistinctOp(input)` — deduplicate whole rows.
@@ -239,13 +260,19 @@ pub enum JoinKind {
     Full,
 }
 
-/// One aggregation in an [`Op::Aggregate`] — `agg_fn(in_field) AS out_field`,
-/// the result typed `ty`.
+/// One aggregation of an [`Op::GroupBy`] — `agg_fn(column) AS out_field`, the
+/// result typed `ty`.
+///
+/// `column` is qualified for the same reason [`Op::GroupBy`]'s keys are: it was
+/// a bare `in_field`, and a bare name after a join names a side by accident.
+/// `ty` is the AGGREGATE's type and not the column's — that is the whole of why
+/// this verb is checker work: `math.sum` takes a `Float` and gives a `Float`,
+/// so summing an `Integer` column produces a `Float` one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub struct AggSpec<'db> {
     pub out_field: SmolStr,
     pub agg_fn: AggFn,
-    pub in_field: SmolStr,
+    pub column: ProjectedColumn,
     pub ty: Ty<'db>,
 }
 
@@ -266,15 +293,10 @@ pub struct VProp<'db> {
     pub single_valued: bool,
 }
 
-/// Aggregation function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::Update)]
-pub enum AggFn {
-    Count,
-    Sum,
-    Min,
-    Max,
-    Avg,
-}
+// `AggFn` lived here, with a `Count` nothing could construct. It is
+// `fossil_hir::stdlib::AggFn` now: which calls are aggregates is the
+// CATALOGUE's answer, and a copy of the answer on this side of the lowering
+// would be a second table to keep in step with four rows of `math/`.
 
 /// Source formats.
 ///

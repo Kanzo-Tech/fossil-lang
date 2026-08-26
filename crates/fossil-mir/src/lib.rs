@@ -30,9 +30,10 @@ pub mod schema;
 // types at the crate root, query functions stay under their module path
 // (`fossil_mir::lower::lower_to_mir_pg`) to avoid name shadowing with modules.
 pub use diagnostics::program_diagnostics;
+pub use fossil_hir::stdlib::AggFn;
 pub use graph::MirGraph;
 pub use lower::{apply_output_shape, lower_to_mir_pg};
 pub use op::{
-    AggFn, AggSpec, Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp,
+    AggSpec, Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp,
 };
 pub use schema::{free_cols, schema_of};

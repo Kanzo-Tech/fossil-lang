@@ -656,6 +656,41 @@ fn lower_source_chain<'db>(
                 chain.relation = pipe.name.clone();
             }
             HirSourceOp::Distinct => ops.push(Op::Distinct { input: chain.last }),
+            // The keys keep the relation each was written against; the
+            // aggregates get the pipeline's, because a group's total came from
+            // no source and there is nothing to qualify it with. `agg_fn` is
+            // the CATALOGUE's answer to which aggregate a call is, so this arm
+            // never spells one.
+            HirSourceOp::GroupBy { keys, aggs } => {
+                let reg = fossil_hir::stdlib::stdlib();
+                let aggs = aggs
+                    .iter()
+                    .filter_map(|a| {
+                        let row = reg.lookup(a.func.as_str())?;
+                        Some(crate::op::AggSpec {
+                            out_field: a.out.clone(),
+                            agg_fn: row.agg_fn()?,
+                            column: crate::op::ProjectedColumn {
+                                source: a.column.binding.clone(),
+                                column: a.column.column.clone(),
+                            },
+                            ty: row.sig.ret.scalar()?.to_ty(db),
+                        })
+                    })
+                    .collect();
+                ops.push(Op::GroupBy {
+                    input: chain.last,
+                    keys: keys
+                        .iter()
+                        .map(|k| crate::op::ProjectedColumn {
+                            source: k.binding.clone(),
+                            column: k.column.clone(),
+                        })
+                        .collect(),
+                    aggs,
+                    relation: pipe.name.clone(),
+                });
+            }
             // Like a join, a union builds a relation neither side was — and
             // unlike a join it does not keep the two sides addressable, because
             // a row of the result came from one of them and nothing says which.
