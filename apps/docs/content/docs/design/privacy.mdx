@@ -1,0 +1,170 @@
+---
+title: A privacy bound with no chokepoint
+description: Why the classification is a document rather than a shape annotation, why the language names no anonymisation operator, and what four vocabularies leave to a five-term profile.
+direction:
+  summary: "The policy document is bound by the program, the way `type { Person } := io.shex(…)` binds a shape — not supplied as a host argument."
+  arguedIn: /docs/design/type-providers
+---
+
+A fossil corpus is files, handed over. The recipient reads every column with any Parquet reader.
+**That is not fixable, and this page is what follows from accepting it.**
+
+## The consequence, taken rather than fought
+
+There is no chokepoint. No process of ours stands between the files and whoever has them, so **no
+read-time privacy control is possible** — not a masked column, not a row filter, not a permission on
+a verb.
+
+The temptation is to answer this by withholding the escape hatch: gate `execute_sql` and the problem
+looks smaller. It is not smaller, it is hidden. [`read`'s `where` is a raw SQL
+fragment](/docs/design/corpus#reads-where-is-sql-and-carries-execute_sqls-authority) evaluated by
+the same engine, so gating one and not the other is the same surface with a second door — and even
+with both gated, the recipient has the Parquet.
+
+The systems that genuinely do this have a chokepoint and still do not put the control on SQL.
+Snowflake applies dynamic data masking and row access policies inside the query planner; BigQuery
+does column-level ACLs and row-level security the same way; Databricks likewise. The control is
+**below** the query language, which is exactly the position a file format does not have.
+
+So:
+
+- Protection is **total at write time**. The bytes that would violate the bound are never written,
+  and every reader preserves it for free.
+- What travels with the artifact is a **declaration plus a verifiable property**, never an
+  enforcement. [The declared bound](/docs/format/conventions/privacy) is the format.
+
+<Callout type="warn" title="Two products, and only one of them is this">
+A corpus that is **served** — the operator keeps the files, access is only through their engine —
+does have a chokepoint, and it admits what this cannot: query-time perturbation, differential
+privacy, a budget that runs out. It also costs what this does not: a trusted operator, and an answer
+that degrades with use.
+
+That is a different product and nothing here is built for it. Nothing here assumes it away either:
+the manifest states what the *bytes* guarantee, and a served deployment is free to guarantee more on
+top.
+</Callout>
+
+## The language names no anonymisation operator
+
+There is no `anon.generalise`, no `anon.mask`, no `anon.hash`. The reason is not that they are hard.
+
+**An obligation an author discharges by remembering to call a function is one they can forget**, and
+the failure is silent in the worst possible way: the program compiles, the corpus writes, the
+manifest seals, and the missing call is discovered by the recipient. Nothing in the pipeline is in a
+position to notice, because a mapping that does not call a function looks exactly like a mapping
+that had no need to.
+
+The bound is stated instead, and the writer refuses. The author's obligation becomes "reach k",
+which is checkable, rather than "remember to anonymise", which is not.
+
+## The classification is a separate document, and not an annotation on the shape
+
+A program already binds one external document per output type — `type { Person } :=
+io.shex("persons.shex")` — and [shapes](/docs/design/shapes) is where that stands. The obvious
+place for a privacy classification is inside it: ShEx and SHACL both have annotation mechanisms, and
+the shape already enumerates every predicate.
+
+**It must not go there, and the reason is reuse.** A shape says what a `Person` *is*: which
+predicates it carries, with what cardinality, at what datatype. That is a property of the
+vocabulary, and it holds in every jurisdiction and every deployment. Whether `birth_year` is a
+quasi-identifier is none of those things — it depends on what else is released, on who the recipient
+is, and on which regulator is reading.
+
+Putting the second inside the first produces one shape per deployment, differing only in
+annotations. That is how a vocabulary stops being shared.
+
+So it is a second document, bound the same way, and the two are joined by **the predicate IRI they
+both name**.
+
+## Three vocabularies, and the gaps that forced a fourth
+
+| | what it supplies | where it stops |
+| --- | --- | --- |
+| **ODRL 2.2** | The structure: `Policy`, `Permission`, `Prohibition`, `Constraint`, and the `leftOperand`/`operator`/`rightOperand` triple | `odrl:target` names an `Asset`. There is **no granularity below it** — no column, no attribute, no field, no schema |
+| **DPV 2.3** | Classification values: `dpv:IdentifyingPersonalData`, `dpv:SensitivePersonalData` | It names privacy *techniques* and **cannot parameterise them**, and it has no quasi-identifier at all |
+| **ISO/IEC 20889:2018** | The definitions the terms stand for | It is a paywalled standard, not a vocabulary — nothing dereferences |
+
+The two gaps are load-bearing and both were checked rather than assumed.
+
+**DPV cannot hold a number.** Not one `xsd:decimal`, `xsd:integer`, `xsd:float` or `xsd:double`
+appears in DPV core, `dpv-tech` or `dpv-risk`, and every `has*` property is concept-valued —
+`dpv:hasScale`'s range is `dpv:Scale`, an enumeration, not a magnitude. `dpv:DifferentialPrivacy`
+exists as a bare class you assert or do not; **there is nowhere in DPV to put an ε or a k.**
+
+**DPV has no quasi-identifier.** Case-insensitive search across all eight DPV 2.3 serializations for
+`QuasiIdentifier`, `IndirectIdentifier` or `DirectIdentifier` returns nothing. The combination case
+— which is the whole of k-anonymity — is absent.
+
+### The profile is five terms
+
+ODRL sanctions the extension in as many words. Information Model §3.3: *"Additional Constraint left
+operands: Create an instance of the LeftOperand class."* And §3.2 buys the property worth having:
+*"if the ODRL Processing system does not recognise the ODRL Profile identifier(s) then it MUST stop
+processing the policy."* A runtime that does not know this profile is **required to stop, not to
+guess**.
+
+| term | why it is not somebody else's |
+| --- | --- |
+| `fossil:attribute` | ODRL has no sub-asset granularity. This is the term that does most of the work |
+| `fossil:classification` | The dimension a `Constraint`'s single triple cannot carry alone |
+| `fossil:anonymityK` | DPV has no numeric range |
+| `fossil:absentQuasiIdentifier` | Likewise, and it is the parameter the whole check turns on |
+| `fossil:suppressionBudget` | Likewise |
+
+Plus two `skos:Concept` values — `fossil:QuasiIdentifier` and `fossil:NoDisclosureRisk` — where DPV
+has nothing to borrow. The classification values that DPV *does* have are DPV's.
+
+**Five is the ceiling and it is a test.** Catena-X is the one production European data-space profile
+and it ships **four** `odrl:LeftOperand`s — `FrameworkAgreement`, `Membership`, `ContractReference`,
+`UsagePurpose` — for an entire automotive industry, and not one of them is schema-aware. A sixth
+term here needs an argument.
+
+<Callout type="warn" title="The interoperability claim is narrower than it is usually made">
+The reason normally given for minting into ODRL is that the Dataspace Protocol leaves `leftOperand`
+open. **It does not.** DSP's `contract-schema.json` pins `LeftOperand` to a closed `enum` of exactly
+the 34 ODRL Core instances — no extension slot, no `pattern`, no `anyOf` — so a policy carrying
+`fossil:attribute` fails that schema.
+
+What is true is narrower and still worth having. DSP's SHACL shapes constrain `odrl:target`,
+`dspace:timestamp`, `odrl:assigner` and `odrl:assignee` and place **no** constraint on
+`leftOperand`; its prose says nothing about it either. The closed enum is one artefact of three, and
+the same file carries `odrl:term-lteq` in its `Operator` enum — an HTML anchor pasted where the term
+IRI goes — which is a fair indication of how much load it is bearing. Eclipse EDC shipped the enum
+as a Java type, had it filed as *"a severe blocker"* because the model *"cannot express constraints
+other than those defined in the enum class"*, and moved to free-form.
+
+So: an ODRL profile in ODRL's own sense, readable by anything that reads ODRL, and rejected by a
+**strict** DSP validator until DSP's schema catches up with ODRL's extension point. That is a defect
+in one JSON Schema, not a reason to invent a fifth format.
+</Callout>
+
+## Verification is the part that is easy to get wrong
+
+The check is not `GROUP BY qi HAVING count(*) < k`. [The declared
+bound](/docs/format/conventions/privacy#three-ways-to-compute-k-and-a-group-by-picks-one-by-accident)
+specifies the three traps and what the manifest publishes about each; the short version is that
+nulls have two defensible readings that disagree on the same file, that a suppression limit is part
+of what k-anonymity means in practice, and that a corpus of tiles makes a per-tile aggregation the
+easiest wrong answer available.
+
+The verifier **measures and refuses**. It derives nothing: no generalisation search, no recoding, no
+rows dropped and no cells blanked. A verifier that also repairs is a verifier whose failures nobody
+ever sees — and the repair belongs upstream, where the author can see what it cost.
+
+Its refusals name counts, column names and type labels, and **never a cell**. A diagnostic about a
+privacy violation that prints the violating row has moved the disclosure out of the artifact and
+into the log, the terminal scrollback and whatever CI captured — none of which was ever going to be
+checked by a guard.
+
+## What is claimed, and what is merely declared
+
+The honest split, because the two are easy to blur:
+
+**Checked, by anyone, from the files:** that the classes over the declared quasi-identifiers reach
+the declared `k`; that the aggregation spanned the release; that the suppression is inside the
+budget; that the manifest's numbers are the bytes' numbers.
+
+**Declared, and checkable by nobody:** that the quasi-identifier set is the right one; that
+`subject` is opaque; that anything a producer chose not to write was ever there. Those are stated on
+the guard as what it cannot prove, because a guard that overstates its reach is worse than a missing
+one.

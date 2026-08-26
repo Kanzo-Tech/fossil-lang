@@ -287,6 +287,33 @@ TypeDef             := RenameAttr* 'type'
 RenameAttr          := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
 Rename              := STRING 'as' IDENT
 
+(* Policy binding: the second document a program names, and the one the writer
+   refuses against. `policy := io.policy("people.jsonld")` binds an ODRL
+   document in fossil's privacy profile, and `fossil run` will not seal a corpus
+   that misses the bound it declares.
+
+   NOT PARSED YET, and this file is normative and ahead of the parser on
+   purpose. What exists is a host argument — `fossil run --policy <path>` — and
+   the difference is not cosmetic. An obligation discharged by remembering a
+   flag is one that can be forgotten, which is the same argument that keeps an
+   anonymisation operator out of the standard library
+   (`/docs/design/privacy`). What stands in for the binding until it is parsed
+   is that forgetting is VISIBLE: a run with no policy seals
+   `privacy: undeclared` into the manifest rather than omitting the field, so a
+   corpus that was never checked never looks like one that was.
+
+   `policy` is not a reserved word, for TypeDef's reason: the token after the
+   name is what separates this from a mapping header, and `policy` is a
+   plausible column name.
+
+   ONE binding, not one per type. The bound is a property of the whole release
+   — `graph.graph.yml` carries it beside `container` — and a per-type policy
+   would be several bounds a recipient has to combine by hand. The document
+   names the types it covers, and a program writing a type the document is
+   silent about is an ERROR rather than an exemption: silence is
+   indistinguishable from a judgement that there was nothing to protect. *)
+PolicyDef           := 'policy' DEFINE Expression
+
 (* `as` is one of two survivors of the word (the other is AliasArg, for the
    self-join). It is CONTEXTUAL, not reserved: it is recognised only between
    two operands where no expression could continue, and everywhere else it is

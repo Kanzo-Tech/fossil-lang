@@ -1,4 +1,9 @@
 {
   "title": "Conventions",
-  "pages": ["identity", "addressing", "adjacency"]
+  "pages": [
+    "identity",
+    "addressing",
+    "adjacency",
+    "privacy"
+  ]
 }

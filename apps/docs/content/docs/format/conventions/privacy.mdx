@@ -1,0 +1,189 @@
+---
+title: The declared bound
+description: What a corpus says its bytes guarantee, how a recipient re-derives it from the files alone, and the three ways of computing k that a naive GROUP BY gets wrong.
+---
+
+A corpus carries a `privacy:` block in `graph.graph.yml`, beside `container`. It states what the
+bytes guarantee and it is **a declaration plus a re-derivable property, never an enforcement**.
+
+```yaml
+name: graph
+prefix: ''
+container: rowgroups
+privacy:
+  bound: k-anonymity
+  k: 5
+  reached: 20
+  absent_quasi_identifier: value
+  population: 600
+  suppressed: 0
+  suppression_budget_ppm: 0
+  quasi_identifiers: Person.birthYear Person.postcode
+  policy: https://example.org/policies/people-v1
+  profile: https://fossil-lang.org/ns/privacy/v1
+vertices:
+- vertex/Person.vertex.yml
+edges: []
+version: gar/v1
+```
+
+## There is no chokepoint, so the protection is at write time
+
+A recipient holding a corpus reads every column with any Parquet reader — [reading a corpus without
+fossil](/docs/format/reading/without-fossil) documents exactly that as the way to look at one.
+Nothing sits between the files and the reader, so no read-time control exists to build.
+
+**The protection is that the offending bytes were never written.** A writer refuses to seal a
+corpus that misses the declared bound, and every reader then preserves it for free, including
+arbitrary SQL: you cannot extract what is not there.
+
+<Callout type="warn" title="Withholding a verb is not a privacy mechanism">
+The systems that do have a chokepoint do not put the control on the query language either.
+Snowflake's dynamic data masking and row access policies, BigQuery's column-level ACLs and
+row-level security, and Databricks' equivalent all apply **inside the query planner**, whatever SQL
+the caller wrote. A design that answered this by hiding `execute_sql` would have the same surface
+with a second door — and [`read`'s `where` is a raw SQL
+fragment](/docs/design/corpus#reads-where-is-sql-and-carries-execute_sqls-authority), which is that
+second door in one field.
+</Callout>
+
+## Absence is not "public"
+
+Three states, and a reader distinguishes all three:
+
+| what `graph.graph.yml` holds | what it means |
+| --- | --- |
+| no `privacy:` key | The corpus was written before this convention. Nothing is claimed. |
+| `bound: undeclared` | The producer knows the convention and declares no bound over this release. |
+| `bound: k-anonymity` | The block below is a claim, and every number in it is re-derivable from the files. |
+
+None of the three means the data carries no risk. A producer that emits `undeclared` has said so
+about the release, not about the data.
+
+## The fields, and what a recipient does with each
+
+| field | |
+| --- | --- |
+| `k` | What the policy asked for. |
+| `reached` | The smallest equivalence class measured over the release. The claim is `reached >= k`. |
+| `quasi_identifiers` | `<Type>.<column>` names separated by single spaces. **The one field a reader cannot derive**, and the one the whole bound turns on. |
+| `absent_quasi_identifier` | How a `NULL` is read: `value`, `wildcard` or `suppress`. |
+| `population` | The records the bound was measured over — the sum of those types' `vertex_count`. |
+| `suppressed` | Records excluded from certification. Non-zero only under `suppress`. |
+| `suppression_budget_ppm` | The allowance, in parts per million of `population`. |
+| `policy` | The `odrl:uid` of the policy document. A name, not a location. |
+| `profile` | The `odrl:profile` IRI, so a reader knows which vocabulary the terms came from. |
+
+`reached` is published beside `k` rather than instead of it because they answer different questions
+— what was required, and what there is — and because a recipient recomputing has something to check
+the producer's arithmetic against rather than only a threshold to clear.
+
+### Why the block is flat scalars
+
+The manifest grammar is a flat mapping of scalars, one sequence of paths and one sequence of small
+mappings. Two of the four readers of `graph.graph.yml` are line scanners
+(`apps/corpus/guards/manifest.mjs`, `packages/graph/src/manifest.ts`) and both **skip** what they
+cannot see rather than failing on it. A quasi-identifier set emitted as a YAML sequence scans as
+absent, which is indistinguishable from a corpus that declares none — so the set is one
+space-separated scalar and the crate that emits it asserts the shape.
+
+### Why the budget is an integer
+
+`suppression_budget_ppm` is parts per million and the comparison is
+`suppressed × 1_000_000 <= population × suppression_budget_ppm`. A manifest is a text document four
+independent parsers read, and a float is the one scalar they can disagree about over the same bytes.
+Integer arithmetic reproduces exactly, `BigInt` included. `20000` is 2%.
+
+## Three ways to compute k, and a `GROUP BY` picks one by accident
+
+A `GROUP BY qi HAVING count(*) < k` is not this check.
+
+### Nulls are a declared parameter
+
+SQL groups every `NULL` together. Statistical disclosure control treats an absent quasi-identifier
+as a wildcard matching every value. Both readings are defensible and they **disagree on the same
+file**, so the reading is declared:
+
+| `absent_quasi_identifier` | a record with an absent quasi-identifier | 
+| --- | --- |
+| `value` | is a category of its own; two `NULL`s are equal |
+| `wildcard` | joins every class it could belong to |
+| `suppress` | is not certified at all, and is charged to the budget |
+
+Six records at `(1980, SW1)` and four at `(1980, NULL)` reach **k=4** under `value`, **k=10** under
+`wildcard`, and **k=6 with 4 suppressed** under `suppress`. Nothing about the bytes changes between
+those three numbers.
+
+`value` is the conservative end: every record compatible with `r` under `wildcard` is either in
+`r`'s exact class or in another one, so a corpus passing under `value` passes under `wildcard`. What
+`value` is **not** conservative against is cell suppression — blanking quasi-identifier cells makes
+a large class of all-`NULL` rows that clears any `k` while carrying no generalisation at all, which
+is what `suppress` answers and why the null reading and the budget are one decision.
+
+### The suppression budget is part of the bound
+
+k-anonymity in practice is generalisation *plus* a suppression limit. A verification with no budget
+in it verifies a different property from the one the literature means, so the count and the
+allowance are both published. A release that reaches `k` and overspends its budget is refused.
+
+Only suppression **visible in the bytes** is checkable: quasi-identifier cells that are null. A
+record that was never written leaves no trace, and a producer that dropped rows instead reports a
+smaller population that no recipient can distinguish from a smaller input.
+
+### The class is the release, not the tile
+
+The equivalence class is the whole released population. **A corpus is tiles**, which makes a
+per-tile aggregation the easiest wrong answer available here: it is more parallel, it looks the
+same, and every class it finds is a subset of a real one — so it reports a `k` that is too small and
+looks conservative while never having been checked against the release.
+
+`population` is what makes that detectable by somebody else. A recipient recomputing holds the count
+it reads off the files against `population` and against `vertex_count`, and holds the class sizes
+against both.
+
+## Re-deriving it, with neither fossil nor the policy
+
+```bash
+node apps/corpus/guards/check.mjs /path/to/corpus
+```
+
+`declared-privacy` recomputes the classes over every tile of each payload set as one relation, under
+the declared null reading, and fails when the manifest and the bytes disagree. `node` and the
+`duckdb` binary; no fossil crate, no npm package, no install.
+
+<Callout title="Checking k needs the quasi-identifiers and not the sensitive column">
+An auditor verifies compliance **without entitlement to the data the policy exists to protect**.
+That is a property of k-anonymity rather than of this implementation: ℓ-diversity is a statement
+about the distribution of the sensitive attribute inside each class, so checking it means reading
+it. The cost of moving to ℓ-diversity includes losing this, and it is not usually counted.
+</Callout>
+
+## What the bound does not say
+
+<Callout type="warn" title="Four things a declared bound is silent about">
+**The quasi-identifier set may be wrong.** It is a judgement about a jurisdiction, a recipient and
+what else was released — not a property of a column — and no amount of scanning recovers it. A
+corpus declaring a set of one reaches a large `k` honestly and protects nobody.
+
+**`subject` may not be opaque.** Every vertex carries a unique IRI, and the bound is over the
+quasi-identifier **tuple**, not the record: it stops linkage through an external table keyed on the
+quasi-identifiers and stops nothing at all if the IRI itself carries an identifier. Nothing on disk
+distinguishes `person/8a3f…` from `person/nhs-4433221`.
+
+**Attribute disclosure is untouched.** Every record in a class of 4,000 sharing one diagnosis
+satisfies k=4,000 and discloses the diagnosis of all 4,000.
+
+**A second writer's numbers are its own.** The guard checks a manifest against bytes; where one
+writer produced both, both being wrong together passes.
+</Callout>
+
+## A served corpus is a different product
+
+A corpus that is **handed over** has no privacy beyond what it carries inside. A corpus that is
+**served** — the operator keeps the files and the only access is through their engine — has a
+chokepoint, and a chokepoint admits mechanisms this one cannot: query-time perturbation, a
+differential-privacy budget that runs out. The price is a trusted operator and an answer that
+degrades with use.
+
+This block states what the **bytes** guarantee. A served deployment guarantees more on top of it,
+and nothing here is written for that case.

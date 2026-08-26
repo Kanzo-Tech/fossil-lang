@@ -72,6 +72,22 @@ expression in an attribute argument. These are the languages, and the control ex
 | **StarBench** | Double nesting alone broke two of four engines, which is the evidence for an explicit nesting cap with a number rather than unbounded recursion. |
 | **ISO GQL and openCypher** | `N ∩ E = ∅` — an edge cannot be the endpoint of another edge *by definition*, which is why the corpus question is ours and not a lookup. |
 
+## Privacy, and what four vocabularies leave out
+
+The claim on [the privacy bound](/docs/design/privacy) is that ODRL, DPV, ISO 20889 and the
+Dataspace Protocol between them leave column-level targeting and numeric technique parameters
+unoccupied. These are the four, and the two that were read expecting to be wrong.
+
+| source | what it settles |
+| --- | --- |
+| **ODRL 2.2** ([Information Model](https://www.w3.org/TR/odrl-model/), [Vocabulary](https://www.w3.org/TR/odrl-vocab/)) | The structure, and the sanctioned way to extend it. §3.3: *"Additional Constraint left operands: Create an instance of the LeftOperand class."* §3.2 supplies the property worth having: *"if the ODRL Processing system does not recognise the ODRL Profile identifier(s) then it MUST stop processing the policy."* And the limit: `odrl:target` names an `odrl:Asset`, and the vocabulary has nothing below it — no column, no attribute, no field. (`odrl:attribute` is the *attribution* action.) |
+| **Catena-X ODRL profile** ([`profile.ttl`](https://github.com/catenax-eV/cx-odrl-profile/blob/main/profile.ttl)) | The ceiling on how many terms a profile needs: **four** `odrl:LeftOperand`s — `FrameworkAgreement`, `Membership`, `ContractReference`, `UsagePurpose` — for an entire automotive data space, none of them schema-aware. |
+| **Dataspace Protocol** ([`contract-schema.json`](https://github.com/International-Data-Spaces-Association/ids-specification/blob/main/negotiation/message/schema/contract-schema.json)) | The correction. It was read expecting an unconstrained `leftOperand` string, and it pins a closed `enum` of the 34 ODRL Core instances — so a profiled policy fails that schema, while the same spec's SHACL shapes constrain `leftOperand` not at all. [Eclipse EDC #338](https://github.com/eclipse-edc/Connector/issues/338) is the same enum filed as *"a severe blocker"*, and the reason EDC moved to free-form. |
+| **DPV 2.3** ([spec](https://w3c-cg.github.io/dpv/2.3/dpv)) | Two classification values that are not ours — `dpv:IdentifyingPersonalData` (*"Personal Data that explicitly and by itself is sufficient to identify a person"*) and `dpv:SensitivePersonalData` — and the two gaps that forced the profile: **no quasi-identifier anywhere in it**, and **no property with a numeric range at all**, so `dpv:DifferentialPrivacy` is a class you assert with nowhere to put an ε. |
+| **ISO/IEC 20889:2018** | The definitions the terms stand for: direct identifier (3.10), indirect identifier (3.16), quasi-identifier (3.28), sensitive attribute (3.34), equivalence class (3.11), K-anonymity (3.18). And the distinction the obvious reading gets wrong — **quasi-identifier is not a synonym for indirect identifier**; they are separate definitions on different axes, and ISO's own synonym for the latter is "key attribute". |
+| **sdcMicro**, `freqCalc` ([CRAN](https://cran.r-project.org/web/packages/sdcMicro/sdcMicro.pdf)) | That the null reading is a parameter rather than a default, from the field that has had to decide it: `alpha`, *"a numeric value between 0 and 1 specifying how much keys that contain missing values (NAs) should contribute to the calculation of fk and Fk"*, default 1. (`measure_risk` is often cited for the same parameter and does not document it.) |
+| **ARX** ([`ARXConfiguration`](https://github.com/arx-deidentifier/arx/blob/master/src/main/org/deidentifier/arx/ARXConfiguration.java), [Lightning, *TDP* 9(2)](http://www.tdp.cat/issues16/tdp.a223a15.pdf)) | That a suppression limit is part of what k-anonymity means in practice — `setSuppressionLimit`, library default `0`. And a correction: its sweeps are **0% against 10%** and **0% against 100%**, and its GUI recommends 100%. The 0/2/4 this design was first written against is the `0.02d` of the API tutorial page mistaken for a benchmark. |
+
 ## The corpus, and how a format ships
 
 | source | what it settles |
