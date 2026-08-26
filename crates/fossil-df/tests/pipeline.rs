@@ -1,13 +1,12 @@
 //! The relational operators the source pipeline needs, executed.
 //!
-//! `Op::Filter`, `Op::Project`, `Op::Join`, `Op::Distinct` and `Op::Union` had
-//! been defined since the
-//! algebra was completed and reached by nothing: the operator algebra was
+//! `Op::Filter`, `Op::Project`, `Op::Join`, `Op::Distinct` and `Op::Union` were
+//! defined when the algebra was, and reached by nothing: the operator algebra was
 //! defined WHOLE and lowered in part on purpose, and the source pipeline is what starts paying that debt back.
-//! The lowering that will emit them is F5; this file is the other half —
-//! it builds the op list by hand, which is the pattern this repo already uses
-//! for an operator no `.fossil` can produce yet, and asserts the **rows that
-//! come out**, not the plan that was built.
+//! `fossil-hir` and `fossil-mir` emit five of them from a program now; this is
+//! the other half — it builds the op list by hand, which is the pattern this
+//! repo already uses for an operator no `.fossil` can produce yet, and asserts
+//! the **rows that come out**, not the plan that was built.
 //!
 //! `cargo test`'s cwd is the crate root, so the sources are
 //! `tests/fixtures/{users,teams}.csv`.
