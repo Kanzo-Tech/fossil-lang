@@ -347,8 +347,24 @@ and 36.0 kB** against **4 requests and 37.0 kB** for all six columns, from 68.8 
 All of the above is arithmetic over four manifest fields — `prefix`, `chunk_size`, `aligned_by` and
 the adjacency's own `prefix` — and a reader that re-derives it from this page has copied a convention
 no compiler compares against the corpus. Change a prefix or a shift and the copy composes URLs that
-404 at runtime, in a browser, with no type error and nothing red. So the composition ships as code,
-in `@fossil-lang/graph`, sharing nothing with the verbs but the manifest:
+404 at runtime, in a browser, with no type error and nothing red.
+
+A 404 is the loud half. A copy of `chunk_size` that is **too large** fails in the other direction and
+says nothing at all: it names fewer tiles than the corpus has, and every name it composes is real. A
+reader holding 122,880 — fossil's own earlier default, chosen when a chunk was thought to be a row
+group — against a corpus written at 4,096 composes `ceil(1_000_000 / 122_880) = 9` URLs where the
+corpus publishes 245. All nine resolve, because `chunk0…chunk8` are the corpus's own first nine
+tiles; each holds 4,096 rows, not 122,880. The window opens `dense_id` 0..36,863, **3.7% of the
+corpus**, and reports a first paint over it — a latency flattering in exact proportion to what it
+skipped, with nothing red anywhere. What a reader can check is not the cause but the count: *fewer
+vertices arrived than the manifest declares* is one comparison against a number the manifest already
+carries. What would reverse this whole argument is fixing `chunk_size` in the specification instead
+of declaring it per corpus: a copied constant could not drift, and the composition would not need the
+manifest. The declared field is what buys a corpus the freedom to be addressed at the size its writer
+chose, and the arithmetic above is what that freedom costs a reader who guesses instead of reading.
+
+So the composition ships as code, in `@fossil-lang/graph`, sharing nothing with the verbs but the
+manifest:
 
 ```ts
 const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
