@@ -498,9 +498,10 @@ pub enum LoweringKind {
 /// conformance programs use.
 ///
 /// The gap that is now VISIBLE rather than hidden: this enum has 13 relation
-/// operators and `crate::lower::lower_source_stage` implements three
-/// (`where`, `select`, `join`). Before the receiver, nothing could enumerate
-/// the members of a relation and so nothing could count the difference.
+/// operators and `crate::lower::lower_source_stage` implements five
+/// (`where`, `select`, `join`, `distinct`, `union`). Before the receiver,
+/// nothing could enumerate the members of a relation and so nothing could
+/// count the difference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanOp {
     /// `seq.where` → `FilterOp` (`WHERE`).
@@ -513,7 +514,7 @@ pub enum PlanOp {
     Take,
     /// `seq.drop` → `OFFSET n`.
     Drop,
-    /// `seq.distinct` → `DISTINCT` / `DISTINCT ON`.
+    /// `seq.distinct` → `SELECT DISTINCT`, over the whole row.
     Distinct,
     /// `seq.sort` → `ORDER BY`.
     Sort,
@@ -716,10 +717,10 @@ impl FunctionRegistry {
         // fourteenth `PlanOp` compiled clean and the message a user got named
         // three implemented verbs from a string literal.
         //
-        // Ten of the thirteen still have no lowering. That is unchanged and
-        // deliberate; what changes is that their arguments are now checked by
-        // the same code that checks `str.trim`'s, and that the day one is
-        // implemented it is implemented and not also re-declared.
+        // Eight of the thirteen still have no lowering. That is deliberate;
+        // what changed is that their arguments are checked by the same code
+        // that checks `str.trim`'s, and that the day one is implemented it is
+        // implemented and not also re-declared.
         add_rows(
             e,
             "seq.where",
@@ -749,14 +750,15 @@ impl FunctionRegistry {
             vec![rows("rows"), p("n", S::Integer)],
             L(P::Drop),
         );
-        // `distinct`, `sort` and `group_by` take COLUMN NAMES, and these three
-        // rows are the ones the reference page invented parameters for.
-        add_rows(
-            e,
-            "seq.distinct",
-            vec![rows("rows"), col("on", Arity::OneOrMore)],
-            L(P::Distinct),
-        );
+        // `distinct` declared `on: Column+` and takes NOTHING. The column list
+        // is `DISTINCT ON`, which keeps one row per group and chooses it
+        // arbitrarily without an `ORDER BY` — and `sort` has no lowering, so
+        // there is no way to write the order that would settle it. A verb whose
+        // corpus differs between two runs of the same program is not a verb
+        // this language can admit; see `/docs/design/discarded`.
+        add_rows(e, "seq.distinct", vec![rows("rows")], L(P::Distinct));
+        // `sort` and `group_by` take COLUMN NAMES, and are two of the three rows
+        // the reference page invented parameters for.
         add_rows(
             e,
             "seq.sort",
@@ -782,17 +784,17 @@ impl FunctionRegistry {
             vec![rows("rows"), binding("right"), pred_named("on")],
             L(P::Join),
         );
-        // `union` declares only its receiver, and that is a refusal rather than
-        // an omission. Its right side is structurally a binding — the same shape
-        // as a join's — but nothing in the tree confirms it: `union` has no
-        // lowering, so no code reads a second parameter and no program writes
-        // one. Declaring `binding("other")` here would be a reasoned guess
-        // printed on the reference page as a fact, which is the failure that
-        // page's invented `by`, `key` and `desc` were.
-        //
-        // **What settles it is implementing the verb.** Whoever does writes the
-        // parameter and finds out in the same hour.
-        add_rows(e, "seq.union", vec![rows("rows")], L(P::Union));
+        // The right side is a BINDING, and implementing the verb is what settled
+        // it — the row declared only its receiver until then, because a guess
+        // printed on the reference page reads as a fact. Unlike a join's it
+        // takes no `X as Y`: the two rows become ONE row under the pipeline's
+        // name, so an alias would name a side the verb does not produce.
+        add_rows(
+            e,
+            "seq.union",
+            vec![rows("rows"), binding("other")],
+            L(P::Union),
+        );
         add_rows(
             e,
             "seq.group_by",

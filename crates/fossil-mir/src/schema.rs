@@ -99,7 +99,7 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
             schema.extend(schema_of(db, ops, right.input));
             schema
         }
-        Op::Union { left, right } => {
+        Op::Union { left, right, .. } => {
             let left_schema = schema_of(db, ops, *left);
             debug_assert_eq!(
                 left_schema,

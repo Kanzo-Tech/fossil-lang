@@ -164,8 +164,9 @@ pub fn resolve_binding_row<'db>(
 /// row transformed, and the base is a binding, not a mapping. Everything below
 /// the pipeline branch is what the function has always done for a binding that
 /// reads a file — and it is where the scope BOTTOMS OUT at one row under one
-/// name, which is why a derived relation can never invent a binding: it can only
-/// carry, restrict or extend the names its base already had.
+/// name. Every verb but `union` carries, restricts or extends the names its
+/// base already had; `union` replaces them with the pipeline's own, because a
+/// row of its result came from one of two sides and nothing says which.
 pub fn resolve_binding_scope<'db>(
     db: &'db dyn fossil_base::Db,
     file: fossil_base::SourceFile,
@@ -359,7 +360,11 @@ fn apply_source_op<'db>(
             HirSourceOp::Join { right, alias, .. } => {
                 Ok(scope.concat(right_scope(db, file, right, alias.as_ref(), depth)?))
             }
-            HirSourceOp::Where(_) | HirSourceOp::Select(_) => Ok(scope),
+            // A union answers to ONE name whether or not either side has a
+            // schema, and the two sides' names do not survive it: the pipeline
+            // is the only thing a body can address the result by.
+            HirSourceOp::Union { .. } => Ok(scope.rename_to(db, &pipe.name)),
+            HirSourceOp::Where(_) | HirSourceOp::Select(_) | HirSourceOp::Distinct => Ok(scope),
         };
     };
     match op {
@@ -467,6 +472,57 @@ fn apply_source_op<'db>(
             let joined = scope.concat(right);
             typecheck_stage(db, file, pipe, "seq.join", on, &joined)?;
             Ok(joined)
+        }
+        // `distinct` keeps rows, not columns, and names none of them: the row
+        // type is its input's, and there is nothing to check.
+        HirSourceOp::Distinct => Ok(scope),
+        // The one verb whose two inputs must agree rather than combine.
+        // `Op::Union`'s schema rule is `left`, asserted equal to `right`, and
+        // `fossil-df` unions BY POSITION — so equal names in equal order with
+        // equal types is not a stricter rule than the backend's, it is the
+        // backend's rule stated where a user can be told about it.
+        HirSourceOp::Union { right } => {
+            let right = right_scope(db, file, right, None, depth)?;
+            let (Some(left_fields), Some(right_fields)) = (scope.fields(db), right.fields(db))
+            else {
+                // The right side declares no schema. Nothing can be compared,
+                // and a pipeline over an untyped source is every schemaless
+                // program in the tree — so the result is untyped too, under the
+                // one name it answers to.
+                return Ok(scope.rename_to(db, &pipe.name));
+            };
+            if left_fields.len() != right_fields.len() {
+                return Err(pipe_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`union` in `{}` needs both sides to carry the same row. The left has \
+                         {}; the right has {}.",
+                        pipe.name,
+                        column_list(&left_fields),
+                        column_list(&right_fields),
+                    ),
+                ));
+            }
+            for (i, (l, r)) in left_fields.iter().zip(right_fields.iter()).enumerate() {
+                if l.name != r.name || l.ty != r.ty {
+                    return Err(pipe_error(
+                        db,
+                        pipe,
+                        format!(
+                            "`union` in `{}` pairs its sides column by column, and column {} is \
+                             `{}` ({}) on the left and `{}` ({}) on the right.",
+                            pipe.name,
+                            i + 1,
+                            l.name,
+                            crate::ty::display::render_ty_kind(db, l.ty.kind(db)),
+                            r.name,
+                            crate::ty::display::render_ty_kind(db, r.ty.kind(db)),
+                        ),
+                    ));
+                }
+            }
+            Ok(scope.rename_to(db, &pipe.name))
         }
     }
 }

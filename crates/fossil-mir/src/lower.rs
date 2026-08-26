@@ -655,6 +655,20 @@ fn lower_source_chain<'db>(
                 // pipeline's own name is what qualifies its columns.
                 chain.relation = pipe.name.clone();
             }
+            HirSourceOp::Distinct => ops.push(Op::Distinct { input: chain.last }),
+            // Like a join, a union builds a relation neither side was — and
+            // unlike a join it does not keep the two sides addressable, because
+            // a row of the result came from one of them and nothing says which.
+            // The pipeline's name is what both sides are re-qualified under.
+            HirSourceOp::Union { right } => {
+                let right_chain = lower_source_chain(db, dm, file, right, span, ops, depth + 1)?;
+                ops.push(Op::Union {
+                    left: chain.last,
+                    right: right_chain.last,
+                    relation: pipe.name.clone(),
+                });
+                chain.relation = pipe.name.clone();
+            }
         }
         chain.last = ops.len() - 1;
     }

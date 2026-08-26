@@ -16,7 +16,7 @@
 //!
 //! # What this file does NOT prove
 //!
-//! - **That the ten unlowered verbs should stay unlowered.** The gap is
+//! - **That the eight unlowered verbs should stay unlowered.** The gap is
 //!   deliberate — the catalogue already carries their signatures, so the day one
 //!   gains a lowering its arguments are checked by the code that checks
 //!   `str.trim`'s. This pins the message, not the gap.
@@ -24,7 +24,7 @@
 //!   this file's: the `match` in `lower_source_stage` is exhaustive and has no
 //!   wildcard, so a new variant fails to build. A test cannot assert a
 //!   compile error, and a test that tried would be asserting its own mock.
-//! - **That the lowered three do the right thing.** `source_pipeline_row.rs`
+//! - **That the lowered verbs do the right thing.** `source_pipeline_row.rs`
 //!   owns the row algebra; this owns the refusals.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
@@ -103,12 +103,12 @@ fn a_catalogued_verb_with_no_lowering_says_which_of_the_two_things_is_true() {
 #[test]
 fn the_message_lists_the_implemented_verbs_from_the_registry() {
     let m = one_about("derived := pedidos.sort(pedidos.id)", "Implemented today");
-    // Alphabetical because `verb_names` sorts, and all three because the filter
-    // is over the table rather than over a literal. If someone implements
-    // `sort` and forgets the message, this line moves on its own — which is the
-    // whole reason the list is derived.
+    // Alphabetical because `verb_names` sorts, and all five because the filter
+    // is over the table rather than over a literal. It read `join`, `select`,
+    // `where` until `distinct` and `union` gained lowerings and moved this line
+    // on its own — which is the whole reason the list is derived.
     assert!(
-        m.contains("Implemented today: `join`, `select`, `where`"),
+        m.contains("Implemented today: `distinct`, `join`, `select`, `union`, `where`"),
         "the list must come from the registry, not from a format string: {m}"
     );
 }

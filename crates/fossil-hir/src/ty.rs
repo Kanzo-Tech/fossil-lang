@@ -166,7 +166,9 @@ pub struct Rows<'db> {
 /// [`TyKind`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash, salsa::Update)]
 pub struct NamedRow<'db> {
-    /// The binding a body addresses these columns by — `User`, never `Adults`.
+    /// The binding a body addresses these columns by — `User` and not the
+    /// `Adults` that filtered it. A `union` is the exception and it is the only
+    /// one: its result is neither side, so it answers to the pipeline's name.
     pub binding: SmolStr,
     /// The row itself, or `None` when the source declares no schema.
     pub row: Option<Ty<'db>>,
@@ -255,11 +257,11 @@ impl<'db> Rows<'db> {
         self
     }
 
-    /// `Node as Other` — the right side of a self-join under its second name.
+    /// A whole scope under ONE name — `Node as Other`, the right side of a
+    /// self-join, and the result of a `union`, which is neither of its sides.
     ///
-    /// The whole right scope collapses to one row, because the alias is one
-    /// name: joining a multi-binding relation under an alias makes its columns
-    /// reachable through the alias and through nothing else.
+    /// The scope collapses to one row, because the name is one name: its
+    /// columns become reachable through that name and through nothing else.
     pub(crate) fn rename_to(self, db: &'db dyn salsa::Database, alias: &SmolStr) -> Self {
         let row = self.flat(db);
         Self {

@@ -113,7 +113,8 @@ pub struct HirSourcePipe {
     pub span: Span,
 }
 
-/// The three verbs of the first version.
+/// The relation verbs that have a lowering. `lowered_verbs` derives the list
+/// from this enum's constructors; the catalogue declares more.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::Update)]
 pub enum HirSourceOp {
     /// `where(User.age >= 18)` — keeps the rows the predicate holds for. The row
@@ -143,6 +144,18 @@ pub enum HirSourceOp {
         alias: Option<SmolStr>,
         on: HirExpr,
     },
+    /// `distinct()` — keep one of each identical row. It takes nothing: a
+    /// `distinct(on = …)` is `DISTINCT ON`, which picks an arbitrary row per
+    /// group until `sort` exists to order them, and an arbitrary pick is a
+    /// program whose corpus differs between two runs.
+    Distinct,
+    /// `union(Contractor)` — every row of both sides, duplicates kept.
+    ///
+    /// The right side is a BINDING, like a join's, and it is the only verb
+    /// whose result answers to NEITHER side's name: the two rows become one
+    /// row, addressed by the pipeline. There is no `alias` field, because
+    /// `X as Y` names a side that does not survive the verb.
+    Union { right: SmolStr },
 }
 
 /// One column a [`HirSourceOp::Select`] keeps, under the binding that owns it.
@@ -1022,10 +1035,6 @@ fn member_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
     }
 }
 
-/// One stage of a source pipeline — `where(...)`, `select(...)` or `join(...)`.
-///
-/// `verb` is the member the call names; `stage` is the call node, which is where
-/// the `ARG_LIST` hangs.
 /// The arguments of one stage, matched to the parameters the row declares.
 ///
 /// Indexed from the parameter AFTER the receiver: every relation row's
@@ -1245,7 +1254,14 @@ fn describe_position(param: &ParamSpec) -> String {
 }
 
 /// Every position of a row said in words, for the too-many-arguments message.
+///
+/// A row with no parameter after the receiver says so: `distinct` is the first
+/// verb to reach a user with an empty list, and the sentence read «takes , and
+/// this call gives more».
 fn describe_arity(params: &[ParamSpec]) -> String {
+    if params.is_empty() {
+        return "no arguments".to_string();
+    }
     let each: Vec<String> = params.iter().map(describe_position).collect();
     each.join(" and ")
 }
@@ -1289,7 +1305,7 @@ fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
     format!("{}({})", row.member, args.join(", "))
 }
 
-/// One stage of a source pipeline — `where(...)`, `select(...)` or `join(...)`.
+/// One stage of a source pipeline — `where(...)`, `distinct()`, `union(...)`.
 ///
 /// `verb` is the member the call names; `stage` is the call node, which is where
 /// the `ARG_LIST` hangs.
@@ -1306,9 +1322,8 @@ fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
 /// Dispatching on the TEXT was the cause. A fourteenth [`PlanOp`] compiled
 /// clean, and the arms held what the rows failed to declare. Now the row is
 /// looked up, [`bind_stage_args`] fills its declared parameters, and what is
-/// left below is CONSTRUCTION: three arms of three lines, exhaustive over
-/// `PlanOp`, with the ten unlowered verbs named rather than swept into a
-/// wildcard. Adding a variant is a compile error here and nowhere else.
+/// left below is CONSTRUCTION, exhaustive over `PlanOp`, with the unlowered
+/// verbs named rather than swept into a wildcard. Adding a variant is a compile error here and nowhere else.
 fn lower_source_stage(
     db: &dyn fossil_base::Db,
     verb: &SmolStr,
@@ -1348,6 +1363,22 @@ fn lower_source_stage(
             let on = bound.value(db, 1, types)?;
             Some(HirSourceOp::Join { right, alias, on })
         }
+        PlanOp::Distinct => Some(HirSourceOp::Distinct),
+        PlanOp::Union => {
+            let (right, alias) = bound.binding(db, 0, pipe)?;
+            if let Some(alias) = alias {
+                diagnose(
+                    db,
+                    stage,
+                    format!(
+                        "`union` in `{pipe}` gives its result the one name `{pipe}`, so the \
+                         alias `{alias}` would name a row the verb does not produce."
+                    ),
+                );
+                return None;
+            }
+            Some(HirSourceOp::Union { right })
+        }
         // Catalogued, and `fossil-mir` has no lowering for them. Listed by name
         // on purpose: the day one is implemented it moves up one group, and
         // until then a user is told which of the two things is true about the
@@ -1356,9 +1387,7 @@ fn lower_source_stage(
         | PlanOp::Flatten
         | PlanOp::Take
         | PlanOp::Drop
-        | PlanOp::Distinct
         | PlanOp::Sort
-        | PlanOp::Union
         | PlanOp::GroupBy
         | PlanOp::Aggregate
         | PlanOp::Count => {
@@ -1401,6 +1430,8 @@ fn lowered_verbs() -> String {
             crate::stdlib::PlanOp::Where
                 | crate::stdlib::PlanOp::Select
                 | crate::stdlib::PlanOp::Join
+                | crate::stdlib::PlanOp::Distinct
+                | crate::stdlib::PlanOp::Union
         )
     })
 }

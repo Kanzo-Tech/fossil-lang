@@ -9,10 +9,10 @@
 //! This module is that walk, and it is the only place that turns a relational
 //! operator into a [`DataFrame`].
 //!
-//! Three operators are executable here — [`Op::Filter`], [`Op::Project`] and
-//! [`Op::Join`] (`Inner` only). The rest of the eleven stay unreachable, and
-//! reaching one is an error that names it rather than a plan that quietly
-//! drops it.
+//! Five operators are executable here — [`Op::Filter`], [`Op::Project`],
+//! [`Op::Distinct`], [`Op::Union`] and [`Op::Join`] (`Inner` only). The rest
+//! stay unreachable, and reaching one is an error that names it rather than a
+//! plan that quietly drops it.
 
 use std::collections::HashMap;
 
@@ -113,9 +113,26 @@ async fn build(
             on,
             *kind,
         ),
+        // `distinct()`: whole rows, and nothing to say about which one survives
+        // because they are identical. `DISTINCT ON` is refused one layer up —
+        // see `Op::Distinct`.
+        Op::Distinct { input: i } => input(*i)?.distinct(),
+        // `union(Contractor)`: `UNION ALL`, then the whole thing qualified under
+        // the relation it answers to.
+        //
+        // DataFusion pairs the two sides BY POSITION and hands back a schema
+        // whose fields carry NO qualifier at all — so the re-qualification has
+        // to come after, and doing it to each side first would leave the result
+        // unqualified anyway. That is why `Op::Union` names the relation instead
+        // of borrowing the left side's: there is nothing to borrow.
+        Op::Union {
+            left: l,
+            right: r,
+            relation,
+        } => qualify(input(*l)?.union(input(*r)?)?, relation),
         other => Err(DataFusionError::Plan(format!(
             "`{}` is defined in the operator algebra and this engine does not execute it \
-             (it executes `Filter`, `Project` and `Join`/`Inner`)",
+             (it executes `Filter`, `Project`, `Distinct`, `Union` and `Join`/`Inner`)",
             op_name(other)
         ))),
     }
@@ -370,7 +387,7 @@ fn inputs(op: &Op<'_>) -> Vec<usize> {
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => vec![*input],
         Op::Join { left, right, .. } => vec![left.input, right.input],
-        Op::Union { left, right } => vec![*left, *right],
+        Op::Union { left, right, .. } => vec![*left, *right],
     }
 }
 
@@ -409,5 +426,360 @@ fn expr_name(e: &Expr<'_>) -> &'static str {
         Expr::BinOp { .. } => "a binary operator that is not `==`",
         Expr::Ternary { .. } => "a conditional",
         Expr::Assert { .. } => "an assertion",
+    }
+}
+
+// ───────────────────────────────────────────────── the join key, asserted here
+
+/// [`join_equalities`] and [`conjuncts`], tested directly.
+///
+/// Both are private, so `tests/pipeline.rs` can only reach them through the rows
+/// that come out, and until this module existed nothing in `src/plan.rs` was
+/// tested at all. The case every test below is built on is the one `8184c1f`
+/// measured, and it is the case **no count can see**:
+/// `apps/docs/programs/compound-key` joins on two columns, and dropping the
+/// `tenant` conjunct takes the join from four rows to seven while the seven mint
+/// the same four subjects — so the vertex count, the property list and the
+/// mapping census are all equal across the break. The predicate rendered into
+/// that program's `expected/compiled.txt` was the only committed evidence that a
+/// compound key is compound. It is not the only one now:
+/// [`tests::a_compound_key_is_four_rows_and_one_conjunct_short_is_seven`] is the
+/// number, and [`tests::the_seven_rows_mint_the_same_four_subjects`] is why the
+/// number had to be asserted somewhere the counts are not.
+///
+/// The rows are read from that program's own CSVs rather than copied into a
+/// fixture here. A transcribed fixture agrees with the artefact right up until
+/// one of the two moves.
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use datafusion::arrow::array::{Array, StringArray};
+    use datafusion::arrow::record_batch::RecordBatch;
+    use datafusion::prelude::SessionContext;
+    use fossil_base::test_support::NativeSystem;
+    use fossil_base::{FossilDb, System};
+    use fossil_graph_schema::Primitive;
+    use fossil_hir::ty::{Record, RecordField};
+    use fossil_hir::{Ty, TyKind};
+    use fossil_mir::SourceFormat;
+    use smol_str::SmolStr;
+
+    use super::{
+        BinOp, Expr, JoinKind, JoinSide, Op, SourceAnchor, conjuncts, join_equalities,
+        plan_relation,
+    };
+
+    fn db() -> FossilDb {
+        let system: Arc<dyn System> = Arc::new(NativeSystem::default());
+        FossilDb::new(system)
+    }
+
+    /// A `Record` row over `names`, all `String`. Only `fossil_mir::schema_of`
+    /// reads it — the backend takes its columns from the file — but a `Source`
+    /// is not well-formed without one.
+    fn row<'db>(db: &'db dyn fossil_base::Db, names: &[&str]) -> Ty<'db> {
+        let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+        let fields: Vec<RecordField<'db>> = names
+            .iter()
+            .map(|n| RecordField {
+                name: SmolStr::from(*n),
+                ty: string_ty,
+            })
+            .collect();
+        Ty::new(db, TyKind::Record(Record::new(db, fields)))
+    }
+
+    fn source<'db>(
+        db: &'db dyn fossil_base::Db,
+        uri: &str,
+        binding: &str,
+        cols: &[&str],
+    ) -> Op<'db> {
+        Op::Source {
+            uri: SmolStr::from(uri),
+            format: SourceFormat::Csv,
+            row_type: row(db, cols),
+            binding: SmolStr::from(binding),
+        }
+    }
+
+    fn col(source: &str, column: &str) -> Expr<'static> {
+        Expr::ColRef {
+            source: SmolStr::from(source),
+            column: SmolStr::from(column),
+        }
+    }
+
+    fn binop<'db>(
+        db: &'db dyn fossil_base::Db,
+        op: BinOp,
+        lhs: Expr<'db>,
+        rhs: Expr<'db>,
+    ) -> Expr<'db> {
+        Expr::BinOp {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
+        }
+    }
+
+    fn eq<'db>(db: &'db dyn fossil_base::Db, lhs: Expr<'db>, rhs: Expr<'db>) -> Expr<'db> {
+        binop(db, BinOp::Eq, lhs, rhs)
+    }
+
+    fn and<'db>(db: &'db dyn fossil_base::Db, lhs: Expr<'db>, rhs: Expr<'db>) -> Expr<'db> {
+        binop(db, BinOp::And, lhs, rhs)
+    }
+
+    fn side(input: usize, relation: &str) -> JoinSide {
+        JoinSide {
+            input,
+            relation: SmolStr::from(relation),
+            alias: None,
+        }
+    }
+
+    /// `LineRow.order_id == OrderRow.id` — the conjunct a single-column join
+    /// would have, and the one the break keeps.
+    fn order_key(db: &dyn fossil_base::Db) -> Expr<'_> {
+        eq(db, col("LineRow", "order_id"), col("OrderRow", "id"))
+    }
+
+    /// `LineRow.tenant == OrderRow.tenant` — the conjunct the break drops, and
+    /// the reason `compound-key` exists.
+    fn tenant_key(db: &dyn fossil_base::Db) -> Expr<'_> {
+        eq(db, col("LineRow", "tenant"), col("OrderRow", "tenant"))
+    }
+
+    /// The whole condition `compound-key.fossil` writes.
+    fn compound_key(db: &dyn fossil_base::Db) -> Expr<'_> {
+        and(db, order_key(db), tenant_key(db))
+    }
+
+    /// The conformance program's own directory. `data/lines.csv` resolves
+    /// against it exactly as the program's own run resolves it, which is what
+    /// makes these the artefact's rows and not a copy of them.
+    fn compound_key_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/docs/programs/compound-key")
+    }
+
+    /// `LineRow.join(OrderRow, on = …)` over that program's two CSVs, executed.
+    async fn joined(db: &FossilDb, on: Expr<'_>) -> Vec<RecordBatch> {
+        let ops = vec![
+            source(
+                db,
+                "data/lines.csv",
+                "LineRow",
+                &["tenant", "id", "order_id", "quantity"],
+            ),
+            source(
+                db,
+                "data/orders.csv",
+                "OrderRow",
+                &["tenant", "id", "placed_on"],
+            ),
+            Op::Join {
+                left: side(0, "LineRow"),
+                right: side(1, "OrderRow"),
+                on,
+                kind: JoinKind::Inner,
+            },
+        ];
+        let ctx = SessionContext::new();
+        let dir = compound_key_dir();
+        plan_relation(&ctx, &ops, 2, SourceAnchor::beside(&dir))
+            .await
+            .expect("the join plans")
+            .collect()
+            .await
+            .expect("the join runs")
+    }
+
+    fn total_rows(batches: &[RecordBatch]) -> usize {
+        batches.iter().map(RecordBatch::num_rows).sum()
+    }
+
+    fn strings(batch: &RecordBatch, i: usize) -> Vec<String> {
+        let a = batch
+            .column(i)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("a string column");
+        (0..a.len()).map(|r| a.value(r).to_string()).collect()
+    }
+
+    /// The subjects the joined rows mint, deduplicated —
+    /// `"https://shop.example/{LineRow.tenant}/line/{LineRow.id}"`, the template
+    /// `compound-key.fossil` writes. Columns 0 and 1 are the left side's
+    /// `tenant` and `id`: a join composes `fila(izq) ++ fila(der)`.
+    fn subjects(batches: &[RecordBatch]) -> Vec<String> {
+        let mut out: Vec<String> = batches
+            .iter()
+            .flat_map(|b| {
+                strings(b, 0)
+                    .into_iter()
+                    .zip(strings(b, 1))
+                    .map(|(tenant, line)| format!("https://shop.example/{tenant}/line/{line}"))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// `and` is the only structure a condition is taken apart by, and it is
+    /// taken apart whole: `(a and b) and c` is three conjuncts, not two.
+    #[test]
+    fn a_conjunction_is_taken_apart_and_a_leaf_is_not() {
+        let db = db();
+        assert_eq!(
+            conjuncts(&order_key(&db)).len(),
+            1,
+            "one equality is one conjunct"
+        );
+        assert_eq!(
+            conjuncts(&compound_key(&db)).len(),
+            2,
+            "`a and b` is its two conjuncts, never the `and` itself"
+        );
+        let three = and(
+            &db,
+            compound_key(&db),
+            eq(&db, col("LineRow", "quantity"), col("OrderRow", "placed_on")),
+        );
+        assert_eq!(
+            conjuncts(&three).len(),
+            3,
+            "the split is recursive, however the parser associated the `and`s"
+        );
+        let disjunction = binop(&db, BinOp::Or, order_key(&db), tenant_key(&db));
+        assert_eq!(
+            conjuncts(&disjunction).len(),
+            1,
+            "`or` is a leaf here — it is refused by join_equalities, not split by this"
+        );
+    }
+
+    /// The compound key reaches the plan as TWO equalities, each naming the
+    /// columns it came from.
+    ///
+    /// This is the assertion that goes red the moment a conjunct stops reaching
+    /// the plan, and it goes red by the number: one rendered equality where the
+    /// program wrote two.
+    #[test]
+    fn a_compound_key_reaches_the_plan_as_two_equalities() {
+        let db = db();
+        let equalities = join_equalities(
+            &compound_key(&db),
+            &side(0, "LineRow"),
+            &side(1, "OrderRow"),
+        )
+        .expect("a conjunction of column equalities is the admitted form");
+        let rendered: Vec<String> = equalities.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            rendered,
+            [
+                "LineRow.order_id = OrderRow.id",
+                "LineRow.tenant = OrderRow.tenant"
+            ],
+            "both conjuncts are planned, in written order, qualified by the side each reads"
+        );
+    }
+
+    /// A conjunct that is not an equality between two column references is
+    /// refused, and the message says which form arrived.
+    #[test]
+    fn a_conjunct_that_is_not_a_column_equality_is_refused() {
+        let db = db();
+        let theta = binop(&db, BinOp::Lt, col("LineRow", "quantity"), Expr::LitInt(10));
+        let not_an_equality = and(&db, order_key(&db), theta);
+        let err = join_equalities(&not_an_equality, &side(0, "LineRow"), &side(1, "OrderRow"))
+            .expect_err("a theta join is not an equijoin");
+        assert!(
+            err.to_string().contains("a binary operator that is not `==`"),
+            "the refusal names the form that arrived: {err}"
+        );
+
+        let against_a_literal = eq(&db, col("LineRow", "tenant"), Expr::LitString("north".into()));
+        let err = join_equalities(&against_a_literal, &side(0, "LineRow"), &side(1, "OrderRow"))
+            .expect_err("a constant comparison is a filter, not a key");
+        assert!(
+            err.to_string().contains("a string literal"),
+            "the refusal names the side that is not a column: {err}"
+        );
+    }
+
+    /// A reference qualified by a relation that is neither input is refused —
+    /// the check the docblock says had never once fired, because until
+    /// `CODEGEN-LOWERING-01` every `ColRef` reaching here carried an empty
+    /// source and an empty source is equal to neither name.
+    #[test]
+    fn a_conjunct_qualified_by_neither_input_is_refused() {
+        let db = db();
+        let elsewhere = eq(&db, col("Invoice", "tenant"), col("OrderRow", "tenant"));
+        let err = join_equalities(&elsewhere, &side(0, "LineRow"), &side(1, "OrderRow"))
+            .expect_err("`Invoice` is not an input of this join");
+        let message = err.to_string();
+        assert!(
+            message.contains("`Invoice`") && message.contains("`LineRow`, `OrderRow`"),
+            "the refusal names the stranger and both inputs: {message}"
+        );
+    }
+
+    /// **The measurement `8184c1f` made, executed.** Four rows on the key the
+    /// program wrote; seven on the key one conjunct short.
+    ///
+    /// `data/lines.csv` holds four lines over two tenants and `data/orders.csv`
+    /// three orders over the same two, and order number `1001` exists in both —
+    /// so `order_id == id` alone pairs every `north` line with the `south` order
+    /// and back. That is the whole reason `compound-key` is in the conformance
+    /// set, and this is the number that says so.
+    #[tokio::test]
+    async fn a_compound_key_is_four_rows_and_one_conjunct_short_is_seven() {
+        let db = db();
+        assert_eq!(
+            total_rows(&joined(&db, compound_key(&db)).await),
+            4,
+            "on = LineRow.order_id == OrderRow.id and LineRow.tenant == OrderRow.tenant"
+        );
+        assert_eq!(
+            total_rows(&joined(&db, order_key(&db)).await),
+            7,
+            "the same join with the `tenant` conjunct gone — and nothing downstream notices"
+        );
+    }
+
+    /// **Why the row count had to be asserted here.** The seven rows mint the
+    /// same four subjects as the four, so every number the conformance harness
+    /// keeps — the vertex count, the property list, the mapping census — is
+    /// equal across the break.
+    ///
+    /// This one passes on both sides of the defect on purpose. It is the
+    /// falsifiable form of the claim the artefact, `programs.rs` and
+    /// `fossil-hir`'s `display` docblock all repeat in prose, and it is what
+    /// makes the test above a guard rather than a duplicate of the census.
+    #[tokio::test]
+    async fn the_seven_rows_mint_the_same_four_subjects() {
+        let db = db();
+        let whole = subjects(&joined(&db, compound_key(&db)).await);
+        let broken = subjects(&joined(&db, order_key(&db)).await);
+        assert_eq!(
+            whole,
+            [
+                "https://shop.example/north/line/L-1",
+                "https://shop.example/north/line/L-2",
+                "https://shop.example/north/line/L-3",
+                "https://shop.example/south/line/L-1",
+            ],
+            "the four lines the program writes"
+        );
+        assert_eq!(
+            broken, whole,
+            "seven rows, four subjects — the same four, so no count moves"
+        );
     }
 }

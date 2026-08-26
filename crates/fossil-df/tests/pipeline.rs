@@ -1,6 +1,7 @@
-//! The three relational operators the source pipeline needs, executed.
+//! The relational operators the source pipeline needs, executed.
 //!
-//! `Op::Filter`, `Op::Project` and `Op::Join` have been defined since the
+//! `Op::Filter`, `Op::Project`, `Op::Join`, `Op::Distinct` and `Op::Union` had
+//! been defined since the
 //! algebra was completed and reached by nothing: the operator algebra was
 //! defined WHOLE and lowered in part on purpose, and the source pipeline is what starts paying that debt back.
 //! The lowering that will emit them is F5; this file is the other half —
@@ -654,20 +655,129 @@ async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
     );
 }
 
-/// An operator that is defined and not executed fails as itself. Seven of the
-/// eleven are in this state; `Union` stands for them.
+/// An operator that is defined and not executed fails as itself. `GroupBy`
+/// stands for the rest: it is the next verb of the six and it is not here yet,
+/// which is what makes it the honest stand-in rather than a retired one.
 #[tokio::test]
 async fn an_unexecuted_operator_fails_as_itself() {
     let db = db();
     let ops = vec![
         source(&db, "users.csv", "users", &["id", "name"]),
-        source(&db, "users.csv", "again", &["id", "name"]),
-        Op::Union { left: 0, right: 1 },
+        Op::GroupBy {
+            input: 0,
+            keys: vec![SmolStr::from("name")],
+        },
     ];
     let ctx = SessionContext::new();
-    let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+    let err = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
         .await
-        .expect_err("Union is defined and unreached")
+        .expect_err("GroupBy is defined and unreached")
         .to_string();
-    assert!(err.contains("Union"), "the error names the operator: {err}");
+    assert!(
+        err.contains("GroupBy"),
+        "the error names the operator: {err}"
+    );
+}
+
+/// `distinct()` keeps one of each identical row, and it keeps every column: the
+/// row type is its input's, which is what `schema_of` says and what makes it
+/// the cheap verb beside `select`.
+///
+/// `users.csv` has three distinct rows and `people_extra.csv` shares one of
+/// them, so the union is six rows and the distinct over it is five. Asserting
+/// on the union alone would not tell a `distinct` that works from one that is
+/// a no-op — both give six.
+#[tokio::test]
+async fn distinct_over_a_union_drops_the_shared_row() {
+    let db = db();
+    let ops = vec![
+        source(&db, "users.csv", "users", &["id", "name"]),
+        source(&db, "people_extra.csv", "extra", &["id", "name"]),
+        Op::Union {
+            left: 0,
+            right: 1,
+            relation: SmolStr::from("everyone"),
+        },
+        Op::Distinct { input: 2 },
+    ];
+    let ctx = SessionContext::new();
+
+    let both = collect_names(&ops, &ctx, 2).await;
+    assert_eq!(
+        both,
+        ["Alice", "Bob", "Carol", "Carol", "Dave", "Eve"],
+        "`union` is UNION ALL: Carol is in both files and appears twice"
+    );
+
+    let deduped = collect_names(&ops, &ctx, 3).await;
+    assert_eq!(
+        deduped,
+        ["Alice", "Bob", "Carol", "Dave", "Eve"],
+        "`distinct` keeps one of the two identical Carol rows"
+    );
+}
+
+/// The union's columns answer to the relation the op names, and to NEITHER
+/// side's — which is the whole reason `Op::Union` carries one.
+///
+/// The projection is written against `everyone`, a name no `Op::Source` below
+/// it uses. Before the field existed the plan kept the left side's qualifier
+/// and this select resolved against nothing.
+#[tokio::test]
+async fn a_union_is_addressed_by_its_own_relation() {
+    let db = db();
+    let ops = vec![
+        source(&db, "users.csv", "users", &["id", "name"]),
+        source(&db, "people_extra.csv", "extra", &["id", "name"]),
+        Op::Union {
+            left: 0,
+            right: 1,
+            relation: SmolStr::from("everyone"),
+        },
+        Op::Project {
+            input: 2,
+            cols: vec![ProjectedColumn {
+                source: SmolStr::from("everyone"),
+                column: SmolStr::from("name"),
+            }],
+        },
+    ];
+    let ctx = SessionContext::new();
+    assert_eq!(
+        collect_names(&ops, &ctx, 3).await,
+        ["Alice", "Bob", "Carol", "Carol", "Dave", "Eve"],
+        "`everyone.name` resolves against the union, not against `users`"
+    );
+
+    let err = fossil_df::plan_relation(&ctx, &ops[..3], 2, anchor())
+        .await
+        .expect("the union plans")
+        .select(vec![datafusion::prelude::col(
+            datafusion::common::Column::new(
+                Some(datafusion::common::TableReference::bare("users")),
+                "name",
+            ),
+        )])
+        .expect_err("the left side's name did not survive the union")
+        .to_string();
+    assert!(
+        err.contains("users.name"),
+        "the refusal names the column nobody can reach: {err}"
+    );
+}
+
+/// The names a relation produces, sorted — the two verbs above are set
+/// operations and neither promises an order.
+async fn collect_names(ops: &[Op<'_>], ctx: &SessionContext, index: usize) -> Vec<String> {
+    let df = fossil_df::plan_relation(ctx, ops, index, anchor())
+        .await
+        .expect("the relation plans");
+    let batches = df.collect().await.expect("the relation runs");
+    let name_at = |b: &RecordBatch| {
+        let i = b.schema().fields().len() - 1;
+        strings(b, i)
+    };
+    let mut names: Vec<String> = batches.iter().flat_map(name_at).collect();
+    names.sort();
+    names
 }

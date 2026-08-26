@@ -1,5 +1,6 @@
-//! The row algebra of a source pipeline: what `where`, `select`
-//! and `join` do to the type of a row.
+//! The row algebra of a source pipeline: what `where`, `select`, `join`,
+//! `distinct` and `union` do to the type of a row, and to the NAMES it is
+//! addressed by.
 //!
 //! Only this crate can test it, because it needs a real descriptor behind the
 //! base binding — a pipeline over a source that declares no columns has no row
@@ -57,32 +58,45 @@ fn two_sources() -> Vec<(&'static str, &'static [(&'static str, Primitive)])> {
 }
 
 /// The whole program: the shape binding, the two sources, the pipeline under
-/// test, and a mapping that reads it.
+/// test, and a mapping that reads it through `row.column`.
 ///
 /// The identity is a required assignment on the body's first line, and naming a
 /// shape document is mandatory — a program missing either does not reach the
 /// row algebra at all, so neither is optional scaffolding here.
-fn program(pipe: &str) -> String {
+///
+/// The body's reference is a PARAMETER because a `union`'s result answers to
+/// the pipeline's name and to neither side's, so `pedidos.id` is not a
+/// reference every pipeline here can be read through.
+fn program(pipe: &str, row: &str, column: &str) -> String {
     format!(
         "type {{ Persona }} := io.shex(\"v.shex\")\n\
          pedidos := io.csv(\"o.csv\")\n\
          personas := io.csv(\"p.csv\")\n\
          {pipe}\n\
          Venta : Persona from ventas\n    \
-         @subject = \"https://example.org/v/{{pedidos.id}}\"\n    \
-         name = pedidos.id\n"
+         @subject = \"https://example.org/v/{{{row}.{column}}}\"\n    \
+         name = {row}.{column}\n"
     )
+}
+
+fn db_reading(
+    pipe: &str,
+    row: &str,
+    column: &str,
+    descriptors: Vec<(&'static str, &'static [(&'static str, Primitive)])>,
+) -> (FossilDb, SourceFile) {
+    let (db, file) = db_with_document(&program(pipe, row, column), "v.shex", DOCUMENT);
+    for (uri, columns) in descriptors {
+        register_inferred(&db, uri, columns);
+    }
+    (db, file)
 }
 
 fn db_with(
     pipe: &str,
     descriptors: Vec<(&'static str, &'static [(&'static str, Primitive)])>,
 ) -> (FossilDb, SourceFile) {
-    let (db, file) = db_with_document(&program(pipe), "v.shex", DOCUMENT);
-    for (uri, columns) in descriptors {
-        register_inferred(&db, uri, columns);
-    }
-    (db, file)
+    db_reading(pipe, "pedidos", "id", descriptors)
 }
 
 /// Column names of the row the mapping sees, or the diagnostics that stopped it.
@@ -239,5 +253,111 @@ fn two_sources_sharing_a_column_name_both_keep_it() {
     assert_eq!(
         row_of(&db, file).expect("two sources sharing a column name now join"),
         ["id", "persona_id", "nombre", "persona_id", "nombre"]
+    );
+}
+
+/// Two sources whose rows agree — what a `union` needs and a `join` does not
+/// care about.
+fn twin_sources() -> Vec<(&'static str, &'static [(&'static str, Primitive)])> {
+    const COLUMNS: &[(&str, Primitive)] =
+        &[("id", Primitive::Integer), ("nombre", Primitive::String)];
+    vec![("o.csv", COLUMNS), ("p.csv", COLUMNS)]
+}
+
+/// A `union` keeps the row and REPLACES the names: its result is neither side,
+/// so it answers to the pipeline and to nothing else.
+///
+/// This is the one place a derived relation introduces a binding its base did
+/// not have. Every other verb carries, restricts or extends the names it was
+/// given, which is why the scope is built by name at all — and why keeping the
+/// left side's would be the ambiguity `select` after a `join` was decided
+/// against on 2026-08-14: `pedidos.nombre` would name rows that came from
+/// `personas`.
+#[test]
+fn a_union_answers_to_the_pipeline_and_to_neither_side() {
+    let (db, file) = db_reading(
+        "ventas := pedidos.union(personas)",
+        "ventas",
+        "nombre",
+        twin_sources(),
+    );
+    assert_eq!(row_of(&db, file).expect("types"), ["id", "nombre"]);
+
+    let (db, file) = db_reading(
+        "ventas := pedidos.union(personas)",
+        "pedidos",
+        "nombre",
+        twin_sources(),
+    );
+    let errs = row_of(&db, file).expect_err("the left side's name did not survive");
+    assert!(
+        errs.iter().any(|m| m.contains("pedidos")),
+        "the diagnostic must name the row that is gone, got {errs:?}"
+    );
+}
+
+/// The sides of a `union` are paired COLUMN BY COLUMN, and the refusal says
+/// which pair disagreed.
+///
+/// `fossil-df` unions by position and hands back a schema with the left side's
+/// names, so a mismatch it accepted would be a corpus whose `nombre` column
+/// holds half integers. The rule is the backend's, said where a user hears it.
+#[test]
+fn a_union_whose_sides_disagree_is_refused() {
+    let (db, file) = db_reading(
+        "ventas := pedidos.union(personas)",
+        "ventas",
+        "id",
+        two_sources(),
+    );
+    let errs = row_of(&db, file).expect_err("three columns against two must refuse");
+    assert!(
+        errs.iter().any(|m| m.contains("`union` in `ventas`")),
+        "got {errs:?}"
+    );
+
+    let (db, file) = db_reading(
+        "ventas := pedidos.union(personas)",
+        "ventas",
+        "id",
+        vec![
+            (
+                "o.csv",
+                &[("id", Primitive::Integer), ("nombre", Primitive::String)],
+            ),
+            (
+                "p.csv",
+                &[("id", Primitive::Integer), ("nombre", Primitive::Integer)],
+            ),
+        ],
+    );
+    let errs = row_of(&db, file).expect_err("a column of a different type must refuse");
+    assert!(
+        errs.iter().any(|m| m.contains("column 2")),
+        "the refusal names the pair that disagreed, got {errs:?}"
+    );
+}
+
+/// `distinct()` keeps rows, not columns — the row it hands on is the one it was
+/// given — and it takes NOTHING.
+///
+/// The column list would be `DISTINCT ON`, whose surviving row is arbitrary
+/// without an `ORDER BY`, and `sort` has no lowering to write one with. The
+/// refusal is the binder's arity check, and `distinct` is the first verb to
+/// reach it with an empty parameter list.
+#[test]
+fn distinct_keeps_the_row_and_takes_no_arguments() {
+    let (db, file) = db_with("ventas := pedidos.distinct()", two_sources());
+    assert_eq!(
+        row_of(&db, file).expect("types"),
+        ["id", "persona_id", "total"]
+    );
+
+    let (db, file) = db_with("ventas := pedidos.distinct(pedidos.id)", two_sources());
+    let errs = row_of(&db, file).expect_err("a column list must refuse");
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("`distinct` in `ventas` takes no arguments")),
+        "the refusal says the verb takes nothing, got {errs:?}"
     );
 }

@@ -204,6 +204,10 @@ pub fn pipe_text(pipe: &HirSourcePipe) -> String {
                 write_expr(&mut out, on);
                 out.push(')');
             }
+            HirSourceOp::Distinct => out.push_str(".distinct()"),
+            HirSourceOp::Union { right } => {
+                let _ = write!(out, ".union({right})");
+            }
         }
     }
     out

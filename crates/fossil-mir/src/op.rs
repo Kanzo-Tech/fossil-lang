@@ -11,10 +11,10 @@
 //! untyped fragment is operationally their algebra.
 //!
 //! `/docs/design/algebra` is the page that argues it. **Completeness of the
-//! IR is not surface coverage**: every operator is DEFINED here, but only
-//! `Source` / `EmitVertex` / `EmitEdge` / `Sink` are lowered from `.fossil`
-//! source; the rest have no surface syntax and are exercised by direct
-//! `MirGraph` construction instead.
+//! IR is not surface coverage**: every operator is DEFINED here, and the ones
+//! a program can reach are the ones a verb spells. `fossil_hir::stdlib::PlanOp`
+//! is the list, and `fossil_hir::lower::lowered_verbs` derives which of them
+//! have arrived; the rest are exercised by direct `MirGraph` construction.
 //!
 //! # Design notes
 //!
@@ -95,8 +95,21 @@ pub enum Op<'db> {
         kind: JoinKind,
     },
 
-    /// `UnionOp(left, right)` — multiset union of two same-schema streams.
-    Union { left: usize, right: usize },
+    /// `UnionOp(left, right, relation)` — multiset union of two same-schema
+    /// streams, under the name the unified row answers to.
+    ///
+    /// `relation` is there for the same reason [`JoinSide::relation`] is: a
+    /// column reference carries the relation it belongs to, and after a union
+    /// neither input's name is that relation. `Staff.union(Contractor)` yields
+    /// rows from both, so addressing them as `Staff.email` would name the row
+    /// by whichever side happened to be written first — the ambiguity the
+    /// qualified `select` was decided against on 2026-08-14. Both sides are
+    /// re-qualified under this name and the body addresses the pipeline.
+    Union {
+        left: usize,
+        right: usize,
+        relation: SmolStr,
+    },
 
     /// `GroupByOp(input, keys)` — group rows by the key columns.
     GroupBy { input: usize, keys: Vec<SmolStr> },
@@ -107,12 +120,15 @@ pub enum Op<'db> {
         aggs: Vec<AggSpec<'db>>,
     },
 
-    /// `DistinctOp(input, by?)` — deduplicate rows, optionally by a subset of
-    /// columns.
-    Distinct {
-        input: usize,
-        by: Option<Vec<SmolStr>>,
-    },
+    /// `DistinctOp(input)` — deduplicate whole rows.
+    ///
+    /// It carried an optional `by: Vec<SmolStr>` for `DISTINCT ON`, which
+    /// nothing ever constructed. `DISTINCT ON` picks one row per group and
+    /// which one is arbitrary without an `ORDER BY`, so the language cannot
+    /// admit it while `sort` has no lowering: a conformance artefact blessed
+    /// byte-for-byte would differ between two runs of the same program. See
+    /// `/docs/design/discarded`.
+    Distinct { input: usize },
 
     /// `EmitVertex(input, type_name, rdf_type?, id, dedup, props)` — project rows
     /// to a typed property-graph VERTEX. The property-graph-canonical model: one
