@@ -21,7 +21,7 @@ graph LR
 
   E -->|17| L
   E -->|1| M
-  M -->|22| L
+  M -->|21| L
   M -->|4| C
   C -->|1| M
   X -->|1| L
@@ -29,7 +29,7 @@ graph LR
   C -->|1| X
 ```
 
-**48 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**47 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -50,10 +50,11 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 
 `fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole
 of the change: neither crate has a fossil dependency of its own, so a leaf changed groups and no
-code moved. It **cost** an edge — 47 before, 48 after, because `fossil-df → fossil-sinks`,
+code moved. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
 `fossil-engine → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
-engine — and it bought the cycle: `fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver`
-are now inside `corpus`, so the return leg went from three edges to one. There are still two cores,
+engine, three that started crossing against two that stopped — and it bought the cycle:
+`fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver` are now inside `corpus`, so the
+return leg went from three edges to one. There are still two cores,
 but the stitch that closes the loop is one function.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
 
