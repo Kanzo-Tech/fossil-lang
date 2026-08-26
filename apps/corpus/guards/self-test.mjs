@@ -59,28 +59,39 @@ function broken(layout, mutate) {
 }
 
 /**
- * Re-cut one orientation's tiles through a SELECT.
+ * Re-cut one orientation's tiles through a SELECT, **in the container the corpus declares.**
  *
  * The edge mutations used to rewrite `by_source.parquet`, the uncut relation, and that file is not
  * published any more: a corpus carries an orientation one way, as tiles. So they read the tiles as
  * one relation and write them back cut on the column the orientation is ordered by — which also
  * means a mutation aimed at ordering or at content no longer moves a row into the wrong tile by
  * accident, and each one still fails the single guard it names.
+ *
+ * The container matters and it took two red mutations to notice: writing `tile{k}.parquet` into a
+ * corpus whose orientation is one `tiles.parquet` leaves BOTH, which is `mixed` — `declared-tiling`
+ * fires, the guard the mutation is aimed at reads the untouched copy, and the break is reported as
+ * somebody else's.
  */
 function recut(dir, orientation, key, { select = "SELECT * FROM m", order } = {}) {
   const tileRows = 4096;
   const into = join(dir, EDGE_DIR, orientation);
   const other = key === "src_dense" ? "dst_dense" : "src_dense";
-  const copies = [...Array(Math.ceil(70_000 / tileRows)).keys()]
-    .map(
-      (k) =>
-        `COPY (SELECT * FROM (${select}) WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
-                ORDER BY ${order ?? `${key}, ${other}`})
-           TO '${lit(join(into, `tile${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
-    )
-    .join("\n");
+  const sorted = `ORDER BY ${order ?? `${key}, ${other}`}`;
+  const rowgroups = readFileSync(join(dir, "graph.graph.yml"), "utf8").includes("container: rowgroups");
+  const copies = rowgroups
+    ? [
+        `COPY (SELECT * FROM (${select}) ${sorted})
+           TO '${lit(join(into, "tiles.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
+      ]
+    : [...Array(Math.ceil(70_000 / tileRows)).keys()].map(
+        (k) =>
+          `COPY (SELECT * FROM (${select}) WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
+                  ${sorted})
+             TO '${lit(join(into, `tile${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
+      );
   execute(
-    `CREATE TEMP TABLE m AS SELECT * FROM read_parquet('${lit(join(into, "*.parquet"))}');\n${copies}`,
+    `CREATE TEMP TABLE m AS SELECT * FROM read_parquet('${lit(join(into, "*.parquet"))}');
+     ${copies.join("\n")}`,
   );
 }
 
@@ -221,6 +232,18 @@ const MUTATIONS = [
     },
   },
   {
+    guard: "published-vectors",
+    what: "the vector table gives the row-group container a tile in the filename",
+    vectors: (table) => {
+      const copy = structuredClone(table);
+      // The break a port makes: carrying the file-per-tile composition into the other container.
+      // It composes cleanly, and the file it names is not there.
+      const row = copy.tile_url.vectors.find((v) => v.container === "rowgroups" && v.tile === "7");
+      row.url = `${row.prefix}tiles7.parquet`;
+      return copy;
+    },
+  },
+  {
     guard: "morton-order",
     what: "two distant vertices swap positions, so the code falls where the id rises",
     layout: "rowgroups",
@@ -334,20 +357,11 @@ const MUTATIONS = [
   {
     guard: "tile-of",
     what: "the `by_target` tiles are cut on `src_dense`, which is the source half again",
-    layout: "rowgroups",
-    mutate(dir) {
-      const tileRows = 4096;
-      const relation = join(dir, EDGE_DIR, "by_target", "*.parquet");
-      const tiles = [...Array(Math.ceil(70_000 / tileRows)).keys()]
-        .map(
-          (k) =>
-            `COPY (SELECT * FROM m WHERE src_dense >= ${k * tileRows} AND src_dense < ${(k + 1) * tileRows}
-                    ORDER BY src_dense, dst_dense)
-               TO '${lit(join(dir, EDGE_DIR, "by_target", `tile${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
-        )
-        .join("\n");
-      execute(`CREATE TEMP TABLE m AS SELECT * FROM read_parquet('${lit(relation)}');\n${tiles}`);
-    },
+    // The one break that is only nameable where a tile has a name: `tile-of` asks the row-group
+    // container for ascending boxes rather than for an ordinal, and a target half cut on the source
+    // column ascends perfectly well.
+    layout: "files",
+    mutate: (dir) => recut(dir, "by_target", "src_dense"),
   },
 ];
 

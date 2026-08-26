@@ -16,6 +16,10 @@
  * against 5.6, and 1.15 MB of footer against 496 kB, at five million vertices. A file boundary is
  * the only thing that stops contiguous tiles from being fetched in one range. Both are readable,
  * so this module classifies rather than judges, and the guard that cares says which it found.
+ *
+ * **What is on disk is one answer and what the manifest declares is another.** A checker can list a
+ * directory; a reader over HTTP cannot, which is why `graph.graph.yml` carries `container` and why
+ * `declared-tiling` compares the two. This module reports both and reconciles neither.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -220,5 +224,13 @@ export function inspect(root) {
     }
   }
 
-  return { root, manifest, types, edges, rel };
+  return {
+    root,
+    manifest,
+    /** What `graph.graph.yml` says the container is. Absent is the file-per-tile one. */
+    container: manifest.index.container === undefined ? "files" : String(manifest.index.container),
+    types,
+    edges,
+    rel,
+  };
 }

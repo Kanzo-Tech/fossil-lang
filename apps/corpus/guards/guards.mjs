@@ -20,7 +20,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { query, scalar } from "./duck.mjs";
 import { fileList, rowGroups } from "./inspect.mjs";
-import { TILE_ROWS, morton2, quantize, shiftFor, tailRows, tileOf, tilesOf } from "./arithmetic.mjs";
+import { TILE_ROWS, morton2, quantize, shiftFor, tailRows, tileOf, tileUrl, tilesOf } from "./arithmetic.mjs";
 
 /**
  * The published borders, read on first use.
@@ -116,6 +116,12 @@ export function checkVectors(vectors) {
   for (const v of vectors.quantize.vectors) {
     const got = quantize(v.v, v.lo, v.hi);
     if (got !== v.q) failures.push(`quantize(${v.v}, ${v.lo}, ${v.hi}) = ${got}, not ${v.q}`);
+  }
+  for (const v of vectors.tile_url.vectors) {
+    const got = tileUrl(v.prefix, v.stem, v.container, v.tile);
+    if (got !== v.url) {
+      failures.push(`tileUrl(${v.prefix}, ${v.stem}, ${v.container}, ${v.tile}) = ${got}, not ${v.url}`);
+    }
   }
   for (const v of vectors.declared_count.vectors) {
     const count = BigInt(v.count);
@@ -242,14 +248,42 @@ export const GUARDS = [
     title: "The manifest declares the tiling that was emitted",
     proves:
       "`chunk_size` is a power of two, so `dense_id >> shift` addresses a tile and no division " +
-      "does; the tile count on disk is the one the row count implies; and an edge type's " +
-      "`src_chunk_size` equals its source type's `chunk_size`, because an edge tile is addressed " +
-      "by the source's tile and a different number there would address nothing.",
+      "does; the tile count on disk is the one the row count implies; the container on disk is " +
+      "the one `graph.graph.yml` declares, for every payload set, because a reader over HTTP " +
+      "cannot list a directory to find out; and an edge type's `src_chunk_size` equals its source " +
+      "type's `chunk_size`, because an edge tile is addressed by the source's tile and a " +
+      "different number there would address nothing.",
     cannotProve:
       "That the declared size is the *right* size. 4,096 is a measured trade-off between requests " +
       "and bytes, not an invariant, and a corpus may declare another power of two and be read.",
     run(corpus) {
       const failures = [];
+      // The manifest against the disk, per payload set. `mixed` is caught below as the violation
+      // it is; this catches the quieter one — a corpus that declares one container and carries the
+      // other, where every guard here passes and every reader composes a URL that 404s.
+      if (corpus.container !== "files" && corpus.container !== "rowgroups") {
+        failures.push(
+          `graph.graph.yml declares container ${corpus.container}; a tile is a file or a row group`,
+        );
+      }
+      for (const [label, layout] of [
+        ...corpus.types.flatMap((t) => [
+          [t.name, t.layout],
+          ...(t.index === null ? [] : [[`${t.name} index`, t.index.layout]]),
+        ]),
+        ...corpus.edges.flatMap((e) => [
+          [`${e.rel} by_source`, e.bySource.layout],
+          [`${e.rel} by_target`, e.byTarget.layout],
+        ]),
+      ]) {
+        if (layout === "mixed") {
+          failures.push(`${label} carries tiles two ways at once, so a reader that globs finds both`);
+        } else if (layout !== "empty" && layout !== corpus.container) {
+          failures.push(
+            `${label} carries its tiles as ${layout} and graph.graph.yml declares ${corpus.container}`,
+          );
+        }
+      }
       for (const type of corpus.types) {
         if (type.shift === null) {
           failures.push(`${type.name} declares a tile of ${type.chunkSize} rows, which no shift addresses`);
@@ -258,9 +292,6 @@ export const GUARDS = [
         const expected = Math.ceil(type.count / Number(type.chunkSize));
         if (type.layout === "files" && type.files.length !== expected) {
           failures.push(`${type.name} has ${type.files.length} tile files where ${expected} are implied`);
-        }
-        if (type.layout === "mixed") {
-          failures.push(`${type.name} carries tiles two ways at once, so a reader that globs finds both`);
         }
       }
       // The same rule on the edge side, where it was not being applied and where it is the only
@@ -438,13 +469,19 @@ export const GUARDS = [
     proves:
       "`dense_id >> shift` is the entire index — no table, no listing, no discovery — so a row in " +
       "the wrong container is a row a reader will never fetch and never miss. Checked in whichever " +
-      "form the corpus uses: against the number in the filename when a tile is a file, against the " +
-      "row-group ordinal when a tile is a row group. An edge is checked against the tile of the " +
-      "endpoint its file is ordered by — the source for `by_source`, the destination for " +
-      "`by_target` — which is what CSR and CSC placement mean.",
+      "form the corpus uses: against the number in the filename when a tile is a file, and against " +
+      "the row-group ordinal when a tile is a row group of a FIXED-STRIDE set — the vertex payload " +
+      "and the identity index, whose tiles are exactly `chunk_size` rows. An adjacency is not " +
+      "fixed-stride, so what is checked there is the property a reader actually needs: the " +
+      "row-group boxes on the key column ascend and do not overlap, so a tile is a contiguous run " +
+      "of them. An edge is checked against the tile of the endpoint its file is ordered by — the " +
+      "source for `by_source`, the destination for `by_target` — which is what CSR and CSC mean.",
     cannotProve:
       "That the shift is applied the same way elsewhere. This asks the corpus a question; the " +
-      "published border vectors are what ask the *reader* one, and they are the next guard.",
+      "published border vectors are what ask the *reader* one, and they are the next guard. And " +
+      "in the row-group container it cannot ask an adjacency for its ordinal: a tile whose " +
+      "vertices have no edges contributes no rows, so it has no row group to be numbered, and " +
+      "there is nothing weaker to check than ascending boxes.",
     run(corpus) {
       const failures = [];
 
@@ -478,6 +515,36 @@ export const GUARDS = [
         }
       };
 
+      /**
+       * The rule an adjacency satisfies in the row-group container, and the ordinal is not it.
+       *
+       * A tile's rows are contiguous when the boxes on the key column ascend and do not overlap,
+       * which is what lets the footer turn a `dense_id` range into a run of row groups. Equal
+       * endpoints are allowed: one vertex's edges can straddle a group boundary.
+       */
+      const checkAscending = (files, column, label, chunkSize) => {
+        for (const [file, groups] of rowGroups(files)) {
+          let previous = null;
+          for (const [id, group] of [...groups].sort((a, b) => a[0] - b[0])) {
+            const stats = group.stats.get(column);
+            if (!stats || stats.min === null) {
+              failures.push(`${label}: row group ${id} of ${file} carries no ${column} statistics`);
+              continue;
+            }
+            const lo = BigInt(stats.min);
+            if (previous !== null && lo < previous) {
+              failures.push(
+                `${label}: row group ${id} starts at ${column} ${lo} and the one before it ends at ${previous}`,
+              );
+            }
+            previous = BigInt(stats.max);
+            if (group.rows > Number(chunkSize)) {
+              failures.push(`${label}: row group ${id} holds ${group.rows} rows against a tile of ${chunkSize}`);
+            }
+          }
+        }
+      };
+
       for (const type of corpus.types) {
         if (type.shift === null || type.files.length === 0) continue;
         if (type.layout === "files") checkFiles(type.files, "dense_id", type.name, type.shift);
@@ -500,7 +567,7 @@ export const GUARDS = [
           const label = `${edge.rel} ${side.name}`;
           if (side.layout === "files") checkFiles(side.tiles, side.column, label, shift);
           else if (side.layout === "rowgroups") {
-            checkRowGroups(side.tiles, side.column, label, shift, chunkSize);
+            checkAscending(side.tiles, side.column, label, chunkSize);
           }
         }
       }
@@ -513,12 +580,14 @@ export const GUARDS = [
     id: "published-vectors",
     title: "The published vectors reproduce",
     proves:
-      "`tile_of`, `morton2`, the quantisation and the count-to-tiles arithmetic answer what " +
-      "`guards/vectors.json` says they answer, at every border where a re-implementation " +
-      "diverges: 2³¹ for a shift taken as signed, 2⁵³ for an id or a count that went through a " +
-      "JavaScript `Number`, bit 31 of a Morton code for an interleave that was not coerced back " +
-      "to unsigned, and a count that exactly fills a tile for the ceiling that writes an empty " +
-      "one after it. The vectors are the deliverable — they are what gets copied.",
+      "`tile_of`, `tile_url`, `morton2`, the quantisation and the count-to-tiles arithmetic answer " +
+      "what `guards/vectors.json` says they answer, at every border where a re-implementation " +
+      "diverges: 2³¹ for a shift taken as signed, 2⁵³ for an id, a count or a tile number that " +
+      "went through a JavaScript `Number`, bit 31 of a Morton code for an interleave that was not " +
+      "coerced back to unsigned, a count that exactly fills a tile for the ceiling that writes an " +
+      "empty one after it, and one path for every tile of a set for a port that carried the " +
+      "file-per-tile composition into the other container. The vectors are the deliverable — they " +
+      "are what gets copied.",
     cannotProve:
       "Anything about the corpus. This is a statement about a function, and it is here so that a " +
       "checker run against somebody else's corpus also checks the checker.",

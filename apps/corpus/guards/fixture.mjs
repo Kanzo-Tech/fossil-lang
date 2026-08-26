@@ -133,9 +133,9 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   // It cannot be a column of the payload, and that is the whole reason it is a
   // second table: one table has one sort, the payload's is Morton because the
   // spatial order IS the id space, and a lookup by identity needs the other one.
-  // Tiled with the same arithmetic so a reader that can seek a chunk can seek
-  // this, and written only for the file-per-tile layout, because the row-group
-  // container is the one this format refuses by name.
+  // Tiled with the same arithmetic in whichever container the corpus declares —
+  // an index tile is a fixed slice of a total order, so a row group of
+  // `chunk_size` rows IS tile `k`, exactly as it is for the payload.
   const indexPrefix = join(vertexPrefix, "index");
   const indexCopy =
     layout === "files"
@@ -146,7 +146,8 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
                     LIMIT ${tileRows} OFFSET ${k * tileRows})
                TO '${lit(join(indexPrefix, `tile${k}.parquet`))}' (FORMAT PARQUET);`,
         ).join("\n")
-      : "";
+      : `COPY (SELECT subject, dense_id FROM v ORDER BY subject)
+           TO '${lit(join(indexPrefix, "tiles.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`;
 
   // Both orientations tiled, each on the column it is ordered by: the out-edges
   // of a vertex are in the `by_source` tile its id names and the in-edges in the
@@ -159,9 +160,24 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   // copy of every vertex". The asymmetry was never argued, and it is the difference between a
   // staging artefact that gets deleted and one that ships: two containers is two places a reader
   // can look, and two readers here looked in different ones.
+  //
+  // In the row-group container an orientation is one file, and its tiles are runs of row groups
+  // rather than one row group each: a vertex tile is exactly `chunk_size` gapless rows, and an
+  // adjacency tile is however many edges those vertices happen to have. A writer cannot make the
+  // ordinal the address here — a vertex with no out-edges contributes no row, and a tile whose
+  // vertices have none contributes no row group to be numbered. So the file is written in key
+  // order at `chunk_size` rows per group and the footer's box on the key column is what locates a
+  // tile, which is the general rule the vertex payload satisfies by being fixed-stride.
   const edgeTileCopy = ["by_source", "by_target"]
     .flatMap((orientation) => {
       const [key, other] = orientation === "by_source" ? ["src_dense", "dst_dense"] : ["dst_dense", "src_dense"];
+      if (layout !== "files") {
+        return [
+          `COPY (SELECT * FROM e ORDER BY ${key}, ${other})
+             TO '${lit(join(edgeDir, orientation, "tiles.parquet"))}'
+             (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
+        ];
+      }
       return Array.from({ length: tiles }, (_, k) => {
         const target = join(edgeDir, orientation, `tile${k}.parquet`);
         return `COPY (SELECT * FROM e WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
@@ -191,6 +207,10 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     [
       "name: graph",
       "prefix: ''",
+      // Which container carries every payload set of this corpus. A reader has no
+      // directory to list, so the one thing it cannot derive is which of the two
+      // it is looking at, and this is where it is told.
+      `container: ${layout}`,
       "vertices:",
       "- vertex/Person.vertex.yml",
       "edges:",
@@ -214,13 +234,10 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  - name: subject",
       "    data_type: string",
       "    is_primary: true",
-      // Declared only when it was written. A corpus without one is legal and
-      // readable — `subject = ?` over every tile returns the same row the index
-      // would have found — so its absence is a cost rather than a gap, and the
-      // reader is what says which of the two it paid.
-      ...(indexCopy === ""
-        ? []
-        : ["index:", "  prefix: index/", "  ordered_by: subject", `  chunk_size: ${tileRows}`]),
+      "index:",
+      "  prefix: index/",
+      "  ordered_by: subject",
+      `  chunk_size: ${tileRows}`,
       "version: gar/v1",
       "",
     ].join("\n"),
