@@ -151,7 +151,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// This read `<dest>/vertex/<Type>.parquet` until 2026-08-06, which is a file
 /// the writer **deletes**: `c416e07` made the layout pass emit one tile per
 /// 4,096-row `dense_id` range and then remove the single staged file
-/// (`crates/fossil-engine/src/lib.rs:502`). Every verb over a freshly written
+/// (`crates/fossil-engine/src/lib.rs:494`). Every verb over a freshly written
 /// corpus failed to find its vertices, and the test below asserted the stale
 /// path, so nothing went red — the same commit left four call sites naming a
 /// path that no longer exists.

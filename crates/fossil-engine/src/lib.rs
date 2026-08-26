@@ -13,12 +13,6 @@
 //!
 //! # What is not a host job, and is still here
 //!
-//! [`census`] is a compiler query behind a native tripwire, reachable only from
-//! `tests/programs.rs`. It reads the CST against the `HirBody` it produced and
-//! belongs in `fossil-hir` or beside the harness; it is here because it started
-//! here. `crates/fossil-engine/src/census.rs` says which, and why the module
-//! doc's own premise is now stale.
-//!
 //! [`run`]'s layout post-pass re-derives `fossil-df`'s on-disk path convention
 //! (`vertex/<T>.parquet`, `vertex/<T>/`, `edge/<s>_<l>_<d>/by_{source,target}`)
 //! in order to find files `fossil-df` wrote and delete them. That is behavioural
@@ -61,19 +55,16 @@ use fossil_df::RunReport;
 use fossil_lineage::{ProviderInfo, SourceRefInfo};
 use smol_str::SmolStr;
 
-pub mod census;
 mod documents;
 mod system;
 
-pub use system::host_system;
+pub use system::{host_system, open_db};
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
     "fossil-engine is native-only: `run` writes a GraphAr tree to a local \
      directory through `fossil_df::run_to_dir`, which is itself wasm-gated"
 );
-
-use system::open_db;
 
 // ===================================================================== providers
 

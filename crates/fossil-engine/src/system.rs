@@ -122,10 +122,11 @@ impl System for EngineSystem {
 /// output contract while claiming to have read one. See
 /// [`crate::documents::register_shape_documents`] for why it has to happen
 /// before any query looks for the document.
-pub(crate) fn open_db(
-    text: String,
-    path: &Path,
-) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
+///
+/// `pub` for one caller outside the crate: `tests/census`, which reports what
+/// the compiler read and would be reporting on a different compiler if it built
+/// a database of its own.
+pub fn open_db(text: String, path: &Path) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
     let system = host_system(path);
     let mut db = fossil_base::FossilDb::new(system);
     let file = fossil_base::SourceFile::new(&db, text, path.to_string_lossy().into_owned());

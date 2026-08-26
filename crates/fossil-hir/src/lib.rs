@@ -52,10 +52,10 @@ pub mod def_map;
 pub mod didyoumean;
 /// The source spelling of a lowered node — the HIR said back in surface syntax.
 ///
-/// Its consumer is the conformance census, which commits a per-program record of
-/// what the compiler UNDERSTOOD. Rendering that from source text would prove
-/// nothing; rendering it from the HIR is the only version of the artefact that
-/// can be wrong.
+/// Its consumer is the conformance census — `fossil-engine`'s `tests/census`,
+/// which commits a per-program record of what the compiler UNDERSTOOD. Rendering
+/// that from source text would prove nothing; rendering it from the HIR is the
+/// only version of the artefact that can be wrong.
 pub mod display;
 pub mod documents;
 /// The identity of a TYPE: one `@subject` template per shape, file-keyed.

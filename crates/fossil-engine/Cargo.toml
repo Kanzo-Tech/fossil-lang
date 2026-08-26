@@ -17,10 +17,6 @@ workspace = true
 # Compiler core + IR.
 fossil-base     = { path = "../fossil-base" }
 fossil-hir      = { path = "../fossil-hir" }
-# The CST, for `census`: the properties an author WROTE are `PROPERTY` nodes,
-# and the count that matters is theirs against the `HirBody`'s. Reading the
-# survivors alone cannot see a property lowering dropped.
-fossil-syntax   = { path = "../fossil-syntax" }
 fossil-mir      = { path = "../fossil-mir" }
 fossil-lineage = { path = "../fossil-lineage" }
 # Descriptors: the input forward-propagation table, and the output side — the
@@ -60,6 +56,12 @@ tracing  = { workspace = true }
 # it as a real dependency; the five test files here that drive `check`/`run` need
 # the descriptor cache filled first, exactly as the CLI does it.
 fossil-introspect = { path = "../fossil-introspect" }
+# The CST, for `tests/census`: the properties an author WROTE are `PROPERTY`
+# nodes, and the count that matters is theirs against the `HirBody`'s. Reading
+# the survivors alone cannot see a property lowering dropped. It was a regular
+# dependency, whose comment said it was here «for `census`» — and census was the
+# only thing in `src/` that named it, so it came down here with the module.
+fossil-syntax = { path = "../fossil-syntax" }
 # The tests read back the Parquet a run wrote — the same «test convenience, not a
 # dependency of the language» `fossil-layout` demoted.
 duckdb = { workspace = true }

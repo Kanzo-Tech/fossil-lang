@@ -53,6 +53,11 @@
 //! crate boundary outwards; 25 crossed it inwards, and are `pub(crate)` on this
 //! side because a test binary has no outside to be public to.
 
+// These items are `pub(crate)` (private module ⇒ unreachable_pub wants pub(crate));
+// that trips the inverse `redundant_pub_crate` nursery lint, silenced here — the
+// same convention the rest of the codebase uses.
+#![allow(clippy::redundant_pub_crate)]
+
 use std::fmt::Write as _;
 use std::path::Path;
 

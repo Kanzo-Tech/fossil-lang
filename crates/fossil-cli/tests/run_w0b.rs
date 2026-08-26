@@ -75,7 +75,7 @@ fn fresh_workdir(test_name: &str) -> PathBuf {
 /// A vertex is **tiles**, not a file. `c416e07` made the layout pass emit one
 /// tile per 4,096-row `dense_id` range under `vertex/<Type>/` and then delete
 /// the single staged `vertex/<Type>.parquet`
-/// (`crates/fossil-engine/src/lib.rs:502`). Three assertions in this file went
+/// (`crates/fossil-engine/src/lib.rs:494`). Three assertions in this file went
 /// on naming the deleted path, so the suite went red the day the emitter landed
 /// and stayed red — one of five failures across the repo from the same commit,
 /// none of which were the emitter being wrong.
