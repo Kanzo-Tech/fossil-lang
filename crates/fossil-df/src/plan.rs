@@ -649,7 +649,11 @@ mod tests {
         let three = and(
             &db,
             compound_key(&db),
-            eq(&db, col("LineRow", "quantity"), col("OrderRow", "placed_on")),
+            eq(
+                &db,
+                col("LineRow", "quantity"),
+                col("OrderRow", "placed_on"),
+            ),
         );
         assert_eq!(
             conjuncts(&three).len(),
@@ -700,13 +704,22 @@ mod tests {
         let err = join_equalities(&not_an_equality, &side(0, "LineRow"), &side(1, "OrderRow"))
             .expect_err("a theta join is not an equijoin");
         assert!(
-            err.to_string().contains("a binary operator that is not `==`"),
+            err.to_string()
+                .contains("a binary operator that is not `==`"),
             "the refusal names the form that arrived: {err}"
         );
 
-        let against_a_literal = eq(&db, col("LineRow", "tenant"), Expr::LitString("north".into()));
-        let err = join_equalities(&against_a_literal, &side(0, "LineRow"), &side(1, "OrderRow"))
-            .expect_err("a constant comparison is a filter, not a key");
+        let against_a_literal = eq(
+            &db,
+            col("LineRow", "tenant"),
+            Expr::LitString("north".into()),
+        );
+        let err = join_equalities(
+            &against_a_literal,
+            &side(0, "LineRow"),
+            &side(1, "OrderRow"),
+        )
+        .expect_err("a constant comparison is a filter, not a key");
         assert!(
             err.to_string().contains("a string literal"),
             "the refusal names the side that is not a column: {err}"
