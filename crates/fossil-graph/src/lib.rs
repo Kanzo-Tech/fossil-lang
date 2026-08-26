@@ -8,20 +8,31 @@
 //! ```text
 //!         fossil-graph (this crate)        ← verbs + schemas
 //!                  ▲
-//!   ┌──────────────┼──────────────┬────────────────┐
-//!   │              │              │                │
-//! fossil-mcp   fossil-cli   @fossil-lang/graph
-//!   (stdio       (HTTP+SSE      (terminal      (in-process TS,
-//!    JSON-RPC      for          for             DuckDB-WASM)
-//!    for AI        keasy        scripting)
-//!    agents)       proxy)
+//!         ┌────────┴────────┐
+//!         │                 │
+//!   fossil-mcp        fossil-graph-wasm
+//!    (stdio            (wasm-bindgen; and
+//!     JSON-RPC          @fossil-lang/graph
+//!     for AI            on top of it —
+//!     agents)           in-process TS,
+//!                       DuckDB-WASM)
 //! ```
+//!
+//! **Two bindings, and the list is derived rather than remembered**: the crates
+//! whose `[dependencies]` name this one are exactly `fossil-mcp` and
+//! `fossil-graph-wasm`. This figure used to draw four — it named `fossil-cli`,
+//! which does not depend on this crate at all (its subcommands are `check`,
+//! `run`, `providers`, `refs`, and none of them is a verb), and an `HTTP+SSE`
+//! transport "for the keasy proxy" whose only occurrence anywhere in the tree
+//! was this diagram, and no crate manifest declares an HTTP server. The ASCII
+//! had drifted with it: four stems, three names, four captions.
 //!
 //! The pattern follows fossil's existing split between logic and protocol —
 //! `fossil-ide` carries IDE features, `fossil-lsp` carries the LSP wire.
 //! **MCP is one transport, not the protocol**: calling the entire surface
-//! "MCP" would lock fossil into an AI-agent framing when the same verbs serve
-//! dashboards, federation, tests, and the CLI.
+//! "MCP" would lock fossil into an AI-agent framing when the same verbs already
+//! serve the browser through the other binding, and are exercised by tests that
+//! speak neither wire (`crates/fossil-mcp/tests/graph_verbs.rs`).
 //!
 //! ## Verbs (6)
 //!
