@@ -14,6 +14,11 @@ publish = false
 workspace = true
 
 [dependencies]
+# The privacy policy vocabulary, for `AbsentQuasiIdentifier` alone. The
+# dependency runs THIS WAY on purpose: the manifest records the outcome of a
+# policy check, so it names policy vocabulary, and `fossil-policy` names nothing
+# — it is a serde/serde_json/thiserror leaf and knows nothing about GraphAr.
+fossil-policy = { path = "../fossil-policy" }
 # The GraphAr "writer" is DuckDB COPY —
 # fossil-sinks is a plan + manifest generator, NOT an I/O library, so it never byte-writes
 # Parquet from Rust. It therefore depends on `arrow-schema` ONLY (DataType -> data_type

@@ -1944,6 +1944,7 @@ dependencies = [
  "fossil-hir",
  "fossil-mem-probe",
  "fossil-mir",
+ "fossil-policy",
  "fossil-shex",
  "fossil-sinks",
  "log",
@@ -2201,6 +2202,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "fossil-resolver"
 version = "0.1.0"
 dependencies = [
@@ -2223,6 +2233,7 @@ name = "fossil-sinks"
 version = "0.1.0"
 dependencies = [
  "arrow-schema",
+ "fossil-policy",
  "insta",
  "serde",
  "serde_yaml_ng",

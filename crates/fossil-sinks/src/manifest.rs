@@ -199,7 +199,8 @@ pub struct KAnonymity {
     pub reached: u64,
     /// How a `NULL` in a quasi-identifier column is read. **A parameter and not
     /// a default**, because both extremes are wrong and the field that settles
-    /// it has said so for fifteen years — see [`AbsentQuasiIdentifier`].
+    /// it says so by exposing the choice as a number rather than making it —
+    /// see [`AbsentQuasiIdentifier`].
     pub absent_quasi_identifier: AbsentQuasiIdentifier,
     /// The records the bound was measured over: every row of every tile of
     /// every type carrying a quasi-identifier, summed. Equal to the sum of
@@ -220,10 +221,19 @@ pub struct KAnonymity {
     ///
     /// # Why parts per million and not a fraction
     ///
-    /// k-anonymity in practice is generalisation *plus* a suppression limit —
-    /// ARX's own benchmarks sweep 0%, 2% and 4% — so a verification with no
-    /// budget in it is verifying a different property from the one the
-    /// literature means. It is an integer here because a manifest is a text
+    /// k-anonymity in practice is generalisation *plus* a suppression limit, so
+    /// a verification with no budget in it is verifying a different property
+    /// from the one the literature means. ARX's `setSuppressionLimit` is that
+    /// parameter, its library default is `0`, and the sweeps its own papers run
+    /// are **0% against 10%** and **0% against 100%** (Lightning, *Transactions
+    /// on Data Privacy* 9(2), §6.1) — not the 0/2/4 this line first claimed,
+    /// which is the `0.02d` of ARX's API tutorial page mistaken for a benchmark.
+    /// The GUI's own advice is that *"the recommended value for this parameter
+    /// is 100%"*, which is worth knowing before treating a small budget as the
+    /// conservative choice: a low limit does not make a release safer, it makes
+    /// the search fail.
+    ///
+    /// It is an integer here because a manifest is a text
     /// document that four independent readers parse (`serde_yaml_ng`, two line
     /// scanners in JavaScript and TypeScript, and whatever a stranger brings),
     /// and a float is the one scalar where they can disagree about the same
@@ -255,50 +265,19 @@ pub struct KAnonymity {
     pub profile: String,
 }
 
-/// How a `NULL` in a quasi-identifier column is read when equivalence classes
-/// are formed.
+/// The declared reading of an absent quasi-identifier, re-exported from the
+/// crate that owns it.
 ///
-/// **Declared, never assumed.** SQL groups all `NULL`s together, which is one
-/// answer; statistical disclosure control treats a missing quasi-identifier as
-/// a wildcard matching every value, which is the other. sdcMicro exposes the
-/// choice as `alpha`, a number in `[0, 1]` with `1` the default, in `freqCalc`
-/// and `measure_risk` — a *parameter*, and it is a parameter precisely because
-/// both extremes are wrong. A checker that picks one silently has answered a
-/// question the producer was supposed to answer.
-///
-/// # The ordering between them, which is what makes the choice checkable
-///
-/// [`Self::Value`] is the conservative end: two `NULL`s are equal, so a class
-/// is an exact tuple match, and every record compatible with `r` under
-/// [`Self::Wildcard`] is either in `r`'s exact class or in another one — so
-/// `f_wildcard(r) >= f_value(r)`, always. **A corpus that passes under `value`
-/// passes under `wildcard`.** The declaration therefore only ever matters in
-/// one direction: a producer choosing `wildcard` is claiming the *weaker*
-/// bound, and saying so.
-///
-/// # What `value` is not conservative against
-///
-/// Cell suppression. If a producer blanked quasi-identifier cells to reach `k`,
-/// `value` counts the blanks as a category and rewards the suppression twice —
-/// a large class of all-`NULL` rows clears any `k` while carrying no
-/// generalisation at all. That is what [`Self::Suppress`] is for, and it is why
-/// the budget and the null semantics are one decision rather than two.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AbsentQuasiIdentifier {
-    /// A `NULL` is a category. Classes are exact tuple matches, `NULL = NULL`.
-    /// What SQL does, stated so that nobody has to infer it from the engine.
-    #[default]
-    Value,
-    /// A `NULL` matches every value. Record `r`'s class is every record that
-    /// agrees with it wherever both are non-`NULL`. The permissive end.
-    Wildcard,
-    /// A record with any `NULL` quasi-identifier is not certified by a class at
-    /// all: it is counted as suppressed and charged to
-    /// [`KAnonymity::suppression_budget_ppm`]. The only one of the three under
-    /// which [`KAnonymity::suppressed`] can be non-zero.
-    Suppress,
-}
+/// It lives in `fossil-policy` and not here because it is a **policy
+/// parameter**: the producer chooses it in the document, and the manifest
+/// records the choice. The dependency runs manifest → policy vocabulary →
+/// nothing, which is the direction that makes sense — a record of a check names
+/// the vocabulary of the check, and a policy document knows nothing about
+/// `GraphAr`. Re-exported rather than mirrored so that there is exactly one
+/// spelling of `value` / `wildcard` / `suppress` in the tree; two enums with a
+/// conversion between them is how the two halves of a manifest start
+/// disagreeing.
+pub use fossil_policy::AbsentQuasiIdentifier;
 
 /// `GraphAr` vertex-info manifest (one per vertex/shape type).
 ///

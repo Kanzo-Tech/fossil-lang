@@ -1,0 +1,33 @@
+# The privacy policy document a program binds: ODRL for structure, DPV for the
+# classification values, and a minimal own profile for the parameters nobody
+# else has an idiom for. A leaf — serde, serde_json, thiserror and nothing else
+# — because a policy document knows nothing about GraphAr, about DataFusion or
+# about the language. `fossil-sinks` depends on THIS and not the other way
+# round: the manifest records the outcome of a policy check, so the manifest
+# names policy vocabulary, and the policy names nothing.
+#
+# WASM-clean by construction. It has to be: the browser host writes corpora too,
+# and a bound that only the native writer can verify is a bound with a hole in
+# it the shape of a second writer.
+[package]
+name = "fossil-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The privacy policy document a corpus is verified against — ODRL structure, DPV classification, a four-term fossil profile"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
+serde = { workspace = true }
+# The policy document is JSON-LD, and it is read with a JSON parser. See
+# `src/document.rs` for why that is a restriction rather than a shortcut, and
+# for the four things it refuses rather than guesses at.
+serde_json = { workspace = true }
+thiserror = { workspace = true }
