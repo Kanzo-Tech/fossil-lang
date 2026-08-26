@@ -16,7 +16,14 @@
  *
  * **The one thing a host brings is an engine.** See `./query.ts` for why the capability is a single
  * `query` callback and not a bundled Parquet decoder: this package still has zero runtime
- * dependencies, and DuckDB's own footer pruning is the half of a windowed read nobody has to write.
+ * dependencies, and the engine is the one the host already has.
+ *
+ * That sentence used to end «and DuckDB's own footer pruning is the half of a windowed read nobody
+ * has to write», which is true of DuckDB and false as a reason to prefer it. Measured on a
+ * million-vertex corpus over HTTP: on the windowed read both DuckDB v1.5.3 and DataFusion 54 open
+ * exactly **5 of 245** row groups, and DataFusion reads **2.6× fewer bytes** doing it, because
+ * DuckDB's httpfs floors every footer read at 16 KiB. The pruning is not a differentiator. What
+ * this package actually buys by taking a callback is that it links no engine at all.
  *
  * **Five things a consumer used to supply out of its own head.** Four are absorbed and the fifth is
  * declared, and each is argued where it bites rather than here:
@@ -655,9 +662,23 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       // **The seek**, in two reads and no scan of either table.
       //
       // First the index: two columns over tiles that are sorted by the key with disjoint ranges,
-      // which is the arrangement that lets the engine prune to the one tile a value can be in.
+      // which is the arrangement that lets an engine prune to the one tile a value can be in.
       // The payload cannot be arranged that way and keep the Morton order a window depends on,
       // which is why the index is a second table rather than a second sort.
+      //
+      // **The arrangement is right and DuckDB does not exploit it, which this batch pays for.**
+      // Measured on v1.5.3 over a million-vertex corpus: `key = 'x'` prunes to one tile and reads
+      // 3.98 MB; `key IN ('x','y')` — or the same spelled `= 'x' OR = 'y'` — prunes to NONE and
+      // reads all 245 index tiles, 44.1 MB. DuckDB does not prune a disjunction over a VARCHAR
+      // column at all. DataFusion does, up to about twenty values.
+      //
+      // Taking the batch apart is NOT the fix, and it was tried: one query per identity crosses
+      // back over the batch at about eleven seeds (11 x 3.98 > 44.1), and `tests/corpus.test.ts`
+      // holds a bound whose whole purpose is to catch a lookup per seed. The fix that has no
+      // crossover is to ADDRESS the index tiles from their own footers — `tileBoxes` already does
+      // exactly this for `x`/`y` — and then ask only the tiles a key can be in. It works under the
+      // `files` container and cannot work under `rowgroups`, where a row group has no URL, so it
+      // is a real piece of work with a measurement attached rather than an edit to this line.
       const hits = await query(
         `SELECT ${ident(index.orderedBy)} AS id, dense_id ` +
           `FROM read_parquet(${list(index.files())}) ` +
@@ -867,7 +888,9 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
      *
      * **What it costs, measured rather than asserted.** Where the type declares an `index:` this is
      * a seek: two reads, no scan of either table, and see {@link Corpus.types} — `indexed` says
-     * which of the two a type gets. Where it does not, it is a scan of the `subject` column over
+     * which of the two a type gets. The index read is one query for the whole batch and it does
+     * not prune on this engine — {@link findByIdentity} has the measurement and the fix that has
+     * no crossover. Where it does not, it is a scan of the `subject` column over
      * every tile, because the rows are in Morton order and subjects are not, so every tile's
      * `min`/`max` overlaps every other's and the footers prune nothing. At five million vertices
      * that column is 8.016 compressed bytes per row, so one lookup reads about 40 MB. Both answers
