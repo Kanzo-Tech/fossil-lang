@@ -94,6 +94,11 @@ regex = "1"
 # 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
 # is what Cargo.lock already resolves transitively via duckdb's parquet.
 arrow-schema = "58"
+# `arrow-array` alongside it, for the same reason and one crate further in:
+# `fossil-kanon` reads the quasi-identifier columns value by value and builds
+# the generalised ones, which needs the array types and not the umbrella's four
+# format readers. Same 58.3.0 the lockfile already resolves.
+arrow-array = "58"
 arrow = "58"
 parquet = "58"
 
@@ -158,6 +163,12 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 # === Dev / testing ===
 insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
+# Property tests. `fossil-kanon`'s contract is a universally quantified sentence
+# — for any input and any k, every released row's anonymity set is at least k —
+# and a privacy guarantee asserted by example is a guarantee asserted on the
+# inputs its author thought of. Already in the lockfile at 1.11.0 via the
+# DataFusion stack, so adding it resolves nothing new.
+proptest = "1"
 wasm-bindgen-test = "0.3"
 # Native temp dirs for integration tests that write Parquet to disk and read it
 # back via duckdb — `fossil-engine`, `fossil-df` and `fossil-introspect`, which
