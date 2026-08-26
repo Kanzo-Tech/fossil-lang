@@ -1,8 +1,6 @@
 ---
 title: The mapping algebra
-description: Fourteen operators over typed schemas, seven of which the lowering emits today, and the relational verbs that reach them. A conservative typed elaboration of a published operational semantics — and the plan is DataFusion's.
-direction:
-  summary: The relational verbs are six — `where`, `select`, `join`, `groupBy`, `distinct`, `union` — and the match that lowers them is exhaustive.
+description: Thirteen operators over typed schemas, ten of which the lowering emits today, and the six relational verbs that reach them. A conservative typed elaboration of a published operational semantics — and the plan is DataFusion's.
 ---
 
 A fossil program is not translated to SQL directly. It is elaborated into a tree of operators, each
@@ -17,7 +15,7 @@ document and disagree about what it produces. **Min Oo and Hartig, *An Algebraic
 Knowledge Graph Construction*** (arXiv 2503.10385; ESWC 2025) closed the gap, and fossil's middle is
 their algebra with a type on every operator's schema.
 
-## The fourteen operators
+## The thirteen operators
 
 What an operator does to the **schema** is as much of its definition as what it does to the rows.
 
@@ -30,8 +28,7 @@ What an operator does to the **schema** is as much of its definition as what it 
 | `Filter` | unchanged; the predicate must be boolean | `WHERE` |
 | `Join` | the union of two schemas, qualified | `JOIN … ON` |
 | `Union` | both inputs must carry the same schema | `UNION ALL` |
-| `GroupBy` | the grouping columns, plus what `Aggregate` adds | `GROUP BY` |
-| `Aggregate` | adds one column whose type the aggregate decides | an aggregate in the `SELECT` list |
+| `GroupBy` | the grouping columns, plus one column per aggregate, whose type the aggregate decides | `SELECT keys, aggs … GROUP BY keys` |
 | `Distinct` | unchanged | `SELECT DISTINCT` |
 | `EmitVertex` | a schema of graph terms, not of source columns | a projection into the vertex encoding |
 | `EmitEdge` | a schema of two identities and a predicate | a projection into the adjacency encoding |
@@ -97,17 +94,17 @@ and our checker types the result end to end, which is what neither of the other 
 `Adults := User.where(User.age >= 18)` is a **relation**, not a value. `join` is in the first version
 as an inner join, and the checker gained its first two-input rule with it — the joined row is the
 two sides' scopes side by side, each column addressed by the binding that owns it — because a join
-is where an operator set stops being a list and starts being an algebra. Nine of the fourteen are
-what the lowering emits today; the other five are defined and unreached, which is a different
+is where an operator set stops being a list and starts being an algebra. Ten of the thirteen are
+what the lowering emits today; the other three are defined and unreached, which is a different
 problem from being over-designed and takes a different fix:
 
 ```mermaid
 graph LR
   SRC["Source"] --> FIL["Filter"] --> PRJ["Project"] --> JOI["Join"]
-  JOI --> DIS["Distinct"] --> UNI["Union"]
-  UNI --> EV["EmitVertex"] --> SNK["Sink"]
-  UNI --> EE["EmitEdge"] --> SNK
-  WAIT["<i>defined, not yet reached</i><br/>Extend · Rename · GroupBy<br/>Aggregate · Empty"]
+  JOI --> DIS["Distinct"] --> UNI["Union"] --> GRP["GroupBy"]
+  GRP --> EV["EmitVertex"] --> SNK["Sink"]
+  GRP --> EE["EmitEdge"] --> SNK
+  WAIT["<i>defined, not yet reached</i><br/>Extend · Rename · Empty"]
   classDef unreached stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
   class WAIT unreached
 ```
@@ -161,7 +158,7 @@ without the verb. The rows are asserted where rows exist —
 `LogicalPlan`, which already has predicate pushdown, join reordering and a cost model; we supply the
 types of the mapping, which DataFusion has no way to know, and borrow the rest. Two consequences:
 
-- **The fourteen operators stay.** They are the pipeline's vocabulary, not an aspiration.
+- **The thirteen operators stay.** They are the pipeline's vocabulary, not an aspiration.
 - **The ten rewrite rules are gone**, which gave up on optimising *twice*, not on optimising:
   `rewrite()` ran on every compile and always returned its input, because all ten matched operators
   the lowering never emits.
@@ -169,7 +166,7 @@ types of the mapping, which DataFusion has no way to know, and borrow the rest. 
 <Callout title="Deliberately absent">
 **No planner of ours** — no cost model, no statistics, no join reordering. If any of it is ever
 needed it arrives through DataFusion or it does not arrive. And **no operator the pipeline cannot
-express**: `Op` has fourteen variants (`crates/fossil-mir/src/op.rs:43`) and stops there, because an
+express**: `Op` has thirteen variants (`crates/fossil-mir/src/op.rs`) and stops there, because an
 operator enters when a verb needs it and a verb enters when a program spells it.
 </Callout>
 
@@ -184,12 +181,12 @@ after it](/docs/design/shapes).
 
 ## What this does not settle
 
-- **The eight relation verbs the catalogue declares and the lowering does not implement.** `seq/`
-  has thirteen rows — `map`, `flatten`, `take`, `drop`, `sort`, `group_by`, `aggregate` and `count`
-  beside the five — and the refusal says so by reading the table rather than by listing what it
-  knows. Each one that arrives has to arrive with the operator that carries it and a program that
-  spells it, not as a row. `groupBy` is the next of the six and the expensive one: an aggregate
-  changes the type of the row it produces, which is work for the checker and not for the syntax.
+- **The six relation verbs the catalogue declares and the lowering does not implement.** `seq/`
+  has twelve rows — `map`, `flatten`, `take`, `drop`, `sort` and `count` beside the six — and the
+  refusal says so by reading the table rather than by listing what it knows. Each one that arrives
+  has to arrive with the operator that carries it and a program that spells it, not as a row.
+  `seq.aggregate` was a seventh and is deleted: `group_by` took the aggregations into itself,
+  because a grouping with nothing aggregated has the rows of `select(…).distinct()`.
 - **The three join flavours that are not `Inner`.** They stay defined and unreachable
   (`crates/fossil-df/tests/pipeline.rs:481` pins the refusal). An outer join manufactures NULL, and
   [the shape](/docs/design/shapes) has no way to declare a nullable property yet, so the one that

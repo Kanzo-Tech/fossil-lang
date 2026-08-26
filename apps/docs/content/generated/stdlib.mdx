@@ -70,12 +70,11 @@ and `catalogue.bnf` for `io`. Change either and re-run the command. */}
 
 | | signature | lowers to |
 | --- | --- | --- |
-| `aggregate` | `(rows: Relation) -> Relation` | the `Aggregate` operator |
 | `count` | `(rows: Relation) -> Integer` | the `Count` operator |
 | `distinct` | `(rows: Relation) -> Relation` | the `Distinct` operator |
 | `drop` | `(rows: Relation, n: Integer) -> Relation` | the `Drop` operator |
 | `flatten` | `(rows: Relation, of: Column) -> Relation` | the `Flatten` operator |
-| `group_by` | `(rows: Relation, keys: Column…) -> Relation` | the `GroupBy` operator |
+| `group_by` | `(rows: Relation, keys: Column…, <name> = Aggregate…) -> Relation` | the `GroupBy` operator |
 | `join` | `(rows: Relation, right: Binding, on = Predicate) -> Relation` | the `Join` operator |
 | `map` | `(rows: Relation) -> Relation` | the `Map` operator |
 | `select` | `(rows: Relation, cols: Column…) -> Relation` | the `Select` operator |

@@ -46,12 +46,14 @@ are **names and not values** — the lowering reads them off the syntax. `join` 
 between qualified references, or several joined by `and`, and does not flatten the rows: both sides
 stay in scope after it. `distinct` takes nothing and keeps one of each identical row; `union` takes
 another binding and gives back one row that answers to the pipeline's name, because a row of it came
-from one of the two sides and nothing says which. `group_by` is consumed by `aggregate` and by
-nothing else. There is no `filter` — it is spelled `where`, so that the catalogue spells what the
-surface spells.
+from one of the two sides and nothing says which. `group_by` takes the columns to group by and then
+one aggregation per column it produces, written with the name that column will answer to —
+`group_by(Order.customer, total = math.sum(Order.amount))`. There has to be at least one: a grouping
+with nothing aggregated has the rows of `select(…).distinct()`, which is how to write that. There is
+no `filter` — it is spelled `where`, so that the catalogue spells what the surface spells.
 
-**Five of the thirteen reach the surface today** — `where`, `select`, `join`, `distinct` and
-`union`. The other eight are rows the checker knows and the lowering does not handle yet.
+**Six of the twelve reach the surface today** — `where`, `select`, `join`, `distinct`, `union` and
+`group_by`. The other six are rows the checker knows and the lowering does not handle yet.
 
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" />
 
@@ -69,8 +71,9 @@ honour.
 
 <include>../../generated/stdlib.mdx#math</include>
 
-`math.sum`, `math.avg`, `math.min` and `math.max` are the four that go inside `aggregate`. Nothing in
-the rows says so — the catalogue has no field for it, and the table above is the catalogue.
+`math.sum`, `math.avg`, `math.min` and `math.max` are the four that go inside a `group_by`, and the
+catalogue is what says so: an aggregation naming any other row is refused, and the refusal lists
+these four by reading the table above.
 `math.round` takes no `digits` argument, and it is the one row taking a `Float` and handing back an
 `Integer`.
 
