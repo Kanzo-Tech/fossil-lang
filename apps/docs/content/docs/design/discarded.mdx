@@ -225,10 +225,43 @@ duplicates the addressing rather than the argument.
 | A subprocess as the embedding surface: a product spawns the binary and reads JSON off its stdout | The cheapest possible integration — no linking, no version skew in the build, no wasm toolchain — and it works on day one for any host that can start a process | It makes the *binary* the API, and the binary is the one host that cannot be embedded where the product actually runs — measured 2026-08-16, see below | A host that cannot run wasm at all, or a corpus whose run genuinely needs facilities `wasm32` does not have — a disk to spill to being the concrete one. Neither is a reason to keep a second copy of a capability the browser already performs; both are reasons for the command line to remain a client |
 | A linked Rust type as the contract between fossil and a host: a small, wasm-clean crate holding the wire structs | Genuinely one source of truth, checked by the compiler on both sides, and one lightweight dependency for the host | The crate accumulates unrelated contracts and build machinery belonging to the consumer, and two of its three contracts are consumed from a language that never links it — see below | A host in the same workspace, or one that wants the compiler to enforce the contract at *its* build time rather than at its deserialize time — a real thing to want, and a different argument from the one that put three unrelated contracts in one crate |
 | Foldering the crates into `core/`, `extensions/` and `corpus/` | Two dozen sibling directories show nothing, and the grouping the site draws in its dependency diagram would become the grouping on disk | A folder cannot hold a boundary. Every candidate for `core/` is already separated by something real — a cycle, a `cfg`, an orphan rule — so the directory would restate an edge that exists; and `fossil-base`, the one crate whose *contents* are wrong, would be filed rather than fixed. `extensions/` fails the same way: `fossil-shex` sits outside the descriptors because of a cycle, and a folder does not dissolve a cycle. The only grouping that is real today is *compiles to wasm32 or does not*, and six `compile_error!` already enforce it without a directory | A grouping that is not already implied by an edge — one a reader could not derive from `cargo metadata` |
+| Lifting `fossil-base`'s `test_support` feature into a crate of its own, the way the locator went | The same rule that moved the locator, applied to the other thing in `base` that is not substrate — and it takes a feature and 339 lines out with it | It cannot compile. A helper crate that implements `System` must depend on `fossil-base`, and `fossil-base`'s own unit tests must depend on the helper — a dev cycle Cargo allows and `#[cfg(test)]` breaks, because the crate under test is a **second copy** of `fossil-base` whose types do not unify with the one the helper linked. Measured on a two-crate spike; the accordion has rustc's words. Sixteen of thirty-two unit tests would have to leave `src/`, and `fossil-base` would shed no dependency for it | `test_support` ceasing to name `fossil-base`'s own types — if what it hands out were only `fossil-graph-schema` values, the helper would not depend on `fossil-base` and there would be no cycle to break |
 | An unmaintained language-server framework, rather than the low-level protocol library | The obvious choice by search ranking and by API pleasantness | Roughly three years without maintenance, and all three reference implementations in this space use the low-level library instead | Maintenance resuming — and until then the ban is explicit rather than tacit, so reintroducing it takes a decision rather than an import |
 | An editor client that consumes semantic tokens | Exactly the missing piece, and two candidates advertise the area | Obtained by probing the packages rather than reading their prose: of twenty-seven exports and seventeen prototype methods in the leading candidate, none matches semantic tokens; the other candidate's semantic-sounding strings are initialisation options passed through to the server, not consumers of a response. The generic request escape hatch does exist and does return the payload | A client that consumes the response rather than forwarding an option — and the transferable part is the technique: probe a package by its exports and its prototype before adopting it |
 
 <Accordions>
+<Accordion title="Lifting `fossil-base`'s `test_support` feature into a crate of its own">
+Cargo permits a dev-dependency cycle, and half of it works: an **integration** test in `tests/`
+links the plain rlib, so it sees the same `fossil-base` the helper crate saw. A **unit** test does
+not. `#[cfg(test)]` compiles a second `fossil-base`, and rustc says so exactly:
+
+```text
+note: there are multiple different versions of crate `base` in the dependency graph
+   |
+15 |     use crate::System;
+   |         ------------- `System` imported here doesn't correspond to the right version of crate `base`
+```
+
+Measured 2026-08-26 on a two-crate spike outside the workspace, reduced to one trait and one impl.
+It is not a quirk of the reduction: every `SourceFile`, `Provider`, `System` and Salsa input that
+`test_support` hands out is a `fossil-base` type, so every one of them crosses that seam.
+
+The bill, then: sixteen of `fossil-base`'s thirty-two unit tests move out of `src/` into `tests/`
+and lose their module's private scope; `test_support`'s own three go with the module; 112 call sites
+in 58 files across eight crates change import path; nine manifests change a dev-dependency line.
+
+Against which `fossil-base` sheds 339 lines, one feature — and **no dependency**. Its two path
+dependencies are both held by production code: `fossil-graph-schema` by `shape_documents.rs`,
+`providers.rs` and `diagnostic.rs`, `fossil-descriptors-input` by `system.rs`. No arrow moves on the
+architecture diagram either, because that page reads `[dependencies]` and this is a dev edge.
+
+The rule being applied here indicts what a `base` decides **about a program**. The locator decided
+where a written path points, which is a decision about a program, so it left. `test_support` decides
+nothing about one, and its own header already said so before this was measured: *"This is not
+compiler logic … a format that exists nowhere else and that no program will ever be written in."*
+It is a reference implementation of a seam `fossil-base` itself defines, behind a feature no shipped
+binary carries.
+</Accordion>
 <Accordion title="Removing the incremental core from the batch path">
 The borrowed 52% does not transfer, and measuring locally says why: that project is a library whose
 entire work is compilation, so its percentage of compilation *is* its percentage of the process.

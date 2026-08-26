@@ -118,6 +118,19 @@ The prose half of that rule is now a test — `crates/fossil-base/tests/substrat
 reads `providers.rs` and fails on a string literal with a space in it, because a crate that decides
 nothing about a program has no business composing an English sentence about one.
 
+The file abstraction is the part that has gone: `fossil-locator` is the rule that says where a
+written path points, which is the one thing in `fossil-base` that decided something about a program.
+`base-db` keeps its VFS in another crate for that reason and this is the same move.
+
+**What stayed, and why it is not the same case.** `test_support` is also not compiler logic — its
+own header says so — and lifting it out looks like the identical move. It is not: a helper that
+implements `System` must depend on `fossil-base`, `fossil-base`'s unit tests must depend on the
+helper, and `#[cfg(test)]` makes the crate under test a second copy of `fossil-base` whose types do
+not unify with the one the helper linked. It does not compile, and the rest of the bill is in
+[what was discarded](/docs/design/discarded). The distinction the rule actually draws is *decides
+something about a program*: the locator did, and a decoder for a format no program is written in
+does not.
+
 ### What would move the remaining edge
 
 `fossil-base → fossil-descriptors-input` exists for **one trait method**, `System::descriptors`,
@@ -148,15 +161,15 @@ So the fold is blocked while that edge stands. Three ways out were costed:
 | --- | --- |
 | a generic or associated type on `System` | impossible, not merely expensive: the trait is used as `Arc<dyn System>` and as `&dyn System`, and either shape is object-safety's own counterexample |
 | the types down into `fossil-graph-schema`, the leaf both sides already see | no new crate — and a `Mutex<HashMap>` of host-owned mutable state inside the crate that depends on nothing but `serde`, which is this page's own mistake committed a second time |
-| a new leaf holding `DescriptorCache` + `InferredDescriptor` | it works, and it is the only one that does: a 26th crate, an import path changed in nine crates, and **nothing removed from `fossil-base`** |
+| a new leaf holding `DescriptorCache` + `InferredDescriptor` | it works, and it is the only one that does: a 27th crate, an import path changed in nine crates, and **nothing removed from `fossil-base`** |
 
 **What reverses this:** the fold itself. It removes a crate, so the third way nets zero on the count
 and the cycle goes with it.
 
 ## The verdict is not the crate count
 
-**Twenty-five crates over roughly 47,000 lines of Rust** — non-blank, non-comment, measured
-2026-08-25. Gluon has ~11 crates for 90k, Gleam 15 (six real) for 228k, rust-analyzer 36 for 571k.
+**Twenty-six crates over roughly 47,000 lines of Rust** — non-blank, non-comment, measured
+2026-08-25, and the twenty-sixth moved lines rather than adding them. Gluon has ~11 crates for 90k, Gleam 15 (six real) for 228k, rust-analyzer 36 for 571k.
 **At this size the honest target is five to eight.**
 
 What makes two dozen feel like a maze is not the count. Three of them lie about what they are, and a
@@ -175,7 +188,10 @@ false name costs more than a surplus crate because you cannot skip it while read
 boundary is `proc-macro-srv-cli`, and procedural macros segfault — fault isolation, not a ring.
 
 **No crate that exists by imitation.** A crate earns its boundary from a cycle, a `cfg`, an orphan
-rule or a publishing frontier.
+rule, a publishing frontier — or a rule about what the crate it left is allowed to contain, which is
+the fifth and `fossil-locator` is the first to use it. Naming it is not widening the list: the rule
+in question is the one at the head of this page, and a list that could not hold the page's own rule
+would be a list that forbids acting on it.
 </Callout>
 
 ## The second core has one dependency left
