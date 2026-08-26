@@ -35,9 +35,7 @@ use xtask::reference;
 
 /// The generator's own view of the file, parsed once.
 fn rows() -> Vec<catalogue::Row> {
-    let text = std::fs::read_to_string(catalogue::repo_root().join("catalogue.bnf"))
-        .expect("read catalogue.bnf");
-    catalogue::parse(&text)
+    catalogue::read().rows
 }
 
 /// The check `cargo xtask catalogue --check` runs, as a test — so a stale file
@@ -122,7 +120,7 @@ fn every_row_lands_in_exactly_one_generated_file() {
 #[test]
 fn a_new_native_reader_is_a_row_and_nothing_else() {
     let invented =
-        catalogue::parse("row avro = extensions \"avro\" ; reads native read_avro_scan .\n");
+        catalogue::parse("row avro = extensions \"avro\" ; reads native read_avro_scan .\n").rows;
     assert_eq!(invented.len(), 1);
     assert_eq!(
         invented[0].reads,
@@ -178,9 +176,11 @@ fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
     // Without this the two loops below would sweep a corpus of zero and report
     // it as a clean page — the vacuous pass this file's second test already
     // exists to prevent, one level up.
+    // Six: `core`, `io`, `math`, `parse`, `seq`, `str`. It was eight, and the
+    // two that left are `validate` and `anon` — whole namespaces, not rows.
     assert!(
-        ids.len() >= 8,
-        "the partial declares {} section(s); the catalogue has at least eight receivers",
+        ids.len() >= 6,
+        "the partial declares {} section(s); the catalogue has at least six receivers",
         ids.len()
     );
 
@@ -205,7 +205,7 @@ fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
     }
 }
 
-/// Every row of the registry reaches the page.
+/// Every stdlib row reaches the page.
 ///
 /// The emitter groups by receiver head and prints one table per group, so a row
 /// whose head nothing includes would vanish silently — the partial would simply
@@ -214,57 +214,201 @@ fn the_reference_page_includes_the_partial_and_writes_no_row_itself() {
 /// halves.
 ///
 /// **What it cannot prove:** that the row's SIGNATURE is right. That
-/// `str.slice` should take an `end` is a decision, and `stdlib.rs` is where it
-/// is argued; this proves the page says what the registry says.
+/// `str.slice` should take an `end` is a decision, and `catalogue.bnf` is where
+/// it is argued; this proves the page says what the file says.
 #[test]
-fn every_registry_row_reaches_the_reference_page() {
+fn every_stdlib_row_reaches_the_reference_page() {
     let partial = std::fs::read_to_string(catalogue::repo_root().join(reference::PARTIAL))
         .expect("the generated partial is on disk");
 
-    let grouped = reference::by_head();
+    let cat = catalogue::read();
+    let grouped = reference::by_head(&cat);
     assert!(
-        grouped.values().map(Vec::len).sum::<usize>() >= 40,
-        "the registry yielded almost nothing; a guard over an empty catalogue passes vacuously"
+        grouped.values().map(Vec::len).sum::<usize>() >= 30,
+        "the catalogue yielded almost nothing; a guard over an empty one passes vacuously"
     );
 
     for entries in grouped.values() {
         for entry in entries {
-            let cell = format!("| `{}` |", reference::call_spelling(entry));
+            let cell = format!("| `{}` |", reference::call_spelling(&entry.name));
             assert!(
                 partial.contains(&cell),
-                "`{}` is in the registry and not on the page",
+                "`{}` is in the catalogue and not on the page",
                 entry.name
             );
         }
     }
 }
 
-/// The `io` section comes from `catalogue.bnf` and not from the registry, and
-/// this is the claim that makes choosing safe rather than merely deliberate:
-/// every `io.` row the registry carries is a `catalogue.bnf` row too.
-///
-/// The registry has three (`csv`, `json`, `parquet`) against the file's six —
-/// they are stubs saying «this name is a source», and the file is the datum.
-/// Printing the registry's three would have deleted `io.rdf`, `io.shex` and
-/// `io.shacl` from the page. If the subset ever stops holding, a name exists
-/// that this page cannot show, and the choice of source has to be reopened.
-///
-/// **What it cannot prove:** the converse. `io.rdf` has no registry row and
-/// binds perfectly well, so a file row without a registry row is normal.
-#[test]
-fn every_registry_io_row_is_a_catalogue_row() {
-    let names: Vec<String> = rows().iter().map(|r| r.name.clone()).collect();
-    let io = reference::by_head();
-    let io = io.get("io").expect("the registry carries `io.` rows");
-    assert!(!io.is_empty(), "an empty `io` group would pass vacuously");
+// ── The round trip ─────────────────────────────────────────────────────────
+//
+// These are what make `fossil-hir` a DEV-dependency rather than a deleted one.
+// `cargo xtask catalogue` generates that crate's stdlib table, so the binary
+// must not link it — a bad emit would stop the tool that fixes it from
+// building. But the emit still has to be PROVEN faithful, and the only way to
+// prove it is to hold the generated table against the registry it becomes. A
+// dev-dependency buys both: the tests link fossil-hir, the binary does not.
 
-    for entry in io {
-        let member = entry.name.split_once('.').expect("a dotted name").1;
+/// **Every row in `catalogue.bnf` is in the registry with the signature and the
+/// lowering the file gives it — and the registry carries nothing else.**
+///
+/// The one guard that would catch the emitter dropping a row, reordering a
+/// parameter, losing an arity or a type, or mangling a template.
+/// `str.strip_html` is what makes the last one concrete: its template carries
+/// double quotes, and the line scanner this replaces would have truncated it
+/// silently rather than failing.
+///
+/// The comparisons are derived rather than restated. An `Arity` and a `SigTy`
+/// are two enums with the same variant names on either side of the generator,
+/// so `Debug` is the shared spelling and neither side needs a translation table
+/// that could itself drift.
+#[test]
+fn the_generated_table_is_the_file() {
+    use fossil_hir::stdlib::{LoweringKind, stdlib};
+
+    let cat = catalogue::read();
+    let reg = stdlib();
+    let declared = cat.registry_rows();
+    assert!(
+        declared.len() >= 30,
+        "the catalogue parsed to {} row(s); a comparison over nothing passes vacuously",
+        declared.len()
+    );
+
+    for (name, sig, lowering) in &declared {
+        let entry = reg
+            .lookup(name)
+            .unwrap_or_else(|| panic!("`{name}` is in catalogue.bnf and not in the registry"));
+
+        assert_eq!(
+            entry.sig.params.len(),
+            sig.params.len(),
+            "`{name}`: {} parameter(s) in the registry, {} in the file",
+            entry.sig.params.len(),
+            sig.params.len()
+        );
+        for (got, want) in entry.sig.params.iter().zip(&sig.params) {
+            assert_eq!(got.name.as_str(), want.name, "`{name}`: parameter name");
+            assert_eq!(
+                got.named, want.named,
+                "`{name}` `{}`: named-ness",
+                want.name
+            );
+            assert_eq!(
+                format!("{:?}", got.arity),
+                format!("{:?}", want.arity),
+                "`{name}` `{}`: arity",
+                want.name
+            );
+            assert_eq!(
+                format!("{:?}", got.ty),
+                debug_of(want.ty),
+                "`{name}` `{}`: type",
+                want.name
+            );
+        }
+        assert_eq!(
+            format!("{:?}", entry.sig.ret),
+            debug_of(sig.ret),
+            "`{name}`: return type"
+        );
+
+        match (&entry.lowering, lowering) {
+            (LoweringKind::Expr(got), catalogue::Lowering::Expr(want)) => assert_eq!(
+                got.as_str(),
+                want.as_str(),
+                "`{name}`: the template did not round-trip"
+            ),
+            (LoweringKind::Op(got), catalogue::Lowering::Op(want)) => assert_eq!(
+                format!("{got:?}"),
+                *want,
+                "`{name}`: the operator did not round-trip"
+            ),
+            (got, want) => {
+                panic!("`{name}`: lowering kind differs — registry {got:?}, file {want:?}")
+            }
+        }
+    }
+
+    // And nothing the file does not declare. The table is generated, so a row
+    // here that no row declares could only have arrived by somebody editing a
+    // file whose header says DO NOT EDIT.
+    let names: Vec<&str> = declared.iter().map(|(n, _, _)| n.as_str()).collect();
+    for entry in reg.iter() {
         assert!(
-            names.iter().any(|n| n == member),
-            "the registry carries `{}` and `catalogue.bnf` has no `{member}` row, \
-             so the page's `io` table cannot show it",
+            names.contains(&entry.name.as_str()),
+            "`{}` is in the registry and in no `catalogue.bnf` row",
             entry.name
+        );
+    }
+}
+
+/// `fossil_hir::stdlib::SigTy`'s `Debug` spelling of one of the file's types.
+///
+/// `rust_path` is what the emitter writes; dropping the two type qualifiers off
+/// it is exactly `Debug`'s output for the same value. Derived from the emitter's
+/// own answer so that a new type spelling cannot be added here and forgotten
+/// there.
+fn debug_of(ty: catalogue::SigTy) -> String {
+    ty.rust_path()
+        .replace("SigTy::", "")
+        .replace("ScalarTy::", "")
+}
+
+/// `is_namespace_head` agrees with `fossil_hir::stdlib::receiver_of`.
+///
+/// `xtask` states the receiver rule a second time — it needs one bit of it to
+/// decide whether the page prints a row's dotted name or its member, and it may
+/// not link `fossil-hir` to ask. A second statement of a rule is a second thing
+/// to keep in step, so this derives the comparison from the original rather than
+/// asserting the answer.
+#[test]
+fn the_receiver_rule_agrees_with_fossil_hir() {
+    use fossil_hir::stdlib::{Receiver, receiver_of};
+
+    let cat = catalogue::read();
+    let mut heads: Vec<&str> = cat
+        .fns
+        .iter()
+        .filter_map(|f| f.name.split_once('.').map(|(h, _)| h))
+        .collect();
+    heads.sort_unstable();
+    heads.dedup();
+    assert!(heads.len() >= 4, "only {} head(s) found", heads.len());
+
+    for head in heads {
+        assert_eq!(
+            catalogue::is_namespace_head(head),
+            receiver_of(head) == Receiver::Namespace,
+            "`{head}`: xtask and fossil-hir disagree about whether it is a namespace"
+        );
+    }
+    // A head neither side has seen must still agree, or the two rules only
+    // happen to match on the corpus that exists.
+    assert!(catalogue::is_namespace_head("invented"));
+    assert_eq!(receiver_of("invented"), Receiver::Namespace);
+}
+
+/// `io.shex` and `io.shacl` carry NO signature, and that is a decision rather
+/// than an oversight — so it is pinned.
+///
+/// They give back a shape document, which `SigTy` has no spelling for. Writing
+/// `-> Rows` to fill the column would repeat the defect the `add`/`add_verb`
+/// split once had, where three constructors of relations declared `String`.
+/// Every row that reads DATA does carry one, `io.rdf` included — which is what
+/// the fold fixed: it had none, so writing it in a value position went
+/// undiagnosed.
+#[test]
+fn exactly_the_data_rows_carry_a_signature() {
+    let rows = rows();
+    assert!(rows.len() >= 6, "an empty row set would pass vacuously");
+    for row in rows {
+        assert_eq!(
+            row.call.is_some(),
+            row.reads.is_some(),
+            "`io.{}`: a row that reads DATA needs a signature, and a row that \
+             decodes a shape language cannot have one",
+            row.name
         );
     }
 }

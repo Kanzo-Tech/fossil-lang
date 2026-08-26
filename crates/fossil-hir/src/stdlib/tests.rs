@@ -129,33 +129,19 @@ fn no_member_is_spelled_on_two_receivers() {
 
 // ── The lowering ───────────────────────────────────────────────────────────
 
-#[test]
-fn anon_redact_is_a_template_that_ignores_its_argument() {
-    let r = FunctionRegistry::stdlib_default();
-    let redact = r.lookup("anon.redact").expect("anon.redact present");
-    let LoweringKind::Expr(t) = &redact.lowering else {
-        panic!("anon.redact must be an Expr row, got {:?}", redact.lowering);
-    };
-    assert_eq!(t.as_str(), "'[REDACTED]'");
-    // The ZERO-hole case, and half the reason the notation is indexed rather
-    // than sequential: a sequential placeholder cannot say "ignore".
-    assert!(template_holes(t.as_str()).is_empty());
-    assert_eq!(redact.sig.params.len(), 1);
-}
-
-#[test]
-fn core_require_is_a_template_that_reads_its_argument_twice() {
-    let r = FunctionRegistry::stdlib_default();
-    let require = r.lookup("core.require").expect("core.require present");
-    let LoweringKind::Expr(t) = &require.lowering else {
-        panic!("core.require must be an Expr row");
-    };
-    // The REPEATED-hole case, the other half of the reason. `%0` twice, one
-    // parameter: a sequential placeholder would demand two.
-    assert_eq!(template_holes(t.as_str()), vec![0]);
-    assert_eq!(t.as_str().matches("%0").count(), 2);
-    assert_eq!(require.sig.params.len(), 1);
-}
+// `anon_redact_is_a_template_that_ignores_its_argument` and
+// `core_require_is_a_template_that_reads_its_argument_twice` stood here. They
+// pinned the two shapes that make the `%N` holes INDEXED rather than
+// sequential — a hole used zero times and a hole used twice — and both rows
+// left the language in the same sweep.
+//
+// **No row exercises either shape now**, and that is worth saying rather than
+// quietly dropping two tests. The closest survivor is `core.lang`, whose `%0`
+// template declares two parameters and reads one, so a template still does not
+// determine arity. The repeated and out-of-order cases are exercised against
+// `render_template` directly, below: the notation keeps the capability, the
+// catalogue has stopped needing it, and if a future row needs it again the
+// renderer is already proven.
 
 /// **A template may never name an argument the signature does not have.**
 ///
@@ -220,10 +206,10 @@ fn math_namespace_has_exactly_six_no_ceil_floor() {
 /// The authoritative function set. `io/` is excluded (source constructors).
 fn expected_stdlib_names() -> Vec<&'static str> {
     vec![
-        // core/ (2)
+        // core/ (1) — `core.require` went with `error()`, which DataFusion
+        // cannot express at all.
         "core.lang",
-        "core.require",
-        // seq/ (13) — the relation verbs. `filter`/`project` are spelled
+        // seq/ (12) — the relation verbs. `filter`/`project` are spelled
         // `where`/`select`, which is what the surface spells.
         "seq.where",
         "seq.map",
@@ -237,14 +223,13 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "seq.union",
         "seq.group_by",
         "seq.count",
-        // parse/ (7)
+        // parse/ (5) — `json` needed an extraction function DataFusion does
+        // not ship; `csv_row` renders and is simply not wanted.
         "parse.integer",
         "parse.float",
         "parse.decimal",
         "parse.date",
         "parse.datetime",
-        "parse.json",
-        "parse.csv_row",
         // math/ (6 — NO ceil/floor)
         "math.sum",
         "math.avg",
@@ -267,16 +252,7 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "str.upper",
         "str.slug",
         "str.strip_html",
-        // validate/ (5)
-        "validate.email",
-        "validate.url",
-        "validate.uuid",
-        "validate.iso_date",
-        "validate.regex",
-        // anon/ (2) — `anon.hmac` left the language: HMAC needs a key
-        // schedule and DuckDB has sha256 and no HMAC.
-        "anon.hash",
-        "anon.redact",
+        // validate/ and anon/ are GONE — see `the_deleted_names_are_gone`.
     ]
 }
 
@@ -302,15 +278,24 @@ fn catalog_is_bidirectionally_complete() {
         missing.is_empty() && extra.is_empty(),
         "catalog must equal the declared set exactly.\n  MISSING: {missing:?}\n  EXTRA: {extra:?}"
     );
-    // 2 + 12 + 7 + 6 + 13 + 5 + 2 = 47 surface functions. `seq/` went from 13
-    // to 12 with `seq.aggregate`, whose aggregations `seq.group_by` took.
-    assert_eq!(catalog.len(), 47);
-    // The three io/ constructors on top.
-    assert_eq!(r.iter().count(), 47 + 3);
+    // 1 + 12 + 5 + 6 + 13 = 37 surface functions.
+    assert_eq!(catalog.len(), 37);
+    // The FOUR io/ constructors on top, not three. `io.rdf` reads rows like the
+    // other three and had no row here at all while the registry stated its `io.`
+    // half by hand — so a program writing `io.rdf(...)` in a value position got
+    // no diagnostic. The signature comes off `catalogue.bnf` with the rest now.
+    //
+    // `io.shex` and `io.shacl` are still absent, and deliberately: they give
+    // back a shape document, which `SigTy` has no spelling for.
+    assert_eq!(r.iter().count(), 37 + 4);
 }
 
-/// `clean/` does not exist, and neither do the two functions that were deleted
-/// from the language rather than ported.
+/// **Every name the language has deleted, pinned so that none can come back.**
+///
+/// `clean/` does not exist; neither do the two functions that could not be
+/// ported honestly, the two renamed verbs' old spellings, nor the ten rows that
+/// left when the catalogue moved into `catalogue.bnf`. A deletion that is only
+/// an absence is a deletion somebody re-adds by accident.
 #[test]
 fn the_deleted_names_are_gone() {
     let r = FunctionRegistry::stdlib_default();
@@ -327,6 +312,31 @@ fn the_deleted_names_are_gone() {
         // The old spellings of the two renamed verbs.
         "seq.filter",
         "seq.project",
+        // ── The ten that left when the catalogue moved into the file ──────
+        //
+        // Six needed `error()`, which has no DataFusion equivalent: there is no
+        // way to raise from an expression, so "this value or stop the run" has
+        // no spelling on the engine that writes a corpus. The whole `validate.`
+        // namespace goes with them.
+        "core.require",
+        "validate.email",
+        "validate.url",
+        "validate.uuid",
+        "validate.iso_date",
+        "validate.regex",
+        // DataFusion ships no JSON extraction in its default function set.
+        "parse.json",
+        // Renders perfectly well and is simply not wanted: pulling a field out
+        // of a line of CSV is what `io.csv` is for, and a row that re-does the
+        // reader's work inside a mapping invites a program to parse its own
+        // input twice. It was `split_part`'s only user.
+        "parse.csv_row",
+        // The `anon.` namespace goes entirely. Anonymisation is a DECLARED
+        // POLICY the writer applies; the language names no anonymisation
+        // operator. `anon.hash` was also `sha256`'s last user, which is why
+        // `fossil-df` leaves `crypto_expressions` off.
+        "anon.hash",
+        "anon.redact",
     ] {
         assert!(r.lookup(gone).is_none(), "`{gone}` must not exist");
     }

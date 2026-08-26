@@ -13,8 +13,6 @@ you are mid-line: you have a value, you want to know what you can do to it.
 | [`math`](#a-number) | a number |
 | [`core`](#core) | the two that belong nowhere else |
 | [`parse`](#parse) | text you want as something else |
-| [`validate`](#validate) | text that has to look like something |
-| [`anon`](#anon) | text you do not want to publish |
 | [`io`](#io) | nothing — the readers are what make the thing |
 
 **Every table below is generated and the prose between them is written.** The rows come out of the
@@ -84,8 +82,8 @@ these four by reading the table above.
 `core.lang("Bonjour", tag = "fr")` is a language-tagged literal. There is no `dir` argument.
 
 A column the source declares as nullable is a `T?`, and a shape that requires a value will not take
-one. `require` is how you say the value is there; it is written over `String` rather than over a type
-variable for the reason given above.
+one. There is no operator that turns one into the other: `core.require` did that by raising, and
+raising is what the execution engine has no spelling for.
 
 ## `parse`
 
@@ -95,29 +93,28 @@ variable for the reason given above.
 
 <Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
 
-`parse.json` takes a path and gives back a `String`, not a schema and a `T` — schema-directed parsing
-has no surface syntax yet. It extracts the string rather than the JSON, so on `{"a":"x"}` you get
-`x`, without the quotes ending up inside your data. `parse.csv_row` takes a separator and a field
-index and gives back that one field. `parse.decimal` differs from `parse.float` in refusing what will
-not fit: `'1e400'` is an error there and an infinity here.
+`parse.decimal` differs from `parse.float` in refusing what will not fit: `'1e400'` is an error there
+and an infinity here.
 
-## `validate`
+There is no `parse.json`: it needed a JSON extraction the execution engine does not ship, and
+schema-directed parsing — a path and a `T`, rather than a path and a `String` — is what the row
+should have been in the first place. There is no `parse.csv_row` either; pulling one field out of a
+line of CSV is what `io.csv` is for.
 
-Each one returns its input unchanged when the input is well formed.
+## What is not here
 
-<include>../../generated/stdlib.mdx#validate</include>
+Two namespaces have been deleted from the language, and each for its own reason.
 
-All five have exactly that shape — the value or an error, never a null — and a `NULL` input passes
-through untouched. That includes `validate.regex`, which hands the string back rather than answering
-whether the pattern matched: a `String` in and a `Bool` out is `str.contains`, and it already exists.
+`validate` was five rows sharing one shape — the value or an error, never a null — and that shape is
+a raise. The engine that writes a corpus has no way to raise from an expression, so not one of the
+five could run. `validate.regex` is the instructive one: it lowered to a bare match, which the engine
+renders happily as a `Bool`, under a row declaring `String` — so a mapping that validated a code
+wrote `true` into it and nothing failed. Renderable and wrong is worse than absent.
 
-## `anon`
-
-<include>../../generated/stdlib.mdx#anon</include>
-
-`anon.hash` with a salt is the usual way to build an identity out of something you must not put in an
-IRI, and `salt` is a parameter rather than a convenience: a hash of an email with no salt is a
-rainbow-table lookup. There is no `algo` argument; the row hashes with SHA-256.
+`anon` was two rows, and it is a change of design rather than of engine. Anonymisation is a policy
+you declare once for a corpus and the writer applies, so the language names no anonymisation
+operator. `anon.hash(x, salt = "…")` put the salt in the program text at every call site and made
+"is this column anonymised?" a question you answered by reading every mapping.
 
 ## `io`
 

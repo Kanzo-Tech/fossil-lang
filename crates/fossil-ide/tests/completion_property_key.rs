@@ -443,21 +443,43 @@ fn every_position_that_is_not_a_key_keeps_its_catalogue() {
     let mut db = host();
     let shop = program(&mut db, SHOP);
     let blank = program(&mut db, BLANK);
+    // **Derived, not written down.** These were the literals `50` and `12` —
+    // the catalogue's size and the relation's member count at the time the
+    // table above was measured — and they went stale the moment a namespace was
+    // deleted. What the test is about is that a non-key position offers the
+    // catalogue WHOLE, which is a claim about a number matching, not about a
+    // number being 50. The doc table above keeps its figures because it records
+    // a measurement taken on a particular day; these have to track the tree.
+    let whole = fossil_hir::stdlib::stdlib().iter().count();
+    let verbs = fossil_hir::stdlib::stdlib()
+        .members_of(fossil_hir::stdlib::Receiver::Relation)
+        .count();
+    assert!(
+        whole > verbs && verbs > 0,
+        "the catalogue yielded {whole} rows and {verbs} verbs; a count assertion \
+         against an empty catalogue passes vacuously"
+    );
     // (fixture, line, character, expected FUNCTION count, what it is)
     let cases: &[(SourceFile, u32, u32, usize, &str)] = &[
-        (shop, 0, 0, 50, "the start of the file"),
-        (shop, 1, 4, 50, "top level, outside any mapping"),
-        (shop, 2, 3, 50, "the mapping header"),
-        (shop, 3, 16, 50, "`User` on the right of `=`"),
-        (shop, 3, 17, 12, "`User.` — the relation verbs, untouched"),
+        (shop, 0, 0, whole, "the start of the file"),
+        (shop, 1, 4, whole, "top level, outside any mapping"),
+        (shop, 2, 3, whole, "the mapping header"),
+        (shop, 3, 16, whole, "`User` on the right of `=`"),
+        (
+            shop,
+            3,
+            17,
+            verbs,
+            "`User.` — the relation verbs, untouched",
+        ),
         (
             shop,
             3,
             4,
-            50,
+            whole,
             "the column before the key's first character",
         ),
-        (blank, 4, 4, 50, "a still-blank body line"),
+        (blank, 4, 4, whole, "a still-blank body line"),
     ];
     for (f, line, character, expected, what) in cases {
         let items = fossil_ide::completions(&db, &[*f], *f, *line, *character);

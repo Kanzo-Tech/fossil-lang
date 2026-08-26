@@ -234,7 +234,11 @@ impl SigTy {
     }
 
     /// The `fossil_hir::stdlib::SigTy` expression this spelling denotes.
-    fn rust_path(self) -> &'static str {
+    ///
+    /// Public because the round-trip guard derives `Debug`'s spelling from it
+    /// rather than carrying a second table of the same twelve names.
+    #[must_use]
+    pub fn rust_path(self) -> &'static str {
         match self {
             Self::String => "SigTy::Scalar(ScalarTy::String)",
             Self::Integer => "SigTy::Scalar(ScalarTy::Integer)",
@@ -474,9 +478,11 @@ impl Parser {
     }
 
     fn eat_punct(&mut self, p: &str) -> bool {
-        if self.peek() == Some(&Tok::Punct(
-            PUNCT.iter().find(|q| **q == p).expect("a known punct"),
-        )) {
+        if self.peek()
+            == Some(&Tok::Punct(
+                PUNCT.iter().find(|q| **q == p).expect("a known punct"),
+            ))
+        {
             self.pos += 1;
             true
         } else {
@@ -485,7 +491,11 @@ impl Parser {
     }
 
     fn expect_punct(&mut self, p: &str) {
-        assert!(self.eat_punct(p), "catalogue.bnf: expected `{p}`, found {:?}", self.peek());
+        assert!(
+            self.eat_punct(p),
+            "catalogue.bnf: expected `{p}`, found {:?}",
+            self.peek()
+        );
     }
 
     fn word(&mut self) -> String {
@@ -635,10 +645,7 @@ fn parse_row(p: &mut Parser) -> Row {
                 while matches!(p.peek(), Some(Tok::Str(_))) {
                     extensions.push(p.string());
                 }
-                assert!(
-                    !extensions.is_empty(),
-                    "row `{name}` declares no extension"
-                );
+                assert!(!extensions.is_empty(), "row `{name}` declares no extension");
             }
             "reads" => {
                 let what = p.word();

@@ -136,7 +136,7 @@ pub struct FunctionRegistry {
 /// The three variants are the three things the grammar says can stand on the
 /// left, reduced to what the checker can actually dispatch on:
 ///
-/// - [`Self::Namespace`] — `io`, `core`, `parse`, `math`, `validate`, `anon`.
+/// - [`Self::Namespace`] — `io`, `core`, `parse`, `math`.
 ///   A name, not a value: there is nothing to dispatch on, so the entry is
 ///   reached by its dotted spelling and only that. `io` is the clearest case —
 ///   its entries **create** the thing, so they cannot have a receiver.
@@ -757,7 +757,6 @@ impl FunctionRegistry {
         }
         Self { entries }
     }
-
 
     /// Lookup a row by fully-qualified dotted name — the TYPE path,
     /// `str.trim(x)`. Returns `None` if the name is unknown.

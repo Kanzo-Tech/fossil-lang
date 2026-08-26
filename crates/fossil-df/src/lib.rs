@@ -1599,8 +1599,15 @@ impl TemplateReader<'_> {
             }
             let df_name = crate::stdlib::datafusion_name(&name)
                 .ok_or_else(|| format!("calls `{name}`, which has no DataFusion equivalent"))?;
+            // BOTH function packages, and the second one is why `str.split`
+            // renders. `all_default_functions()` is the SCALAR package alone;
+            // `string_to_array` — what `string_split` reconciles to — lives in
+            // the nested package, which the `nested_expressions` feature brings
+            // in. Enabling the feature and not looking here left the row exactly
+            // as unrenderable as before, under a Cargo.toml that said otherwise.
             let udf = datafusion::functions::all_default_functions()
                 .into_iter()
+                .chain(datafusion::functions_nested::all_default_nested_functions())
                 .find(|u| u.name() == df_name || u.aliases().iter().any(|a| a == df_name))
                 .ok_or_else(|| {
                     format!("calls `{name}` → `{df_name}`, which is not a DataFusion function")

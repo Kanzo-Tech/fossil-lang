@@ -60,7 +60,24 @@ serde_yaml_ng = { workspace = true }
 # (Apple's system clang lacks the wasm target; `brew install llvm` provides one.)
 # Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
 # subcrates — deferred. The wasm CI job must install LLVM.
-datafusion = { version = "54", default-features = false, features = ["parquet"] }
+#
+# `nested_expressions` is ON because a catalogue row asked for it, and that is
+# the only reason a feature is on here. `str.split` lowers to `string_split`,
+# which reconciles to DataFusion's `string_to_array` — a function that lives in
+# the nested-expressions package and is therefore absent from
+# `all_default_functions()`. The row was UNRENDERABLE on this engine for want of
+# a feature flag, which is a different thing from unrenderable for want of a
+# capability, and it was filed beside the ones that cannot be done at all.
+#
+# `crypto_expressions` is deliberately OFF. It is the sibling package, and its
+# `sha256` had exactly one consumer — `anon.hash` — which is gone from the
+# language: anonymisation is a declared policy the writer applies, not an
+# operator a program names. Turning it on would grow the wasm surface for a
+# function no template says.
+datafusion = { version = "54", default-features = false, features = [
+  "parquet",
+  "nested_expressions",
+] }
 # The single Arrow→Parquet encoder, shared native+wasm (universal-substrate
 # decision: one parquet-rs encoder, no parquet-wasm JS). `default-features =
 # false` + `arrow` keeps it pure-Rust (no compression C deps) → wasm-clean; the

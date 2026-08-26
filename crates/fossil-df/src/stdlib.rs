@@ -32,7 +32,6 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         "lower" => "lower",
         "replace" => "replace",
         "round" => "round",
-        "sha256" => "sha256",
         "starts_with" => "starts_with",
         "substring" => "substr",
         "trim" => "btrim",
@@ -41,25 +40,31 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         // nine `InlineForm` variants used to hide in a doc-comment, so they
         // could never appear here before ruling 15.
         "regexp_replace" => "regexp_replace",
-        "split_part" => "split_part",
-        // The four that differ.
-        "regexp_matches" => "regexp_like",
+        // The two that differ.
+        //
+        // `string_to_array` lives in the NESTED function package, not the
+        // scalar one, so `str.split` needs both the `nested_expressions` feature
+        // and a lookup that searches both — see `render_expr_template`. It was
+        // filed as unrenderable for want of those, beside rows that cannot be
+        // done at all.
         "string_split" => "string_to_array",
         "strptime" => "to_timestamp",
-        // `error()` has NO DataFusion equivalent, and it is the single reason
-        // the four validators do not render on this engine. Naming it here as a
-        // `None` rather than leaving it to fall through the catch-all is the
-        // difference between a gap that is declared and a gap that is a typo.
-        "error" => return None,
-        // `json_extract_string` is DuckDB's; DataFusion ships no JSON
-        // extraction in its default function set. The name here was
-        // `json_extract`, which no template says any more: that one returns
-        // DuckDB's `JSON` type against a row declaring `String`.
-        "json_extract_string" => return None,
         // Aggregates are not scalar expressions: `math.sum` in a property
-        // position is a different feature (a pipeline with a group-by), and F5
-        // is where it lands. Saying so beats emitting a call that plans wrong.
+        // position is a pipeline with a group-by, which is a different feature.
+        // Saying so beats emitting a call that plans wrong.
+        //
+        // These four are the WHOLE of `UNREACHABLE_ON_DATAFUSION` now, and they
+        // are not a capability gap: `math.sum` is how a `group_by`'s
+        // aggregations are SPELLED, and `RegistryEntry::agg_fn` turns the row
+        // into the `AggFn` that `fossil_mir::lower` reads. Only the scalar
+        // rendering is missing, and only a scalar rendering should be.
         "avg" | "max" | "min" | "sum" => return None,
+        // `error`, `json_extract_string`, `split_part` and `regexp_matches`
+        // stood here and are gone with the rows that named them
+        // (`core.require` + `validate.*`, `parse.json`, `parse.csv_row`, and
+        // `validate.regex` respectively). `no_mapping_is_dead` below is what
+        // keeps this list from outliving its templates again — the arms used to
+        // be an append-only record of names once seen.
         _ => return None,
     })
 }
@@ -74,47 +79,28 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
 /// The catalogued functions this engine cannot render, pinned so that making
 /// one work — or breaking one — is a diff in this list and not a surprise in a
 /// user's program.
+///
+/// **It is down to one cause from four, and that is the change worth reading.**
+/// Three of the four were not capability gaps at all:
+///
+/// - `str.split` and `anon.hash` recorded a Cargo feature and a lookup that
+///   searched one function package. `string_to_array` and `sha256` are real
+///   DataFusion functions living in the nested and crypto packages, absent from
+///   `all_default_functions()`. `str.split` renders now — `nested_expressions`
+///   is on and `render_expr_template` searches both packages — and `anon.hash`
+///   left the language, which is why `crypto_expressions` stays off.
+/// - `core.require` and the five `validate.*` rows needed `error()`, which has
+///   no DataFusion spelling: there is no way to raise from an expression. They
+///   are deleted from the language rather than carried as a permanent gap.
+/// - `parse.json` needed a JSON extraction DataFusion does not ship. Also
+///   deleted.
+///
+/// What is left is the four aggregates, and they are here for a reason that is
+/// not a gap either: an aggregate in a SCALAR position is a pipeline with a
+/// group-by, and only the scalar rendering is missing. They remain the spelling
+/// of a `group_by`'s aggregations — see `datafusion_name`.
 #[cfg(test)]
-const UNREACHABLE_ON_DATAFUSION: &[&str] = &[
-    // Four causes, and they are different. Every one of them was MEASURED by
-    // the test below planning the real template, not guessed from a name.
-    //
-    // 1 — `sha256` and `string_to_array` are real DataFusion functions that are
-    //     not in `all_default_functions()`: they live in optional function
-    //     packages this crate does not register. A `SessionContext` that
-    //     registered them would make these two render with no other change.
-    "anon.hash",
-    "str.split",
-    // 2 — `error()`. There is no way to raise from a DataFusion expression, so
-    //     "return this value or stop the run" has no spelling. It is the sole
-    //     cause for all six.
-    //
-    //     `validate.regex` is the newcomer, and its arrival is the shape of the
-    //     fix rather than a regression: it lowered to a bare `regexp_matches`,
-    //     which this engine renders happily — as a BOOLEAN, under a row
-    //     declaring `String`. Renderable and wrong became unrenderable and
-    //     declared, which is the trade this list exists to make visible.
-    "core.require",
-    "validate.email",
-    "validate.iso_date",
-    "validate.regex",
-    "validate.url",
-    "validate.uuid",
-    // 3 — the aggregates are not scalar calls at all: `math.sum` in a property
-    //     position is a pipeline with a group-by, which is F5.
-    "math.avg",
-    "math.max",
-    "math.min",
-    "math.sum",
-    // 4 — `json_extract` is DuckDB's; DataFusion ships no JSON extraction.
-    "parse.json",
-    // WHAT IS NOT HERE ANY MORE, and it is the point of ruling 15 on this
-    // engine: `str.slug` and `str.strip_html`. They were native Rust UDFs whose
-    // logic lived inside `fossil-layout`'s DuckDB trampolines, unreachable
-    // from this crate by construction. As templates they render here, because a
-    // template is portable in a way a UDF is not. `clean.strip_html` was the
-    // name in this list; the row is `str.strip_html` now and it is renderable.
-];
+const UNREACHABLE_ON_DATAFUSION: &[&str] = &["math.avg", "math.max", "math.min", "math.sum"];
 
 #[cfg(test)]
 mod tests {
@@ -174,5 +160,91 @@ mod tests {
                 "`{name}` must render on DataFusion"
             );
         }
+    }
+
+    /// **Every arm of `datafusion_name` is named by some catalogue template.**
+    ///
+    /// The reconciliation table is append-only by nature: a row leaves the
+    /// language and its function names stay behind, spelling out a mapping for
+    /// text nothing writes. Four arms had already outlived their rows —
+    /// `error`, `json_extract_string`, `split_part` and `regexp_matches` — and
+    /// nothing was red, because a mapping nobody reaches cannot be wrong.
+    ///
+    /// It reads this file as text rather than taking a hand-written list of the
+    /// arms, which is the shape `xtask`'s `registry_is_shared` and
+    /// `packages/introspect`'s parity test both use: derive the guard from the
+    /// original instead of repeating it. A second list here would need the same
+    /// guard one level up.
+    ///
+    /// **What it cannot prove:** that a mapping is CORRECT. That `substring`
+    /// should become `substr` and not `substring` is a fact about DataFusion,
+    /// and the test above — which plans every template through the real
+    /// renderer — is what would catch it being wrong.
+    #[test]
+    fn no_mapping_is_dead() {
+        // The names every surviving template actually calls. A template is SQL,
+        // so a call is an identifier followed by `(`; `CAST` and `CASE` are
+        // keywords the reader handles itself and are excluded by being
+        // upper-case, which no catalogued function name is.
+        let mut called: Vec<String> = Vec::new();
+        for entry in stdlib().iter() {
+            let LoweringKind::Expr(t) = &entry.lowering else {
+                continue;
+            };
+            let chars: Vec<char> = t.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                if !(chars[i].is_ascii_alphabetic() || chars[i] == '_') {
+                    i += 1;
+                    continue;
+                }
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let word: String = chars[start..i].iter().collect();
+                if chars.get(i) == Some(&'(') && word.chars().any(|c| c.is_ascii_lowercase()) {
+                    called.push(word);
+                }
+            }
+        }
+
+        // The arms, read off this file. Each is `"a" => …` or `"a" | "b" => …`
+        // inside `datafusion_name`, and nothing else in the function is a string
+        // literal on a line with a `=>`.
+        let source = include_str!("stdlib.rs");
+        let body = source
+            .split_once("pub fn datafusion_name")
+            .expect("the function is in this file")
+            .1;
+        let body = body.split_once("\n}\n").expect("the function ends").0;
+
+        let mut dead: Vec<String> = Vec::new();
+        for line in body.lines() {
+            let line = line.trim();
+            if line.starts_with("//") || !line.contains("=>") {
+                continue;
+            }
+            let arm = line.split_once("=>").expect("checked").0;
+            for name in arm.split('"').skip(1).step_by(2) {
+                if !called.iter().any(|c| c == name) {
+                    dead.push(name.to_owned());
+                }
+            }
+        }
+
+        assert!(
+            dead.is_empty(),
+            "`datafusion_name` maps {dead:?}, which no catalogue template calls. \
+             A row left the language and its reconciliation stayed behind; delete \
+             the arm."
+        );
+        // The guard is worthless if the scan found nothing to scan.
+        assert!(
+            called.len() > 10,
+            "only {} template calls were found; a mapping check over an empty \
+             corpus passes vacuously",
+            called.len()
+        );
     }
 }

@@ -25,7 +25,7 @@ Readings : Reading from Valid
     label    = str.lower(str.trim(Row.label))
     // #endregion two-paths
     // #region named-arguments
-    operator = anon.hash(Row.operator, salt = "lab")
+    operator = str.slice(Row.operator, start = 2)
     taken_on = parse.date(Row.taken_on, format = "%d %b %Y")
     // #endregion named-arguments
     celsius  = Row.celsius
