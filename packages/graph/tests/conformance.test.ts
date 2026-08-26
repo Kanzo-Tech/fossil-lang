@@ -35,6 +35,7 @@ interface Case {
   name: string;
   root: string;
   on_disk: boolean;
+  container?: 'files' | 'rowgroups';
   types?: Array<{ type: string; prefix: string; chunk_size: number; shift: number }>;
   edges?: Array<{
     edge_type: string;
@@ -102,6 +103,12 @@ describe('the conformance corpus', () => {
       }
 
       const corpus: ResolvedCorpus = resolveCorpus({ manifestFiles: manifestFiles(root) });
+
+      it('reads the container off the manifest', () => {
+        // The one thing about a corpus a reader cannot work out: working it out means listing a
+        // directory, and there is no listing over HTTP. Every path below is what it decides.
+        expect(corpus.container).toBe(expected.container);
+      });
 
       it('resolves the vertex types the table declares', () => {
         expect(

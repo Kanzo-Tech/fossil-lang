@@ -13,6 +13,7 @@
       "root": "corpus",
       "on_disk": true,
       "about": "300 vertices in 5 tiles of 64, both orientations tiled. Passes every guard — `node guards/check.mjs conformance/corpus` — so every address below names a file that is there.",
+      "container": "files",
       "types": [
         {
           "type": "Person",
@@ -123,6 +124,7 @@
       "root": "manifests/csr-only",
       "on_disk": false,
       "about": "The corpus every fossil release before the target half was tiled produced: one `adj_lists` entry, `aligned_by: src`. A reader that composes `by_target/tile{k}.parquet` from the convention rather than from the manifest gets a 404 in a browser with no type error and no failing test. This case is the one that has to refuse.",
+      "container": "files",
       "types": [
         { "type": "Person", "prefix": "vertex/Person/", "chunk_size": 4096, "shift": 12 }
       ],
@@ -178,6 +180,7 @@
       "root": "manifests/unaddressable",
       "on_disk": false,
       "about": "Both orientations declared, and the target one carries no `prefix`. `prefix` is the one part of a tile's URL a reader cannot compute, so an `adj_lists` entry without one declares a capability with no address behind it — which reads exactly like the tiled case to anything that counts entries.",
+      "container": "files",
       "types": [
         { "type": "Person", "prefix": "vertex/Person/", "chunk_size": 4096, "shift": 12 }
       ],
@@ -219,6 +222,7 @@
       "root": "manifests/cross-type",
       "on_disk": false,
       "about": "`Author authored Paper`, with the two types on different tile sizes. This is where one shift for both endpoints stops being right and starts being wrong quietly: `by_target` tile 1 of this edge is `Paper`'s tile 1, which has nothing to do with `Author`'s tile 1.",
+      "container": "files",
       "types": [
         { "type": "Author", "prefix": "vertex/Author/", "chunk_size": 64, "shift": 6 },
         { "type": "Paper", "prefix": "vertex/Paper/", "chunk_size": 128, "shift": 7 }
@@ -294,6 +298,67 @@
       "on_disk": false,
       "about": "The edge declares tiles of 8,192 against a vertex type cut at 4,096. Every URL still composes and most of the files it names still exist, which is why this is refused at resolve rather than at the first request. It lived as a comment in a reader — `src_chunk_size equals the source type's chunk_size` — and a comment is not a check.",
       "resolve_throws": "src_chunk_size 8192 against Person's chunk_size 4096"
+    },
+    {
+      "name": "rowgroups",
+      "root": "manifests/rowgroups",
+      "on_disk": false,
+      "about": "The other container, declared. `graph.graph.yml` says `container: rowgroups`, so every payload set of this corpus is ONE Parquet whose row groups are the tiles, and the address of a tile is that file plus what its footer says. The tiling is unchanged — same `chunk_size`, same shift, same orientations — and only the paths move. A reader that carried the file-per-tile composition here composes `chunk0.parquet` and `tile7.parquet`, both of which are 404, and it does so with no type error and nothing red. That is why the container is a manifest field and this is a case rather than a sentence.",
+      "container": "rowgroups",
+      "types": [
+        { "type": "Person", "prefix": "vertex/Person/", "chunk_size": 4096, "shift": 12 }
+      ],
+      "edges": [
+        {
+          "edge_type": "knows",
+          "src_type": "Person",
+          "dst_type": "Person",
+          "prefix": "edge/Person_knows_Person/",
+          "directions": ["src", "dst"],
+          "adjacencies": [
+            {
+              "direction": "src",
+              "prefix": "edge/Person_knows_Person/by_source/",
+              "column": "src_dense",
+              "chunk_size": 4096,
+              "shift": 12
+            },
+            {
+              "direction": "dst",
+              "prefix": "edge/Person_knows_Person/by_target/",
+              "column": "dst_dense",
+              "chunk_size": 4096,
+              "shift": 12
+            }
+          ]
+        }
+      ],
+      "tile_of": [
+        { "type": "Person", "dense_id": "4095", "tile": "0" },
+        { "type": "Person", "dense_id": "4096", "tile": "1" }
+      ],
+      "addresses": [
+        { "kind": "vertex", "type": "Person", "tile": 0, "path": "vertex/Person/tiles.parquet" },
+        { "kind": "vertex", "type": "Person", "tile": 4, "path": "vertex/Person/tiles.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "src", "tile": 7, "path": "edge/Person_knows_Person/by_source/tiles.parquet" },
+        { "kind": "edge", "edge_type": "knows", "direction": "dst", "tile": 7, "path": "edge/Person_knows_Person/by_target/tiles.parquet" }
+      ],
+      "refused": [],
+      "windows": [
+        {
+          "about": "Four tiles, three files. The addresses a window hands back are DISTINCT — `read_parquet` scans every element of its list, so a path named once per tile reads the relation once per tile, which is how a window holding 1,848 vertices came back with 9,240 over five tiles.",
+          "type": "Person",
+          "tiles": [0, 1, 2, 3],
+          "directions": ["src", "dst"],
+          "vertex_urls": ["vertex/Person/tiles.parquet"],
+          "edge_urls": [
+            "edge/Person_knows_Person/by_source/tiles.parquet",
+            "edge/Person_knows_Person/by_target/tiles.parquet"
+          ],
+          "complete": true,
+          "gaps": []
+        }
+      ]
     }
   ],
   "answers": {

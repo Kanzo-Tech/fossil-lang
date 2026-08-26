@@ -78,6 +78,71 @@
       }
     ]
   },
+  "tile_url": {
+    "formula": "files: <prefix><stem>{tile}.parquet · rowgroups: <prefix>tiles.parquet",
+    "container": "`container` on `graph.graph.yml`, and absent is `files`. It is a declaration and not something a reader works out: working it out means listing a directory, and there is no listing over HTTP.",
+    "stem": "the manifest's own spelling of the set — `chunk` for a vertex payload, `tile` for an identity index and for an adjacency orientation. It is not a naming preference: a reader that used one where the other belongs composes a name nothing wrote.",
+    "input": "a dataset-relative prefix with a trailing separator, and an unsigned 64-bit tile number",
+    "output": "one dataset-relative path. Under `rowgroups` many tiles share it, and a list that names it once per tile reads the set once per tile.",
+    "vectors": [
+      {
+        "container": "files",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "0",
+        "url": "vertex/Person/chunk0.parquet",
+        "why": "the first tile of a vertex payload, and the first file a reader opens in either container"
+      },
+      {
+        "container": "files",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "7",
+        "url": "vertex/Person/chunk7.parquet",
+        "why": "the address is in the name, so a file boundary sits between tile 7 and tile 8 and a request cannot cross it"
+      },
+      {
+        "container": "rowgroups",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "0",
+        "url": "vertex/Person/tiles.parquet",
+        "why": "the same set, one file. The stem is ignored, and a port that kept composing it addresses a corpus that is not there"
+      },
+      {
+        "container": "rowgroups",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "7",
+        "url": "vertex/Person/tiles.parquet",
+        "why": "the row that separates the containers: EVERY tile of a set is this one file, and which of its row groups the tile is comes from the footer. A reader that passes the same path once per tile scans the relation once per tile — measured at 9,240 vertices where a window holds 1,848, exactly five times over five tiles"
+      },
+      {
+        "container": "files",
+        "prefix": "edge/Person_knows_Person/by_source/",
+        "stem": "tile",
+        "tile": "3",
+        "url": "edge/Person_knows_Person/by_source/tile3.parquet",
+        "why": "an adjacency orientation, whose stem is `tile` and not `chunk`. The prefix is the one the `adj_lists` entry declares, never the convention that names it"
+      },
+      {
+        "container": "rowgroups",
+        "prefix": "edge/Person_knows_Person/by_source/",
+        "stem": "tile",
+        "tile": "3",
+        "url": "edge/Person_knows_Person/by_source/tiles.parquet",
+        "why": "one file per ORIENTATION and not per corpus: `by_target` has its own, because they are one relation stored twice and a reader filtering the wrong one answers a question nobody asked"
+      },
+      {
+        "container": "files",
+        "prefix": "vertex/Person/",
+        "stem": "chunk",
+        "tile": "9007199254740993",
+        "url": "vertex/Person/chunk9007199254740993.parquet",
+        "why": "2⁵³ + 1, where a composer that puts the tile through a JavaScript Number writes `chunk9007199254740992.parquet` — a file nothing wrote, composed with no error and no warning"
+      }
+    ]
+  },
   "morton2": {
     "formula": "morton = spread(x) | (spread(y) << 1)",
     "input": "two unsigned 16-bit quantised coordinates",

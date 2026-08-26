@@ -73,6 +73,11 @@ for (const expected of table.cases) {
 
   const corpus = resolve(root);
 
+  // Which container carries the tiles. It is the one thing about a corpus a reader cannot work out
+  // — working it out means listing a directory — so it is a manifest field, and it is pinned here
+  // rather than inferred from the paths below, which are what it decides.
+  same(`${label}: container`, corpus.container, expected.container);
+
   same(
     `${label}: vertex types`,
     corpus.types.map((t) => ({

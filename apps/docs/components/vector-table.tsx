@@ -19,7 +19,11 @@ interface Table {
  *
  * So the page renders the file, and `published-vectors` executes the same file.
  */
-export function VectorTable({ of }: { of: "tile_of" | "declared_count" | "morton2" | "quantize" }) {
+export function VectorTable({
+  of,
+}: {
+  of: "tile_of" | "tile_url" | "declared_count" | "morton2" | "quantize";
+}) {
   // Off the repo root, not off `process.cwd()`: the file lives with the checker that executes it,
   // and this page renders it from there rather than keeping a copy on this side of the tree.
   const path = join(repoRoot, "apps", "corpus", "guards", "vectors.json");
