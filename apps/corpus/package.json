@@ -7,12 +7,14 @@
   "//no-build": "There is no build here and no dependency to install. This was a Next.js site until the documentation was centralised — twelve pages with their own bundler, their own search index and nine runtime dependencies identical, version for version, to the ones next door. The pages are `apps/docs/content/docs/format/`; what stayed is the part that executes.",
   "//guards": "`guards/` has no npm dependencies and no build step. It needs `node` and the `duckdb` binary, so `pnpm check`, `pnpm self-test` and `pnpm fixture` run in a checkout where nothing has been installed — which is the position the third party this format is for is in.",
   "//conformance": "`conformance/` is the other half: the guards check that a corpus IS what the conventions say, and the conformance corpus checks that two readers ADDRESS it the same way. `pnpm test` runs the checked-in corpus through the guards and then runs `expected.json` — every address that must compose and every one that must be refused — through the plain-Node implementation here. The published module executes the same table from `packages/graph/tests/conformance.test.ts`, which is a **pnpm** test in another package: moving an address here turns it red and `node guards/self-test.mjs` will not tell you.",
+  "//containers": "`conformance/containers.mjs` is the third question, and it is the one a change of container has to pass BEFORE a writer emits one: the same graph written both ways answers identically. `packages/graph/tests/containers.test.ts` asks it of the published module. Two readers moved and diffed in advance is the whole rule — after the writer moves, the only corpus that exists is the new one and there is nothing left to compare against. It runs BEFORE `check.mjs conformance/corpus`, which is knowingly 16/17: the checked-in corpus still ships `by_source.parquet` beside `by_source/`, and it stays there until the writer emits one container (`a358383`) because `fossil-mcp` registers its views over that file. A step behind a knowingly-red one never runs.",
   "//test": "`pnpm test` is the guards' own self-test: a conforming corpus is written in both containers, every guard passes on it, and then every guard is required to FIRE against a corpus broken in exactly one way. There is deliberately no guard over the prose that describes this — one existed, it checked that a cited line existed rather than that it said what the page claimed, and 159 dead references accumulated under it with CI green throughout. A guard that measures the artifact is worth writing; a guard that measures a page's punctuation buys the appearance of one.",
   "scripts": {
-    "test": "node guards/self-test.mjs && node guards/check.mjs conformance/corpus && node conformance/verify.mjs",
+    "test": "node guards/self-test.mjs && node conformance/containers.mjs && node guards/check.mjs conformance/corpus && node conformance/verify.mjs",
     "check": "node guards/check.mjs",
     "self-test": "node guards/self-test.mjs",
     "fixture": "node guards/fixture.mjs",
-    "conformance": "node conformance/verify.mjs"
+    "conformance": "node conformance/verify.mjs",
+    "containers": "node conformance/containers.mjs"
   }
 }
