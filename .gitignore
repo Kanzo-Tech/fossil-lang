@@ -65,3 +65,11 @@ packages/executor/pkg/
 # one git index, and an untracked directory is exactly what a careless `git add`
 # sweeps up.
 .tmp/
+
+# Agent worktrees and per-user tool settings.
+# `.claude/worktrees/` is git's own machinery — a checked-in worktree directory is a
+# broken repository, not a stale one, so this is not the `.planning/` case above: there
+# is nothing here a reviewer could ever want to read in a diff. `settings.local.json`
+# is per-user by convention; a shared `settings.json` is not ignored and never should be.
+.claude/worktrees/
+.claude/settings.local.json
