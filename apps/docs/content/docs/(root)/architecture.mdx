@@ -17,7 +17,7 @@ graph LR
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 5 crates<br/>df · df-wasm · engine · cli · introspect"]
   C["<b>corpus</b> · 6 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver"]
-  X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
+  X["<b>no home</b> · 3 crates<br/>mem-probe · kanon · xtask"]
 
   E -->|17| L
   E -->|1| M
@@ -57,6 +57,13 @@ engine, three that started crossing against two that stopped — and it bought t
 return leg went from three edges to one. There are still two cores,
 but the stitch that closes the loop is one function.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
+
+`fossil-kanon` is filed under *no home* for a stronger reason than the other two: it has no
+dependents **and** no dependencies inside the tree, so it is the one node this diagram draws with no
+arrow at either end. It is a disclosure-control pass over Arrow arrays that nothing in the pipeline
+calls yet, and filing it beside a crate it does not touch would be filing it by hope.
+[Deriving k-anonymity](/docs/design/anonymity) is the argument for it and states what would give it
+a caller.
 
 What has **not** happened is everything below this diagram: `fossil-base` still holds a `tracked`
 query and the `@conn` locator, and `fossil-engine` is still a sack.

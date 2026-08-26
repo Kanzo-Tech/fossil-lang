@@ -1,0 +1,174 @@
+---
+title: Deriving k-anonymity
+description: Mondrian strict over Arrow, in the data holder's browser — why that algorithm and not Flash or Datafly, why deriving and verifying are two functions, and the four things the output is not.
+---
+
+`fossil-kanon` takes the quasi-identifier columns of a table, a k, and a generalisation hierarchy per
+column, and returns the generalised values plus a report. It is a port of **Mondrian**, strict, and
+it is the one crate here with no dependents and no dependencies inside the tree — see
+[the architecture](/docs/architecture).
+
+Nothing on crates.io does this. The search turned up one candidate, `diff-priv`, which is streaming
+microaggregation, was last published in 2022, and does not build for wasm32. OpenDP is differential
+privacy — a different guarantee, not a stronger version of this one — and vendors OpenSSL. ARX and
+Amnesia are the reference implementations of the generalisation literature and are JVM and Python.
+So it is a port rather than a dependency, and the sources are named in [prior art](/docs/design/prior-art).
+
+## wasm32 is the requirement, not a nice-to-have
+
+The reason to hold a k-anonymiser in this workspace at all is that it can run **where the microdata
+already is** — a browser tab on the data holder's machine, so the identified table never crosses a
+network to be de-identified. A pass that only runs server-side has already been handed the thing it
+exists to protect.
+
+That makes the wasm32 constraint the design's first input rather than a portability nicety, and it
+is what rules out most of the field before the algorithms are compared. The crate declares
+`[package.metadata.fossil] wasm = true`, which is what puts it in the closure that
+`cargo xtask wasm-check` derives; it holds four dependencies — two `arrow` sub-crates, `serde`,
+`thiserror` — and no threads, no filesystem and no clock. `rayon` is out for wanting threads. The same argument, from
+the other end, is [one engine](/docs/design/one-engine).
+
+## Mondrian strict, and the two that were not taken
+
+**Flash and Incognito** search a full generalisation lattice. That buys *global* recoding — an output
+where every cell of a column sits at one declared hierarchy level — and the price is a lattice to
+build, a quality-metric framework to order it by, and predictive tagging to prune it. That is ARX's
+decade of work, and this is not a reimplementation of it.
+
+**Datafly** was the closer call, and it deserves the sentence: it is small, it produces
+hierarchy-level output, and global recoding is exactly what the incomparability problem below wants.
+It generalises a whole column at a time, so one dense region of the table drags every other row up a
+level with it, and the published table comes out coarser — often far coarser — than multidimensional
+recoding needs for the same k. What is taken instead is a narrower fix for the specific harm:
+bucketed numeric publication, below, which recovers declared comparable values on numeric columns
+without giving up local partitioning. A levelled column — a postcode prefix, a date — publishes
+declared hierarchy nodes already and never had the problem.
+
+Both rejections, with what reverses them, are in [what was discarded](/docs/design/discarded).
+
+### Strict, and why there is no flag for the other one
+
+Mondrian cuts a dimension at the median. When the median value has many duplicates, every record
+holding it must fall on one side, so the sides come out unbalanced — and the *relaxed* variant fixes
+that by dealing the tied records across both sides. The two partitions then overlap on that
+dimension, the equivalence classes stop being determined by the published values, and classes
+smaller than k come out. Quietly: the row counts look balanced and nothing in the algorithm notices.
+
+Strict refuses the cut instead. A cut happens only when every side of it already holds k, and a
+dimension whose cut fails is struck off for that partition. There is no `relaxed` flag, no feature
+and no constructor, because a weaker guarantee reachable by a parameter is a weaker guarantee
+reachable by a typo.
+
+The consequence surprises people arriving from Datafly and is worth stating: **strict Mondrian
+barely suppresses.** It reaches k by declining to cut, not by withholding records. The only rows it
+withholds are the ones a null policy withheld before the search and the whole table when the table
+is smaller than k.
+
+## Deriving and verifying are two functions
+
+`anonymize` derives. `verify::assess` takes a table that is **already published** — the released
+quasi-identifier columns and a k — and reports the achieved k, the equivalence-class sizes and the
+rows below the bound. It imports no hierarchy and cannot generalise anything.
+
+That separation is load-bearing twice.
+
+**An auditor is not entitled to the sensitive column.** k-anonymity is a property of the
+quasi-identifier projection; the sensitive attribute appears nowhere in its definition. So a third
+party holding only `postcode`, `birth_year` and `sex` — Parquet files, no diagnosis column, no
+entitlement to one — computes the compliance answer in full. Had the check been reachable only
+through the function that derives, an auditor would have had to ask for data they must not be given
+in order to verify that the data they were given is safe. `crates/fossil-kanon/tests/audit.rs`
+imports neither `anonymize` nor the hierarchy module, and that omission is the test: if verification
+ever grows a need for either, the file stops compiling.
+
+**A verifier that shares the generaliser's assumptions verifies nothing.** `anonymize` runs its own
+output back through `assess` before returning it, and that check is worth something only because the
+class sizes are re-derived from the published strings rather than read off the partitions that
+produced them. `Report::suppressed_by_safety_net` counts what that pass withheld. It should always
+be zero — strict Mondrian cannot emit a short class — and it is reported because *should* is not
+*is*.
+
+It has already earned it. The property test refuted a rule this crate shipped with, in nine rows: a
+missing value was being counted towards k on **both** sides of a cut, on the reasoning that it
+publishes `*` there and is indistinguishable from either. True at the moment of the cut, false
+immediately after — the side it lands on gets cut again on another dimension and takes the wildcard's
+row with it, so the compatibility the *sibling* was allowed on the strength of does not survive, and
+nothing goes back to check the sibling. The verifier caught the short class before it was published.
+
+## The four things the output is not
+
+**It is not a hierarchy level, on numeric columns.** Mondrian is *local* recoding: each partition's
+span is computed from its own members, so two classes can publish `[29, 44]` and `[31, 58]` —
+overlapping spans that nest in no lattice. You cannot join two outputs on such a column, compare
+"the level reached" across runs, or roll one release up into another. The report encodes this in the
+type rather than in a footnote: a numeric column reports `ColumnLevels::Spans` and is given no level
+to misread, a levelled one reports `Levels`.
+
+**Its endpoints are not safe by default.** Mondrian's own output for a numeric dimension is
+`[min, max]` over the partition, and both of those are values a specific record actually holds. A
+published `[29, 61]` says exactly that someone in this class is 29 and someone is 61 — two
+attributes released in full, in the column whose entire purpose was to be generalised, and worst
+where the class is small. So publication is a named parameter. `EnclosingBucket` publishes the
+narrowest span of **declared** bucket edges enclosing the partition, which is a function of the
+hierarchy rather than of the data: it names no record, and two partitions landing in the same bucket
+publish the same string and merge into one larger class, so it can only raise the achieved k.
+`ObservedRange` is offered because it is what the literature reports its utility numbers against,
+and choosing it warns on every run.
+
+**Minimal is not safest.** Wong et al. showed that publishing the table an algorithm generalised
+*minimally* leaks: an adversary who knows the algorithm reasons backwards from where it stopped —
+it stopped here, so one more cut would have left a class below k, so that class had this shape — and
+recovers values the k-anonymous table appears to protect. Mondrian stops as soon as it can, so this
+crate produces exactly such a table. It is not defended against, and defending against it is a
+different algorithm rather than a flag.
+
+**k is not the whole of disclosure control.** It bounds re-identification, not attribute disclosure:
+a class of 50 records that all carry the same diagnosis discloses that diagnosis for all 50 while
+satisfying k = 50 comfortably. l-diversity and t-closeness answer that, they are properties of the
+**sensitive** column, and this crate never sees one.
+
+There is a fifth that is not about the algorithm: a quasi-identifier not declared is not protected.
+
+## Missing values, and the reading that comes naturally is wrong
+
+A null quasi-identifier is not a value. In disclosure-control semantics it is compatible with every
+value of the attribute, so the record is indistinguishable from the members of every class it could
+have belonged to — its anonymity set is larger than its class, not separate from it.
+
+The implementation that treats null as one more distinct value is the one that falls out of a
+group-by, and it is wrong in the unsafe direction: it collects the records with missing postcodes
+into a small class of their own and reports it as k-anonymous when it is a list of the people whose
+postcode nobody recorded. There is no such option in the API. What remains is `Wildcard` — publish
+`*`, count the record into every class it matches — and `Suppress` — withhold it and say so — and
+the choice is a parameter with no default, because the two give different numbers about the same
+file.
+
+`verify::WildcardPolicy` carries the same question for a published file, in both halves: which token
+means *any value*, and whether an Arrow null reads as that token.
+
+## What holds it
+
+> For any input and any k, every emitted equivalence class has at least k members, **or** its
+> records are counted as suppressed.
+
+That sentence is the whole promise and it is universally quantified, so it is asserted by a property
+test rather than by examples — `crates/fossil-kanon/tests/invariant.rs`. A privacy guarantee
+asserted by example is one asserted over the inputs its author thought of, and the inputs that break
+this algorithm are the ones nobody writes down: the median with k duplicates behind it, the column
+that is one value repeated, the k larger than the table, the table that is entirely nulls. Both
+counterexamples it has found so far are checked in as seeds.
+
+`tests/traps.rs` asserts the *shape* of the output rather than its safety, because a table
+generalised entirely to `*` satisfies every k and would pass the invariant. `tests/hierarchies.rs`
+reads the three shipped hierarchies from disk and generalises with them: hierarchies are declared
+data — dates, string prefixes, numeric buckets — as they are in Amnesia, and a hierarchy that parses
+into a value nobody generalises with is a fixture rather than data.
+
+## What would give it a caller
+
+Nothing in the pipeline calls it. It is a pass over Arrow arrays and the write path already holds
+Arrow arrays, so the mechanical fit is there and the missing piece is not mechanical: a program has
+no way to *say* which columns are quasi-identifiers, what generalises them, and what k the release
+targets. That is a surface question — it would be declarations in the language, checked by the type
+layer the way a shape is — and answering it is what turns this crate from a library into a stage.
+Until then it is a library, and the diagram draws it with no arrows because that is the truth.
