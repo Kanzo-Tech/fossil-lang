@@ -115,8 +115,8 @@ pub enum Container {
     /// `<prefix>chunk{k}.parquet`, `<prefix>tile{k}.parquet`.
     #[default]
     Files,
-    /// One Parquet per payload set, the address the row-group ordinal —
-    /// `<prefix>`[`TILES_FILE`]. What fossil writes.
+    /// One Parquet per payload set, the address the row-group ordinal, named by
+    /// [`TILES_FILE`] under the set's own prefix. What fossil writes.
     RowGroups,
 }
 

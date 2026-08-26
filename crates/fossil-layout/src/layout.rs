@@ -246,12 +246,13 @@ pub struct VertexLayoutTarget {
     pub type_name: String,
     /// Vertex Parquet URL (e.g. `file://…/vertex/Person.parquet`, `s3://…`).
     ///
-    /// This is the writer's single-file output and is **read, not written**: the
-    /// enriched vertices are emitted as chunks under [`Self::chunk_prefix`].
+    /// This is the writer's staged output and is **read, not written**: the
+    /// enriched vertices are emitted under [`Self::chunk_prefix`], and the
+    /// caller deletes this afterwards.
     pub vertex_parquet: String,
     /// Where the tiles go — the manifest's `prefix`, e.g. `…/vertex/Person/`,
-    /// trailing separator included. Files are named `chunk{k}.parquet`, which is
-    /// what the manifest declares.
+    /// trailing separator included. The set is one Parquet there, named by
+    /// `TILES_FILE`, and its row groups are the tiles.
     pub chunk_prefix: String,
     /// Rows per tile — the manifest's `chunk_size`. The manifest and the files
     /// have to agree, so this comes from whoever wrote the manifest rather than
@@ -436,9 +437,9 @@ pub enum LayoutError {
 /// self-edges, run [`community_hierarchy`] + [`cluster_layout`], derive the
 /// Morton rank of each vertex, and keep `dense_id → (new_dense_id, x, y,
 /// cluster_id)` as four arrays. The enriched vertices are then emitted **as tiles** under
-/// [`VertexLayoutTarget::chunk_prefix`] — `chunk{k}.parquet`, `chunk_size` rows
-/// each. The writer's single-file output is the input to this and is not written
-/// back.
+/// [`VertexLayoutTarget::chunk_prefix`] — one Parquet whose `k`th row group is
+/// tile `k`, `chunk_size` rows each. The writer's staged output is the input to
+/// this, is not written back, and is deleted by the caller.
 ///
 /// Then every adjacency: both endpoints remapped through their own type's
 /// mapping, and **re-sorted**, because the manifest declares `ordered: true` and

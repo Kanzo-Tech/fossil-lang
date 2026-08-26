@@ -492,7 +492,7 @@ fn enrich_written_layout(
             fossil_layout::layout::VertexLayoutTarget {
                 type_name: node.label.clone(),
                 vertex_parquet: path_str(format!("vertex/{}.parquet", node.label)),
-                // Trailing separator: the layout appends `chunk{k}.parquet`.
+                // Trailing separator: the layout appends the tiles file.
                 chunk_prefix: path_str(format!("vertex/{}/", node.label)),
                 // The same constant the manifest is written with, so the files
                 // and the promise cannot drift apart.
