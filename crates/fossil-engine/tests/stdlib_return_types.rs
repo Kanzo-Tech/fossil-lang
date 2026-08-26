@@ -212,5 +212,5 @@ fn every_op_row_returns_rows_except_the_one_that_counts_them() {
         Some(SigTy::Scalar(ScalarTy::Integer)),
         "`COUNT(*)` is a BIGINT"
     );
-    assert_eq!(op_rows.len(), 16, "13 `seq/` rows and 3 `io/` constructors");
+    assert_eq!(op_rows.len(), 15, "12 `seq/` rows and 3 `io/` constructors");
 }
