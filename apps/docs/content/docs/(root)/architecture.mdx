@@ -15,40 +15,47 @@ the finding, not a failure of the drawing.
 graph LR
   L["<b>language</b> · 9 crates<br/>base · syntax · hir · mir · lineage<br/>descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
-  M["<b>engine</b> · 7 crates<br/>df · df-wasm · engine · cli<br/>sinks · resolver · introspect"]
-  C["<b>corpus</b> · 4 crates<br/>graph · graph-wasm · mcp · layout"]
+  M["<b>engine</b> · 5 crates<br/>df · df-wasm · engine · cli · introspect"]
+  C["<b>corpus</b> · 6 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver"]
   X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|17| L
   E -->|1| M
   M -->|22| L
-  M -->|1| C
-  C -->|3| M
+  M -->|4| C
+  C -->|1| M
   X -->|1| L
   M -->|1| X
   C -->|1| X
 ```
 
-Twenty-five crates, forty-seven cross-group edges, and **one pair still runs both ways**. Measured
-2026-08-25 from `cargo metadata`, `[dependencies]` only — a test may depend on whatever it likes, so
-dev edges are out of scope here for the same reason they are in `content.test.ts`.
+**48 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
+likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
+reads the manifests and fails the build on any figure in this diagram that stops holding.
 
 The single `editor → engine` edge is `fossil-lsp → fossil-introspect`, and it is deliberate: without
 the columns a `DESCRIBE` finds, the editor is silent on every diagnostic whose evidence is a source's
 schema, which is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`.
 
-The mutual arrow is `engine ↔ corpus`, and naming the four edges is the whole of the finding:
+The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
-| engine → corpus | `fossil-engine → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
 | corpus → engine | `fossil-layout → fossil-df` | one function, `files::batches_to_parquet`, the single Arrow→Parquet encoder — moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
-| corpus → engine | `fossil-graph → fossil-sinks` | the manifest model, which is the format, filed under the engine by history rather than by subject |
-| corpus → engine | `fossil-mcp → fossil-resolver` | `@conn` rendering, a host concern wearing an engine label |
+| engine → corpus | `fossil-engine → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
+| engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
+| engine → corpus | `fossil-engine → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk |
+| engine → corpus | `fossil-introspect → fossil-resolver` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
-So there are two cores, stitched together in the wrong place — but the stitch is three named
-functions and not a crate boundary, and [one engine](/docs/design/one-engine) is where the filing
-gets settled.
+`fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole
+of the change: neither crate has a fossil dependency of its own, so a leaf changed groups and no
+code moved. It **cost** an edge — 47 before, 48 after, because `fossil-df → fossil-sinks`,
+`fossil-engine → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
+engine — and it bought the cycle: `fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver`
+are now inside `corpus`, so the return leg went from three edges to one. There are still two cores,
+but the stitch that closes the loop is one function.
+[One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
 
 What has **not** happened is everything below this diagram: `fossil-base` still holds a `tracked`
 query and the `@conn` locator, and `fossil-engine` is still a sack.
@@ -162,8 +169,9 @@ it does not touch the disk. It declares two ports instead: `ManifestSource::fetc
 `DuckExecutor::query_json`, **the only two real extension points in the entire workspace.**
 
 That last dependency is the manifest, and conforming to an existing graph interchange specification
-is already a [discarded alternative](/docs/design/discarded) — so the seam between the two cores is
-made of the one thing the design has ruled out.
+is already a [discarded alternative](/docs/design/discarded) — so the read surface's one remaining
+dependency is on the one thing the design has ruled out. Filing `fossil-sinks` under the corpus put
+that edge inside a group; it did not make it disappear.
 
 ```mermaid
 graph LR

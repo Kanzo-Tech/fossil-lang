@@ -119,12 +119,20 @@ describe("a declared direction is complete", () => {
  */
 const GRAPH_MANIFEST = "crates/fossil-graph/Cargo.toml";
 
-/** Enough of a TOML reader for one question: the `fossil-*` keys under `[dependencies]`. */
-function fossilDependenciesOf(manifest: string): string[] {
-  let section = "";
-  const found: string[] = [];
+interface Manifest {
+  /** The `[package] name`, because `xtask`'s is not its directory's name plus a prefix. */
+  name: string;
+  /** The `fossil-*` keys under `[dependencies]`, sorted. Dev and build edges are not read. */
+  deps: string[];
+}
 
-  for (const raw of readFileSync(manifest, "utf8").split("\n")) {
+/** Enough of a TOML reader for two questions: who a crate is, and which siblings it links. */
+function readManifest(path: string): Manifest {
+  let section = "";
+  let name = "";
+  const deps: string[] = [];
+
+  for (const raw of readFileSync(path, "utf8").split("\n")) {
     const line = raw.trim();
     if (line.startsWith("#")) continue;
 
@@ -134,11 +142,20 @@ function fossilDependenciesOf(manifest: string): string[] {
       continue;
     }
 
+    if (section === "package") {
+      const declared = /^name\s*=\s*"([^"]+)"/.exec(line);
+      if (declared) name = declared[1];
+    }
+
     const key = /^(fossil-[a-z0-9-]+)\s*=/.exec(line);
-    if (section === "dependencies" && key) found.push(key[1]);
+    if (section === "dependencies" && key) deps.push(key[1]);
   }
 
-  return found.sort();
+  return { name, deps: deps.sort() };
+}
+
+function fossilDependenciesOf(manifest: string): string[] {
+  return readManifest(manifest).deps;
 }
 
 describe("the graph core reaches the rest of the tree exactly once", () => {
@@ -150,6 +167,176 @@ describe("the graph core reaches the rest of the tree exactly once", () => {
 
   it("fossil-graph depends on fossil-sinks and on nothing else of ours", () => {
     expect(fossilDependenciesOf(join(repoRoot, GRAPH_MANIFEST))).toEqual(["fossil-sinks"]);
+  });
+});
+
+/**
+ * The group diagram on `architecture.mdx` is the whole of the grouping — there is no second file
+ * that files a crate under a subject — so the diagram is read as the declaration and the manifests
+ * are read as the truth.
+ *
+ * Five figures per drawing rot independently and none of them is visible in a diff: which crates a
+ * group holds, how many it says it holds, the number on each arrow, the total in the sentence
+ * below, and whether the whole thing is still a DAG. Every one of them was hand-counted before this
+ * guard existed, and hand-counting is how `xtask` gets mapped as `fossil-xtask` and one edge
+ * vanishes — 46 where the tree has 47.
+ *
+ * The page's `direction:` is *acyclic*, and it is one edge away. That last edge is named here
+ * rather than tolerated: remove `fossil-layout → fossil-df` and the group graph must have no cycle
+ * left at all, which makes the direction's closure condition a test rather than a promise.
+ *
+ * What this does NOT prove:
+ *
+ *   - **That the grouping is right.** Nothing can. It proves the drawing matches the tree, and a
+ *     crate filed under the wrong subject is a drawing that matches the tree perfectly.
+ *   - **Anything about a dev or build edge.** Same scope as the page: `[dependencies]` only.
+ *   - **That the excuse is good.** It pins the one excused edge in place, so deleting the excuse
+ *     without deleting the edge fails, and deleting the edge without rewriting the page fails too.
+ */
+const ARCHITECTURE = join(CONTENT_ROOT, "(root)/architecture.mdx");
+
+/**
+ * The one cross-group edge the page keeps, with its reason written beside it there: moving
+ * `files::batches_to_parquet` would put `arrow` + `parquet` into a browser bundle that has neither.
+ */
+const EXCUSED_EDGE: readonly [string, string] = ["fossil-layout", "fossil-df"];
+
+const crates: Manifest[] = readdirSync(join(repoRoot, "crates"))
+  .map((dir) => join(repoRoot, "crates", dir, "Cargo.toml"))
+  .filter(existsSync)
+  .map(readManifest);
+
+interface GroupNode {
+  /** The mermaid node id, which is what the arrows use. */
+  id: string;
+  name: string;
+  /** The count the label claims, kept apart from the list so the two can disagree. */
+  claimed: number;
+  members: string[];
+}
+
+/** The first mermaid fence of the page: the group diagram. The later ones draw crates. */
+function groupDiagram(): { nodes: GroupNode[]; arrows: Map<string, number> } {
+  const fence = /```mermaid\n([\s\S]*?)```/.exec(readFileSync(ARCHITECTURE, "utf8"))?.[1] ?? "";
+  const names = new Set(crates.map((c) => c.name));
+
+  const nodes: GroupNode[] = [];
+  for (const [, id, label] of fence.matchAll(/^\s*(\w+)\["([^"]+)"\]\s*$/gm)) {
+    const parts = /^<b>([^<]+)<\/b> · (\d+) crates<br\/>(.+)$/.exec(label);
+    if (!parts) continue;
+    nodes.push({
+      id,
+      name: parts[1],
+      claimed: Number(parts[2]),
+      // A crate is written without its prefix, except the one that has none.
+      members: parts[3]
+        .split(/<br\/>|·/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((short) => (names.has(short) ? short : `fossil-${short}`)),
+    });
+  }
+
+  const arrows = new Map<string, number>();
+  for (const [, from, count, to] of fence.matchAll(/^\s*(\w+)\s*-->\|(\d+)\|\s*(\w+)\s*$/gm)) {
+    arrows.set(`${from} -> ${to}`, Number(count));
+  }
+
+  return { nodes, arrows };
+}
+
+const { nodes: groups, arrows: declaredArrows } = groupDiagram();
+
+/** Which group each crate is drawn in. A crate nobody drew is absent, not defaulted. */
+const groupOf = new Map<string, string>(
+  groups.flatMap((g) => g.members.map((m) => [m, g.id] as const)),
+);
+
+/** Every cross-group `[dependencies]` edge, counted per ordered pair of groups. */
+function measuredArrows(skip: readonly (readonly [string, string])[] = []): Map<string, number> {
+  const out = new Map<string, number>();
+
+  for (const crate of crates) {
+    for (const dep of crate.deps) {
+      if (skip.some(([from, to]) => from === crate.name && to === dep)) continue;
+      const from = groupOf.get(crate.name);
+      const to = groupOf.get(dep);
+      if (!from || !to || from === to) continue;
+      const key = `${from} -> ${to}`;
+      out.set(key, (out.get(key) ?? 0) + 1);
+    }
+  }
+
+  return out;
+}
+
+function rendered(arrows: Map<string, number>): string[] {
+  return [...arrows].map(([edge, n]) => `${edge}: ${n}`).sort();
+}
+
+/** The first cycle over the group graph, named, or `undefined` if there is none. */
+function cycle(arrows: Map<string, number>): string | undefined {
+  const adjacent = new Map<string, string[]>();
+  for (const edge of arrows.keys()) {
+    const [from, to] = edge.split(" -> ");
+    adjacent.set(from, [...(adjacent.get(from) ?? []), to]);
+  }
+
+  const done = new Set<string>();
+  const walk = (node: string, path: string[]): string | undefined => {
+    if (path.includes(node)) return [...path.slice(path.indexOf(node)), node].join(" -> ");
+    if (done.has(node)) return undefined;
+    for (const next of adjacent.get(node) ?? []) {
+      const found = walk(next, [...path, node]);
+      if (found) return found;
+    }
+    done.add(node);
+    return undefined;
+  };
+
+  for (const node of adjacent.keys()) {
+    const found = walk(node, []);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+describe("the group diagram is the manifests", () => {
+  it("finds a diagram, and crates to check it against", () => {
+    expect(groups.length, "no group node parsed out of the first mermaid fence").toBeGreaterThan(1);
+    expect(declaredArrows.size, "no labelled arrow parsed").toBeGreaterThan(1);
+    expect(crates.length, "no crate manifest read").toBeGreaterThan(20);
+  });
+
+  it("files every crate exactly once", () => {
+    const filed = groups.flatMap((g) => g.members);
+    expect([...filed].sort()).toEqual(crates.map((c) => c.name).sort());
+  });
+
+  it.each(groups)("$name lists as many crates as it claims", ({ claimed, members }) => {
+    expect(members.length).toBe(claimed);
+  });
+
+  it("labels every arrow with the number of edges the manifests carry", () => {
+    expect(rendered(declaredArrows)).toEqual(rendered(measuredArrows()));
+  });
+
+  it("states the total the arrows add up to", () => {
+    const stated = /\*\*(\d+) cross-group edges\*\*/.exec(readFileSync(ARCHITECTURE, "utf8"));
+    expect(stated, "the page no longer states a cross-group total").not.toBeNull();
+    expect(Number(stated?.[1])).toBe([...declaredArrows.values()].reduce((a, b) => a + b, 0));
+  });
+
+  it("keeps the one edge the page excuses", () => {
+    const [from, to] = EXCUSED_EDGE;
+    expect(
+      crates.find((c) => c.name === from)?.deps,
+      `${from} no longer depends on ${to}: the direction may be closed, and the page has to say so`,
+    ).toContain(to);
+  });
+
+  it("is acyclic once that edge is removed", () => {
+    expect(cycle(measuredArrows([EXCUSED_EDGE]))).toBeUndefined();
   });
 });
 
