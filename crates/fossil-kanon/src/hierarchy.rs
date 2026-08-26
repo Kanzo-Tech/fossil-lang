@@ -72,7 +72,7 @@ pub struct Numeric {
 impl Numeric {
     /// Bucketed publication over the given edges — the presentation that leaks no record.
     #[must_use]
-    pub fn bucketed(buckets: Vec<f64>) -> Self {
+    pub const fn bucketed(buckets: Vec<f64>) -> Self {
         Self {
             buckets,
             presentation: NumericPresentation::EnclosingBucket,
@@ -80,7 +80,8 @@ impl Numeric {
     }
 
     fn validate(&self, column: &str) -> Result<(), crate::Error> {
-        if !self.buckets.windows(2).all(|w| w[0] < w[1]) || self.buckets.iter().any(|b| !b.is_finite())
+        if !self.buckets.windows(2).all(|w| w[0] < w[1])
+            || self.buckets.iter().any(|b| !b.is_finite())
         {
             return Err(crate::Error::BucketsNotAscending {
                 column: column.to_owned(),
@@ -174,7 +175,7 @@ impl Prefix {
         out
     }
 
-    pub(crate) fn depth(&self) -> usize {
+    pub(crate) const fn depth(&self) -> usize {
         self.lengths.len()
     }
 }
@@ -212,7 +213,7 @@ impl Date {
         }
     }
 
-    pub(crate) fn depth(&self) -> usize {
+    pub(crate) const fn depth(&self) -> usize {
         self.levels.len()
     }
 }
@@ -238,6 +239,10 @@ pub enum DateLevel {
 /// worth a fifth. The correctness of this function is not taken on trust — `tests/hierarchies.rs`
 /// checks it against the epoch, both Gregorian century rules, and every leap-day boundary in a
 /// four-century cycle.
+#[expect(
+    clippy::similar_names,
+    reason = "`doe`/`doy`/`yoe` are Hinnant's own names — day-of-era, day-of-year, year-of-era — and               renaming them for legibility is what would make this unreviewable against the source"
+)]
 fn civil_from_days(days: i32) -> (i32, u32, u32) {
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);

@@ -114,6 +114,20 @@
 //! assert_eq!(out.report.input_rows, 6);
 //! ```
 
+// Every module below `lib` is private, so `pub(crate)` on the items they share is redundant to
+// clippy and required by `unreachable_pub`, which the workspace turns on. The two lints want
+// opposite spellings of the same fact; the rust lint is the one that catches a real leak.
+#![allow(
+    clippy::redundant_pub_crate,
+    reason = "conflicts with the workspace's `unreachable_pub`; see above"
+)]
+// «OpenDP», «DeWitt», «Ramakrishnan», «LeFevre» — proper nouns of the literature this crate ports,
+// which `doc_markdown` reads as unbackticked identifiers. Backticking a surname is worse.
+#![allow(
+    clippy::doc_markdown,
+    reason = "the prior art is cited by author name, and a surname is not code"
+)]
+
 pub mod hierarchy;
 mod ingest;
 mod mondrian;
@@ -364,7 +378,10 @@ pub fn anonymize(qis: &[QuasiIdentifier], config: &Config) -> Result<Anonymized,
     let suppressed_by_null_policy = rows - live.len();
 
     if live.len() < k {
-        warnings.push(Warning::EverythingSuppressed { input_rows: rows, k });
+        warnings.push(Warning::EverythingSuppressed {
+            input_rows: rows,
+            k,
+        });
         return Ok(nothing_released(
             qis,
             &dims,
@@ -461,11 +478,16 @@ pub fn anonymize(qis: &[QuasiIdentifier], config: &Config) -> Result<Anonymized,
             rows: suppressed_by_safety_net,
         });
     }
-    if released_rows.is_empty() && !warnings.contains(&Warning::EverythingSuppressed {
-        input_rows: rows,
-        k,
-    }) {
-        warnings.push(Warning::EverythingSuppressed { input_rows: rows, k });
+    if released_rows.is_empty()
+        && !warnings.contains(&Warning::EverythingSuppressed {
+            input_rows: rows,
+            k,
+        })
+    {
+        warnings.push(Warning::EverythingSuppressed {
+            input_rows: rows,
+            k,
+        });
     }
 
     let mut released = vec![false; rows];
@@ -536,7 +558,7 @@ fn render(c: &Cell) -> String {
     }
 }
 
-fn presentation_of(h: &Hierarchy) -> NumericPresentation {
+const fn presentation_of(h: &Hierarchy) -> NumericPresentation {
     match h {
         Hierarchy::Numeric(n) => n.presentation,
         // Unreachable: only a numeric dimension reports spans.
@@ -546,10 +568,6 @@ fn presentation_of(h: &Hierarchy) -> NumericPresentation {
 
 /// The empty release. Every column is all-null, every row is withheld, and the report says which of
 /// the two reasons it was.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one call site; the alternative is a struct that exists to be destructured immediately"
-)]
 fn nothing_released(
     qis: &[QuasiIdentifier],
     dims: &[ingest::Dim],

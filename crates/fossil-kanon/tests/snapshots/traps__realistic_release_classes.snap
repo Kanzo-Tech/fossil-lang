@@ -1,0 +1,24 @@
+---
+source: crates/fossil-kanon/tests/traps.rs
+expression: out.assessment.classes
+---
+- values:
+    - "[18, 45)"
+    - SW*
+  exact_rows: 3
+  anonymity_set: 3
+- values:
+    - "[30, 45)"
+    - "*"
+  exact_rows: 3
+  anonymity_set: 3
+- values:
+    - "[45, 65)"
+    - "*"
+  exact_rows: 3
+  anonymity_set: 3
+- values:
+    - "[45, 80)"
+    - EC*
+  exact_rows: 3
+  anonymity_set: 3

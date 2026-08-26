@@ -35,6 +35,9 @@ use std::collections::BTreeMap;
 use crate::ingest::{Dim, Values};
 use crate::verify::Cell;
 
+/// The rows of one side of a numeric cut, paired with the values that put them there.
+type Side = Vec<(u32, f64)>;
+
 /// Where one partition sits on one dimension.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DimState {
@@ -190,6 +193,14 @@ fn try_split(dims: &[Dim], part: &Partition, d: usize, k: usize) -> Option<Vec<P
 ///
 /// The wildcards are still spent rather than wasted: they are dealt to the sides that need them to
 /// reach k, which lets a cut happen that neither side's real rows could have paid for alone.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "`d` is the dimension and `k` is k; both are the names the paper uses"
+)]
+#[expect(
+    clippy::float_cmp,
+    reason = "grouping duplicates of a value against itself — the equality is the definition of a               duplicate, not a tolerance question, and the values are never arithmetic results"
+)]
 fn split_numeric(
     part: &Partition,
     d: usize,
@@ -237,15 +248,11 @@ fn split_numeric(
         return None;
     }
 
-    let (left, right): (Vec<(u32, f64)>, Vec<(u32, f64)>) =
-        reals.iter().partition(|&&(_, v)| v <= split_val);
+    let (left, right): (Side, Side) = reals.iter().partition(|&&(_, v)| v <= split_val);
 
     // Strict: BOTH sides must satisfy k once the wildcards have been dealt out. A wildcard can pay
     // for one side or the other, never for both — see this function's docs.
-    let (need_l, need_r) = (
-        k.saturating_sub(left.len()),
-        k.saturating_sub(right.len()),
-    );
+    let (need_l, need_r) = (k.saturating_sub(left.len()), k.saturating_sub(right.len()));
     if need_l + need_r > nulls.len() {
         return None;
     }
@@ -400,6 +407,10 @@ pub(crate) fn publish(dim: &Dim, part: &Partition, d: usize) -> Published {
                 };
             };
             let span = Some(max - min);
+            #[expect(
+                clippy::float_cmp,
+                reason = "a one-value class publishes the value rather than a degenerate interval;                           the equality is between two elements of the same array, not a computation"
+            )]
             match presentation {
                 crate::hierarchy::NumericPresentation::ObservedRange => Published {
                     cell: Cell::Value(if min == max {

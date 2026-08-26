@@ -240,8 +240,8 @@ pub(crate) fn assess_cells(
     }
 
     let tuples: Vec<(Vec<Cell>, usize)> = counts.into_iter().collect();
-    let (wild, exact): (Vec<usize>, Vec<usize>) = (0..tuples.len())
-        .partition(|&i| tuples[i].0.iter().any(|c| *c == Cell::Wildcard));
+    let (wild, exact): (Vec<usize>, Vec<usize>) =
+        (0..tuples.len()).partition(|&i| tuples[i].0.contains(&Cell::Wildcard));
 
     let mut classes: Vec<EquivalenceClass> = tuples
         .iter()

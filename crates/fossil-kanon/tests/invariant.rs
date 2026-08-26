@@ -22,15 +22,12 @@ use fossil_kanon::verify::{ReleasedColumn, WildcardPolicy, assess};
 use fossil_kanon::{Anonymized, Config, NullPolicy, QuasiIdentifier, anonymize};
 use proptest::prelude::*;
 
+/// Ages, postcodes and birth dates — one column per hierarchy kind, all of one length.
+type Table = (Vec<Option<i32>>, Vec<Option<String>>, Vec<Option<i32>>);
+
 /// Three columns of one length, one of each hierarchy kind — the three shapes the partitioner has
 /// separate code paths for, exercised together so a cut on one interacts with a cut on another.
-fn table() -> impl Strategy<
-    Value = (
-        Vec<Option<i32>>,
-        Vec<Option<String>>,
-        Vec<Option<i32>>,
-    ),
-> {
+fn table() -> impl Strategy<Value = Table> {
     (0usize..40).prop_flat_map(|n| {
         (
             prop::collection::vec(prop::option::of(0i32..90), n),

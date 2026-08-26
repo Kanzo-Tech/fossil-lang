@@ -62,7 +62,7 @@ impl Values {
         }
     }
 
-    pub(crate) fn depth(&self) -> usize {
+    pub(crate) const fn depth(&self) -> usize {
         match self {
             Self::Numeric { .. } => 0,
             Self::Levelled { levels, .. } => levels.len(),
@@ -248,9 +248,11 @@ fn date(column: &str, array: &ArrayRef, decl: &Date) -> Result<Values, Error> {
                     out.push(None);
                 } else {
                     let days = a.value(i).div_euclid(MS_PER_DAY);
-                    out.push(Some(i32::try_from(days).map_err(|_| Error::DateOutOfRange {
-                        column: column.to_owned(),
-                        row: i,
+                    out.push(Some(i32::try_from(days).map_err(|_| {
+                        Error::DateOutOfRange {
+                            column: column.to_owned(),
+                            row: i,
+                        }
                     })?));
                 }
             }
@@ -267,7 +269,11 @@ fn date(column: &str, array: &ArrayRef, decl: &Date) -> Result<Values, Error> {
 
     Ok(ladder(
         (1..=decl.depth())
-            .map(|level| raw.iter().map(|v| v.map(|d| decl.value_at(level, d))).collect())
+            .map(|level| {
+                raw.iter()
+                    .map(|v| v.map(|d| decl.value_at(level, d)))
+                    .collect()
+            })
             .collect(),
     ))
 }

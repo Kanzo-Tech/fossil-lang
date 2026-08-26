@@ -1,0 +1,28 @@
+---
+source: crates/fossil-kanon/tests/traps.rs
+expression: out.report
+---
+k: 3
+input_rows: 12
+released_rows: 12
+suppressed_rows: 0
+suppressed_by_null_policy: 0
+suppressed_below_k: 0
+suppressed_by_safety_net: 0
+equivalence_classes: 4
+achieved_k: 3
+smallest_exact_class: 3
+columns:
+  - name: age
+    levels:
+      spans:
+        narrowest: 7
+        widest: 9
+        presentation: enclosing_bucket
+  - name: postcode
+    levels:
+      levels:
+        coarsest: 0
+        finest: 2
+        declared: 3
+warnings: []
