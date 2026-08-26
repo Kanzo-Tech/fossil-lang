@@ -2,26 +2,35 @@
 //!
 //! The corpus is read by a host with nothing to re-introspect with: it fetches
 //! `graph.graph.yml`, follows the per-type documents it names, and computes each
-//! tile's URL from `prefix` + `chunk_size` + the row count. Nothing is
-//! discovered by listing, so every one of those strings owes its existence.
+//! payload set's URL from `prefix` + the container the graph document declares.
+//! Nothing is discovered by listing, so every one of those strings owes its
+//! existence.
 //!
 //! It did not. `run` used to build a `RunStatus` from the executor's own view
 //! (`vertex/<Type>.parquet` — what `run_to_dir` writes) and then run the W3
 //! layout pass, whose LAST act is to delete exactly those files after tiling
-//! them into `vertex/<Type>/chunk{k}.parquet`. Nothing failed: the deletion
-//! succeeded, the status serialised, the CLI's own assertion
+//! them into `vertex/<Type>/`. Nothing failed: the deletion succeeded, the
+//! status serialised, the CLI's own assertion
 //! (`first["file"].starts_with("vertex/")`) held on a string, and the host got a
 //! 404 it had no way to attribute. The status is gone and the report is the
-//! manifest, which has always declared the chunk prefix — so the defect is not
+//! manifest, which has always declared the tile prefix — so the defect is not
 //! reachable by construction any more. This file is what says so out loud, and
 //! what would notice if some future pass moved a file the manifest names.
 //!
+//! **A payload set is one file whose row groups are its tiles** since `818218c`,
+//! so what the reader composes is `<prefix>tiles.parquet` and what addresses a
+//! tile inside it is the row-group ordinal. That moves the count out of the
+//! directory and into the footer: the tiles are still `ceil(vertex_count /
+//! chunk_size)`, and asking the file how many row groups it has is the same
+//! question the old `chunk{k}.parquet` listing asked of the directory.
+//!
 //! # What this cannot prove
 //!
-//! Edge tiles are not asserted. A tile with no rows is not written, so a missing
-//! `<edge prefix>by_source/tile{k}.parquet` is the answer «no edges in this
-//! tile» and not a hole — which means existence is the wrong predicate for them
-//! and only summing them against `edge_count` is the right one.
+//! Edge tiles are not asserted. An adjacency tile holds whatever edges its
+//! vertices happen to have, and one with none contributes no rows — so it gets
+//! no row group, the ordinals are dense where the tile numbers are not, and
+//! neither existence nor a count of row groups is a predicate arithmetic
+//! predicts. Only summing them against `edge_count` is right.
 //! `apps/corpus`'s `declared-count` guard is where that is done, over a corpus
 //! this crate does not write.
 
@@ -29,7 +38,7 @@
 
 use std::path::Path;
 
-use fossil_sinks::manifest::VertexInfo;
+use fossil_sinks::manifest::{TILES_FILE, VertexInfo};
 
 const PROGRAM: &str = "\
 type { Person } := io.shex(\"person.shex\")
@@ -50,14 +59,34 @@ ex:Person {
 
 const USERS: &str = "id,name\n1,Alice\n2,Bob\n3,Cleo\n";
 
-/// Every tile of one vertex type, addressed the way a reader addresses them:
-/// `ceil(vertex_count / chunk_size)` files named `chunk{k}.parquet` under the
-/// declared `prefix`. A reader computes this list before it emits a request, so
-/// a name it computes and cannot fetch is the failure.
-fn tiles(info: &VertexInfo) -> Vec<String> {
-    (0..info.vertex_count.div_ceil(info.chunk_size))
-        .map(|k| format!("{}chunk{k}.parquet", info.prefix))
-        .collect()
+/// The payload set of one vertex type, addressed the way a reader addresses it:
+/// [`TILES_FILE`] under the declared `prefix`. A reader composes this string
+/// before it emits a request, so a name it composes and cannot fetch is the
+/// failure.
+///
+/// It was a `Vec` of `ceil(vertex_count / chunk_size)` names — one per tile,
+/// each its own file. The tiles are row groups of this one file now, so the
+/// arithmetic is not a list of URLs any more; it is [`row_groups`], asked of the
+/// footer.
+fn payload(info: &VertexInfo) -> String {
+    format!("{}{TILES_FILE}", info.prefix)
+}
+
+/// How many tiles a payload set holds, read off its footer — one row group per
+/// tile, which is what makes an ordinal an address.
+fn row_groups(path: &Path) -> u64 {
+    let conn = duckdb::Connection::open_in_memory().expect("duckdb");
+    let count: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT count(DISTINCT row_group_id) FROM parquet_metadata('{}')",
+                path.display().to_string().replace('\'', "''")
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|e| panic!("read the footer of {}: {e}", path.display()));
+    u64::try_from(count).expect("a row-group count fits a u64")
 }
 
 /// Run the fixture program into a fresh dest and hand back both.
@@ -94,7 +123,7 @@ fn every_path_the_manifest_names_exists_on_disk() {
     let mut named = vec!["graph.graph.yml".to_string()];
     named.extend(report.graph.vertices.clone());
     named.extend(report.graph.edges.clone());
-    named.extend(report.vertices.iter().flat_map(tiles));
+    named.extend(report.vertices.iter().map(payload));
     assert!(named.len() > 1, "the manifest named nothing to fetch");
     for rel in named {
         assert!(
@@ -102,15 +131,36 @@ fn every_path_the_manifest_names_exists_on_disk() {
             "`{rel}` is what the manifest tells a reader to fetch, and it is not there"
         );
     }
+
+    // And the container that says how those strings are composed. It is the one
+    // thing about a tile's URL a reader is told rather than derives, so a corpus
+    // written with row groups and declaring `files` sends every reader to
+    // `chunk0.parquet` — a 404 nothing above would catch, because every path
+    // checked here is composed by the same side that wrote them.
+    //
+    // Read off the bytes and by line scan, for the reason the whole file exists:
+    // a struct agreeing with itself is what the deleted `RunStatus` also did,
+    // and deserialising through `GraphInfo` would prove that struct round-trips
+    // rather than that the artefact says anything. The spelling is transcribed
+    // because a stranger transcribes it too — `serde(rename_all = "lowercase")`
+    // over `Container::RowGroups` is what puts it there.
+    let graph_yaml =
+        std::fs::read_to_string(dest.join("graph.graph.yml")).expect("read the graph document");
+    assert!(
+        graph_yaml
+            .lines()
+            .any(|line| line.trim_end() == "container: rowgroups"),
+        "the graph document declares a container fossil does not write; got:\n{graph_yaml}"
+    );
 }
 
-/// And the specific shape of it: the vertices live under the chunk PREFIX the
+/// And the specific shape of it: the vertices live under the tile PREFIX the
 /// manifest declares, and the staged single-file Parquet the layout pass
 /// consumed is gone. Both halves, because «the tiles exist» would also pass if
 /// the pass had simply stopped deleting — which is the other fix, and the one
 /// that leaves a stale second copy of every vertex behind.
 #[test]
-fn the_vertices_are_the_chunk_prefix_and_the_staged_parquet_is_gone() {
+fn the_vertices_are_the_tile_prefix_and_the_staged_parquet_is_gone() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (dest, report) = run(&dir);
 
@@ -118,21 +168,45 @@ fn the_vertices_are_the_chunk_prefix_and_the_staged_parquet_is_gone() {
     assert_eq!(vertex.vertex_type, "Person");
     assert_eq!(
         vertex.prefix, "vertex/Person/",
-        "the chunk prefix, which is the string the layout pass tiles into"
+        "the tile prefix, which is the string the layout pass tiles into"
     );
     assert!(
         !Path::new(&dest.join("vertex/Person.parquet")).exists(),
         "the staged single-file Parquet is the layout pass's input and it is deleted"
     );
-    let chunks: Vec<_> = std::fs::read_dir(dest.join(&vertex.prefix))
+
+    // ONE payload file under the prefix, beside the identity index, and nothing
+    // else. It counted `.parquet` entries against the tile count, which is the
+    // same question asked of the container that existed then: `chunk{k}` files
+    // are gone, so the entry that must be there is `tiles.parquet` and a second
+    // `.parquet` beside it is two containers for one set of rows.
+    let mut emitted: Vec<String> = std::fs::read_dir(dest.join(&vertex.prefix))
         .expect("the prefix is a directory")
         .filter_map(std::result::Result::ok)
-        .filter(|e| e.file_name().to_string_lossy().ends_with(".parquet"))
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
         .collect();
+    emitted.sort();
     assert_eq!(
-        chunks.len(),
-        tiles(vertex).len(),
-        "the prefix holds the tiles the count implies, and no others"
+        emitted,
+        vec!["index".to_string(), TILES_FILE.to_string()],
+        "the prefix holds the payload and the index, and nothing else"
+    );
+
+    // And the tiles are in the footer, which is where the count moved: a
+    // directory listing answered it before, and a listing is the one thing the
+    // corpus is designed so nobody performs. Derived from the declaration rather
+    // than from the fixture, so it is the reader's own arithmetic.
+    //
+    // **Three rows at a `chunk_size` of 4,096 is one tile**, so what this can
+    // catch is a payload written with no row groups at all or with more than the
+    // count implies — not a writer that stopped cutting, because there is
+    // nothing here to cut. `tests/conformance.rs` is where that is separated,
+    // over ten thousand rows and three tiles, and it checks each tile's
+    // `dense_id` range as well as the count.
+    assert_eq!(
+        row_groups(&dest.join(payload(vertex))),
+        vertex.vertex_count.div_ceil(vertex.chunk_size),
+        "the payload's row groups are not the tiles `vertex_count` and `chunk_size` imply"
     );
 }
 

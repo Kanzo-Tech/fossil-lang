@@ -6,8 +6,8 @@
 //! program-resident (synthesised from the typed mapping — no `--shape`).
 //!
 //! This test goes deeper than mere existence — it asserts the **content** of
-//! the produced `vertex/Person.parquet` matches the mapping verbatim (5 Person
-//! vertices with the expanded subject IRIs `https://example.org/user/{1..5}`
+//! the produced `vertex/Person/tiles.parquet` matches the mapping verbatim (5
+//! Person vertices with the expanded subject IRIs `https://example.org/user/{1..5}`
 //! and the five names from `examples/users.csv` on the `name` property column).
 //! It is the strongest form of the walking-skeleton invariant: any regression
 //! that silently changes the produced graph (wrong template substitution,
@@ -113,11 +113,16 @@ fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
     // 4,096-row `dense_id` range under `vertex/<Type>/` and delete the single
     // staged `vertex/<Type>.parquet`. This asserted the deleted path and had been
     // red since — the last of the five failures that commit left behind.
-    let tiles = dest.join("vertex").join("Person");
+    //
+    // `818218c` then moved the file boundary between the tiles: they are the row
+    // groups of ONE `tiles.parquet` under that prefix. So the path below is an
+    // address a reader composes from the manifest, where it used to be a
+    // `*.parquet` glob — a directory listing, and there is no listing over HTTP.
+    let tiles = dest.join("vertex/Person/tiles.parquet");
     let manifest = dest.join("vertex/Person.vertex.yml");
     assert!(
-        tiles.is_dir(),
-        "vertex tile directory missing at {}",
+        tiles.is_file(),
+        "vertex payload missing at {}",
         tiles.display()
     );
     assert!(
@@ -148,7 +153,7 @@ fn walking_skeleton_run_writes_5_person_vertices_with_expected_content() {
     // 3. Parquet content. Open via DuckDB native. Build the path as a Display so
     //    platform-specific separators round-trip through the SQL string literal.
     let conn = duckdb::Connection::open_in_memory().expect("open in-memory duckdb");
-    let parquet_path = format!("{}/*.parquet", tiles.display()).replace('\'', "''");
+    let parquet_path = tiles.display().to_string().replace('\'', "''");
 
     // 3a. Row count == 5 (one Person per row of users.csv).
     let count: i64 = conn

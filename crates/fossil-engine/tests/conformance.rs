@@ -221,29 +221,59 @@ fn declared_count(manifest: &Path, key: &str, on_disk: i64) -> u64 {
     declared
 }
 
-/// How many **tiles** a directory holds, by name.
+/// The footer's box on `key`, one row per row group: the ordinal, how many rows
+/// it holds, and the closed range of `key` it covers.
 ///
-/// [`files_in`] counts entries, and a vertex prefix stopped being only tiles when the identity
-/// index landed inside it: `vertex/<Type>/index/` is a directory the manifest declares, so a count
-/// of entries reads three tiles and an index as four tiles. That was red on this test, and it was
-/// red about the artefact being right.
-fn tiles_in(dir: &Path, stem: &str) -> u64 {
-    std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("read dir {}: {e}", dir.display()))
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            name.starts_with(stem) && name.ends_with(".parquet")
-        })
-        .count() as u64
+/// **This is the reader's index.** A payload set is one Parquet whose row groups
+/// are its tiles, so what used to be a directory listing — `tiles_in`, `files_in`
+/// and a `chunk{k}.parquet` name to `regexp_extract` an address out of — is this
+/// one table, fetched in one range request at the end of the file. Every tiling
+/// assertion below is phrased against it.
+///
+/// **`stats_min_value` and not `stats_min`, and it was measured.** `parquet_metadata`
+/// exposes both: `stats_min`/`stats_max` are Parquet's deprecated `min`/`max`
+/// thrift fields, and `stats_min_value`/`stats_max_value` are the `min_value`/
+/// `max_value` that replaced them because the old pair had no defined ordering
+/// for anything but signed integers. `arrow-rs` — which is what writes this
+/// corpus — emits only the new pair, so the old one reads back NULL for every
+/// row group, every comparison against it is NULL, and every `count` of
+/// violations below comes out zero **because there was nothing to compare**.
+/// That is why each predicate that uses a bound also fails on a NULL one: this
+/// exact shape of vacuity is what the assertions were rewritten out of.
+fn boxes(payload: &str, key: &str) -> String {
+    format!(
+        "(SELECT row_group_id, row_group_num_rows AS rows, \
+          stats_min_value::BIGINT AS lo, stats_max_value::BIGINT AS hi \
+            FROM parquet_metadata('{payload}') WHERE path_in_schema = '{key}')"
+    )
 }
 
-/// How many files a directory holds — the count the emitter is answerable for.
-fn files_in(dir: &Path) -> u64 {
-    std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("read dir {}: {e}", dir.display()))
-        .count() as u64
+/// Every row of a payload set with the tile its own row group addresses —
+/// `tile`, from the box's lower bound, and `tile_hi` from its upper.
+///
+/// The replacement for `read_parquet(glob, filename = true)` plus a regex over
+/// the file name, and it has to be the box rather than `row_group_id` because
+/// the two only coincide for a fixed-stride set. A vertex tile is exactly
+/// `chunk_size` gapless ids, so its ordinal IS its address and the check below
+/// asserts that. An adjacency tile is however many edges its vertices happen to
+/// have, and a tile whose vertices have none contributes no rows and therefore
+/// no row group — the ordinals stay dense while the tile numbers skip, so an
+/// ordinal cannot address one and no writer can fix that.
+///
+/// Rows are attached to their group by `file_row_number` against the running sum
+/// of the row counts, which is exact because row groups partition the file in
+/// order.
+fn addressed(payload: &str, key: &str, shift: u32) -> String {
+    format!(
+        "(WITH span AS (SELECT *, coalesce(sum(rows) OVER (ORDER BY row_group_id \
+             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS first_row \
+           FROM {} b) \
+          SELECT r.*, s.row_group_id, s.lo >> {shift} AS tile, s.hi >> {shift} AS tile_hi \
+            FROM read_parquet('{payload}', file_row_number = true) r \
+            JOIN span s ON r.file_row_number >= s.first_row \
+                       AND r.file_row_number < s.first_row + s.rows)",
+        boxes(payload, key),
+    )
 }
 
 #[test]
@@ -267,12 +297,20 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     )
     .expect("fossil run");
 
+    // The three payload sets, each ONE file whose row groups are its tiles.
+    //
+    // They were a `vertex/Person/*.parquet` glob and the two uncut relations
+    // `edge/…/by_{source,target}.parquet`. The star was a directory listing,
+    // which is the one thing the corpus is designed so nobody performs; the two
+    // relations were the writer's staging, published beside their own cut, and
+    // `818218c` deletes them. Nothing here reads a path a reader could not
+    // compose from the manifest.
     let conn = Connection::open_in_memory().expect("duckdb");
-    let vertices = dest.join("vertex/Person/*.parquet");
+    let vertices = dest.join("vertex/Person/tiles.parquet");
     let vertices = vertices.display();
-    let by_source = dest.join("edge/Person_knows_Person/by_source.parquet");
+    let by_source = dest.join("edge/Person_knows_Person/by_source/tiles.parquet");
     let by_source = by_source.display();
-    let by_target = dest.join("edge/Person_knows_Person/by_target.parquet");
+    let by_target = dest.join("edge/Person_knows_Person/by_target/tiles.parquet");
     let by_target = by_target.display();
 
     // 0. The corpus is not empty. Every check below is a count of violations, so
@@ -303,11 +341,14 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "dense_id repeats"
     );
 
-    // 2. The adjacency files are what their names claim. Measured on the ten
-    //    million corpus as zero disorders over 71,024,690 rows; asserted here so
-    //    a writer change cannot quietly stop it being true. `by_source` is CSR
-    //    and `by_target` is CSC — a reader that trusts the ordering to skip work
-    //    gets wrong answers rather than slow ones if this breaks.
+    // 2. The adjacency payloads are what their prefixes claim, end to end and
+    //    not tile by tile — row groups partition the file in order, so one
+    //    statement over the whole file is the stronger form of «every tile is
+    //    sorted». Measured on the ten million corpus as zero disorders over
+    //    71,024,690 rows; asserted here so a writer change cannot quietly stop
+    //    it being true. `by_source` is CSR and `by_target` is CSC — a reader
+    //    that trusts the ordering to skip work gets wrong answers rather than
+    //    slow ones if this breaks.
     for (file, key) in [(&by_source, "src_dense"), (&by_target, "dst_dense")] {
         assert_eq!(
             scalar(
@@ -374,20 +415,34 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "the report disagrees with the vertex files"
     );
 
-    // 6. The staged single-file vertex Parquet is gone. It is the layout pass's
-    //    input, and leaving it behind is a second, stale copy of every vertex —
-    //    the kind of thing a reader picks up by globbing and never questions.
-    assert!(
-        !dest.join("vertex/Person.parquet").exists(),
-        "the staged vertex file survived the layout pass"
-    );
+    // 6. The staged Parquet the layout pass consumed is gone — the vertex file
+    //    AND both adjacencies. Each is the pass's input, and leaving one behind
+    //    is a second, stale copy of the rows — the kind of thing a reader picks
+    //    up by globbing and never questions. The adjacencies are the newer half:
+    //    the pass used to write the remapped relation back over its input and
+    //    leave it, so the uncut relation shipped beside its own cut, which is two
+    //    containers for one set of rows and one too many.
+    for staged in [
+        "vertex/Person.parquet",
+        "edge/Person_knows_Person/by_source.parquet",
+        "edge/Person_knows_Person/by_target.parquet",
+    ] {
+        assert!(
+            !dest.join(staged).exists(),
+            "the staged {staged} survived the layout pass"
+        );
+    }
 
     // ── the tiling ────────────────────────────────────────────────────────────
     //
     // A tile is a fixed `dense_id` range and its address is a shift, so there is
     // no index to check and nothing to discover: what can go wrong is that a row
     // is not in the tile its id names, and no row count anywhere would show it.
-    // Every check below is that one question asked of a different family of file.
+    // Every check below is that one question asked of a different payload set.
+    //
+    // What moved is where the answer is read. A tile was a file with the address
+    // in its name, so the question was a directory listing and a regex; a tile is
+    // a row group now, so it is the footer — see [`boxes`] and [`addressed`].
 
     // 7. The manifest declares the tiling that was emitted. This is the gap the
     //    tiling work is about — the manifest declared a chunking the writer did
@@ -401,6 +456,18 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "the manifest declares a tile of {tile_rows} rows, which no shift addresses"
     );
     let shift = tile_rows.trailing_zeros();
+
+    //    And which container those tiles are in, which is the one thing about a
+    //    tile's URL a reader is told rather than derives — listing a directory
+    //    is how it would work it out, and there is no listing over HTTP. Every
+    //    path above was composed as `<prefix>tiles.parquet`; this is the field
+    //    that says a reader may compose it that way, and a corpus that wrote row
+    //    groups while declaring `files` sends every reader to `chunk0.parquet`.
+    assert_eq!(
+        manifest_line(&dest.join("graph.graph.yml"), "container: "),
+        Some("rowgroups".to_string()),
+        "the graph document declares a container the writer did not use"
+    );
 
     //    And the manifest says how many rows there are, which for a long time it
     //    could not — see [`declared_count`], which is also where that field is
@@ -423,18 +490,39 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "non-vacuity: {PEOPLE} rows in tiles of {tile_rows} is {expected_tiles} tile(s), \
          which has no boundary to get wrong"
     );
+    let vertex_boxes = boxes(&vertices.to_string(), "dense_id");
     assert_eq!(
-        tiles_in(&dest.join("vertex/Person"), "chunk"),
+        u64::try_from(scalar(
+            &conn,
+            &format!("SELECT count(*) FROM {vertex_boxes}")
+        ))
+        .expect("a row-group count fits a u64"),
         expected_tiles,
         "the vertex tiles are not the {expected_tiles} the manifest implies"
     );
-    for k in 0..expected_tiles {
-        assert!(
-            dest.join(format!("vertex/Person/chunk{k}.parquet"))
-                .exists(),
-            "tile {k} is missing, so the ids it holds are not addressable"
-        );
-    }
+
+    //    And each of them holds exactly the `dense_id` range its ordinal names.
+    //    This is the whole of the addressing story for a fixed-stride set: tile
+    //    `k` is `[k << shift, (k+1) << shift)`, clipped by the count, so the
+    //    ordinal IS the address and there is nothing to look up. It read
+    //    `chunk{k}.parquet` and checked that the file existed; a row group
+    //    cannot be missing without the ordinals after it shifting down, which is
+    //    what this catches instead — and it catches a mistiled range as well,
+    //    which the existence check never could.
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM {vertex_boxes} \
+                   WHERE lo IS NULL OR hi IS NULL \
+                      OR lo <> row_group_id << {shift} \
+                      OR hi <> least((row_group_id + 1) << {shift}, {n}) - 1 \
+                      OR rows <> hi - lo + 1"
+            )
+        ),
+        0,
+        "a vertex tile is not the dense_id range its ordinal names"
+    );
 
     // 7b. The identity index, which the manifest declares and nothing here read.
     //     It is what turns a subject IRI back into an address, so it is the half
@@ -451,24 +539,50 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         Some("index/".to_string()),
         "the index prefix the manifest declares is not the one the writer used"
     );
+    let index = index_dir.join("tiles.parquet");
+    let index = index.display();
     assert_eq!(
-        tiles_in(&index_dir, "tile"),
+        u64::try_from(scalar(
+            &conn,
+            &format!("SELECT count(DISTINCT row_group_id) FROM parquet_metadata('{index}')")
+        ))
+        .expect("a row-group count fits a u64"),
         expected_tiles,
         "the index is not tiled like the vertices it addresses, so a lookup cannot name its tile"
     );
 
-    // 8. Every vertex is in the tile its own id names. `dense_id >> shift` is the
-    //    entire index — no table, no listing, no footer — so a row in the wrong
-    //    file is a vertex a reader will never fetch and never miss.
-    let in_named_tile = |glob: &str, column: &str| {
-        format!(
-            "SELECT count(*) FROM read_parquet('{glob}', filename = true) \
-             WHERE ({column} >> {shift}) \
-                <> regexp_extract(filename, '([0-9]+)\\.parquet$', 1)::BIGINT"
-        )
-    };
+    // 8. Every vertex is in the tile its own id names, asked of the rows and not
+    //    only of the boxes. `dense_id >> shift` is the entire index — no table,
+    //    no listing — so a row in the wrong tile is a vertex a reader will never
+    //    fetch and never miss.
+    //
+    //    Three clauses because the box is now the thing being trusted: the row
+    //    is in the tile its id names, the whole group is that one tile, and for
+    //    a fixed-stride set the tile is the ordinal. It used to be one clause
+    //    against a number pulled out of the file name with a regex.
+    //
+    //    Non-vacuity first, and it is not ceremony: [`addressed`] attaches every
+    //    row to its row group by arithmetic, and a join that matches nothing
+    //    returns no rows — at which point a count of violations is zero and says
+    //    so about an empty table. Measured while this was being written: the
+    //    first draft read `stats_min`, every bound came back NULL, and four
+    //    checks passed over nothing.
+    let addressed_vertices = addressed(&vertices.to_string(), "dense_id", shift);
     assert_eq!(
-        scalar(&conn, &in_named_tile(&vertices.to_string(), "dense_id")),
+        scalar(&conn, &format!("SELECT count(*) FROM {addressed_vertices}")),
+        n,
+        "the rows could not be attached to their row groups, so every check on them is vacuous"
+    );
+    assert_eq!(
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM {addressed_vertices} \
+                   WHERE tile IS NULL OR tile_hi IS NULL \
+                      OR (dense_id >> {shift}) <> tile \
+                      OR tile_hi <> tile OR tile <> row_group_id"
+            )
+        ),
         0,
         "a vertex is in a tile its dense_id does not name"
     );
@@ -482,108 +596,121 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     //    wrong answer rather than a partial one. Non-vacuity first: an empty
     //    directory satisfies every check after it.
     //
-    //    The pair of (relation, tile directory, addressing column) is walked
-    //    rather than written twice, because a check that only ever ran against
-    //    `by_source` is how the target half went untiled while every assertion
-    //    here passed.
+    //    The pair of (payload, addressing column) is walked rather than written
+    //    twice, because a check that only ever ran against `by_source` is how
+    //    the target half went untiled while every assertion here passed.
+    //
+    //    **An ordinal cannot address an adjacency tile**, and that is a property
+    //    of the data and not of the writer: a tile of 4,096 sources can hold no
+    //    edges at all, it contributes no rows, and a row group is not written to
+    //    say so. The ordinals stay dense while the tile numbers skip. What
+    //    locates a tile here is the footer's box on the key column, so what is
+    //    asserted is that the boxes ascend, do not overlap, and each covers
+    //    exactly one tile — which together is «the boxes are a lookup table» and
+    //    is the strongest statement the container supports.
     let orientations = [
         ("by_source", &by_source, "src_dense", "dst_dense"),
         ("by_target", &by_target, "dst_dense", "src_dense"),
     ];
-    for (name, relation, key, other) in orientations {
-        let tiles_dir = dest.join(format!("edge/Person_knows_Person/{name}"));
-        let glob = tiles_dir.join("*.parquet");
-        let glob = glob.display();
+    for (name, payload, key, other) in orientations {
+        let payload = payload.to_string();
         let occupied = scalar(
             &conn,
-            &format!("SELECT count(DISTINCT {key} >> {shift}) FROM '{relation}'"),
+            &format!("SELECT count(DISTINCT {key} >> {shift}) FROM '{payload}'"),
         );
         assert!(
             occupied >= 3,
             "non-vacuity: {occupied} occupied {name} tile(s)"
         );
         assert_eq!(
-            i64::try_from(files_in(&tiles_dir)).expect("a directory listing fits in i64"),
+            scalar(
+                &conn,
+                &format!("SELECT count(*) FROM {}", boxes(&payload, key))
+            ),
             occupied,
-            "the {name} tiles emitted are not the tiles the {key}s occupy — either one \
-             is missing, or an empty one was written and every reader pays a request \
-             to learn it holds nothing"
+            "the {name} row groups are not the tiles the {key}s occupy — either a tile was \
+             split across two, or an empty one was written and every reader pays for a box \
+             that describes nothing"
         );
+        let addressed_edges = addressed(&payload, key, shift);
         assert_eq!(
-            scalar(&conn, &in_named_tile(&glob.to_string(), key)),
-            0,
-            "an edge is in a {name} tile its {key} does not name"
-        );
-
-        // 10. The tiles are the whole edge relation and nothing else. Splitting a
-        //     file is where rows are silently dropped or written twice, and both
-        //     survive every check above.
-        assert_eq!(
-            scalar(&conn, &format!("SELECT count(*) FROM '{glob}'")),
+            scalar(&conn, &format!("SELECT count(*) FROM {addressed_edges}")),
             edges,
-            "the {name} tiles hold a different number of edges than the file they cut"
+            "the {name} rows could not be attached to their row groups, so every check on \
+             them is vacuous"
         );
         assert_eq!(
             scalar(
                 &conn,
                 &format!(
-                    "SELECT count(*) FROM ( \
-                       (SELECT src_dense, dst_dense FROM '{relation}' \
-                        EXCEPT SELECT src_dense, dst_dense FROM '{glob}') \
-                       UNION ALL \
-                       (SELECT src_dense, dst_dense FROM '{glob}' \
-                        EXCEPT SELECT src_dense, dst_dense FROM '{relation}'))"
+                    "SELECT count(*) FROM {addressed_edges} \
+                       WHERE tile IS NULL OR tile_hi IS NULL \
+                          OR ({key} >> {shift}) <> tile OR tile_hi <> tile"
                 )
             ),
             0,
-            "the {name} tiles and the file they cut disagree about which edges exist"
+            "an edge is in a {name} tile its {key} does not name"
         );
 
-        // And each tile is ordered the way its relation claims to be, secondary
-        // key included — a reader that binary-searches a tile for one vertex's
-        // rows is trusting the same `ordered: true` the whole relation carries,
-        // and a COPY that dropped the ORDER BY would leave every count above
+        // 10. The boxes ascend and do not overlap, which is what makes them an
+        //     index: a reader looking for one tile's edges takes the box that
+        //     contains its address, and if two boxes could contain it the answer
+        //     is a scan. Written as a comparison against the previous box's
+        //     upper bound rather than as a sort, because a single pair of
+        //     overlapping boxes is invisible in a `count(DISTINCT)`.
+        assert_eq!(
+            scalar(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM (SELECT lo, hi, row_group_id, \
+                       lag(hi) OVER (ORDER BY row_group_id) AS prev FROM {}) \
+                     WHERE lo IS NULL OR hi IS NULL \
+                        OR lo > hi \
+                        OR (row_group_id > 0 AND (prev IS NULL OR lo <= prev))",
+                    boxes(&payload, key)
+                )
+            ),
+            0,
+            "the {name} boxes on {key} do not ascend, or two of them overlap"
+        );
+
+        // And the payload is ordered the way its manifest claims, secondary key
+        // included — a reader that binary-searches a tile for one vertex's rows
+        // is trusting the same `ordered: true` the whole relation carries, and a
+        // sort that dropped its second column would leave every count above
         // unchanged.
+        //
+        // Over the whole file and no longer `PARTITION BY filename`: row groups
+        // partition it in order, so this is the per-tile statement plus the
+        // statement that consecutive tiles do not cross, and it costs one clause
+        // fewer than either.
         assert_eq!(
             scalar(
                 &conn,
                 &format!(
                     "SELECT count(*) FROM (SELECT {key} AS k, {other} AS v, \
-                     lag({key}) OVER (PARTITION BY filename ORDER BY file_row_number) AS pk, \
-                     lag({other}) OVER (PARTITION BY filename ORDER BY file_row_number) AS pv \
-                     FROM read_parquet('{glob}', filename = true, file_row_number = true)) \
+                     lag({key}) OVER (ORDER BY file_row_number) AS pk, \
+                     lag({other}) OVER (ORDER BY file_row_number) AS pv \
+                     FROM read_parquet('{payload}', file_row_number = true)) \
                      WHERE pk IS NOT NULL AND (k, v) < (pk, pv)"
                 )
             ),
             0,
-            "a {name} tile is not ordered by ({key}, {other})"
+            "the {name} payload is not ordered by ({key}, {other})"
         );
     }
 
-    // And the two tilings are the same relation cut two ways — the check that
-    // catches a target half built from a stale or partial source. A hop reads one
-    // tile from each and would otherwise disagree with itself about the graph.
-    let by_source_glob = dest.join("edge/Person_knows_Person/by_source/*.parquet");
-    let by_source_glob = by_source_glob.display();
-    let by_target_glob = dest.join("edge/Person_knows_Person/by_target/*.parquet");
-    let by_target_glob = by_target_glob.display();
-    assert_eq!(
-        scalar(
-            &conn,
-            &format!(
-                "SELECT count(*) FROM ( \
-                   (SELECT src_dense, dst_dense FROM '{by_source_glob}' \
-                    EXCEPT SELECT src_dense, dst_dense FROM '{by_target_glob}') \
-                   UNION ALL \
-                   (SELECT src_dense, dst_dense FROM '{by_target_glob}' \
-                    EXCEPT SELECT src_dense, dst_dense FROM '{by_source_glob}'))"
-            )
-        ),
-        0,
-        "the source-ordered and target-ordered tilings are not the same relation"
-    );
-
-    let edge_glob = by_source_glob;
+    // What 9 and 10 no longer say, and it is deliberate: «the tiles are the whole
+    // relation and nothing else» was a comparison against
+    // `by_source.parquet` — the uncut relation, published beside its own cut.
+    // There is one container per payload set now, so there is nothing to compare
+    // against and the comparison would be the file against itself. What carries
+    // that weight instead is already above and is stronger: check 0 pins the row
+    // count against the fixture rather than against a sibling file,
+    // `declared_count` pins it against `edge_count` in the manifest, checks 3 and
+    // 4 pin the two orientations against each other and against the vertices,
+    // and 13 pins every edge against the identity it was written from.
+    let edge_payload = by_source.to_string();
 
     // 11. And the corpus, read back through its tiles, is the graph that was
     //     asked for. Byte-identity against a previous build is not available —
@@ -596,7 +723,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     //     An assertion phrased in dense ids would be an assertion
     //     about the address.
     let ring = format!(
-        "FROM read_parquet('{edge_glob}') e \
+        "FROM read_parquet('{edge_payload}') e \
          JOIN read_parquet('{vertices}') s ON s.dense_id = e.src_dense \
          JOIN read_parquet('{vertices}') d ON d.dense_id = e.dst_dense"
     );
@@ -639,51 +766,44 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     //     connection behind it.
     //
     //     Phrased as a disagreement rather than as a count so it cannot pass by
-    //     both sides being empty: the addressed read is restricted to the named
-    //     tile file, and the answer it gives is compared against the relation.
-    let hop = |direction: &str, glob: &str, key: &str| {
+    //     both sides being empty: the addressed read is restricted to the tile
+    //     the seed's own id names, and the answer it gives is compared against
+    //     the same payload read whole.
+    //
+    //     The restriction used to be a regex over the tile's file name. It is
+    //     `e.tile = v.dense_id >> shift` now — the footer's box, resolved by
+    //     [`addressed`] — which is the same predicate a reader evaluates, and
+    //     the only one available once a tile stops being a file.
+    let hop = |payload: &str, key: &str| {
+        let window = addressed(payload, key, shift);
         format!(
             "SELECT count(*) FROM ( \
                (SELECT v.dense_id AS seed, e.src_dense, e.dst_dense \
                   FROM read_parquet('{vertices}') v \
-                  JOIN read_parquet('{glob}', filename = true) e \
-                    ON e.{key} = v.dense_id \
-                   AND regexp_extract(e.filename, '([0-9]+)\\.parquet$', 1)::BIGINT \
-                     = (v.dense_id >> {shift}) \
+                  JOIN {window} e \
+                    ON e.{key} = v.dense_id AND e.tile = (v.dense_id >> {shift}) \
                 EXCEPT \
                 SELECT v.dense_id, e.src_dense, e.dst_dense \
                   FROM read_parquet('{vertices}') v \
-                  JOIN read_parquet('{direction}') e ON e.{key} = v.dense_id) \
+                  JOIN read_parquet('{payload}') e ON e.{key} = v.dense_id) \
                UNION ALL \
                (SELECT v.dense_id, e.src_dense, e.dst_dense \
                   FROM read_parquet('{vertices}') v \
-                  JOIN read_parquet('{direction}') e ON e.{key} = v.dense_id \
+                  JOIN read_parquet('{payload}') e ON e.{key} = v.dense_id \
                 EXCEPT \
                 SELECT v.dense_id, e.src_dense, e.dst_dense \
-                  FROM read_parquet('{glob}', filename = true) e \
+                  FROM {window} e \
                   JOIN read_parquet('{vertices}') v \
-                    ON e.{key} = v.dense_id \
-                   AND regexp_extract(e.filename, '([0-9]+)\\.parquet$', 1)::BIGINT \
-                     = (v.dense_id >> {shift})))"
+                    ON e.{key} = v.dense_id AND e.tile = (v.dense_id >> {shift})))"
         )
     };
     assert_eq!(
-        scalar(
-            &conn,
-            &hop(&by_source.to_string(), &edge_glob.to_string(), "src_dense")
-        ),
+        scalar(&conn, &hop(&edge_payload, "src_dense")),
         0,
         "the out-edges of a vertex are not all in the by_source tile its dense_id names"
     );
     assert_eq!(
-        scalar(
-            &conn,
-            &hop(
-                &by_target.to_string(),
-                &by_target_glob.to_string(),
-                "dst_dense"
-            )
-        ),
+        scalar(&conn, &hop(&by_target.to_string(), "dst_dense")),
         0,
         "the in-edges of a vertex are not all in the by_target tile its dense_id names"
     );

@@ -192,29 +192,32 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         "no endpoint dangled; got: {parsed}"
     );
 
-    // The GraphAr edge Parquet pair + per-type vertex chunks exist on disk.
+    // The payload sets exist on disk, at the addresses the manifest composes:
+    // one Parquet per set, its row groups the tiles.
     //
-    // Chunks, not `vertex/<Type>.parquet`: that single file is the layout pass's
-    // input and `c678e63` deletes it once the chunks the manifest has always
-    // declared are written. Asserting it still exists is asserting the writer
-    // leaves a stale second copy of every vertex behind.
-    assert!(
-        dest.join("vertex/KB/chunk0.parquet").exists(),
-        "KB vertex chunk"
-    );
-    assert!(
-        dest.join("vertex/Project/chunk0.parquet").exists(),
-        "Project vertex chunk"
-    );
-    assert!(
-        !dest.join("vertex/KB.parquet").exists(),
-        "the staged single-file vertex Parquet is removed once chunked"
-    );
-    assert!(
-        dest.join("edge/KB_hasProject_Project/by_source.parquet")
-            .exists(),
-        "edge CSR Parquet"
-    );
+    // The tiles, not `vertex/<Type>.parquet`: that single file is the layout
+    // pass's input and `c678e63` deletes it once the tiles the manifest has
+    // always declared are written. Asserting it still exists is asserting the
+    // writer leaves a stale second copy of every vertex behind. `818218c` did
+    // the same to the staged adjacency, which used to be published uncut beside
+    // its own cut — so `by_source.parquet` is now `by_source/tiles.parquet`,
+    // and both halves are asserted for the same reason.
+    for tiles in [
+        "vertex/KB/tiles.parquet",
+        "vertex/Project/tiles.parquet",
+        "edge/KB_hasProject_Project/by_source/tiles.parquet",
+    ] {
+        assert!(dest.join(tiles).exists(), "{tiles} is not there");
+    }
+    for staged in [
+        "vertex/KB.parquet",
+        "edge/KB_hasProject_Project/by_source.parquet",
+    ] {
+        assert!(
+            !dest.join(staged).exists(),
+            "the staged {staged} is the layout pass's input and it is removed once tiled"
+        );
+    }
 }
 
 // The `.fossil` for the @conn test: data AND schema are `@conn` references — the
