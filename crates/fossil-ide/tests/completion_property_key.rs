@@ -21,13 +21,13 @@
 //!
 //! | position                       | total | FUNCTION | FIELD              |
 //! |--------------------------------|-------|----------|--------------------|
-//! | key position (end of `email`)  | 54    | 51       | 3 raw IRIs         |
-//! | after `User.`                  | 16    | 13       | the SAME 3 raw IRIs|
-//! | top level, outside the mapping | 51    | 51       | 0                  |
+//! | key position (end of `email`)  | 53    | 50       | 3 raw IRIs         |
+//! | after `User.`                  | 15    | 12       | the SAME 3 raw IRIs|
+//! | top level, outside the mapping | 50    | 50       | 0                  |
 //!
-//! and against this file's two-predicate fixture: 53 / 51 / 2 at the key
+//! and against this file's two-predicate fixture: 52 / 50 / 2 at the key
 //! position, at the header, on the right of `=` and on a blank body line, and
-//! 15 / 13 / 2 after `User.`.
+//! 14 / 12 / 2 after `User.`.
 //!
 //! **The stdlib source's turn**, measured against the same two-predicate
 //! fixture. It offered the catalogue whole wherever there was no dot to the
@@ -35,16 +35,16 @@
 //!
 //! | position                          | total before | total after | FUNCTION before → after |
 //! |-----------------------------------|--------------|-------------|-------------------------|
-//! | key position (`email`, cols 6, 9) | 53           | **2**       | 51 → **0**              |
-//! | the same, under an `@subject`     | 53           | **2**       | 51 → **0**              |
-//! | start of file                     | 51           | 51          | 51 → 51                 |
-//! | top level, outside the mapping    | 51           | 51          | 51 → 51                 |
-//! | the mapping header                | 51           | 51          | 51 → 51                 |
-//! | right of `=` (`User`)             | 51           | 51          | 51 → 51                 |
-//! | after `User.`                     | 13           | 13          | 13 → 13                 |
-//! | the column before the key         | 51           | 51          | 51 → 51                 |
-//! | a still-blank body line           | 51           | 51          | 51 → 51                 |
-//! | inside / just past `@subject`     | 51           | 51          | 51 → 51                 |
+//! | key position (`email`, cols 6, 9) | 52           | **2**       | 50 → **0**              |
+//! | the same, under an `@subject`     | 52           | **2**       | 50 → **0**              |
+//! | start of file                     | 50           | 50          | 50 → 50                 |
+//! | top level, outside the mapping    | 50           | 50          | 50 → 50                 |
+//! | the mapping header                | 50           | 50          | 50 → 50                 |
+//! | right of `=` (`User`)             | 50           | 50          | 50 → 50                 |
+//! | after `User.`                     | 12           | 12          | 12 → 12                 |
+//! | the column before the key         | 50           | 50          | 50 → 50                 |
+//! | a still-blank body line           | 50           | 50          | 50 → 50                 |
+//! | inside / just past `@subject`     | 50           | 50          | 50 → 50                 |
 //!
 //! [`the_catalogue_is_not_offered_in_key_position`] holds the first row and
 //! [`every_position_that_is_not_a_key_keeps_its_catalogue`] holds the rest,
@@ -269,7 +269,7 @@ fn a_member_access_offers_no_property_key() {
             CompletionItemKind::FUNCTION
         )
         .len(),
-        13,
+        12,
         "the relation verbs are untouched by this",
     );
 }
@@ -445,19 +445,19 @@ fn every_position_that_is_not_a_key_keeps_its_catalogue() {
     let blank = program(&mut db, BLANK);
     // (fixture, line, character, expected FUNCTION count, what it is)
     let cases: &[(SourceFile, u32, u32, usize, &str)] = &[
-        (shop, 0, 0, 51, "the start of the file"),
-        (shop, 1, 4, 51, "top level, outside any mapping"),
-        (shop, 2, 3, 51, "the mapping header"),
-        (shop, 3, 16, 51, "`User` on the right of `=`"),
-        (shop, 3, 17, 13, "`User.` — the relation verbs, untouched"),
+        (shop, 0, 0, 50, "the start of the file"),
+        (shop, 1, 4, 50, "top level, outside any mapping"),
+        (shop, 2, 3, 50, "the mapping header"),
+        (shop, 3, 16, 50, "`User` on the right of `=`"),
+        (shop, 3, 17, 12, "`User.` — the relation verbs, untouched"),
         (
             shop,
             3,
             4,
-            51,
+            50,
             "the column before the key's first character",
         ),
-        (blank, 4, 4, 51, "a still-blank body line"),
+        (blank, 4, 4, 50, "a still-blank body line"),
     ];
     for (f, line, character, expected, what) in cases {
         let items = fossil_ide::completions(&db, &[*f], *f, *line, *character);

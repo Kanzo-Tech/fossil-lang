@@ -689,6 +689,7 @@ fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
         // the catalogue said every verb took a bare relation.
         SigTy::Column => "Column".to_string(),
         SigTy::Binding => "Binding".to_string(),
+        SigTy::Aggregate => "Aggregate".to_string(),
     }
 }
 

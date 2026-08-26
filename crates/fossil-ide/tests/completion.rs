@@ -232,19 +232,8 @@ fn a_relation_receiver_offers_the_verbs_and_no_other_row() {
     assert_eq!(
         fns,
         vec![
-            "aggregate",
-            "count",
-            "distinct",
-            "drop",
-            "flatten",
-            "group_by",
-            "join",
-            "map",
-            "select",
-            "sort",
-            "take",
-            "union",
-            "where",
+            "count", "distinct", "drop", "flatten", "group_by", "join", "map", "select", "sort",
+            "take", "union", "where",
         ],
         "`users` is a relation: its members are the verbs, sorted, bare",
     );

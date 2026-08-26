@@ -247,7 +247,7 @@ User : Person from users
     );
     assert_eq!(
         labels(&items, CompletionItemKind::FUNCTION).len(),
-        13,
+        12,
         "the relation verbs are still offered here — see this test's docs",
     );
 }
