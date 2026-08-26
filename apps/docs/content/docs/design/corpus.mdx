@@ -223,8 +223,16 @@ through reader code of ours. What is missing is Arrow's ordering applied to the 
 actually pending, and it is written down as an obligation rather than an intention:
 **a format change lands after both readers have been moved to it and diffed, never before.**
 
-What runs lives in `apps/corpus/conformance/verify.mjs`, and the conventions it checks are
-documented for reader implementors on the corpus site rather than here.
+That obligation has been discharged once, and the shape of it is what to copy. The
+[row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
+format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
+which is the only window in which two containers of one corpus exist at the same time to be compared.
+`apps/corpus/conformance/containers.mjs` and `packages/graph/tests/containers.test.ts` are that diff:
+the same graph written both ways, every answer required to match. After the writer moves there is
+one container and nothing left to compare against.
+
+What runs lives in `apps/corpus/conformance/verify.mjs` and `containers.mjs`, and the conventions
+they check are documented for reader implementors on the corpus site rather than here.
 
 <Callout type="warn" title="One consumer does not read through the conventions, and that is the real gap">
 `fossil-mcp` registers its relations with `read_parquet('{base}/vertex/<Type>/*.parquet')` and reads

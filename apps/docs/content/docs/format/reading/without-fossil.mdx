@@ -78,10 +78,10 @@ pruning is a choice of what to read, and written as a predicate it is measured s
 pruning at all ([Addressing](/docs/format/conventions/addressing#why-the-camera-does-not-ask)).
 
 The glob above is a listing, which is the thing an HTTP reader cannot do; over an origin, compose
-the names from the count and the shift. It also assumes one tile per file — against the container
-whose row groups are the tiles, drop the glob and the `file_name` column and read `row_group_id` as
-the tile number, which is the cheaper of the two
-([two containers, one address](/docs/format/conventions/addressing#two-containers-one-address)).
+the names from the count and the shift. It also assumes one tile per file, which the manifest's
+`container` is what says: against `rowgroups` the path is `vertex/Person/tiles.parquet`, and you drop
+the glob and the `file_name` column and read `row_group_id` as the tile number. That is the cheaper
+of the two ([two containers, one address](/docs/format/conventions/addressing#two-containers-one-address)).
 
 ## The tiles
 
@@ -168,9 +168,11 @@ whole. **Every edge appears once**, too: the corpus stores one relation twice, s
 concatenates both orientations counts a self-type relation double — 1,192 edges against the 596
 the conformance manifest declares, which draws identically.
 
-It refuses four things: a corpus declaring no `vertex_count`; the row-group container, refused **by
-name** and never globbed; an edge label incident twice to one vertex type, which the addressing
-cannot name unambiguously; and an `index:` with a `prefix` and no `ordered_by`.
+It refuses three things: a corpus declaring no `vertex_count`; an edge label incident twice to one
+vertex type, which the addressing cannot name unambiguously; and an `index:` with a `prefix` and no
+`ordered_by`. It reads **both containers** and globs for neither — which one it is looking at comes
+off `graph.graph.yml`'s `container`, and a corpus that declares one and carries the other is what
+`declared-tiling` refuses.
 
 And it declares two costs. **`extent` is believed, not verified** — it comes from the footers, a
 box wider than its rows costs a read, a box narrower than its rows **loses vertices**, and only

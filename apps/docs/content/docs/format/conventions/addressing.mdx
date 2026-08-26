@@ -115,6 +115,10 @@ target.
 | the out-edges of `v` | `by_source/tile{v >> shift}.parquet`, filtered to `src_dense = v` |
 | the in-edges of `v` | `by_target/tile{v >> shift}.parquet`, filtered to `dst_dense = v` |
 
+The filenames are the file-per-tile container's; in the other one every row is
+[the set's single file](#two-containers-one-address) and the `k` is what the footer is asked for.
+The question, the tile and the filter are the same either way.
+
 The last two are a **hop**, and they are why both orientations are tiled: asking the edge relation
 for a neighbourhood with a recursive query
 [did not return in 45 seconds](/docs/format/conventions/adjacency). Which prefix carries which
@@ -183,7 +187,7 @@ Arithmetic says **which tiles exist**. It does not say **which tiles intersect t
 boxes say. They live in the footer, and one request buys all of them.
 
 ```
-chunk0.parquet                                5,000,000 rows
+tiles.parquet                                 5,000,000 rows
 ┌──────┬────────┬────────┬─────┬─────────┬────────┐
 │ PAR1 │  rg 0  │  rg 1  │  …  │ rg 1220 │ footer │
 └──────┴────────┴────────┴─────┴─────────┴────┬───┘
@@ -242,7 +246,7 @@ graph LR
     f9["chunk9.parquet<br/>+ footer"]
   end
   subgraph B["one file, one row group per tile"]
-    g["chunk0.parquet<br/>… rg 7 · rg 8 · rg 9 …<br/>+ one footer"]
+    g["tiles.parquet<br/>… rg 7 · rg 8 · rg 9 …<br/>+ one footer"]
   end
   f7 --> R1["3 requests<br/>a file boundary cannot be crossed"]
   f8 --> R1
@@ -254,9 +258,48 @@ graph LR
 
 A request is one file when a tile is a file, and a **maximal run of consecutive row groups** when it
 is not. The file boundary is the only thing preventing the merge: **one file per tile costs 4× the
-requests and does not save a byte.** The checker reports which container it found and refuses *both
-at once*, because two ways to address the same rows is one too many and a reader that globs finds
-both. Guard: `tile-of`, in whichever form the corpus uses.
+requests and does not save a byte.** Guard: `tile-of`, in whichever form the corpus uses.
+
+**Which one a corpus is, it declares.** `graph.graph.yml` carries `container: files` or
+`container: rowgroups`, and it applies to every payload set in the corpus — the vertex tiles, the
+identity index, and each orientation of each edge type. A reader cannot work it out: working it out
+means listing a directory, and there is no listing over HTTP. Absent is `files`, which is what fossil
+writes today. The row-group container's file is `tiles.parquet` in the set's own prefix, one per set,
+and the addresses are published as vectors below.
+
+```yaml
+name: graph
+prefix: ''
+container: rowgroups          # vertex/Person/tiles.parquet, by_source/tiles.parquet, index/tiles.parquet
+```
+
+The checker compares that declaration against what is on disk and refuses *both at once*, because
+two ways to address the same rows is one too many and a reader that globs finds both. Guard:
+`declared-tiling`.
+
+### Where the ordinal is the address, and where the footer is
+
+Row group `k` **is** tile `k` for a set whose tiles are a fixed number of rows: a vertex payload,
+whose tile is exactly `chunk_size` gapless `dense_id`s, and an identity index, whose tile is a slice
+of a total order. `tile-of` checks that ordinal, and it is what makes a byte-range reader's address
+arithmetic rather than a lookup.
+
+**An adjacency is not one of those**, and the difference is a property of the data rather than of the
+writer. An adjacency tile is however many edges its vertices happen to have, so the boundaries do not
+land on a fixed stride; and a tile whose vertices have no edges contributes no rows, so it has no row
+group to be numbered. What locates it there is the general rule the fixed-stride sets satisfy by
+construction: **the footer's box on the endpoint column the orientation is ordered by**, over the
+tile's `dense_id` range. `tile-of` asks that orientation the question it can answer — the boxes
+ascend and do not overlap, so a tile is a contiguous run of row groups.
+
+<Callout type="warn" title="DuckDB cannot write a row group under 2,048 rows">
+Row groups come out in multiples of DuckDB's 2,048-row vector, and a smaller `ROW_GROUP_SIZE` is
+clamped without a warning: 300 rows written at `ROW_GROUP_SIZE 64` come back as **one** row group of
+300. So a corpus whose `chunk_size` is under 2,048 cannot be put in the row-group container by
+DuckDB at all — which is why the conformance corpus, at `chunk_size` 64, is the file-per-tile one and
+the two-container comparison runs on a fixture at 4,096. It is a limit of that writer and not of the
+format.
+</Callout>
 
 ## There is no tile tree
 
@@ -338,6 +381,18 @@ manifest's declared count divided the same way:
 off-by-one addresses a `chunk1.parquet` nothing wrote. `count = 0` is the other — zero tiles, not one
 empty one, and a reader that assumed at least one pays a request to be told 404. Guard:
 `declared-count`.
+
+Which tile an id is in and how many there are are both numbers. **Where a tile is** is a path, and
+the container is the one field of it a reader is told rather than derives:
+
+<VectorTable of="tile_url" />
+
+The last row of the pair on `vertex/Person/` is the one that separates the containers: every tile of
+a set is the same file, and a reader that hands the same path to `read_parquet` once per tile scans
+the relation once per tile — 9,240 vertices where the window holds 1,848, exactly five times over
+five tiles. Guard: `published-vectors`; harness:
+`apps/corpus/conformance/containers.mjs`, which writes one graph both ways and requires every answer
+to match.
 
 ## The payload format is open
 
