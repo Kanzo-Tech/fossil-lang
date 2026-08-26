@@ -88,6 +88,15 @@ jobs:
         working-directory: apps/corpus
         run: node guards/check.mjs conformance/corpus
 
+      # Where the checked-in corpus came from. It is twenty Parquet files and three manifests
+      # and nothing recorded the parameters, which cost one diagnosis already: the generator's
+      # DEFAULTS give 600 edges against the 596 the manifest declares, and that reads exactly
+      # like a stale fixture. It is `clusters`, and at 16 the generator reproduces this corpus
+      # byte for byte. The recipe is in the file and this step is what keeps it true.
+      - name: The conformance corpus reproduces from its recorded recipe
+        working-directory: apps/corpus
+        run: node conformance/provenance.mjs
+
       # The plain-Node reader of the table. The other two — the published TypeScript and the
       # wasm32 build of the Rust one — run in `pnpm-ci.yml`; all three execute
       # `conformance/expected.json` and none of them wrote it.
