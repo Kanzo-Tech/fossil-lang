@@ -3,7 +3,7 @@
 //!
 //! A program brings a shape document in with
 //! `type { Person } = io.shex("shapes/person.shex")`. The checker decodes that
-//! document through [`fossil_base::shape_document`], which is keyed by a
+//! document through [`fossil_hir::shape_documents::shape_document`], which is keyed by a
 //! [`SourceFile`] **input** — so the document has to be IN the database before
 //! any query goes looking for it, and putting it there is a host job:
 //! [`fossil_base::register_file`] takes `&mut dyn Db`, which no query body can
@@ -134,7 +134,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use fossil_base::{Diagnostic, System, shape_document};
+    use fossil_base::{Diagnostic, System};
+    use fossil_hir::shape_documents::shape_document;
     use salsa::Setter as _;
 
     use super::*;

@@ -91,7 +91,7 @@ pub use generated::{CSV, DATA, JSON, NativeReader, PARQUET, RDF};
 ///
 /// **Pure**: no IO, no network, no clock. It is called from inside a tracked
 /// query, where an untracked read of the outside world is exactly the bug
-/// [`crate::shape_documents::shape_document`] exists to remove. The `uri` is
+/// `fossil_hir::shape_documents::shape_document` exists to remove. The `uri` is
 /// passed because a document can carry relative references and a diagnostic
 /// wants to name the file — not so the decoder can go and read it.
 pub type DecodeTypes = fn(&str, &str) -> Result<OutputShapes, Rejection>;

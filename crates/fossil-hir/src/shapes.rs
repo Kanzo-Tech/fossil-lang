@@ -26,7 +26,7 @@
 //! dependency: editing the document re-ran nothing, and in an LSP that is a
 //! diagnostic that never clears. The document is now a [`fossil_base::SourceFile`]
 //! **input** found through [`fossil_base::file_at`] and decoded by the tracked
-//! [`fossil_base::shape_document`], so an edit to the `.shex` invalidates every
+//! [`crate::shape_documents::shape_document`], so an edit to the `.shex` invalidates every
 //! mapping checked against it.
 //!
 //! Naming no document is an ERROR: a property key is a bare name whose meaning
@@ -419,7 +419,7 @@ impl fmt::Display for DocumentError {
 /// The ONE place `fossil-hir` turns a path a program wrote into a shape
 /// document. Both steps are Salsa-visible — [`fossil_base::file_at`] reads the
 /// registry input (so registering the file later invalidates a reader that
-/// missed) and [`fossil_base::shape_document`] is tracked on the file's text
+/// missed) and [`crate::shape_documents::shape_document`] is tracked on the file's text
 /// (so editing the document re-runs the checker). Neither was true of the
 /// `System::read_file` this replaces.
 ///
@@ -467,8 +467,8 @@ pub(crate) fn decoded_document(
     // another key» became the same message.
     let key = crate::documents::registry_key(db, file, path);
     let doc = fossil_base::file_at(db, &key).ok_or(DocumentError::Unregistered)?;
-    let shapes =
-        fossil_base::shape_document(db, doc, row.name).ok_or(DocumentError::Undecodable)?;
+    let shapes = crate::shape_documents::shape_document(db, doc, row.name)
+        .ok_or(DocumentError::Undecodable)?;
     malformed_cause(&shapes).map_or(Ok(shapes), |cause| Err(DocumentError::Unparseable(cause)))
 }
 

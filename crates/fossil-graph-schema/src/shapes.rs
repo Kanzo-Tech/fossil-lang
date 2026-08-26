@@ -27,7 +27,7 @@
 //!
 //! # Structural equality is load-bearing
 //!
-//! Salsa memoizes an `OutputShapes` (`fossil_base::shape_documents::shape_document`),
+//! Salsa memoizes an `OutputShapes` (`fossil_hir::shape_documents::shape_document`),
 //! and salsa 0.26 decides "did this change?" with `PartialEq` — `update_fallback`
 //! in `salsa/src/update.rs` compares the old and new values and skips the
 //! invalidation entirely when they are equal. So every type here derives

@@ -1,20 +1,25 @@
 //! `fossil-base` — Salsa `Db` trait + `System` abstraction.
 //!
-//! This crate is the substrate every downstream compiler crate
-//! (`fossil-syntax`, `fossil-hir`, `fossil-mir`, `fossil-codegen`,
-//! `fossil-layout`, `fossil-cli`, `fossil-lsp`, `fossil-wasm`) consumes.
+//! The substrate. `cargo tree -i fossil-base` is the list of what consumes it,
+//! and there is deliberately no list here: the one that was written down named
+//! `fossil-codegen`, which has not existed for some time.
 //!
 //! **Public-API commitment**: the signatures here are stable. The
 //! change this commitment exists to prevent is widening the `Db` trait —
 //! descriptors, registry and host capabilities go behind `System`, never onto
 //! `Db`, and every crate above this one is built on that being true.
+//!
+//! **What is deliberately not here**, because a substrate decides nothing about
+//! a program: the rule turning a written reference into a locator, which is
+//! `fossil-locator`; and the query that decodes a shape document, which is
+//! `fossil_hir::shape_documents` — `providers` still declares the ROW a decoder
+//! fills, because a row is a table entry and not a decision.
 
 pub mod db;
 pub mod diagnostic;
 pub mod error;
 pub mod files;
 pub mod providers;
-pub mod shape_documents;
 pub mod system;
 /// A shape decoder with no schema language behind it, plus the host that
 /// installs it — the seam every crate above this one needs to test against a
@@ -33,7 +38,6 @@ pub use providers::{
     Capability, Catalogue, NativeReader, Provider, Registry, RowReader, claimed, install,
     installed, provider,
 };
-pub use shape_documents::{TypeDocument, decode_shape_document, shape_document};
 pub use system::{FsError, System};
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -73,11 +73,15 @@ calls yet, and filing it beside a crate it does not touch would be filing it by 
 [Deriving k-anonymity](/docs/design/anonymity) is the argument for it and states what would give it
 a caller.
 
-The `@conn` locator has left: it is `fossil-locator`, a crate with no dependencies at all, and the
-edges it cost are why the total moved. Filing it under `language` is the same kind of move
-`fossil-sinks` and `fossil-resolver` got — by subject, and it changed no code — except that this one
-did move a file. What has **not** happened is the rest of what is below this diagram: `fossil-base`
-still holds a `tracked` query, and `fossil-engine` is still a sack.
+Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`
+locator is `fossil-locator`, a crate with no dependencies at all — filing it under `language` is the
+same subject-not-history move `fossil-sinks` and `fossil-resolver` got, except that this one moved a
+file. The `tracked` query that decodes a shape document is `fossil_hir::shape_documents`, and it
+cost **no** edge: its only production caller was `fossil-hir` already, and `fossil-hir` already
+depended on `fossil-base`. A module crossing a boundary that was already crossed is the cheapest
+kind of move there is.
+
+What has **not** happened is the last line below this diagram: `fossil-engine` is still a sack.
 
 ## What is left of the rings
 
@@ -118,9 +122,12 @@ The prose half of that rule is now a test — `crates/fossil-base/tests/substrat
 reads `providers.rs` and fails on a string literal with a space in it, because a crate that decides
 nothing about a program has no business composing an English sentence about one.
 
-The file abstraction is the part that has gone: `fossil-locator` is the rule that says where a
-written path points, which is the one thing in `fossil-base` that decided something about a program.
-`base-db` keeps its VFS in another crate for that reason and this is the same move.
+Two parts have gone. `fossil-locator` is the file abstraction — the rule that says where a written
+path points; `base-db` keeps its VFS in another crate for exactly that reason. And the shape-document
+decode is `fossil_hir::shape_documents`: `base-db` holds *input queries*, and a query that runs a
+decoder over a document to produce a type is not an input, it is the compiler asking a question.
+What stayed in `providers` is the ROW a decoder fills, because a table entry is not a decision about
+a program — and `substrate_has_no_prose.rs` is the test that keeps it from becoming one.
 
 **What stayed, and why it is not the same case.** `test_support` is also not compiler logic — its
 own header says so — and lifting it out looks like the identical move. It is not: a helper that

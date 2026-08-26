@@ -3,7 +3,7 @@
 //!
 //! A program brings a shape document in with
 //! `type { Person } = io.shex("shapes/person.shex")`. The checker decodes that
-//! document through [`fossil_base::shape_document`], which is keyed by a
+//! document through [`fossil_hir::shape_documents::shape_document`], which is keyed by a
 //! [`SourceFile`] **input**, so the document has to be registered before any
 //! query goes looking for it — and registering takes `&mut dyn Db`, which no
 //! query body can have. That is why this is a host job and lives here rather

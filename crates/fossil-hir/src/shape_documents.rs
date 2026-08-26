@@ -1,5 +1,5 @@
 //! Decoding a shape document — the query that runs one row of
-//! [`crate::providers`] against one registered file.
+//! [`fossil_base::providers`] against one registered file.
 //!
 //! # What this replaces
 //!
@@ -18,14 +18,14 @@
 //!    it keeps `MAX_PER_MAPPING_FAN_OUT` at 1. Editing the `.shex`
 //!    therefore re-ran nothing, and in the LSP that is a stale diagnostic that
 //!    never clears. [`decode_shape_document`] pays for the fix: it reads the text
-//!    from a [`SourceFile`] input instead — see [`crate::files`] for the registry
-//!    that turns a path into one.
+//!    from a [`SourceFile`] input instead — see [`fossil_base::files`] for the
+//!    registry that turns a path into one.
 //!
 //! # The row is chosen by NAME
 //!
 //! The name a program writes after `io.` selects the row and the row checks its
 //! own extension, so the two are checked against each other rather than one of
-//! them being decorative. See [`crate::providers`] for the whole argument.
+//! them being decorative. See [`fossil_base::providers`] for the whole argument.
 //!
 //! Hence the query key is the document **and the name**, interned into
 //! [`TypeDocument`]: `io.shex("x.ttl")` and `io.shacl("x.ttl")` are two
@@ -33,18 +33,17 @@
 //! key contains no mapping, so N mappings naming one document under one
 //! constructor still share ONE decode, and editing the PROGRAM re-runs none.
 
+use fossil_base::db::Db;
+use fossil_base::files::SourceFile;
+use fossil_base::providers::provider;
 use fossil_graph_schema::OutputShapes;
-
-use crate::db::Db;
-use crate::files::SourceFile;
-use crate::providers::provider;
 
 /// A decode request: **which document, read as which language**.
 ///
 /// Interned rather than passed as two arguments because a tracked query's key
 /// has to be a Salsa struct — salsa 0.26 rejects a bare `String` with "the trait
-/// bound `String: SalsaStructInDb` is not satisfied", which `crate::files`'s own
-/// tests already record.
+/// bound `String: SalsaStructInDb` is not satisfied", which `fossil_base::files`'s
+/// own tests already record.
 #[salsa::interned(debug)]
 pub struct TypeDocument<'db> {
     /// The registered document.
@@ -87,7 +86,7 @@ pub fn decode_shape_document<'db>(
     request: TypeDocument<'db>,
 ) -> Option<OutputShapes> {
     let doc = request.document(db);
-    let row = provider(crate::providers::installed(db), request.provider(db))?;
+    let row = provider(fossil_base::providers::installed(db), request.provider(db))?;
     let decode = row.reads_types?;
     let uri = doc.path(db);
     Some(match decode(uri, doc.text(db)) {
@@ -108,6 +107,23 @@ pub fn shape_document(db: &dyn Db, doc: SourceFile, provider_name: &str) -> Opti
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    /// The registration half: a document written to the registry is reachable
+    /// through the same `file_at` the compiler resolves with.
+    ///
+    /// It was a `test_support` unit test in `fossil-base`, and it came here with
+    /// the query — a `#[cfg(test)]` module cannot reach a crate above its own.
+    #[test]
+    fn a_registered_document_decodes_through_the_query() {
+        let (db, _file) = fossil_base::test_support::db_with_document(
+            "",
+            "person.shex",
+            fossil_base::test_support::PERSON_DOCUMENT,
+        );
+        let doc = fossil_base::files::file_at(&db, "person.shex").expect("registered");
+        let shapes = shape_document(&db, doc, "shex").expect("the `shex` row");
+        assert!(shapes.lookup("http://example.org/Person").is_some());
+    }
+
     use std::path::Path;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -116,7 +132,7 @@ mod tests {
     use fossil_graph_schema::Rejection;
     use salsa::Setter as _;
 
-    use crate::providers::Capability;
+    use fossil_base::providers::Capability;
 
     /// Does `provider_name` name an installed row that reads types?
     ///
@@ -126,21 +142,21 @@ mod tests {
     /// caller was ever written. These three assertions were its only callers,
     /// so it lives where its callers do.
     fn reads_types(db: &dyn Db, provider_name: &str) -> bool {
-        provider(crate::providers::installed(db), provider_name)
+        provider(fossil_base::providers::installed(db), provider_name)
             .is_some_and(|p| p.provides(Capability::ReadTypes))
     }
 
     use super::*;
-    use crate::db::FossilDb;
-    use crate::files::{file_at, register_file};
-    use crate::providers::{DATA, Provider};
-    use crate::system::{FsError, System};
+    use fossil_base::db::FossilDb;
+    use fossil_base::files::{file_at, register_file};
+    use fossil_base::providers::{DATA, Provider};
+    use fossil_base::system::{FsError, System};
     // The line decoder used to be written out again here, in a THIRD dialect of
     // the same idea (first line a shape IRI, each further line a predicate).
     // There is one now, and it lives one module over — see
-    // `crate::test_support`'s header for why it is a feature and not a
+    // `fossil_base::test_support`'s header for why it is a feature and not a
     // `#[cfg(test)]` module.
-    use crate::test_support::{SHEX, TABLE, decode_lines};
+    use fossil_base::test_support::{SHEX, TABLE, decode_lines};
 
     /// A second type-reading row, to prove selection actually selects — and it
     /// shares `SHEX`'s extensions on purpose, so only the NAME can tell them
@@ -362,12 +378,12 @@ mod tests {
     /// workspace's tests rest on.
     #[test]
     fn the_test_support_table_carries_the_line_row_under_the_name_shex() {
-        let row = crate::providers::provider(TABLE, "io.shex").expect("installed");
+        let row = fossil_base::providers::provider(TABLE, "io.shex").expect("installed");
         assert_eq!(row.name, "shex");
         assert!(
             std::ptr::fn_addr_eq(
                 row.reads_types.expect("the row reads types"),
-                decode_lines as crate::providers::DecodeTypes,
+                decode_lines as fossil_base::providers::DecodeTypes,
             ),
             "the row's `decode` is `decode_lines`"
         );

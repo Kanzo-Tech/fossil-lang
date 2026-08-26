@@ -27,7 +27,7 @@
 //!
 //! # Precision: the decoder keeps no offsets, and this says so
 //!
-//! [`fossil_base::shape_document`] answers with a
+//! [`fossil_hir::shape_documents::shape_document`] answers with a
 //! `fossil_graph_schema::OutputShapes` — `Shape { iri, properties }` and
 //! `PropertyConstraint { predicate, datatype, targets, occurs }`. **There is no
 //! span anywhere in that vocabulary**, and there deliberately cannot be a cheap

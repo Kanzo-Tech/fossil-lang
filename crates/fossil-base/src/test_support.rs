@@ -13,7 +13,8 @@
 //! to avoid.
 //!
 //! So the line format below was written three times: once in
-//! `fossil-base`'s own `shape_documents` tests, once in
+//! `fossil-hir`'s `shape_documents` tests (`fossil-base`'s own, while the
+//! query lived here), once in
 //! `fossil-hir/src/test_support.rs` (`#[cfg(test)]`, so no other crate could
 //! reach it), and a third was about to be written in `fossil-mir`'s
 //! `tests/lower_pg.rs`. A `#[cfg(test)]` module is invisible across a crate
@@ -23,7 +24,7 @@
 //! **This is not compiler logic** — the anti-pattern `CLAUDE.md` names for this
 //! crate. It is a reference implementation of the seam `fossil-base` itself
 //! defines ([`Provider`](crate::Provider),
-//! [`shape_document`](crate::shape_document), [`register_file`]), in a format
+//! `fossil_hir::shape_documents::shape_document`, [`register_file`]), in a format
 //! that exists nowhere else and that no program will ever be written in.
 //! Coverage of a real `ShEx` document belongs where the `ShEx` decoder lives.
 //!
@@ -324,16 +325,5 @@ mod tests {
             decode_lines("x.shex", "!malformed no shapes here\n"),
             Err(Rejection::Malformed("no shapes here".into()))
         );
-    }
-
-    /// The registration half: a document written to the registry is reachable
-    /// through the same `file_at` the compiler resolves with.
-    #[test]
-    fn a_registered_document_decodes_through_the_query() {
-        let (db, _file) = db_with_document("", "person.shex", PERSON_DOCUMENT);
-        let doc = crate::files::file_at(&db, "person.shex").expect("registered");
-        let shapes =
-            crate::shape_documents::shape_document(&db, doc, "shex").expect("the `shex` row");
-        assert!(shapes.lookup("http://example.org/Person").is_some());
     }
 }

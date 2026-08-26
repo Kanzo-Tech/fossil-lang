@@ -4,7 +4,7 @@
 //!
 //! A program brings a shape document in with
 //! `type { Person } := io.shex("shapes/person.shex")`. The document is a Salsa
-//! **input** ([`fossil_base::shape_document`] is keyed by a
+//! **input** ([`crate::shape_documents::shape_document`] is keyed by a
 //! [`SourceFile`]), so a host has to register it before any query goes looking
 //! — registering takes `&mut dyn Db`, which no query body can have. That splits
 //! the work in two: the host asks WHICH documents and under WHAT key, and the

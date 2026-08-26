@@ -121,7 +121,7 @@
 //!     `System::read_file`, which registers no Salsa dependency — so editing
 //!     the document re-ran nothing, and in the LSP that is a diagnostic that
 //!     never clears. It now reads the document as an INPUT: `file_at` (the file
-//!     registry) and `fossil_base::shape_document` (tracked).
+//!     registry) and `fossil_hir::shape_documents::shape_document` (tracked).
 //!
 //!     That adds two Salsa dependencies to `typecheck_mapping` and NEITHER is
 //!     per-mapping: `shape_document` is keyed by the DOCUMENT's `SourceFile`,

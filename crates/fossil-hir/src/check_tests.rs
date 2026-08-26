@@ -1519,7 +1519,8 @@ User : Person from users
 
     let renames = def_map(&db, file).renames(&db);
     let document = fossil_base::file_at(&db, "person.shex").expect("registered above");
-    let shapes = fossil_base::shape_document(&db, document, "shex").expect("the `shex` row");
+    let shapes =
+        crate::shape_documents::shape_document(&db, document, "shex").expect("the `shex` row");
     let schema = shapes.to_graph_schema(&renames);
     let columns: Vec<&str> = schema.nodes[0]
         .properties

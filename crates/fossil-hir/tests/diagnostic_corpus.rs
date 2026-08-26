@@ -43,7 +43,7 @@
 //!
 //! 1. `new_db()` used `NativeSystem`, whose `System::providers` is the trait
 //!    default — the four rows that read DATA and none that reads types, so
-//!    `fossil_base::shape_document` answers `None` for every document.
+//!    `shape_document` answers `None` for every document.
 //! 2. `fossil_hir::shapes::decoded_document` resolves through
 //!    `fossil_base::file_at`, which reads the SALSA INPUT REGISTRY and never
 //!    the disk — and `run_db_wired_fixture` never called `register_file`.
@@ -680,7 +680,7 @@ fn the_harness_installs_a_decoder_and_registers_the_document() {
              message for that is the one a program with no `type` line gets"
         )
     });
-    let shapes = fossil_base::shape_document(&db, doc, "shex").expect(
+    let shapes = fossil_hir::shape_documents::shape_document(&db, doc, "shex").expect(
         "no installed row is named `shex`: `System::providers` defaults to the \
          DATA rows and `NativeSystem` never overrides it, so no row reads types \
          at all and every document decodes to nothing — silently, and \

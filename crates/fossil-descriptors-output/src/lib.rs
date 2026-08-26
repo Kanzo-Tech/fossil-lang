@@ -8,7 +8,7 @@
 //! `fn(&str, &str) -> Result<OutputShapes, Rejection>` under the *read types*
 //! capability. [`PROVIDERS`] is those two spliced onto `fossil_base`'s data rows
 //! — the whole registry, which a host hands out from `System::providers`.
-//! `fossil_base::shape_document` picks a row **by the name the program wrote**
+//! `fossil_hir::shape_documents::shape_document` picks a row **by the name the program wrote**
 //! and calls it. The compiler reads the neutral vocabulary and never learns
 //! which language produced it — the cut `0e6898d` made for `fossil-mir`, now
 //! made for the checker.

@@ -21,9 +21,12 @@ workspace = true
 #
 # It is here rather than in `fossil-hir` (where the first copy lived,
 # `#[cfg(test)]` and so unreachable across the crate boundary) because the seam
-# it exercises is defined here: `ShapeDecoder`, `shape_document`, `SourceFile`,
+# it exercises is defined here: the `DecodeTypes` row, `SourceFile`,
 # `register_file`. A decoder for a format no program is written in is not the
-# compiler logic this crate refuses.
+# compiler logic this crate refuses — and it cannot be lifted OUT into a crate
+# of its own, because a helper that implements `System` must depend on this
+# crate and `#[cfg(test)]` then compiles a second, incompatible copy of it. That
+# is measured, and it is in `/docs/design/discarded`.
 test-support = []
 
 [dependencies]
@@ -37,9 +40,11 @@ smol_str = { workspace = true }
 # direction matches the existing fossil-hir → fossil-descriptors-input
 # direction; descriptors-input remains a leaf data crate.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# Promoted from a dev-dependency: `System::shape_documents` and the
-# `shape_document` query name `OutputShapes` and `Rejection` in their public
-# signatures, so the type is part of this crate's API and not just its tests.
+# Three modules name it in a public signature, so it is API and not just tests:
+# `providers` (the `DecodeTypes` row returns `OutputShapes` and `Rejection`),
+# `diagnostic` (`Span` is re-exported from there) and `system`. The
+# `shape_document` query named it too and has gone to `fossil-hir`; the ROW it
+# runs stays, because a table entry is not a decision about a program.
 # This is the dependency that lets `fossil-hir` stop linking `shex_ast` — the
 # compiler names the neutral vocabulary and a host supplies the decoder. It
 # stays cheap and stays WASM-clean: `fossil-graph-schema` depends on `serde`

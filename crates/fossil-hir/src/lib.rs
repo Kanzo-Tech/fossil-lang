@@ -74,6 +74,7 @@ pub mod provenance;
 /// `fossil-engine`'s run path. They were methods on `fossil_base::Provider`,
 /// which put English Fossil compiler errors in the trait-and-db substrate.
 pub mod refusals;
+pub mod shape_documents;
 pub mod shapes;
 pub mod spans;
 /// The stdlib catalog: every function the language declares, its signature and
