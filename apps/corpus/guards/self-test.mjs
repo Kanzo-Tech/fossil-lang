@@ -58,6 +58,32 @@ function broken(layout, mutate) {
   return dir;
 }
 
+/**
+ * Re-cut one orientation's tiles through a SELECT.
+ *
+ * The edge mutations used to rewrite `by_source.parquet`, the uncut relation, and that file is not
+ * published any more: a corpus carries an orientation one way, as tiles. So they read the tiles as
+ * one relation and write them back cut on the column the orientation is ordered by — which also
+ * means a mutation aimed at ordering or at content no longer moves a row into the wrong tile by
+ * accident, and each one still fails the single guard it names.
+ */
+function recut(dir, orientation, key, { select = "SELECT * FROM m", order } = {}) {
+  const tileRows = 4096;
+  const into = join(dir, EDGE_DIR, orientation);
+  const other = key === "src_dense" ? "dst_dense" : "src_dense";
+  const copies = [...Array(Math.ceil(70_000 / tileRows)).keys()]
+    .map(
+      (k) =>
+        `COPY (SELECT * FROM (${select}) WHERE ${key} >= ${k * tileRows} AND ${key} < ${(k + 1) * tileRows}
+                ORDER BY ${order ?? `${key}, ${other}`})
+           TO '${lit(join(into, `tile${k}.parquet`))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});`,
+    )
+    .join("\n");
+  execute(
+    `CREATE TEMP TABLE m AS SELECT * FROM read_parquet('${lit(join(into, "*.parquet"))}');\n${copies}`,
+  );
+}
+
 /** Rewrite one Parquet file through a SELECT, which is how every mutation below is expressed. */
 function rewrite(path, select) {
   execute(
@@ -225,28 +251,26 @@ const MUTATIONS = [
     guard: "csr-and-csc",
     what: "`by_source` is written in target order",
     layout: "rowgroups",
-    mutate: (dir) =>
-      rewrite(join(dir, EDGE_DIR, "by_source.parquet"), "SELECT * FROM m ORDER BY dst_dense, src_dense"),
+    mutate: (dir) => recut(dir, "by_source", "src_dense", { order: "dst_dense, src_dense" }),
   },
   {
     guard: "one-relation-twice",
     what: "one edge is missing from `by_target`",
     layout: "rowgroups",
     mutate: (dir) =>
-      rewrite(
-        join(dir, EDGE_DIR, "by_target.parquet"),
-        "SELECT * FROM m WHERE NOT (src_dense = 0 AND dst_dense = (SELECT min(dst_dense) FROM m WHERE src_dense = 0)) ORDER BY dst_dense, src_dense",
-      ),
+      recut(dir, "by_target", "dst_dense", {
+        select:
+          "SELECT * FROM m WHERE NOT (src_dense = 0 AND dst_dense = (SELECT min(dst_dense) FROM m WHERE src_dense = 0))",
+      }),
   },
   {
     guard: "no-dangling-endpoint",
     what: "one edge points at a `dense_id` no vertex has",
     layout: "rowgroups",
     mutate: (dir) =>
-      rewrite(
-        join(dir, EDGE_DIR, "by_source.parquet"),
-        "SELECT src_dense, CASE WHEN src_dense = 5 THEN 999999 ELSE dst_dense END AS dst_dense FROM m ORDER BY src_dense",
-      ),
+      recut(dir, "by_source", "src_dense", {
+        select: "SELECT src_dense, CASE WHEN src_dense = 5 THEN 999999 ELSE dst_dense END AS dst_dense FROM m",
+      }),
   },
   {
     guard: "exactly-once",
@@ -313,7 +337,7 @@ const MUTATIONS = [
     layout: "rowgroups",
     mutate(dir) {
       const tileRows = 4096;
-      const relation = join(dir, EDGE_DIR, "by_target.parquet");
+      const relation = join(dir, EDGE_DIR, "by_target", "*.parquet");
       const tiles = [...Array(Math.ceil(70_000 / tileRows)).keys()]
         .map(
           (k) =>

@@ -263,6 +263,28 @@ export const GUARDS = [
           failures.push(`${type.name} carries tiles two ways at once, so a reader that globs finds both`);
         }
       }
+      // The same rule on the edge side, where it was not being applied and where it is the only
+      // place it bites: a vertex type never carries two containers, and every relation does.
+      // `by_source.parquet` beside `by_source/tile{k}.parquet` is the uncut relation shipped next
+      // to its own cut, which is what `<Type>.parquet` beside the vertex tiles already is — and
+      // that one is a violation two guards down, in as many words, "a second copy of every vertex".
+      // The asymmetry was never argued; it is the difference between a staging artefact that is
+      // deleted and one that is published.
+      //
+      // It matters because the two are read by different consumers. `fossil-mcp` registers its
+      // views over `by_source.parquet` and the reference reader addresses the tiles, so the corpus
+      // has two readers disagreeing about where its bytes are — which is the failure this whole
+      // suite exists to make impossible.
+      for (const edge of corpus.edges) {
+        for (const side of [edge.bySource, edge.byTarget]) {
+          if (side.relation.length > 0 && side.tiles.length > 0) {
+            failures.push(
+              `${edge.rel} ${side.name}: ${side.name}.parquet is the uncut relation published beside ` +
+                `its own tiles, so a reader that globs finds both`,
+            );
+          }
+        }
+      }
       for (const edge of corpus.edges) {
         const source = corpus.types.find((t) => t.name === edge.srcType);
         if (!source) {

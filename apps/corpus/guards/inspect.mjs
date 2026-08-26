@@ -38,15 +38,27 @@ function declaredCount(value) {
   return BigInt(String(value).trim());
 }
 
-/** Parquet files directly inside `dir`, sorted, with the tile number their name claims. */
+/**
+ * Parquet files directly inside `dir`, **in tile order**, with the tile number their name claims.
+ *
+ * By the number and not by the name: `tile10.parquet` sorts before `tile2.parquet` as a string, and
+ * a guard that reads the list as one relation then sees the rows in an order no writer produced.
+ * That was invisible for as long as the uncut relation was published beside the tiles, because
+ * every ordering guard preferred the single file and never read the set — `csr-and-csc` reports one
+ * disorder per orientation the moment it does. A file whose name claims no tile keeps its place by
+ * name, since there is no number to sort it by.
+ */
 function payload(dir) {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
   return readdirSync(dir)
     .filter((name) => name.endsWith(".parquet"))
-    .sort()
     .map((name) => {
       const named = /^(?:chunk|tile)(\d+)\.parquet$/.exec(name);
       return { name, path: join(dir, name), tile: named ? BigInt(named[1]) : null };
+    })
+    .sort((a, b) => {
+      if (a.tile === null || b.tile === null) return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+      return a.tile < b.tile ? -1 : a.tile > b.tile ? 1 : 0;
     });
 }
 

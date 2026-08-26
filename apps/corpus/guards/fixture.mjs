@@ -152,6 +152,13 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   // of a vertex are in the `by_source` tile its id names and the in-edges in the
   // `by_target` one, and a fixture that only wrote the source half would leave
   // every target-half guard passing on nothing.
+  //
+  // And ONLY tiled. `by_source.parquet` beside `by_source/` was the uncut relation published next
+  // to its own cut, which is what a `<Type>.parquet` beside the vertex tiles already is — and that
+  // one has been a violation for as long as `exactly-once` has existed, in as many words, "a second
+  // copy of every vertex". The asymmetry was never argued, and it is the difference between a
+  // staging artefact that gets deleted and one that ships: two containers is two places a reader
+  // can look, and two readers here looked in different ones.
   const edgeTileCopy = ["by_source", "by_target"]
     .flatMap((orientation) => {
       const [key, other] = orientation === "by_source" ? ["src_dense", "dst_dense"] : ["dst_dense", "src_dense"];
@@ -173,10 +180,6 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
         FROM read_csv('${lit(edgeCsv)}', header = true);
     ${vertexCopy}
     ${indexCopy}
-    COPY (SELECT * FROM e ORDER BY src_dense, dst_dense)
-      TO '${lit(join(edgeDir, "by_source.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});
-    COPY (SELECT * FROM e ORDER BY dst_dense, src_dense)
-      TO '${lit(join(edgeDir, "by_target.parquet"))}' (FORMAT PARQUET, ROW_GROUP_SIZE ${tileRows});
     ${edgeTileCopy}
   `);
 
