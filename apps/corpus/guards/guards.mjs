@@ -140,6 +140,48 @@ export function checkVectors(vectors) {
   return result(failures, [`${counted} vectors`]);
 }
 
+
+/** The smallest of a list of class sizes, or `null` for no classes at all. */
+function minOf(sizes) {
+  return sizes.length === 0 ? null : sizes.reduce((a, b) => (b < a ? b : a));
+}
+
+/**
+ * The smallest **wildcard** frequency count over a class table.
+ *
+ * Under `absent_quasi_identifier: wildcard` a record's class is every record
+ * agreeing with it wherever both are non-null, so a record with an absent value
+ * borrows the size of every class it could belong to:
+ *
+ *     f(r) = Σ { |c| : c compatible with r }
+ *
+ * The shortcut worth knowing about, because it is only valid on one side: when
+ * `r` has NO null, the only null-free class compatible with it is its own, so
+ * the sum collapses to `|r| + Σ over null-bearing c ≠ r`. When `r` HAS a null it
+ * is compatible with plenty of null-free classes and the sum is over
+ * everything. Applying the collapsed form on both sides is a bug the Rust side
+ * shipped for one test run — `crates/fossil-df/src/privacy.rs` carries the
+ * measurement — and this implementation was written from the definition rather
+ * than from that one, which is the only reason the two agreeing means anything.
+ */
+function wildcardMinimum(classes, columns) {
+  const table = classes.map((row) => ({
+    key: columns.map((c) => (row[c] === null || row[c] === undefined ? null : String(row[c]))),
+    n: BigInt(row.n),
+  }));
+  if (table.length === 0) return null;
+  const withNull = table.filter((c) => c.key.some((v) => v === null));
+  const compatible = (a, b) => a.every((v, i) => v === null || b[i] === null || v === b[i]);
+  let smallest = null;
+  for (const { key, n } of table) {
+    const f = key.some((v) => v === null)
+      ? table.filter((c) => compatible(key, c.key)).reduce((a, c) => a + c.n, 0n)
+      : withNull.filter((c) => c.key !== key && compatible(key, c.key)).reduce((a, c) => a + c.n, n);
+    if (smallest === null || f < smallest) smallest = f;
+  }
+  return smallest;
+}
+
 export const GUARDS = [
   {
     id: "not-empty",
@@ -976,6 +1018,199 @@ export const GUARDS = [
         );
       }
       return result(failures, notes);
+    },
+  },
+  {
+    id: "declared-privacy",
+    title: "The privacy bound the manifest declares is the one the files hold",
+    proves:
+      "That `k` can be re-derived from the Parquet by somebody who has neither fossil nor the " +
+      "policy document, and that it comes out at the `reached` the manifest published. The " +
+      "equivalence classes are recomputed over the WHOLE released population of each type — every " +
+      "tile of every payload set as one relation — and the count is held against `vertex_count`, " +
+      "because a corpus is tiles and a per-tile aggregation is the easiest wrong answer available " +
+      "here. The declared `absent_quasi_identifier` is honoured rather than assumed, the " +
+      "suppressed records are counted, and the suppression budget is checked in integer parts per " +
+      "million so that this arithmetic and the writer's cannot round differently.\n\n" +
+      "**Verifying k needs the quasi-identifier columns and never the sensitive one**, so this " +
+      "guard runs for an auditor who is not entitled to the data the policy exists to protect. " +
+      "That asymmetry is a property of k-anonymity and not of this implementation: ℓ-diversity is " +
+      "a statement about the distribution of the sensitive attribute inside each class, so " +
+      "checking it would mean reading it.",
+    cannotProve:
+      "That the quasi-identifier SET is the right one. It is the one field here a reader cannot " +
+      "derive and the one the whole bound turns on — whether `birth_year` identifies anybody " +
+      "depends on the jurisdiction, the recipient and what else was released, and no amount of " +
+      "scanning recovers that judgement. A corpus declaring a set of one reaches a large `k` " +
+      "honestly and protects nobody.\n\n" +
+      "That `subject` is opaque. Every vertex carries a unique IRI, and k-anonymity bounds the " +
+      "quasi-identifier TUPLE, not the record: it stops linkage through an external table keyed " +
+      "on the quasi-identifiers, and stops nothing at all if the IRI itself carries an " +
+      "identifier. Nothing on disk distinguishes `person/8a3f…` from `person/nhs-4433221`.\n\n" +
+      "That anything was suppressed. A record that was never written leaves no trace, so what is " +
+      "checked is the suppression VISIBLE in the bytes — quasi-identifier cells that are null. A " +
+      "producer that dropped rows instead reports a smaller population and this guard cannot tell " +
+      "that from a smaller input.\n\n" +
+      "Attribute disclosure. Every record in a class of 4,000 sharing one diagnosis satisfies " +
+      "k=4,000 and discloses the diagnosis of every one of them.",
+    run(corpus) {
+      const declared = corpus.privacy;
+      if (declared === null) {
+        // Absence means «written before this field existed», which is a corpus
+        // and not a violation. It emphatically does not mean «public», and the
+        // note says so rather than leaving a silent pass to be read as one.
+        return result([], ["no `privacy:` — written before the field existed, so nothing is claimed"]);
+      }
+      const bound = String(declared.bound ?? "");
+      if (bound === "undeclared") {
+        return result([], ["`privacy: undeclared` — the producer declares no bound over these bytes"]);
+      }
+      if (bound !== "k-anonymity") {
+        return result([`the manifest declares a bound of \`${bound}\`, which this guard cannot check`]);
+      }
+
+      const number = (key) => {
+        const raw = declared[key];
+        return raw !== undefined && /^\d+$/.test(String(raw).trim()) ? BigInt(String(raw).trim()) : null;
+      };
+      const k = number("k");
+      const reached = number("reached");
+      const population = number("population");
+      const suppressed = number("suppressed");
+      const budget = number("suppression_budget_ppm");
+      const absent = String(declared.absent_quasi_identifier ?? "");
+      const failures = [];
+      const notes = [];
+
+      for (const [key, value] of Object.entries({ k, reached, population, suppressed, budget })) {
+        if (value === null) failures.push(`the bound declares no \`${key}\``);
+      }
+      if (!["value", "wildcard", "suppress"].includes(absent)) {
+        failures.push(
+          `\`absent_quasi_identifier\` is \`${absent}\`, and a bound whose null reading is unstated ` +
+            "does not say what its own k means",
+        );
+      }
+      if (failures.length > 0) return result(failures);
+
+      // `<Type>.<column>`, space-separated. The set is per type, and a type
+      // named here that the corpus does not carry is a manifest describing a
+      // different corpus.
+      const wanted = new Map();
+      for (const name of String(declared.quasi_identifiers ?? "").split(/\s+/).filter(Boolean)) {
+        const cut = name.indexOf(".");
+        if (cut < 1) {
+          failures.push(`\`${name}\` is not a \`<Type>.<column>\` name`);
+          continue;
+        }
+        const [type, column] = [name.slice(0, cut), name.slice(cut + 1)];
+        if (!wanted.has(type)) wanted.set(type, []);
+        wanted.get(type).push(column);
+      }
+      for (const type of wanted.keys()) {
+        if (!corpus.types.some((t) => t.name === type)) {
+          failures.push(`the bound names quasi-identifiers of \`${type}\`, which is not a type here`);
+        }
+      }
+      if (failures.length > 0) return result(failures);
+
+      let counted = 0n;
+      let spent = 0n;
+      let smallest = null;
+      for (const type of corpus.types) {
+        if (type.files.length === 0) continue;
+        const columns = wanted.get(type.name) ?? [];
+        for (const column of columns) {
+          if (!type.columns.has(column)) {
+            failures.push(`\`${type.name}.${column}\` is declared a quasi-identifier and is not a column`);
+          }
+        }
+        if (failures.length > 0) continue;
+
+        // ONE relation over every tile of the set. This is the line the whole
+        // guard turns on: `fileList` spans the payload, so the classes are
+        // classes of the release. A loop over `type.files` here would report a
+        // k that is too small and look conservative doing it.
+        const relation = `read_parquet(${fileList(type.files)})`;
+        const quoted = columns.map((c) => `"${c.replace(/"/g, '""')}"`);
+        const anyNull = quoted.map((c) => `${c} IS NULL`).join(" OR ") || "false";
+        const rows = Number(scalar(`SELECT count(*) FROM ${relation}`));
+        counted += BigInt(rows);
+
+        // The declared count is what the release IS, and the class sizes have to
+        // add back up to it. Checked here as well as by `declared-count`
+        // because that guard proves the tiles are all there and this one proves
+        // the AGGREGATE saw them.
+        if (type.declared !== null && BigInt(rows) !== type.declared) {
+          failures.push(
+            `${type.name} carries ${rows.toLocaleString("en-US")} rows and declares ${type.declared} — ` +
+              "the equivalence class is the whole released population, so a bound over a different " +
+              "number of records is a bound over something else",
+          );
+        }
+
+        const suppressedHere =
+          absent === "suppress" && columns.length > 0
+            ? BigInt(scalar(`SELECT count(*) FROM ${relation} WHERE ${anyNull}`))
+            : 0n;
+        spent += suppressedHere;
+        const certified = absent === "suppress" && columns.length > 0 ? `WHERE NOT (${anyNull})` : "";
+        const group = quoted.length > 0 ? `GROUP BY ${quoted.join(", ")}` : "";
+        const select = quoted.length > 0 ? `${quoted.join(", ")}, count(*) AS n` : "count(*) AS n";
+        const classes = query(`SELECT ${select} FROM ${relation} ${certified} ${group}`);
+
+        const sizes = classes.map((row) => BigInt(row.n));
+        const total = sizes.reduce((a, b) => a + b, 0n);
+        if (total + suppressedHere !== BigInt(rows)) {
+          failures.push(
+            `${type.name}: the classes hold ${total} record(s) and ${suppressedHere} are suppressed, ` +
+              `against ${rows} in the corpus — the aggregation did not span the release`,
+          );
+        }
+
+        const here = absent === "wildcard" ? wildcardMinimum(classes, columns) : minOf(sizes);
+        notes.push(
+          `${type.name}: ${classes.length.toLocaleString("en-US")} class(es) over (${columns.join(", ") || "no quasi-identifier"}), smallest ${here}`,
+        );
+        if (here !== null) smallest = smallest === null ? here : (here < smallest ? here : smallest);
+      }
+      if (failures.length > 0) return result(failures, notes);
+
+      if (smallest === null) smallest = counted;
+      if (smallest !== reached) {
+        failures.push(
+          `the manifest says it reached k=${reached} and the files reach k=${smallest}`,
+        );
+      }
+      if (smallest < k) {
+        failures.push(`the bound asks for k=${k} and the files reach k=${smallest}`);
+      }
+      if (counted !== population) {
+        failures.push(
+          `the bound was declared over ${population} record(s) and the corpus holds ${counted}`,
+        );
+      }
+      if (spent !== suppressed) {
+        failures.push(
+          `the manifest declares ${suppressed} suppressed record(s) and ${spent} carry an absent ` +
+            "quasi-identifier",
+        );
+      }
+      // Integer parts per million on both sides. A fraction here and a fraction
+      // in the writer is two roundings of one number.
+      if (suppressed * 1_000_000n > population * budget) {
+        failures.push(
+          `${suppressed} of ${population} record(s) suppressed is over the declared budget of ${budget} ppm`,
+        );
+      }
+      return result(
+        failures,
+        [
+          `k=${k} asked, k=${smallest} reached over ${counted.toLocaleString("en-US")} record(s), ` +
+            `absent quasi-identifier read as \`${absent}\``,
+          ...notes,
+        ],
+      );
     },
   },
 ];

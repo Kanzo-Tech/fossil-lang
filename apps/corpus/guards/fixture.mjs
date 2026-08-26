@@ -92,11 +92,38 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   const points = positions(count, clusters);
   const { ordered, denseOf } = renumber(points);
 
-  const rows = ordered.map(
-    (p, dense) => `${dense},https://example.org/person/${p.index},${p.x},${p.y},${p.cluster}`,
-  );
+  // Two quasi-identifiers, because a corpus with none cannot exercise the
+  // convention that a corpus declares what its bytes guarantee — and a guard
+  // that only ever runs on a corpus with nothing to protect is a guard that has
+  // never been asked a question.
+  //
+  // They are functions of the PRE-layout index rather than of `dense_id`, so the
+  // equivalence classes are a property of the data and not of the tiling: 40
+  // birth years by 25 postcodes is 1,000 combinations, each holding
+  // `count / 1000` records, and the smallest class is the same number however
+  // the corpus is cut. That is what makes `declared-privacy` and
+  // `the_class_is_the_release_and_not_the_tile` the same assertion in two
+  // languages.
+  const quasi = (index) => [1950 + (index % 40), `PC${index % 25}`];
+  const rows = ordered.map((p, dense) => {
+    const [birthYear, postcode] = quasi(p.index);
+    return `${dense},https://example.org/person/${p.index},${birthYear},${postcode},${p.x},${p.y},${p.cluster}`;
+  });
   const vertexCsv = join(dir, "vertices.csv");
-  writeFileSync(vertexCsv, `dense_id,subject,x,y,cluster_id\n${rows.join("\n")}\n`);
+  writeFileSync(
+    vertexCsv,
+    `dense_id,subject,birth_year,postcode,x,y,cluster_id\n${rows.join("\n")}\n`,
+  );
+
+  // The smallest equivalence class, counted rather than derived — the fixture
+  // publishes it and the guard re-derives it off the Parquet, so a formula here
+  // and a formula there agreeing would prove only that one was copied.
+  const classes = new Map();
+  for (const p of ordered) {
+    const key = quasi(p.index).join("\u0000");
+    classes.set(key, (classes.get(key) ?? 0) + 1);
+  }
+  const reached = Math.min(...classes.values());
 
   const per = Math.ceil(count / clusters);
   const pairs = [];
@@ -189,6 +216,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
   execute(`
     CREATE TEMP TABLE v AS
       SELECT dense_id::UINTEGER AS dense_id, subject::VARCHAR AS subject,
+             birth_year::INTEGER AS birth_year, postcode::VARCHAR AS postcode,
              x::FLOAT AS x, y::FLOAT AS y, cluster_id::UINTEGER AS cluster_id
         FROM read_csv('${lit(vertexCsv)}', header = true);
     CREATE TEMP TABLE e AS
@@ -211,6 +239,21 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       // directory to list, so the one thing it cannot derive is which of the two
       // it is looking at, and this is where it is told.
       `container: ${layout}`,
+      // What the bytes guarantee, beside the container, because both are
+      // properties of the whole release rather than of a column. A flat mapping
+      // of scalars: the manifest's grammar is what `manifest.mjs` reads, and a
+      // nested sequence here would be SKIPPED rather than refused.
+      "privacy:",
+      "  bound: k-anonymity",
+      "  k: 5",
+      `  reached: ${reached}`,
+      "  absent_quasi_identifier: value",
+      `  population: ${count}`,
+      "  suppressed: 0",
+      "  suppression_budget_ppm: 0",
+      "  quasi_identifiers: Person.birth_year Person.postcode",
+      "  policy: https://example.org/policies/fixture-v1",
+      "  profile: https://fossil-lang.org/ns/privacy/v1",
       "vertices:",
       "- vertex/Person.vertex.yml",
       "edges:",
@@ -234,6 +277,10 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
       "  - name: subject",
       "    data_type: string",
       "    is_primary: true",
+      "  - name: birth_year",
+      "    data_type: int32",
+      "  - name: postcode",
+      "    data_type: string",
       "index:",
       "  prefix: index/",
       "  ordered_by: subject",
@@ -270,7 +317,7 @@ export function write(dir, { count = 70_000, clusters = 256, layout = "rowgroups
     ].join("\n"),
   );
 
-  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows };
+  return { dir, count, edges: pairs.length, tiles, layout, chunkSize: tileRows, reached };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

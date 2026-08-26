@@ -229,6 +229,22 @@ export function inspect(root) {
     manifest,
     /** What `graph.graph.yml` says the container is. Absent is the file-per-tile one. */
     container: manifest.index.container === undefined ? "files" : String(manifest.index.container),
+    /**
+     * What `graph.graph.yml` says the bytes guarantee, or `null`.
+     *
+     * **`null` and `{bound: "undeclared"}` are different findings and neither is
+     * "public".** An absent key is a corpus written before the field existed; a
+     * declared `undeclared` is a producer that knows about the field and is
+     * saying this release carries no bound. A reader that collapsed the two
+     * would be reporting the age of a writer as a property of the data.
+     *
+     * It scans as a flat mapping of scalars because that is the only shape this
+     * scanner reads — see `manifest.mjs`. A producer emitting the set as a YAML
+     * sequence would find it silently absent here, which is why the Rust that
+     * writes it has a test asserting the shape rather than a comment asking for
+     * it.
+     */
+    privacy: manifest.index.privacy === undefined ? null : manifest.index.privacy,
     types,
     edges,
     rel,

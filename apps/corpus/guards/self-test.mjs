@@ -355,6 +355,35 @@ const MUTATIONS = [
     mutate: (dir) => rmSync(join(dir, EDGE_DIR, "by_target"), { recursive: true, force: true }),
   },
   {
+    guard: "declared-privacy",
+    what: "one record is moved out of its equivalence class, so the release reaches k=1",
+    layout: "rowgroups",
+    // The break the guard exists for, and the one a producer actually ships: the
+    // manifest's numbers are untouched and the BYTES stop supporting them. A
+    // reader that trusted `reached: N` would see nothing.
+    mutate: (dir) =>
+      rewrite(
+        join(dir, VERTICES),
+        "SELECT * REPLACE (CASE WHEN dense_id = 0 THEN 1234 ELSE birth_year END AS birth_year) FROM m",
+      ),
+  },
+  {
+    guard: "declared-privacy",
+    what: "the manifest claims a larger k than the files hold, with the files untouched",
+    layout: "rowgroups",
+    // The other direction, and the reason `reached` is published beside `k`
+    // rather than only `k`: a corpus that merely CLEARS the bar cannot be told
+    // apart from one whose producer wrote a number down. Publishing what was
+    // reached gives a stranger something to recompute against, and this is that
+    // recomputation going red.
+    mutate(dir) {
+      const path = join(dir, "graph.graph.yml");
+      const yaml = readFileSync(path, "utf8");
+      const reached = /reached: (\d+)/.exec(yaml);
+      writeFileSync(path, yaml.replace(reached[0], `reached: ${Number(reached[1]) + 1}`));
+    },
+  },
+  {
     guard: "tile-of",
     what: "the `by_target` tiles are cut on `src_dense`, which is the source half again",
     // The one break that is only nameable where a tile has a name: `tile-of` asks the row-group
