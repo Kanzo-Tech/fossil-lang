@@ -78,7 +78,7 @@ that files appeared — and is the test that goes red if it stops holding.
 `examples/hello.fossil` is a CLI fixture, not a conformance program: it is the
 one thing that drives the *binary* end to end and asserts the GraphAr dataset on
 disk by content. The language itself is proved by the conformance programs under
-`apps/docs/programs/`, which `crates/fossil-engine/tests/programs.rs` compiles
+`apps/docs/programs/`, which `crates/fossil-cli/tests/programs.rs` compiles
 and the documentation transcludes.
 
 ## Foundations
@@ -108,7 +108,7 @@ There is **one** reference, in three pieces:
   somewhere else and it runs — `node` and a `duckdb` binary, no install, no build.
 - [`apps/docs/programs/`](apps/docs/programs/) — the conformance programs. Every program the
   documentation shows is one of these, read off disk at build time and never retyped into prose.
-  No count here: `crates/fossil-engine/tests/programs.rs` walks the directory, and the number this
+  No count here: `crates/fossil-cli/tests/programs.rs` walks the directory, and the number this
   line used to carry was five behind it.
 
 Plus [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev cycle and commit policy, and

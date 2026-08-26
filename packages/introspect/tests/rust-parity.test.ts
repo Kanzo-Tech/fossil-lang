@@ -237,7 +237,7 @@ function rustTypeTable(): {
   return { exact, prefixes, fallback };
 }
 
-describe("source-binding pattern parity with fossil-engine", () => {
+describe("source-binding pattern parity with fossil-introspect", () => {
   it("is character-for-character the Rust one", () => {
     expect(SOURCE_REF_PATTERN).toBe(rustPattern());
   });
@@ -290,7 +290,7 @@ describe("reader dispatch parity with the generated Rust catalogue", () => {
   });
 });
 
-describe("DuckDB type table parity with fossil-engine", () => {
+describe("DuckDB type table parity with fossil-introspect", () => {
   it("maps every spelling the Rust names to the same primitive", () => {
     const { exact } = rustTypeTable();
     for (const [spelling, primitive] of exact) {

@@ -123,7 +123,7 @@ export function duckdbTypeToFossilPrimitive(t: string): InferredPrimitive {
 
 /**
  * The source-binding pattern. Exported because it is the thing the parity
- * guard compares against `fossil-engine`'s, and because a caller that wants to
+ * guard compares against `fossil-introspect`'s, and because a caller that wants to
  * ask "does this text bind any source?" should not write a second one.
  *
  * Not a shared `RegExp` instance: `g` carries `lastIndex`, so one object

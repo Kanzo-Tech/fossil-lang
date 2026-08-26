@@ -10,7 +10,7 @@ Framework-agnostic, zero `@fossil-lang/*` runtime deps. The host injects the
 parsing, the DuckDB→Fossil primitive table, the DESCRIBE SQL, and the
 descriptor shape — so the playground and keasy read one copy of it.
 
-`crates/fossil-engine` does the same job natively, and the two are separate
+`crates/fossil-introspect` does the same job natively, and the two are separate
 implementations, not a shared one. Three things must agree or a program means
 something different in the browser and on the CLI: the source-binding pattern,
 the DuckDB reader each `io.` constructor picks (`read_csv_auto`,
