@@ -160,3 +160,15 @@ fn the_example_in_a_message_names_the_binding_the_program_wrote() {
         "`User` is the hardcoded example, and no program here declares one: {m}"
     );
 }
+#[test]
+fn a_union_refuses_the_alias_a_join_takes() {
+    // `binding("other")` is the same parameter kind a join's right side is, and
+    // `X as Y` fills one on its own — so without this arm the alias would be
+    // read and dropped, which is the silent half of a wrong answer. A union's
+    // result answers to one name and it is not the alias.
+    let m = one_about("derived := pedidos.union(personas as otras)", "union");
+    assert!(
+        m.contains("alias `otras`") && m.contains("`derived`"),
+        "the refusal names the alias and the name the result does answer to: {m}"
+    );
+}
