@@ -8,6 +8,10 @@ Keep it under 200 lines, rules-not-context.
 - `grammar.bnf` — the syntax, normative, and ahead of the parser on purpose. A production
   written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
   the file.
+- `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
+  function with its signature and lowering. Generated from, not compared against — six files
+  come out of `cargo xtask catalogue` and no Rust states a row a second time. Adding a
+  function is a line here. `CONTRIBUTING.md` has the six and the round-trip guard.
 - `apps/docs/` — the whole of the documentation, and there is no second site. `/docs/book`
   teaches the language and `/docs/format` specifies the corpus; behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
@@ -117,7 +121,10 @@ crates/
   fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
-                           catalog (`stdlib.rs` — the checker resolves calls against it)
+                           catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
+                           are `catalogue.bnf` and `stdlib/generated.rs` is what
+                           `cargo xtask catalogue` makes of them. Adding a function is a
+                           line in the `.bnf` and touches no Rust
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-shex/             ShExDescriptor over `shex_ast` — backward target-shape checking
   fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
@@ -186,6 +193,8 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
                            reader that shares no code with them
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
+catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
+                           source of six generated files; no Rust states a row twice
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 

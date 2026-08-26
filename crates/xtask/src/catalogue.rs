@@ -151,19 +151,21 @@ fn lex(text: &str) -> Vec<Tok> {
             let mut w = String::new();
             while i < chars.len() {
                 let c = chars[i];
-                if c.is_ascii_alphanumeric() || c == '_' {
-                    w.push(c);
-                    i += 1;
-                } else if c == '.'
-                    && chars
-                        .get(i + 1)
-                        .is_some_and(|n| n.is_ascii_alphanumeric() || *n == '_')
-                {
-                    w.push(c);
-                    i += 1;
-                } else {
+                // A `.` continues a word only when a word character follows it.
+                // That one condition is what tells `str.replace` from the `.`
+                // that ends a row, and it is why the grammar needs no escape for
+                // either.
+                let continues = c.is_ascii_alphanumeric()
+                    || c == '_'
+                    || (c == '.'
+                        && chars
+                            .get(i + 1)
+                            .is_some_and(|n| n.is_ascii_alphanumeric() || *n == '_'));
+                if !continues {
                     break;
                 }
+                w.push(c);
+                i += 1;
             }
             toks.push(Tok::Word(w));
             continue;

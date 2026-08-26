@@ -75,45 +75,51 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm -p fossil-gra
 
 ## Generated files
 
-Five files are generated and must not be hand-edited — two Rust, two TypeScript,
-one MDX:
+Six files are generated and must not be hand-edited — three Rust, two TypeScript,
+one MDX. **All six have one source**, which they did not until the stdlib half of
+the catalogue moved into the file:
 
 ```
-catalogue.bnf ──cargo xtask catalogue──▶ crates/fossil-base/src/providers/generated.rs
-                                         crates/fossil-descriptors-output/src/generated.rs
-                                         packages/introspect/src/catalogue.generated.ts
-                                         packages/executor/src/catalogue.generated.ts
-
-catalogue.bnf ─┐
-               ├─cargo xtask catalogue──▶ apps/docs/content/generated/stdlib.mdx
-fossil-hir ────┘   (crates/fossil-hir/src/stdlib.rs — the FunctionRegistry)
+                     ┌─▶ crates/fossil-base/src/providers/generated.rs
+                     ├─▶ crates/fossil-descriptors-output/src/generated.rs
+catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
+              xtask  ├─▶ packages/introspect/src/catalogue.generated.ts
+            catalogue├─▶ packages/executor/src/catalogue.generated.ts
+                     └─▶ apps/docs/content/generated/stdlib.mdx
 ```
 
 Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` gets
 the rows whose behaviour the compiler can link, `descriptors-output` the ones
-needing a shape-language parser, `introspect` the ones with a table function to
+needing a shape-language parser, `fossil-hir` the stdlib table the checker
+resolves every call against, `introspect` the ones with a table function to
 `DESCRIBE` through (`io.rdf` has none), `executor` every row that reads data
 (`io.rdf` included — the host fetches its bytes like any other source). Which
 projection a row lands in is derived from its clauses, never configured.
 
-The fifth has a second source, because the catalogue has two halves and only the
-`io.` one became a file. `FunctionRegistry` is already a table of values —
-`RegistryEntry { name, recv, member, sig, lowering }` — so the emitter reads it
-rather than the Rust that writes it down, and `apps/docs/content/docs/book/stdlib.mdx`
-pulls each section in with `<include>` and keeps only the prose. It had written
-the same table out by hand: 58 rows, of which **seven named nothing the checker
-knows**, two of them (`io.sql`, `io.http`) occurring nowhere else in the
-repository at all. `crates/xtask/src/reference.rs` has the measurement and the
-argument for where each half comes from.
+The MDX one had a SECOND source until the move — `fossil-hir`'s
+`FunctionRegistry`, because only the `io.` half of the catalogue was a file, and
+fifteen lines of module doc existed to say which datum came from where. It reads
+one parse now. The page itself had once written the table out by hand: 58 rows,
+of which **seven named nothing the checker knows**, two of them (`io.sql`,
+`io.http`) occurring nowhere else in the repository at all.
+`crates/xtask/src/reference.rs` has the measurement.
 
-Add or change a row in `catalogue.bnf` **or in `fossil-hir`'s registry**, run
-`cargo xtask catalogue`, commit what it wrote. `cargo xtask catalogue --check`
-fails without writing, and there is no CI step for it on purpose:
-`crates/xtask/tests/catalogue_generated.rs` is the same check as a test, so
-`cargo test --workspace` already fails on a stale file and a second gate would be
-one idea in two places. That file also holds the two guards the reference page
-needs and `--check` cannot give it: that every registry row reaches the page, and
-that the page has not gone back to writing a row of its own.
+`xtask` depends on `fossil-hir` as a **dev-dependency**, and that is load-bearing
+rather than tidy. The generator writes `fossil-hir`'s stdlib table, so a bad emit
+stops that crate compiling — and while the edge was a normal dependency, it
+stopped `xtask` building too, which is to say the tool that fixes the problem was
+the tool the problem broke. Cargo does not build dev-dependencies for a plain
+`run -p xtask`, so the binary links none of it; the tests still do, and
+`the_generated_table_is_the_file` holds the emitted table against the registry it
+becomes, parameter by parameter.
+
+Add or change a row in `catalogue.bnf`, run `cargo xtask catalogue`, commit what
+it wrote. `cargo xtask catalogue --check` fails without writing, and there is no
+CI step for it on purpose: `crates/xtask/tests/catalogue_generated.rs` is the
+same check as a test, so `cargo test --workspace` already fails on a stale file
+and a second gate would be one idea in two places. That file also holds the
+guards `--check` cannot give: the round trip above, that every row reaches the
+reference page, and that the page has not gone back to writing a row of its own.
 
 The `--check` proves each file matches its own emitter and nothing more. That the
 Rust and TypeScript projections AGREE is a separate claim, and
@@ -122,7 +128,8 @@ test, so `cargo test` will not tell you.
 
 The file carries the argument for each row in its `(* … *)` commentary. A doc
 comment in the generated Rust is derived and one line long; if you want to know
-*why* `io.shex` refuses `.ttl`, that is in the `.bnf`.
+*why* `io.shex` refuses `.ttl`, or why `str.slug`'s regex is the one it is
+(16/16 by hand, 0 mismatches over 240,998 fuzzed inputs), that is in the `.bnf`.
 
 ## Development cycle
 

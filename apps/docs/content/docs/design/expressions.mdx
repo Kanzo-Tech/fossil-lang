@@ -98,11 +98,12 @@ spells one.
 - **The bare name.** A property may still write `id` where it means `User.id`, and the lowering
   builds the anonymous-row form for it. Two spellings for one idea, which this house does not keep:
   the sequence ends by deleting the `FieldRef` variant.
-- **The thirteen functions the DataFusion backend cannot render.** `anon.hash` and `str.split` are
-  one `SessionContext` registration away and nothing else; the other eleven each need a decision,
-  and four (`math.sum`, `avg`, `min`, `max`) are not scalar calls at all but [a pipeline with a
-  group-by](/docs/design/algebra).
-- **Where the value library is written down.** The catalogue is Rust today and is meant to become a
-  file the compiler reads, so that adding a row stops touching the compiler. Nothing loads a file
-  yet, deliberately: what the catalogue owes a loader is a shape it can fill, not a parser it has to
-  agree with.
+- **The four functions the DataFusion backend cannot render.** It was thirteen, and nine of the
+  thirteen were not a capability gap. `str.split` needed a Cargo feature and a lookup that searched
+  both function packages, and it renders now. Ten rows were deleted from the language instead:
+  `core.require` and the five `validate.*` needed a way to raise from an expression, which this
+  engine does not have; `parse.json` needed a JSON extraction it does not ship; `parse.csv_row` was
+  simply not wanted; and `anon.*` went because anonymisation is a declared policy the writer
+  applies, not an operator a program names. What is left is `math.sum`, `avg`, `min` and `max`,
+  which are not scalar calls at all but [a pipeline with a group-by](/docs/design/algebra) — they
+  remain how a `group_by`'s aggregations are spelled.

@@ -167,12 +167,23 @@ fn every_expr_template_returns_the_type_its_row_declares() {
         mismatches.len(),
         mismatches.join("\n  "),
     );
-    // An all-`Op` catalogue would pass the assertion above with an empty loop.
-    // 51 rows, of which 16 are `Op` (13 `seq/` + 3 `io/`); the remaining 35 are
-    // what a real DuckDB just typed.
+    // An all-`Op` catalogue would pass the assertion above with an empty loop,
+    // so the count has to be checked — but against the catalogue rather than
+    // against a literal. This was `35`, and it went stale the first time a row
+    // was deleted; what the test needs to know is that EVERY `Expr` row reached
+    // a real DuckDB, which is a claim about two numbers agreeing.
+    let expr_rows = FunctionRegistry::stdlib_default()
+        .iter()
+        .filter(|e| matches!(e.lowering, LoweringKind::Expr(_)))
+        .count();
     assert_eq!(
-        checked, 35,
-        "the number of Expr templates moved; say so here rather than shrink quietly"
+        checked, expr_rows,
+        "every `Expr` row must be typed by the engine; {checked} of {expr_rows} were"
+    );
+    assert!(
+        checked > 20,
+        "only {checked} template(s) were typed; a loop over almost nothing proves \
+         almost nothing"
     );
 }
 
@@ -212,5 +223,25 @@ fn every_op_row_returns_rows_except_the_one_that_counts_them() {
         Some(SigTy::Scalar(ScalarTy::Integer)),
         "`COUNT(*)` is a BIGINT"
     );
-    assert_eq!(op_rows.len(), 15, "12 `seq/` rows and 3 `io/` constructors");
+    // Every `seq/` row plus every `io.` constructor that reads data — derived,
+    // because this was the literal `15` written as "12 `seq/` rows and 3 `io/`
+    // constructors" and both halves have since moved: `io.rdf` gained a
+    // signature when the registry's hand-written `io.` half was folded into
+    // `catalogue.bnf`, making it four.
+    let seq = op_rows
+        .iter()
+        .filter(|(n, _)| n.starts_with("seq."))
+        .count();
+    let io = op_rows.iter().filter(|(n, _)| n.starts_with("io.")).count();
+    assert_eq!(
+        op_rows.len(),
+        seq + io,
+        "an operator row is a `seq/` verb or an `io.` constructor and nothing else; \
+         got {op_rows:?}"
+    );
+    assert!(
+        seq >= 12 && io >= 4,
+        "expected every relation verb and every data constructor, got {seq} `seq/` \
+         and {io} `io/`"
+    );
 }

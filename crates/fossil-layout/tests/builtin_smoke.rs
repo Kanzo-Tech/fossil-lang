@@ -13,8 +13,8 @@
 //!
 //! A template is fed dummy arguments typed from its own [`SigSpec`], and dummy
 //! arguments cannot satisfy every row: `strptime('abc', 'abc')` is a real call
-//! to a real function that fails at RUNTIME, and `validate.uuid` is SUPPOSED to
-//! raise on input that is not a UUID — that is the whole of what it does.
+//! to a real function that fails at RUNTIME, and `CAST('abc' AS BIGINT)` is a
+//! real cast that refuses real data.
 //!
 //! So the criterion is BINDING, not evaluation. A `Catalog`, `Parser` or
 //! `Binder` error means the template does not name real SQL and is a failure. A
@@ -100,97 +100,48 @@ fn every_expr_template_binds_on_a_real_duckdb() {
         failures.join("\n  "),
     );
     // The catalogue is not allowed to become all-`Op` without anyone noticing:
-    // an empty loop would pass the assertion above silently.
-    // 48 surface rows, of which the 13 relation verbs and the 3 `io/`
-    // constructors are `Op`. The remainder is what a real DuckDB just bound.
+    // an empty loop would pass the assertion above silently. Derived rather
+    // than the literal `35` it was — that number described a catalogue of 48
+    // surface rows and went stale the first time one was deleted, and what this
+    // needs to know is that EVERY `Expr` row reached the engine.
+    let expr_rows = FunctionRegistry::stdlib_default()
+        .iter()
+        .filter(|e| matches!(e.lowering, LoweringKind::Expr(_)))
+        .count();
     assert_eq!(
-        checked, 35,
-        "the number of Expr templates moved; the catalogue or the lowering \
-         kinds changed and this smoke should say so rather than shrink quietly"
+        checked, expr_rows,
+        "every `Expr` row must bind on DuckDB; {checked} of {expr_rows} were tried"
+    );
+    assert!(
+        checked > 20,
+        "only {checked} template(s) were bound; a loop over almost nothing proves \
+         almost nothing"
     );
 }
 
-/// The four validators return their input when it is valid and RAISE when it is
-/// not, and both halves are the point: a validator that returns NULL on bad
-/// input is the silent-failure mode this project exists to make impossible.
-///
-/// This also pins the two `DuckDB` facts the templates rest on, measured rather
-/// than assumed: `error()` inside a `CASE` arm is lazy, and a NULL predicate
-/// takes the ELSE branch (which is why every validator opens `%0 IS NULL OR`).
-#[test]
-fn a_validator_returns_its_input_raises_on_bad_input_and_passes_null_through() {
-    let conn = Connection::open_in_memory().expect("open in-memory DuckDB");
-    let reg = FunctionRegistry::stdlib_default();
-
-    // One valid value per validator, so the THEN arm is exercised.
-    let valid: &[(&str, &str)] = &[
-        ("validate.email", "'a@b.com'"),
-        ("validate.url", "'https://example.org/x'"),
-        ("validate.uuid", "'550e8400-e29b-41d4-a716-446655440000'"),
-        ("validate.iso_date", "'2026-05-21'"),
-    ];
-
-    for (name, good) in valid {
-        let entry = reg
-            .lookup(name)
-            .unwrap_or_else(|| panic!("`{name}` is catalogued"));
-        let LoweringKind::Expr(template) = &entry.lowering else {
-            panic!("`{name}` must be an Expr row");
-        };
-
-        // Valid input comes back unchanged.
-        let sql = format!(
-            "SELECT {}",
-            render_template(template.as_str(), &[(*good).to_string()])
-        );
-        let got: String = conn
-            .prepare(&sql)
-            .and_then(|mut s| s.query_row([], |r| r.get::<_, String>(0)))
-            .unwrap_or_else(|e| panic!("`{name}` on valid input failed: {e}\n{sql}"));
-        assert_eq!(
-            format!("'{got}'"),
-            *good,
-            "`{name}` must return its input unchanged"
-        );
-
-        // Invalid input RAISES, and the message names the function.
-        let sql = format!(
-            "SELECT {}",
-            render_template(
-                template.as_str(),
-                &["'!! definitely not valid !!'".to_string()]
-            )
-        );
-        let err = conn
-            .prepare(&sql)
-            .and_then(|mut s| s.query_row([], |r| r.get::<_, String>(0)))
-            .expect_err("invalid input must raise, not return NULL");
-        assert!(
-            err.to_string().contains(name),
-            "`{name}` must name itself in its error; got {err}"
-        );
-
-        // NULL passes through as NULL rather than raising. Without the
-        // `%0 IS NULL OR` guard this is an error, because `regexp_matches(NULL,
-        // …)` is NULL and a NULL predicate takes the ELSE branch.
-        let sql = format!(
-            "SELECT {}",
-            render_template(template.as_str(), &["CAST(NULL AS VARCHAR)".to_string()])
-        );
-        let got: Option<String> = conn
-            .prepare(&sql)
-            .and_then(|mut s| s.query_row([], |r| r.get::<_, Option<String>>(0)))
-            .unwrap_or_else(|e| panic!("`{name}` on NULL raised: {e}\n{sql}"));
-        assert!(got.is_none(), "`{name}` must pass NULL through");
-    }
-}
+// `a_validator_returns_its_input_raises_on_bad_input_and_passes_null_through`
+// stood here. It fed each of the four `validate.*` templates a valid value, an
+// invalid one and a NULL, and asserted the shape all five rows of that
+// namespace shared: the value or an error, never a null.
+//
+// The namespace is gone from the language, so the test has no subject. What it
+// proved about DuckDB is not gone, and the test below keeps the load-bearing
+// half of it: `error()` in a `CASE` arm is lazy per row. That is why `validate/`
+// was expressible on this engine at all — and, read the other way, exactly what
+// DataFusion has no spelling for, which is why the rows were deleted rather than
+// carried as a permanent gap. It is kept as the evidence behind that decision,
+// executable rather than recalled.
 
 /// `error()` in a `CASE` arm is lazy PER ROW, not merely per query.
 ///
-/// This is the fact every validator rests on and the one that would be most
-/// expensive to discover late: were it eager, a column containing one bad value
-/// would not fail on that row — it would fail on every query that mentions the
-/// column, including one whose rows are all valid.
+/// This is the fact every `validate.*` row rested on, and it is kept because it
+/// is the evidence for their deletion rather than a leftover: laziness is what
+/// made "the value or an error" expressible on `DuckDB`, and having no way to
+/// raise from an expression at all is what makes it inexpressible on
+/// `DataFusion`.
+/// Were it eager even here, a column containing one bad value would not fail on
+/// that row — it would fail on every query that mentions the column, including
+/// one whose rows are all valid.
 #[test]
 fn error_in_a_case_arm_is_lazy_per_row() {
     let conn = Connection::open_in_memory().expect("open in-memory DuckDB");

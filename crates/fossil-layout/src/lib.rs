@@ -67,12 +67,14 @@
 //! as *«the exact shape codegen emits»* and proved `DuckDB` raises on it.
 //! **Nothing emits `fossil_assertion_`** — the string appears in no `src/` file
 //! in the workspace. And the coverage that replaces it already existed before
-//! this deletion: `error()` has no `DataFusion` equivalent, which
-//! `fossil_df::stdlib`'s `UNREACHABLE_ON_DATAFUSION` pins as the sole cause for
-//! `core.require` and the four `validate.*` rows not rendering — measured by
-//! planning the real template, not guessed. The named-assertion contract does
-//! not exist on the engine the language runs on, and that is declared where a
-//! reader will meet it.
+//! this deletion: `error()` has no `DataFusion` equivalent, which is why
+//! `core.require` and the five `validate.*` rows could not render on the engine
+//! the language runs on — measured by planning the real template, not guessed.
+//! Those six rows have since been **deleted from the language** rather than
+//! carried as a permanent gap, so the named-assertion contract has no spelling
+//! at any level now. `crates/fossil-layout/tests/builtin_smoke.rs` keeps the
+//! `DuckDB` measurement that made the shape possible on one engine and not the
+//! other, as the evidence behind that decision.
 
 // `pub mod graph_exec;` lived here — `ConnectionExecutor`, then called
 // `DuckRuntime` after this crate, which is the native side of the
