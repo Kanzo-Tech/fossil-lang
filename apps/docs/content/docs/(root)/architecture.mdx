@@ -13,23 +13,22 @@ the finding, not a failure of the drawing.
 
 ```mermaid
 graph LR
-  L["<b>language</b> · 9 crates<br/>base · syntax · hir · mir · lineage<br/>descriptors-input · descriptors-output<br/>shex · graph-schema"]
+  L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 5 crates<br/>df · df-wasm · engine · cli · introspect"]
-  C["<b>corpus</b> · 6 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver"]
+  C["<b>corpus</b> · 7 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver · policy"]
   X["<b>no home</b> · 3 crates<br/>mem-probe · kanon · xtask"]
 
-  E -->|17| L
+  E -->|18| L
   E -->|1| M
-  M -->|21| L
-  M -->|4| C
+  M -->|24| L
+  M -->|8| C
   C -->|1| M
-  X -->|1| L
   M -->|1| X
   C -->|1| X
 ```
 
-**47 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**54 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -46,6 +45,10 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 | engine → corpus | `fossil-engine → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
 | engine → corpus | `fossil-engine → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk |
+| engine → corpus | `fossil-cli → fossil-sinks` | the same constant, read by the binary that prints the manifest |
+| engine → corpus | `fossil-df → fossil-policy` | the bound is verified where the release is still a value, before any of it is a file |
+| engine → corpus | `fossil-engine → fossil-policy` | reading the document is a host's job, the way reading a shape document is |
+| engine → corpus | `fossil-cli → fossil-policy` | `--policy` is a path, and a path becomes a `PrivacyPolicy` before the host is called |
 | engine → corpus | `fossil-introspect → fossil-resolver` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
 `fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole
@@ -58,6 +61,11 @@ return leg went from three edges to one. There are still two cores,
 but the stitch that closes the loop is one function.
 [One engine](/docs/design/one-engine) is where the rest of the filing gets settled.
 
+`fossil-policy` is filed under **corpus** and not under the engine that reads it, for the reason
+`fossil-sinks` is: the declared bound is part of what the artefact says about itself, and the crate
+that models it has no fossil dependency of its own. Four of the eight `engine → corpus` edges are
+its arrivals, which is what took that arrow from four to eight in one landing.
+
 `fossil-kanon` is filed under *no home* for a stronger reason than the other two: it has no
 dependents **and** no dependencies inside the tree, so it is the one node this diagram draws with no
 arrow at either end. It is a disclosure-control pass over Arrow arrays that nothing in the pipeline
@@ -65,8 +73,11 @@ calls yet, and filing it beside a crate it does not touch would be filing it by 
 [Deriving k-anonymity](/docs/design/anonymity) is the argument for it and states what would give it
 a caller.
 
-What has **not** happened is everything below this diagram: `fossil-base` still holds a `tracked`
-query and the `@conn` locator, and `fossil-engine` is still a sack.
+The `@conn` locator has left: it is `fossil-locator`, a crate with no dependencies at all, and the
+edges it cost are why the total moved. Filing it under `language` is the same kind of move
+`fossil-sinks` and `fossil-resolver` got — by subject, and it changed no code — except that this one
+did move a file. What has **not** happened is the rest of what is below this diagram: `fossil-base`
+still holds a `tracked` query, and `fossil-engine` is still a sack.
 
 ## What is left of the rings
 

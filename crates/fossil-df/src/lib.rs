@@ -71,12 +71,13 @@ use datafusion::logical_expr::{Expr as DfExpr, JoinType, Operator, binary_expr};
 use datafusion::prelude::{
     CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
 };
-use fossil_base::{SourceAnchor, SourceFile};
+use fossil_base::SourceFile;
 use fossil_graph_schema::{
     Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
 use fossil_hir::shapes::{inner_primitive, primitive_to_graphar};
 use fossil_hir::{MappingLoc, def_map::def_map};
+use fossil_locator::SourceAnchor;
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
@@ -172,7 +173,7 @@ pub async fn execute_graph<'db>(
     // anchor — so `io.csv("data/items.csv")` meant a different file depending
     // on where you invoked from, while `io.shex("shop.shex")` in the same
     // program was already resolved beside it.
-    let program_dir = fossil_base::program_dir(file.path(db));
+    let program_dir = fossil_locator::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
     let mut probe = Probe::new(&format!("execute_graph — {} mapping(s)", mappings.len()));
@@ -262,7 +263,7 @@ pub async fn execute_vertex<'db>(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let program_dir = fossil_base::program_dir(mapping.file(db).path(db));
+    let program_dir = fossil_locator::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared]).await
@@ -686,7 +687,7 @@ async fn execute_edge(
 // reference also has to be anchored somewhere, and every caller of this was
 // left to decide that for itself: the executor decided "nowhere", which is the
 // process's working directory. Both halves are one function now,
-// `fossil_base::SourceAnchor::locator`, and it cannot be called without an
+// `fossil_locator::SourceAnchor::locator`, and it cannot be called without an
 // anchor.
 
 /// Every resolved source URI + format + binding name of a lowered mapping, in
@@ -885,7 +886,7 @@ pub fn provider_bindings(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
-    let program_dir = fossil_base::program_dir(file.path(db));
+    let program_dir = fossil_locator::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema(&def_map(db, file).renames(db));
@@ -950,7 +951,7 @@ pub fn program_sources(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<SourceRef> {
-    let program_dir = fossil_base::program_dir(file.path(db));
+    let program_dir = fossil_locator::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema(&def_map(db, file).renames(db));

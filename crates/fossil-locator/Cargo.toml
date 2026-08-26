@@ -1,0 +1,20 @@
+[package]
+name = "fossil-locator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The one rule that turns a reference a program writes into a locator a reader can open"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+# No dependencies, and that is the crate's whole claim. It is `std::path` and a
+# `HashMap`, which is why it can sit under `fossil-base` rather than beside it:
+# the substrate is what everything depends on, and a crate the substrate itself
+# depends on has to cost nothing.
+[dependencies]

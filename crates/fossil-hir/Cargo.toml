@@ -17,6 +17,9 @@ workspace = true
 # fossil-hir collapses what was three crates (fossil-types + fossil-resolve +
 # fossil-typeck) into one: they shared every type and could not be built apart.
 fossil-base = { path = "../fossil-base" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator = { path = "../fossil-locator" }
 fossil-syntax = { path = "../fossil-syntax" }
 # The checker consumes the input descriptor via this path dep.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }

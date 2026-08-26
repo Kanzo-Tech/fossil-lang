@@ -1944,6 +1944,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-locator",
  "fossil-mem-probe",
  "fossil-mir",
  "fossil-policy",
@@ -2003,6 +2004,7 @@ dependencies = [
  "fossil-introspect",
  "fossil-layout",
  "fossil-lineage",
+ "fossil-locator",
  "fossil-mir",
  "fossil-policy",
  "fossil-sinks",
@@ -2059,6 +2061,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
+ "fossil-locator",
  "fossil-syntax",
  "indexmap",
  "insta",
@@ -2095,6 +2098,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
+ "fossil-locator",
  "fossil-resolver",
  "miette",
  "regex",
@@ -2146,6 +2150,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-locator"
+version = "0.1.0"
+
+[[package]]
 name = "fossil-lsp"
 version = "0.1.0"
 dependencies = [
@@ -2158,6 +2166,7 @@ dependencies = [
  "fossil-hir",
  "fossil-ide",
  "fossil-introspect",
+ "fossil-locator",
  "fossil-mir",
  "fossil-wasm",
  "lsp-server",

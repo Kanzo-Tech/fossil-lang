@@ -37,14 +37,24 @@
 //! 2. anything with a scheme (`s3://`, `az://`, `https://`) — already a locator.
 //! 3. an absolute path — already a locator.
 //!
-//! # Why it lives in `fossil-base`
+//! # Why it is its own crate
 //!
-//! Because all four readers of it are above this crate and no two of them share
-//! anything else: the checker (`fossil-hir`, resolving a shape document), the
-//! host that registers those documents (`fossil-engine`), the executor
-//! (`fossil-df`), and the editor surfaces (`fossil-ide`). Anywhere higher and
-//! at least one of them would have to keep a copy — which is exactly how three
-//! of them came to exist.
+//! Because no two of its five readers share anything else: the checker
+//! (`fossil-hir`, resolving a shape document), the host that registers those
+//! documents (`fossil-engine`), the pre-compile introspection
+//! (`fossil-introspect`), the executor (`fossil-df`), and the editor
+//! (`fossil-lsp`). Anywhere higher and at least one of them would have to keep
+//! a copy — which is exactly how three of them came to exist.
+//!
+//! It was a module of `fossil-base`, and that was the mistake this crate
+//! undoes. rust-analyzer's `base-db` states the invariant plainly — it *"doesn't
+//! know about file system and file paths"* — and it holds because its VFS is a
+//! separate crate and the operating-system implementation a third. A substrate
+//! that decides what a written path means is deciding something about a
+//! program. This crate decides it; `fossil-base` no longer can.
+//!
+//! It depends on nothing, which is what lets `fossil-base` depend on **it**
+//! instead of the other way round.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

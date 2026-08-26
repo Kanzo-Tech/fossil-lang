@@ -40,9 +40,10 @@
 
 use std::collections::HashMap;
 
-use fossil_base::{SourceAnchor, System};
+use fossil_base::System;
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
+use fossil_locator::SourceAnchor;
 use smol_str::SmolStr;
 
 pub mod creds;
@@ -214,7 +215,7 @@ pub fn introspect_program(
     creds: &RunCreds,
 ) -> std::io::Result<()> {
     let text = std::fs::read_to_string(path)?;
-    let program_dir = fossil_base::program_dir(&path.to_string_lossy());
+    let program_dir = fossil_locator::program_dir(&path.to_string_lossy());
     let anchor = SourceAnchor::new(&program_dir, connections);
     pre_introspect_and_register(system, &text, anchor, &creds.connections, Reach::Anywhere);
     Ok(())
@@ -351,7 +352,7 @@ pub fn pre_introspect_and_register(
 }
 
 /// The name→base-URL view of the run's connections — what
-/// [`fossil_base::SourceAnchor`] expands a `@conn` alias through, and what the
+/// [`fossil_locator::SourceAnchor`] expands a `@conn` alias through, and what the
 /// executor is handed for the same purpose.
 ///
 /// Projected ONCE per command and then borrowed, rather than rebuilt inside a
@@ -419,7 +420,7 @@ mod tests {
     }
 
     /// The four `@conn` cases this file used to assert against its own resolver
-    /// live beside the rule itself, in `fossil_base::locator` — there is one
+    /// live beside the rule itself, in `fossil_locator` — there is one
     /// implementation, so there is one place to test it. What is left here is
     /// the host's own half: the projection the anchor is built from, which is
     /// the LAST thing a credential touches before `fossil-engine` sees only

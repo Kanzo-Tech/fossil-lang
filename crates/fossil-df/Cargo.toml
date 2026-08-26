@@ -19,6 +19,9 @@ doctest = false
 
 [dependencies]
 fossil-base = { path = "../fossil-base" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator = { path = "../fossil-locator" }
 fossil-hir = { path = "../fossil-hir" }
 # `FOSSIL_MEM_PROBE` — peak RSS and elapsed seconds per phase of a write. A
 # dependency-free leaf, shared with `fossil-layout`'s DuckDB layout pass;
@@ -128,6 +131,9 @@ tokio = { workspace = true }
 # production surface into its `test_support` module, which is behind this
 # feature — they had no consumer that was not a test.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
+# `tests/pipeline.rs` builds a `SourceAnchor` itself — a regular dependency is
+# invisible to an integration test, which links the crate plus its dev deps only.
+fossil-locator = { path = "../fossil-locator" }
 tokio = { workspace = true }
 fossil-hir = { path = "../fossil-hir" }
 # `tests/rdf_source.rs` builds a `ShExDescriptor` to exercise the ShEx→edge path

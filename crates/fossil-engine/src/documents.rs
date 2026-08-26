@@ -248,7 +248,7 @@ User : Person from users
         fossil_introspect::pre_introspect_and_register(
             db.system(),
             PROGRAM,
-            fossil_base::SourceAnchor::beside(dir),
+            fossil_locator::SourceAnchor::beside(dir),
             &std::collections::HashMap::new(),
             fossil_introspect::Reach::Anywhere,
         );

@@ -49,10 +49,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use fossil_base::{Diagnostic, SourceAnchor};
+use fossil_base::Diagnostic;
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_df::RunReport;
 use fossil_lineage::{ProviderInfo, SourceRefInfo};
+use fossil_locator::SourceAnchor;
 use smol_str::SmolStr;
 
 mod documents;
@@ -378,7 +379,7 @@ pub fn run(
     // this and nothing below consults the process's working directory — which
     // is what makes `fossil run apps/docs/programs/hello/hello.fossil` mean the
     // same thing from the repository root as from beside the program.
-    let program_dir = fossil_base::program_dir(&path.to_string_lossy());
+    let program_dir = fossil_locator::program_dir(&path.to_string_lossy());
     let anchor = SourceAnchor::new(&program_dir, connections);
     // The CSV type pre-introspection that fed the type-checker's `source_row`
     // stood here. It is the CALLER's now — `fossil_introspect::pre_introspect_and_register`

@@ -34,6 +34,9 @@ harness = false
 # the `Setter` (`set_text`) cancellation trigger + the custom `#[salsa::db]` LSP
 # db.
 fossil-base               = { path = "../fossil-base" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator            = { path = "../fossil-locator" }
 fossil-ide                = { path = "../fossil-ide" }
 fossil-hir                = { path = "../fossil-hir" }
 # The editor must report what the compiler reports: diagnostics are drained from

@@ -119,6 +119,10 @@ API changes.
 ```
 crates/
   fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
+  fossil-locator/          the ONE rule turning a written reference into something a reader can
+                           open — `@conn`, scheme, absolute, else the program's directory; never
+                           the cwd. Depends on NOTHING, which is what puts it UNDER `fossil-base`
+                           rather than inside it: a substrate «doesn't know about file paths»
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS

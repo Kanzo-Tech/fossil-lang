@@ -23,7 +23,7 @@ use datafusion::prelude::{DataFrame, SessionContext};
 use fossil_hir::BinOp;
 use fossil_mir::{AggFn, Expr, JoinKind, JoinSide, Op};
 
-use fossil_base::SourceAnchor;
+use fossil_locator::SourceAnchor;
 
 use crate::{read_source, render};
 

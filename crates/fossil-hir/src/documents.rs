@@ -66,7 +66,7 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 }
 
 /// The key a document is registered and looked up under: the reference the
-/// program wrote, put through [`fossil_base::SourceAnchor`] — the one
+/// program wrote, put through [`fossil_locator::SourceAnchor`] — the one
 /// resolution rule.
 ///
 /// It is a KEY and not a locator. The LSP's file paths are `file://` URIs, so
@@ -81,8 +81,8 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 /// that is the whole of what a hand-rolled `parent().join()` got wrong.
 #[must_use]
 pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
-    let dir = fossil_base::program_dir(file.path(db));
-    fossil_base::SourceAnchor::beside(&dir).locator(document)
+    let dir = fossil_locator::program_dir(file.path(db));
+    fossil_locator::SourceAnchor::beside(&dir).locator(document)
 }
 
 // The `.fossil` sources below carry a `{users.id}` interpolation hole and

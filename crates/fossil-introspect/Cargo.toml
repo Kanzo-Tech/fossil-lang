@@ -17,6 +17,9 @@ workspace = true
 # The `System` seam this fills: `descriptors()` is a host-owned cache, and this
 # is the native host's way of filling it. `SourceAnchor` resolves `@conn`.
 fossil-base = { path = "../fossil-base" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator = { path = "../fossil-locator" }
 # `InferredDescriptor` / `InferredColumn` — the cache's element type.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.

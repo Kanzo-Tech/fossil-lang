@@ -106,10 +106,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use fossil_base::{
-    Catalogue, Files, FsError, Provider, SourceAnchor, SourceFile, System, register_file,
-};
+use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System, register_file};
 use fossil_descriptors_input::DescriptorCache;
+use fossil_locator::SourceAnchor;
 use lsp_server::{ErrorCode, Notification, Request, Response, ResponseError};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
