@@ -87,3 +87,28 @@ jobs:
 
       - name: Type-check all packages
         run: pnpm --filter "./packages/*" exec tsc --noEmit
+
+      # The conformance table, against every reader that exists at once.
+      #
+      # `apps/corpus/conformance/expected.json` is executed by three implementations and
+      # written by none of them: plain Node (`conformance/reader.mjs`), the published
+      # TypeScript (`resolveCorpus`, run by the `Test all packages` step above), and
+      # `fossil_graph::address` compiled to wasm32 — which needs `packages/graph/pkg/`,
+      # and this is the only job that has it, because `Build all packages` two steps up
+      # is what wrote it.
+      #
+      # It is a step here rather than in `corpus.yml` for the reason that file states: its
+      # install list is `node` and a `duckdb` binary, deliberately, and the wasm leg needs
+      # a Rust toolchain. There it runs with `--without-wasm`; here it runs with all of
+      # them, and no flag, so the leg cannot go missing without this step going red.
+      #
+      # `--addressing-only` because the `answers` half of that file opens Parquet through the
+      # `duckdb` binary, which this job has no reason to install; `corpus.yml` is where that
+      # half runs, and duplicating its pinned CLI install here would be one version in two
+      # files. It is an explicit refusal rather than a skip — without the flag the run fails.
+      # The wasm reader opens no byte, so it has nothing to contribute to that half anyway.
+      #
+      # `apps/` is otherwise out of this job's reach on purpose — every recursive step is
+      # filtered to `./packages/*`. This is one file invoked by path, not a build of an app.
+      - name: Conformance, every reader at once
+        run: node apps/corpus/conformance/verify.mjs --addressing-only

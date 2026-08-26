@@ -22,6 +22,15 @@ name: corpus
 # directory, it is meant to be copied" — has stopped being true and the fix is in the
 # guards, not here.
 #
+# Which is why `verify.mjs` runs here with `--without-wasm`. Its third reader is
+# `fossil_graph::address` compiled to wasm32, and reaching it means `packages/graph/pkg/`,
+# a Rust toolchain and `wasm-bindgen-cli` — the third thing the paragraph above refuses.
+# The flag is the explicit refusal rather than a silent skip: without it the run fails,
+# because a leg that disappears when its dependency is missing is how a conformance suite
+# comes to pass over nothing. The three-legged run is in `pnpm-ci.yml`, which has already
+# built that output by the time it gets there, and the native run of the same table is
+# `crates/fossil-graph/tests/conformance.rs` in `ci.yml`.
+#
 # `packages/graph/**` is in the path filter because `apps/corpus/conformance/expected.json`
 # is the contract BOTH implementations execute: an addressing change in the package has
 # to run the reader that shares nothing with it.
@@ -79,9 +88,9 @@ jobs:
         working-directory: apps/corpus
         run: node guards/check.mjs conformance/corpus
 
-      # The plain-Node half of the pair. `packages/graph/tests/conformance.test.ts` is the
-      # other, and it runs in `pnpm-ci.yml`; both execute `conformance/expected.json` and
-      # neither wrote it.
+      # The plain-Node reader of the table. The other two — the published TypeScript and the
+      # wasm32 build of the Rust one — run in `pnpm-ci.yml`; all three execute
+      # `conformance/expected.json` and none of them wrote it.
       - name: Conformance
         working-directory: apps/corpus
-        run: node conformance/verify.mjs
+        run: node conformance/verify.mjs --without-wasm

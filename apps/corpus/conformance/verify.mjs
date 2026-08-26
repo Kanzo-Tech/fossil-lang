@@ -8,10 +8,30 @@
  * in SQL. That is a third thing neither implementation wrote, and it is what makes the block worth
  * having: both readers PRUNE, and both must land where an unpruned read already is.
  *
- * This file is one of the two implementations that execute it. The other is
- * `packages/graph/tests/conformance.test.ts`, which runs `resolveCorpus` — the published module —
- * against the same table. Neither wrote it, and a change to either that moves an address moves it
- * away from the other.
+ * # Three readers, and none of them is the contract
+ *
+ * `cases` is executed here against **two** readers and against a third elsewhere, and none of the
+ * three wrote the table:
+ *
+ * | reader | what it is |
+ * | --- | --- |
+ * | `./reader.mjs` | plain Node, written from the conventions and from nothing else |
+ * | `./wasm-reader.mjs` | `fossil_graph::address` compiled to wasm32, through `fossil-graph-wasm` |
+ * | `packages/graph/src/address.ts` | the published module, run by `packages/graph/tests/conformance.test.ts` |
+ *
+ * It was two, and both were JavaScript. A mistake they share — a shift taken as signed, a count
+ * that went through a `Number` — was invisible to a diff of the two, which is the same shape of
+ * blindness `GraphAr`'s fourth implementation landed through: it re-derived the path arithmetic
+ * differently from the other three *and* from the corpus on disk, green on both sides, because its
+ * tests asserted hand-written strings instead of resolving against a shared table. The Rust reader
+ * runs the same table natively in `crates/fossil-graph/tests/conformance.rs`; what runs here is the
+ * wasm32 build of it, which is a different claim — `usize` is 64 bits there and 32 here.
+ *
+ * The wasm leg needs `packages/graph/pkg/`, which is the one thing under `apps/corpus/` that is not
+ * `node` plus a `duckdb` binary. It is therefore **required by default and refused explicitly**:
+ * `--without-wasm` is the opt-out, and `.github/workflows/corpus.yml` — which installs `node` and
+ * `duckdb` and nothing else — is where it is passed and where the reason is written down. A leg
+ * that skipped itself quietly would be a conformance suite passing over nothing.
  *
  * The `answers` half is executed here through `./answers.mjs` and, on the published side, by
  * `openCorpus` itself. The first bug it caught was in this side: an adjacency tile filtered by
@@ -25,9 +45,11 @@
  * corpus `fossil run` has just written, which is the question a table cannot ask, because a table
  * is written by whoever read the conventions last and the writer never sees it.
  *
- *   node conformance/verify.mjs
+ *   node conformance/verify.mjs                     # both halves, both readers
+ *   node conformance/verify.mjs --without-wasm      # a checkout with no Rust toolchain
+ *   node conformance/verify.mjs --addressing-only   # a checkout with no `duckdb` binary
  *
- * Exit `0` when every address in the table reproduces, `1` when one does not.
+ * Exit `0` when every address in the table reproduces for every reader, `1` when one does not.
  */
 
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -36,14 +58,39 @@ import { dirname, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as answers from "./answers.mjs";
 import { resolve } from "./reader.mjs";
+import * as wasm from "./wasm-reader.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/**
+ * The two halves this file runs, and the two things a checkout can be missing.
+ *
+ * Both flags are **explicit refusals, not skips**: without one, the missing half is a failure.
+ * A run that quietly does less than it says is the shape of a suite that has stopped being
+ * evidence, so a checkout that cannot do something has to say which and CI has to say why.
+ *
+ * - `--without-wasm` — no Rust toolchain, so no `packages/graph/pkg/` and no third reader.
+ *   `.github/workflows/corpus.yml` passes it: its install list is `node` and a `duckdb` binary,
+ *   deliberately, because `guards/` is meant to be copied by somebody who has neither.
+ * - `--addressing-only` — no `duckdb` binary, so the `answers` block cannot open a byte.
+ *   `.github/workflows/pnpm-ci.yml` passes it: that job builds the wasm and has no DuckDB, and
+ *   duplicating `corpus.yml`'s pinned CLI install into it would be one version in two files,
+ *   which is the drift this repository keeps deleting.
+ *
+ * Between the two workflows every half runs against every reader that can run it, and the
+ * `answers` half has nothing to gain from the wasm leg in any case: that reader opens no byte.
+ */
+const WITHOUT_WASM = process.argv.includes("--without-wasm");
+const ADDRESSING_ONLY = process.argv.includes("--addressing-only");
 
 // ---------------------------------------------------------------------------
 
 const failures = [];
 const notes = [];
-const fail = (message) => failures.push(message);
+
+/** Which reader the failures and notes being recorded belong to. */
+let reader = "reader.mjs";
+const fail = (message) => failures.push(`[${reader}] ${message}`);
+const note = (message) => notes.push(`[${reader}] ${message}`);
 
 function same(what, got, want) {
   const a = JSON.stringify(got);
@@ -53,6 +100,14 @@ function same(what, got, want) {
 
 const table = JSON.parse(readFileSync(pathJoin(HERE, "expected.json"), "utf8"));
 
+/**
+ * Every case in the table, against one reader.
+ *
+ * `resolve(root, base)` is the whole of the seam: a reader is a function from a corpus root to
+ * addresses, and nothing below knows which language answered. That is also what keeps this
+ * indifferent to which engine a reader would open the files with — this block opens none.
+ */
+function runCases(resolve) {
 for (const expected of table.cases) {
   const root = pathJoin(HERE, expected.root);
   const label = expected.name;
@@ -67,7 +122,7 @@ for (const expected of table.cases) {
     if (threw === null) fail(`${label}: resolved a manifest that addresses nothing`);
     else if (!threw.includes(expected.resolve_throws)) {
       fail(`${label}: threw "${threw}", which does not say "${expected.resolve_throws}"`);
-    } else notes.push(`${label}: refused — ${threw}`);
+    } else note(`${label}: refused — ${threw}`);
     continue;
   }
 
@@ -170,7 +225,7 @@ for (const expected of table.cases) {
     }
   }
 
-  notes.push(
+  note(
     `${label}: ${corpus.types.length} type(s), ${corpus.edges.length} edge type(s), ` +
       `${(expected.addresses ?? []).length} address(es)${expected.on_disk ? " checked on disk" : ""}`,
   );
@@ -186,6 +241,40 @@ for (const expected of table.cases) {
     .find((u) => u.endsWith(path.slice(path.lastIndexOf("/") + 1)));
   if (got !== url) fail(`base_join: composed ${got}, not ${url}`);
 }
+}
+
+// ---------------------------------------------------------------------------
+// The readers, run over the same table in turn.
+//
+// `runCases` is called once per reader and the failures carry which one they came from, so a
+// disagreement names the implementation that moved rather than the case that noticed.
+
+runCases(resolve);
+let legs = 1;
+
+if (WITHOUT_WASM) {
+  reader = "wasm";
+  note(
+    "not run: --without-wasm. The wasm leg needs `packages/graph/pkg/`, which needs a Rust " +
+      "toolchain; this invocation declared it has none.",
+  );
+  reader = "reader.mjs";
+} else if (!wasm.built()) {
+  // Not a skip. A checkout that cannot run a reader says so out loud, or the suite quietly becomes
+  // the one leg it started as.
+  reader = "wasm";
+  fail(
+    `wasm: ${wasm.PKG_DIR} holds no build output, so the third reader did not run. ` +
+      `Build it with \`${wasm.BUILD_COMMAND}\`, or pass --without-wasm to run the two that need ` +
+      `nothing but node.`,
+  );
+  reader = "reader.mjs";
+} else {
+  reader = "wasm";
+  runCases(wasm.reader(await wasm.load()));
+  reader = "reader.mjs";
+  legs += 1;
+}
 
 // ---------------------------------------------------------------------------
 // The four members of the reference API, executed against the same table.
@@ -194,7 +283,9 @@ for (const expected of table.cases) {
 // executes `answers`, which is what the API on top of that addressing returns. The numbers in the
 // table come from a full scan — no addressing at all — so this asks whether a reader that PRUNES
 // lands where an unpruned read already is.
-{
+if (ADDRESSING_ONLY) {
+  note("answers: not run: --addressing-only. This invocation declared it has no `duckdb` binary.");
+} else {
   const expected = table.answers;
   const target = table.cases.find((c) => c.name === expected.case);
   const root = pathJoin(HERE, target.root);
@@ -272,16 +363,27 @@ for (const expected of table.cases) {
     });
   }
 
-  notes.push(
+  note(
     `answers: ${expected.window.length} window(s), ${expected.node.length} node(s), ` +
       `${expected.neighbours.length} neighbourhood(s) over ${expected.case}`,
   );
 }
 
-for (const note of notes) console.log(`  ${note}`);
+for (const line of notes) console.log(`  ${line}`);
 if (failures.length > 0) {
   console.error(`\n${failures.length} address(es) do not reproduce:\n`);
   for (const failure of failures) console.error(`  ✗ ${failure}`);
   process.exit(1);
 }
-console.log(`\n${table.cases.length}/${table.cases.length} conformance cases reproduce`);
+// What this file ran, and what it did not. The third reader of the table is
+// `packages/graph/src/address.ts`, executed by `packages/graph/tests/conformance.test.ts` — a pnpm
+// test in another package, so an address moved here turns it red and this file will not tell you.
+// Saying so is the point: a line reading "conformance cases reproduce" over one implementation is
+// the sentence `GraphAr`'s fourth reader was green under.
+console.log(
+  `\n${table.cases.length}/${table.cases.length} conformance cases reproduce for ${legs} of the ` +
+    `2 readers this file runs` +
+    (legs > 1
+      ? "; the third is packages/graph/tests/conformance.test.ts"
+      : " — one side is not a diff, and the other two run elsewhere"),
+);
