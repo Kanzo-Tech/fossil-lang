@@ -162,10 +162,7 @@ pub fn parse(text: &str) -> Result<PrivacyPolicy, PolicyError> {
     let prefixes = context_prefixes(&doc)?;
     let expand = |s: &str| expand_term(s, &prefixes);
 
-    let profile_iri = doc
-        .get("profile")
-        .and_then(Value::as_str)
-        .map(&expand);
+    let profile_iri = doc.get("profile").and_then(Value::as_str).map(&expand);
     if profile_iri.as_deref() != Some(PROFILE) {
         return Err(PolicyError::WrongProfile { found: profile_iri });
     }
