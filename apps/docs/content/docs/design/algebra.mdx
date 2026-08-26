@@ -97,16 +97,17 @@ and our checker types the result end to end, which is what neither of the other 
 `Adults := User.where(User.age >= 18)` is a **relation**, not a value. `join` is in the first version
 as an inner join, and the checker gained its first two-input rule with it — the joined row is the
 two sides' scopes side by side, each column addressed by the binding that owns it — because a join
-is where an operator set stops being a list and starts being an algebra. Seven of the fourteen are
-what the lowering emits today; the other seven are defined and unreached, which is a different
+is where an operator set stops being a list and starts being an algebra. Nine of the fourteen are
+what the lowering emits today; the other five are defined and unreached, which is a different
 problem from being over-designed and takes a different fix:
 
 ```mermaid
 graph LR
   SRC["Source"] --> FIL["Filter"] --> PRJ["Project"] --> JOI["Join"]
-  JOI --> EV["EmitVertex"] --> SNK["Sink"]
-  JOI --> EE["EmitEdge"] --> SNK
-  WAIT["<i>defined, not yet reached</i><br/>Extend · Rename · Union · GroupBy<br/>Aggregate · Distinct · Empty"]
+  JOI --> DIS["Distinct"] --> UNI["Union"]
+  UNI --> EV["EmitVertex"] --> SNK["Sink"]
+  UNI --> EE["EmitEdge"] --> SNK
+  WAIT["<i>defined, not yet reached</i><br/>Extend · Rename · GroupBy<br/>Aggregate · Empty"]
   classDef unreached stroke-dasharray:4 3,color:#888,stroke:#888,fill:none
   class WAIT unreached
 ```
@@ -122,6 +123,37 @@ Three shapes follow and each has an executed test: differently-named keys plan a
 equi-join (`crates/fossil-df/tests/pipeline.rs:272`), a compound key is a conjunction of equalities
 joined by `and` (`crates/fossil-df/tests/pipeline.rs:307`), and a self-join tells its two halves
 apart by the alias `X as Y` (`crates/fossil-df/tests/pipeline.rs:603`).
+
+### A union answers to the pipeline, and to neither side
+
+<Program src="union/union.fossil" region="chain" title="union.fossil" />
+
+`join` keeps its two sides addressable — the body writes `Purchase.amount` and `User.email`, and the
+scope holds two rows. `union` cannot: its result is one row, and a row of it came from one of the
+two with nothing in the data to say which. So `Everyone` is the name, `Staff.email` is refused, and
+`Op::Union` carries the relation the way a `JoinSide` does. Keeping the left side's name instead
+would be the ambiguity that `select` after a `join` was decided against on 2026-08-14, one operator
+along.
+
+The sides are paired **by position**, and equal names in equal order with equal types is the
+requirement. That is not a rule of ours: DataFusion pairs them by position and returns a schema
+whose fields carry no qualifier at all, which is also why the re-qualification happens after the
+union rather than to each side before it.
+
+### `distinct` takes nothing
+
+<Program src="distinct/distinct.fossil" region="chain" title="distinct.fossil" />
+
+Its catalogue row declared `on: Column+` — `DISTINCT ON`, which keeps one row per group and picks it
+arbitrarily unless an `ORDER BY` says otherwise. `sort` has no lowering, so there is no way to write
+that order, and a verb whose corpus differs between two runs of the same program cannot be admitted
+while every conformance artefact is compared byte for byte. The parameter is gone and
+[what would bring it back](/docs/design/discarded) is `sort`.
+
+Its effect is **not** visible in either conformance artefact, and it cannot be made so: `EmitVertex`
+dedups by subject unconditionally, so four sightings of two species mint two vertices with or
+without the verb. The rows are asserted where rows exist —
+`crates/fossil-df/tests/pipeline.rs:690` unions three names onto three and counts six, then five.
 
 ## The plan is DataFusion's
 
@@ -152,11 +184,12 @@ after it](/docs/design/shapes).
 
 ## What this does not settle
 
-- **The ten relation verbs the catalogue declares and the lowering does not implement.** `seq/` has
-  thirteen rows — `map`, `flatten`, `take`, `drop`, `distinct`, `sort`, `union`, `group_by`,
-  `aggregate` and `count` beside the three — and the refusal says so by counting them rather than by
-  listing what it knows. Each one that arrives has to arrive with the operator that carries it and a
-  program that spells it, not as a row.
+- **The eight relation verbs the catalogue declares and the lowering does not implement.** `seq/`
+  has thirteen rows — `map`, `flatten`, `take`, `drop`, `sort`, `group_by`, `aggregate` and `count`
+  beside the five — and the refusal says so by reading the table rather than by listing what it
+  knows. Each one that arrives has to arrive with the operator that carries it and a program that
+  spells it, not as a row. `groupBy` is the next of the six and the expensive one: an aggregate
+  changes the type of the row it produces, which is work for the checker and not for the syntax.
 - **The three join flavours that are not `Inner`.** They stay defined and unreachable
   (`crates/fossil-df/tests/pipeline.rs:481` pins the refusal). An outer join manufactures NULL, and
   [the shape](/docs/design/shapes) has no way to declare a nullable property yet, so the one that

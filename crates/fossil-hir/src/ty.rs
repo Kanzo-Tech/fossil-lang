@@ -137,9 +137,13 @@ impl<'db> Ty<'db> {
 /// `SourceDef`: *«a mapping body writes `User.name` and never
 /// `Adults.name`, even when it draws `from Adults`»*. A binding ties the type
 /// and the relation together, so a relation DERIVED from `User` — by `where`, by
-/// `select`, by standing on the left of a `join` — keeps handing back rows that
-/// are addressed as `User`. The derived name (`Adults`, `Reachable`, `Joined`)
-/// names the relation and never a row.
+/// `select`, by `distinct`, by standing on the left of a `join` — keeps handing
+/// back rows that are addressed as `User`. The derived name (`Adults`,
+/// `Reachable`, `Joined`) names the relation and never a row.
+///
+/// `union` is the one verb that breaks that, and `grammar.bnf` says so under
+/// `SourceDef`: its rows come from two bindings with nothing to say which, so
+/// neither name identifies them and the pipeline's own is what a body writes.
 ///
 /// Which is why this is a LIST and not one record. A join brings a second
 /// binding into the same relation, and its columns stay under their own name:

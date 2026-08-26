@@ -44,11 +44,14 @@ Everything here takes a relation and gives back a relation, so they chain.
 `where` filters. `select` narrows to the named fields, and it names one parameter because its columns
 are **names and not values** — the lowering reads them off the syntax. `join` takes an equality
 between qualified references, or several joined by `and`, and does not flatten the rows: both sides
-stay in scope after it. `group_by` is consumed by `aggregate` and by nothing else. There is no
-`filter` — it is spelled `where`, so that the catalogue spells what the surface spells.
+stay in scope after it. `distinct` takes nothing and keeps one of each identical row; `union` takes
+another binding and gives back one row that answers to the pipeline's name, because a row of it came
+from one of the two sides and nothing says which. `group_by` is consumed by `aggregate` and by
+nothing else. There is no `filter` — it is spelled `where`, so that the catalogue spells what the
+surface spells.
 
-**Three of the thirteen reach the surface today** — `where`, `select` and `join`. The other ten are
-rows the checker knows and the lowering does not handle yet.
+**Five of the thirteen reach the surface today** — `where`, `select`, `join`, `distinct` and
+`union`. The other eight are rows the checker knows and the lowering does not handle yet.
 
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" />
 

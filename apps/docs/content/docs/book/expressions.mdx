@@ -21,7 +21,7 @@ A string is delimited by `"`. Whole numbers are `Integer`, numbers with a point 
 | --- | --- | --- |
 | a reader — `io` | the sources it opens | `io.csv("data/users.csv")` |
 | a type — `User`, `str` | its fields and operations | `User.email` |
-| a relation — `User`, `Adults` | `where`, `select`, `join` | `User.where(...)` |
+| a relation — `User`, `Adults` | `where`, `select`, `join`, `distinct`, `union` | `User.where(...)` |
 | a value — a `String` | what you can do to it | `User.email.trim()` |
 
 <Program src="expressions/expressions.fossil" region="member-access" title="expressions.fossil" />

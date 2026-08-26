@@ -17,7 +17,7 @@ user declares no functions.
 
 ## The forms
 
-`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs:291`) — the ten below cover twelve
+`HirExpr` has thirteen variants (`crates/fossil-hir/src/lower.rs:304`) — the ten below cover twelve
 between them, plus the bare-name column reference the surface is retiring. Each is spelled by a
 program in `apps/docs/programs/`, compiled by the production path and not transcribed here.
 
@@ -79,9 +79,9 @@ expression, and the compiler declared success over a corpus with a property miss
 arm is a diagnostic now — it quotes the source text, points at it, names the node kind the parser
 built — and every `*_EXPR` kind has an arm, so what still arrives there is the parser's own `ERROR`
 node. `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`
-(`crates/fossil-hir/src/lower.rs:3176`) pins the guarantee, which is the drop being **loud**, not any
+(`crates/fossil-hir/src/lower.rs:3207`) pins the guarantee, which is the drop being **loud**, not any
 particular expression being unlowerable — its own fixture lowers fine today
-(`crates/fossil-hir/src/lower.rs:3222`).
+(`crates/fossil-hir/src/lower.rs:3253`).
 
 ## What leaves
 

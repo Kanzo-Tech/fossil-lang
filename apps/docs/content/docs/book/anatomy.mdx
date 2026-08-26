@@ -65,7 +65,9 @@ not `.age`, which does not exist in this language, but `User.age`. **Every refer
 it came from**, even here where there is only one row in scope.
 
 And `Adults` is not a new type. It is a relation of `User`s, which is why the mapping body below
-writes `User.name` and not `Adults.name`.
+writes `User.name` and not `Adults.name`. One verb is the exception, and only because it has to be:
+a `union`'s rows come from two bindings with nothing in the data to say which, so neither name
+identifies them and the derived name is what the body writes.
 
 ## 4. The first mapping
 
