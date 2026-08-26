@@ -172,9 +172,10 @@ expected and accepted, and **none of the six verbs answers a camera** — which 
 it holds: the camera is addressed, not queried.
 
 What used to stand here beside it was that there is no tile emission and no tile index anywhere in
-`crates/`, and **both stopped being true**. `fossil run` writes `vertex/<Type>/chunk{k}.parquet`,
-`edge/<E>/by_source/tile{k}.parquet` in both orientations, and an identity index at
-`vertex/<Type>/index/tile{k}.parquet` that the manifest declares under `index:` — verified by
+`crates/`, and **both stopped being true**. `fossil run` writes `vertex/<Type>/tiles.parquet`,
+`edge/<E>/by_source/tiles.parquet` in both orientations, and an identity index at
+`vertex/<Type>/index/tiles.parquet` that the manifest declares under `index:` — one file per payload
+set, whose row groups are the tiles, and `graph.graph.yml` says which container that is. Verified by
 reproducing a corpus and listing it, and now held by `crates/fossil-engine/tests/conformance.rs`,
 which asserts the index exists, that the prefix the manifest declares is the one the writer used,
 and that it is tiled by the same shift as the vertices it addresses. There is still no tile
@@ -234,13 +235,20 @@ one container and nothing left to compare against.
 What runs lives in `apps/corpus/conformance/verify.mjs` and `containers.mjs`, and the conventions
 they check are documented for reader implementors on the corpus site rather than here.
 
-<Callout type="warn" title="One consumer does not read through the conventions, and that is the real gap">
-`fossil-mcp` registers its relations with `read_parquet('{base}/vertex/<Type>/*.parquet')` and reads
-edges from `by_source.parquet`, the single-file container. **Expanding a wildcard is listing a
-directory**, which is the one thing this design says a reader may never need, and the single file is
-a second container for bytes the tiles already hold. It works — MCP is native and can list — but two
-readers disagreeing about where the bytes are is GraphAr's failure wearing a different coat.
-**Decided:** it is a defect, and MCP moves onto the same addresses the viewer uses.
+<Callout title="The consumer that did not read through the conventions, and now does">
+`fossil-mcp` registered its relations with `read_parquet('{base}/vertex/<Type>/*.parquet')` and read
+edges from `by_source.parquet`, the uncut relation the writer published beside its own tiles.
+**Expanding a wildcard is listing a directory**, which is the one thing this design says a reader may
+never need, and the second file was a second container for bytes the tiles already held. It worked —
+MCP is native and can list — but two readers disagreeing about where the bytes are is GraphAr's
+failure wearing a different coat.
+
+It composes both paths from the manifest now: `container` says whether a tile is a file or a row
+group and `prefix` says where the set is, so under the container fossil writes each relation is one
+named file and there is nothing to expand. Under the other one a vertex type's tiles are enumerated
+from `vertex_count` and `chunk_size`, which is why the count is declared. The single wildcard left is
+an edge orientation in the file-per-tile container, where a tile whose vertices have no edges is a
+file that was never written and no arithmetic predicts the gaps.
 </Callout>
 
 <Callout title="Checked for vacuity">

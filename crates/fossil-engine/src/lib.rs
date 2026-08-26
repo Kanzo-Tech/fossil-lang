@@ -554,5 +554,17 @@ fn enrich_written_layout(
         std::fs::remove_file(&target.vertex_parquet)
             .map_err(|e| miette::miette!("remove staged {}: {e}", target.vertex_parquet))?;
     }
+
+    // And the staged adjacencies, for the same reason and one more. The pass
+    // reads each one, renumbers it and emits its tiles; the file it read is
+    // pre-renumbering, so leaving it is a copy of the relation carrying ids that
+    // now belong to other vertices. It used to be rewritten in place and left —
+    // the uncut relation published beside its own tiles, which is two containers
+    // for one set of rows, and `apps/corpus`'s `declared-tiling` is the guard
+    // that says so in as many words.
+    for adjacency in &adjacencies {
+        std::fs::remove_file(&adjacency.parquet)
+            .map_err(|e| miette::miette!("remove staged {}: {e}", adjacency.parquet))?;
+    }
     Ok(())
 }

@@ -58,15 +58,21 @@ parquet = { workspace = true }
 # obstacle in this crate's way.
 fossil-df = { path = "../fossil-df" }
 
-# `fossil-sinks` and `fossil-resolver` stood here and NEITHER is named by a
-# single line of this crate any more. The comment they shared described a
-# materialiser that no longer exists — «this crate (native) runs the COPY
-# against DuckDB and threads the resolver's cloud-config into SET statements»;
-# the COPY went to `fossil-df` and the resolver went with `materialize.rs`.
-# `fossil-sinks` had already outlived it silently: grep finds it in no `.rs` in
-# this crate at all.
+# The manifest model, for one name: `manifest::TILES_FILE`. This pass writes the
+# row-group container, and the file a set's tiles live in is a fact about the
+# container rather than about the pass — declared in the same crate as the
+# `container:` field that selects it, so the writer and the manifest cannot
+# spell it two ways. An intra-`corpus` edge: both crates are filed there, so it
+# is invisible to the cross-group count in `/docs/architecture`.
 #
-# `fossil-resolver` is why this is not merely tidying. It carries its OWN
+# It stood here once with `fossil-resolver` under a comment describing a
+# materialiser that no longer exists — «this crate (native) runs the COPY
+# against DuckDB and threads the resolver's cloud-config into SET statements» —
+# and by then grep found it in no `.rs` in this crate at all. That deletion was
+# right; this is a different edge with a caller.
+fossil-sinks = { path = "../fossil-sinks" }
+
+# `fossil-resolver` is why that deletion was not merely tidying. It carries its OWN
 # wasm32 `compile_error!`, for a different reason (cloud credentials must not
 # cross the wasm boundary), so an unused edge to it kept this crate off wasm32
 # even after DuckDB left — and `cargo check` does not report an unused

@@ -21,6 +21,7 @@ use fossil_graph::executor::quote_ident;
 use fossil_graph::manifest::{Manifest, ManifestSource, edge_table_name};
 use fossil_graph::{GraphError, Operation, Result as GraphResult};
 use fossil_resolver::{CloudSecret, ResolvedPath};
+use fossil_sinks::manifest::{Container, TILES_FILE};
 use secrecy::SecretString;
 use serde::Deserialize;
 use serde_json::Value;
@@ -146,47 +147,94 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// `CREATE OR REPLACE VIEW` per vertex/edge type, over the writer's Parquet
 /// layout. The view names match what the verbs query.
 ///
-/// # Vertices are tiles, and the manifest says where
+/// # Every path is composed, and none is discovered
 ///
-/// This read `<dest>/vertex/<Type>.parquet` until 2026-08-06, which is a file
-/// the writer **deletes**: `c416e07` made the layout pass emit one tile per
-/// 4,096-row `dense_id` range and then remove the single staged file
-/// (`crates/fossil-engine/src/lib.rs:494`). Every verb over a freshly written
-/// corpus failed to find its vertices, and the test below asserted the stale
-/// path, so nothing went red — the same commit left four call sites naming a
-/// path that no longer exists.
+/// This globbed `<prefix>/*.parquet` for a vertex type and read
+/// `by_source.parquet` for an edge, and neither is an address. Expanding a
+/// wildcard is listing a directory — the one operation the corpus is designed so
+/// that a reader never has to perform — and `by_source.parquet` was the uncut
+/// relation published beside its own tiles, so `fossil-mcp` and every other
+/// reader disagreed about where a corpus's bytes are. It is not there now: the
+/// layout pass emits tiles and the caller deletes what it read.
 ///
-/// The fix is not a new hard-coded string. `VertexInfo::prefix` is the
-/// directory the writer declares it emitted into, so the reader asks the
-/// manifest instead of re-deriving the convention; the day the tile naming
-/// changes again, this does not.
+/// So the paths come out of the manifest, which carries the two things that
+/// decide them: `container` says whether a tile is a file or a row group, and
+/// `prefix` says where the set is. Under [`Container::RowGroups`] a set is one
+/// file and there is nothing to enumerate. Under [`Container::Files`] a vertex
+/// type's tiles are enumerated from `vertex_count` and `chunk_size` — the count
+/// is declared precisely so that nobody has to list — and an edge orientation's
+/// are not, because a tile whose vertices have no edges is a file that was never
+/// written and a run of them is a gap no arithmetic predicts. That one stays a
+/// glob, and it is the only one.
 ///
-/// Edges are unaffected: the layout pass rewrites `by_source.parquet` in place
-/// (`crates/fossil-layout/src/layout.rs:630`) and emits its tiles alongside it.
+/// It read `<dest>/vertex/<Type>.parquet` until 2026-08-06, a file the writer
+/// deletes, and the test below asserted the stale path so nothing went red.
+/// Hence the second test, which asserts a row count against a corpus on disk
+/// rather than a string.
 fn register_views_sql(manifest: &Manifest, dest: &str) -> String {
     use std::fmt::Write;
     let base = dest.trim_end_matches('/');
+    let container = manifest.graph().container;
     let mut sql = String::new();
     for v in manifest.vertices() {
-        let name = &v.vertex_type;
-        let dir = v.prefix.trim_end_matches('/');
+        let prefix = format!("{base}/{}", v.prefix.trim_end_matches('/'));
+        let source = match container {
+            Container::RowGroups => sql_str_lit(&format!("{prefix}/{TILES_FILE}")),
+            Container::Files => {
+                let tiles = if v.chunk_size == 0 {
+                    0
+                } else {
+                    v.vertex_count.div_ceil(v.chunk_size)
+                };
+                sql_list((0..tiles).map(|k| format!("{prefix}/chunk{k}.parquet")))
+            }
+        };
         let _ = writeln!(
             sql,
-            "CREATE OR REPLACE VIEW {ident} AS SELECT * FROM read_parquet('{base}/{path}/*.parquet');",
-            ident = quote_ident(name),
-            path = escape_lit(dir),
+            "CREATE OR REPLACE VIEW {ident} AS SELECT * FROM read_parquet({source});",
+            ident = quote_ident(&v.vertex_type),
         );
     }
     for e in manifest.edges() {
-        let table = edge_table_name(e);
+        // The source-ordered orientation, because that is the one a verb reads
+        // the whole relation from; `aligned_by` is what says which prefix that
+        // is, and an edge type that publishes no source-ordered adjacency gets
+        // no view rather than a composed path that 404s.
+        let Some(adj) = e.adj_lists.iter().find(|a| a.aligned_by == "src") else {
+            continue;
+        };
+        let prefix = format!(
+            "{base}/{}{}",
+            e.prefix.trim_end_matches('/').to_string() + "/",
+            adj.prefix.trim_end_matches('/')
+        );
+        let source = match container {
+            Container::RowGroups => sql_str_lit(&format!("{prefix}/{TILES_FILE}")),
+            // A tile with no rows is not written, so the set of tile numbers is
+            // a property of the data and not of the count. Nothing composes it.
+            Container::Files => sql_str_lit(&format!("{prefix}/tile*.parquet")),
+        };
         let _ = writeln!(
             sql,
-            "CREATE OR REPLACE VIEW {ident} AS SELECT * FROM read_parquet('{base}/edge/{path}/by_source.parquet');",
-            ident = quote_ident(&table),
-            path = escape_lit(&table),
+            "CREATE OR REPLACE VIEW {ident} AS SELECT * FROM read_parquet({source});",
+            ident = quote_ident(&edge_table_name(e)),
         );
     }
     sql
+}
+
+/// One path as a `DuckDB` string literal.
+fn sql_str_lit(path: &str) -> String {
+    format!("'{}'", escape_lit(path))
+}
+
+/// Several paths as a `DuckDB` list literal, which `read_parquet` takes as the
+/// enumerated set it is — no wildcard, so nothing is expanded against a
+/// directory. An empty set reads as an empty relation, which is what a type
+/// declaring zero vertices is.
+fn sql_list(paths: impl Iterator<Item = String>) -> String {
+    let items: Vec<String> = paths.map(|p| sql_str_lit(&p)).collect();
+    format!("[{}]", items.join(", "))
 }
 
 /// A `DuckDB` single-quoted string literal's INNARDS — the quotes are written
@@ -236,7 +284,8 @@ mod tests {
     fn register_views_sql_uses_writer_layout() {
         use fossil_graph::manifest::ManifestSource as _;
         use fossil_sinks::manifest::{
-            DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+            AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup,
+            VertexInfo,
         };
 
         let mut person = VertexInfo::new(
@@ -268,13 +317,23 @@ mod tests {
             dst_chunk_size: DEFAULT_CHUNK_SIZE,
             directed: true,
             prefix: "edge/Person_knows_Person/".into(),
-            adj_lists: vec![],
+            // The source-ordered orientation, because the view reads the whole
+            // relation and `aligned_by` is what says which prefix that is. This
+            // was `vec![]` while the path was the hard-coded `by_source.parquet`
+            // — a fixture that declared no adjacency and got a view over one.
+            adj_lists: vec![AdjList {
+                ordered: true,
+                aligned_by: "src".into(),
+                prefix: "by_source/".into(),
+                file_type: "parquet".into(),
+            }],
             property_groups: vec![],
             version: "gar/v1".into(),
         };
         let graph = GraphInfo::new(
             "graph",
             "",
+            Container::RowGroups,
             vec!["vertex/Person.vertex.yml".into()],
             vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
         );
@@ -295,20 +354,25 @@ mod tests {
         let manifest = Manifest::load(&MapSource(map)).unwrap();
 
         let sql = register_views_sql(&manifest, "s3://bucket/run/");
-        // The vertex view globs the tile directory the manifest declares, not a
-        // single file. It asserted `vertex/Person.parquet` until 2026-08-06 —
-        // a path the writer deletes — which is why this test stayed green while
-        // every verb over a real corpus failed. It must read the fixture's
-        // `prefix`, so a future change to the tile naming lands here as a diff.
+        // One file per set, and no star anywhere. It asserted
+        // `vertex/Person.parquet` until 2026-08-06 — a path the writer deletes —
+        // which is why this test stayed green while every verb over a real
+        // corpus failed, and then `vertex/Person/*.parquet`, which is a
+        // directory listing spelled as a path. Both paths below come out of the
+        // manifest's `prefix` and its `container`.
         assert!(
             sql.contains(
-                "CREATE OR REPLACE VIEW \"Person\" AS SELECT * FROM read_parquet('s3://bucket/run/vertex/Person/*.parquet')"
+                "CREATE OR REPLACE VIEW \"Person\" AS SELECT * FROM read_parquet('s3://bucket/run/vertex/Person/tiles.parquet')"
             ),
-            "vertex view did not glob the declared prefix, got: {sql}"
+            "vertex view did not address the declared prefix, got: {sql}"
         );
         assert!(sql.contains(
-            "CREATE OR REPLACE VIEW \"Person_knows_Person\" AS SELECT * FROM read_parquet('s3://bucket/run/edge/Person_knows_Person/by_source.parquet')"
-        ));
+            "CREATE OR REPLACE VIEW \"Person_knows_Person\" AS SELECT * FROM read_parquet('s3://bucket/run/edge/Person_knows_Person/by_source/tiles.parquet')"
+        ), "edge view did not address the declared adjacency prefix, got: {sql}");
+        assert!(
+            !sql.contains("*.parquet"),
+            "the row-group container has nothing to expand, got: {sql}"
+        );
     }
 
     /// **The glob is one star, and the difference between one and two is a
@@ -386,6 +450,24 @@ mod tests {
         assert_eq!(
             columns, 5,
             "Person's payload is dense_id, subject, x, y, cluster_id"
+        );
+
+        // And the edge view, which is the half decision 12 was written about:
+        // this read `by_source.parquet`, the uncut relation the corpus published
+        // beside its own tiles, and that file is gone. `DuckDB` binds a view
+        // early, so a path that names nothing fails at `CREATE VIEW` — which is
+        // why the assertion above already proves the edge path resolves, and why
+        // this one only has to prove it resolves to the RELATION rather than to
+        // one tile of it.
+        let edges: u64 = conn
+            .query_row("SELECT count(*) FROM \"Person_knows_Person\"", [], |r| {
+                r.get(0)
+            })
+            .expect("the edge view is readable");
+        let declared = manifest.edges()[0].edge_count;
+        assert_eq!(
+            edges, declared,
+            "the edge view reads {edges} rows where the manifest declares {declared}",
         );
     }
 }

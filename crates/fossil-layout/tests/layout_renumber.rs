@@ -125,21 +125,24 @@ fn targets(
     )
 }
 
-/// All chunks as one relation — what a `GraphAr` reader sees.
-fn glob(chunks: &Path) -> String {
-    format!("{}/*.parquet", lit(chunks))
+/// One payload set as one relation — what a `GraphAr` reader sees.
+///
+/// It was `format!("{}/*.parquet", …)` and a star is a directory listing, which
+/// is the one thing the corpus is designed so that nobody performs. A set is one
+/// file now; the tiles inside it are its row groups.
+fn payload(prefix: &Path) -> String {
+    lit(&prefix.join("tiles.parquet"))
 }
 
 /// Edges as pairs of **subjects**, which is the one description of the graph
 /// that renumbering is not allowed to change.
-fn edges_by_subject(conn: &Connection, all: &str, adjacency: &Path) -> Vec<(String, String)> {
+fn edges_by_subject(conn: &Connection, all: &str, adjacency: &str) -> Vec<(String, String)> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT s.subject, d.subject FROM read_parquet('{}') e \
+            "SELECT s.subject, d.subject FROM read_parquet('{adjacency}') e \
              JOIN read_parquet('{all}') s ON s.dense_id = e.src_dense \
              JOIN read_parquet('{all}') d ON d.dense_id = e.dst_dense \
              ORDER BY 1, 2",
-            lit(adjacency),
         ))
         .expect("prepare subject join");
     let rows = stmt
@@ -162,25 +165,32 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
 
     // The graph as it stands before the layout touches it, read off the writer's
     // single file — the only point at which that file is the source of truth.
-    let before = edges_by_subject(&conn, &lit(&vertices), &by_source);
+    let before = edges_by_subject(&conn, &lit(&vertices), &lit(&by_source));
     let (v, a) = targets(&vertices, &by_source, &by_target, &chunks);
     fossil_layout::layout::enrich_layout(&v, &a).expect("enrich_layout");
+
+    // Where each orientation's tiles went: `by_source.parquet` → `by_source/`.
+    // The pass no longer writes the remapped relation back over its input, so
+    // the two `.parquet` files above still hold the PRE-renumbering ids and
+    // reading them here would compare the corpus against its own staging.
+    let src_tiles = root.join("by_source");
+    let dst_tiles = root.join("by_target");
 
     // 1. The graph is the same graph. Ids changed; who is connected to whom did
     //    not. This is the assertion a missed adjacency file fails.
     assert_eq!(
         before,
-        edges_by_subject(&conn, &glob(&chunks), &by_source),
+        edges_by_subject(&conn, &payload(&chunks), &payload(&src_tiles)),
         "renumbering changed which subjects are connected",
     );
     assert_eq!(
         before,
-        edges_by_subject(&conn, &glob(&chunks), &by_target),
+        edges_by_subject(&conn, &payload(&chunks), &payload(&dst_tiles)),
         "by_target disagrees with by_source about the graph",
     );
 
     // 2. Ids stay dense and gap-free — a chunk range means nothing otherwise.
-    let all = glob(&chunks);
+    let all = payload(&chunks);
     assert_eq!(
         scalar(
             &conn,
@@ -200,62 +210,70 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
         "dense_id left the range 0..n-1",
     );
 
-    // 3. Each chunk holds exactly the dense_id range GraphAr says it does, and
-    //    holds it in order. This is what the whole renumbering was for: chunk k
-    //    is [k*size, (k+1)*size), so unless the ids land that way a chunk is a
-    //    file name and not a tile. Six vertices at two per chunk is three files.
-    let mut found = 0;
-    for k in 0..3u64 {
-        let chunk = chunks.join(format!("chunk{k}.parquet"));
-        assert!(chunk.exists(), "missing {}", chunk.display());
-        found += 1;
-        assert_eq!(
-            scalar(
-                &conn,
-                &format!(
-                    "SELECT count(*) FROM (SELECT dense_id, row_number() OVER () - 1 + {} AS pos \
-                     FROM read_parquet('{}')) WHERE dense_id <> pos",
-                    k * 2,
-                    lit(&chunk)
-                )
-            ),
-            0,
-            "chunk {k} is not the dense_id range [{}, {}) in order",
-            k * 2,
-            k * 2 + 2,
-        );
-    }
-    assert_eq!(found, 3);
-    // Chunk FILES, not directory entries. It counted entries and read 3 until the pass began
-    // emitting the identity index, which is a fourth entry and not a chunk — a `index/` directory
-    // beside the tiles. What the assertion is for has not moved: a stray `chunk4.parquet` is still
-    // a failure, and now it is the only thing that can cause one.
-    let emitted = fs::read_dir(&chunks)
-        .expect("read chunk dir")
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.starts_with("chunk") && name.ends_with(".parquet"))
-        })
-        .count();
-    assert_eq!(emitted, 3, "extra chunk files were emitted");
-
-    // And the index the pass now writes beside them, addressed the same way.
-    let index = chunks.join("index");
-    let index_tiles = fs::read_dir(&index)
-        .expect("the pass writes an identity index beside the tiles")
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.starts_with("tile") && name.ends_with(".parquet"))
-        })
-        .count();
+    // 3. Each ROW GROUP holds exactly the dense_id range GraphAr says it does,
+    //    and holds it in order. This is what the whole renumbering was for: tile
+    //    k is [k*size, (k+1)*size), so unless the ids land that way an ordinal
+    //    is a number and not an address. Six vertices at two per tile is three
+    //    row groups, in one file.
+    //
+    //    It read three `chunk{k}.parquet` files. The container changed and the
+    //    property did not: what makes a footer an index is one box per tile, and
+    //    a file boundary between the tiles only costs requests.
     assert_eq!(
-        index_tiles, 3,
+        scalar(
+            &conn,
+            &format!(
+                "SELECT count(*) FROM (SELECT dense_id, row_number() OVER () - 1 AS pos \
+                 FROM read_parquet('{all}')) WHERE dense_id <> pos"
+            )
+        ),
+        0,
+        "the payload is not the dense_id range [0, 6) in order",
+    );
+    let groups: Vec<(i64, i64)> = {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT DISTINCT row_group_id, row_group_num_rows \
+                 FROM parquet_metadata('{all}') ORDER BY 1"
+            ))
+            .expect("prepare footer read");
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("read the footer");
+        rows.map(|r| r.expect("row group")).collect()
+    };
+    assert_eq!(
+        groups,
+        vec![(0, 2), (1, 2), (2, 2)],
+        "six vertices at a chunk_size of 2 is three row groups of two",
+    );
+
+    // ONE file in the prefix, and it is the payload. Two containers at once is
+    // one too many — a reader that globs finds both — which is the convention
+    // `apps/corpus`'s `declared-tiling` fires on.
+    let mut emitted: Vec<String> = fs::read_dir(&chunks)
+        .expect("read the tile prefix")
+        .filter_map(Result::ok)
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .collect();
+    emitted.sort();
+    assert_eq!(
+        emitted,
+        vec!["index".to_string(), "tiles.parquet".to_string()],
+        "the tile prefix holds the payload and the index, and nothing else",
+    );
+
+    // And the index the pass writes beside it, addressed the same way: tiled at
+    // the same size over the SORTED order, so three row groups again.
+    let index_groups = scalar(
+        &conn,
+        &format!(
+            "SELECT count(DISTINCT row_group_id) FROM parquet_metadata('{}')",
+            payload(&chunks.join("index"))
+        ),
+    );
+    assert_eq!(
+        index_groups, 3,
         "six vertices at a chunk_size of 2 is three payload tiles and, since the index is tiled at \
          the same size over the SORTED order, three index tiles — unless the fixture's chunk_size \
          differs, in which case this number is the one that has to move",
@@ -264,9 +282,9 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
     // 4. Both adjacency lists are sorted on the endpoint they declare. The
     //    manifest says `ordered: true`; the remap invalidates that order and
     //    re-sorting is what restores it.
-    for (path, first, second) in [
-        (&by_source, "src_dense", "dst_dense"),
-        (&by_target, "dst_dense", "src_dense"),
+    for (prefix, first, second) in [
+        (&src_tiles, "src_dense", "dst_dense"),
+        (&dst_tiles, "dst_dense", "src_dense"),
     ] {
         // Stated as "file order equals sorted order" rather than as a
         // pairwise-descent check: comparing each row to the one before it via
@@ -280,12 +298,12 @@ fn renumbering_preserves_the_graph_and_the_order_the_manifest_declares() {
                     "SELECT count(*) FROM (SELECT row_number() OVER () AS pos, \
                      row_number() OVER (ORDER BY {first}, {second}) AS want \
                      FROM read_parquet('{}')) WHERE pos <> want",
-                    lit(path)
+                    payload(prefix)
                 )
             ),
             0,
             "{} is not ordered by {first}",
-            path.display(),
+            prefix.display(),
         );
     }
 

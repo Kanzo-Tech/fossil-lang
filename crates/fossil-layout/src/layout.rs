@@ -200,8 +200,9 @@ use arrow::compute::{
 };
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::error::ArrowError;
-use fossil_df::files::batches_to_parquet;
+use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
+use fossil_sinks::manifest::TILES_FILE;
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -667,9 +668,13 @@ pub fn enrich_layout(
             .collect();
         probe.mark("read vertices");
 
-        // One Parquet per tile, which is the whole point: a tile is an HTTP
-        // resource a browser and a CDN can cache, and its address is
-        // `dense_id >> shift` — no index, no listing, no discovery.
+        // One row group per tile in ONE Parquet, which is the whole point: a
+        // tile's address is `dense_id >> shift` — no index, no listing, no
+        // discovery — and a run of consecutive tiles is a run of consecutive row
+        // groups, which is ONE byte range. A file boundary is the only thing
+        // that could prevent that merge, so there is not one: measured at five
+        // million in 1,221 tiles, 5.6 range requests per window against 22.3 for
+        // the same tiles as 1,221 files, and the same bytes stored.
         //
         // A range and not a filter. Ordering by the new id *is* ordering by
         // Morton code — that is what the new id is — and the ids are a gapless
@@ -680,6 +685,8 @@ pub fn enrich_layout(
         // `gather` itself and there is nothing left to prune.
         let rows = gather.len();
         let tiles = (rows as u64).div_ceil(target.chunk_size);
+        let payload = format!("{}{TILES_FILE}", target.chunk_prefix);
+        let mut writer = open_tiles(&payload, batch_refs[0].schema())?;
         for k in 0..tiles {
             let lo = (k << shift) as usize;
             let len = (rows - lo).min(target.chunk_size as usize);
@@ -704,11 +711,9 @@ pub fn enrich_layout(
                     ),
                 ],
             )?;
-            write_parquet(
-                &format!("{}chunk{k}.parquet", target.chunk_prefix),
-                &enriched,
-            )?;
+            writer.tile(&enriched).map_err(write_err(&payload))?;
         }
+        writer.finish().map_err(write_err(&payload))?;
         probe.mark("gather + write vertex tiles");
 
         // The identity index: the SAME rows a second time, ordered by `subject`
@@ -854,7 +859,15 @@ pub fn enrich_layout(
         let sorted = take_record_batch(&remapped, &order).map_err(arrow_err(aurl))?;
         drop(remapped);
         drop(order);
-        write_parquet(aurl, &sorted)?;
+
+        // The remapped relation is NOT written back over its input. It used to
+        // be, and the corpus then shipped `by_source.parquet` beside
+        // `by_source/` — the uncut relation published next to its own cut, which
+        // is two containers for one set of rows and one too many. A reader that
+        // globs finds both; `fossil-mcp` read that file while every other reader
+        // addressed the tiles, which is the disagreement `apps/corpus`'s
+        // `declared-tiling` fires on. The input is a staging artefact and the
+        // caller deletes it, exactly as it deletes the staged vertex Parquet.
 
         // Which endpoint addresses this file is which endpoint it is ordered by.
         // The tile space is that endpoint's type's, and the two are different
@@ -877,11 +890,17 @@ pub fn enrich_layout(
         // column, so a tile is a run of it and every run is found in one pass.
         //
         // A vertex tile is always full — dense ids are gapless — but a tile of
-        // 4,096 sources can hold no edges at all, and writing the empty file to
-        // say so is a request the reader pays for to learn nothing. A 404 says it
-        // for free, and a run that does not exist is a file that is not written.
+        // 4,096 sources can hold no edges at all, and it contributes no rows, so
+        // it gets no row group. **That is why a row-group ordinal cannot address
+        // an adjacency** and no writer can fix it: the ordinals are dense and
+        // the tile numbers are not. What locates a tile here is the footer's box
+        // on the key column, and the runs below are written in ascending order,
+        // so the boxes ascend and do not overlap — which is the property
+        // `apps/corpus`'s `tile-of` asks an adjacency for.
         let keys = u32_column(&sorted, aurl, key)?;
         let addresses = keys.values();
+        let payload = format!("{prefix}{TILES_FILE}");
+        let mut writer = open_tiles(&payload, sorted.schema())?;
         let mut start = 0usize;
         while start < addresses.len() {
             let tile = u64::from(addresses[start]) >> tile_shift;
@@ -889,12 +908,12 @@ pub fn enrich_layout(
             while end < addresses.len() && u64::from(addresses[end]) >> tile_shift == tile {
                 end += 1;
             }
-            write_parquet(
-                &format!("{prefix}tile{tile}.parquet"),
-                &sorted.slice(start, end - start),
-            )?;
+            writer
+                .tile(&sorted.slice(start, end - start))
+                .map_err(write_err(&payload))?;
             start = end;
         }
+        writer.finish().map_err(write_err(&payload))?;
     }
     probe.mark("remap adjacencies + write edge tiles");
     probe.finish();
@@ -991,6 +1010,8 @@ fn write_identity_index(
     ensure_prefix(&prefix)?;
 
     let tiles = (pairs.len() as u64).div_ceil(target.chunk_size);
+    let payload = format!("{prefix}{TILES_FILE}");
+    let mut writer: Option<TileWriter<File>> = None;
     for k in 0..tiles {
         let lo = (k * target.chunk_size) as usize;
         let len = (pairs.len() - lo).min(target.chunk_size as usize);
@@ -1002,7 +1023,17 @@ fn write_identity_index(
             ("dense_id", Arc::new(addresses) as ArrayRef),
         ])
         .map_err(arrow_err(&prefix))?;
-        write_parquet(&format!("{prefix}tile{k}.parquet"), &batch)?;
+        // Opened from the first tile's schema rather than declared up front,
+        // because that schema is built here and a second statement of it is a
+        // second thing to keep in step.
+        let writer = match &mut writer {
+            Some(open) => open,
+            slot => slot.insert(open_tiles(&payload, batch.schema())?),
+        };
+        writer.tile(&batch).map_err(write_err(&payload))?;
+    }
+    if let Some(writer) = writer {
+        writer.finish().map_err(write_err(&payload))?;
     }
     Ok(())
 }
@@ -1155,27 +1186,32 @@ fn replace_columns(
     RecordBatch::try_new(schema, columns).map_err(arrow_err(url))
 }
 
-/// Encode one batch and put it at `url`.
+/// Open the row-group container one payload set goes into, at `url`.
 ///
-/// Through [`batches_to_parquet`] and not through a writer of its own, because
-/// the row-group size is the tile size and that is a property of the format
-/// rather than of this pass — the reader's index is the footer, and one box per
-/// tile is what makes it one. Uncompressed, which is what that encoder does:
-/// the same encoder wrote the file being read here.
-fn write_parquet(url: &str, batch: &RecordBatch) -> Result<(), LayoutError> {
+/// Through [`TileWriter`] and not through a writer of its own, because one row
+/// group per tile is a property of the format rather than of this pass — the
+/// reader's index is the footer, and one box per tile is what makes it one.
+/// Uncompressed, which is what that encoder does: the same encoder wrote the
+/// file being read here.
+///
+/// The bytes go straight to the `File`. Encoding to a `Vec` first would put the
+/// whole encoded type beside the type — 75 MB at five million, for nothing —
+/// which is the same argument `try_for_each_file` makes on the sink side.
+fn open_tiles(url: &str, schema: SchemaRef) -> Result<TileWriter<File>, LayoutError> {
     let path = local_path(url)?;
-    let Some(bytes) =
-        batches_to_parquet(std::slice::from_ref(batch)).map_err(|source| LayoutError::Write {
-            target: url.to_string(),
-            source,
-        })?
-    else {
-        return Ok(());
-    };
-    std::fs::write(path, bytes).map_err(|source| LayoutError::Io {
+    let file = File::create(&path).map_err(|source| LayoutError::Io {
         target: url.to_string(),
         source,
-    })
+    })?;
+    TileWriter::new(file, schema).map_err(write_err(url))
+}
+
+/// `parquet` errors encoding into `url`, as a [`LayoutError::Write`].
+fn write_err(url: &str) -> impl Fn(parquet::errors::ParquetError) -> LayoutError + '_ {
+    move |source| LayoutError::Write {
+        target: url.to_string(),
+        source,
+    }
 }
 
 /// The shift that addresses a tile of `rows` rows, or `None` if `rows` is not a

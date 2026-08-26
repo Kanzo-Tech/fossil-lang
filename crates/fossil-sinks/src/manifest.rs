@@ -91,6 +91,35 @@ use serde::{Deserialize, Serialize};
 /// The `GraphAr` manifest format version string. Emitted as `version: gar/v1`.
 pub const GRAPHAR_VERSION: &str = "gar/v1";
 
+/// The payload file of a row-group container: one per set, its row groups the
+/// tiles. `@fossil-lang/graph` spells the same constant.
+pub const TILES_FILE: &str = "tiles.parquet";
+
+/// Which container carries a corpus's tiles — one file per tile with the address
+/// in the name, or one file per set with the address as the row-group ordinal.
+///
+/// **A reader cannot work this out, which is the whole reason it is declared.**
+/// Working it out means listing a directory, and there is no listing over HTTP.
+/// So it is a field of `graph.graph.yml` and it applies to every payload set in
+/// the corpus at once — the vertex tiles, the identity index, and each
+/// orientation of each edge type. `/docs/format/conventions/addressing` has the
+/// measurement that chose fossil's: 5.6 range requests per window against 22.3,
+/// and 496,373 B of footer in one piece against 1,150,490 B in 1,221.
+///
+/// Absence is [`Self::Files`] and not an error, because a corpus written before
+/// the field existed is that one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Container {
+    /// One Parquet per tile, the address in the filename —
+    /// `<prefix>chunk{k}.parquet`, `<prefix>tile{k}.parquet`.
+    #[default]
+    Files,
+    /// One Parquet per payload set, the address the row-group ordinal —
+    /// `<prefix>`[`TILES_FILE`]. What fossil writes.
+    RowGroups,
+}
+
 /// `GraphAr` vertex-info manifest (one per vertex/shape type).
 ///
 /// Serializes with the spec field names; `vertex_type` renames to `type`.
@@ -100,9 +129,9 @@ pub struct VertexInfo {
     #[serde(rename = "type")]
     pub vertex_type: String,
     /// Full RDF type IRI (empty for non-RDF graphs). Carried into the manifest
-    /// so the query side's schema verbs surface it without a separate registry
-    ///. Omitted from YAML when
-    /// empty so non-RDF graphs keep the canonical `GraphAr` shape.
+    /// so the query side's schema verbs surface it without a separate registry.
+    /// Omitted from YAML when empty, so non-RDF graphs keep the canonical
+    /// `GraphAr` shape.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub iri: String,
     /// **How many rows this vertex type has** — every row of every tile under
@@ -287,6 +316,13 @@ pub struct GraphInfo {
     /// Prefix the `vertices`/`edges` entries are relative to. Usually `""`
     /// — the entries are already `<dest>`-relative `rel_path`s.
     pub prefix: String,
+    /// Which container carries every payload set of this corpus. See
+    /// [`Container`]: it is here, once, because it is the one thing about a
+    /// tile's URL a reader is told rather than derives, and because two payload
+    /// sets in different containers would be two addressing schemes in one
+    /// corpus.
+    #[serde(default)]
+    pub container: Container,
     /// Relative paths to each vertex-info YAML, e.g. `vertex/Person.vertex.yml`.
     pub vertices: Vec<String>,
     /// Relative paths to each edge-info YAML, e.g.
@@ -473,12 +509,14 @@ impl GraphInfo {
     pub fn new(
         name: impl Into<String>,
         prefix: impl Into<String>,
+        container: Container,
         vertices: Vec<String>,
         edges: Vec<String>,
     ) -> Self {
         Self {
             name: name.into(),
             prefix: prefix.into(),
+            container,
             vertices,
             edges,
             version: GRAPHAR_VERSION.to_string(),

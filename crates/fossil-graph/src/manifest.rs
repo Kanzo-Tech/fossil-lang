@@ -195,7 +195,8 @@ fn parse_yaml<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &str) -> Resul
 mod tests {
     use super::*;
     use fossil_sinks::manifest::{
-        AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+        AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup,
+        VertexInfo,
     };
 
     /// In-memory manifest source: the test analogue of httpfs/fs. Proves the
@@ -299,6 +300,7 @@ mod tests {
         let graph = GraphInfo::new(
             "graph",
             "",
+            Container::RowGroups,
             vec![
                 "vertex/Person.vertex.yml".into(),
                 "vertex/Org.vertex.yml".into(),

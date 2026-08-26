@@ -32,8 +32,12 @@ tokio = { workspace = true }
 # boundary via serde_json, never JsonSchema, so the mismatch is inert).
 schemars = "1"
 
-[dev-dependencies]
+# The manifest model, for the two names a path is composed from:
+# `manifest::Container` and `manifest::TILES_FILE`. It was a dev-dependency while
+# `register_views_sql` hard-coded its paths; it is a dependency now that the
+# paths come out of the manifest instead of out of this file.
 fossil-sinks = { path = "../fossil-sinks" }
+
 
 [lints]
 workspace = true

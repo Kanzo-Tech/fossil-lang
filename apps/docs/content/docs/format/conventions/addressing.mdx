@@ -263,9 +263,11 @@ requests and does not save a byte.** Guard: `tile-of`, in whichever form the cor
 **Which one a corpus is, it declares.** `graph.graph.yml` carries `container: files` or
 `container: rowgroups`, and it applies to every payload set in the corpus — the vertex tiles, the
 identity index, and each orientation of each edge type. A reader cannot work it out: working it out
-means listing a directory, and there is no listing over HTTP. Absent is `files`, which is what fossil
-writes today. The row-group container's file is `tiles.parquet` in the set's own prefix, one per set,
-and the addresses are published as vectors below.
+means listing a directory, and there is no listing over HTTP. Absent is `files`, because a corpus
+written before the field existed is that one. **fossil writes `rowgroups`**, and its file is
+`tiles.parquet` in the set's own prefix, one per set; the addresses are published as vectors below.
+The conformance corpus is the other one and says so, for a reason that belongs to a writer rather
+than to the format — see below.
 
 ```yaml
 name: graph
@@ -292,13 +294,18 @@ construction: **the footer's box on the endpoint column the orientation is order
 tile's `dense_id` range. `tile-of` asks that orientation the question it can answer — the boxes
 ascend and do not overlap, so a tile is a contiguous run of row groups.
 
-<Callout type="warn" title="DuckDB cannot write a row group under 2,048 rows">
+<Callout type="warn" title="DuckDB cannot write a row group under 2,048 rows, and arrow-rs can">
 Row groups come out in multiples of DuckDB's 2,048-row vector, and a smaller `ROW_GROUP_SIZE` is
 clamped without a warning: 300 rows written at `ROW_GROUP_SIZE 64` come back as **one** row group of
 300. So a corpus whose `chunk_size` is under 2,048 cannot be put in the row-group container by
-DuckDB at all — which is why the conformance corpus, at `chunk_size` 64, is the file-per-tile one and
-the two-container comparison runs on a fixture at 4,096. It is a limit of that writer and not of the
-format.
+DuckDB at all — which is why the conformance corpus, at `chunk_size` 64, is the file-per-tile one,
+declares `container: files`, and the two-container comparison runs on a fixture at 4,096.
+
+**It is a limit of that writer and not of the format**, and fossil is not that writer: `parquet`'s
+`ArrowWriter` cuts a row group where it is told, and the same 300 rows at 64 come back as
+`[64, 64, 64, 64, 44]`. `a_tile_can_be_smaller_than_duckdbs_vector` in `crates/fossil-df/src/files.rs`
+is that measurement, and it is why the container fossil emits is not the container its own fixture
+generator can produce.
 </Callout>
 
 ## There is no tile tree

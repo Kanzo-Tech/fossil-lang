@@ -21,7 +21,7 @@
 //! ```
 
 use fossil_sinks::manifest::{
-    DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
 };
 use serde_json::{Map, Value, json};
 
@@ -81,6 +81,7 @@ fn main() {
     let graph = GraphInfo::new(
         "graph",
         "",
+        Container::RowGroups,
         vec!["vertex/Person.vertex.yml".into()],
         vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
     );

@@ -1,5 +1,6 @@
 name: graph
 prefix: ''
+container: files
 vertices:
 - vertex/Person.vertex.yml
 edges:

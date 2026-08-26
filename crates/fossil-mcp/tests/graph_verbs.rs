@@ -14,7 +14,7 @@ use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
 use fossil_graph::{GraphError, Operation, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
 use fossil_sinks::manifest::{
-    DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+    Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
 };
 
 /// In-memory manifest source mirroring the writer's on-disk layout.
@@ -77,6 +77,7 @@ fn manifest() -> Manifest {
     let graph = GraphInfo::new(
         "graph",
         "",
+        Container::RowGroups,
         vec!["vertex/Person.vertex.yml".into()],
         vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
     );

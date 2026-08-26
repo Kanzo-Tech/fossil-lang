@@ -77,8 +77,8 @@ use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_mem_probe::Probe;
 use fossil_mir::{Expr, Op, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::manifest::{
-    AdjList, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property, PropertyGroup,
-    VertexIndex, VertexInfo, data_type_name,
+    AdjList, Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GRAPHAR_VERSION, GraphInfo, Property,
+    PropertyGroup, VertexIndex, VertexInfo, data_type_name,
 };
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
@@ -1704,7 +1704,12 @@ impl GraphArData {
                 format!("edge/{dir}/{dir}.edge.yml")
             })
             .collect();
-        let graph = GraphInfo::new("graph", "", vertex_paths, edge_paths);
+        // The container, declared. A reader cannot work it out — working it out
+        // means listing a directory, and there is no listing over HTTP — so it
+        // is written down here, once, for every payload set of the corpus. What
+        // fossil emits is the row-group one: `fossil-layout` cuts each set into
+        // one Parquet whose row groups ARE its tiles.
+        let graph = GraphInfo::new("graph", "", Container::RowGroups, vertex_paths, edge_paths);
 
         // The counts come off the materialised batches and not off the schema,
         // because the schema knows what types there are and only the data knows

@@ -980,7 +980,7 @@ mod tests {
     use super::*;
     use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
     use fossil_sinks::manifest::{
-        DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
+        Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
     };
     use std::collections::HashMap;
 
@@ -1050,6 +1050,7 @@ mod tests {
         let graph = GraphInfo::new(
             "graph",
             "",
+            Container::RowGroups,
             vec!["vertex/Person.vertex.yml".into()],
             vec!["edge/Person_knows_Person/Person_knows_Person.edge.yml".into()],
         );
