@@ -995,6 +995,11 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 /// substring that stops before the rendering — and the binding names THREE
 /// shapes on purpose, because 1, 2 and 3 are exactly the ordinals English is
 /// irregular for and 3 is the largest of them.
+///
+/// That binding has TWO surplus names, which is why it is read twice below. The
+/// second reading is the one nothing covered: the number in the last clause is
+/// the NAME's position, so `Second` must be told 2. It was told 3, because
+/// `named` is the binding's total and both surplus names read it.
 #[test]
 fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
@@ -1045,6 +1050,17 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
             "`Third` is declared and bound nothing: the binding names 3 shape(s) \
              and the document declares 1. Names bind by POSITION, so there is no \
              shape 3 for it to take.",
+        ),
+        (
+            // The SECOND surplus name of the same binding, and the row that
+            // says the last clause is about this name and not about the
+            // binding: `Second` is position 2 and was told there is no shape 3.
+            program("person.shex", "T, Second, Third", "Second"),
+            "person.shex",
+            PERSON_DOCUMENT,
+            "`Second` is declared and bound nothing: the binding names 3 shape(s) \
+             and the document declares 1. Names bind by POSITION, so there is no \
+             shape 2 for it to take.",
         ),
     ];
 

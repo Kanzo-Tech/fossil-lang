@@ -73,7 +73,16 @@ pub enum ShapeBindError {
     /// The binding names more shapes than the document declares. Binding is
     /// POSITIONAL, so this is the check that model gives
     /// away free: the Nth name wants an Nth shape and there is none.
-    Arity { declared: usize, named: usize },
+    ///
+    /// `position` is that N, and it belongs to the surplus NAME rather than to
+    /// the binding — so this is one error value per member, not one shared by
+    /// all of them. `named` did both jobs, and every surplus name of a binding
+    /// was told the LAST one's number.
+    Arity {
+        declared: usize,
+        named: usize,
+        position: usize,
+    },
 }
 
 /// One entry in the source-binding table (`users := io.csv(...)`).
@@ -1030,14 +1039,19 @@ fn resolve_member_shape_iris(
         .shapes()
         .map(|s| SmolStr::from(s.iri.as_str()))
         .collect();
-    let arity = ShapeBindError::Arity {
-        declared: declared.len(),
-        named: members.len(),
-    };
     (0..members.len())
         .map(|i| {
             declared.get(i).map_or_else(
-                || (None, Some(arity.clone())),
+                || {
+                    (
+                        None,
+                        Some(ShapeBindError::Arity {
+                            declared: declared.len(),
+                            named: members.len(),
+                            position: i + 1,
+                        }),
+                    )
+                },
                 |iri| (Some(iri.clone()), None),
             )
         })
@@ -1295,7 +1309,8 @@ b := io.parquet(\"b.parquet\")
             dm.lookup_source_shape_error(&db, "c"),
             Some(ShapeBindError::Arity {
                 declared: 2,
-                named: 3
+                named: 3,
+                position: 3
             })
         );
     }
@@ -1406,7 +1421,8 @@ b := io.parquet(\"b.parquet\")
             dm.lookup_type_error(&db, "c"),
             Some(ShapeBindError::Arity {
                 declared: 2,
-                named: 3
+                named: 3,
+                position: 3
             })
         );
         assert_eq!(

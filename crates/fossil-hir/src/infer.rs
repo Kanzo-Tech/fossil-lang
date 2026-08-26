@@ -308,7 +308,12 @@ fn resolve_leaf_row<'db>(
             ShapeBindError::Unparseable { path, cause } => {
                 format!("shape document `{path}` for `{source_name}` failed to parse: {cause}")
             }
-            ShapeBindError::Arity { declared, named } => format!(
+            // `position` is not read: this sentence names the source binding
+            // rather than a number, so the surplus member's index has nothing
+            // to say in it.
+            ShapeBindError::Arity {
+                declared, named, ..
+            } => format!(
                 "the binding names {named} shape(s) and the document declares {declared}; \
                  names bind by position, so `{source_name}` has no shape to bind"
             ),

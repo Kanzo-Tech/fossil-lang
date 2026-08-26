@@ -1769,15 +1769,20 @@ fn unbound_shape_message(
                  could not be read as a shape document ({cause}), so this mapping is \
                  checked against nothing"
             ),
-            ShapeBindError::Arity { declared, named } => format!(
+            ShapeBindError::Arity {
+                declared,
+                named,
+                position,
+            } => format!(
                 // "no {named}th shape" printed «no 3th shape». English ordinals
                 // are irregular for 1, 2 and 3, and a suffix table for one
                 // message is a second way to write a number down; the sentence
-                // does not need an ordinal at all, because the count it wants is
-                // already the cardinal one two clauses earlier.
+                // does not need an ordinal at all. The number it wants is this
+                // NAME's position — `named` is the binding's total, and reading
+                // it here told every surplus name the last one's number.
                 "`{shape_name}` is declared and bound nothing: the binding names {named} \
                  shape(s) and the document declares {declared}. Names bind by POSITION, \
-                 so there is no shape {named} for it to take."
+                 so there is no shape {position} for it to take."
             ),
         };
     }
