@@ -203,26 +203,55 @@ plainly, and fossil follows both:
 ```mermaid
 graph LR
   W["writer (Rust)"] --> C[("corpus on disk")]
+  R[["recipe · provenance.mjs"]] --> C
   C --> JS["reader.mjs · from the conventions alone"]
   C --> TS["resolveCorpus · the published module"]
+  C --> RS["fossil_graph::address · native and wasm32"]
   JS --> D{"diff"}
   TS --> D
+  RS --> D
   V[["vectors.json · the borders"]] --> D
-  S[["full scan · neither wrote it"]] --> D
+  S[["full scan · none of them wrote it"]] --> D
 ```
 
-Two readers that never read each other, and the numbers they are diffed against come from a **full
-scan** — every tile read with no addressing at all and filtered in SQL, which is a third thing
-neither implementation wrote. Both prune, and both have to land where an unpruned read already is.
-That is what closes GraphAr's gap: an assertion here cannot be satisfied by agreeing with the other
-implementation, only by agreeing with the bytes.
+Three readers that never read each other, and the numbers they are diffed against come from a **full
+scan** — every tile read with no addressing at all and filtered in SQL, which is a fourth thing none
+of the implementations wrote. All of them prune, and all of them have to land where an unpruned read
+already is. That is what closes GraphAr's gap: an assertion here cannot be satisfied by agreeing with
+another implementation, only by agreeing with the bytes.
 
-**A third implementation is not what is missing.** One in Rust would have no consumer today —
-`fossil-mcp` does not read through the conventions, keasy reads through the TypeScript path, and the
-writer's own validator reads the artefact with plain SQL *on purpose*, so that it never passes
-through reader code of ours. What is missing is Arrow's ordering applied to the change that is
-actually pending, and it is written down as an obligation rather than an intention:
-**a format change lands after both readers have been moved to it and diffed, never before.**
+The corpus they resolve against is itself generated, and **the parameters that generated it are
+executed rather than remembered.** They were not written down, and the cost of that was a
+misdiagnosis: regenerating with the fixture's defaults produces 600 edges against the 596 the
+manifest declares, which reads exactly like a fixture that has drifted from its generator. It has
+not. `clusters` decides how many chords the ring carries and the default is 256; at **16** the
+generator reproduces the checked-in corpus **byte for byte**, all twenty-three files.
+`apps/corpus/conformance/provenance.mjs` carries the recipe and proves it, asserting the manifests
+as text and every payload's rows in order — and *reporting* byte-identity rather than requiring it,
+because a writer may change an encoding without changing a row, and a check that went red on a
+DuckDB point release would teach everyone to regenerate the fixture instead of reading the diff.
+
+**There are three readers, and the third one is Rust.** This paragraph argued the opposite, and the
+argument it made was about *consumers*: one in Rust would have none, since `fossil-mcp` composes its
+own paths, keasy reads through the TypeScript, and the writer's own validator reads the artefact with
+plain SQL on purpose so that it never passes through reader code of ours. All of that is still true
+and none of it was the point. **Both existing readers were JavaScript**, and a mistake they share is
+invisible to a diff of the two — a shift taken as signed, a count that went through a `Number`, which
+are exactly the borders `vectors.json` publishes because a port can get them wrong. A third reader in
+the same language family is what is not missing; a third reader in a different one is a different
+claim.
+
+`fossil_graph::address` is that reader. It goes through no struct of the writer's — `fossil-graph`'s
+other manifest module deserialises into `fossil-sinks`' own types, which proves those types
+round-trip and says nothing about the artefact, so this one reads a generic YAML value and asks the
+document a stranger's questions. It opens no byte, which is also what makes it indifferent to which
+engine anybody would open the files with. `crates/fossil-graph/tests/conformance.rs` runs it
+natively; `apps/corpus/conformance/wasm-reader.mjs` runs the wasm32 build of it, through
+`fossil-graph-wasm`, which is a separate claim rather than the same one twice — `usize` is 64 bits in
+one and 32 in the other.
+
+What that buys is Arrow's ordering, and it remains an obligation rather than an intention:
+**a format change lands after every reader has been moved to it and diffed, never before.**
 
 That obligation has been discharged once, and the shape of it is what to copy. The
 [row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
@@ -232,8 +261,17 @@ which is the only window in which two containers of one corpus exist at the same
 the same graph written both ways, every answer required to match. After the writer moves there is
 one container and nothing left to compare against.
 
-What runs lives in `apps/corpus/conformance/verify.mjs` and `containers.mjs`, and the conventions
-they check are documented for reader implementors on the corpus site rather than here.
+What runs lives in `apps/corpus/conformance/` — `verify.mjs` (the table, against each reader in
+turn), `containers.mjs` (the same graph in both containers) and `provenance.mjs` (the corpus from its
+recipe) — plus `crates/fossil-graph/tests/conformance.rs` and
+`packages/graph/tests/conformance.test.ts`. The conventions they check are documented for reader
+implementors on the corpus site rather than here.
+
+The wasm leg is the one part of that directory needing more than `node` and a `duckdb` binary, and it
+is **refused explicitly rather than skipped**: `verify.mjs --without-wasm` is the opt-out, passed by
+the workflow whose whole install list is those two, and a missing build output is otherwise a
+failure. A leg that disappears with its dependency is the same failure as a guard that passes over
+NULL — it stops guarding and nothing says so.
 
 <Callout title="The consumer that did not read through the conventions, and now does">
 `fossil-mcp` registered its relations with `read_parquet('{base}/vertex/<Type>/*.parquet')` and read

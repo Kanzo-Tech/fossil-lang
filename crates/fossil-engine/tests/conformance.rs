@@ -20,12 +20,23 @@
 //! implementations and integration tests *before* a format change lands, which
 //! is why its gaps are enumerated skip-lines instead of wrong answers.
 //!
-//! **What this cannot prove yet, and it is the larger half.** This is one
-//! writer read by one independent engine. It is not the full round trip —
-//! write with the Rust writer, read with the wasm reader *and* with
-//! the TypeScript/DuckDB path, diff the three — because two of those three live
-//! in another repository. What is here is the artefact validator that `GraphAr`
-//! explicitly lacks; the cross-implementation half arrives with the tile reader.
+//! **What this cannot prove, and where the rest of it is now.** This is one
+//! writer read by one engine. The cross-implementation half is real and it is
+//! not here: `apps/corpus/conformance/expected.json` is a table of addresses
+//! executed by three readers that none of them wrote — plain Node
+//! (`conformance/reader.mjs`), the published TypeScript (`resolveCorpus`), and
+//! `fossil_graph::address`, natively in `crates/fossil-graph/tests/conformance.rs`
+//! and as wasm32 through `conformance/wasm-reader.mjs`. This paragraph said two
+//! of those three lived in another repository. All three are in this one.
+//!
+//! What still has one side is the seam between the two: that table resolves
+//! against a checked-in corpus, and the corpus THIS file writes is read back by
+//! one reader, `apps/corpus/conformance/writer.mjs`. A writer change that moved
+//! an address would be caught there, by that reader, and by nothing else — which
+//! is a smaller gap than the one this paragraph used to describe and is still a
+//! gap. It is named rather than closed because closing it means running the wasm
+//! reader over a corpus `fossil run` produced, and that is a Rust test that would
+//! need a wasm build to exist.
 //!
 //! **It does not freeze the Morton arithmetic.** No test vector for `morton2`
 //! appears below: the quantisation is in motion — it may widen if flattened
