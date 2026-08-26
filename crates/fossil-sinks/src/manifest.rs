@@ -82,7 +82,7 @@
 //! writes Parquet through `arrow-rs` and holds no connection, and this paragraph named a
 //! `materialize.rs` that commit deleted. This module declares the tiling; it does not emit bytes,
 //! and `enrich_layout` is the only thing that does — **what the emitter writes is what the
-//! manifest says**, asserted on the artefact by `fossil-engine/tests/conformance.rs` rather than
+//! manifest says**, asserted on the artefact by `fossil-cli/tests/conformance.rs` rather than
 //! agreed by convention. That gap stood open for a long time; it does not get to reopen.
 
 use arrow_schema::DataType;
@@ -740,7 +740,7 @@ impl GraphInfo {
 /// `files.rs` encodes Arrow→Parquet, and COPY survives only in the layout
 /// post-pass. And "must match" was a `must` nothing enforces. Nothing in the
 /// tree compares a manifest's declared `data_type` against the type of the
-/// column the file actually holds: `fossil-engine/tests/conformance.rs` checks
+/// column the file actually holds: `fossil-cli/tests/conformance.rs` checks
 /// paths, counts, tiling and the adjacency joins, and
 /// `apps/corpus/guards/guards.mjs` records the same gap in its own
 /// `cannotProve` — a `dense_id` stored as a string opens, describes and
@@ -1141,8 +1141,6 @@ version: gar/v1
             suppressed: 1_401,
             ..bound
         };
-        assert!(
-            over.suppressed * 1_000_000 > over.population * over.suppression_budget_ppm
-        );
+        assert!(over.suppressed * 1_000_000 > over.population * over.suppression_budget_ppm);
     }
 }

@@ -15,7 +15,7 @@
 //! Because a key that stops matching reads exactly like a document nobody
 //! registered — the least debuggable failure the registry can produce — and
 //! there were three answers to «what key».
-//! `fossil_engine::documents` and `fossil_ide::shape_documents` each
+//! `fossil_cli::documents` and `fossil_ide::shape_documents` each
 //! carried a copy of [`documents_named`], and `fossil-ide`'s [`registry_key`]
 //! was a hand-rolled `parent().join()` that disagreed with this one on two live
 //! cases: a document named through a scheme (`s3://bucket/x.shex` came back as

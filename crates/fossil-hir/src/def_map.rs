@@ -410,7 +410,7 @@ impl<'db> DefMap<'db> {
     ///
     /// **This is the PROGRAM's output descriptor, not a mapping's contract.**
     /// The run writes one corpus and classifies its edges against one schema
-    /// (`fossil_engine::resolve_output_descriptor`, v1). A mapping's contract is
+    /// (`fossil_cli::host`'s `resolve_output_descriptor`, v1). A mapping's contract is
     /// resolved by TYPE — [`Self::shape_binding_for`] — because a program may
     /// bring in two documents and a mapping is checked against the one that
     /// declared ITS type.

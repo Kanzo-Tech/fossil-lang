@@ -26,9 +26,8 @@ prose.
 | --- | --- | --- | --- |
 | `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
 | `fossil-mcp` | **directly** | no | the native binding for the corpus verbs |
-| `fossil-cli` | via `fossil-introspect` | no | a host: it introspects, then compiles |
+| `fossil-cli` | via `fossil-introspect` | no — `run_to_dir` writes a directory | **the** native host: it introspects, compiles, runs, and is the binary over all three |
 | `fossil-lsp` | via `fossil-introspect` | no | a host, for the reason `fossil check` is one |
-| `fossil-engine` | dev-dependency only | no — `run_to_dir` writes a directory | the native host |
 | `fossil-layout` | dev-dependency only | **yes** | the post-pass, over Parquet through `arrow-rs` |
 
 Removing the database from `fossil-layout` was necessary and not sufficient: `fossil-resolver` was an
@@ -36,13 +35,18 @@ unused edge carrying its own wasm32 refusal for an unrelated reason, and `cargo 
 an unused dependency. The crate still links `datafusion` transitively through `fossil-df`, which is
 not the same claim — what it takes from there is one Arrow → Parquet encoder.
 
-In `fossil-engine` the reason changed rather than the fact: `pre_introspect` and the credentials went
-to `fossil-introspect`, a crate a **host** takes, and `run` takes a map of connection URLs rather
-than a `RunCreds`, so the compiler cannot see a secret. One wasm32 error is left and it is the
-filesystem — `fossil_df::run_to_dir` writes a corpus to a local directory. **`check` is wasm-capable
-and `run` is not, in one crate**, and that does not contradict the sentence the project is built on
-the way bundling a database did, because writing files to a disk is what a native host does. None of
-it is the DataFusion rewrite either: **DuckDB is still the engine that `DESCRIBE`s, on both sides.**
+In the native host the reason changed rather than the fact: `pre_introspect` and the credentials
+went to `fossil-introspect`, a crate a **host** takes, and `run` takes a map of connection URLs
+rather than a `RunCreds`, so the compiler cannot see a secret. One wasm32 error is left and it is
+the filesystem — `fossil_df::run_to_dir` writes a corpus to a local directory. **`check` is
+wasm-capable and `run` is not, in one crate**, and that does not contradict the sentence the project
+is built on the way bundling a database did, because writing files to a disk is what a native host
+does. None of it is the DataFusion rewrite either: **DuckDB is still the engine that `DESCRIBE`s, on
+both sides.**
+
+That host was `fossil-engine` when this was measured. It is `fossil-cli`'s `host` module now — one
+library crate with one consumer, folded into the consumer — which changes where the row above points
+and nothing about which engine is reachable from it.
 
 ## What the layout pass paid for it
 
@@ -71,7 +75,7 @@ Measured 2026-08-23 against a real S3 (MinIO in Docker), reading `@sales/users.c
 
 A cloud `@conn` source type-checks against the columns it really has and then cannot run. `run`
 refuses it explicitly now, naming the source; registering a native object store is a feature rather
-than a correction. `crates/fossil-engine/tests/cloud_source.rs` pins both halves and asserts the
+than a correction. `crates/fossil-cli/tests/cloud_source.rs` pins both halves and asserts the
 *introspection* too, because a test that only asserted the failure would pass with a wrong credential.
 
 ## Why this does not reopen "unifying the two execution engines"

@@ -83,7 +83,7 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
 
     // Introspect first, as `fossil-cli` does: without it the sources carry no
     // forward-propagated types and `amount` would not be an `Integer` at all.
-    let system = fossil_engine::host_system(&path);
+    let system = fossil_cli::host_system(&path);
     let _ = fossil_introspect::introspect_program(
         &*system,
         &path,
@@ -92,7 +92,7 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
     );
 
     let dest = root.join("out");
-    fossil_engine::run(
+    fossil_cli::run(
         &path,
         &format!("file://{}", dest.display()),
         &std::collections::HashMap::new(),

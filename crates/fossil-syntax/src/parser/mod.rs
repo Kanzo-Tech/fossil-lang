@@ -143,7 +143,7 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
     // the host (CLI / LSP / WASM) via the `Diagnostic` accumulator.
     // `.file_absolute()` and not the default frame: `parse` is FILE-keyed, so a
     // parse error's span is a file offset by construction. Left in the default
-    // `MappingRelative`, the per-mapping drain in `fossil-engine` rebases it by
+    // `MappingRelative`, the per-mapping drain in the native host rebases it by
     // the mapping's own start — which moves the copy, so the dedup keyed on
     // (severity, message, span) stops collapsing the two and the reader gets the
     // same error twice, the second one pointing past the end of the file.

@@ -40,7 +40,7 @@ pub enum OutputDescriptorKind {
     ///
     /// It was called `Shacl`, and the name was a claim about the document's
     /// language that the value does not carry: since the run reads its shape
-    /// document through the provider registry (`fossil_engine`'s
+    /// document through the provider registry (`fossil_cli::host`'s
     /// `read_output_shape`), a `ShEx` document arrives here too. What the
     /// variant means is "the decode already happened", which is what it now
     /// says. [`Self::ShEx`] survives beside it because the browser executor is
@@ -54,7 +54,7 @@ pub enum OutputDescriptorKind {
 
 impl OutputDescriptorKind {
     /// Inherent `const` default: the descriptor an executor uses when the
-    /// program declares no output shape (`fossil_engine`'s `output_shape`,
+    /// program declares no output shape (`fossil_cli::host`'s `output_shape`,
     /// `fossil_df_wasm`'s `build_program`). Backward checking is a no-op and
     /// the produced graph is accepted whole.
     ///
@@ -99,7 +99,7 @@ impl OutputDescriptorKind {
     ///
     /// `renames` is the program's [`Renames`] and governs the column label.
     /// [`Self::Lowered`] ignores it on purpose: the decode already happened,
-    /// and the side that did it (`fossil_engine`'s `read_output_shape`) is the
+    /// and the side that did it (`fossil_cli::host`'s `read_output_shape`) is the
     /// side that had the program.
     #[must_use]
     pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {

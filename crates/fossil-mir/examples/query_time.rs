@@ -9,7 +9,7 @@
 //! # The three quantities
 //!
 //! 1. **The batch compile.** `def_map` + `lower_to_mir_pg` per mapping, the
-//!    exact shape `fossil_engine::check` runs, timed at four sizes.
+//!    exact shape `fossil_cli::check` runs, timed at four sizes.
 //! 2. **Salsa's per-execution cost.** A tracked function over an interned key
 //!    that computes nothing, on cold keys — so what is timed is intern + memo
 //!    insert + dependency edge, and nothing else. Multiplied by the execution

@@ -109,46 +109,46 @@ deny = [
     # transitive linkers (what the rule always meant), and the reason says which
     # is which.
     #
-    # ## THE FOUR `unused-wrapper` WARNINGS ARE THE TRANSITIVE NAMES. LEAVE THEM.
+    # ## THE `unused-wrapper` WARNINGS ARE THE TRANSITIVE NAMES. LEAVE THEM.
     #
     # `cargo deny check bans` prints `warning[unused-wrapper]` for each name that
-    # is not a direct parent — `fossil-lsp` under `duckdb`, and the last three
+    # is not a direct parent — `fossil-lsp` under `duckdb`, and the last two
     # under `datafusion`. It still exits 0 and CI's `deny` job still passes; the
     # action runs no `--deny warnings` and adding one would suppress the
     # diagnostic globally, which is how a genuinely stale entry would go quiet.
     #
-    # Deleting the four names silences the warnings AND reopens the hole, and
+    # Deleting those names silences the warnings AND reopens the hole, and
     # `engine_reach.rs` is what goes red if anyone tries. There is no config key
     # for the level: cargo-deny 0.19.6 offers it only as the CLI flag
     # `--allow unused-wrapper`, which is not scoped to an entry.
     { name = "duckdb", wrappers = [
         # Links it, directly. DESCRIBE opens a connection — `fbd1102` moved that
-        # out of `fossil-engine`, and naming this crate is the review the rule
+        # out of the native host, and naming this crate is the review the rule
         # exists to force.
         "fossil-introspect",
         "fossil-mcp",
         # Links it TRANSITIVELY, through `fossil-introspect`. Both are hosts, and
-        # a host is where introspection belongs.
+        # a host is where introspection belongs. `fossil-cli` is ALSO a direct
+        # parent by a dev edge, to read written Parquet back — it absorbed
+        # `fossil-engine`, which held that edge and is gone.
         "fossil-cli",
         "fossil-lsp",
-        # Direct parents by a DEV edge only — to read written Parquet back, or to
-        # bring an engine to a test. Not a ring crossing, and cargo-deny still
-        # counts them as direct parents.
-        "fossil-engine",
+        # A direct parent by a DEV edge only — to bring an engine to a test. Not
+        # a ring crossing, and cargo-deny still counts it as a direct parent.
         "fossil-layout",
     ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the fourth host beside `fossil-cli`, `fossil-mcp` and `fossil-wasm` — a native-only binary outside every wasm closure — and it reaches `duckdb` through `fossil-introspect` for the same reason `fossil check` does: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The previous reason string said `fossil-cli` kept `duckdb` as a dev-dependency; `cargo tree -e normal` says it links it through `fossil-introspect`, which is exactly the transitive edge this list could not see." },
     { name = "datafusion", wrappers = [
         # Links it, directly.
         "fossil-df",
         "fossil-df-wasm",
-        # Links it TRANSITIVELY, through `fossil-df`. None of the three is new —
-        # they were undeclared for as long as the check could not see them, and
-        # they are recorded here rather than changed, because whether the layout
-        # pass should carry an executor is a question this commit does not own.
+        # Links it TRANSITIVELY, through `fossil-df`. Neither is new — they were
+        # undeclared for as long as the check could not see them, and they are
+        # recorded here rather than changed, because whether the layout pass
+        # should carry an executor is a question this entry does not own.
+        # `fossil-engine` was a third and is gone: `fossil-cli` absorbed it.
         "fossil-cli",
-        "fossil-engine",
         "fossil-layout",
-    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. The last three reach it through `fossil-df` and are recorded, not endorsed: `fossil-layout` is in the wasm closure and `CLAUDE.md` describes it as linking no engine, which is true of DuckDB and false of DataFusion. `crates/xtask/tests/engine_reach.rs` is what made that visible; it has no opinion about it." },
+    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed — compiling the engine to the browser asserts the opposite of a camera that is addressed rather than queried. The last two reach it through `fossil-df` and are recorded, not endorsed: `fossil-layout` is in the wasm closure and `CLAUDE.md` describes it as linking no engine, which is true of DuckDB and false of DataFusion. `crates/xtask/tests/engine_reach.rs` is what made that visible; it has no opinion about it." },
 ]
 
 [sources]

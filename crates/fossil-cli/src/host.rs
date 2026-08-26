@@ -1,12 +1,27 @@
-//! **`fossil-engine` is fossil's native host.** It supplies the [`fossil_base::System`] the
-//! compiler runs against, does the pre-compile jobs the compiler cannot do for
-//! itself — introspect the sources, register the shape documents a program
-//! names, install the cloud secrets a `@conn` needs — and drives the
-//! compile→run pipeline, returning structured data the binaries render.
+//! **The five verbs the `fossil` binary is a shell over**, and the host work
+//! under them.
+//!
+//! This was `fossil-engine`, a library crate with exactly one consumer — this
+//! one. `fossil-lsp` and `fossil-wasm` are the other two hosts and each keeps
+//! its own inside itself; the native host was the only one filed apart from the
+//! thing that used it, and `/docs/design/three-hosts` is the cut that says why
+//! the three are three.
+//!
+//! It supplies the [`fossil_base::System`] the compiler runs against, registers
+//! the shape documents a program names, and drives the compile→run pipeline,
+//! returning structured data that `src/main.rs` renders. The rendering is
+//! deliberately not here: `run` returns a [`RunReport`] and `check` a
+//! [`CheckOutcome`], and what a terminal does with either is the binary's.
+//!
+//! The other pre-compile job — `DESCRIBE` each source, and the credential that
+//! reaches a cloud one — is `fossil-introspect`'s, and `src/main.rs` calls it
+//! before it calls anything here. Both `check` and `run` READ what it left in
+//! the `System`'s descriptor cache; neither fills it, which is what makes the
+//! two commands agree.
 //!
 //! `fossil-wasm` is the same shape for the browser and is worth reading beside
 //! this: a `System` over an in-memory file map, `registerInferredDescriptor`
-//! where this crate has `pre_introspect_and_register`, and the same one-line
+//! where this module has `pre_introspect_and_register`, and the same one-line
 //! projections of `fossil_lineage::{providers, source_refs}`. Where the two
 //! differ is the outside world — a disk, a `DuckDB`, a credential — which is
 //! `/docs/design/three-hosts`' cut, and it is the whole of the difference.
@@ -27,25 +42,6 @@
 //! classes of diagnostic outright. It is [`fossil_mir::program_diagnostics`],
 //! which all three hosts now call.
 
-#![allow(rustdoc::private_intra_doc_links)] // `enrich_written_layout` is named
-// above because it is where the coupling lives, and a reader who follows the
-// pointer should land on the code rather than on a paraphrase of it.
-
-// **The reason changed, and that is the point of the change.** This said
-// «depends on fossil-layout which uses bundled DuckDB», then «its own bundled
-// DuckDB, for `pre_introspect`». Neither is true: introspection and credentials
-// are `fossil-introspect`'s, and this crate links no database.
-//
-// What is left is `run`, and it is the FILESYSTEM. `fossil_df::run_to_dir` is
-// itself `cfg(not(wasm32))` because it writes a GraphAr tree to a local
-// directory, which a browser has no concept of — measured by building for the
-// target, and it is the only remaining error. That does not contradict «fossil
-// is a compiler consumed as a WASM library»: writing files to a disk is what a
-// native host DOES, and the browser's host writes bytes back over its own seam.
-//
-// So `check` is wasm-capable and `run` is not, in one crate. Splitting them is a
-// decision and not a cleanup; `docs/design/one-engine.mdx` records it.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -56,16 +52,7 @@ use fossil_lineage::{ProviderInfo, SourceRefInfo};
 use fossil_locator::SourceAnchor;
 use smol_str::SmolStr;
 
-mod documents;
-mod system;
-
-pub use system::{host_system, open_db};
-
-#[cfg(target_arch = "wasm32")]
-compile_error!(
-    "fossil-engine is native-only: `run` writes a GraphAr tree to a local \
-     directory through `fossil_df::run_to_dir`, which is itself wasm-gated"
-);
+use crate::system::open_db;
 
 // ===================================================================== providers
 

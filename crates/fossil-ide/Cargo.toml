@@ -21,7 +21,7 @@ fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
 fossil-hir = { path = "../fossil-hir" }
 # `fossil_mir::program_diagnostics` — the one answer to «what does this file
-# report», which `fossil-engine` also calls. The `diagnostics` module is where
+# report», which `fossil-cli` also calls. The `diagnostics` module is where
 # both editor hosts ask it, after each having asked it separately and each
 # having been wrong about it separately. WASM-clean: the MIR is an operator
 # algebra, and the backend that executes one is `fossil-df`.

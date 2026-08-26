@@ -20,7 +20,7 @@ Keep it under 200 lines, rules-not-context.
   is `/docs/format`; the two server components that render `guards.mjs` and `vectors.json` live
   on the docs side and read across, so renaming either file breaks the docs build on purpose.
 - `apps/docs/programs/` — the conformance programs. Documentation transcludes them; nothing
-  retypes a program into prose. No number here: `crates/fossil-engine/tests/programs.rs` walks
+  retypes a program into prose. No number here: `crates/fossil-cli/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
@@ -136,15 +136,11 @@ crates/
   fossil-lineage/          source lineage + provider introspection, projected onto the wire
   fossil-sinks/            the canonical GraphAr manifest model (atop arrow + parquet)
   fossil-df/               DataFusion backend for the property-graph MIR
-  fossil-engine/           fossil's native HOST: the `System` the compiler runs against, the
-                           shape documents a program names, and the compile→run pipeline.
-                           `fossil-wasm` is the same shape for the browser. It no longer
-                           introspects or installs `@conn` secrets  [NATIVE-ONLY]
-  fossil-introspect/       those two, which are a host job and not a compiler one: `DESCRIBE`
-                           each source's columns, and the `--creds-stdin` payload that
-                           authenticates one. `fossil-cli` calls it before the compile. The one
-                           crate linking `DuckDB` on a normal edge — and it is native by that
-                           edge and by `fossil-resolver`, without a tripwire of its own
+  fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each source's columns,
+                           and the `--creds-stdin` payload that authenticates one. `fossil-cli`
+                           calls it before the compile. The one crate linking `DuckDB` on a
+                           normal edge — and it is native by that edge and by `fossil-resolver`,
+                           without a tripwire of its own
   fossil-layout/           the layout post-pass — Louvain + Morton over Parquet through
                            arrow-rs. It links no `DuckDB` (that is a dev-dependency) but it
                            DOES link `DataFusion`, transitively through `fossil-df` for the
@@ -162,7 +158,13 @@ crates/
   fossil-graph/            the typed verb surface over GraphAr+DuckDB (WASM-clean)
   fossil-mcp/              that same verb surface as a native server-side service
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
-  fossil-cli/              `fossil check/run/providers/refs`  [NATIVE-ONLY]
+  fossil-cli/              fossil's native HOST *and* the binary over it: `src/host.rs` is the
+                           `System` the compiler runs against, the shape documents a program
+                           names, and the compile→run pipeline; `src/main.rs` is
+                           `fossil check/run/providers/refs` and does the rendering. It was
+                           `fossil-engine` plus a shell, and the library half had exactly one
+                           consumer — this one. `fossil-lsp` and `fossil-wasm` keep their hosts
+                           inside themselves too: three hosts, three crates  [NATIVE-ONLY]
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
   fossil-wasm/             WASM host shim (FossilPlayground API + the tokenizer the editor reuses)
   fossil-df-wasm/          the fossil-df executor exposed to JS

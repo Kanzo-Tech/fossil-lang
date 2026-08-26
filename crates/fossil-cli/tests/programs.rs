@@ -21,7 +21,7 @@
 //! problem, and the docs build already has two ways to be red for reasons that
 //! are its own.
 //!
-//! And `fossil-engine` specifically, of the crates that could host it, because it
+//! And `fossil-cli` specifically, of the crates that could host it, because it
 //! is the only one with the WHOLE host. It installs the whole provider registry
 //! (`src/system.rs`, `providers`) and registers the documents a program
 //! names (`src/documents.rs`, `register_shape_documents`), so a `.shex` sitting
@@ -75,7 +75,7 @@
 //!   subjects. Every number in the artefact is equal across a change that breaks
 //!   the program. The predicate is the only thing that is not.
 //!
-//! `FOSSIL_BLESS=1 cargo test -p fossil-engine --test programs` regenerates them.
+//! `FOSSIL_BLESS=1 cargo test -p fossil-cli --test programs` regenerates them.
 //! A diagnostic text nobody produces is a promise the compiler does not make.
 //!
 //! # Every `expected/diagnostic.txt` is blessed, and five were hand-written
@@ -634,7 +634,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
 
         // ── stage 1: compile, the production path ─────────────────────────────
         introspect(&program.source);
-        let outcome = match fossil_engine::check(&program.source) {
+        let outcome = match fossil_cli::check(&program.source) {
             Ok(outcome) => outcome,
             Err(e) => {
                 findings.push(format!("  COMPILE the engine refused the file: {e}"));
@@ -761,7 +761,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
                 // lets twenty-five programs be compiled from one process
                 // without any of them caring where that process stands.
                 introspect(&program.source);
-                let outcome = fossil_engine::run(
+                let outcome = fossil_cli::run(
                     &program.source,
                     &url,
                     &std::collections::HashMap::new(),
@@ -858,7 +858,7 @@ fn the_census_counts_hello_by_hand() {
 /// stopped doing for themselves. Without it a program's sources have no
 /// forward-propagated types, which is a different (and quietly weaker) answer.
 fn introspect(path: &std::path::Path) {
-    let system = fossil_engine::host_system(path);
+    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
         &*system,
         path,

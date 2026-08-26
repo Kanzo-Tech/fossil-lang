@@ -287,6 +287,11 @@ fn addressed(payload: &str, key: &str, shift: u32) -> String {
     )
 }
 
+// A numbered sequence of assertions over ONE corpus, read top to bottom, and the
+// order is the contract rather than an accident of writing. Splitting it either
+// threads the same eight bindings through helpers or writes the corpus once per
+// helper — the first hides the sequence, the second makes the test minutes long.
+#[allow(clippy::cognitive_complexity)]
 #[test]
 fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -300,7 +305,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // the directory of the program that wrote it, so the fixture means the same
     // thing from anywhere and the test does not have to move to read it.
     introspect(&dir.path().join("mapping.fossil"));
-    let report = fossil_engine::run(
+    let report = fossil_cli::run(
         &dir.path().join("mapping.fossil"),
         &format!("file://{}", dest.display()),
         &std::collections::HashMap::new(),
@@ -869,8 +874,8 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     // Both endpoints are addresses; resolving each back to the identity it now
     // names is the only way to ask whether the edge still connects the two
     // vertices it connected before the corpus was reordered.
-    let src = ordinal("s.subject");
-    let dst = ordinal("d.subject");
+    let source_ordinal = ordinal("s.subject");
+    let target_ordinal = ordinal("d.subject");
     assert_eq!(
         scalar(
             &conn,
@@ -878,7 +883,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
                 "SELECT count(*) FROM '{by_source}' e \
                    JOIN '{vertices}' s ON s.dense_id = e.src_dense \
                    JOIN '{vertices}' d ON d.dense_id = e.dst_dense \
-                  WHERE {dst} <> ({src} + 1) % {PEOPLE}"
+                  WHERE {target_ordinal} <> ({source_ordinal} + 1) % {PEOPLE}"
             )
         ),
         0,
@@ -896,7 +901,7 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
 /// stopped doing for themselves. Without it a program's sources have no
 /// forward-propagated types, which is a different (and quietly weaker) answer.
 fn introspect(path: &std::path::Path) {
-    let system = fossil_engine::host_system(path);
+    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
         &*system,
         path,

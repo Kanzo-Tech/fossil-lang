@@ -1,7 +1,7 @@
 //! Every `LoweringKind::Expr` row returns the type its `sig.ret` declares, and
 //! a real `DuckDB` is the one asked.
 //!
-//! NATIVE-ONLY (`fossil-engine` carries a `wasm32` `compile_error!` tripwire).
+//! NATIVE-ONLY (`fossil-cli` carries a `wasm32` `compile_error!` tripwire).
 //!
 //! # The defect this is the guard for
 //!

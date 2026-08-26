@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "`fossil compile/check/run` command-line interface — a thin shell over fossil-engine"
+description = "fossil's native host — the `System` the compiler runs against, the pre-compile jobs, the compile→run pipeline, and the `fossil` binary over them"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -14,32 +14,63 @@ publish = false
 workspace = true
 
 [dependencies]
-# All orchestration lives in the engine; the binary is a thin CLI + presentation shell.
-fossil-engine = { path = "../fossil-engine" }
+# Compiler core + IR. These arrived with `fossil-engine`, which was this crate's
+# library half and had exactly one consumer: this crate.
+fossil-base     = { path = "../fossil-base" }
+fossil-hir      = { path = "../fossil-hir" }
+fossil-mir      = { path = "../fossil-mir" }
+fossil-lineage  = { path = "../fossil-lineage" }
+# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
+# It depends on nothing, so this edge costs a `std::path` join and no build time.
+fossil-locator  = { path = "../fossil-locator" }
+# Descriptors: the input forward-propagation table, and the output side — the
+# `SHEX` decoder row this host installs plus the `OutputDescriptorKind` the
+# executor is handed.
+fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
+fossil-descriptors-output = { path = "../fossil-descriptors-output" }
+# `fossil-shex` is not here, and that is the point: `read_output_shape` named
+# `ShExDescriptor::from_reader` directly and could therefore read only ShExJ
+# while the checker read both syntaxes through the `shex` ROW. The run goes
+# through the same row now, so this host names no schema language at all.
+# Pre-introspection types a column: the DuckDB type string lands on the lattice.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# The DataFusion executor — the SINGLE `run` path (lower_to_mir_pg → execute_graph
+# → write_to_dir). Re-exports `OutputDescriptorKind`, and `RunReport` is the shape
+# `run` prints. DuckDB now serves only the layout post-pass + CSV type
+# pre-introspection.
+fossil-df           = { path = "../fossil-df" }
 # The privacy policy a run is verified against. The host READS the document
 # (a file is a host's job, like a shape document) and hands the parsed value to
 # the write path, which refuses rather than sealing a corpus that misses the
-# bound.
-fossil-policy = { path = "../fossil-policy" }
+# bound. `--policy` is a path on the command line and a `PrivacyPolicy` by the
+# time `host::run` is called, which is the same shape every other host job has.
+fossil-policy       = { path = "../fossil-policy" }
+# The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
+# after the write. It links no DuckDB and it is not the «native runtime + secrets
+# + cloud-path resolver» this line used to call it: `materialize.rs` took the
+# resolver with it, and `install_secret` went with the `DuckDB` connection.
+fossil-layout       = { path = "../fossil-layout" }
+# `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot
+# disagree about a chunk — and `Privacy`, because the run summary says what the
+# corpus claims and «undeclared» is the outcome of forgetting `--policy`.
+fossil-sinks        = { path = "../fossil-sinks" }
 # The host half: DESCRIBE each source before the compile, and hold the
-# credentials that let it. See its module doc for why it is not in the engine.
-fossil-introspect = { path = "../fossil-introspect" }
-# `Diagnostic` / `Severity` for rustc-style `check` rendering.
-fossil-base       = { path = "../fossil-base" }
-# `RunReport` — the shape `run` prints, named where it is produced. The binary
-# already links this crate through the engine; what it adds here is the name.
-# (`refs` and `providers` print `Vec`s the engine hands back and this file never
-# names, so `fossil-lineage` is not an edge.)
-fossil-df         = { path = "../fossil-df" }
-# The manifest model, for `Privacy` — the run summary says what the corpus
-# claims, and «undeclared» is the outcome of forgetting `--policy`.
-fossil-sinks      = { path = "../fossil-sinks" }
+# credentials that let it. See its module doc for why it is not compiler work.
+fossil-introspect   = { path = "../fossil-introspect" }
+
+regex    = { workspace = true }
+smol_str = { workspace = true }
+serde    = { workspace = true, features = ["derive"] }
 # Machine JSON on stdout (`--output-json`) for keasy subprocess consumption.
 serde_json = { workspace = true }
+# Credentials never ride argv/env — kept off Debug via SecretString.
+secrecy  = { workspace = true }
 
 clap = { workspace = true }
 # `fancy` ONLY in this crate: pulls native-only `terminal_size` + `supports-color`.
-# fossil-cli is NATIVE-ONLY (cfg-tripwire), so the leak is contained.
+# fossil-cli is NATIVE-ONLY (cfg-tripwire), so the leak is contained. The library
+# half renders nothing — rustc-style rendering is the binary's job, and the binary
+# is in the same crate now, which is why the feature is not split.
 miette = { workspace = true, features = ["fancy", "derive"] }
 # CLI-02: `CheckError` / `CheckReport` derive `thiserror::Error` alongside `miette::Diagnostic`.
 thiserror = { workspace = true }
@@ -48,16 +79,29 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 # Integration tests drive the `fossil` binary as a black box, then read the
-# produced parquet back + assert registry invariants. These crates are TEST-ONLY
-# (the binary itself links none of them — they live in fossil-engine now).
+# produced parquet back + assert registry invariants.
 insta = { workspace = true }
+# The tests read back the Parquet a run wrote — the same «test convenience, not a
+# dependency of the language» `fossil-layout` demoted.
 duckdb = { workspace = true }
-fossil-layout       = { path = "../fossil-layout" }
 # `--output-json` prints the manifest, and `run_w0b.rs` reads the YAML document
 # the same run wrote to disk and compares the two values. Without this the test
 # could only compare strings it built itself, which is the drift it is there to
 # catch.
 serde_yaml_ng = { workspace = true }
+# The CST, for `tests/census`: the properties an author WROTE are `PROPERTY`
+# nodes, and the count that matters is theirs against the `HirBody`'s. Reading
+# the survivors alone cannot see a property lowering dropped.
+fossil-syntax = { path = "../fossil-syntax" }
+# The shape-document invalidation test edits a registered document through its
+# Salsa input (`Setter::set_text`) and counts `WillExecute` events — the only
+# way to assert that editing the document re-runs the checker and that editing
+# the program does not re-run the decode.
+salsa = { workspace = true }
+# The artefact validator (tests/conformance.rs) writes a corpus and reads it
+# back with plain SQL — never through our own reader. tempfile gives it a
+# destination; duckdb is already a dev dependency for reading Parquet back.
+tempfile = { workspace = true }
 
 [[bin]]
 name = "fossil"

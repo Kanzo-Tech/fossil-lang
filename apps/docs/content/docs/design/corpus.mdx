@@ -176,7 +176,7 @@ What used to stand here beside it was that there is no tile emission and no tile
 `edge/<E>/by_source/tiles.parquet` in both orientations, and an identity index at
 `vertex/<Type>/index/tiles.parquet` that the manifest declares under `index:` — one file per payload
 set, whose row groups are the tiles, and `graph.graph.yml` says which container that is. Verified by
-reproducing a corpus and listing it, and now held by `crates/fossil-engine/tests/conformance.rs`,
+reproducing a corpus and listing it, and now held by `crates/fossil-cli/tests/conformance.rs`,
 which asserts the index exists, that the prefix the manifest declares is the one the writer used,
 and that it is tiled by the same shift as the vertices it addresses. There is still no tile
 **store**, which is a different noun.

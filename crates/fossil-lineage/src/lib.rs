@@ -2,7 +2,7 @@
 //! program reference?" and "what sources does fossil support?" surface.
 //!
 //! Both hosts consume one implementation — one crate, two hosts: the
-//! native `fossil-engine`/`fossil-cli` (via [`source_refs`] over a file-backed
+//! native `fossil-cli` (via [`source_refs`] over a file-backed
 //! db) and the browser `fossil-wasm` (over its in-memory `WasmDb`). The host
 //! injects only its own [`fossil_base::Db`] + program text; the logic — parse →
 //! source headers → typed refs — is identical and pure (no I/O, no `DuckDB`),

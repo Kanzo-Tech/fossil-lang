@@ -715,7 +715,7 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
 /// asks for types. Asking a row for a capability it does not declare is an error
 /// that **names both**, and it is worded once in
 /// [`crate::refusals::decline_capability`], shared with
-/// [`crate::shapes::decoded_document`] and with `fossil-engine`'s run path.
+/// [`crate::shapes::decoded_document`] and with the native host's run path.
 ///
 /// Reported here and not in [`crate::shapes::resolve_target_shape`] for the
 /// span: `node.text_range()` covers the binding the author wrote, and the

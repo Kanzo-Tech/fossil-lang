@@ -578,7 +578,7 @@ async fn execute_edges<'db>(
 /// A row whose `src_iri` or `dst_iri` names a subject no vertex carries
 /// resolves nothing and does not become an edge. **That is intended and it
 /// stays** — a corpus cannot hold an edge to a vertex that is not there, and
-/// `fossil-engine`'s conformance assertion 4 reads every endpoint back and
+/// `fossil-cli`'s conformance assertion 4 reads every endpoint back and
 /// fails on a `dense_id` no vertex has.
 ///
 /// What it stopped being is silent. It reported nothing at any log level, and

@@ -249,7 +249,7 @@ pub fn program_sources_core(
 /// `VertexInfo` whose `iri` was the empty string where the shape's type IRI
 /// belongs.
 ///
-/// The order is forced and it is `fossil-engine`'s: parse → ask the def-map what
+/// The order is forced and it is the native host's: parse → ask the def-map what
 /// the program names → register → compile. Registering bumps the registry's
 /// revision, so the `def_map` computed here is re-derived once on the way to the
 /// plan. This host reads no filesystem, so there is exactly one text to

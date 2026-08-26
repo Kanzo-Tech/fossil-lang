@@ -31,7 +31,7 @@
 //! # What is still here, and why
 //!
 //! [`OutputDescriptor`] and [`OutputDescriptorKind`] stay for now: `fossil-df`,
-//! `fossil-df-wasm` and `fossil-engine` carry an `OutputDescriptorKind` into
+//! `fossil-df-wasm` and `fossil-cli` carry an `OutputDescriptorKind` into
 //! the executor. They are the next thing to go — the kind enum's only live
 //! method is `to_graph_schema`, which is the seam `apply_output_shape` already
 //! takes directly.
@@ -344,7 +344,7 @@ ex:Contact {
         // answer is a bool. The SENTENCE it turns into is
         // `fossil_hir::refusals::decline_extension`, tested there and asserted
         // end-to-end over this very table in
-        // `fossil-engine/tests/provider_registry.rs`.
+        // `fossil-cli/tests/provider_registry.rs`.
         assert!(!SHEX.accepts("catalogue.ttl"));
     }
 

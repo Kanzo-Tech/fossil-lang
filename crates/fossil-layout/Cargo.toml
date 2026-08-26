@@ -28,7 +28,7 @@ workspace = true
 # both of its callers flattened to a string — the rendering it wrapped is
 # `ResolvedPath::create_secret_sql` in `fossil-resolver` and never moved. This is
 # the second and third pieces of `docs/design/one-engine.mdx` for THIS crate;
-# `fossil-engine`'s own `DESCRIBE` pre-introspection still opens a connection.
+# the host's own `DESCRIBE` pre-introspection still opens a connection.
 #
 # What it bought: the workspace's cold build stops paying for `libduckdb-sys` on
 # this crate's account, and `cargo check --target wasm32-unknown-unknown -p

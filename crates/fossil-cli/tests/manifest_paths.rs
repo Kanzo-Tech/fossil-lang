@@ -97,7 +97,7 @@ fn run(dir: &tempfile::TempDir) -> (std::path::PathBuf, fossil_df::RunReport) {
 
     let dest = dir.path().join("out");
     introspect(&dir.path().join("prog.fossil"));
-    let report = fossil_engine::run(
+    let report = fossil_cli::run(
         &dir.path().join("prog.fossil"),
         &dest.to_string_lossy(),
         &std::collections::HashMap::new(),
@@ -215,7 +215,7 @@ fn the_vertices_are_the_tile_prefix_and_the_staged_parquet_is_gone() {
 /// stopped doing for themselves. Without it a program's sources have no
 /// forward-propagated types, which is a different (and quietly weaker) answer.
 fn introspect(path: &std::path::Path) {
-    let system = fossil_engine::host_system(path);
+    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
         &*system,
         path,

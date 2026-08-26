@@ -1,6 +1,6 @@
 // The embedded `.fossil` fixture carries `"…{people.id}"` interpolation holes —
 // LITERAL fossil source, which clippy mistakes for format args in a plain Rust
-// string literal. Same allow, same reason, as `fossil-engine`'s
+// string literal. Same allow, same reason, as `host.rs`'s
 // `provider_registry.rs`.
 #![allow(clippy::literal_string_with_formatting_args)]
 
@@ -75,7 +75,7 @@ fn fresh_workdir(test_name: &str) -> PathBuf {
 /// A vertex is **tiles**, not a file. `c416e07` made the layout pass emit one
 /// tile per 4,096-row `dense_id` range under `vertex/<Type>/` and then delete
 /// the single staged `vertex/<Type>.parquet`
-/// (`crates/fossil-engine/src/lib.rs:494`). Three assertions in this file went
+/// (`crates/fossil-cli/src/host.rs:538`). Three assertions in this file went
 /// on naming the deleted path, so the suite went red the day the emitter landed
 /// and stayed red — one of five failures across the repo from the same commit,
 /// none of which were the emitter being wrong.
@@ -445,7 +445,7 @@ ex:Order {
 // It was `run_w0b_writes_to_cloud_dest_with_stdin_creds`: env-gated on
 // `FOSSIL_TEST_S3_ENDPOINT`, so it skipped on every machine that has ever run
 // this suite, and it asserted that `fossil run --dest s3://…` succeeds. It
-// cannot. `fossil_engine::run` resolves its destination through
+// cannot. `fossil_cli::run` resolves its destination through
 // `local_dest_dir`, which returns `None` for any scheme but `file://`, and the
 // run is refused before a byte is written. The test had also drifted out of the
 // wire it drove: it piped `{"dest":{"config":{…}}}` while the payload type
@@ -453,6 +453,6 @@ ex:Order {
 //
 // A skipped test asserting a capability that does not exist is worse than no
 // test: it is the capability's only documentation, and it reads as coverage.
-// What replaced it is `crates/fossil-engine/tests/cloud_dest.rs`, which asserts
+// What replaced it is `crates/fossil-cli/tests/cloud_dest.rs`, which asserts
 // the refusal — and which goes red the day the write path learns an object
 // store, so the removal cannot be forgotten.

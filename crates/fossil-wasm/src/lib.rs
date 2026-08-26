@@ -569,7 +569,7 @@ impl Default for FossilPlayground {
 // program's typed lineage (which `@conn`s + `schema =` it references) and the
 // supported source providers WITHOUT subprocessing the `fossil` binary. Both
 // delegate to the shared, WASM-clean `fossil_registry` implementation — the SAME
-// code `fossil-engine` runs natively — so the browser and the CLI can never
+// code `fossil-cli` runs natively — so the browser and the CLI can never
 // diverge.
 //
 // Free functions (not `FossilPlayground` methods): they are stateless and

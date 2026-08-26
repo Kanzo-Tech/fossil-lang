@@ -112,7 +112,7 @@ impl HostDb {
 }
 
 /// The introspected `users` row, registered by the HOST before the compile —
-/// what `fossil_engine::pre_introspect_and_register` and the browser's
+/// what `fossil_introspect::pre_introspect_and_register` and the browser's
 /// `registerInferredDescriptor` do for real. Its `name` column is
 /// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
 fn register_users(db: &dyn fossil_base::Db) {

@@ -23,7 +23,7 @@
 //! subtree: `subject_templates` is read from inside `typecheck_mapping` and
 //! `lower_to_mir_pg` (an edge constructor needs it), so a diagnostic pushed
 //! there comes back out of EVERY mapping that constructs an edge — once per
-//! mapping, for a fact about the file. `fossil_engine::check` would dedup it and
+//! mapping, for a fact about the file. `fossil_cli::check` would dedup it and
 //! the LSP, which drains per mapping and does not, would show it N times.
 //!
 //! So the check is its own file-keyed query that nothing per-mapping reads, and
@@ -438,7 +438,7 @@ mod tests {
     ///
     /// `check_identities::accumulated` yields its whole dependency subtree —
     /// every `body`, `lower_to_hir` and `def_map` diagnostic the file produced —
-    /// which is why `fossil_engine::check` filters this drain by frame. These
+    /// which is why `fossil_cli::check` filters this drain by frame. These
     /// fixtures are clean, so the filter here is belt-and-braces: it keeps a
     /// failure in one of those readable as ITS failure rather than as this one.
     fn conflicts(db: &fossil_base::FossilDb, file: SourceFile) -> Vec<&fossil_base::Diagnostic> {

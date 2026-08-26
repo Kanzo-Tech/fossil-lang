@@ -1,14 +1,14 @@
 //! `fossil-introspect` — what a NATIVE host does before it asks the compiler to
 //! compile: read each source's columns, and hold the credentials that let it.
 //!
-//! # Why this is a crate and not a module of `fossil-engine`
+//! # Why this is a crate and not a module of the native host
 //!
 //! Because the compiler does not introspect. **The host does**, and one host
 //! already proved it: `fossil-wasm` implements
 //! [`fossil_base::System::descriptors`], the browser runs
 //! `@fossil-lang/introspect` against its own DuckDB-WASM, and the registered
 //! descriptors are all the checker ever sees. The native side did the same job
-//! from *inside* `fossil-engine`, which is what made that crate open a `DuckDB`
+//! from *inside* the native host, which is what made that crate open a `DuckDB`
 //! connection and carry a `compile_error!` for `wasm32`.
 //!
 //! Moving it does not change what the compiler infers, and that is the point of
@@ -22,19 +22,19 @@
 //!
 //! [`creds`] holds `RunCreds` — the `--creds-stdin` payload. It names
 //! `fossil-resolver`, which carries its OWN `wasm32` tripwire because cloud
-//! credentials must not cross the wasm boundary. So a `fossil-engine` that
+//! credentials must not cross the wasm boundary. So a native host that
 //! still parsed credentials could not be wasm-clean no matter what happened to
 //! `DuckDB`. Introspection and credentials are the same concern anyway: the
 //! secret exists so that the `DESCRIBE` over a cloud `@conn` source
 //! authenticates.
 //!
-//! `fossil-engine` therefore takes a `HashMap<String, String>` of connection
+//! The host therefore takes a `HashMap<String, String>` of connection
 //! URLs and never sees a secret.
 //!
 //! # What this crate is NOT
 //!
 //! It is not a second compiler entry point. It fills a cache and returns
-//! nothing; `fossil_engine::check` / `run` read that cache through `System`. The
+//! nothing; `fossil_cli::check` / `run` read that cache through `System`. The
 //! order — introspect, then compile — is the caller's, and it is the order the
 //! browser has always used.
 
@@ -198,7 +198,7 @@ fn freshness_token(resolved: &str) -> String {
 /// text that has already been read and an anchor that has already been built,
 /// and every one of the eleven callers wanted the same three lines in front of
 /// it. The `System` is the caller's because only the caller knows which host it
-/// is — `fossil_engine::host_system(path)` natively, and the browser does not
+/// is — `fossil_cli::host_system(path)` natively, and the browser does not
 /// come through here at all.
 ///
 /// # Errors
@@ -423,14 +423,14 @@ mod tests {
     /// live beside the rule itself, in `fossil_locator` — there is one
     /// implementation, so there is one place to test it. What is left here is
     /// the host's own half: the projection the anchor is built from, which is
-    /// the LAST thing a credential touches before `fossil-engine` sees only
+    /// the LAST thing a credential touches before the host sees only
     /// URLs.
     ///
     /// The fixture is `fossil_base::test_support::NativeSystem` and not
-    /// `fossil-engine`'s `EngineSystem`, which is what these tests used when they
+    /// `fossil-cli`'s `EngineSystem`, which is what these tests used when they
     /// lived there. Both are a `System` with a descriptor cache; `NativeSystem`
     /// is the one that exists so a test can have one without a host crate, and
-    /// taking `fossil-engine` as a dev-dependency here would close the loop these
+    /// taking `fossil-cli` as a dev-dependency here would close the loop these
     /// tests are part of opening.
     #[test]
     fn the_creds_map_projects_onto_the_anchor_the_rule_takes() {

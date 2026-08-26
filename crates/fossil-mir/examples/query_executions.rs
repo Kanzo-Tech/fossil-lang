@@ -3,7 +3,7 @@
 //! The design keeps salsa but says its scope is wrong, and refuses to settle
 //! that on an argument. The open
 //! question is narrow: the CLI builds a `FossilDb` with empty storage on every
-//! call (`crates/fossil-engine/src/system.rs:60`), so there is no incrementality
+//! call (`crates/fossil-cli/src/system.rs:60`), so there is no incrementality
 //! across invocations by construction — the only thing salsa can be buying the
 //! batch path is **memoization within a single run**, which a `HashMap` also
 //! buys, at none of salsa's cost.
@@ -16,7 +16,7 @@
 //!
 //! # What this measures
 //!
-//! It reproduces the shape of `fossil_engine::check` — `def_map`, then
+//! It reproduces the shape of `fossil_cli::check` — `def_map`, then
 //! `lower_to_mir_pg` per mapping — against a database with an event callback,
 //! and counts `EventKind::WillExecute` **per query**. An execution is a cache
 //! miss; a call that does not appear is a hit.

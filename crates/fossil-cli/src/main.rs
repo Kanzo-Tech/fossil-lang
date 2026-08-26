@@ -1,6 +1,6 @@
 //! `fossil` — the native CLI binary (`run` / `check` / `providers` / `refs`).
 //!
-//! A thin shell over [`fossil_engine`]: it parses args, reads files/stdin, calls
+//! A thin shell over `fossil_cli::host`: it parses args, reads files/stdin, calls
 //! the engine, and renders the result — rustc-style miette diagnostics for
 //! `check`, machine `RunReport`/list JSON (or a human summary) for the rest. ALL
 //! orchestration (the compile→run pipeline + the registry surface) lives in the
@@ -12,7 +12,7 @@
 
 #[cfg(target_arch = "wasm32")]
 compile_error!(
-    "fossil-cli is native-only (depends on fossil-engine which uses bundled DuckDB); \
+    "fossil-cli is native-only: `run` writes a GraphAr tree to a local directory; \
      do not add it to the WASM CI gate"
 );
 
@@ -128,7 +128,7 @@ enum Commands {
 /// The two halves are separated here, because only one of them is ambient by
 /// right. **Colour** genuinely depends on the terminal, and on `NO_COLOR` —
 /// that stays. **Glyphs** do not: unicode always, so the frame is a constant.
-/// `crates/fossil-engine/tests/programs.rs` reached the same conclusion for the
+/// `crates/fossil-cli/tests/programs.rs` reached the same conclusion for the
 /// same reason and pins `unicode_nocolor()` for its committed artefacts; this
 /// is that decision moved to where the CLI actually renders, so the two agree
 /// by construction instead of by coincidence.
@@ -177,7 +177,7 @@ fn main() -> miette::Result<()> {
 
 /// `fossil refs`: parse-only lineage, JSON or `role\tconn\tpath` lines.
 fn cmd_refs(path: &Path, output_json: bool) -> miette::Result<()> {
-    let refs = fossil_engine::refs(path)?;
+    let refs = fossil_cli::refs(path)?;
     if output_json {
         println!(
             "{}",
@@ -198,7 +198,7 @@ fn cmd_refs(path: &Path, output_json: bool) -> miette::Result<()> {
 
 /// `fossil providers`: the `io.*` data-source providers fossil owns.
 fn cmd_providers(output_json: bool) -> miette::Result<()> {
-    let providers = fossil_engine::providers();
+    let providers = fossil_cli::providers();
     if output_json {
         let json = serde_json::to_string(&providers).map_err(|e| miette::miette!(e))?;
         println!("{json}");
@@ -216,7 +216,7 @@ fn cmd_check(path: &Path) -> miette::Result<()> {
     // `check` has no `--creds-stdin`, so it introspects with no connection map —
     // and against the same directory `run` will.
     introspect(path, &HashMap::new(), &RunCreds::default())?;
-    let outcome = fossil_engine::check(path)?;
+    let outcome = fossil_cli::check(path)?;
     let named = NamedSource::new(path.to_string_lossy(), outcome.source);
 
     let mut errors: Vec<CheckError> = Vec::new();
@@ -274,7 +274,7 @@ fn gib_to_bytes(raw: &str) -> Result<u64, String> {
 
 /// `fossil run`: compile + execute, then report the resulting `RunReport`.
 /// Fill the compiler's descriptor cache before asking it to compile — the one
-/// pre-compile job a native host owes, and the reason `fossil-engine` links no
+/// pre-compile job a native host owes, and the reason `host.rs` links no
 /// database.
 ///
 /// `fossil-wasm` does the same from the other side: `@fossil-lang/introspect`
@@ -290,13 +290,8 @@ fn introspect(
     // `host_system` takes the program PATH and derives the directory itself —
     // the cache is keyed by that directory, so a caller deriving it differently
     // would fill a table the compile never reads.
-    fossil_introspect::introspect_program(
-        &*fossil_engine::host_system(path),
-        path,
-        connections,
-        creds,
-    )
-    .map_err(|e| miette::miette!("read {}: {e}", path.display()))
+    fossil_introspect::introspect_program(&*fossil_cli::host_system(path), path, connections, creds)
+        .map_err(|e| miette::miette!("read {}: {e}", path.display()))
 }
 
 fn cmd_run(
@@ -329,7 +324,7 @@ fn cmd_run(
                 .map_err(|e| miette::miette!("policy `{}`: {e}", p.display()))
         })
         .transpose()?;
-    let run = fossil_engine::run(path, dest, &connections, memory_bytes, policy.as_ref())?;
+    let run = fossil_cli::run(path, dest, &connections, memory_bytes, policy.as_ref())?;
     report(&run, output_json);
     Ok(())
 }

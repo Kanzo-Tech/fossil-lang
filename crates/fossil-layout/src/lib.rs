@@ -11,7 +11,7 @@
 //! opens on what that cost: *«the sentence this project is built on — fossil is
 //! a compiler consumed as a WASM library — is true of `fossil-wasm` and false of
 //! the layout pass and the engine. One dependency is what makes it half true.»*
-//! The dependency is gone from here. `fossil-engine` still has one.
+//! The dependency is gone from here. The native host still has one.
 //!
 //! What is left is [`layout`], which holds no connection: it reads and writes
 //! Parquet through `arrow-rs`/`parquet-rs` and its algorithm — Louvain, Morton —
@@ -51,7 +51,7 @@
 //!
 //! `apply_memory_budget(conn, bytes)` had **no caller at all**, not even a test
 //! outside its own. What it capped was the `DuckDB` layout pass, and
-//! `fossil_engine::enrich_written_layout` records in its own comment that the
+//! `fossil_cli::host`'s `enrich_written_layout` records in its own comment that the
 //! pass no longer opens a connection. Two comments named the function; neither
 //! called it, and both were honest about that (*«used to»*, *«when it does»*).
 //!

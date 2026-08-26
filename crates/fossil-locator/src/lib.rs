@@ -9,8 +9,8 @@
 //!
 //! | what resolved | against what | where |
 //! |---|---|---|
-//! | `io.shex("shop.shex")` | the program's directory | `fossil_engine::documents::registry_key`, mirroring `fossil_hir`'s own resolution (both are `fossil_hir::documents::registry_key` now) |
-//! | provider sources, `@conn` | the program's directory, **falling back to the cwd** | `fossil_engine::resolve_ref` |
+//! | `io.shex("shop.shex")` | the program's directory | the native host's `documents::registry_key`, mirroring `fossil_hir`'s own resolution (both are `fossil_hir::documents::registry_key` now) |
+//! | provider sources, `@conn` | the program's directory, **falling back to the cwd** | the native host's `resolve_ref` |
 //! | `io.csv("data/items.csv")` under `run` | the process's cwd, and only that | the `DataFusion` executor, which was handed the written path verbatim |
 //!
 //! None of the three is theoretical. Inside ONE program `io.shex("x.shex")` and
@@ -41,7 +41,7 @@
 //!
 //! Because no two of its five readers share anything else: the checker
 //! (`fossil-hir`, resolving a shape document), the host that registers those
-//! documents (`fossil-engine`), the pre-compile introspection
+//! documents (`fossil-cli`), the pre-compile introspection
 //! (`fossil-introspect`), the executor (`fossil-df`), and the editor
 //! (`fossil-lsp`). Anywhere higher and at least one of them would have to keep
 //! a copy — which is exactly how three of them came to exist.

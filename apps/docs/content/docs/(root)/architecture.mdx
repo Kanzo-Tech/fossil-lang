@@ -15,20 +15,20 @@ the finding, not a failure of the drawing.
 graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
-  M["<b>engine</b> · 5 crates<br/>df · df-wasm · engine · cli · introspect"]
+  M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
   C["<b>corpus</b> · 7 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver · policy"]
   X["<b>no home</b> · 3 crates<br/>mem-probe · kanon · xtask"]
 
   E -->|18| L
   E -->|1| M
-  M -->|24| L
-  M -->|8| C
+  M -->|23| L
+  M -->|6| C
   C -->|1| M
   M -->|1| X
   C -->|1| X
 ```
 
-**54 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**51 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -42,19 +42,17 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 | direction | edge | why it is there |
 | --- | --- | --- |
 | corpus → engine | `fossil-layout → fossil-df` | one function, `files::batches_to_parquet`, the single Arrow→Parquet encoder — moving it would put `arrow` + `parquet` into `fossil-graph-wasm`'s browser bundle, which has neither |
-| engine → corpus | `fossil-engine → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
+| engine → corpus | `fossil-cli → fossil-layout` | the post-pass runs after the write, so the thing that writes calls it |
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
-| engine → corpus | `fossil-engine → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk |
-| engine → corpus | `fossil-cli → fossil-sinks` | the same constant, read by the binary that prints the manifest |
+| engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
 | engine → corpus | `fossil-df → fossil-policy` | the bound is verified where the release is still a value, before any of it is a file |
-| engine → corpus | `fossil-engine → fossil-policy` | reading the document is a host's job, the way reading a shape document is |
-| engine → corpus | `fossil-cli → fossil-policy` | `--policy` is a path, and a path becomes a `PrivacyPolicy` before the host is called |
+| engine → corpus | `fossil-cli → fossil-policy` | reading the document is a host's job, the way reading a shape document is: `--policy` is a path, and a `PrivacyPolicy` by the time `host::run` is called |
 | engine → corpus | `fossil-introspect → fossil-resolver` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
 `fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole
 of the change: neither crate has a fossil dependency of its own, so a leaf changed groups and no
 code moved. It **cost** an edge rather than saving one — `fossil-df → fossil-sinks`,
-`fossil-engine → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
+`fossil-cli → fossil-sinks` and `fossil-introspect → fossil-resolver` used to be internal to the
 engine, three that started crossing against two that stopped — and it bought the cycle:
 `fossil-graph → fossil-sinks` and `fossil-mcp → fossil-resolver` are now inside `corpus`, so the
 return leg went from three edges to one. There are still two cores,
@@ -81,7 +79,14 @@ cost **no** edge: its only production caller was `fossil-hir` already, and `foss
 depended on `fossil-base`. A module crossing a boundary that was already crossed is the cheapest
 kind of move there is.
 
-What has **not** happened is the last line below this diagram: `fossil-engine` is still a sack.
+`fossil-engine` is the crate that is gone. It was the native host, it was a library, and it had
+**one consumer** — `fossil-cli`, which called all five of its verbs and nothing else did. The other
+two hosts each keep theirs inside themselves, so the native one was the only host filed apart from
+the thing that used it. Folding it in removed a crate and three edges — 54 → 51 — because the two
+manifests shared `fossil-df`, `fossil-sinks`, `fossil-layout`, `fossil-policy` and
+`fossil-introspect`, and each of those stopped being counted twice. `providers()` did not survive the
+fold at all — it was `fossil_lineage::providers()` with a `Vec` around it, and the binary calls the
+projection directly.
 
 ## What is left of the rings
 
@@ -175,18 +180,23 @@ and the cycle goes with it.
 
 ## The verdict is not the crate count
 
-**Twenty-six crates over roughly 47,000 lines of Rust** — non-blank, non-comment, measured
-2026-08-25, and the twenty-sixth moved lines rather than adding them. Gluon has ~11 crates for 90k, Gleam 15 (six real) for 228k, rust-analyzer 36 for 571k.
-**At this size the honest target is five to eight.**
+**Twenty-seven crates**, against Gluon's ~11 for 90k, Gleam's 15 (six real) for 228k and
+rust-analyzer's 36 for 571k. **At this size the honest target is five to eight.**
 
-What makes two dozen feel like a maze is not the count. Three of them lie about what they are, and a
-false name costs more than a surplus crate because you cannot skip it while reading.
+Four of them moved in one sitting and only two are new code: `fossil-locator` arrived by moving a
+module down out of `fossil-base`, `fossil-engine` left by moving three into the crate that already
+used them, and `fossil-kanon` and `fossil-policy` arrived carrying the privacy clause. Which is the
+point of the heading — the count went 25 → 26 → 25 → 27 and none of those numbers is the verdict.
+
+What makes two dozen feel like a maze is not the count. Two of them lie about what they are, and a
+false name costs more than a surplus crate because you cannot skip it while reading. There were
+three: `fossil-engine` was not an engine, it was the native host, and the crate that was wrong
+about itself is now a module of the one host that used it.
 
 | the name | what it actually is |
 | --- | --- |
 | `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs:64`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
 | `fossil-sinks` | writes nothing: the manifest model, borrowing GraphAr's YAML field names without conforming to GraphAr ([where borrowing stops](/docs/design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops)); half its dependents are readers |
-| `fossil-engine` | not an engine: the native host, which supplies the `System` the compiler runs against, does the pre-compile jobs — register the shape documents, install the secrets a `@conn` needs, call `fossil-introspect` — and drives compile→run |
 
 <Callout title="Deliberately absent">
 **No numbered layers.** A rule that needs a number to explain itself is a taxonomy, not a rule.

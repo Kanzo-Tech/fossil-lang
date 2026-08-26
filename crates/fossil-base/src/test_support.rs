@@ -219,7 +219,7 @@ impl System for DecodingHost {
     /// missed unconditionally and no fixture above this crate could take a
     /// source row from introspection at all.
     /// [`register_inferred`] is the other half: a host puts the descriptor in
-    /// before the compile, exactly as `fossil_engine::pre_introspect_and_register`
+    /// before the compile, exactly as `fossil_introspect::pre_introspect_and_register`
     /// and the browser's `registerInferredDescriptor` do.
     fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
         self.0.descriptors()

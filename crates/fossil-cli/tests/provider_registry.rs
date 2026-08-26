@@ -1,7 +1,7 @@
 //! **One registry, dispatch by name, end to end through the real host** — and
 //! the two diagnostics a mismatch produces.
 //!
-//! `fossil-engine` is the crate with the WHOLE host: it installs
+//! `fossil-cli` is the crate with the WHOLE host: it installs
 //! `fossil_descriptors_output::PROVIDERS` (`src/system.rs`) and registers the
 //! documents a program names (`src/documents.rs`), so a `.ttl` sitting on disk
 //! beside the program is enough. In any crate below it the document has to be
@@ -36,7 +36,7 @@ fn programs_dir() -> PathBuf {
 /// Every diagnostic message `fossil check` produces for `path`.
 fn messages(path: &Path) -> Vec<String> {
     introspect(path);
-    fossil_engine::check(path)
+    fossil_cli::check(path)
         .expect("the program is readable")
         .diagnostics
         .into_iter()
@@ -85,7 +85,7 @@ fn program_binding(type_line: &str) -> String {
 /// different criterion.
 #[test]
 fn one_table_carries_every_constructor() {
-    let listed: Vec<String> = fossil_engine::providers()
+    let listed: Vec<String> = fossil_cli::providers()
         .into_iter()
         .map(|p| p.name)
         .collect();
@@ -101,7 +101,7 @@ fn one_table_carries_every_constructor() {
 /// behind it was half a table.
 #[test]
 fn the_wire_contract_finally_reports_a_schema_provider() {
-    let listed = fossil_engine::providers();
+    let listed = fossil_cli::providers();
     let kind = |name: &str| {
         listed
             .iter()
@@ -410,7 +410,7 @@ fn a_file_with_no_mapping_still_reports_its_bindings() {
 /// stopped doing for themselves. Without it a program's sources have no
 /// forward-propagated types, which is a different (and quietly weaker) answer.
 fn introspect(path: &std::path::Path) {
-    let system = fossil_engine::host_system(path);
+    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
         &*system,
         path,

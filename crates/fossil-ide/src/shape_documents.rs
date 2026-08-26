@@ -17,7 +17,7 @@
 //! nothing, so a diagnostic derived from it never cleared; and the disk is not
 //! the truth for a document the user has open and has not saved.
 //!
-//! `fossil-engine` carries the same loop for the native hosts, because it may
+//! `fossil-cli` carries the same loop for the native hosts, because it may
 //! not depend on the editor surface. What it does NOT carry any more is a
 //! second answer to «which documents» and «under what key»: both are
 //! [`fossil_hir::documents`], one function each, called from here and from

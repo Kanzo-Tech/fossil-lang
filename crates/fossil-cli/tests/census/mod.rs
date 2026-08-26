@@ -1,6 +1,6 @@
 //! What the compiler UNDERSTOOD from a program — the reading, not the verdict.
 //!
-//! [`fossil_engine::check`] answers «is anything wrong», and a program can be
+//! [`fossil_cli::check`] answers «is anything wrong», and a program can be
 //! entirely right about nothing. The hole this module was built to close: a
 //! property whose right-hand side the lowering cannot read is dropped in silence.
 //! [`fossil_hir::body::body`] walks the `PROPERTY` children of a mapping body
@@ -44,7 +44,7 @@
 //! properties that SURVIVED (`HirBody::properties`). Equality is the invariant
 //! — a compiler may reject a property, but it may not lose one.
 //!
-//! It runs over the same [`fossil_engine::open_db`] as `check` and `run`, which
+//! It runs over the same [`fossil_cli::open_db`] as `check` and `run`, which
 //! is the point: the shape documents the program names are registered, the real
 //! `ShEx` decoder is installed, and the reading reported here is the reading the
 //! executor will act on. A second database built beside this one would be a
@@ -67,7 +67,7 @@ use fossil_hir::display::pipe_text;
 use fossil_hir::lower::{PropertyKey, lower_to_hir};
 use fossil_syntax::SyntaxKind;
 
-use fossil_engine::open_db;
+use fossil_cli::open_db;
 
 /// One `type { … } := io.shex("…")` name, and what it bound.
 #[derive(Debug, Clone)]

@@ -230,7 +230,7 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
 // `fossil check` answers «`KBShape` is declared and bound nothing: its document
 // `@vocab/graph.shex` could not be read (no document is registered at that
 // path)», and the run then fails in the reader with `No field named label`.
-// That is `fossil-engine`'s document registry, not this test's subject; what
+// That is the host's document registry, not this test's subject; what
 // this test is FOR is the `schema =` argument below, which is the reference a
 // regex over the data URI cannot see, and it goes through `@vocab`.
 const CPI_FOSSIL_CONN: &str = r#"type { KBShape, ProjectShape } := io.shex("vocab/graph.shex")

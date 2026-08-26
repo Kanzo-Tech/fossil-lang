@@ -222,7 +222,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     // Introspection cannot run here — `fossil-hir` is WASM-clean and has no
     // `DuckDB`, and these directories have no CSV to introspect anyway. So the
     // host registers what an introspection WOULD have found, which is exactly
-    // what `fossil_engine::pre_introspect_and_register` and the browser's
+    // what `fossil_introspect::pre_introspect_and_register` and the browser's
     // `registerInferredDescriptor` do before a compile.
     for entry in def_map(&db, file).sources(&db).clone() {
         if let Some(uri) = entry.uri.as_deref() {

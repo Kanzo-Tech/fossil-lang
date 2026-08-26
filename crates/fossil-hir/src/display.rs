@@ -4,7 +4,7 @@
 //! Not a formatter. A formatter reads the CST and preserves what the author
 //! wrote; this reads the HIR and can therefore only say what survived lowering.
 //! That difference is the point of the module: the census in
-//! `crates/fossil-engine/tests/census` commits a per-program artefact
+//! `crates/fossil-cli/tests/census` commits a per-program artefact
 //! recording the compiler's READING, and an
 //! artefact rendered from source text proves nothing, because the source text is
 //! what it would be checked against.

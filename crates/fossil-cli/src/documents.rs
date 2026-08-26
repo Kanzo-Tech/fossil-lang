@@ -29,7 +29,7 @@
 //!
 //! `fossil_ide::shape_documents` is this file's twin, and it is deliberate, not
 //! an oversight: `fossil-lsp` and `fossil-wasm` share it, and the engine
-//! cannot, because `fossil-engine` depending on the editor surface is the
+//! cannot, because the native host depending on the editor surface is the
 //! arrangement that was undone deliberately — `fossil-lineage`'s module docs
 //! name it as the mistake that crate exists to prevent.
 //!

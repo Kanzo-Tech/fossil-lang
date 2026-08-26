@@ -135,7 +135,7 @@ fn a_cloud_source_introspects_through_duckdb_and_the_run_refuses_it() {
 
     let creds = fossil_introspect::RunCreds::from_json(&creds_json()).expect("the payload parses");
     let urls = fossil_introspect::connection_urls(&creds.connections);
-    let system = fossil_engine::host_system(&path);
+    let system = fossil_cli::host_system(&path);
     fossil_introspect::introspect_program(&*system, &path, &urls, &creds).expect("introspect");
 
     // HALF ONE: the DESCRIBE reached the bucket and came back with real types.
@@ -160,7 +160,7 @@ fn a_cloud_source_introspects_through_duckdb_and_the_run_refuses_it() {
     );
 
     // HALF TWO: the run refuses, in a sentence about the program.
-    let err = fossil_engine::run(
+    let err = fossil_cli::run(
         &path,
         &dir.path().join("out").to_string_lossy(),
         &urls,

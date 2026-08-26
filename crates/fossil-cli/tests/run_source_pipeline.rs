@@ -1,6 +1,6 @@
 // The embedded `.fossil` programs carry `"…{users.id}"` interpolation holes —
 // LITERAL fossil source, which clippy mistakes for format args in a plain Rust
-// string literal. Same allow, same reason, as `fossil-engine`'s
+// string literal. Same allow, same reason, as `host.rs`'s
 // `provider_registry.rs`.
 #![allow(clippy::literal_string_with_formatting_args)]
 

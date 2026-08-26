@@ -43,7 +43,7 @@ use crate::position::{line_index, offset_to_lsp_position};
 use crate::related::related_locations;
 
 /// Every diagnostic `file` produces, from the one implementation of that
-/// question — [`fossil_mir::program_diagnostics`], which `fossil-engine` also
+/// question — [`fossil_mir::program_diagnostics`], which `fossil-cli` also
 /// calls.
 ///
 /// Each host used to run a per-mapping loop of its own instead, and what the

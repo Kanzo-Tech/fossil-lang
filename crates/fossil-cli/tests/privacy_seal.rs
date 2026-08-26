@@ -126,7 +126,7 @@ fn write_fixture(dir: &Path) {
 }
 
 fn introspect(path: &Path) {
-    let system = fossil_engine::host_system(path);
+    let system = fossil_cli::host_system(path);
     let _ = fossil_introspect::introspect_program(
         &*system,
         path,
@@ -141,7 +141,7 @@ fn run(
     policy: Option<&fossil_policy::PrivacyPolicy>,
 ) -> miette::Result<()> {
     introspect(&dir.join("mapping.fossil"));
-    fossil_engine::run(
+    fossil_cli::run(
         &dir.join("mapping.fossil"),
         &format!("file://{}", dest.display()),
         &std::collections::HashMap::new(),
