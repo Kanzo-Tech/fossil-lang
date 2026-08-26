@@ -33,13 +33,13 @@
 (*    mandatory, and the user declares no functions — are stated at    *)
 (*    the production they bind.                                        *)
 (*                                                                     *)
-(*  THE CONFORMANCE SET is `apps/docs/programs/` — 25 programs with    *)
+(*  THE CONFORMANCE SET is `apps/docs/programs/` — 26 programs with    *)
 (*  their shape documents and data, 5 of which are expected to fail    *)
 (*  the checker and carry the diagnostic they must produce. Every one  *)
-(*  of the 25 is derivable from the productions below, and no          *)
+(*  of the 26 is derivable from the productions below, and no          *)
 (*  production below exists for a form none of them spells, except     *)
 (*  where a comment says so and says why. Nothing mechanically checks  *)
-(*  this file against the parser today, so those 25 programs are the   *)
+(*  this file against the parser today, so those 26 programs are the   *)
 (*  only check it has.                                                 *)
 (*                                                                     *)
 (*  What a well-formed program MEANS, as against how it is spelled —   *)
@@ -251,7 +251,7 @@ SourceDef           := IDENT DEFINE Expression
    Binding is POSITIONAL — the Nth name binds the Nth shape the document
    declares, and the name is a free local label.
 
-   No conformance program spells one: every source in the 25 is single-shape
+   No conformance program spells one: every source in the 26 is single-shape
    (`io.csv`, `io.json`). It stays because the type side below is the same
    production in type position and the two must not drift apart. *)
 MultiSourceDef      := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression

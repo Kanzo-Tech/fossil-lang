@@ -1,0 +1,12 @@
+type { Spend } := io.shex("group-by.shex")
+
+Order := io.csv("data/orders.csv")
+
+// #region chain
+PerCustomer := Order.group_by(Order.customer, total = math.sum(Order.amount))
+// #endregion chain
+
+Spending : Spend from PerCustomer
+    @subject = "https://shop.example/spend/{Order.customer}"
+    customer = Order.customer
+    total    = PerCustomer.total
