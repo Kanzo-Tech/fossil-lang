@@ -1,10 +1,10 @@
-//! **The conformance set, executed.** `apps/docs/programs/` — eighteen programs,
+//! **The conformance set, executed.** `apps/docs/programs/` — twenty programs,
 //! compiled by the production path, each one's output or diagnostic kept as an
 //! artefact.
 //!
 //! `grammar.bnf`'s header names this directory as the language's only mechanical
 //! control: *«THE CONFORMANCE SET is `apps/docs/programs/` … Nothing mechanically
-//! checks this file against the parser today, so those 18 programs are the only
+//! checks this file against the parser today, so those 25 programs are the only
 //! check it has.»* Until this file existed that sentence was false in the one way
 //! that matters — **nobody compiled them.** They were transcluded by the
 //! documentation, and the only thing checked was that the file and its
@@ -37,7 +37,7 @@
 //! a tempdir and validates the `GraphAr` corpus it produces with twelve numbered
 //! SQL checks over `DuckDB` — density of `dense_id`, CSR/CSC ordering, the two
 //! orientations agreeing, the tiling being the partition the manifest declares.
-//! It is one corpus in great depth. This file is eighteen programs at the depth
+//! It is one corpus in great depth. This file is twenty programs at the depth
 //! of «did it compile, and did it keep every property the author wrote». Both are
 //! needed and neither substitutes for the other; `conformance.rs` is misnamed for
 //! what it does (it is a corpus artefact validator) and this file did not take
@@ -62,7 +62,9 @@
 //! - `compiled.txt` — what the compiler UNDERSTOOD. Type bindings and the shape
 //!   IRI each resolved to, source bindings, and per mapping the properties
 //!   written against the properties lowered. Then the manifest the run wrote,
-//!   for the thirteen that are meant to produce one.
+//!   for the twenty that are meant to produce one — which is all of them
+//!   that are not under `errors/`. This line read «the thirteen» while
+//!   eighteen `expected/compiled.txt` carried a `── run ──` section.
 //!
 //!   A source binding that DERIVES a relation carries its pipeline, rendered from
 //!   the HIR by `fossil_hir::display` — the join key, the filter predicate, the
@@ -153,7 +155,7 @@
 //! a shape-valued range reads as `expected Iri, got String`, which is why
 //! `tests/conformance.rs` is red too.
 //!
-//! # Five of the twenty-three exist because the grammar promised and nobody paid
+//! # Five of the twenty-five exist because the grammar promised and nobody paid
 //!
 //! `grammar.bnf`'s header claims that no production exists below it for a form
 //! none of the conformance programs spells, except where a comment says so and
@@ -186,7 +188,7 @@
 //! are meant to move. So the invariants below are checked in BOTH modes and are
 //! independent of every golden:
 //!
-//! 1. The set is twenty-three, eighteen clean and five under `errors/`.
+//! 1. The set is twenty-five, twenty clean and five under `errors/`.
 //! 2. **No property is lost in silence.** The measured trap:
 //!    `fossil_hir::body::body` keeps the properties `lower_property` returns
 //!    `Some` for and skips the `None`s with a bare `if let` — no diagnostic, no
@@ -197,11 +199,11 @@
 //!    SECOND, independent reader — a text scan of the program for indented
 //!    `name = …` lines. If the parser stops producing `PROPERTY` nodes, (2)
 //!    becomes vacuously true and only this catches it.
-//! 4. The thirteen produce no error diagnostic; the five produce at least one.
-//! 5. Every `type { … }` binding in the thirteen resolves to a shape IRI. A
+//! 4. The twenty produce no error diagnostic; the five produce at least one.
+//! 5. Every `type { … }` binding in the twenty resolves to a shape IRI. A
 //!    binding that resolved to nothing gives the mapping no output contract, and
 //!    a program with no contract can write no property at all.
-//! 6. The thirteen `run` and produce at least one vertex type — the artefact
+//! 6. The twenty `run` and produce at least one vertex type — the artefact
 //!    each one is kept for.
 //!
 //! # It is red today, and the report is the point
@@ -213,11 +215,17 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+/// What the compiler UNDERSTOOD, which is the `compiled.txt` half of every
+/// artefact below. It was `fossil-engine`'s `src/census.rs` until 2026-08-26;
+/// this file is the only caller it has ever had, and its own docblock had
+/// already named this as where it goes.
+mod census;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use census::ProgramCensus;
 use fossil_base::Severity;
-use fossil_engine::census::ProgramCensus;
 use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, SourceSpan};
 
 /// How many programs the conformance set has, and how many of them are meant to
@@ -225,7 +233,7 @@ use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, S
 /// and `grammar.bnf`'s header states these numbers: a program added or deleted
 /// without that header changing is a divergence between the language's spec and
 /// its only control.
-const EXPECTED_TOTAL: usize = 23;
+const EXPECTED_TOTAL: usize = 25;
 const EXPECTED_FAILING: usize = 5;
 
 /// One program of the set.
@@ -589,7 +597,7 @@ fn indent(text: &str) -> String {
 // ───────────────────────────────────────────────────────────────── the harness
 
 #[test]
-fn the_eighteen_programs_compile_and_keep_what_they_say() {
+fn the_twenty_programs_compile_and_keep_what_they_say() {
     let bless = std::env::var_os("FOSSIL_BLESS").is_some();
     let root = programs_root();
     let set = discover(&root);
@@ -661,7 +669,7 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
         }
 
         // ── stage 2: the census — what survived being read ────────────────────
-        let census = fossil_engine::census::census(&program.source)
+        let census = census::census(&program.source)
             .unwrap_or_else(|e| panic!("census {}: {e}", program.source.display()));
 
         // The measured trap, and the distinction that makes it precise.
@@ -733,7 +741,7 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
         );
         let mut compiled = census.render();
 
-        // ── stage 4: run, for the thirteen that are meant to produce a graph ──
+        // ── stage 4: run, for the twenty that are meant to produce a graph ──
         //
         // Not attempted when the compile already failed: `run` would fail for the
         // same reason and the second message says nothing the first did not.
@@ -749,7 +757,7 @@ fn the_eighteen_programs_compile_and_keep_what_they_say() {
                 // the other test in this binary runs on another thread, so the
                 // workaround was also a race nobody had lost yet. One rule now
                 // anchors both to the program's own directory, which is what
-                // lets twenty-three programs be compiled from one process
+                // lets twenty-five programs be compiled from one process
                 // without any of them caring where that process stands.
                 introspect(&program.source);
                 let outcome = fossil_engine::run(
@@ -828,7 +836,7 @@ fn the_census_counts_hello_by_hand() {
         "hello.fossil writes `@subject` and `name`, and the independent reader must see both"
     );
 
-    let census: ProgramCensus = fossil_engine::census::census(&hello).expect("census hello");
+    let census: ProgramCensus = census::census(&hello).expect("census hello");
     assert_eq!(
         census.written(),
         2,

@@ -1,0 +1,6 @@
+PREFIX field: <https://field.example/voc#>
+PREFIX xsd:   <http://www.w3.org/2001/XMLSchema#>
+
+field:Species {
+  field:name xsd:string
+}

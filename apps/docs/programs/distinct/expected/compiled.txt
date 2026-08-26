@@ -1,0 +1,15 @@
+── type bindings ──
+Species ← distinct.shex = https://field.example/voc#Species
+
+── source bindings ──
+Sighting := io.csv(data/sightings.csv)
+Seen := Sighting.select(Sighting.species).distinct()
+
+── mappings ──
+Observed: 2 written, 2 lowered
+    @subject
+    name
+
+── run ──
+vertex Species (https://field.example/voc#Species) × 2 — dense_id, subject, name, x, y, cluster_id
+NO EDGE TYPE was written
