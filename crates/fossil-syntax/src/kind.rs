@@ -128,6 +128,22 @@ pub enum SyntaxKind {
     /// `@rename` renames a predicate OF ONE BINDING and there is nowhere else
     /// for it to hang.
     TYPE_DEF,
+    /// `policy := "people.jsonld"` — the ODRL document the release is verified
+    /// against (grammar.bnf, `PolicyDef`). One per program, and the writer
+    /// refuses to seal a corpus that misses the bound it declares.
+    ///
+    /// The right-hand side is a plain `STRING` and NOT an expression, so this
+    /// node has exactly two token children that matter: the contextual `policy`
+    /// and the reference. `io` is the type-provider registry — a row there runs
+    /// at compile time and yields types — and the compiler never opens this
+    /// document; the writer does, after the check. So there is no `io.policy`
+    /// to call and no `EXPR` child to walk.
+    ///
+    /// It shares the `IDENT DEFINE` opening with [`SyntaxKind::SOURCE_DEF`] and
+    /// the token AFTER `:=` decides (disambiguation rule 8; grammar.bnf,
+    /// § DISAMBIGUATION RULES), which is what keeps `policy := io.csv("p.csv")`
+    /// a source binding and `policy` an ordinary identifier everywhere.
+    POLICY_DEF,
     /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` —
     /// `RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN`
     /// (grammar.bnf, `RenameAttr`).
@@ -282,30 +298,31 @@ impl SyntaxKind {
             41 => Self::SOURCE_DEF,
             42 => Self::MULTI_SOURCE_DEF,
             43 => Self::TYPE_DEF,
-            44 => Self::RENAME_ATTR,
-            45 => Self::RENAME,
-            46 => Self::MAPPING,
-            47 => Self::MAPPING_HEADER,
-            48 => Self::MAPPING_BODY,
-            49 => Self::PROPERTY,
-            50 => Self::PROPERTY_LHS,
-            51 => Self::SHAPE_EXPR,
-            52 => Self::EXPR,
-            53 => Self::INTERP_STRING_EXPR,
-            54 => Self::INTERPOLATION,
-            55 => Self::LITERAL_EXPR,
-            56 => Self::TERNARY_EXPR,
-            57 => Self::BINARY_EXPR,
-            58 => Self::UNARY_EXPR,
-            59 => Self::POSTFIX_EXPR,
-            60 => Self::PAREN_EXPR,
-            61 => Self::ARG_LIST,
-            62 => Self::ARG,
-            63 => Self::NAMED_ARG,
-            64 => Self::ALIAS_ARG,
-            65 => Self::ERROR,
-            66 => Self::EOF,
-            67 => Self::NULL,
+            44 => Self::POLICY_DEF,
+            45 => Self::RENAME_ATTR,
+            46 => Self::RENAME,
+            47 => Self::MAPPING,
+            48 => Self::MAPPING_HEADER,
+            49 => Self::MAPPING_BODY,
+            50 => Self::PROPERTY,
+            51 => Self::PROPERTY_LHS,
+            52 => Self::SHAPE_EXPR,
+            53 => Self::EXPR,
+            54 => Self::INTERP_STRING_EXPR,
+            55 => Self::INTERPOLATION,
+            56 => Self::LITERAL_EXPR,
+            57 => Self::TERNARY_EXPR,
+            58 => Self::BINARY_EXPR,
+            59 => Self::UNARY_EXPR,
+            60 => Self::POSTFIX_EXPR,
+            61 => Self::PAREN_EXPR,
+            62 => Self::ARG_LIST,
+            63 => Self::ARG,
+            64 => Self::NAMED_ARG,
+            65 => Self::ALIAS_ARG,
+            66 => Self::ERROR,
+            67 => Self::EOF,
+            68 => Self::NULL,
             _ => panic!("invalid SyntaxKind raw value: {v}"),
         }
     }

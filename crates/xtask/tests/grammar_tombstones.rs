@@ -3,8 +3,11 @@
 //!
 //! The file is normative and DELIBERATELY AHEAD of the parser: a production written there and
 //! absent from `crates/fossil-syntax` is work outstanding, not an error in the file. That
-//! asymmetry is the design and this test does not touch it — `PolicyDef` is written, unparsed,
-//! and nothing here goes red for it.
+//! asymmetry is the design and this test does not touch it — a name the file DEFINES is exempt
+//! from the tombstone reader however far behind the parser is, and
+//! `the_tombstone_guard_is_reading_both_trees` derives that exemption rather than naming an
+//! instance of it. It named one until `PolicyDef` landed in the parser, at which point the pin
+//! was asserting a property of a production that no longer had it.
 //!
 //! The asymmetry is safe in one direction only. Deleting a tombstone and adding the production
 //! puts the parser's own tests red, so that direction announces itself. **A tombstone written
@@ -509,14 +512,28 @@ fn the_tombstone_guard_is_reading_both_trees() {
         );
     }
 
-    // The ahead-ness is the design, and this is the live case: written, normative, unparsed.
+    // The ahead-ness is the design, and it is a property of the READER rather than of any one
+    // production: a name the file DEFINES is skipped by `tombstones`, whether the parser builds
+    // it or not. Derived over every definition, so a production written tomorrow is covered with
+    // no edit here — the pin used to name `PolicyDef` as the live instance, and stopped being
+    // about ahead-ness the moment `PolicyDef` was parsed.
+    let defined_canon: BTreeSet<String> = defined(&src).iter().map(|n| canon(n)).collect();
+    for name in found.keys() {
+        assert!(
+            !defined_canon.contains(&canon(name)),
+            "`{name}` is a production grammar.bnf DEFINES and it was read as a tombstone; a file \
+             that is ahead of the parser would now fail this suite for being ahead",
+        );
+    }
+
+    // `PolicyDef` keeps a pin of its own, with its direction reversed by the landing. The parser
+    // builds `POLICY_DEF`, so the file has to keep defining `PolicyDef` — which is the ONE
+    // node-level instance of direction 2 (see this file's header: the general form needs a name
+    // mapping neither file supplies, and this one name maps by `canon` alone).
     assert!(
         defined(&src).contains("PolicyDef"),
-        "PolicyDef left grammar.bnf — this pin is what proves the guard tolerates ahead-ness",
-    );
-    assert!(
-        !found.contains_key("PolicyDef"),
-        "a production the file DEFINES was read as a tombstone; the ahead-ness is now a failure",
+        "crates/fossil-syntax builds POLICY_DEF and grammar.bnf stopped defining PolicyDef — \
+         the parser may never run ahead of the grammar",
     );
 
     let live = live_forms();

@@ -45,6 +45,12 @@ fossil-df           = { path = "../fossil-df" }
 # bound. `--policy` is a path on the command line and a `PrivacyPolicy` by the
 # time `host::run` is called, which is the same shape every other host job has.
 fossil-policy       = { path = "../fossil-policy" }
+# The CST, and it is a NORMAL dependency rather than the dev one it was: the
+# policy binding (`policy := "people.jsonld"`, grammar.bnf, PolicyDef) is the one
+# thing a program names that the compiler never opens, so it has no def-map entry
+# to read and `host::run` walks the tree for it. `tests/census` still uses this
+# for the `PROPERTY`-node count it always did.
+fossil-syntax       = { path = "../fossil-syntax" }
 # The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
 # after the write. It links no DuckDB and it is not the «native runtime + secrets
 # + cloud-path resolver» this line used to call it: `materialize.rs` took the
@@ -89,10 +95,6 @@ duckdb = { workspace = true }
 # could only compare strings it built itself, which is the drift it is there to
 # catch.
 serde_yaml_ng = { workspace = true }
-# The CST, for `tests/census`: the properties an author WROTE are `PROPERTY`
-# nodes, and the count that matters is theirs against the `HirBody`'s. Reading
-# the survivors alone cannot see a property lowering dropped.
-fossil-syntax = { path = "../fossil-syntax" }
 # The shape-document invalidation test edits a registered document through its
 # Salsa input (`Setter::set_text`) and counts `WillExecute` events — the only
 # way to assert that editing the document re-runs the checker and that editing

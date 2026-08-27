@@ -92,9 +92,16 @@ enum Commands {
         /// document in fossil's privacy profile. The run REFUSES rather than
         /// writing a corpus that does not satisfy it.
         ///
-        /// Omit and the corpus is sealed `privacy: undeclared`, which says on
-        /// the artifact that no bound was checked. It does not say the data is
-        /// public and no reader may take it that way.
+        /// This is how a RECIPIENT imposes a bound on a program they did not
+        /// write. A PRODUCER binds one in the program instead — `policy :=
+        /// "people.jsonld"` — because an obligation discharged by remembering a
+        /// flag is one that can be forgotten. Giving both is an ERROR: the flag
+        /// would weaken a bound the program declares, and the program would make
+        /// the flag silently inert.
+        ///
+        /// Omit BOTH and the corpus is sealed `privacy: undeclared`, which says
+        /// on the artifact that no bound was checked. It does not say the data
+        /// is public and no reader may take it that way.
         #[arg(long, value_name = "PATH")]
         policy: Option<PathBuf>,
     },
@@ -359,11 +366,16 @@ fn report(run: &RunReport, output_json: bool) {
     // What the corpus claims, on the line the operator reads. A run that
     // verified a bound and a run that did not are different outcomes, and
     // «undeclared» is the one worth saying out loud — it is the outcome of
-    // forgetting `--policy`, and the whole reason forgetting is survivable is
-    // that it is visible.
+    // naming no policy either way, and the whole reason that is survivable is
+    // that it is visible. The message names BOTH ways since there are two: a
+    // reader who is told only about the flag will reach for the flag, which is
+    // the forgettable one.
     match &run.graph.privacy {
         Privacy::Undeclared => {
-            println!("  privacy: undeclared — no policy was given, so no bound was checked");
+            println!(
+                "  privacy: undeclared — the program binds no `policy := \"…\"` and no \
+                 --policy was given, so no bound was checked"
+            );
         }
         Privacy::KAnonymity(bound) => println!(
             "  privacy: k-anonymity, k={} asked and k={} reached over {} record(s){}",
