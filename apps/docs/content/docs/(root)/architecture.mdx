@@ -22,13 +22,13 @@ graph LR
   E -->|18| L
   E -->|1| M
   M -->|23| L
-  M -->|7| C
+  M -->|9| C
   C -->|1| M
   M -->|1| X
   C -->|1| X
 ```
 
-**51 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**54 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
