@@ -225,7 +225,13 @@ TopLevel            := SourceDef
    `SubjectAssign`, the other thing that lexes as one, sits inside a
    `MappingBody`, which is reachable only through an `INDENT`. That is
    disambiguation rule 6 — one token, two names, POSITION decides — and it is
-   why neither name needs a token of its own. *)
+   why neither name needs a token of its own.
+
+   `PolicyDef` is where the top level stops being LL(1), and the cost is
+   bounded at THREE tokens: `IDENT DEFINE STRING`. It buys the thing rule 5
+   could not buy for `type` — `policy` stays an ordinary identifier in every
+   position, `policy := io.csv("p.csv")` included, because the token after `:=`
+   is what decides. Disambiguation rule 8. *)
 
 (* There is no PrefixDecl. `prefix ex: <http://example.org/>` introduced the
    CURIE, and the CURIE is gone from every position it held: a shape name, a
@@ -300,23 +306,45 @@ RenameAttr          := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
 Rename              := STRING 'as' IDENT
 
 (* Policy binding: the second document a program names, and the one the writer
-   refuses against. `policy := io.policy("people.jsonld")` binds an ODRL
-   document in fossil's privacy profile, and `fossil run` will not seal a corpus
-   that misses the bound it declares.
+   refuses against. `policy := "people.jsonld"` binds an ODRL document in
+   fossil's privacy profile, and `fossil run` will not seal a corpus that misses
+   the bound it declares.
 
-   NOT PARSED YET, and this file is normative and ahead of the parser on
-   purpose. What exists is a host argument — `fossil run --policy <path>` — and
-   the difference is not cosmetic. An obligation discharged by remembering a
-   flag is one that can be forgotten, which is the same argument that keeps an
-   anonymisation operator out of the standard library
-   (`/docs/design/privacy`). What stands in for the binding until it is parsed
-   is that forgetting is VISIBLE: a run with no policy seals
+   Why the program and not a flag. `fossil run --policy <path>` still exists and
+   is still the way a RECIPIENT imposes a bound on somebody else's program, but
+   an obligation discharged by remembering a flag is one that can be forgotten,
+   which is the same argument that keeps an anonymisation operator out of the
+   standard library (`/docs/design/privacy`). A program that binds its own
+   policy carries the obligation in the artifact that is reviewed, diffed and
+   committed. Where the two disagree the run REFUSES — see the CLI, and
+   `/docs/design/privacy` for why neither one may quietly win.
+
+   Forgetting is still VISIBLE for a program that binds none: the run seals
    `privacy: undeclared` into the manifest rather than omitting the field, so a
    corpus that was never checked never looks like one that was.
 
-   `policy` is not a reserved word, for TypeDef's reason: the token after the
-   name is what separates this from a mapping header, and `policy` is a
-   plausible column name.
+   The right-hand side is a STRING and not an Expression, and that is the
+   decision this production carries. Every other external document in the
+   language arrives through the `io.` registry — `io.shex("p.shex")` — and a
+   policy must NOT, because `io` is the TYPE-PROVIDER registry
+   (`/docs/design/type-providers`): a row there runs at COMPILE time and its
+   output is types. The compiler never opens a policy document. The WRITER does,
+   after the check, immediately before it seals — so an `io.policy` row would
+   join a registry whose defining property it lacks, and would be advertised by
+   `fossil providers`, whose JSON populates a connector UI. The reference is
+   resolved by the ONE rule every other written reference goes through
+   (`fossil-locator`: `@conn`, scheme, absolute, else the program's directory),
+   and that rule reads a string, not a call.
+
+   `policy` stays an ordinary identifier in EVERY position, which is stronger
+   than TypeDef's `type` manages: `policy := io.csv("p.csv")` is still a
+   SourceDef binding the name `policy`, because the STRING is what selects this
+   production. Disambiguation rule 8.
+
+   The STRING is a plain one. An interpolated `"…{x}…"` opens with a different
+   token and derives SourceDef, which is right: a policy reference has nothing
+   in scope to interpolate, and the bound must be readable off the source text
+   without running the program.
 
    ONE binding, not one per type. The bound is a property of the whole release
    — `graph.graph.yml` carries it beside `container` — and a per-type policy
@@ -324,7 +352,7 @@ Rename              := STRING 'as' IDENT
    names the types it covers, and a program writing a type the document is
    silent about is an ERROR rather than an exemption: silence is
    indistinguishable from a judgement that there was nothing to protect. *)
-PolicyDef           := 'policy' DEFINE Expression
+PolicyDef           := 'policy' DEFINE STRING
 
 (* `as` is one of two survivors of the word (the other is AliasArg, for the
    self-join). It is CONTEXTUAL, not reserved: it is recognised only between
@@ -580,6 +608,22 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*       operand is followed by a bare IDENT, which no expression can      *)
 (*       continue, so one token of lookahead settles it and `as` stays an  *)
 (*       ordinary identifier everywhere else.                              *)
+(*                                                                         *)
+(*  8. `policy` at top level                                               *)
+(*     - `policy := STRING` → PolicyDef.  `policy :=` anything else →      *)
+(*       SourceDef binding the name `policy`.  `policy :` → a mapping      *)
+(*       called `policy`.  TWO tokens of lookahead past the name, and it   *)
+(*       is two rather than rule 5's one because the RHS is what decides:  *)
+(*       `policy := io.csv("p.csv")` has to keep binding a source.         *)
+(*     - So `policy` costs NOTHING in the identifier space, where rule 5   *)
+(*       costs `type` the `type {` opening. The slot this claims —         *)
+(*       a top-level name bound to a bare string constant — was a          *)
+(*       derivation the checker rejects for every name: a SourceDef binds  *)
+(*       a relation, and a STRING is not one.                              *)
+(*     - The STRING must be a plain one. An interpolated string opens      *)
+(*       with STRING_OPEN, so `policy := "p-{x}.jsonld"` is a SourceDef    *)
+(*       and the checker refuses it. A policy reference has nothing in     *)
+(*       scope to interpolate.                                             *)
 
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
