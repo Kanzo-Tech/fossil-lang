@@ -164,11 +164,30 @@ reads the three shipped hierarchies from disk and generalises with them: hierarc
 data — dates, string prefixes, numeric buckets — as they are in Amnesia, and a hierarchy that parses
 into a value nobody generalises with is a fixture rather than data.
 
-## What would give it a caller
+## What gave it a caller
 
-Nothing in the pipeline calls it. It is a pass over Arrow arrays and the write path already holds
-Arrow arrays, so the mechanical fit is there and the missing piece is not mechanical: a program has
-no way to *say* which columns are quasi-identifiers, what generalises them, and what k the release
-targets. That is a surface question — it would be declarations in the language, checked by the type
-layer the way a shape is — and answering it is what turns this crate from a library into a stage.
-Until then it is a library, and the diagram draws it with no arrows because that is the truth.
+This section used to say that nothing in the pipeline called it, that the mechanical fit was
+obvious — a pass over Arrow arrays, and a write path that already holds Arrow arrays — and that the
+missing piece was a way to *say* which columns are quasi-identifiers, what generalises them, and
+what k the release targets.
+
+The answer turned out not to be a surface question. It is the **policy document**, which already
+said which columns are quasi-identifiers and what k the release targets, and needed one more term to
+say what generalises them: `fossil:generalization`, carrying the hierarchy inline as exactly the
+JSON `hierarchies/*.json` already holds. Putting it in the language instead would have made the
+obligation a call an author can forget, which is the thing
+[the privacy design](/docs/design/privacy) exists to avoid; putting it in the policy makes it a
+parameter applied on every run. `fossil-df`'s `generalize` module is the stage, and it runs between
+execution and verification — after the corpus is a value, before any of it is a file.
+
+What the crate does **not** get from having a caller is the verdict. The write path re-measures the
+generalised corpus with a DataFusion aggregate that shares no code with this crate and is handed
+nothing by it, precisely because `anonymize` already re-reads its own output: a deriver that also
+supplied the answer would establish only that its code agrees with itself. Two implementations, one
+artefact, and the manifest records the second.
+
+The caller also narrows what it will accept, in one way worth reading here. `NumericPresentation::ObservedRange`
+is **refused** by the writer — it stays in this crate for the benchmark-comparability reason above,
+but a corpus may not publish it, because `[min, max]` over a partition is two values real records
+hold in the column that was being generalised. Every cell fossil writes is a node of a declared
+hierarchy, which is also what makes the manifest's recorded levels recomputable by a recipient.

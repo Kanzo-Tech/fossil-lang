@@ -1,6 +1,6 @@
 ---
 title: A privacy bound with no chokepoint
-description: Why the classification is a document rather than a shape annotation, why the language names no anonymisation operator, and what four vocabularies leave to a five-term profile.
+description: Why the classification is a document rather than a shape annotation, why the language names no anonymisation operator, and what four vocabularies leave to a six-term profile.
 direction:
   summary: "The policy document is bound by the program, the way `type { Person } := io.shex(…)` binds a shape — not supplied as a host argument."
   arguedIn: /docs/design/type-providers
@@ -57,6 +57,18 @@ that had no need to.
 The bound is stated instead, and the writer refuses. The author's obligation becomes "reach k",
 which is checkable, rather than "remember to anonymise", which is not.
 
+**The writer also reaches it.** The policy declares a generalisation hierarchy per
+quasi-identifier — `fossil:generalization`, below — and the write path derives the generalisation
+that meets the bound before it verifies one. That is not a retreat from the paragraph above, and
+the distinction is the whole of why it is safe: a hierarchy is a **parameter**, declared once beside
+the bound it exists to reach and applied on every run, and there is still no call for an author to
+forget because there is no call.
+
+What it replaces is worse than an operator. For as long as the policy could name a `k` and no
+hierarchy, nothing in the system could produce a generalised column — so the verification could
+only ever **refuse**, and a corpus passed exactly when its source data happened to be k-anonymous
+already. A bound nothing can satisfy is not a stricter design; it is half a mechanism.
+
 ## The classification is a separate document, and not an annotation on the shape
 
 A program already binds one external document per output type — `type { Person } :=
@@ -95,7 +107,7 @@ exists as a bare class you assert or do not; **there is nowhere in DPV to put an
 `QuasiIdentifier`, `IndirectIdentifier` or `DirectIdentifier` returns nothing. The combination case
 — which is the whole of k-anonymity — is absent.
 
-### The profile is five terms
+### The profile is six terms
 
 ODRL sanctions the extension in as many words. Information Model §3.3: *"Additional Constraint left
 operands: Create an instance of the LeftOperand class."* And §3.2 buys the property worth having:
@@ -110,14 +122,36 @@ guess**.
 | `fossil:anonymityK` | DPV has no numeric range |
 | `fossil:absentQuasiIdentifier` | Likewise, and it is the parameter the whole check turns on |
 | `fossil:suppressionBudget` | Likewise |
+| `fossil:generalization` | The hierarchy that reaches the `k`. DPV has `dpv:Generalisation` as a bare class you assert or do not, and nowhere to put the levels |
 
 Plus two `skos:Concept` values — `fossil:QuasiIdentifier` and `fossil:NoDisclosureRisk` — where DPV
 has nothing to borrow. The classification values that DPV *does* have are DPV's.
 
-**Five is the ceiling and it is a test.** Catena-X is the one production European data-space profile
-and it ships **four** `odrl:LeftOperand`s — `FrameworkAgreement`, `Membership`, `ContractReference`,
-`UsagePurpose` — for an entire automotive industry, and not one of them is schema-aware. A sixth
-term here needs an argument.
+**The ceiling is a test, and the sixth term is what it was for.** Catena-X is the one production
+European data-space profile and it ships **four** `odrl:LeftOperand`s — `FrameworkAgreement`,
+`Membership`, `ContractReference`, `UsagePurpose` — for an entire automotive industry, and not one
+of them is schema-aware. For as long as there were five here, this page said a sixth needed an
+argument. The argument is the paragraph above: five terms could *state* a bound and not one of them
+could *reach* one.
+
+Catena-X's four are the wrong bar for this term specifically, and the reason is worth stating rather
+than treating "four is the bar" as arithmetic. All four are about **contract eligibility** — who may
+use the asset, under which agreement, for what stated purpose. None is schema-aware, so none could
+parameterise a transformation even in principle; a profile that reaches inside the asset is
+answering a question that profile never asks. The bar it *does* set — do not mint a term for
+something an existing vocabulary can say — is the one applied, and it is met.
+
+A **seventh** now needs an argument. The one that will be asked for first is a generalisation
+margin — "derive to k times this", as a mitigation for the minimality attack below — and the answer
+is that `fossil:anonymityK` already expresses it: a producer who wants a table that is not minimal
+for `k` declares a larger `k`, and the number they chose is published on the artifact instead of
+hidden in a multiplier.
+
+The `rightOperand` of `fossil:generalization` is the **hierarchy itself, inline** — the object
+`fossil-kanon`'s `hierarchies/*.json` files already hold. Not a registry name, which would undo the
+reason those hierarchies are files a statistician revises rather than constants a programmer
+recompiles; and not an IRI to fetch, which is the one thing the policy reader refuses on principle.
+See [discarded](/docs/design/discarded) for both.
 
 <Callout type="warn" title="The interoperability claim is narrower than it is usually made">
 The reason normally given for minting into ODRL is that the Dataspace Protocol leaves `leftOperand`
@@ -149,7 +183,36 @@ easiest wrong answer available.
 
 The verifier **measures and refuses**. It derives nothing: no generalisation search, no recoding, no
 rows dropped and no cells blanked. A verifier that also repairs is a verifier whose failures nobody
-ever sees — and the repair belongs upstream, where the author can see what it cost.
+ever sees.
+
+The derivation is a **separate pass immediately before it**, over the same in-memory batches, and
+the separation is load-bearing rather than tidy. Nothing flows from the deriver into the verifier —
+not the achieved `k`, not the class count, not the column list, not a hint that derivation happened
+at all. So the release is measured **twice by two implementations that share no code**: once inside
+`fossil-kanon`, which re-reads its own output before returning it, and once by a DataFusion
+aggregate over the written columns that was handed nothing. The manifest records the second. If the
+two ever agreed by construction rather than by measurement, the guarantee would be circular.
+
+A consequence worth stating plainly: the deriver is allowed to fail. A derivation that does not
+reach the bound produces exactly the refusal an ungeneralised corpus would. It is best-effort; the
+verifier is the guarantee.
+
+<Callout type="warn" title="Minimal generalisation is not the safest generalisation">
+Wong, Fu, Wang and Pei (VLDB 2007) showed that publishing the table an algorithm generalised
+*minimally* leaks: an adversary who knows the algorithm reasons backwards from where it stopped —
+"one more cut would have left a class below k, so that class had this shape" — and recovers values
+the k-anonymous table appears to protect. Mondrian stops as soon as it can, so this is exactly such
+a table, and **it is not defended against**. Defending means m-invariance or a descendant, which is
+a different algorithm and not a flag.
+
+Three things are done instead, none of them a defence and all of them visible. Observed-range
+numeric output is **refused** — Mondrian's own `[min, max]` is two values real records hold, in the
+column being generalised — so every published cell is a node of a *declared* hierarchy. That partly
+mitigates the attack, because a declared bucket is a function of the hierarchy and not of the
+partition, so the cut position the inference reasons back from is not in the released bytes.
+Partial, and not a reason to call the release defended. And the manifest says what was done: see
+`generalization` in [the format](/docs/format/conventions/privacy).
+</Callout>
 
 Its refusals name counts, column names and type labels, and **never a cell**. A diagnostic about a
 privacy violation that prints the violating row has moved the disclosure out of the artifact and

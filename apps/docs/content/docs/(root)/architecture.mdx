@@ -16,13 +16,13 @@ graph LR
   L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 4 crates<br/>df · df-wasm · cli · introspect"]
-  C["<b>corpus</b> · 7 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver · policy"]
-  X["<b>no home</b> · 3 crates<br/>mem-probe · kanon · xtask"]
+  C["<b>corpus</b> · 8 crates<br/>graph · graph-wasm · mcp · layout<br/>sinks · resolver · policy · kanon"]
+  X["<b>no home</b> · 2 crates<br/>mem-probe · xtask"]
 
   E -->|18| L
   E -->|1| M
   M -->|23| L
-  M -->|6| C
+  M -->|7| C
   C -->|1| M
   M -->|1| X
   C -->|1| X
@@ -64,12 +64,19 @@ but the stitch that closes the loop is one function.
 that models it has no fossil dependency of its own. Four of the eight `engine → corpus` edges are
 its arrivals, which is what took that arrow from four to eight in one landing.
 
-`fossil-kanon` is filed under *no home* for a stronger reason than the other two: it has no
-dependents **and** no dependencies inside the tree, so it is the one node this diagram draws with no
-arrow at either end. It is a disclosure-control pass over Arrow arrays that nothing in the pipeline
-calls yet, and filing it beside a crate it does not touch would be filing it by hope.
-[Deriving k-anonymity](/docs/design/anonymity) is the argument for it and states what would give it
-a caller.
+`fossil-kanon` was filed under *no home* on the strongest version of that reason: it had no
+dependents **and** no dependencies inside the tree, so it was the one node this diagram drew with no
+arrow at either end — a disclosure-control pass over Arrow arrays that nothing in the pipeline
+called. It has a caller now. `fossil-df`'s write path derives the generalisation a declared bound
+needs before verifying one, which is the seventh `engine → corpus` edge and the reason that arrow
+went from six to seven.
+
+It is filed under **corpus** rather than under the engine that calls it, for the reason
+`fossil-policy` is: what it models is a property of the artefact — what these bytes disclose — and
+not a capability of the executor. The crate itself is unchanged by the edge; it was already
+`[package.metadata.fossil] wasm = true` on the claim that the pass belongs in the data holder's
+browser, and the gate was already reading that declaration.
+[Deriving k-anonymity](/docs/design/anonymity) is the argument for the crate.
 
 Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`
 locator is `fossil-locator`, a crate with no dependencies at all — filing it under `language` is the

@@ -19,6 +19,7 @@ privacy:
   suppressed: 0
   suppression_budget_ppm: 0
   quasi_identifiers: Person.birthYear Person.postcode
+  generalization: Person.birthYear@bucket Person.postcode@1-3/4
   policy: https://example.org/policies/people-v1
   profile: https://fossil-lang.org/ns/privacy/v1
 vertices:
@@ -67,6 +68,7 @@ about the release, not about the data.
 | `k` | What the policy asked for. |
 | `reached` | The smallest equivalence class measured over the release. The claim is `reached >= k`. |
 | `quasi_identifiers` | `<Type>.<column>` names separated by single spaces. **The one field a reader cannot derive**, and the one the whole bound turns on. |
+| `generalization` | What the writer did to reach `k`, per column, or `none`. See below. |
 | `absent_quasi_identifier` | How a `NULL` is read: `value`, `wildcard` or `suppress`. |
 | `population` | The records the bound was measured over — the sum of those types' `vertex_count`. |
 | `suppressed` | Records excluded from certification. Non-zero only under `suppress`. |
@@ -77,6 +79,39 @@ about the release, not about the data.
 `reached` is published beside `k` rather than instead of it because they answer different questions
 — what was required, and what there is — and because a recipient recomputing has something to check
 the producer's arithmetic against rather than only a threshold to clear.
+
+### `generalization`, and why `reached` is ambiguous without it
+
+A `reached: 20` over raw postcodes and a `reached: 20` over postcodes truncated to three characters
+are **not the same release** — the second traded resolution the first still has — and a recipient
+recomputing `k` from the Parquet gets 20 either way. Nothing else in the block distinguishes them.
+
+`none` means the quasi-identifiers were published as the program produced them, which is what every
+corpus written before the writer could derive anything says. Otherwise one token per generalised
+column, same spelling and same flat grammar as `quasi_identifiers`:
+
+| token | meaning |
+| --- | --- |
+| `Person.birthYear@bucket` | A numeric column published as its enclosing **declared** bucket. A writer never publishes an observed range, so this is never a real record's value. |
+| `Person.postcode@1-3/4` | A levelled column — prefix or date — sitting between hierarchy levels 1 and 3, of the 4 the hierarchy declares below the implicit top. |
+
+A coarsest and a finest that are the **same** number, short of the declared count, is a column every
+row of which publishes one value: the release satisfies its bound by carrying no information in that
+column. That is a valid release and it is not refused — utility is not a property the verifier can
+measure, and a threshold on it would be the format inventing a policy parameter — but it is legible
+here rather than discovered in the Parquet.
+
+<Callout type="info" title="This one is checkable, with a caveat the others do not have">
+Every published quasi-identifier cell is a node of a declared hierarchy, so a reader can read a
+column, decide which level each cell sits at, and recompute the pair. What the corpus does **not**
+carry is the hierarchy, which lives in the policy document `policy` names and does not locate. That
+is weaker than `quasi_identifiers`, which is self-contained. The field is checkable by the recipient
+who has the policy, and the recipient who has the policy is who it is for.
+
+It claims nothing about the source. A column already coarse before the writer saw it generalises to
+the same cells, and no released byte distinguishes that — which is fine, because the claim is about
+what a recipient holds, not what a producer started from.
+</Callout>
 
 ### Why the block is flat scalars
 
