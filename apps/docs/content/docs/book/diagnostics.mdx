@@ -1,12 +1,12 @@
 ---
 title: When it does not compile
-description: Five programs that fail, the diagnostic each one produces, and the fix — the promise of the language shown in the errors rather than asserted.
+description: Six programs that fail, the diagnostic each one produces, and the fix — the promise of the language shown in the errors rather than asserted.
 ---
 
 "If it compiles, it is correct in its types" is a claim about the errors you get. This is the page
 that shows them.
 
-Five programs. Each one is a real file in this documentation's corpus, each one fails, and each
+Six programs. Each one is a real file in this documentation's corpus, each one fails, and each
 diagnostic below is the one that program produces.
 
 | what you did | what you get |
@@ -16,6 +16,7 @@ diagnostic below is the one that program produces.
 | [left out a required property](#3-a-required-property-the-mapping-never-writes) | the mapping header, and the line in the document that required it |
 | [minted two identities for one type](#4-two-mappings-that-mint-different-identities) | both mappings and both `@subject` expressions |
 | [named a predicate two shapes share](#5-two-predicates-with-the-same-short-name) | both full IRIs, and `@rename` as the repair |
+| [wrote a join that names one side twice](#6-a-join-that-names-one-side-twice) | the pipeline, and which of the two sides the condition never mentions |
 
 One thing about the blocks below, so that running one yourself is not a surprise: `fossil check` puts
 a count in front of them — `× type-checking failed: 2 error(s)` — which the artefacts here do not
@@ -99,9 +100,26 @@ property depend on the order of a document you did not write.
 
 Full program in [naming what you produce](/docs/book/what-you-produce#when-two-of-them-collide).
 
+## 6. A join that names one side twice
+
+<Program src="errors/join-one-side/program.fossil" title="program.fossil" />
+
+<Program src="errors/join-one-side/expected/diagnostic.txt" title="fossil check program.fossil" />
+
+**Why this is an error and not a slow program.** Nothing here is misspelt and nothing is mistyped:
+`Purchase.id` and `Purchase.user_id` are both columns of `Purchase`, and comparing them is a
+perfectly good `Bool`. What it is not is a relationship between two relations. A condition that
+mentions only one side is either true for every pairing or false for every pairing, so the join
+degenerates into the product of the two — every order against every user — with a filter on top. On
+two CSVs that is a wrong answer delivered quickly. On two corpora it is a wrong answer that never
+arrives.
+
+**The fix.** `on = Purchase.user_id == User.id`. The key that connects two files lives in one of
+them, and the condition has to reach across.
+
 ## Reading any diagnostic
 
-The five above are different errors and they have the same anatomy.
+The six above are different errors and they have the same anatomy.
 
 - **The first line says what is wrong**, in the terms of your program: a name, a type, a mapping.
 - **The spans are where the two sides met.** A type error has two, because a type error is always a
