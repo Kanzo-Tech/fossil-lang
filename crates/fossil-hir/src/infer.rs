@@ -362,8 +362,17 @@ fn apply_source_op<'db>(
             // writes `User.email` next to an untyped `Purchase` would be told
             // `User` is not a row this mapping has — which is false, and is the
             // diagnostic this whole seam exists to stop being wrong.
-            HirSourceOp::Join { right, alias, .. } => {
-                Ok(scope.concat(right_scope(db, file, right, alias.as_ref(), depth)?))
+            //
+            // The condition's SHAPE is checked here too, and that is the whole
+            // reason this arm names `on` at all. Whether the two sides are
+            // related is a question about bindings and operators, and neither
+            // needs a column type to answer — so a schemaless join, which is
+            // `hello.fossil` and every program like it, is where the engine's
+            // late refusal used to be the only one there was.
+            HirSourceOp::Join { right, alias, on } => {
+                let right = right_scope(db, file, right, alias.as_ref(), depth)?;
+                check_join_condition(db, pipe, on, &scope, &right)?;
+                Ok(scope.concat(right))
             }
             // A union answers to ONE name whether or not either side has a
             // schema, and the two sides' names do not survive it: the pipeline
@@ -448,8 +457,14 @@ fn apply_source_op<'db>(
             // and handed to `check_refs`, which resolved a name against it. The
             // scope IS that answer and keeps the sides apart, so the flat list
             // went with the walk.
-            let joined = scope.concat(right);
+            // Two questions, and the order is the useful one. `typecheck_stage`
+            // answers «is this a condition at all, and do its columns exist»;
+            // `check_join_condition` answers «and does it relate THESE two
+            // sides». Typing first means a misspelled column is reported as a
+            // misspelled column and not as a side that goes unmentioned.
+            let joined = scope.clone().concat(right.clone());
             typecheck_stage(db, file, pipe, "seq.join", on, &joined)?;
+            check_join_condition(db, pipe, on, &scope, &right)?;
             Ok(joined)
         }
         // `distinct` keeps rows, not columns, and names none of them: the row
@@ -709,6 +724,223 @@ fn typecheck_stage<'db>(
     }
 
     cx.first_error.map_or(Ok(()), Err)
+}
+
+/// Which side of a join one column reference names.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConditionSide {
+    Left,
+    Right,
+}
+
+/// The SHAPE of a join condition, exacted where the join is WRITTEN.
+///
+/// [`typecheck_stage`] answers the first half — the condition is a `Bool`, and
+/// every column it names exists under the binding that qualifies it. That is
+/// not enough to be a join. `Purchase.join(User, on = Purchase.id ==
+/// Purchase.user_id)` passes both of those questions and never mentions `User`,
+/// so what it describes is every order paired with every user and then
+/// filtered. So does `Both.join(Third, on = Left.k == Right.k)`, where both
+/// bindings are real, both belong to the LEFT side, and `Third` is joined to
+/// everything.
+///
+/// # The rule
+///
+/// The condition is a conjunction of equalities, and each equality equates a
+/// column of one side with a column of the other. Three refusals fall out, and
+/// each is a distinct mistake with a message of its own: a conjunct that is not
+/// an `==`, an operand that is not a bare column reference, and an equality
+/// whose two operands come from the same side.
+///
+/// # Why here and not one layer down
+///
+/// The rule is not new: `fossil_df::plan::join_equalities` has enforced it since
+/// the day joins executed, and refused a malformed condition with a
+/// `DataFusionError::Plan` at `fossil run` — late, and with no span, because by
+/// then the author's text is gone. The engine keeps its copy as a backstop: a
+/// MIR reaching it need not have come through this checker.
+///
+/// What the checker can say that the engine cannot is WHICH SIDE, in the
+/// author's own names. A `JoinSide` carries one relation name — the pipeline's
+/// after a previous join — while the scope here carries every binding a body
+/// may address, which is what makes «and `Third` goes unmentioned» sayable at
+/// all.
+///
+/// # What is refused that a relational algebra would allow
+///
+/// A theta join (`on = A.since < B.at`) and a disjunction (`on = A.k == B.k or
+/// A.j == B.j`) are ordinary relational conditions and are refused here, for the
+/// engine's reason: neither leaves an equality to plan a hash join against, so
+/// what executes is a nested loop over the product of two corpora, and a corpus
+/// is the size where that is not a slow program but a hung one.
+///
+/// A COMPUTED key (`on = str.lower(A.k) == B.k`) is refused with them, and it is
+/// the one refusal with no workaround inside the language today: `seq.map` takes
+/// no function (`grammar.bnf` lists `LambdaExpr` among the productions
+/// intentionally absent) and there is no `extend`, so there is nowhere to put
+/// the computation. Widening the rule to admit it would
+/// mean admitting an arbitrary expression as a key, which is the theta join
+/// again wearing an `==`.
+fn check_join_condition<'db>(
+    db: &'db dyn fossil_base::Db,
+    pipe: &crate::lower::HirSourcePipe,
+    on: &crate::lower::HirExpr,
+    left: &Rows<'db>,
+    right: &Rows<'db>,
+) -> Result<(), fossil_base::ErrorGuaranteed> {
+    use crate::display::expr_text;
+    use crate::lower::{BinOp, HirExpr};
+
+    for conjunct in conjuncts(on) {
+        let HirExpr::BinOp {
+            op: BinOp::Eq,
+            lhs,
+            rhs,
+        } = conjunct
+        else {
+            return Err(join_error(
+                db,
+                pipe,
+                format!(
+                    "`join` in `{}` relates its two sides by equality, and `{}` is not one",
+                    pipe.name,
+                    expr_text(conjunct),
+                ),
+                "`on` takes an equality between one column of each side — `on = A.k == B.k` — or \
+                 several of them joined by `and`. Anything else leaves no key to plan against, and \
+                 what it would run as is a nested loop over the product of the two relations.",
+            ));
+        };
+
+        let mut sides = Vec::with_capacity(2);
+        for operand in [lhs.as_ref(), rhs.as_ref()] {
+            let HirExpr::ColumnRef { binding, column } = operand else {
+                return Err(join_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`join` in `{}` equates `{}` with `{}`, and `{}` is not a column reference",
+                        pipe.name,
+                        expr_text(lhs),
+                        expr_text(rhs),
+                        expr_text(operand),
+                    ),
+                    "A join key is a column of one of the two sides, written `Binding.column`, and \
+                     not a literal or anything computed from a column. There is nowhere to compute \
+                     one first — `map` takes no function and the language has no `extend` — so a \
+                     derived key has to be prepared in the source.",
+                ));
+            };
+            let Some(side) = side_of(left, right, binding) else {
+                return Err(join_error(
+                    db,
+                    pipe,
+                    format!(
+                        "`join` in `{}` names `{binding}.{column}`, and `{binding}` is neither \
+                         side of this join",
+                        pipe.name,
+                    ),
+                    &format!(
+                        "The left side has {}; the right side has {}.",
+                        binding_list(left),
+                        binding_list(right),
+                    ),
+                ));
+            };
+            sides.push(side);
+        }
+
+        if sides[0] == sides[1] {
+            let (named, unmentioned) = if sides[0] == ConditionSide::Left {
+                ("left", right)
+            } else {
+                ("right", left)
+            };
+            return Err(join_error(
+                db,
+                pipe,
+                format!(
+                    "`join` in `{}` equates `{}` with `{}`, and both are columns of the {named} \
+                     side",
+                    pipe.name,
+                    expr_text(lhs),
+                    expr_text(rhs),
+                ),
+                &format!(
+                    "A condition that never names {} holds or fails for whole relations rather \
+                     than for a pairing, so every row of one side pairs with every row of the \
+                     other. That is a filter over their product, not a join.",
+                    binding_list(unmentioned),
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Split a condition on `and`. A conjunction is the only structure a join
+/// condition is taken apart by; everything else is a leaf for
+/// [`check_join_condition`] to admit or refuse.
+///
+/// `fossil_df::plan::conjuncts` is the same function over `fossil_mir::Expr`,
+/// and the two cannot be one: the HIR is where the author's names still are, and
+/// this crate is below the one that owns the MIR.
+fn conjuncts(on: &crate::lower::HirExpr) -> Vec<&crate::lower::HirExpr> {
+    match on {
+        crate::lower::HirExpr::BinOp {
+            op: crate::lower::BinOp::And,
+            lhs,
+            rhs,
+        } => {
+            let mut out = conjuncts(lhs);
+            out.extend(conjuncts(rhs));
+            out
+        }
+        other => vec![other],
+    }
+}
+
+/// The side of the join a binding belongs to, or `None` when it belongs to
+/// neither.
+///
+/// The left scope is searched first, and after a self-join that ordering is the
+/// answer rather than a tiebreak: `Node.join(Node as Other, …)` renames the
+/// right side to `Other`, so `Node` is on the left and only there. A join whose
+/// right side kept its own name AND appeared on the left would be a self-join
+/// without an alias, which the scope cannot represent.
+fn side_of(left: &Rows<'_>, right: &Rows<'_>, binding: &str) -> Option<ConditionSide> {
+    if left.has(binding) {
+        Some(ConditionSide::Left)
+    } else if right.has(binding) {
+        Some(ConditionSide::Right)
+    } else {
+        None
+    }
+}
+
+/// The bindings of one side of a join, for a message that has to name them.
+fn binding_list(rows: &Rows<'_>) -> String {
+    let names: Vec<String> = rows.bindings().map(|b| format!("`{b}`")).collect();
+    match names.len() {
+        0 => "no rows at all".to_string(),
+        _ => names.join(", "),
+    }
+}
+
+/// A refusal about the join condition, pointed at the pipeline that wrote it.
+///
+/// File-absolute for the reason every pipeline diagnostic is: a pipeline's span
+/// is measured against the file and the default frame is `MappingRelative`.
+fn join_error(
+    db: &dyn fossil_base::Db,
+    pipe: &crate::lower::HirSourcePipe,
+    message: String,
+    help: &str,
+) -> fossil_base::ErrorGuaranteed {
+    let d = fossil_base::Diagnostic::new(fossil_base::Severity::Error, message, pipe.span)
+        .with_help(help)
+        .file_absolute();
+    fossil_base::raise(db, d)
 }
 
 fn column_list(fields: &[RecordField<'_>]) -> String {

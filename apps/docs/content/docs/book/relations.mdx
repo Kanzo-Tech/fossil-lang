@@ -43,9 +43,18 @@ needs:
 
 <Program src="compound-key/compound-key.fossil" region="on" title="compound-key.fossil" />
 
-It is not a general condition. `on = A.date > B.since` is refused rather than quietly becoming a
-nested loop over the product of two corpora — today by `fossil run` rather than `fossil check`, so
-the message arrives late and without a span.
+It is not a general condition, and `fossil check` is where it stops being one. Two things have to
+hold of every conjunct, and each is a distinct refusal:
+
+**It is an equality between two columns.** `on = A.date > B.since` is refused, and so is
+`on = A.k == B.k or A.j == B.j`, and so is `on = str.lower(A.k) == B.k`. None of the three leaves a
+key to plan against, so what each would run as is a nested loop over the product of two corpora —
+and a corpus is the size at which that is not a slow program but a hung one.
+
+**The two columns are one from each side.** `on = Purchase.id == Purchase.user_id` is well-typed,
+names columns that exist, and never mentions `User` — so it holds or fails for whole relations
+rather than for a pairing, and every order pairs with every user. That is a filter over the product,
+not a join. It is [the sixth diagnostic](/docs/book/diagnostics#6-a-join-that-names-one-side-twice).
 
 ### A join does not flatten
 

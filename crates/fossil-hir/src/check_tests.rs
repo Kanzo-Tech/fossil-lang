@@ -1715,6 +1715,196 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
     );
 }
 
+/// **A `Bool` over columns that exist is not yet a join**, and that is the half
+/// the clause above could not reach.
+///
+/// `on = Left.k == "x"` types: it is a `Bool`, and `Left.k` is a column of the
+/// left side. It never mentions the right side, so what it describes is every
+/// row of one relation paired with every row of the other and then filtered —
+/// the product of two corpora. `on = true` is the same program with less
+/// writing, and `Both.join(Third, on = Left.k == Right.k)` is the same program
+/// with two REAL bindings, both of them on the left.
+///
+/// The rule was already enforced, by `fossil_df::plan::join_equalities`, at
+/// `fossil run`. Every case below now fails at `fossil check` instead, which is
+/// where the span is.
+///
+/// Seven cases, and the accepted ones are half the point: a rule that refused
+/// everything would pass every assertion that only looks for a refusal.
+#[test]
+fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
+    use fossil_base::test_support::{DecodingHost, register_inferred};
+    use fossil_graph_schema::Primitive;
+    use std::sync::Arc;
+
+    /// Every fixture below names the pipeline under test `Out`, so the tracked
+    /// shim needs no argument of its own — a salsa-tracked function takes owned
+    /// arguments, and one more would be a `String` per call for a name the
+    /// fixtures can simply agree on.
+    fn diagnostics(program: &str) -> Vec<String> {
+        let system: Arc<dyn fossil_base::System> = Arc::new(DecodingHost::default());
+        let db = FossilDb::new(system);
+        for (file, key) in [("l.csv", "id"), ("r.csv", "rid"), ("t.csv", "tid")] {
+            register_inferred(
+                &db,
+                file,
+                &[
+                    (key, Primitive::Integer),
+                    ("k", Primitive::String),
+                    // A SECOND string column per side, so a same-side equality
+                    // is well-typed and reaches this rule rather than being
+                    // refused one line earlier for comparing a String with an
+                    // Integer.
+                    ("j", Primitive::String),
+                ],
+            );
+        }
+        let file = SourceFile::new(&db, program.to_string(), "join.fossil".to_string());
+        #[salsa::tracked]
+        fn shim(db: &dyn fossil_base::Db, file: SourceFile) -> bool {
+            crate::infer::resolve_binding_scope(db, file, "Out", 0).is_ok()
+        }
+        let _ = shim(&db, file);
+        shim::accumulated::<Diagnostic>(&db, file)
+            .into_iter()
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    const SOURCES: &str = "Left := io.csv(\"l.csv\")\n\
+                           Right := io.csv(\"r.csv\")\n\
+                           Third := io.csv(\"t.csv\")\n";
+
+    let condition =
+        |on: &str| diagnostics(&format!("{SOURCES}Out := Left.join(Right, on = {on})\n"));
+
+    // Accepted: one column of each side, and a compound key is a conjunction of
+    // those. The two columns need not share a name.
+    for on in [
+        "Left.k == Right.k",
+        "Left.id == Right.rid",
+        "Left.k == Right.k and Left.id == Right.rid",
+    ] {
+        let d = condition(on);
+        assert!(d.is_empty(), "`on = {on}` is a join: {d:#?}");
+    }
+
+    // Refused, and each for its own reason.
+    let filter_on_one_side = condition("Left.k == Left.j");
+    assert!(
+        filter_on_one_side
+            .iter()
+            .any(|m| m.contains("both are columns of the left side")),
+        "a condition that never names the right side is a filter over the \
+         product: {filter_on_one_side:#?}"
+    );
+
+    let literal = condition("Left.k == \"x\"");
+    assert!(
+        literal
+            .iter()
+            .any(|m| m.contains("is not a column reference")),
+        "a constant is not a key: {literal:#?}"
+    );
+
+    let constant = condition("true");
+    assert!(
+        constant
+            .iter()
+            .any(|m| m.contains("relates its two sides by equality")),
+        "`on = true` is not an equality: {constant:#?}"
+    );
+
+    let theta = condition("Left.id > Right.rid");
+    assert!(
+        theta
+            .iter()
+            .any(|m| m.contains("relates its two sides by equality")),
+        "a theta join has no key to plan against: {theta:#?}"
+    );
+
+    let disjunction = condition("Left.k == Right.k or Left.id == Right.rid");
+    assert!(
+        disjunction
+            .iter()
+            .any(|m| m.contains("relates its two sides by equality")),
+        "a disjunction is one leaf, and it is not an `==`: {disjunction:#?}"
+    );
+
+    let computed = condition("str.trim(Left.k) == Right.k");
+    assert!(
+        computed
+            .iter()
+            .any(|m| m.contains("is not a column reference")),
+        "a computed key is not a column of either side: {computed:#?}"
+    );
+
+    // **The third binding, which is the case no layer could see.** `Left` and
+    // `Right` are both real, both in scope, and both on the LEFT — so `Third`
+    // joins to everything. The engine's copy of this rule reads a `JoinSide`,
+    // which carries the pipeline's name after a previous join and cannot say
+    // which binding went unmentioned.
+    let third = diagnostics(&format!(
+        "{SOURCES}Both := Left.join(Right, on = Left.k == Right.k)\n\
+         Out := Both.join(Third, on = Left.k == Right.k)\n"
+    ));
+    assert!(
+        third
+            .iter()
+            .any(|m| m.contains("both are columns of the left side")),
+        "a condition that names neither `Third` nor a column of it is not a \
+         join with `Third`: {third:#?}"
+    );
+
+    // And the chained join that IS one still passes, or the rule above would be
+    // "a join may not follow a join".
+    //
+    // **This one the engine cannot plan yet, and the checker is right anyway.**
+    // `fossil run` answers «the left side of the join condition qualifies a
+    // column with `Right`, which is neither input (`Both`, `Third`)»: a
+    // `fossil_mir::JoinSide` carries the ONE name its relation answers to, which
+    // after a join is the pipeline's, while the scope here carries every binding
+    // a body may address. Refusing it here to match would write that seam into
+    // the language — see `/docs/design/algebra`, "What this does not settle".
+    let chained = diagnostics(&format!(
+        "{SOURCES}Both := Left.join(Right, on = Left.k == Right.k)\n\
+         Out := Both.join(Third, on = Right.k == Third.k)\n"
+    ));
+    assert!(
+        chained.is_empty(),
+        "a binding of the left side may key a second join: {chained:#?}"
+    );
+
+    // A self-join whose alias goes unmentioned is the same mistake wearing the
+    // one piece of apparatus that exists to tell two sides apart.
+    let unaliased = diagnostics(
+        "Node := io.csv(\"l.csv\")\n\
+         Out := Node.join(Node as Other, on = Node.k == Node.j)\n",
+    );
+    assert!(
+        unaliased
+            .iter()
+            .any(|m| m.contains("both are columns of the left side")),
+        "`Other` is what the alias exists for: {unaliased:#?}"
+    );
+
+    // The schemaless program, which is where this bites hardest: no descriptor,
+    // so `typecheck_stage` has nothing to type and never runs — and the shape of
+    // the condition is still answerable, because it is a question about
+    // bindings and operators.
+    let schemaless = diagnostics(
+        "A := io.csv(\"nowhere.csv\")\n\
+         B := io.csv(\"elsewhere.csv\")\n\
+         Out := A.join(B, on = A.k == A.j)\n",
+    );
+    assert!(
+        schemaless
+            .iter()
+            .any(|m| m.contains("both are columns of the left side")),
+        "a join with no schema on either side still has a shape: {schemaless:#?}"
+    );
+}
+
 // ── `null` ─────────────────────────────────────────────────────────────────
 
 /// Comparable with everything, assignable to nothing.

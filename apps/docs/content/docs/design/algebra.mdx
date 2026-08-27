@@ -121,6 +121,28 @@ equi-join (`crates/fossil-df/tests/pipeline.rs:272`), a compound key is a conjun
 joined by `and` (`crates/fossil-df/tests/pipeline.rs:307`), and a self-join tells its two halves
 apart by the alias `X as Y` (`crates/fossil-df/tests/pipeline.rs:603`).
 
+#### And the checker is where it is exacted
+
+Two questions have to be answered about a condition and they are answered in two places, one line
+apart. **Is it a condition** — a `Bool` over columns that exist under the bindings that qualify
+them — is `fossil_hir::infer::typecheck_stage`, and it is the same expression typer a mapping body
+uses, which is the whole of why `Row.celsius > "abc"` stopped being legal in a `where` and illegal
+four lines below. **Does it relate these two sides** is `fossil_hir::infer::check_join_condition`,
+and it is a different question with a different answer: `on = Purchase.id == Purchase.user_id` is a
+perfectly good `Bool` over columns that all exist, and it describes the product of the two relations
+with a filter on one of them.
+
+The rule was not invented at that layer. `fossil_df::plan::join_equalities` has enforced it since
+the day joins executed, and it keeps its copy, because a MIR reaching the engine need not have come
+through this checker. What moved is *where an author meets it*: the refusal now carries a span and
+the author's own names, and [the sixth
+diagnostic](/docs/book/diagnostics#6-a-join-that-names-one-side-twice) is the program that produces
+it.
+
+What the checker can say and the engine cannot is **which side goes unmentioned**. A `JoinSide`
+carries one relation name; the scope here carries every binding a body may address, which is what
+makes `` `User` is never named `` a sentence rather than a guess.
+
 ### A union answers to the pipeline, and to neither side
 
 <Program src="union/union.fossil" region="chain" title="union.fossil" />
@@ -194,3 +216,12 @@ after it](/docs/design/shapes).
 - **How a pipeline's type is reported in the editor.** A source binding today has a schema from a
   descriptor; a pipeline has a schema derived from one, and hover has to say something useful about
   the derived one.
+- **A join whose left side is itself a join.** `Both := L.join(R, …)` followed by
+  `Tri := Both.join(T, on = R.k == T.k)` passes `fossil check` — it is a join by the rule above,
+  `R` being a binding of the left side — and then fails to plan: *«the left side of the join
+  condition qualifies a column with `R`, which is neither input (`Both`, `T`)»*. The two layers
+  disagree about what a side IS. `fossil_mir::JoinSide` carries the one name the relation answers
+  to, which after a join is the pipeline's; the checker's scope carries every binding, because that
+  is what a mapping body may write. The seam is the `JoinSide`, and the fix is a set of names rather
+  than a name — which is a change to what the engine reads, so it arrives with the engine and not
+  before.
