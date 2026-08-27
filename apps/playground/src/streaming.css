@@ -1,0 +1,87 @@
+/*
+ * The streaming panel's own styles — same disposition as `lineage.css`: it reuses
+ * `styles.css`'s custom properties, defines no palette of its own, and lives in its own file
+ * so that replacing the editor half does not collide with it.
+ *
+ * The one thing here that is not decoration is `.str-map`: 245 cells, one per tile, is the
+ * only part of this panel that shows the SHAPE of a selection rather than its size. A window
+ * selecting 17 tiles out of 245 in six runs looks like six streaks, and that is the O(√n)
+ * claim as a picture.
+ */
+
+.str {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.str-claim {
+  margin: 0;
+  font: 12px/1.6 var(--mono);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+}
+
+.str-note { margin: 0; font: 11px/1.6 var(--mono); color: var(--muted); }
+.str-bad { margin: 0; font: 11px/1.6 var(--mono); color: var(--error); }
+.str-dim { color: var(--muted); }
+
+.str-window { display: flex; flex-direction: column; gap: 0.25rem; font: 11px var(--mono); color: var(--muted); }
+.str-window input { width: 100%; accent-color: var(--ok); }
+
+.str-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0.5rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+/* One cell per tile, in tile order — so adjacency on screen is adjacency in the file, which
+   is what makes a contiguous run read as a streak rather than as scattered dots. */
+.str-map i {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--line);
+}
+.str-map i.on { background: var(--ok); }
+
+.str-ledger {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.4rem;
+  font: 11px/1.5 var(--mono);
+}
+.str-ledger div {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  min-width: 0;
+}
+.str-ledger dt { color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+.str-ledger dd { margin: 0.15rem 0 0; word-break: break-word; }
+
+.str-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+.str-urls {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  font: 11px/1.6 var(--mono);
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  max-height: 9rem;
+  overflow: auto;
+  word-break: break-all;
+}

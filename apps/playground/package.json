@@ -5,8 +5,11 @@
   "description": "The loop, clickable: write a .fossil program in a browser tab, type-check it as you type, run it, get a corpus, query the corpus — all client-side, no server, the source bytes never leaving the machine. Never published; the pnpm-workspace entry is for resolution, not for npm.",
   "type": "module",
   "//scripts": "`build` type-checks first, because a playground that compiles but cannot resolve @fossil-lang/wasm's pkg/ is a build that passes and an app that white-screens. The three workspace dependencies each need their own `build` run first (each shells out to cargo + wasm-bindgen); `pnpm --filter @fossil-lang/playground... build` in the workflow is what orders that.",
+  "//bench": "`bench` writes the large demo corpus into public/bench/ (gitignored, ~56 MB, ~5 s) by calling apps/corpus/guards/fixture.mjs — the SAME generator the corpus guards use, not a copy. It is deliberately NOT part of `dev` or `build`: it needs the `duckdb` binary on PATH, and a playground that refuses to start because an optional demo asset is missing would be the worse app. The streaming panel says how to generate it when it is absent. `verify-stream` checks the tile arithmetic against real bytes over a real HTTP server with Range, and needs `bench` to have run.",
   "scripts": {
     "dev": "vite --port 3300",
+    "bench": "node scripts/bench-corpus.mjs",
+    "verify-stream": "node --experimental-strip-types scripts/verify-stream.mjs",
     "build": "pnpm run typecheck && vite build",
     "preview": "vite preview --port 3300",
     "typecheck": "tsc --noEmit",

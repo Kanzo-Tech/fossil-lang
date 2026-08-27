@@ -19,7 +19,9 @@ import * as corpus from './corpus.js';
 import * as duck from './duckdb.js';
 import { CSV_BYTES, CSV_PATH, PROGRAM, PROGRAM_PATH } from './example.js';
 import { describeCsv } from './descriptor.js';
+import Lineage from './Lineage.js';
 import * as runner from './run.js';
+import Streaming from './Streaming.js';
 
 type Phase = 'booting' | 'ready' | 'running' | 'done' | 'failed';
 
@@ -188,6 +190,19 @@ export default function App() {
 
           {error && <p className="log bad">{error}</p>}
 
+          {/*
+            The parse-only half. Reads `program` and nothing else from this component — the
+            bundle sizes are read straight off the modules that measured them, so no state is
+            added here for it. Self-contained by design: see `Lineage.tsx`.
+          */}
+          <Lineage
+            program={program}
+            ready={phase !== 'booting'}
+            checkerBytes={checker.checkerCost()?.bytes ?? null}
+            duckdbBytes={duck.duckdbCost()?.bytes ?? null}
+            executorBytes={runner.executorCost()?.bytes ?? null}
+          />
+
           {files.length > 0 && (
             <>
               <h2>corpus written</h2>
@@ -229,6 +244,16 @@ export default function App() {
 
           <h2>what it cost</h2>
           <pre className="log">{log.join('\n') || '…'}</pre>
+        </section>
+
+        {/*
+          The larger-than-the-tab half, and it is deliberately its own section rather than a
+          tail on the run output: it reads a corpus this program did not write, at a size the
+          five-row demo cannot reach. Its only dependency on the app shell is that DuckDB has
+          booted — it needs a Parquet reader for the footer and brings none of its own.
+        */}
+        <section>
+          <Streaming ready={phase !== 'booting'} />
         </section>
       </main>
     </>

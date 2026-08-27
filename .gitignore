@@ -46,6 +46,11 @@ node_modules/
 packages/wasm/pkg/
 packages/graph/pkg/
 packages/executor/pkg/
+# The playground's large demo corpus: ~56 MB of Parquet written by
+# `apps/playground/scripts/bench-corpus.mjs` from `apps/corpus/guards/fixture.mjs`. A build
+# artifact of a private app, regenerated in about five seconds, and the generator is the
+# checked-in thing rather than its output.
+apps/playground/public/bench/
 # Changesets are tracked on main; the `changeset version` step consumes them at
 # release time. Only the empty-template fixture (if any) is ignored.
 # (Earlier 08-01 ignored .changeset/*.md as "PR-bound" — corrected in 08-12 once

@@ -87,6 +87,32 @@ export async function register(path: string, bytes: Uint8Array): Promise<void> {
 }
 
 /**
+ * Point DuckDB at a URL on this app's own origin, without downloading it here.
+ *
+ * The counterpart to {@link register}: that one hands DuckDB bytes, this one hands it an
+ * address and lets DuckDB fetch what it needs. `DuckDBDataProtocol.HTTP` makes the engine
+ * issue its own `Range` requests, which is the only way to read a footer out of a 21 MB
+ * Parquet file without pulling the 21 MB.
+ *
+ * Used by the streaming panel for exactly one job — reading the bench corpus's footer, once —
+ * and deliberately not for the payload. See the note in `src/stream.ts`: requests the engine
+ * makes happen inside a Worker where this thread cannot weigh them, and a panel about bytes
+ * has to weigh its own bytes.
+ *
+ * `false` is `directIO`: DuckDB caches what it has already read, which is what makes the
+ * footer bought-once rather than bought-per-query.
+ */
+export async function registerUrl(path: string, url: string): Promise<void> {
+  if (!db) throw new Error('duckdb not booted');
+  try {
+    await db.dropFile(path);
+  } catch {
+    // Not registered yet.
+  }
+  await db.registerFileURL(path, url, duckdb.DuckDBDataProtocol.HTTP, false);
+}
+
+/**
  * The one capability, as `@fossil-lang/graph` spells it.
  *
  * Arrow in, plain row objects out — the binding's contract is `Record<string, unknown>`
