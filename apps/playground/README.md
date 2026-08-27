@@ -41,7 +41,13 @@ Measured in Chrome on the built bundle, raw bytes over the wire:
 | `fossil_wasm_bg.wasm` (checker + tokenizer) | 3.53 MB | 1.19 MB | ~20 ms | on load |
 | `duckdb-eh.wasm` + worker | 32.7 MB | — | ~500 ms | on load |
 | `fossil_df_wasm_bg.wasm` (DataFusion) | 22.0 MB | 6.30 MB | ~150 ms | on first Run |
-| app JS + CSS | 425 kB | 120 kB | — | on load |
+| `fossil_graph_wasm_bg.wasm` (verbs) | 549 kB | 217 kB | — | never, so far |
+| app JS + CSS | 438 kB | 122 kB | — | on load |
+
+The graph WASM is emitted as an asset because `@fossil-lang/graph`'s barrel resolves it,
+and it is never fetched: `openCorpus` reaches the tiles through the host's `query`
+callback, and only the typed verb surface instantiates the module. If the app grows a verb
+call, that row stops being free.
 
 The executor is dynamically imported so a session that only edits never pays for it. The
 checker is small enough to be eager, which is what makes check-as-you-type feel like an
@@ -56,6 +62,15 @@ editor rather than a build.
   in for it in SQL and says so at length. Delete it when the real pass reaches wasm.
 - `src/example.ts` — why the program is rewritten on the way into `run` and not on the way
   into the checker.
+
+## Known defect
+
+Typing faster than the 120 ms debounce used to poison the checker for the rest of the
+session: `updateFile` re-entered while a previous call was live throws *"recursive use of
+an object detected which would lead to unsafe aliasing in rust"* out of wasm-bindgen's
+`RefCell`, and the workspace never recovers. `src/check.ts` debounces and guards, which is
+what an LSP client does anyway — but a host calling the surface correctly should not be
+able to poison it, and the fix belongs on `crates/fossil-wasm`.
 
 ## What it is not
 

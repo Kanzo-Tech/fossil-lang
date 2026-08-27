@@ -41,7 +41,7 @@
  * `execute_graph`, so that the browser and the CLI write the same tree. That is a crate
  * change and this app is not the place for it.
  */
-import { openCorpus, type Corpus } from '@fossil-lang/graph/corpus';
+import { openCorpus, type Corpus } from '@fossil-lang/graph';
 import type { GraphArFile, RunReport } from '@fossil-lang/executor';
 
 import { query, register } from './duckdb.js';
