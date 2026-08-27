@@ -26,7 +26,7 @@
 //!   context aliases `uid` to `@id` and types `leftOperand`, `operator` and
 //!   `action` as `@vocab`, so a bare string means something specific; a
 //!   different context makes every one of those a guess.
-//! - A `leftOperand` outside [`crate::profile`]'s five.
+//! - A `leftOperand` outside [`crate::profile`]'s six.
 //! - A `rightOperand` that is not a classification this profile defines.
 //! - An `operator` other than the two used, `odrl:eq` and `odrl:gteq`.
 //! - Any nesting the shapes below do not have.
@@ -54,7 +54,10 @@
 //!         {"leftOperand": "fossil:attribute", "operator": "eq",
 //!          "rightOperand": "https://example.org/birthYear"},
 //!         {"leftOperand": "fossil:classification", "operator": "eq",
-//!          "rightOperand": "fossil:QuasiIdentifier"}
+//!          "rightOperand": "fossil:QuasiIdentifier"},
+//!         {"leftOperand": "fossil:generalization", "operator": "eq",
+//!          "rightOperand": {"kind": "numeric", "buckets": [0, 18, 30, 45, 65, 80],
+//!                           "presentation": "enclosing_bucket"}}
 //!       ]}
 //!     ]
 //!   }],
@@ -71,6 +74,19 @@
 //! `(leftOperand, operator, rightOperand)` triple and "this attribute has that
 //! classification" is two facts, so it is a `LogicalConstraint` over two
 //! constraints — which is ODRL's own way of saying it and needs no term of ours.
+//! Three, above, because "and is generalised by that hierarchy" is a third fact
+//! about the same attribute; the reader requires the `fossil:attribute` and at
+//! least one of the other two, so a document may split them across two `and`s
+//! or write a classification without a hierarchy, which is what every policy
+//! written before `fossil:generalization` existed does.
+//!
+//! That last `rightOperand` is an **object** rather than a string, which is the
+//! one place this reader's shape steps outside what a `@vocab`-typed term
+//! expects. It is deliberate and it is why the hierarchy is not a term: the
+//! value is data the policy author ships, it is the exact JSON
+//! `fossil-kanon`'s `hierarchies/*.json` files hold, and neither a registry
+//! name nor a fetchable IRI would let them paste one in. See
+//! [`crate::profile::GENERALIZATION`].
 
 use std::collections::BTreeMap;
 
@@ -144,6 +160,35 @@ pub enum PolicyError {
         /// The offending attribute.
         attribute: String,
     },
+
+    /// A hierarchy was declared for something the bound is not computed over.
+    #[error(
+        "`{shape}` declares a generalisation for `{attribute}` and does not classify it as a \
+         quasi-identifier. Generalising a column the bound is not computed over costs the release \
+         its resolution and buys it no anonymity — the k is over the quasi-identifier set, and \
+         `{attribute}` is not in it"
+    )]
+    GeneralizationOnNonQuasiIdentifier {
+        /// The shape.
+        shape: String,
+        /// The offending attribute.
+        attribute: String,
+    },
+
+    /// A hierarchy whose `kind` this vocabulary does not admit.
+    #[error(
+        "`{shape}` generalises `{attribute}` by a `{kind:?}` hierarchy, and this profile admits \
+         {}. The hierarchy is the object `fossil-kanon` deserialises, written inline",
+        crate::profile::HIERARCHY_KINDS.join(", ")
+    )]
+    UnknownHierarchyKind {
+        /// The shape.
+        shape: String,
+        /// The attribute it was declared for.
+        attribute: String,
+        /// The `kind` that was written, if there was one at all.
+        kind: Option<String>,
+    },
 }
 
 fn context_of(at: &Option<String>) -> String {
@@ -193,6 +238,7 @@ pub fn parse(text: &str) -> Result<PrivacyPolicy, PolicyError> {
                     classification: Vec::new(),
                     quasi_identifiers: Vec::new(),
                     prohibited: Vec::new(),
+                    generalizations: Vec::new(),
                 });
             for constraint in rule
                 .get("constraint")
@@ -227,9 +273,24 @@ pub fn parse(text: &str) -> Result<PrivacyPolicy, PolicyError> {
                 });
             }
         }
+        // A hierarchy for a column the bound is not computed over. Caught here
+        // and not at write time for the same reason as the rule above: it is a
+        // defect in the policy, the corpus has nothing to do with it, and the
+        // person who can fix it is reading this message. It is checked AFTER
+        // the loop above so that a document which is wrong in both ways is
+        // reported on the contradiction first — that one explains this one.
+        for (attribute, _) in &shape.generalizations {
+            if shape.classify(Some(attribute), attribute) != Classification::QuasiIdentifier {
+                return Err(PolicyError::GeneralizationOnNonQuasiIdentifier {
+                    shape: shape.shape.clone(),
+                    attribute: attribute.clone(),
+                });
+            }
+        }
         shape.classification.sort_by(|a, b| a.0.cmp(&b.0));
         shape.quasi_identifiers.sort();
         shape.prohibited.sort();
+        shape.generalizations.sort_by(|a, b| a.0.cmp(&b.0));
     }
 
     Ok(PrivacyPolicy {
@@ -265,6 +326,7 @@ fn read_constraint(
     if let Some(pair) = constraint.get("and").and_then(Value::as_array) {
         let mut attribute = None;
         let mut classification = None;
+        let mut generalization = None;
         for part in pair {
             let (left, right) = operand(part, expand)?;
             match left.as_str() {
@@ -278,6 +340,11 @@ fn read_constraint(
                         },
                     )?);
                 }
+                // The hierarchy, verbatim: not expanded, not interpreted, not
+                // converted. It is an object rather than a term, and the crate
+                // that can act on one is not this crate — see
+                // `profile::GENERALIZATION`.
+                profile::GENERALIZATION => generalization = Some(right),
                 other => {
                     return Err(PolicyError::UnknownTerm {
                         term: other.to_string(),
@@ -286,15 +353,38 @@ fn read_constraint(
                 }
             }
         }
-        let (Some(attribute), Some(classification)) = (attribute, classification) else {
+        // The attribute is what the other two are *about*, so it is the one part
+        // that cannot be missing. Either of the others alone is a complete
+        // statement: a classification with no hierarchy publishes the column as
+        // it is, which is what every policy written before the sixth term said.
+        let Some(attribute) = attribute else {
             return Err(PolicyError::Missing(
-                "an `odrl:and` pairing fossil:attribute with fossil:classification",
+                "an `odrl:and` naming a fossil:attribute",
             ));
         };
-        if classification == Classification::QuasiIdentifier {
-            shape.quasi_identifiers.push(attribute.clone());
+        if classification.is_none() && generalization.is_none() {
+            return Err(PolicyError::Missing(
+                "an `odrl:and` pairing fossil:attribute with fossil:classification or \
+                 fossil:generalization",
+            ));
         }
-        shape.classification.push((attribute, classification));
+        if let Some(hierarchy) = generalization {
+            let kind = hierarchy.get("kind").and_then(Value::as_str);
+            if !kind.is_some_and(|k| profile::HIERARCHY_KINDS.contains(&k)) {
+                return Err(PolicyError::UnknownHierarchyKind {
+                    shape: shape.shape.clone(),
+                    attribute,
+                    kind: kind.map(ToString::to_string),
+                });
+            }
+            shape.generalizations.push((attribute.clone(), hierarchy));
+        }
+        if let Some(classification) = classification {
+            if classification == Classification::QuasiIdentifier {
+                shape.quasi_identifiers.push(attribute.clone());
+            }
+            shape.classification.push((attribute, classification));
+        }
         return Ok(());
     }
 

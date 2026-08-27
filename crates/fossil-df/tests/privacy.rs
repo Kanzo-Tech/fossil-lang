@@ -116,6 +116,12 @@ fn person(quasi: &[&str]) -> ShapeRule {
             .collect(),
         quasi_identifiers: quasi.iter().map(|q| (*q).to_string()).collect(),
         prohibited: vec![],
+        // No hierarchy. Every test in this file measures a corpus somebody
+        // handed the verifier, which is the whole point of the file: the
+        // verifier does not derive, and its arithmetic must be assertable
+        // without anything having been derived first. `tests/generalize.rs`
+        // is where a declared hierarchy is exercised.
+        generalizations: vec![],
     }
 }
 

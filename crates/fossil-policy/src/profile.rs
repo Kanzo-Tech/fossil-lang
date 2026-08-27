@@ -1,4 +1,4 @@
-//! The fossil privacy profile: five `odrl:LeftOperand`s and two classification
+//! The fossil privacy profile: six `odrl:LeftOperand`s and two classification
 //! concepts, and the argument for each one's existence.
 //!
 //! # Why a profile at all
@@ -38,14 +38,46 @@
 //!   person"), which is a direct identifier and is used below; the *combination*
 //!   case is absent. Hence [`QUASI_IDENTIFIER`].
 //!
-//! # Why five, and why it stops at five
+//! # Why six, and the argument the sixth needed
 //!
 //! Catena-X is the one production European data-space profile and it ships
 //! **four** `odrl:LeftOperand`s — `FrameworkAgreement`, `Membership`,
 //! `ContractReference`, `UsagePurpose` — for an entire automotive industry, and
-//! not one of them is schema-aware. That is the bar. Five here, of which one
-//! ([`ATTRIBUTE`]) buys the granularity ODRL lacks and three are the parameters
-//! DPV cannot hold. A sixth needs an argument this file does not have.
+//! not one of them is schema-aware. That is the bar. One ([`ATTRIBUTE`]) buys
+//! the granularity ODRL lacks, three are the parameters DPV cannot hold, and
+//! this file said for as long as there were five of them that **a sixth needs
+//! an argument it did not have**. Here is the argument.
+//!
+//! The five terms let a policy *state* a bound. Not one of them lets a writer
+//! *reach* one. That was not a gap in the vocabulary, it was a gap in the
+//! system: `fossil-kanon` could derive a generalisation and `fossil-df` could
+//! verify one, and nothing anywhere said which hierarchy a given predicate is
+//! generalised by — so the verification could only ever refuse, and a release
+//! passed only if the source data happened to be k-anonymous already. A bound
+//! nothing can satisfy is not a bound, it is a refusal with a number on it.
+//! [`GENERALIZATION`] is that missing edge and it is the whole of it: one term,
+//! carrying one hierarchy, for one attribute.
+//!
+//! Catena-X's four are the wrong bar for *this* term specifically, and it is
+//! worth saying why rather than treating «four is the bar» as arithmetic. All
+//! four are about contract eligibility — who may use the asset, under which
+//! agreement, for what stated purpose. None is schema-aware, so none of them
+//! could parameterise a transformation even in principle; a profile that
+//! reaches inside the asset is answering a question that profile never asks.
+//! The bar it does set — *do not mint a term for something an existing
+//! vocabulary can say* — is the one applied here, and it is met: see the DPV
+//! paragraph above, which holds for a hierarchy exactly as it holds for a k.
+//! DPV has `dpv:Generalisation` as a bare class you assert or do not, and
+//! nowhere to put the levels.
+//!
+//! A **seventh** now needs an argument this file does not have. The one that
+//! will be asked for first is a generalisation *margin* — «derive to k times
+//! this» — as a mitigation for the minimality attack, and the answer is that
+//! [`ANONYMITY_K`] already expresses it: a producer who wants a table that is
+//! not minimal for `k` declares a larger `k` and gets exactly that, with the
+//! number they chose published on the artifact instead of hidden in a
+//! multiplier. See `fossil_df::generalize` for what the writer does about
+//! minimality with the terms that exist.
 //!
 //! # The interoperability claim, which is weaker than it looks
 //!
@@ -103,6 +135,55 @@ pub const ABSENT_QUASI_IDENTIFIER: &str =
 /// of the released population.
 pub const SUPPRESSION_BUDGET: &str = "https://fossil-lang.org/ns/privacy#suppressionBudget";
 
+/// `fossil:generalization` — **how** that predicate is generalised to reach
+/// [`ANONYMITY_K`].
+///
+/// Paired with [`ATTRIBUTE`] under an `odrl:and`, exactly as [`CLASSIFICATION`]
+/// is, and for the same reason: «this attribute is generalised by that
+/// hierarchy» is two facts and a `Constraint` holds one triple.
+///
+/// # The `rightOperand` is the hierarchy itself, inline
+///
+/// Not a name drawn from a registry, and not an IRI pointing at a document.
+///
+/// A **registry** — `fossil:ukPostcode` and two others — would undo the reason
+/// `fossil-kanon` ships its hierarchies as files in a directory rather than as
+/// constants in a module: a postcode hierarchy is a fact about a country's
+/// postcode system, revised by statisticians and not by programmers, and a
+/// closed enumeration in this file would make a recompile the unit of change
+/// for it again. Amnesia ships files; the directory is meant to be the
+/// interface.
+///
+/// An **IRI to fetch** is the one thing `document.rs` refuses on principle. A
+/// compile-time document whose meaning depends on a host being up is not a
+/// document, it is an outage, and that argument does not weaken because the
+/// thing fetched is a hierarchy rather than a `@context`.
+///
+/// So it is the object `fossil-kanon`'s `Hierarchy` deserialises from, written
+/// out in place — `{"kind": "prefix", "lengths": [1, 2, 4, 6]}` — which means a
+/// policy author pastes one of that crate's `hierarchies/*.json` files in
+/// verbatim and it works, which is what «the directory is the interface» has to
+/// mean if it means anything.
+///
+/// # And this crate does not interpret it
+///
+/// [`crate::ShapeRule::generalizations`] holds it as opaque JSON. `fossil-policy`
+/// is a leaf — serde, `serde_json`, thiserror — and depending on the
+/// anonymiser to read its own policy documents would invert the layering the
+/// crate docs open with: the manifest names policy vocabulary, the policy names
+/// nothing. What is checked here is that `kind` is one of the three the
+/// vocabulary admits, so a typo is a policy error rather than a write-time one;
+/// the levels inside are checked by the crate that can act on them.
+pub const GENERALIZATION: &str = "https://fossil-lang.org/ns/privacy#generalization";
+
+/// The three `kind`s a [`GENERALIZATION`] hierarchy may declare.
+///
+/// Mirrors `fossil_kanon::hierarchy::Hierarchy`'s serde tag, and is checked
+/// against rather than converted to — see [`GENERALIZATION`] on why this crate
+/// does not link the anonymiser. A fourth kind there is a fourth entry here and
+/// `crates/fossil-df/tests/generalize.rs` is where the two are made to meet.
+pub const HIERARCHY_KINDS: [&str; 3] = ["numeric", "prefix", "date"];
+
 /// `dpv:IdentifyingPersonalData` — DPV's own, and an exact fit: *"Personal Data
 /// that explicitly and by itself is sufficient to identify a person"*.
 pub const DIRECT_IDENTIFIER: &str = "https://w3id.org/dpv#IdentifyingPersonalData";
@@ -158,22 +239,41 @@ mod tests {
     use super::*;
     use crate::Classification;
 
-    /// Five left operands and no more. The number is the argument — Catena-X
+    /// Six left operands and no more. The number is the argument — Catena-X
     /// ships four for an industry — so it is asserted rather than described,
-    /// and a sixth turns this red on the way in.
+    /// and a **seventh** turns this red on the way in.
+    ///
+    /// It was five, and the sixth ([`GENERALIZATION`]) arrived with the
+    /// argument the module header now carries: the five stated a bound and none
+    /// of them could reach one, so the verification could only refuse. Turning
+    /// this test red is the point at which that argument has to be written
+    /// down, and it is the reason the assertion is a literal count rather than
+    /// `minted.len()` compared against itself.
     #[test]
-    fn the_profile_mints_five_left_operands() {
+    fn the_profile_mints_six_left_operands() {
         let minted = [
             ATTRIBUTE,
             CLASSIFICATION,
             ANONYMITY_K,
             ABSENT_QUASI_IDENTIFIER,
             SUPPRESSION_BUDGET,
+            GENERALIZATION,
         ];
-        assert_eq!(minted.len(), 5);
+        assert_eq!(minted.len(), 6);
         for term in minted {
             assert!(term.starts_with(NAMESPACE), "{term} is not ours to mint");
         }
+    }
+
+    /// The hierarchy kinds this crate checks against are the ones the
+    /// anonymiser deserialises, and the two lists live in different crates
+    /// because `fossil-policy` does not link `fossil-kanon`. Here the list is
+    /// merely pinned; `crates/fossil-df/tests/generalize.rs` is where a kind
+    /// this crate admits is actually round-tripped through the crate that acts
+    /// on it, which is the only place the two CAN be made to meet.
+    #[test]
+    fn the_admitted_hierarchy_kinds_are_the_three_the_anonymiser_has() {
+        assert_eq!(HIERARCHY_KINDS, ["numeric", "prefix", "date"]);
     }
 
     /// Two of the four classification values are DPV's, and the two that are

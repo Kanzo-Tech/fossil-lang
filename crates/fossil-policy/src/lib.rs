@@ -34,16 +34,28 @@
 //! # What it can express
 //!
 //! Per-predicate classification, a shape-level quasi-identifier **set**, a
-//! target `k`, a suppression budget, the null semantics, and prohibition — "this
-//! predicate is never published".
+//! target `k`, a suppression budget, the null semantics, prohibition — "this
+//! predicate is never published" — and, per predicate, the **generalisation
+//! hierarchy** the writer reaches `k` with.
 //!
 //! # What it deliberately cannot
 //!
-//! It names no anonymisation operator, and the language has none either. An
+//! It names no anonymisation **operator**, and the language has none either. An
 //! obligation an author discharges by remembering to call a function is one they
 //! can forget, and the failure is silent: the corpus writes, the manifest seals,
 //! and the missing call is discovered by the recipient. The policy states the
 //! bound; the writer refuses to seal a corpus that misses it.
+//!
+//! [`ShapeRule::generalizations`] is not a retreat from that and the distinction
+//! is the whole of why it is here. A hierarchy is a **parameter**, in the same
+//! sense `k` is: it is declared once, beside the bound it exists to reach, and
+//! it is applied by the writer on every run whether or not anybody remembered
+//! anything. There is still no `anon.generalize` to call and forget — there is
+//! no call. What changed is that the bound became reachable: for as long as the
+//! policy could name a `k` and no hierarchy, the verifier could only ever
+//! refuse, and a corpus passed exactly when its source data happened to be
+//! k-anonymous already. That is the half of a mechanism that exists without the
+//! half that makes it usable, and it is not a stricter design than this one.
 
 #![deny(unsafe_code)]
 
@@ -234,6 +246,37 @@ pub struct ShapeRule {
     /// the *schema* rather than at the rows: if a column for one of these is in
     /// the corpus, the corpus is refused, whatever is in it.
     pub prohibited: Vec<String>,
+    /// **How each quasi-identifier is generalised** — the declaration the
+    /// writer derives from, keyed the way [`Self::classification`] is keyed
+    /// (predicate IRI where there is one, short name otherwise).
+    ///
+    /// The value is the hierarchy, held as **opaque JSON**: the object
+    /// `fossil_kanon::hierarchy::Hierarchy` deserialises from, checked here only
+    /// for a `kind` this vocabulary admits. This crate is a leaf and does not
+    /// link the anonymiser — see [`profile::GENERALIZATION`] for why the
+    /// `rightOperand` is the hierarchy inline rather than a registry name or a
+    /// fetchable IRI, and why the levels inside are somebody else's to validate.
+    ///
+    /// # A missing entry is not an error, and it is not a default either
+    ///
+    /// A quasi-identifier with no hierarchy is **published as it is**. That is
+    /// the behaviour the corpus had before this field existed and it stays
+    /// available on purpose: a predicate that is already coarse in the source —
+    /// a region code, a decade — has nothing to generalise and inventing a
+    /// hierarchy for it would publish a `*` where a usable value was safe.
+    ///
+    /// The failure mode this leaves open is real and is caught elsewhere: a
+    /// producer who *meant* to generalise and mistyped the predicate gets no
+    /// generalisation, and then gets a **refusal** from the verifier rather than
+    /// a release, because nothing about the corpus improved. The bound is what
+    /// notices, which is the same division of labour every other field here
+    /// follows.
+    ///
+    /// Entries whose attribute is not classified [`Classification::QuasiIdentifier`]
+    /// are refused at parse time: generalising a column the bound is not
+    /// computed over damages the release and buys no anonymity, and a policy
+    /// that asks for it has confused two of its own fields.
+    pub generalizations: Vec<(String, serde_json::Value)>,
 }
 
 impl ShapeRule {
@@ -260,6 +303,21 @@ impl ShapeRule {
         self.prohibited
             .iter()
             .any(|key| iri == Some(key.as_str()) || key == name)
+    }
+
+    /// The generalisation hierarchy declared for one predicate, matched on IRI
+    /// then on short name — the same two-step [`Self::classify`] uses, because a
+    /// non-RDF corpus has no predicate IRIs and a policy for one has to be
+    /// writable anyway.
+    ///
+    /// `None` means «publish this column as it is», which is a position and not
+    /// an omission — see [`Self::generalizations`].
+    #[must_use]
+    pub fn hierarchy(&self, iri: Option<&str>, name: &str) -> Option<&serde_json::Value> {
+        self.generalizations
+            .iter()
+            .find(|(key, _)| iri == Some(key.as_str()) || key == name)
+            .map(|(_, h)| h)
     }
 }
 
