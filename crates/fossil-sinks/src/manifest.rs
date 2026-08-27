@@ -253,6 +253,58 @@ pub struct KAnonymity {
     /// silently scans as absent is the worst available outcome, so the shape is
     /// chosen to be one those scanners already read.
     pub quasi_identifiers: String,
+    /// **What the writer did to reach [`Self::k`]**, per generalised column.
+    ///
+    /// `none` when the policy declared no hierarchy and the quasi-identifiers
+    /// were published as the program produced them — which is what every corpus
+    /// written before the writer could derive anything says. Otherwise a
+    /// space-separated token per generalised column, in the same
+    /// `<Type>.<column>` spelling and the same flat-scalar grammar as
+    /// [`Self::quasi_identifiers`], for the same line-scanner reason:
+    ///
+    /// ```text
+    /// generalization: Person.birthYear@bucket Person.postcode@1-3/4
+    /// ```
+    ///
+    /// `@bucket` is a numeric column published as its enclosing **declared**
+    /// bucket. `@<coarsest>-<finest>/<declared>` is a levelled column — prefix
+    /// or date — with the coarsest and finest hierarchy levels any published
+    /// class sits at, over the levels the hierarchy declares. `finest ==
+    /// declared` means the hierarchy ran out before `k` did.
+    ///
+    /// # Why this is worth writing when so much else was left out
+    ///
+    /// The rule the rest of this struct follows is that a fact a reader cannot
+    /// check is not worth writing, and this field is the closest call in it.
+    ///
+    /// It earns its place because **`reached` means two different things
+    /// without it.** A `reached: 20` over raw postcodes and a `reached: 20`
+    /// over postcodes truncated to three characters are not the same release —
+    /// the second traded resolution the first still has — and a recipient
+    /// recomputing `k` from the Parquet gets 20 either way and cannot tell them
+    /// apart. The one number the manifest exists to publish is ambiguous
+    /// without this one beside it.
+    ///
+    /// And the levels **are** checkable, with one honest caveat. Every
+    /// published quasi-identifier cell is a node of a declared hierarchy — the
+    /// writer refuses to publish an observed range, precisely so that this
+    /// stays true — so a reader can read a column, decide which level each cell
+    /// sits at, and recompute the pair. What they need that the corpus does not
+    /// carry is the hierarchy itself, which lives in the policy document that
+    /// [`Self::policy`] names and does not locate. That is a weaker position
+    /// than [`Self::quasi_identifiers`], which is self-contained, and it is
+    /// stated rather than papered over: the field is checkable by the recipient
+    /// who has the policy, and the recipient who has the policy is the one the
+    /// field is for.
+    ///
+    /// # What it does not claim
+    ///
+    /// Not that the source data was any finer. A column already coarse in the
+    /// source generalises to the same cells, and nothing in the released bytes
+    /// can distinguish that — which is fine, because the claim here is about
+    /// what a recipient holds, not about what a producer started from.
+    #[serde(default)]
+    pub generalization: String,
     /// The `odrl:uid` of the policy document this corpus was verified against.
     /// A name, not a location: the document is not in the corpus, and a corpus
     /// that carried its own policy would be a corpus that can be handed on with
@@ -1032,6 +1084,7 @@ version: gar/v1
             suppressed: 143,
             suppression_budget_ppm: 20_000,
             quasi_identifiers: "Person.birth_year Person.postcode Person.sex".to_string(),
+            generalization: "Person.birth_year@bucket Person.postcode@1-3/4".to_string(),
             policy: "https://example.org/policies/persons-v1".to_string(),
             profile: "https://fossil-lang.org/ns/privacy/v1".to_string(),
         }))

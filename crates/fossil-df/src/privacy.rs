@@ -408,6 +408,15 @@ fn seal(policy: &PrivacyPolicy, measurements: &[Measured]) -> Privacy {
         suppressed,
         suppression_budget_ppm: policy.suppression_budget_ppm,
         quasi_identifiers: names.join(" "),
+        // `none`, always, from here — and it is not a placeholder waiting to be
+        // corrected so much as the only answer this function is entitled to
+        // give. A verifier measures published columns; nothing it can see tells
+        // it whether a value was generalised on the way or arrived that way, and
+        // a field it filled in from an argument would be a field it was TOLD.
+        // `crate::generalize::record` overwrites it afterwards, from the deriver
+        // that actually did the work, and a caller that verified without
+        // deriving leaves it saying `none`, which is true for that release.
+        generalization: "none".to_string(),
         policy: policy.uid.clone(),
         profile: policy.profile.clone(),
     })
