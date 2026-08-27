@@ -29,13 +29,18 @@
 export { initFossilGraphWasm } from './load.js';
 export type { InitFossilGraphWasmOpts } from './load.js';
 
-export { createGraphClient } from './client.js';
-export type {
-  GraphClient,
-  CreateGraphClientOpts,
-  QueryFn,
-  QueryRow,
-} from './client.js';
+// The one capability a host supplies, for every member of the door.
+export type { QueryFn, QueryRow } from './query.js';
+
+// `createGraphClient` is NOT exported, and its absence is the point of this barrel.
+//
+// It took `{ query, manifestFiles }` and returned the six verbs; `openCorpus` takes `(url,
+// { query })` and returns those same six plus the camera. Two entry points over one manifest with
+// no rule for choosing between them is how `node()` and `read({ where: "subject = …" })` came to
+// be two answers to one question, in two languages, over two SQL generators. There is one door
+// now, and `client.ts` is the transport behind it — still a module, still tested directly by
+// `tests/client.test.ts`, and public in the wasm-bindgen sense only because it is generated.
+
 
 // The addressing half, and it deliberately shares nothing with the verb half but the manifest:
 // no WASM to initialise, no `query` callback, no promise. A notebook, a CLI or a server opens the
@@ -70,10 +75,11 @@ export type {
   AddressedTiles,
 } from './address.js';
 
-// The reference API over that same addressing: `openCorpus(url, { query })` and the four members.
-// It is `@fossil-lang/graph/corpus` for the same reason the addressing is a subpath of its own —
-// it needs no WASM, only the engine the host already has — and this re-export is for a consumer
-// already holding the verbs. `tests/address-standalone.test.ts` proves the subpath, not this line.
+// The door. It had a subpath of its own — `@fossil-lang/graph/corpus` — whose one justification
+// was that its closure reached no WASM, and it reaches the verbs now, so the justification is gone
+// and so is the subpath. The objection that answered was never large: `openCorpus` runs a `DESCRIBE`
+// per vertex type before it returns, so a caller holding one is already in "I have an engine"
+// territory. `./address` is the half that genuinely stands alone, and it keeps its subpath.
 export { CorpusReadError, openCorpus } from './corpus.js';
 export type {
   Answer,

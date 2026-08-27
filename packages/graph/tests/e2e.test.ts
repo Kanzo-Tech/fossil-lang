@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/blocking';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { createGraphClient, initFossilGraphWasm } from '../src/index.js';
-import type { GraphClient, QueryRow } from '../src/index.js';
+import { createGraphClient, type GraphClient } from '../src/client.js';
+import { initFossilGraphWasm } from '../src/load.js';
+import type { QueryRow } from '../src/query.js';
 
 // End-to-end: the binding's verbs run for real against DuckDB-WASM (the actual
 // target engine, blocking node API) reading an in-memory GraphAr-shaped dataset.

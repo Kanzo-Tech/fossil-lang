@@ -13,11 +13,10 @@ import { GRAPH_INFO_PATH } from '../src/address.js';
 /**
  * The addressing half opens a corpus with no WASM at all — and this is the test that says so.
  *
- * `./corpus` is here for the same reason and by the same method. `openCorpus` is the reference API
- * and it has to decode Parquet, which is exactly the dependency this package does not have: the
- * engine arrives as a `query` callback, so the module's own closure is still `corpus.js` plus the
- * two the addressing needs. A decoder pulled in as a dependency would not be a type error anywhere,
- * and no test but this one would notice.
+ * `./corpus` was here for the same reason and is not any more. Its one justification was that
+ * `openCorpus`'s closure reached no WASM; the door reaches the six verbs now, so it does, and a
+ * subpath whose only claim was WASM-freedom cannot keep making it. The addressing still can, and
+ * that is what this file is left proving.
  *
  * It was a sentence in `index.ts` and it was false. `exports` published one entry, `.`, whose
  * module graph reaches `client.js` and `load.js`, and both of those static-import
@@ -119,35 +118,6 @@ describe('@fossil-lang/graph/address — reachable without the WASM toolchain', 
       shift: '12',
       info: GRAPH_INFO_PATH,
       kinds: ['function', 'function', 'function'],
-    });
-  }, 120_000);
-});
-
-describe('@fossil-lang/graph/corpus — the reference API brings no engine with it', () => {
-  it('publishes the subpath openCorpus is reached by', () => {
-    expect(manifest.exports['./corpus']).toEqual({
-      types: './dist/corpus.d.ts',
-      import: './dist/corpus.js',
-    });
-  });
-
-  it('loads, and refuses to open a corpus, with nothing installed beside it', () => {
-    // The probe asks for the failure rather than for a corpus: there is no engine here, which is
-    // the whole point. A `query` that is not a function has to be caught by `openCorpus` itself,
-    // because the alternative is a TypeError from inside a template literal three calls down.
-    const stdout = standalone('corpus', 'src/corpus.ts', [
-      "import { CorpusManifestError, CorpusReadError, openCorpus } from '@fossil-lang/graph/corpus';",
-      'const errors = [];',
-      "try { await openCorpus('https://example.org/corpus', {}); } catch (e) { errors.push(e.constructor.name); }",
-      'process.stdout.write(JSON.stringify({',
-      '  kinds: [typeof openCorpus, typeof CorpusManifestError, typeof CorpusReadError],',
-      '  errors,',
-      '}));',
-    ]);
-
-    expect(JSON.parse(stdout)).toEqual({
-      kinds: ['function', 'function', 'function'],
-      errors: ['TypeError'],
     });
   }, 120_000);
 });

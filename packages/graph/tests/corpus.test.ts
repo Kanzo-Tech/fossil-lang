@@ -1,4 +1,5 @@
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -8,6 +9,7 @@ import { ConsoleLogger, NODE_RUNTIME, createDuckDB } from '@duckdb/duckdb-wasm/b
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { CorpusManifestError, CorpusReadError, openCorpus, type Corpus } from '../src/corpus.js';
+import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryFn, QueryRow } from '../src/query.js';
 
 /**
@@ -88,6 +90,15 @@ beforeAll(async () => {
   // the point of `idOf` is that the API survives a host that does either.
   query = async (sql: string): Promise<QueryRow[]> =>
     conn.query(sql).toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
+
+  // The verbs run in `fossil-graph-wasm`, and `openCorpus` boots it on the first verb call only
+  // when it was told where it is. Here the module is booted directly, which is the other half of
+  // the same memoised init and the shape a host that already holds the WASM is in.
+  await initFossilGraphWasm({
+    wasmUrl: (await readFile(
+      fileURLToPath(new URL('../pkg/fossil_graph_wasm_bg.wasm', import.meta.url)),
+    )) as unknown as URL,
+  });
 
   corpus = await openCorpus(CORPUS, { query });
 }, 60_000);
@@ -311,14 +322,13 @@ describe('node — the identity, and what it refuses to be', () => {
   });
 });
 
-describe('neighbours — a walk seeded by identity', () => {
-  const seedOf = async (denseId: number) =>
-    String(
-      await scalar(
-        `SELECT subject FROM read_parquet(${vertexTiles()}) WHERE dense_id = ${denseId}`,
-      ),
-    );
+/** The subject IRI of one address, read by this file rather than by the code under test. */
+const seedOf = async (denseId: number) =>
+  String(
+    await scalar(`SELECT subject FROM read_parquet(${vertexTiles()}) WHERE dense_id = ${denseId}`),
+  );
 
+describe('neighbours — a walk seeded by identity', () => {
   it('reaches exactly the one-hop neighbourhood in both orientations', async () => {
     const seed = await seedOf(42);
     const hood = await corpus.neighbours([seed]);
@@ -491,6 +501,103 @@ describe('neighbours — a walk seeded by identity', () => {
     // finds out by measuring. This corpus has an index; `refuses` below covers one without.
     expect(corpus.types.vertices.every((v) => v.indexed)).toBe(true);
   });
+});
+
+describe('the verbs, through the same door', () => {
+  /**
+   * The six verbs answer over a corpus that was opened by URL — which is the whole of the merge.
+   *
+   * They were `createGraphClient`, a second entry point taking the same two arguments and with no
+   * rule for choosing. It is the transport now. What it needed and `openCorpus` did not is the
+   * bridge asserted below: the verbs' SQL names tables, this corpus is Parquet files, and the door
+   * registers the temp views that join the two.
+   *
+   * **These do not assert what the corpus API asserts elsewhere, on purpose.** A verb reads the
+   * MANIFEST's vocabulary and this corpus declares one property against five columns on disk, so
+   * `read` answers with `subject` alone and `schema` reports no fields at all. That divergence is
+   * the reason `openCorpus` describes the bytes instead, and pinning it here is what stops the two
+   * halves being confused for one.
+   */
+  it('answers a verb over a corpus opened by URL', async () => {
+    const { vertices, edges, fields } = await corpus.schema();
+    expect(vertices).toHaveLength(1);
+    expect(vertices[0]!.name).toBe('Person');
+    // The count is `count(*)` over the registered view, not the manifest's declaration — so this
+    // is the bytes agreeing with `vertex_count`, which is the disagreement the corpus guards
+    // exist to catch.
+    expect(vertices[0]!.count).toBe(Number(VERTEX_COUNT));
+    expect(edges).toHaveLength(1);
+    expect(edges[0]!.table_name).toBe('Person_knows_Person');
+    expect(edges[0]!.count).toBe(Number(EDGE_COUNT));
+    // Five columns on disk, one declared, and `subject` is a writer column: no field survives.
+    expect(fields).toHaveLength(0);
+  }, 30_000);
+
+  it('reads one vertex the way the verb surface says to — `where: subject = …`', async () => {
+    const id = await seedOf(7);
+    const { rows } = await corpus.read({ vertex_type: 'Person', where: `subject = ${lit(id)}` });
+    expect(rows).toHaveLength(1);
+    // The manifest's vocabulary, which is `subject` and nothing else. `node` on the same identity
+    // answers with five columns and a position, because it reads the bytes.
+    expect(rows[0]).toEqual({ subject: id });
+    const placed = await corpus.node(id);
+    expect(placed!.id).toBe(id);
+    expect(Object.keys(placed!.fields)).toEqual(['cluster_id']);
+  }, 30_000);
+
+  it('expands over the whole relation, in identities, where neighbours walks tiles', async () => {
+    const seed = await seedOf(7);
+    const reached = await corpus.expand({ from: [seed], depth: 1 });
+    const walked = await corpus.neighbours([seed], { depth: 1 });
+
+    // **They do not answer the same question, and the counts are how you can tell.** `expand`
+    // reads the source-ordered relation and walks OUT: seed plus out-neighbours. `neighbours`
+    // defaults to both orientations, because an undirected neighbourhood is what a drawing means
+    // by one and the corpus stores the adjacency twice so it can have it. Neither is a filter on
+    // the other.
+    expect(reached.vertices.length).toBeGreaterThan(0);
+    expect(reached.vertices.length).toBeLessThan(walked.vertices.length);
+    // One answers in IRIs and hops, the other in addresses and positions.
+    expect(typeof reached.vertices[0]!.iri).toBe('string');
+    expect(typeof walked.vertices[0]!.denseId).toBe('bigint');
+    // And only one of them says what it is missing.
+    expect(walked.frontier.length).toBeGreaterThan(0);
+    expect(walked.complete).toBe(false);
+  }, 30_000);
+
+  it('shadows a host table of the same name rather than replacing it', async () => {
+    // `Person` is not an unlikely name for a table the host already has. A plain `CREATE OR
+    // REPLACE VIEW` would destroy it; a TEMP one is resolved first and dropped with the
+    // connection. This is the assertion that keeps the door from writing to a host's catalog.
+    // Qualified by CATALOG, not by schema: a temp view lands in `temp.main` and the host's table
+    // in `memory.main`, so `main."Person"` names both and the temp one wins. That precedence is
+    // the mechanism under test, and it makes the schema qualifier useless for saying which.
+    await query(`CREATE OR REPLACE TABLE memory.main."Person" AS SELECT 99 AS host_owned`);
+    const own = await openCorpus(CORPUS, { query });
+    expect((await own.schema()).vertices[0]!.count).toBe(Number(VERTEX_COUNT));
+    // The host's table is untouched, and an unqualified name still reaches the corpus.
+    expect(await query(`SELECT host_owned FROM memory.main."Person"`)).toEqual([{ host_owned: 99 }]);
+    const [seen] = await query(`SELECT count(*) AS n FROM "Person"`);
+    expect(Number(seen!['n'])).toBe(Number(VERTEX_COUNT));
+    await query(`DROP TABLE memory.main."Person"`);
+  }, 30_000);
+
+  it('boots no WASM for a caller that only draws', async () => {
+    // The verbs are the only half that needs the module, so the module is instantiated on the
+    // first verb call. A window and an extent must not reach for it — this is asserted as the
+    // absence of a `CREATE ... VIEW`, which is the observable half of that boot.
+    const statements: string[] = [];
+    const drawing = await openCorpus(CORPUS, {
+      query: async (sql) => {
+        statements.push(sql);
+        return query(sql);
+      },
+    });
+    statements.length = 0;
+    const box = (await drawing.extent())!;
+    await drawing.window({ x: box.minX, y: box.minY, w: 1, h: 1 });
+    expect(statements.some((sql) => sql.includes('VIEW'))).toBe(false);
+  }, 30_000);
 });
 
 describe('what openCorpus refuses, and names', () => {

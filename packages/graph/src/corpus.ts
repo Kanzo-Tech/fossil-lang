@@ -1,5 +1,21 @@
 /**
- * A corpus, opened from a URL — the reference API, with the addressing underneath and invisible.
+ * A corpus, opened from a URL — **the door**, with the addressing underneath and invisible.
+ *
+ * There were three entry points over one manifest and no rule for choosing between them:
+ * `createGraphClient` for the verbs, `openCorpus` for the camera, `resolveCorpus` for the URLs.
+ * The first two took the same two arguments and answered overlapping questions in two languages
+ * through two SQL generators — `node` was `read` with `subject = '…'`, `neighbours` was `expand`.
+ * This is the one door now. `createGraphClient` is the transport it dispatches through, and
+ * `resolveCorpus` stays published on its own subpath because it is the arithmetic a third-party
+ * reader would otherwise re-derive: synchronous, WASM-free, and provably separable.
+ *
+ * **The object has two halves and the line between them is not a spelling.** `extent`, `window`,
+ * `node` and `neighbours` compute which FILES to open and open those; `schema`, `read`, `expand`,
+ * `path`, `aggregate` and `executeSql` name a relation and let the engine decide. The camera is
+ * addressed, not queried — an LOD is a different relation and not a filter — and `fossil-graph`'s
+ * own crate doc states the same rule from the other side: *pruning is which bytes are read, and
+ * that is the tiles' job, not a verb's*. See {@link Corpus.neighbours} for the one place the two
+ * halves answer questions that look identical and are not.
  *
  * `resolveCorpus` is not this. It is the addressing layer: it returns URLs and leaves the consumer
  * knowing what a tile is, which container carries one, how to ask for footers and how to join CSR
@@ -7,11 +23,13 @@
  * no `dense_id`, no Morton, no `by_source`, no prefixes and no footers in the caller's face:
  *
  * ```ts
- * const corpus = await openCorpus(url, { query });
+ * const corpus = await openCorpus(url, { query, wasmUrl });
  * corpus.types                                  // what is inside
  * await corpus.window({ x, y, w, h })           // vertices + edges, and whether that is all of them
  * await corpus.node(iri)
  * await corpus.neighbours([iri], { depth: 2 })
+ * await corpus.schema({ vertex_type: 'Person' })
+ * await corpus.aggregate({ vertex_type: 'Person', group_by: 'age', agg: 'count', bins: 20 })
  * ```
  *
  * **The one thing a host brings is an engine.** See `./query.ts` for why the capability is a single
@@ -59,6 +77,22 @@ import {
   type ResolvedCorpus,
   type VertexAddress,
 } from './address.js';
+import { createGraphClient, type GraphClient } from './client.js';
+import type {
+  AggregateParams,
+  AggregateResult,
+  ExecuteSqlParams,
+  ExecuteSqlResult,
+  ExpandParams,
+  ExpandResult,
+  PathParams,
+  PathResult,
+  ReadParams,
+  ReadResult,
+  SchemaParams,
+  SchemaResult,
+} from './generated.js';
+import { initFossilGraphWasm } from './load.js';
 import { join, paths, scan } from './manifest.js';
 import type { QueryFn, QueryRow } from './query.js';
 
@@ -258,7 +292,25 @@ export interface NeighboursParams {
 export interface Corpus {
   /** Where it lives, as {@link openCorpus} was given it. */
   readonly url: string;
-  /** What is inside. */
+  /**
+   * What is inside: the vertex and edge types, their counts, and every column a row carries.
+   *
+   * **Not {@link Corpus.schema}, and the difference is which artefact each one believes.** This is
+   * read once while the corpus is opening — counts from the manifest's `vertex_count`, columns
+   * from one `DESCRIBE` per type over the bytes — so it is a property rather than a call, it costs
+   * nothing to read again, and it cannot go stale within an open corpus. `schema()` is a verb: it
+   * asks the engine, counts with `count(*)`, takes its column list from the manifest's
+   * `property_groups`, and adds per-field cardinality and role for a type the call names.
+   *
+   * They disagree, and on the conformance corpus they disagree loudly: `property_groups` declares
+   * ONE property against five columns on disk, so `schema()` reports no fields and this reports
+   * `dense_id, subject, x, y, cluster_id`. That is not one of them being wrong. A verb composes
+   * SQL before it has seen a byte and can only read the declaration; this had a round trip to
+   * spend and spent it on the artefact. Where the two must agree is a corpus guard's job —
+   * `apps/corpus`'s `declared-count` is the one that catches a manifest lying about its rows.
+   *
+   * So: **this for what a row carries, `schema()` for what a field looks like.**
+   */
   readonly types: CorpusTypes;
   /**
    * The addressing underneath, for a caller that has outgrown this surface — a drawing path that
@@ -282,14 +334,95 @@ export interface Corpus {
   window(params: WindowParams): Promise<WindowAnswer>;
   /** One vertex by identity, or `null`. */
   node(id: string, params?: NodeParams): Promise<CorpusVertex | null>;
-  /** Everything within `depth` hops of a set of identities. */
+  /**
+   * Everything within `depth` hops of a set of identities.
+   *
+   * **{@link Corpus.expand} is not this, and neither one is a spelling of the other.** They were
+   * going to be merged, on the reading that a neighbourhood asked twice is a neighbourhood asked
+   * twice. Three differences say otherwise, and each is the same difference:
+   *
+   * - **How it walks.** This turns the frontier into tile numbers by shifting the addresses it
+   *   already holds, opens those adjacency tiles and no others, and does it once per hop.
+   *   `expand` is a recursive CTE over the whole edge relation — the query this member exists
+   *   because of, and which did not return in 45 seconds at a million vertices.
+   * - **What it answers with.** Placements: an address, an `x`, a `y`, and every payload column.
+   *   `expand` answers with IRIs and hop counts, which a canvas cannot draw without reading the
+   *   tiles again. The corpus stores the adjacency as two `dense_id` columns and nothing else, so
+   *   naming the far endpoint of every edge means opening the tile it lives in — and a
+   *   neighbourhood's edges point outward by construction.
+   * - **What it admits.** {@link Answer.complete}, {@link Answer.gaps} and
+   *   {@link Neighbourhood.frontier}: the orientations not read and the boundary the depth bound
+   *   cut. `ExpandResult` is two lists. An answer whose outermost ring is missing its own edges
+   *   looks whole in a count, which is why the boundary is a field here.
+   *
+   * `expand` also walks the source-ordered relation only, so it is directed where this defaults to
+   * both orientations. That is the smallest of the three and the easiest to mistake for the whole
+   * of it.
+   */
   neighbours(ids: Iterable<string>, params?: NeighboursParams): Promise<Neighbourhood>;
+
+  // ── The verbs ─────────────────────────────────────────────────────────────────────────────
+  //
+  // Six methods whose SQL is written in Rust — `fossil-graph`, single-source with the native
+  // runtime and with `fossil-mcp`'s server-side surface — and dispatched here through
+  // `fossil-graph-wasm`. They were `createGraphClient`, a second entry point with no rule for
+  // choosing between it and this one; it is the transport now, and this is the door.
+  //
+  // **They read a relation, where everything above reads tiles**, and that is the line between
+  // the two halves of this object rather than a spelling difference. A verb's SQL names a table
+  // and lets the engine decide which bytes to open; `window`, `extent` and `neighbours` compute
+  // which files to open and open those. `crates/fossil-graph/src/lib.rs` states the same rule
+  // from the other side — *pruning is which bytes are read, and that is the tiles' job, not a
+  // verb's*.
+  //
+  // **What a verb sees is the manifest's vocabulary, not the payload's.** {@link openCorpus}
+  // refuses to take the column list off `property_groups` and reads the bytes instead, with the
+  // count that decided it; the verbs have no bytes to read at the time they compose SQL, so they
+  // take the manifest at its word. On the conformance corpus that is one declared property
+  // against five columns on disk, so `read` answers with `subject` and `schema` reports no
+  // fields, while `types` above reports all five. Neither is wrong and they are not the same
+  // question — see {@link Corpus.types}.
+
+  /** The type lists, and per-field statistics for a named `vertex_type`. */
+  schema(params?: SchemaParams): Promise<SchemaResult>;
+  /**
+   * Rows of one vertex type under a `where` predicate, an order and a limit.
+   *
+   * `where` is SQL and carries the same authority as {@link Corpus.executeSql}: a host that gates
+   * one behind a permission MUST gate the other with it.
+   */
+  read(params: ReadParams): Promise<ReadResult>;
+  /**
+   * The neighbourhood of a set of vertices as IRIs — `all` walks outward up to `depth`, `into`
+   * keeps only the edges whose both ends are in the set.
+   *
+   * **Not the same call as {@link Corpus.neighbours}**, which is why both are here. This one is a
+   * recursive CTE over the whole edge relation and answers in identities; that one is tile
+   * arithmetic over the adjacency and answers in placements. See {@link Corpus.neighbours}.
+   */
+  expand(params: ExpandParams): Promise<ExpandResult>;
+  /** The shortest route between two vertices. */
+  path(params: PathParams): Promise<PathResult>;
+  /** One grouping, over values or — with `bins` — over equal-width ranges. */
+  aggregate(params: AggregateParams): Promise<AggregateResult>;
+  /** The escape hatch, for the question the other five cannot shape. */
+  executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
 }
 
 /** What {@link openCorpus} takes. */
 export interface OpenCorpusOptions {
   /** The host's engine. One method, and see `./query.ts` for why it is the only one. */
   query: QueryFn;
+  /**
+   * Where `fossil_graph_wasm_bg.wasm` is, for the verbs.
+   *
+   * Optional, and only the verbs need it: `types`, `extent`, `window`, `node` and `neighbours`
+   * write their own SQL and load nothing. Given, it is booted on the first verb call and not at
+   * open — a caller that only draws never instantiates it. Omitted, the caller is taken to have
+   * called `initFossilGraphWasm` itself, which is the same memoised boot; a verb called before
+   * either rejects with what the WASM says.
+   */
+  wasmUrl?: string | URL | Request | Response;
 }
 
 /** The four columns an answer reads by name; everything else is payload. */
@@ -870,10 +1003,86 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     return edges;
   };
 
+  /**
+   * The verb half, booted on first use and not before.
+   *
+   * **The verbs name tables and this corpus is files, so something has to bridge that.** Every
+   * statement `fossil-graph` composes reads `FROM "Person"` or `FROM "Person_knows_Person"` — it
+   * is the same SQL the native runtime and `fossil-mcp` run, and it is single-source with them
+   * precisely because it does not know where the bytes are. So the door registers the views the
+   * verbs expect, over the paths the manifest already gave it, and `crates/fossil-mcp/src/lib.rs`
+   * does the identical thing for the identical reason on the other side.
+   *
+   * **`TEMP`, and that is not a detail.** A plain `CREATE OR REPLACE VIEW "Person"` would
+   * overwrite a host's own table of that name — `Person` is not an unlikely name for one, and
+   * `tests/e2e.test.ts` creates exactly it. A temp view is resolved before `main` and dropped with
+   * the connection, so opening a corpus shadows the host's catalog for as long as the corpus is
+   * open and destroys nothing in it.
+   *
+   * **The edge orientation is a glob and it is the only one in this file.** A vertex type's tiles
+   * are enumerated from `vertex_count` and `chunk_size`, which is what the declared count is for;
+   * an adjacency's are not, because a tile whose vertices have no edges is a file that was never
+   * written and a run of them is a gap no arithmetic predicts. `read_parquet` over an enumerated
+   * list containing one absent file is an error, not an empty relation. The rule this file states
+   * elsewhere — never glob — is about the vertex payload, where a glob picks up the staged
+   * single-file copy beside the tiles and counts every row twice; `<adjacency>/tile*.parquet` has
+   * no such sibling inside it. `fossil-mcp` makes the same exception and says so.
+   */
+  let transport: Promise<GraphClient> | null = null;
+
+  const verbs = (): Promise<GraphClient> => {
+    transport ??= (async (): Promise<GraphClient> => {
+      if (options.wasmUrl !== undefined) await initFossilGraphWasm({ wasmUrl: options.wasmUrl });
+      for (const type of addressing.types) {
+        await query(
+          `CREATE OR REPLACE TEMP VIEW ${ident(type.type)} AS ` +
+            `SELECT * FROM read_parquet(${list(distinct(payloadFiles.get(type.type)!))})`,
+        );
+      }
+      for (const edge of addressing.edges) {
+        // The source-ordered orientation, because that is the one a verb reads the whole relation
+        // from. An edge type publishing none gets no view rather than a path that 404s — and the
+        // verb that reaches for it fails by name, which is the diagnosis.
+        const adjacency = edge.adjacency('src');
+        if (adjacency === null) continue;
+        const source =
+          adjacency.container === 'rowgroups'
+            ? lit(adjacency.tileUrl(0))
+            : lit(`${adjacency.prefix}tile*.parquet`);
+        await query(
+          `CREATE OR REPLACE TEMP VIEW ` +
+            `${ident(`${edge.srcType}_${edge.edgeType}_${edge.dstType}`)} AS ` +
+            `SELECT * FROM read_parquet(${source})`,
+        );
+      }
+      return createGraphClient({ query, manifestFiles });
+    })();
+    return transport;
+  };
+
   return {
     url,
     types,
     addressing,
+
+    async schema(params = {}) {
+      return (await verbs()).schema(params);
+    },
+    async read(params) {
+      return (await verbs()).read(params);
+    },
+    async expand(params) {
+      return (await verbs()).expand(params);
+    },
+    async path(params) {
+      return (await verbs()).path(params);
+    },
+    async aggregate(params) {
+      return (await verbs()).aggregate(params);
+    },
+    async executeSql(params) {
+      return (await verbs()).executeSql(params);
+    },
 
     async extent(type) {
       const address = vertexType(type);

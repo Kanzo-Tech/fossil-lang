@@ -3,8 +3,11 @@ import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { createGraphClient, initFossilGraphWasm } from '../src/index.js';
-import type { QueryRow } from '../src/index.js';
+// The transport, imported by module rather than through the barrel: `createGraphClient` is not a
+// public export any more — `openCorpus` is the door — and this file is what still tests it as one.
+import { createGraphClient } from '../src/client.js';
+import { initFossilGraphWasm } from '../src/load.js';
+import type { QueryRow } from '../src/query.js';
 
 // Smoke test for @fossil-lang/graph: exercises the REAL fossil-graph-wasm module
 // (first runtime test of the W5 step-2 binding) end-to-end — manifest parse +
