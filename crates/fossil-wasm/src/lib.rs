@@ -46,13 +46,14 @@ mod wasm_system;
 mod workspace;
 
 pub use crate::lsp_worker::start_lsp_worker;
-pub use crate::tokenize::{TokenRow, tokenize_native};
+pub use crate::tokenize::{TokenRow, token_kinds_native, tokenize_native};
 // The #[wasm_bindgen] `tokenize` and `semantic_legend` functions are exposed
 // to JS by virtue of their attribute. The `tokenize` module is `pub` so the
 // `#[wasm_bindgen]` items are reachable (the unreachable_pub lint would
 // otherwise flag them — they ARE reachable, just via wasm-bindgen-generated
 // glue, not via Rust callers).
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
@@ -121,7 +122,11 @@ impl WasmDb {
 /// Hosts construct a single playground per browser tab / Node process and
 /// reuse it across all method calls to amortise the Salsa interning +
 /// memoisation overhead.
-#[wasm_bindgen]
+///
+/// This is the RUST-side workspace and it is not the exported class: the JS
+/// boundary is [`WasmPlayground`], which holds one of these in a `RefCell` and
+/// exports it under the name `FossilPlayground`. That indirection is the fix
+/// for a real defect — the type-level note on [`WasmPlayground`] says which.
 pub struct FossilPlayground {
     db: WasmDb,
     /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
@@ -144,14 +149,13 @@ impl std::fmt::Debug for FossilPlayground {
     }
 }
 
-#[wasm_bindgen]
 impl FossilPlayground {
     /// Construct a new playground.
     ///
-    /// Installs `console_error_panic_hook` (idempotent —
-    /// Don't-Hand-Roll #8) so any panic inside compiler-core surfaces as a
-    /// `console.error` stack trace in the host (browser `DevTools` or Node).
-    #[wasm_bindgen(constructor)]
+    /// Installs `console_error_panic_hook` (idempotent) so any panic inside
+    /// compiler-core surfaces as a `console.error` stack trace in the host
+    /// (browser `DevTools` or Node).
+    #[must_use]
     pub fn new() -> Self {
         console_error_panic_hook::set_once();
         let system = Arc::new(WasmSystem::default());
@@ -166,24 +170,105 @@ impl FossilPlayground {
     // A `classification()` method sat here, returning the `{ name, wasm_class }`
     // manifest for the playground to gray out the native-only functions. There
     // are none: see the tombstone below `inferred_descriptor_native`.
+}
+
+/// The JS-facing workspace — `FossilPlayground` on the JS side, and a
+/// `RefCell` around the Rust one.
+///
+/// # Why the interior `RefCell`, and it is not a style choice
+///
+/// `wasm-bindgen` wraps every exported struct in its own `WasmRefCell`. A
+/// method taking `&mut self` borrows that cell EXCLUSIVELY for the call, and a
+/// failed borrow does not return — it panics, with
+/// *"recursive use of an object detected which would lead to unsafe aliasing in
+/// rust"*. On `wasm32-unknown-unknown` a panic is an abort: the trap unwinds
+/// nothing, so the borrow flag it was holding is never cleared, and **every
+/// later call on that object fails the same way for the life of the module.**
+/// One bad call poisons the workspace permanently.
+///
+/// That is a real defect and it was reachable from correct host code:
+/// `apps/playground` reproduced it by typing sixteen characters faster than its
+/// debounce, and the app carried a `busy` flag and a 120 ms coalesce to stay
+/// out of it. A mitigation a host has to remember is not a fix — and an editor
+/// is precisely the workload that forgets.
+///
+/// So no exported method takes `&mut self`. Every one takes `&self`, which
+/// wasm-bindgen borrows SHARED — shared borrows nest, so re-entry cannot fail
+/// there — and the mutation goes through this `RefCell` with
+/// `try_borrow_mut`. Genuine re-entry (a JS callback that calls back in while a
+/// call is live) now returns a catchable `Error` naming what happened, and
+/// **the workspace is still usable afterwards**, because a returned `Err` drops
+/// its guard where a panic did not.
+///
+/// The Rust-side [`FossilPlayground`] keeps its `&mut self` signatures
+/// untouched: `lsp_worker` already owns it inside an `Rc<RefCell<…>>`, and the
+/// native tests drive it directly. Only the JS boundary changed.
+#[wasm_bindgen(js_name = FossilPlayground)]
+pub struct WasmPlayground {
+    inner: RefCell<FossilPlayground>,
+}
+
+impl std::fmt::Debug for WasmPlayground {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WasmPlayground")
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+
+impl Default for WasmPlayground {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The message a refused re-entrant call carries.
+///
+/// It names the method and says what to do, because the host that hits this is
+/// an editor and the fix is always the same shape: coalesce the edit stream.
+fn busy_error(method: &str) -> JsError {
+    JsError::new(&format!(
+        "fossil workspace is busy: `{method}` was called while another call on \
+         the same workspace was still running. Coalesce edits (an LSP client \
+         debounces `didChange` rather than sending one per keystroke) and retry \
+         — the workspace is still usable."
+    ))
+}
+
+#[wasm_bindgen(js_class = FossilPlayground)]
+impl WasmPlayground {
+    /// Construct a new playground.
+    ///
+    /// Installs `console_error_panic_hook` (idempotent —
+    /// Don't-Hand-Roll #8) so any panic inside compiler-core surfaces as a
+    /// `console.error` stack trace in the host (browser `DevTools` or Node).
+    #[wasm_bindgen(constructor)]
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inner: RefCell::new(FossilPlayground::new()),
+        }
+    }
 
     // ----- Workspace lifecycle (the ty_wasm pattern) -----
 
     /// Open a file in the workspace. Returns a [`FileHandle`] the JS side
-    /// keys subsequent `update_file` / `close_file` / `compile_file` calls
-    /// on. `path` is the URI / virtual path the diagnostics carry back to
-    /// the LSP client.
+    /// keys subsequent `update_file` / `close_file` calls on. `path` is the
+    /// URI / virtual path the diagnostics carry back to the LSP client.
     ///
     /// Mirrors `ty_wasm::Workspace::open_file` (Astral). Interns a fresh
     /// [`fossil_base::SourceFile`] under the current Salsa revision.
     ///
     /// # Errors
     ///
-    /// Returns a JS error only if the internal counter is exhausted
-    /// (`u32::MAX` files — would require a runaway loop in JS, not a normal
-    /// failure mode).
-    pub fn open_file(&mut self, path: String, contents: String) -> Result<FileHandle, JsError> {
-        Ok(self.open_file_native(path, contents))
+    /// Returns a JS error if the workspace is already inside another call —
+    /// see the type-level note on [`WasmPlayground`].
+    pub fn open_file(&self, path: String, contents: String) -> Result<FileHandle, JsError> {
+        let mut pg = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| busy_error("open_file"))?;
+        Ok(pg.open_file_native(path, contents))
     }
 
     /// Apply an edit to an open file. Mutates the SAME `SourceFile` via the
@@ -197,9 +282,16 @@ impl FossilPlayground {
     ///
     /// # Errors
     ///
-    /// Returns a JS error if `handle` was never opened or was already closed.
-    pub fn update_file(&mut self, handle: FileHandle, contents: String) -> Result<(), JsError> {
-        self.update_file_native(handle, contents)
+    /// Returns a JS error if `handle` was never opened or was already closed,
+    /// or if the workspace is already inside another call — see the type-level
+    /// note on [`WasmPlayground`]. **Neither leaves the workspace unusable**,
+    /// which is the whole reason this method takes `&self`.
+    pub fn update_file(&self, handle: FileHandle, contents: String) -> Result<(), JsError> {
+        let mut pg = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| busy_error("update_file"))?;
+        pg.update_file_native(handle, contents)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
@@ -209,9 +301,14 @@ impl FossilPlayground {
     ///
     /// # Errors
     ///
-    /// Returns a JS error if `handle` was never opened or was already closed.
-    pub fn close_file(&mut self, handle: FileHandle) -> Result<(), JsError> {
-        self.close_file_native(handle)
+    /// Returns a JS error if `handle` was never opened or was already closed,
+    /// or if the workspace is busy.
+    pub fn close_file(&self, handle: FileHandle) -> Result<(), JsError> {
+        let mut pg = self
+            .inner
+            .try_borrow_mut()
+            .map_err(|_| busy_error("close_file"))?;
+        pg.close_file_native(handle)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
@@ -234,14 +331,16 @@ impl FossilPlayground {
     ///
     /// # Errors
     ///
-    /// Returns a JS error only if the result fails to serialize to `JsValue`.
+    /// Returns a JS error if the workspace is busy, or if the result fails to
+    /// serialize to `JsValue`.
     pub fn check(&self) -> Result<JsValue, JsError> {
         // Native-side tests reach the pure-Rust core via `check_rows()`;
         // the wasm-bindgen wrapper just serializes. Separating the two
         // halves keeps `cargo test -p fossil-wasm` runnable without a JS
         // runtime (the `to_value` call panics on native targets — the
         // wasm-bindgen library's deliberate guard).
-        serde_wasm_bindgen::to_value(&self.check_rows()).map_err(JsError::from)
+        let pg = self.inner.try_borrow().map_err(|_| busy_error("check"))?;
+        serde_wasm_bindgen::to_value(&pg.check_rows()).map_err(JsError::from)
     }
 
     /// Per-file diagnostic drain — the accessor the LSP Worker consumes for its
@@ -253,9 +352,14 @@ impl FossilPlayground {
     ///
     /// # Errors
     ///
-    /// Returns a JS error if `handle` is unknown, or if serialization fails.
+    /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
+    /// if serialization fails.
     pub fn diagnostics_for(&self, handle: FileHandle) -> Result<JsValue, JsError> {
-        let rows = self
+        let pg = self
+            .inner
+            .try_borrow()
+            .map_err(|_| busy_error("diagnostics_for"))?;
+        let rows = pg
             .diagnostics_for_rows(handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
@@ -264,48 +368,26 @@ impl FossilPlayground {
     // ----- Register a host-introspected descriptor -----
 
     /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
-    /// source binding name BEFORE invoking `Self::compile` /
-    /// `Self::compile_file`. The Rust compiler reads from this registration
-    /// during forward type propagation — the browser has no filesystem to
-    /// introspect a CSV from, so the column types must arrive from the host.
+    /// source binding name BEFORE invoking `check`. The Rust compiler reads
+    /// from this registration during forward type propagation — the browser has
+    /// no filesystem to introspect a CSV from, so the column types must arrive
+    /// from the host.
     ///
-    /// `descriptor_json` is the JSON serialisation of `InferredDescriptor`;
-    /// the canonical shape is exposed in `packages/wasm/src/index.ts` as
-    /// `InferredDescriptorJson`:
-    ///
-    /// ```json
-    /// {
-    ///   "uri": "examples/users.csv",
-    ///   "columns": [
-    ///     { "name": "id", "primitive": "integer" },
-    ///     { "name": "name", "primitive": "string" }
-    ///   ],
-    ///   "freshness_token": ""
-    /// }
-    /// ```
-    ///
-    /// Called by the browser-side playground orchestration AFTER running
-    /// DuckDB-WASM `DESCRIBE read_csv_auto('<resolved-url>')` and BEFORE
-    /// invoking `compile()` / `compile_file()`. Keyed by the source URI as the
-    /// program writes it (`"examples/users.csv"` for
-    /// `users := io.csv("examples/users.csv")`), NOT by the binding name and
-    /// NOT by the resolved URL the host fetched.
-    ///
-    /// Idempotent: re-registering the same `uri` OVERWRITES the previous entry
+    /// Registering the same URI twice REPLACES the previous descriptor
     /// — intentional, since the host re-introspects when the source changes.
-    /// A host that can tell whether it changed puts a token in
-    /// `freshness_token` and skips the `DESCRIBE` when the cache agrees.
     ///
     /// # Errors
     ///
     /// - Malformed JSON / missing required fields → JS `Error` with the
     ///   underlying `serde_json` message.
-    ///
-    /// Implementation: thin shim over the pure-Rust
-    /// [`Self::register_inferred_descriptor_native`] helper.
+    /// - The workspace is busy.
     #[wasm_bindgen(js_name = registerInferredDescriptor)]
     pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsError> {
-        self.register_inferred_descriptor_native(descriptor_json)
+        let pg = self
+            .inner
+            .try_borrow()
+            .map_err(|_| busy_error("registerInferredDescriptor"))?;
+        pg.register_inferred_descriptor_native(descriptor_json)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 }

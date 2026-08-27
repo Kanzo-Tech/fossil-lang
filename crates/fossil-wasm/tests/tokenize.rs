@@ -121,3 +121,71 @@ fn tokenize_kind_is_stable_within_one_call() {
     assert_eq!(a, b, "tokenize_native must be deterministic");
     assert!(!a.is_empty(), "non-empty source emits tokens");
 }
+
+/// The legend is indexed BY the discriminant, and this is what says so.
+///
+/// The comparison is against the lexer itself, not against a copy of it: for
+/// every source that lexes to exactly one token, the name the legend gives at
+/// that row's `kind` must be the name of the variant that source produces. A
+/// reorder of `Token` moves both sides together and this stays green, which is
+/// the whole point — the old TS-side table moved neither and was wrong in nine
+/// places before anyone looked.
+#[test]
+fn token_kinds_legend_indexes_by_kind() {
+    let legend = fossil_wasm::token_kinds_native();
+    assert!(
+        legend.len() >= 30,
+        "the legend covers the whole enum, got {}",
+        legend.len()
+    );
+
+    // One source per name we care to nail down. Each lexes to a single token,
+    // so `rows[0].kind` is the discriminant the legend must name.
+    for (src, expected) in [
+        ("//x", "Comment"),
+        ("from", "KwFrom"),
+        ("and", "KwAnd"),
+        ("not", "KwNot"),
+        ("@subject", "AtAttr"),
+        ("true", "True"),
+        ("false", "False"),
+        ("null", "Null"),
+        ("1.5", "Float"),
+        ("42", "Integer"),
+        ("users", "Ident"),
+        ("\"s\"", "String"),
+        (":=", "Define"),
+        ("==", "Eq"),
+        ("!=", "Neq"),
+        ("<=", "Le"),
+        (">=", "Ge"),
+        ("=", "Assign"),
+        (":", "Colon"),
+        (".", "Dot"),
+        ("(", "LParen"),
+        ("?", "Question"),
+        (" ", "Whitespace"),
+        ("\n", "Newline"),
+    ] {
+        let rows = tokenize_native(src);
+        assert_eq!(rows.len(), 1, "{src:?} must lex to exactly one token");
+        let kind = rows[0].kind as usize;
+        assert_eq!(
+            legend.get(kind).copied(),
+            Some(expected),
+            "{src:?} has kind {kind}, which the legend names {:?}",
+            legend.get(kind)
+        );
+    }
+}
+
+/// Every name in the legend is distinct — a duplicated entry would let two
+/// discriminants claim one highlight category and nothing else would notice.
+#[test]
+fn token_kinds_legend_has_no_duplicates() {
+    let legend = fossil_wasm::token_kinds_native();
+    let mut sorted = legend.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), legend.len(), "legend names must be distinct");
+}
