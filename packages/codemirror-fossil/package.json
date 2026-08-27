@@ -1,0 +1,58 @@
+{
+  "name": "@fossil-lang/codemirror-fossil",
+  "version": "0.0.0-development",
+  "description": "The fossil language layer for CodeMirror 6: highlighting from the compiler's own lexer (tokenize + tokenKinds) and diagnostics from its checker (check → @codemirror/lint). Extensions only — it composes into any editor rather than being one.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanzo-tech/fossil.git",
+    "directory": "packages/codemirror-fossil"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "//peers": "@codemirror/lint is NOT optional and the others are not either — this package IS the wiring between them and fossil, so a consumer that has none of them has no use for it. @fossil-lang/wasm is a peer rather than a dependency because the host owns when the module is instantiated (initFossilWasm takes the .wasm URL) and two copies of that glue is the duplication packages/wasm's client.ts split exists to prevent.",
+  "peerDependencies": {
+    "@codemirror/language": ">=6",
+    "@codemirror/lint": ">=6",
+    "@codemirror/state": ">=6",
+    "@codemirror/view": ">=6",
+    "@fossil-lang/wasm": "workspace:*"
+  },
+  "dependencies": {
+    "@fossil-lang/types": "workspace:*",
+    "@lezer/highlight": "^1.2.0"
+  },
+  "devDependencies": {
+    "@codemirror/language": "^6.10.0",
+    "@codemirror/lint": "^6.8.0",
+    "@codemirror/state": "^6.4.0",
+    "@codemirror/view": "^6.34.0",
+    "@fossil-lang/wasm": "workspace:*",
+    "happy-dom": "^15.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

@@ -5,6 +5,7 @@
  * the list):
  * - {@link initFossilWasm} — consumer-controlled .wasm URL loader (memoised).
  * - {@link tokenize} — calls the Rust lexer, returns TokenRow[].
+ * - {@link tokenKinds} — the legend for TokenRow.kind: variant names by index.
  * - {@link semanticLegend} — returns the LSP SemanticTokensLegend.
  * - {@link FossilPlayground} — Workspace API class for the LSP.
  *
@@ -29,6 +30,7 @@ export type { InitFossilWasmOpts } from './load.js';
 export {
   start_lsp_worker,
   tokenize,
+  tokenKinds,
   semanticLegend,
   FossilPlayground,
   refs,

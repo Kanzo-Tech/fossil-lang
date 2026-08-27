@@ -16,11 +16,12 @@ import {
   FileHandle as RawFileHandle,
   tokenize as rawTokenize,
   semantic_legend as rawSemanticLegend,
+  tokenKinds as rawTokenKinds,
   start_lsp_worker as rawStartLspWorker,
   refs as rawRefs,
   providers as rawProviders,
 } from '../pkg/fossil_wasm.js';
-import type { TokenRow, SemanticTokensLegend } from '@fossil-lang/types';
+import type { TokenRow, TokenKindLegend, SemanticTokensLegend } from '@fossil-lang/types';
 import type {
   CheckRow,
   InferredDescriptorJson,
@@ -70,6 +71,27 @@ export function tokenize(text: string): TokenRow[] {
   // `serde_wasm_bindgen::to_value`, so the shape matches `{ kind, start, end }`
   // exactly. Cast is safe because the Rust ↔ JS contract is enforced upstream.
   return rawTokenize(text) as TokenRow[];
+}
+
+/**
+ * The legend for {@link TokenRow.kind}: every lexer variant NAME, indexed by the
+ * discriminant a row carries. `tokenKinds()[row.kind]` is `"Comment"`,
+ * `"KwFrom"`, `"String"`, …
+ *
+ * **This is the contract, and the numbers are not.** `kind` is a variant
+ * discriminant of `fossil_syntax::lexer::Token`, so any reorder of that enum
+ * remaps every value with nothing going red. The predecessor of this package
+ * hard-coded the table (`enum FossilKind { Whitespace = 0, … }`) under a comment
+ * saying it had to be updated in lockstep; it was wrong in nine places by the
+ * time it was deleted. Keying on the name is what makes a reorder a non-event.
+ *
+ * An index past the end of the legend is a variant appended by a compiler newer
+ * than this host: `undefined`, and a host styles it as plain text.
+ *
+ * MUST be called after {@link initFossilWasm} has resolved.
+ */
+export function tokenKinds(): TokenKindLegend {
+  return rawTokenKinds() as string[];
 }
 
 /**
