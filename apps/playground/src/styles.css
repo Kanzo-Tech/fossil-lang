@@ -1,0 +1,120 @@
+/*
+ * MEANT TO BE DELETED, NOT EXTENDED.
+ *
+ * `@kanzo-tech/ui` is the intended design system and it is not on npm, so consuming it
+ * means vendoring tarballs across two repositories — `apps/docs/CLAUDE.md` defers that as
+ * needing its own argued page. Until that argument is made and won, this file is the
+ * smallest thing that makes the loop legible: three colours, one font stack, no
+ * components, no tokens, no variants, nothing worth keeping.
+ *
+ * If you find yourself adding a second button style here, that is the signal to go make
+ * the dependency argument instead.
+ */
+
+:root {
+  --bg: #ffffff;
+  --fg: #16161d;
+  --muted: #6b6b76;
+  --line: #e2e2e8;
+  --panel: #fafafa;
+  --error: #b4232b;
+  --warn: #8a6100;
+  --ok: #1a6b3c;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131317;
+    --fg: #e8e8ee;
+    --muted: #9a9aa6;
+    --line: #2c2c34;
+    --panel: #1a1a20;
+    --error: #ff8b8b;
+    --warn: #e5b95c;
+    --ok: #6ddb9c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+header .note { color: var(--muted); font-size: 0.8rem; }
+
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px;
+  background: var(--line);
+  min-height: calc(100vh - 3rem);
+}
+
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+
+section {
+  background: var(--bg);
+  padding: 1rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0; }
+
+textarea {
+  font: 13px/1.6 var(--mono);
+  width: 100%;
+  min-height: 22rem;
+  flex: 1;
+  resize: vertical;
+  padding: 0.6rem;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+button {
+  font: inherit;
+  font-weight: 500;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.diagnostics { list-style: none; margin: 0; padding: 0; font: 12px/1.5 var(--mono); }
+.diagnostics li { padding: 0.25rem 0; border-top: 1px solid var(--line); }
+.sev-1 { color: var(--error); }
+.sev-2 { color: var(--warn); }
+.clean { color: var(--ok); font: 12px var(--mono); }
+
+.rows { width: 100%; border-collapse: collapse; font: 12px var(--mono); }
+.rows th, .rows td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rows th { color: var(--muted); font-weight: 500; }
+
+.scroll { overflow-x: auto; }
+.log { font: 11px/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; margin: 0; }
+.bad { color: var(--error); }
+.files { font: 11px/1.5 var(--mono); color: var(--muted); list-style: none; padding: 0; margin: 0; }

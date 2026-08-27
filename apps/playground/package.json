@@ -1,0 +1,30 @@
+{
+  "name": "@fossil-lang/playground",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The loop, clickable: write a .fossil program in a browser tab, type-check it as you type, run it, get a corpus, query the corpus — all client-side, no server, the source bytes never leaving the machine. Never published; the pnpm-workspace entry is for resolution, not for npm.",
+  "type": "module",
+  "//scripts": "`build` type-checks first, because a playground that compiles but cannot resolve @fossil-lang/wasm's pkg/ is a build that passes and an app that white-screens. The three workspace dependencies each need their own `build` run first (each shells out to cargo + wasm-bindgen); `pnpm --filter @fossil-lang/playground... build` in the workflow is what orders that.",
+  "scripts": {
+    "dev": "vite --port 3300",
+    "build": "pnpm run typecheck && vite build",
+    "preview": "vite preview --port 3300",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.32.0",
+    "@fossil-lang/executor": "workspace:*",
+    "@fossil-lang/graph": "workspace:*",
+    "@fossil-lang/wasm": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  }
+}

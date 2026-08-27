@@ -1,0 +1,95 @@
+/**
+ * Half one of the loop: type-check as you type.
+ *
+ * `@fossil-lang/wasm` is the LSP server-side in the browser — the same `fossil-ide` free
+ * functions the native `fossil-lsp` drives over stdio, driven here over a function call.
+ * `FossilPlayground` is a workspace, not a compiler: it holds open files and re-checks
+ * them, because an editor edits.
+ *
+ * ## Two things a host has to supply, and neither is optional
+ *
+ * 1. **The shape document, by opening it.** `hello.fossil` says `io.shex("hello.shex")`.
+ *    The playground's filesystem is `WasmSystem`'s in-memory map and it is EMPTY — a
+ *    document the host never opened is not there, and `fossil-wasm` says so in as many
+ *    words: *"The playground's way to give the compiler a shape document is to open it."*
+ *    So `open()` opens the `.shex` FIRST. Without it the `name` key resolves against
+ *    nothing, the mapping writes no properties, and the run still succeeds with the
+ *    column simply absent — which is the failure mode worth knowing about, because it is
+ *    silent.
+ * 2. **The input columns, by registering a descriptor.** `User := io.csv("users.csv")`
+ *    declares no columns; they are introspected from the real file. Natively
+ *    `fossil-introspect` runs a `DESCRIBE` through DuckDB. Here `descriptor.ts` does the
+ *    same through DuckDB-WASM and pushes the answer in with
+ *    `registerInferredDescriptor` BEFORE the check.
+ *
+ * Skip (2) and `User.name` is an unknown column: the check reports it, correctly, and the
+ * editor looks broken for a program that is fine.
+ */
+import { FossilPlayground, initFossilWasm, type CheckRow } from '@fossil-lang/wasm';
+import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
+
+import { PROGRAM_PATH, SHEX, SHEX_PATH } from './example.js';
+
+export type { CheckRow };
+
+/** What `load()` measured on the way in — the cost of the checker, reported not guessed. */
+export interface BundleCost {
+  /** Bytes over the wire for the `.wasm`, as the browser reports it. */
+  bytes: number;
+  /** Wall-clock milliseconds from first byte requested to instantiated and callable. */
+  ms: number;
+}
+
+let playground: FossilPlayground | null = null;
+let programHandle: number | null = null;
+let cost: BundleCost | null = null;
+
+/** The measured cost of the checker bundle, or `null` before {@link load}. */
+export function checkerCost(): BundleCost | null {
+  return cost;
+}
+
+/**
+ * Fetch + instantiate the checker, open the shape document, open the program.
+ *
+ * Measured rather than declared: the `.wasm` is fetched here as a `Response` so its
+ * `Content-Length` is readable, and `initFossilWasm` accepts one directly — wasm-bindgen's
+ * `--target web` init takes `module_or_path`, and a `Response` is the streaming path.
+ */
+export async function load(program: string): Promise<void> {
+  if (playground) return;
+  const started = performance.now();
+  const response = await fetch(wasmUrl);
+  const buffer = await response.arrayBuffer();
+  await initFossilWasm({ wasmUrl: new Response(buffer, { headers: { 'content-type': 'application/wasm' } }) });
+  cost = { bytes: buffer.byteLength, ms: Math.round(performance.now() - started) };
+
+  playground = new FossilPlayground();
+  // The shape document first: opening it is what puts it in the registry, and the
+  // registry is a Salsa input, so opening it AFTER the program would also work (every
+  // query that missed it re-executes). Doing it first just means the first check is right.
+  playground.open_file(SHEX_PATH, SHEX);
+  programHandle = playground.open_file(PROGRAM_PATH, program) as unknown as number;
+}
+
+/** Push a host-introspected input schema at the compiler. See `descriptor.ts`. */
+export function registerDescriptor(json: string): void {
+  playground?.registerInferredDescriptor(json);
+}
+
+/** Re-check after an edit — the `textDocument/didChange` path, and the same Salsa setter. */
+export function update(program: string): CheckRow[] {
+  if (!playground || programHandle === null) return [];
+  playground.update_file(programHandle as never, program);
+  return playground.check() as CheckRow[];
+}
+
+/** Check without editing — used once after the descriptor lands. */
+export function check(): CheckRow[] {
+  return (playground?.check() ?? []) as CheckRow[];
+}
+
+/** LSP severity 1 is an error; 2 a warning. A program with no 1s is runnable. */
+export function hasErrors(rows: readonly CheckRow[]): boolean {
+  return rows.some((row) => row.severity === 1);
+}
