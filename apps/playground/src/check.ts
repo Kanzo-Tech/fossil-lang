@@ -83,11 +83,34 @@ export function registerDescriptor(descriptor: InferredDescriptorJson): void {
   playground?.registerInferredDescriptor(descriptor);
 }
 
-/** Re-check after an edit — the `textDocument/didChange` path, and the same Salsa setter. */
+/**
+ * Re-check after an edit — the `textDocument/didChange` path, and the same Salsa setter.
+ *
+ * **The `busy` guard is load-bearing and it is covering a real defect.** Calling
+ * `updateFile` again while a previous call is still on the stack makes wasm-bindgen throw
+ * *"recursive use of an object detected which would lead to unsafe aliasing in rust"* — the
+ * `RefCell` around the exported `FossilPlayground` refuses the second borrow — and once
+ * that has happened the workspace stays poisoned for the rest of the session, so every
+ * later keystroke fails too. Reproduced by typing sixteen characters into the textarea
+ * faster than a human can; a single keystroke never trips it.
+ *
+ * The guard plus `App`'s debounce means a re-entrant call cannot be issued from here. That
+ * is the right shape for an editor regardless — an LSP client coalesces `didChange`
+ * notifications rather than emitting one per character. But it is a mitigation, not the
+ * fix: a host that calls the surface correctly should not be able to poison it, and the
+ * one-line reproduction belongs on `crates/fossil-wasm` rather than in this app.
+ */
+let busy = false;
+
 export function update(program: string): CheckRow[] {
-  if (!playground || programHandle === null) return [];
-  playground.updateFile(programHandle, program);
-  return playground.check();
+  if (!playground || programHandle === null || busy) return [];
+  busy = true;
+  try {
+    playground.updateFile(programHandle, program);
+    return playground.check();
+  } finally {
+    busy = false;
+  }
 }
 
 /** Check without editing — used once after the descriptor lands. */

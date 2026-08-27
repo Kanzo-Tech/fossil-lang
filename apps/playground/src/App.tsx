@@ -70,14 +70,23 @@ export default function App() {
     })();
   }, [say]);
 
+  // Debounced, the way an LSP client coalesces `didChange` rather than emitting one per
+  // character — and here it is not only manners: see `check.ts`'s `busy` guard for the
+  // re-entrancy the wasm surface cannot survive. 120 ms is below the threshold where an
+  // editor stops feeling live and well above a fast typist's inter-key interval.
+  const pending = useRef<number | undefined>(undefined);
+
   const onEdit = (next: string) => {
     setProgram(next);
     if (phase === 'booting') return;
-    try {
-      setDiagnostics(checker.update(next));
-    } catch (cause) {
-      setError(String(cause));
-    }
+    window.clearTimeout(pending.current);
+    pending.current = window.setTimeout(() => {
+      try {
+        setDiagnostics(checker.update(next));
+      } catch (cause) {
+        setError(String(cause));
+      }
+    }, 120);
   };
 
   const onRun = async () => {
