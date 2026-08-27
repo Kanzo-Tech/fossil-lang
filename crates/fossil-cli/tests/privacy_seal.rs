@@ -164,6 +164,24 @@ fn generalising_policy(k: u64) -> String {
     )
 }
 
+/// The same program, binding its own policy document (grammar.bnf, `PolicyDef`).
+///
+/// One line, and it is the whole of the difference between an obligation an
+/// operator has to remember and one that lives in the file under review.
+const PROGRAM_BINDING_A_POLICY: &str = "\
+policy := \"people.jsonld\"
+
+type { Person } := io.shex(\"person.shex\")
+
+Users := io.csv(\"users.csv\")
+
+People : Person from Users
+    @subject = \"https://example.org/person/{Users.id}\"
+    birthYear = Users.birth_year
+    postcode = Users.postcode
+    diagnosis = Users.diagnosis
+";
+
 fn write_fixture(dir: &Path) {
     let mut users = String::from("id,birth_year,postcode,diagnosis\n");
     for i in 0..PEOPLE {
@@ -220,9 +238,113 @@ fn a_run_with_no_policy_says_so_on_the_artifact() {
     run(dir.path(), &dest, None).expect("a run with no policy is still a run");
 
     // Not an omission. `undeclared` is a claim a recipient can read, and it is
-    // what forgetting the policy produces — which is the only reason forgetting
-    // is survivable while the binding is a host argument.
+    // what naming no policy produces — by either of the two ways of naming one.
+    // A program that binds none and a run with no `--policy` is a release whose
+    // producer said nothing, and saying nothing has to be legible.
     assert_eq!(privacy_block(&dest), vec!["bound: undeclared".to_string()]);
+}
+
+// ─── The binding, against the flag ──────────────────────────────────────────
+//
+// `--policy` was the only way to name a policy, and a flag is a thing you
+// forget. These four are what the production bought.
+
+/// **The claim, stated as a test.** `run` is handed NO policy — the same call
+/// that produced `bound: undeclared` above — and the release is verified anyway,
+/// because the program binds one. Nothing on the command line, nothing for an
+/// operator to remember, and the seal is the same seal the flag produces.
+#[test]
+fn a_policy_the_program_binds_is_verified_with_nothing_on_the_command_line() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_fixture(dir.path());
+    std::fs::write(dir.path().join("mapping.fossil"), PROGRAM_BINDING_A_POLICY)
+        .expect("write the binding program");
+    std::fs::write(dir.path().join("people.jsonld"), policy(5)).expect("write the policy");
+    let dest = dir.path().join("out");
+
+    run(dir.path(), &dest, None).expect("the bound holds");
+
+    let block = privacy_block(&dest);
+    assert!(
+        block.contains(&"bound: k-anonymity".to_string()),
+        "a bound policy is a checked bound: {block:?}",
+    );
+    assert!(block.contains(&"k: 5".to_string()), "{block:?}");
+    assert!(
+        block.contains(&"policy: https://example.org/policies/people-v1".to_string()),
+        "and the manifest names the document that was read: {block:?}",
+    );
+}
+
+/// The refusal half, from the binding. A producer who binds a `k` their data
+/// misses gets the same refusal and the same empty destination — the binding is
+/// not a weaker statement of the bound, it is the same statement in a place that
+/// cannot be skipped.
+#[test]
+fn a_bound_policy_the_release_misses_refuses_and_writes_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_fixture(dir.path());
+    std::fs::write(dir.path().join("mapping.fossil"), PROGRAM_BINDING_A_POLICY)
+        .expect("write the binding program");
+    // 20 to a class, and 25 asked for.
+    std::fs::write(dir.path().join("people.jsonld"), policy(25)).expect("write the policy");
+    let dest = dir.path().join("out");
+
+    let err = run(dir.path(), &dest, None).expect_err("the bound does not hold");
+    let message = format!("{err:?}");
+    assert!(message.contains("k=20"), "{message}");
+    assert!(message.contains("k=25"), "{message}");
+    assert!(
+        !dest.join("graph.graph.yml").exists(),
+        "a refused release must leave no manifest"
+    );
+}
+
+/// **Both given is an ERROR, and the decision is written down.** Letting the
+/// flag win lets an operator weaken a bound the program declares; letting the
+/// program win makes the flag silently inert, which is worse still because the
+/// operator has evidence they were checked against a document nobody opened.
+/// One message, repaired by deleting one of the two.
+#[test]
+fn binding_a_policy_and_passing_the_flag_as_well_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_fixture(dir.path());
+    std::fs::write(dir.path().join("mapping.fossil"), PROGRAM_BINDING_A_POLICY)
+        .expect("write the binding program");
+    std::fs::write(dir.path().join("people.jsonld"), policy(5)).expect("write the policy");
+    let dest = dir.path().join("out");
+    let flag = fossil_policy::parse(&policy(5)).expect("a valid policy");
+
+    let err = run(dir.path(), &dest, Some(&flag)).expect_err("two policies is not a merge");
+    let message = format!("{err:?}");
+    assert!(message.contains("--policy"), "{message}");
+    assert!(
+        !dest.join("graph.graph.yml").exists(),
+        "and it refuses BEFORE anything is written"
+    );
+}
+
+/// A bound document that cannot be read is a message about the policy, not a
+/// run that gets most of the way and then cannot say what it was checking
+/// against. The message names the reference as WRITTEN as well as the locator it
+/// resolved to, because those differ under `@conn` and under a program run from
+/// another directory, and only one of the two is in the source.
+#[test]
+fn a_bound_policy_that_cannot_be_read_refuses_naming_what_the_program_wrote() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_fixture(dir.path());
+    std::fs::write(dir.path().join("mapping.fossil"), PROGRAM_BINDING_A_POLICY)
+        .expect("write the binding program");
+    // and no `people.jsonld` beside it.
+    let dest = dir.path().join("out");
+
+    let err = run(dir.path(), &dest, None).expect_err("the policy is not there");
+    let message = format!("{err:?}");
+    assert!(message.contains("people.jsonld"), "{message}");
+    assert!(
+        !dest.join("graph.graph.yml").exists(),
+        "and nothing was written"
+    );
 }
 
 #[test]
