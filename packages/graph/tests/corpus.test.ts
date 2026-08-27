@@ -429,18 +429,61 @@ describe('neighbours — a walk seeded by identity', () => {
         return query(sql);
       },
     });
-    const before = queries;
-    await counted.neighbours(seeds, { depth: 1 });
-    // The bound is FIVE and it was four, because this corpus carries an identity index and the
-    // seek path is two reads where the scan was one: the index, then the payload tiles those
-    // addresses name. That is a query more and a great deal less of every one of them — the scan
-    // reads the identity column of every tile, the seek reads two columns of the one tile a value
-    // can be in.
+
+    // **The first walk of a corpus pays a sixth read, and every one after it pays five.** That
+    // sixth is the index's own footers — one `parquet_metadata` over the index tiles, cached per
+    // type exactly as the payload's boxes are — and it is what lets the batched index read name
+    // only the tiles its keys can be in. It is a constant per corpus and not a term in the batch,
+    // which is the whole reason it is read once and kept rather than folded into the lookup.
     //
-    // What the bound is actually for has not moved: five seeds cost the same reads as one. The
-    // failure it exists to catch is a lookup per seed, which is the cost this API is most able to
-    // multiply, and neither route has ever paid it.
-    expect(queries - before).toBeLessThanOrEqual(5);
+    // What the bound is actually for has not moved through either rewrite: **five seeds cost the
+    // same reads as one.** The failure it exists to catch is a lookup per seed — the cost this API
+    // is most able to multiply, and the shape a per-identity `=` query would have — and no route
+    // here has ever paid it. So the assertion below is the one that matters: the warm walk and the
+    // cold one differ by the cached footer read, and neither differs by the size of the batch.
+    const cold = queries;
+    await counted.neighbours(seeds, { depth: 1 });
+    expect(queries - cold, 'cold: index footers, index, payload, two orientations, the hop').toBe(6);
+
+    const warm = queries;
+    await counted.neighbours(seeds, { depth: 1 });
+    const five = queries - warm;
+    expect(five, 'warm: the footers are cached').toBeLessThanOrEqual(5);
+
+    // One seed instead of five, on the same warm corpus: the same reads. A batch that cost per
+    // identity would fall to a fifth of the five-seed count here, and this is where it would show.
+    const one = queries;
+    await counted.neighbours(seeds.slice(0, 1), { depth: 1 });
+    expect(queries - one, 'one seed costs what five did').toBe(five);
+  });
+
+  it('asks only the index tiles whose footers say a key could be in them', async () => {
+    // The index is five tiles of 64 sorted by `subject`, with disjoint ranges. Two identities that
+    // land in one tile must not read the other four — which is the defect this replaced: DuckDB
+    // prunes no disjunction over a VARCHAR column, so `key IN (a, b)` opened all five and only
+    // `key = a` opened one.
+    const named: string[][] = [];
+    const counted = await openCorpus(CORPUS, {
+      query: async (sql) => {
+        if (sql.includes('/index/')) named.push(sql.match(/index\/tile\d+\.parquet/g) ?? []);
+        return query(sql);
+      },
+    });
+    // Sorted lexicographically, `.../person/0` and `.../person/1` are neighbours, so this is the
+    // pair most likely to share a tile — and the assertion is a relationship, not a tile number:
+    // fewer than every tile, and never fewer than the one holding the answer.
+    const pair = [await seedOf(0), await seedOf(1)];
+    named.length = 0;
+    const found = await Promise.all(pair.map((id) => counted.node(id)));
+    expect(found.every((v) => v !== null)).toBe(true);
+
+    // The footer sweep names every index tile once — that is what a sweep is — and the lookups
+    // after it name a strict subset. `named[0]` is the sweep; the rest are the reads it decided.
+    expect(named[0]).toHaveLength(Number(TILES));
+    for (const read of named.slice(1)) {
+      expect(read.length).toBeGreaterThanOrEqual(1);
+      expect(read.length).toBeLessThan(Number(TILES));
+    }
   });
 
   it('the type says whether a lookup on it is a seek or a scan', () => {

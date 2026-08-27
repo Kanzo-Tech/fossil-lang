@@ -325,6 +325,48 @@ function ident(name: string): string {
 }
 
 /**
+ * A key as the bytes a Parquet statistic is compared in.
+ *
+ * **`<` on two JavaScript strings is the wrong comparison here, and silently so.** Parquet orders a
+ * string column by unsigned UTF-8 bytes, and so does DuckDB's default collation, so that is the
+ * order an index tile is sorted in and the order its footer's min/max bound. JavaScript compares
+ * UTF-16 code units, which agrees with UTF-8 order for everything below U+E000 and disagrees above
+ * it: a surrogate pair's code units sort below the private-use area and its bytes sort above it. An
+ * IRI that reached there would be pruned out of the one tile holding it and reported as absent,
+ * which is the failure a lookup cannot notice. So the comparison is on bytes.
+ */
+const UTF8 = new TextEncoder();
+function utf8(value: string): Uint8Array {
+  return UTF8.encode(value);
+}
+
+/** Unsigned byte order, which is Parquet's order for a string column. */
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    if (a[i] !== b[i]) return a[i]! - b[i]!;
+  }
+  return a.length - b.length;
+}
+
+/**
+ * Whether a tile bounded by `[lo, hi]` can hold `key` — and it answers `true` when it cannot tell.
+ *
+ * The upper clause is not just `key <= hi`, because a Parquet writer may TRUNCATE a long string
+ * statistic rather than store it whole. parquet-rs truncates a max upward — it increments the last
+ * byte, so the stored bound is still at least every value in the tile — and a min downward, which
+ * makes the plain comparison safe against the writer this corpus has. A writer that truncated a max
+ * WITHOUT incrementing would store a prefix of the real one, and every key extending that prefix
+ * would be excluded from the only tile that holds it. The prefix test costs one comparison and
+ * removes the whole class.
+ */
+function couldHold(key: Uint8Array, lo: Uint8Array, hi: Uint8Array): boolean {
+  if (compareBytes(key, lo) < 0) return false;
+  if (compareBytes(key, hi) <= 0) return true;
+  return key.length > hi.length && compareBytes(key.subarray(0, hi.length), hi) === 0;
+}
+
+/**
  * A 64-bit id out of an untyped column.
  *
  * The corpus contract's second obligation is that a 64-bit id is a `BigInt` at the TypeScript
@@ -620,6 +662,87 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   };
 
   /**
+   * Where each INDEX tile's keys begin and end, read from its own footer **once per type.**
+   *
+   * The same move {@link tileBoxes} makes for `x`/`y`, for the one column an index is sorted by,
+   * and for the same reason: the arithmetic says which tiles exist and only the footers say which
+   * ones a value can be in. The difference is which side does the pruning. A window leaves it to
+   * the engine because a box over `x`/`y` is a conjunctive range and DuckDB prunes one; a lookup
+   * cannot, because the predicate is a DISJUNCTION and DuckDB prunes none of those over a VARCHAR
+   * column — measured on v1.5.3 over a million-vertex corpus, `key = 'x'` prunes to one tile and
+   * reads 3.98 MB while `key IN ('x','y')`, or the same spelled with `OR`, prunes to none and reads
+   * all 245 index tiles, 44.1 MB. So the pruning is done here, from the same statistics the engine
+   * declined to use, and the batch stays one query.
+   *
+   * **It cannot work under `rowgroups` and does not pretend to.** There the whole index is one file
+   * and a row group has no URL, so there is nothing to address and nothing to leave out of the
+   * list: `null` here means the batched query over the whole index is what there is. Same for a
+   * one-file index, where pruning has nothing to remove.
+   *
+   * A tile whose footer carries no statistics for the key column keeps `lo`/`hi` at `null` and is
+   * always read — the conservative answer, and the same call {@link tileBoxes} makes for a tile
+   * with no box.
+   */
+  interface KeyRange {
+    readonly url: string;
+    /** The tile's key bounds as bytes, or `null` when its footer declared none. */
+    readonly lo: Uint8Array | null;
+    readonly hi: Uint8Array | null;
+  }
+
+  const keyRanges = new Map<string, Promise<readonly KeyRange[] | null>>();
+
+  const indexRanges = (type: VertexAddress): Promise<readonly KeyRange[] | null> => {
+    const cached = keyRanges.get(type.type);
+    if (cached) return cached;
+    const index = type.index!;
+    const loading = (async (): Promise<readonly KeyRange[] | null> => {
+      if (index.container === 'rowgroups') return null;
+      const urls = distinct([...index.files()]);
+      if (urls.length < 2) return null;
+      // `coalesce(stats_min_value, stats_min)` for the reason `tileBoxes` gives: Parquet's original
+      // statistics fields are defined as a signed comparison and a writer that gets that right
+      // leaves them empty, so a reader that knows only the deprecated pair concludes the footer
+      // carries no bound at all. Read either.
+      const rows = await query(
+        `SELECT file_name AS file, ` +
+          `min(coalesce(stats_min_value, stats_min)) AS lo, ` +
+          `max(coalesce(stats_max_value, stats_max)) AS hi ` +
+          `FROM parquet_metadata(${list(urls)}) ` +
+          `WHERE path_in_schema = ${lit(index.orderedBy)} GROUP BY 1`,
+      );
+      const byUrl = new Map<string, KeyRange>();
+      for (const row of rows) {
+        const url = String(row['file']);
+        const lo = row['lo'];
+        const hi = row['hi'];
+        byUrl.set(
+          url,
+          typeof lo === 'string' && typeof hi === 'string'
+            ? { url, lo: utf8(lo), hi: utf8(hi) }
+            : { url, lo: null, hi: null },
+        );
+      }
+      // A tile whose name did not come back verbatim is one this cannot exclude either.
+      return urls.map((url) => byUrl.get(url) ?? { url, lo: null, hi: null });
+    })();
+    keyRanges.set(type.type, loading);
+    return loading;
+  };
+
+  /**
+   * The index tiles a batch of keys can be in. Linear in tiles x keys, and deliberately: the tiles
+   * of an index ARE disjoint and sorted, which would make this a binary search per key, but that is
+   * a property of the writer rather than of the format and a reader that assumed it would answer a
+   * badly written corpus with silence. A few hundred tiles against a caller's own batch is nothing
+   * beside the read it decides.
+   */
+  const indexFilesFor = (ranges: readonly KeyRange[], keys: readonly Uint8Array[]): string[] =>
+    ranges
+      .filter((r) => r.lo === null || r.hi === null || keys.some((k) => couldHold(k, r.lo!, r.hi!)))
+      .map((r) => r.url);
+
+  /**
    * Every vertex whose identity is in `ids` — **one scan for the whole batch, per type.**
    *
    * The scan is the expense the whole surface is most able to multiply (see {@link Corpus.node}),
@@ -659,29 +782,34 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
         continue;
       }
 
-      // **The seek**, in two reads and no scan of either table.
+      // **The seek**, and it is addressed rather than searched at both ends.
       //
-      // First the index: two columns over tiles that are sorted by the key with disjoint ranges,
-      // which is the arrangement that lets an engine prune to the one tile a value can be in.
-      // The payload cannot be arranged that way and keep the Morton order a window depends on,
-      // which is why the index is a second table rather than a second sort.
+      // First the index: two columns over tiles sorted by the key with disjoint ranges, which is
+      // the arrangement that lets a reader go to the one tile a value can be in. The payload cannot
+      // be arranged that way and keep the Morton order a window depends on, which is why the index
+      // is a second table rather than a second sort.
       //
-      // **The arrangement is right and DuckDB does not exploit it, which this batch pays for.**
-      // Measured on v1.5.3 over a million-vertex corpus: `key = 'x'` prunes to one tile and reads
-      // 3.98 MB; `key IN ('x','y')` — or the same spelled `= 'x' OR = 'y'` — prunes to NONE and
-      // reads all 245 index tiles, 44.1 MB. DuckDB does not prune a disjunction over a VARCHAR
-      // column at all. DataFusion does, up to about twenty values.
+      // **The arrangement is right and DuckDB does not exploit it**, so the list of files is what
+      // exploits it. `key = 'x'` prunes to one index tile and reads 3.98 MB; `key IN ('x','y')`, or
+      // the same spelled with `OR`, prunes to NONE and reads all 245 of them, 44.1 MB — measured on
+      // v1.5.3 over a million-vertex corpus, and DuckDB prunes no disjunction over a VARCHAR column
+      // at all. Taking the batch apart to get one equality per query is NOT the fix and was tried:
+      // it crosses back over the batched read at about eleven seeds (11 x 3.98 > 44.1), and it is
+      // a lookup per seed, which is the one cost this surface is most able to multiply.
       //
-      // Taking the batch apart is NOT the fix, and it was tried: one query per identity crosses
-      // back over the batch at about eleven seeds (11 x 3.98 > 44.1), and `tests/corpus.test.ts`
-      // holds a bound whose whole purpose is to catch a lookup per seed. The fix that has no
-      // crossover is to ADDRESS the index tiles from their own footers — `tileBoxes` already does
-      // exactly this for `x`/`y` — and then ask only the tiles a key can be in. It works under the
-      // `files` container and cannot work under `rowgroups`, where a row group has no URL, so it
-      // is a real piece of work with a measurement attached rather than an edit to this line.
+      // So {@link indexRanges} reads the same statistics the engine declined to use, once per
+      // corpus, and the batch stays ONE query over the handful of files its keys can be in. Under
+      // `rowgroups` there is nothing to leave out — one file, and a row group has no URL — and the
+      // batched read over the whole index is what there is.
+      const ranges = await indexRanges(type);
+      const keys = ids.map(utf8);
+      const indexFiles =
+        ranges === null ? distinct([...index.files()]) : indexFilesFor(ranges, keys);
+      // No tile's range can hold any of these keys, which is an answer and not a failure to look.
+      if (indexFiles.length === 0) continue;
       const hits = await query(
         `SELECT ${ident(index.orderedBy)} AS id, dense_id ` +
-          `FROM read_parquet(${list(index.files())}) ` +
+          `FROM read_parquet(${list(indexFiles)}) ` +
           `WHERE ${ident(index.orderedBy)} IN (${ids.map(lit).join(', ')})`,
       );
       if (hits.length === 0) continue;
@@ -888,9 +1016,10 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
      *
      * **What it costs, measured rather than asserted.** Where the type declares an `index:` this is
      * a seek: two reads, no scan of either table, and see {@link Corpus.types} — `indexed` says
-     * which of the two a type gets. The index read is one query for the whole batch and it does
-     * not prune on this engine — {@link findByIdentity} has the measurement and the fix that has
-     * no crossover. Where it does not, it is a scan of the `subject` column over
+     * which of the two a type gets. The index read is one query for the whole batch over only the
+     * index tiles whose own footers say a key could be in them, because this engine prunes no
+     * disjunction over a string column and {@link indexRanges} is where that is made up for. Where
+     * the type declares no index, it is a scan of the `subject` column over
      * every tile, because the rows are in Morton order and subjects are not, so every tile's
      * `min`/`max` overlaps every other's and the footers prune nothing. At five million vertices
      * that column is 8.016 compressed bytes per row, so one lookup reads about 40 MB. Both answers
