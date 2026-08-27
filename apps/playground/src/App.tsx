@@ -58,7 +58,7 @@ export default function App() {
         // Introspect the CSV and tell the compiler what it found — the browser's version of
         // what `fossil-cli` does with `fossil-introspect` before every compile.
         const descriptor = await describeCsv(CSV_PATH, SOURCE_BYTES[CSV_PATH]!);
-        checker.registerDescriptor(JSON.stringify(descriptor));
+        checker.registerDescriptor(descriptor);
         say(`introspected ${CSV_PATH}: ${descriptor.columns.map((c) => `${c.name}:${c.primitive}`).join(', ')}`);
 
         setDiagnostics(checker.check());

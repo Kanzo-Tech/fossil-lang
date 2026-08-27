@@ -26,9 +26,24 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
 import ehWasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
 import ehWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
-import type { QueryFn, QueryRow } from '@fossil-lang/graph/corpus';
-
 import type { BundleCost } from './check.js';
+
+/**
+ * The query capability, restated rather than imported — and that is a REPORTABLE GAP, not
+ * a preference.
+ *
+ * `@fossil-lang/graph`'s `./corpus` subpath exports `openCorpus` and its result types but
+ * not `QueryFn`/`QueryRow`: those are re-exported only from the root barrel, and the root
+ * barrel static-imports `../pkg/fossil_graph_wasm.js`. So a host that wants the corpus API
+ * WITHOUT the WASM — the whole reason `./corpus` has a subpath — cannot name the one type
+ * it has to implement. Structural typing means the callback still fits; naming it does not.
+ *
+ * The one-line fix is `export type { QueryFn, QueryRow } from './query.js';` in
+ * `packages/graph/src/corpus.ts`. That package is another agent's, so it is reported here
+ * instead of edited.
+ */
+export type QueryRow = Record<string, unknown>;
+export type QueryFn = (sql: string) => Promise<QueryRow[]>;
 
 let db: duckdb.AsyncDuckDB | null = null;
 let conn: duckdb.AsyncDuckDBConnection | null = null;
@@ -85,7 +100,7 @@ export async function register(path: string, bytes: Uint8Array): Promise<void> {
 export const query: QueryFn = async (sql: string): Promise<QueryRow[]> => {
   if (!conn) throw new Error('duckdb not booted');
   const table = await conn.query(sql);
-  return table.toArray().map((row) => row.toJSON() as QueryRow);
+  return table.toArray().map((row: { toJSON(): QueryRow }) => row.toJSON());
 };
 
 /**

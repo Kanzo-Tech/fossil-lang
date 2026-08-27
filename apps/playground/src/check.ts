@@ -25,7 +25,13 @@
  * Skip (2) and `User.name` is an unknown column: the check reports it, correctly, and the
  * editor looks broken for a program that is fine.
  */
-import { FossilPlayground, initFossilWasm, type CheckRow } from '@fossil-lang/wasm';
+import {
+  FossilPlayground,
+  initFossilWasm,
+  type CheckRow,
+  type FileHandle,
+  type InferredDescriptorJson,
+} from '@fossil-lang/wasm';
 import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 
 import { PROGRAM_PATH, SHEX, SHEX_PATH } from './example.js';
@@ -41,7 +47,7 @@ export interface BundleCost {
 }
 
 let playground: FossilPlayground | null = null;
-let programHandle: number | null = null;
+let programHandle: FileHandle | null = null;
 let cost: BundleCost | null = null;
 
 /** The measured cost of the checker bundle, or `null` before {@link load}. */
@@ -68,25 +74,25 @@ export async function load(program: string): Promise<void> {
   // The shape document first: opening it is what puts it in the registry, and the
   // registry is a Salsa input, so opening it AFTER the program would also work (every
   // query that missed it re-executes). Doing it first just means the first check is right.
-  playground.open_file(SHEX_PATH, SHEX);
-  programHandle = playground.open_file(PROGRAM_PATH, program) as unknown as number;
+  playground.openFile(SHEX_PATH, SHEX);
+  programHandle = playground.openFile(PROGRAM_PATH, program);
 }
 
 /** Push a host-introspected input schema at the compiler. See `descriptor.ts`. */
-export function registerDescriptor(json: string): void {
-  playground?.registerInferredDescriptor(json);
+export function registerDescriptor(descriptor: InferredDescriptorJson): void {
+  playground?.registerInferredDescriptor(descriptor);
 }
 
 /** Re-check after an edit — the `textDocument/didChange` path, and the same Salsa setter. */
 export function update(program: string): CheckRow[] {
   if (!playground || programHandle === null) return [];
-  playground.update_file(programHandle as never, program);
-  return playground.check() as CheckRow[];
+  playground.updateFile(programHandle, program);
+  return playground.check();
 }
 
 /** Check without editing — used once after the descriptor lands. */
 export function check(): CheckRow[] {
-  return (playground?.check() ?? []) as CheckRow[];
+  return playground?.check() ?? [];
 }
 
 /** LSP severity 1 is an error; 2 a warning. A program with no 1s is runnable. */

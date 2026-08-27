@@ -16,7 +16,7 @@
  */
 import type { InferredDescriptorJson, InferredPrimitive } from '@fossil-lang/wasm';
 
-import { query, register } from './duckdb.js';
+import { query, register, type QueryRow } from './duckdb.js';
 
 /**
  * DuckDB's declared type → fossil's primitive lattice.
@@ -48,7 +48,7 @@ export async function describeCsv(uri: string, bytes: Uint8Array): Promise<Infer
   const rows = await query(`DESCRIBE SELECT * FROM read_csv_auto('${uri.replace(/'/g, "''")}')`);
   return {
     uri,
-    columns: rows.map((row) => ({
+    columns: rows.map((row: QueryRow) => ({
       name: String(row['column_name']),
       primitive: primitiveOf(String(row['column_type'])),
     })),
