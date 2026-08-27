@@ -85,10 +85,17 @@ const STAMP_URL = 'bench/index.json';
  * `null` is not an error: `pnpm dev` has to work in a checkout where `bench-corpus.mjs` has
  * not run, and a playground that refuses to boot because an optional 56 MB demo asset is
  * missing would be a worse app than one that says so in a sentence.
+ *
+ * **`ok` is not the test, and that is the whole of why this reads a header.** Vite's dev
+ * server answers a missing path with the SPA fallback — `200`, and `index.html` in the body —
+ * so `ok` is true for a stamp that does not exist and `json()` throws a `SyntaxError` the
+ * caller renders as `failed`. The sentence this function exists to make possible was being
+ * replaced by `Unexpected token '<'` in exactly the checkout it was written for.
  */
 export async function openBench(): Promise<Bench | null> {
   const stampResponse = await fetch(STAMP_URL);
   if (!stampResponse.ok) return null;
+  if (!(stampResponse.headers.get('content-type') ?? '').includes('json')) return null;
   const stamp = (await stampResponse.json()) as BenchStamp;
   const base = stamp.dir;
 
