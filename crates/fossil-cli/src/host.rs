@@ -166,7 +166,7 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
 ///
 /// # Two ways, and neither may quietly win
 ///
-/// `policy := "people.jsonld"` in the program (grammar.bnf, PolicyDef) and
+/// `policy := "people.jsonld"` in the program (grammar.bnf, `PolicyDef`) and
 /// `fossil run --policy <path>` on the command line. Where both are given this
 /// **REFUSES**, and that is a decision rather than an omission:
 ///

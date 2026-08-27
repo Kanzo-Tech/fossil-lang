@@ -164,7 +164,7 @@ fn generalising_policy(k: u64) -> String {
     )
 }
 
-/// The same program, binding its own policy document (grammar.bnf, PolicyDef).
+/// The same program, binding its own policy document (grammar.bnf, `PolicyDef`).
 ///
 /// One line, and it is the whole of the difference between an obligation an
 /// operator has to remember and one that lives in the file under review.

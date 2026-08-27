@@ -129,7 +129,7 @@ pub enum SyntaxKind {
     /// for it to hang.
     TYPE_DEF,
     /// `policy := "people.jsonld"` — the ODRL document the release is verified
-    /// against (grammar.bnf, PolicyDef). One per program, and the writer
+    /// against (grammar.bnf, `PolicyDef`). One per program, and the writer
     /// refuses to seal a corpus that misses the bound it declares.
     ///
     /// The right-hand side is a plain `STRING` and NOT an expression, so this
