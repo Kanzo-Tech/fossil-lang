@@ -38,9 +38,20 @@
 (*  the checker and carry the diagnostic they must produce. Every one  *)
 (*  of the 26 is derivable from the productions below, and no          *)
 (*  production below exists for a form none of them spells, except     *)
-(*  where a comment says so and says why. Nothing mechanically checks  *)
-(*  this file against the parser today, so those 26 programs are the   *)
-(*  only check it has.                                                 *)
+(*  where a comment says so and says why. Those 26 programs were     *)
+(*  the only check this file had, and they exercised the half of     *)
+(*  it that says what the language IS.                               *)
+(*                                                                   *)
+(*  The other half is the TOMBSTONES — «There is no PIPE», «`iri`    *)
+(*  was a keyword and is gone», the whole NOT IN MVP list — each     *)
+(*  of which asserts that a form does NOT exist. Adding a            *)
+(*  production the parser lacks is safe: the parser's own tests      *)
+(*  stay green and the work is visible. A tombstone for a form       *)
+(*  the parser still builds is SILENT, and that asymmetry is what    *)
+(*  needed a machine. `crates/xtask/tests/grammar_tombstones.rs`     *)
+(*  is it — the tombstones come out of the commentary below by       *)
+(*  phrase, the live forms out of `crates/fossil-syntax`, and no     *)
+(*  list of either is written down anywhere.                         *)
 (*                                                                     *)
 (*  What a well-formed program MEANS, as against how it is spelled —   *)
 (*  the judgments, the subtyping relation, and the exact statement of  *)
@@ -200,6 +211,7 @@ Program             := TopLevel* EOF
 TopLevel            := SourceDef
                      | MultiSourceDef
                      | TypeDef
+                     | PolicyDef
                      | Mapping
 
 (* `@rename` is NOT a fifth alternative, and looking for one here is the
@@ -572,7 +584,15 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
 
-(*  from     and      or       not      true     false                    *)
+(*  from     and      or       not      true     false    null             *)
+(*                                                                         *)
+(*  `true`, `false` and `null` are LITERALS rather than keywords, and      *)
+(*  they are reserved by BEING tokens: the lexer matches each before       *)
+(*  IDENT, so none of the three can name a column. `null` was absent       *)
+(*  from the line above from the day it became a token, which is the       *)
+(*  drift a reserved list has while nothing reads it —                     *)
+(*  `crates/xtask/tests/grammar_tombstones.rs` reads it now, in both       *)
+(*  directions.                                                            *)
 (*                                                                         *)
 (*  CONTEXTUAL, and therefore still usable as names: `type` (rule 5) and   *)
 (*  `as` (rule 7).                                                         *)
