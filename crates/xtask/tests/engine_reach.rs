@@ -452,7 +452,7 @@ mod fires {
 
     #[test]
     fn a_direct_dev_edge_to_the_engine_is_not_a_link() {
-        // `fossil-engine`'s actual shape, and the one deny.toml's reason string
+        // `fossil-cli`'s shape under `duckdb`, and the one deny.toml's reason string
         // gets right.
         let g = graph(&["engine-user"], &[("engine-user", "engine", Some("dev"))]);
         assert!(reachers(&g, "engine", Edges::Linking).is_empty());

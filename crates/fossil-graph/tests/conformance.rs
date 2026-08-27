@@ -12,7 +12,7 @@
 //! | `packages/graph/src/address.ts` | `packages/graph/tests/conformance.test.ts` | the published module |
 //!
 //! Two of them were here before this one, and the gap the third closes is named
-//! at the top of `crates/fossil-engine/tests/conformance.rs`: that file is one
+//! at the top of `crates/fossil-cli/tests/conformance.rs`: that file is one
 //! writer read by one engine, and what it cannot see is a reader disagreeing with
 //! another reader. `GraphAr`'s fourth implementation landed having re-derived the
 //! path arithmetic differently from the other three *and* from the corpus on disk,
