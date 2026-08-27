@@ -19,7 +19,7 @@ import {
   providerTable,
   surfaceStats,
   type ProviderInfo,
-} from './lineage.js';
+} from './refs.js';
 import './lineage.css';
 
 const KB = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} kB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
