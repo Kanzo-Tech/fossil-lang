@@ -1,0 +1,101 @@
+name: playground
+
+# Path-filtered, and deliberately NOT a step inside `pnpm-ci.yml` — same argument as
+# `docs.yml`, with one difference that matters: this app DOES need the Rust toolchain,
+# because its three workspace dependencies each shell out to `cargo build --target
+# wasm32-unknown-unknown` plus `wasm-bindgen`. So its ceiling is tens of minutes, not the
+# fifteen `docs.yml` gets, and hanging it off the shared job would make every crate PR wait
+# for a Vite build it cannot break.
+#
+# `crates/` is in the path filter even though the app compiles no Rust itself: the whole
+# point of the app is that it drives `fossil-wasm` and `fossil-df-wasm`, so a change that
+# breaks either of their JS surfaces has to turn this red. `examples/` is in it because the
+# app imports the walking skeleton directly — changing `hello.fossil` changes what this
+# builds.
+on:
+  pull_request:
+    paths:
+      - 'apps/playground/**'
+      - 'packages/wasm/**'
+      - 'packages/executor/**'
+      - 'packages/graph/**'
+      - 'packages/types/**'
+      - 'crates/**'
+      - 'examples/**'
+      - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/playground.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/playground/**'
+      - 'packages/wasm/**'
+      - 'packages/executor/**'
+      - 'packages/graph/**'
+      - 'packages/types/**'
+      - 'crates/**'
+      - 'examples/**'
+      - 'pnpm-workspace.yaml'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/playground.yml'
+
+jobs:
+  playground:
+    runs-on: ubuntu-latest
+    # A cold run compiles datafusion to wasm32, which is the single most expensive thing in
+    # this repository's CI. Everything else here is seconds.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # `rust-toolchain.toml` pins the channel; this only guarantees the target is
+          # installed before the first `cargo build --target wasm32-unknown-unknown`.
+          toolchain: '1.90'
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: playground-wasm32
+
+      # `fossil-df-wasm`'s `zstd-sys` needs a wasm-capable `clang`, and the runner's default
+      # is not one — the failure is `unknown target triple 'wasm32-unknown-unknown'` out of
+      # `cc-rs`, and it happens deep in a dependency build where it reads as nonsense.
+      # CONTRIBUTING.md carries the same two variables for the local invocation.
+      - name: Install wasm-capable LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld
+          echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
+          echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"
+
+      # Exact pin: the CLI must match the `wasm-bindgen` lib version in the workspace
+      # Cargo.toml or the generated glue is ABI-mismatched against the module it wraps.
+      - name: Install wasm-bindgen-cli
+        run: cargo install --version 0.2.120 wasm-bindgen-cli --locked
+
+      # binaryen 116, NOT apt's. Ubuntu ships 108, whose wasm-opt corrupts wasm-bindgen's
+      # externref table and makes the graph wasm fail to instantiate on Node 20
+      # (binaryen #4711). The build scripts skip the optimisation pass rather than fail if
+      # wasm-opt is missing, so an install that silently gave us 108 would be worse than none.
+      - name: Install wasm-opt
+        run: cargo install wasm-opt@0.116.1 --locked
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # `...` on the filter is load-bearing twice: it installs the app's workspace
+      # dependencies, and it makes the build below run each one's own `build` first — which
+      # is what produces the gitignored `pkg/` directories the app imports `?url` from.
+      - name: Install (the playground and its dependencies only)
+        run: pnpm install --frozen-lockfile --filter "@fossil-lang/playground..."
+
+      - name: Build (wasm bundles, then the app)
+        run: pnpm --filter "@fossil-lang/playground..." build
