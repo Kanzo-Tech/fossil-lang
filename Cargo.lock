@@ -1957,6 +1957,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-kanon",
  "fossil-locator",
  "fossil-mem-probe",
  "fossil-mir",

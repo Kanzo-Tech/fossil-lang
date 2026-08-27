@@ -35,6 +35,15 @@ fossil-mir = { path = "../fossil-mir" }
 # the native writer can establish is a bound with a second writer's worth of
 # hole in it.
 fossil-policy = { path = "../fossil-policy" }
+# Mondrian strict k-anonymity, for `src/generalize.rs`: the writer DERIVES the
+# generalisation a declared bound needs instead of only measuring what it was
+# handed. Two `arrow` sub-crates and serde/thiserror, on the workspace's arrow
+# 58 — the same line `datafusion` resolves to, so a `RecordBatch` crosses this
+# edge without a conversion. It declares `[package.metadata.fossil] wasm = true`
+# and was already in the gate closure on that declaration alone; this edge is
+# what makes it reachable, and the browser writer needs it for the same reason
+# the native one does.
+fossil-kanon = { path = "../fossil-kanon" }
 # Manifest structs (GraphInfo/VertexInfo/EdgeInfo + data_type_name). WASM-clean
 # (arrow-schema / serde only) — the backend reuses them instead of re-deriving
 # the GraphAr layout.

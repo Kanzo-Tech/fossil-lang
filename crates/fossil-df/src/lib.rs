@@ -21,6 +21,10 @@
 //! wrapper + parquet-wasm write glue (the JS-facing packaging, design §E).
 
 pub mod files;
+/// Deriving the generalisation a declared bound needs, over the same batches
+/// [`privacy`] then measures — and separately from it, so the verifier still
+/// repairs nothing.
+pub mod generalize;
 /// The relational operators executed: the walk from an emit op back to the
 /// sources it reads (`Filter` / `Project` / `Join`).
 pub mod plan;
@@ -1167,9 +1171,18 @@ pub fn run_to_dir(
     // No policy leaves `Privacy::Undeclared`, which the manifest writes down as
     // such rather than omitting.
     if let Some(policy) = policy {
+        // Derive FIRST, over these same batches, and hand the verifier nothing:
+        // `derived` carries only what the manifest prints. The bound below is
+        // measured by a DataFusion aggregate that shares no code with the
+        // anonymiser and is told nothing about it, so the two agree by
+        // measurement or not at all. See `generalize`'s module docs.
+        let derived = generalize::apply(policy, &mut graph)
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        probe.mark("derive generalisation");
         graph.privacy = runtime
             .block_on(privacy::verify(policy, &graph))
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        generalize::record(&derived, &mut graph.privacy);
         probe.mark("verify privacy bound");
     }
 
