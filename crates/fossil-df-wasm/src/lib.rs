@@ -203,7 +203,138 @@ pub async fn execute_core(
 
     let files = graph.to_files().map_err(|e| format!("encode: {e}"))?;
     let report = RunReport::of(dest, &graph);
+    let files = enrich_layout_in_memory(&graph, files)?;
     Ok(ExecOutput { files, report })
+}
+
+/// Run the real layout pass over the staged corpus, in memory.
+///
+/// This is `fossil_cli::host::enrich_written_layout` with a different
+/// filesystem under it, and the two are deliberately the same shape: the same
+/// targets, the same adjacencies in both orientations, the same deletions
+/// afterwards. **What the tab writes has to be what `fossil run` writes**, and
+/// the only way to be sure of that is for the browser to run the pass rather
+/// than to approximate it.
+///
+/// # Why this is not optional, and what it was before
+///
+/// `fossil-df` writes `x = 0`, `y = 0`, `cluster_id = 0` as placeholders and
+/// declares in the manifest the tree the layout pass delivers — `vertex/Person/`
+/// and an `index/`, the `rowgroups` container. Until this function existed the
+/// browser wrote the *staged* tree against that manifest and `apps/playground`
+/// papered over the difference with a `DuckDB` `COPY … ROW_GROUP_SIZE`. That
+/// produced row groups of the right size and nothing else: no communities, no
+/// Morton order, coordinates still at the writer's zeros.
+///
+/// The corpus format's whole addressing argument is that `dense_id` ascends
+/// with the Morton code of the vertex's position — the id space *is* the spatial
+/// order, which is what makes a rectangle break into O(√n) contiguous runs
+/// (`/docs/format/conventions/addressing`). A corpus with zeroed coordinates
+/// satisfies the manifest's *shape* and violates the property the shape exists
+/// to express, and it does so silently: every count-based check passes.
+///
+/// # What it costs
+///
+/// One resident copy of every file, twice over at the crossing point — the
+/// staged Parquet the executor produced and the tiles the pass emits are both
+/// in the map until [`MemoryFs::remove`] takes the staged ones away. Natively
+/// the pass streams through `File` and holds one row group; there is no
+/// filesystem here to stream to, so this is what a browser pays. The pass is
+/// also the memory-hungry half of the write path — the vertex read and the
+/// gather, not the edge sort (`/docs/design/streaming`) — and on `wasm32` the
+/// address space is 4 GiB, so a corpus that fits natively can fail here. That
+/// ceiling is a property of the target and is stated rather than worked around.
+fn enrich_layout_in_memory(
+    graph: &fossil_df::GraphArData,
+    files: Vec<GraphArFile>,
+) -> Result<Vec<GraphArFile>, String> {
+    use fossil_layout::io::MemoryFs;
+    use fossil_layout::layout::{AdjacencyTarget, Endpoint, VertexLayoutTarget};
+
+    // The keys are the corpus-relative paths the files already carry, so a
+    // target composed below names the same string the executor emitted. No
+    // `dest` prefix: the native host joins one because it writes into a
+    // directory, and this writes into a map whose keys are what JS receives.
+    let fs = MemoryFs::new();
+    for file in files {
+        fs.insert(file.rel_path, file.bytes);
+    }
+
+    let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
+        format!(
+            "edge/{}_{}_{}/{file}.parquet",
+            e.src_type, e.label, e.dst_type
+        )
+    };
+
+    let targets: Vec<VertexLayoutTarget> = graph
+        .schema
+        .nodes
+        .iter()
+        .map(|node| VertexLayoutTarget {
+            type_name: node.label.clone(),
+            vertex_parquet: format!("vertex/{}.parquet", node.label),
+            // Trailing separator: the layout appends the tiles file.
+            chunk_prefix: format!("vertex/{}/", node.label),
+            // The same constant the manifest is written with, so the files and
+            // the promise cannot drift apart.
+            chunk_size: fossil_sinks::manifest::DEFAULT_CHUNK_SIZE,
+            self_edge_csr: graph
+                .edges
+                .iter()
+                .filter(|e| e.src_type == node.label && e.dst_type == node.label)
+                .map(|e| adjacency(e, "by_source"))
+                .collect(),
+        })
+        .collect();
+
+    // Every adjacency file, both orientations, cross-type included. The pass
+    // renumbers `dense_id`, so a file left out keeps ids that now belong to
+    // somebody else — a silent corruption, which is why this enumerates rather
+    // than letting the layout guess.
+    let adjacencies: Vec<AdjacencyTarget> = graph
+        .edges
+        .iter()
+        .flat_map(|e| {
+            [
+                (adjacency(e, "by_source"), Endpoint::Src),
+                (adjacency(e, "by_target"), Endpoint::Dst),
+            ]
+            .map(|(parquet, ordered_by)| AdjacencyTarget {
+                parquet,
+                src_type: e.src_type.clone(),
+                dst_type: e.dst_type.clone(),
+                ordered_by,
+            })
+        })
+        .collect();
+
+    fossil_layout::layout::enrich_layout_with(&fs, &targets, &adjacencies)
+        .map_err(|e| format!("layout: {e}"))?;
+
+    // The staged single-file vertex Parquet was this pass's input and nothing
+    // reads it afterwards — the manifest points at the chunk prefix. Left in, it
+    // is a second, stale copy of every vertex, and `apps/corpus`'s
+    // `exactly-once` fails a corpus for exactly that.
+    for target in &targets {
+        fs.remove(&target.vertex_parquet);
+    }
+    // And the staged adjacencies: the pass read each one pre-renumbering, so
+    // leaving it publishes the relation with ids that now belong to other
+    // vertices — and publishes it beside its own tiles, which is two containers
+    // for one set of rows (`declared-tiling`).
+    for adjacency in &adjacencies {
+        fs.remove(&adjacency.parquet);
+    }
+
+    Ok(fs
+        .drain()
+        .into_iter()
+        .map(|(rel_path, bytes)| GraphArFile {
+            rel_path,
+            bytes: bytes.to_vec(),
+        })
+        .collect())
 }
 
 /// Enumerate the program's sources as `(uri, row-name)` — the target-agnostic

@@ -200,9 +200,11 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
   playground/              the architectural claim, clickable: check → run → query in one
                            browser tab, no server. It imports `examples/hello.fossil` rather
                            than copying it, and produces the same five subjects the walking
-                           skeleton asserts natively. `src/corpus.ts` documents the ONE gap —
-                           `fossil-df-wasm` does not run the layout pass, so the browser
-                           writes the staged tree and the app re-tiles it in SQL
+                           skeleton asserts natively. It had ONE gap and no longer does:
+                           `fossil-df-wasm` runs the real layout pass over
+                           `fossil_layout::io::MemoryFs` after `execute_graph`, so the tab
+                           writes the tree `fossil run` writes and `src/corpus.ts` stages
+                           bytes instead of re-tiling them in SQL
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The

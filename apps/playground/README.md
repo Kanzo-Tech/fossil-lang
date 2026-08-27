@@ -57,9 +57,10 @@ editor rather than a build.
 
 - `src/check.ts` — why the shape document must be **opened**, and why the CSV must be
   **introspected**, before the first check means anything.
-- `src/corpus.ts` — the one seam. `fossil-df-wasm` does not run the layout pass, so the
-  browser writes the staged tree while the manifest declares the tiled one. `retile` stands
-  in for it in SQL and says so at length. Delete it when the real pass reaches wasm.
+- `src/corpus.ts` — the seam that was not real, and is. `fossil-df-wasm` runs the layout
+  pass in memory now, so the browser writes the tiled tree the manifest declares rather
+  than the staged one. The `retile` stand-in it carried is deleted, which is what its own
+  note asked for.
 - `src/example.ts` — why the program is rewritten on the way into `run` and not on the way
   into the checker.
 

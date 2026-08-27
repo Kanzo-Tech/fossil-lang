@@ -24,6 +24,22 @@ workspace = true
 [dependencies]
 # The executor itself (lower_to_mir_pg → DataFusion → GraphArData → to_files).
 fossil-df = { path = "../fossil-df" }
+# The layout pass — Louvain communities and the Morton renumbering — run here,
+# in memory, after `execute_graph`. It is the same crate and the same entry
+# point the native host calls, driven through `fossil_layout::io::MemoryFs`
+# because a browser has no filesystem. Without this edge the tab wrote the
+# STAGED tree against a manifest declaring the TILED one, with `x`/`y`/
+# `cluster_id` at the writer's zeros — a corpus satisfying the manifest's shape
+# and violating the addressing property that shape exists to express.
+#
+# It costs the wasm bundle nothing it was not already paying: the crate declares
+# `[package.metadata.fossil] wasm = true`, links no engine of its own, and its
+# `arrow` + `parquet` are the same pin `fossil-df` above already brings.
+fossil-layout = { path = "../fossil-layout" }
+# One name — `manifest::DEFAULT_CHUNK_SIZE` — so the tile size this pass emits
+# at and the tile size the manifest declares are one constant, as they are on
+# the native side.
+fossil-sinks = { path = "../fossil-sinks" }
 # FossilDb (production salsa db) + SourceFile + the System trait. The executor
 # takes the output descriptor as an argument, never off the db.
 fossil-base = { path = "../fossil-base" }

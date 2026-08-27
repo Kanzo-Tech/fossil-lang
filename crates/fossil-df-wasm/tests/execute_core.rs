@@ -81,20 +81,37 @@ async fn csv_program_runs_through_the_in_memory_source_seam() {
     .await
     .expect("executor runs the CSV program");
 
-    // The W0b vertex Parquet + the three manifest YAMLs are produced as bytes.
+    // The TILED vertex payload + the three manifest YAMLs are produced as bytes.
+    //
+    // This asserted `vertex/Person.parquet` — the staged single file — and that
+    // is the tree this executor used to hand back while the manifest beside it
+    // declared `prefix: vertex/Person/` and the `rowgroups` container. The two
+    // disagreed, and nothing here said so. The layout pass runs in memory after
+    // `execute_graph` now, so what comes out is the tree `fossil run` writes:
+    // the tiles under the declared prefix, the identity index beside them, and
+    // the staged file GONE — left in, it is a second, stale copy of every vertex
+    // and `apps/corpus`'s `exactly-once` fails a corpus for it.
     let paths: Vec<&str> = out.files.iter().map(|f| f.rel_path.as_str()).collect();
     assert!(
-        paths.contains(&"vertex/Person.parquet"),
-        "expected a Person vertex parquet, got {paths:?}"
+        paths.contains(&"vertex/Person/tiles.parquet"),
+        "expected the tiled Person payload, got {paths:?}"
+    );
+    assert!(
+        paths.contains(&"vertex/Person/index/tiles.parquet"),
+        "expected the identity index beside it, got {paths:?}"
+    );
+    assert!(
+        !paths.contains(&"vertex/Person.parquet"),
+        "the staged vertex Parquet is the pass's INPUT and must not be published: {paths:?}"
     );
     assert!(paths.contains(&"graph.graph.yml"));
     assert!(paths.contains(&"vertex/Person.vertex.yml"));
 
-    // The Person parquet is non-empty (the encoder wrote a real file).
+    // The tiles are non-empty (the encoder wrote a real file).
     let person = out
         .files
         .iter()
-        .find(|f| f.rel_path == "vertex/Person.parquet")
+        .find(|f| f.rel_path == "vertex/Person/tiles.parquet")
         .unwrap();
     assert!(!person.bytes.is_empty());
 

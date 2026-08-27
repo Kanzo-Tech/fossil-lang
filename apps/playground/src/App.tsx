@@ -103,10 +103,10 @@ export default function App() {
 
       setFiles(result.files.map((f) => ({ path: f.path, bytes: f.bytes.byteLength })));
 
+      // The files are the layout pass's output, not the executor's staged tree: the pass
+      // runs inside `fossil-df-wasm` now, so staging is a registration and nothing more.
+      // The `retile()` stand-in that stood here is gone — see the seam note in `corpus.ts`.
       await corpus.stage(result.files);
-      // The stand-in for the layout pass. See the seam note in `corpus.ts` — this is the
-      // one thing in the app that is not what the native pipeline does.
-      await corpus.retile(result.report);
 
       // The door: does the manifest address itself, and can the reader open it? This is the
       // corpus half of the claim — `openCorpus` computes every tile URL by arithmetic before
