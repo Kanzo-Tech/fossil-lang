@@ -334,8 +334,16 @@ export interface ResolveCorpusOptions {
   base?: string;
 }
 
-/** A corpus resolved to addresses. Every method is pure and synchronous. */
-export interface ResolvedCorpus {
+/**
+ * A corpus resolved to addresses. Every method is pure and synchronous.
+ *
+ * **It was `ResolvedCorpus`, one import away from `Corpus`, and neither name said what differed.**
+ * Both are a corpus; one is the door — asynchronous, engine-backed, answering with rows — and this
+ * one is the arithmetic underneath it, which answers with URLs and never reads a byte. So it is
+ * named for the layer rather than for the noun the two share, and {@link Corpus.addressing} is
+ * where a caller that has outgrown the door reaches it.
+ */
+export interface CorpusAddressing {
   readonly base: string;
   /** Which container the corpus declares. One answer for every payload set in it. */
   readonly container: Container;
@@ -610,7 +618,7 @@ function edgeAddress(
  * orientation the corpus does not publish: that is a legitimate corpus, and it is reported as an
  * address that does not exist rather than one that 404s.
  */
-export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
+export function resolveCorpus(options: ResolveCorpusOptions): CorpusAddressing {
   const { manifestFiles, base = '' } = options;
 
   const read = (path: string): ScannedManifest => {

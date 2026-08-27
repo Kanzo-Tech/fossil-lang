@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { resolveCorpus, type Direction, type ResolvedCorpus } from '../src/index.js';
+import { resolveCorpus, type Direction, type CorpusAddressing } from '../src/index.js';
 
 /**
  * The conformance corpus, executed against the published module.
@@ -102,7 +102,7 @@ describe('the conformance corpus', () => {
         return;
       }
 
-      const corpus: ResolvedCorpus = resolveCorpus({ manifestFiles: manifestFiles(root) });
+      const corpus: CorpusAddressing = resolveCorpus({ manifestFiles: manifestFiles(root) });
 
       it('reads the container off the manifest', () => {
         // The one thing about a corpus a reader cannot work out: working it out means listing a

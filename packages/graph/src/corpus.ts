@@ -74,7 +74,7 @@ import {
   type Gap,
   GRAPH_INFO_PATH,
   resolveCorpus,
-  type ResolvedCorpus,
+  type CorpusAddressing,
   type VertexAddress,
 } from './address.js';
 import { createGraphClient, type GraphClient } from './client.js';
@@ -169,8 +169,20 @@ export interface Extent {
   readonly maxY: number;
 }
 
-/** One vertex, as an answer carries it. */
-export interface CorpusVertex {
+/**
+ * One vertex, **placed** — an address, a position, and every column the row carries.
+ *
+ * **`GraphVertex` is the other one, and neither is a lossy spelling of the other.** That is what
+ * `expand` and `path` answer with: an IRI, a label, a vertex type and a hop count, generated from
+ * the Rust structs and single-source with them. It carries no `x`, no `y` and no `dense_id`,
+ * because a verb reads a relation and those are the tiles' columns; this carries all three,
+ * because a camera reads tiles and a canvas cannot draw an identity.
+ *
+ * They were both called something ending in `Vertex` with a prefix that named where they came
+ * from rather than what they hold, which is how one becomes a candidate for deleting the other.
+ * The name says what it holds now.
+ */
+export interface PlacedVertex {
   readonly type: string;
   /** The subject IRI — the identity — or `null` when this payload does not carry one. */
   readonly id: string | null;
@@ -194,10 +206,11 @@ export interface CorpusVertex {
  * holds: two `dense_id` columns and nothing else. They are the one address that survives into an
  * answer, and they are here because the alternative is worse — naming the far endpoint of every
  * edge means reading the tile it lives in, and a window's edges point outside the window by
- * construction. Join them against {@link CorpusVertex.denseId}, which is in the same space, and
+ * construction. Join them against {@link PlacedVertex.denseId}, which is in the same space, and
  * never store one: {@link Corpus.node} says why.
  */
-export interface CorpusEdge {
+export interface PlacedEdge {
+  /** `GraphEdge` is the verbs' answer: a predicate IRI and two subject IRIs. This is two addresses. */
   readonly edgeType: string;
   readonly src: bigint;
   readonly dst: bigint;
@@ -248,8 +261,8 @@ export interface WindowAnswer extends Answer {
   readonly box: Box;
   /** The tiles the answer's vertices turned out to live in. Reported, never asked for. */
   readonly tiles: readonly bigint[];
-  readonly vertices: readonly CorpusVertex[];
-  readonly edges: readonly CorpusEdge[];
+  readonly vertices: readonly PlacedVertex[];
+  readonly edges: readonly PlacedEdge[];
 }
 
 /** What {@link Corpus.neighbours} took and what it reached. */
@@ -260,8 +273,8 @@ export interface Neighbourhood extends Answer {
   readonly seeds: readonly string[];
   readonly missing: readonly string[];
   /** Every vertex reached, the seeds included. */
-  readonly vertices: readonly CorpusVertex[];
-  readonly edges: readonly CorpusEdge[];
+  readonly vertices: readonly PlacedVertex[];
+  readonly edges: readonly PlacedEdge[];
   /**
    * The vertices the last hop reached and whose own edges were never opened — the boundary the
    * depth bound cut, as addresses in this answer's own `dense_id` space.
@@ -316,7 +329,7 @@ export interface Corpus {
    * The addressing underneath, for a caller that has outgrown this surface — a drawing path that
    * wants tile URLs to fetch itself, for instance. Nothing here needs it.
    */
-  readonly addressing: ResolvedCorpus;
+  readonly addressing: CorpusAddressing;
   /**
    * The bounding box of one vertex type's positions, or `null` when it has no geometry.
    *
@@ -333,7 +346,7 @@ export interface Corpus {
   /** The vertices in a rectangle and the edges among them. */
   window(params: WindowParams): Promise<WindowAnswer>;
   /** One vertex by identity, or `null`. */
-  node(id: string, params?: NodeParams): Promise<CorpusVertex | null>;
+  node(id: string, params?: NodeParams): Promise<PlacedVertex | null>;
   /**
    * Everything within `depth` hops of a set of identities.
    *
@@ -383,7 +396,20 @@ export interface Corpus {
   // fields, while `types` above reports all five. Neither is wrong and they are not the same
   // question — see {@link Corpus.types}.
 
-  /** The type lists, and per-field statistics for a named `vertex_type`. */
+  /**
+   * The type lists, and per-field statistics for a named `vertex_type`.
+   *
+   * See {@link Corpus.types} for which of the two believes the manifest and which believes the
+   * bytes; they are not the same question and they disagree on this corpus.
+   *
+   * **`FieldStat.role === 'identifier'` is a chart-axis heuristic and nothing else.** The merge
+   * puts it one call away from {@link CorpusVertexType.identity}, which is the column a subject
+   * IRI is read from and the thing a bookmark keys on, and the two are unrelated: `role` guesses
+   * what a column looks like so an axis can default sensibly, and it will call an integer `id`
+   * column an identifier whether or not anything identifies anything with it. It is not a
+   * governance classification, it does not mark a quasi-identifier, and nothing may gate a
+   * disclosure decision on it. `identity` is the one that names an identity.
+   */
   schema(params?: SchemaParams): Promise<SchemaResult>;
   /**
    * Rows of one vertex type under a `where` predicate, an order and a limit.
@@ -656,7 +682,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
   const extents = new Map<string, Extent | null>();
 
-  const vertexOf = (type: string, row: QueryRow): CorpusVertex => {
+  const vertexOf = (type: string, row: QueryRow): PlacedVertex => {
     const fields: QueryRow = {};
     for (const [key, value] of Object.entries(row)) {
       if (!RESERVED.has(key)) fields[key] = value;
@@ -783,7 +809,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   const ascending = (a: bigint, b: bigint): number => (a < b ? -1 : a > b ? 1 : 0);
 
   /** The vertices a set of dense ids names, read out of the tiles those ids address. */
-  const readByDenseId = async (type: string, ids: readonly bigint[]): Promise<CorpusVertex[]> => {
+  const readByDenseId = async (type: string, ids: readonly bigint[]): Promise<PlacedVertex[]> => {
     if (ids.length === 0) return [];
     const address = vertexType(type);
     const tiles = [...new Set(ids.map((id) => address.tileOf(id)))].sort(ascending);
@@ -885,7 +911,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   const findByIdentity = async (
     ids: readonly string[],
     only?: string,
-  ): Promise<CorpusVertex[]> => {
+  ): Promise<PlacedVertex[]> => {
     if (ids.length === 0) return [];
     const candidates = (only === undefined ? addressing.types : [vertexType(only)]).filter((type) =>
       has(type.type, IDENTITY),
@@ -897,7 +923,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
           `carry it is an open convention`,
       );
     }
-    const found: CorpusVertex[] = [];
+    const found: PlacedVertex[] = [];
     for (const type of candidates) {
       const index = type.index;
       if (index === null) {
@@ -982,8 +1008,8 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
     groups: readonly EdgeTiles[],
     restrict: (adjacency: AdjacencyAddress) => string,
     emitted: Set<string> = new Set(),
-  ): Promise<CorpusEdge[]> => {
-    const edges: CorpusEdge[] = [];
+  ): Promise<PlacedEdge[]> => {
+    const edges: PlacedEdge[] = [];
     for (const group of groups) {
       const adjacency = adjacencyFor(vertexTypeName, group.edgeType, group.direction);
       if (adjacency === null) continue;
@@ -1305,7 +1331,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       const type = kinds[0] ?? addressing.vertexType().type;
       const address = vertexType(type);
       const seen = new Map(resolved.map((v) => [v.denseId, v]));
-      const edges: CorpusEdge[] = [];
+      const edges: PlacedEdge[] = [];
       const emitted = new Set<string>();
       let frontier = resolved.map((v) => v.denseId);
       // One `not-declared`/`not-requested` reading for the whole walk: the orientations are the
