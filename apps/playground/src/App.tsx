@@ -10,12 +10,14 @@
  * completion behind it is the obvious next thing and it is strictly the second thing —
  * `@fossil-lang/wasm` already exposes `tokenize` and `semanticLegend` for it.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { CodeEditor } from '@kanzo-tech/ui/editor';
+import { fossil } from '@fossil-lang/codemirror-fossil';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import * as checker from './check.js';
 import * as corpus from './corpus.js';
 import * as duck from './duckdb.js';
-import { CSV_BYTES, CSV_PATH, PROGRAM } from './example.js';
+import { CSV_BYTES, CSV_PATH, PROGRAM, PROGRAM_PATH } from './example.js';
 import { describeCsv } from './descriptor.js';
 import * as runner from './run.js';
 
@@ -70,24 +72,28 @@ export default function App() {
     })();
   }, [say]);
 
-  // Debounced, the way an LSP client coalesces `didChange` rather than emitting one per
-  // character — and here it is not only manners: see `check.ts`'s `busy` guard for the
-  // re-entrancy the wasm surface cannot survive. 120 ms is below the threshold where an
-  // editor stops feeling live and well above a fast typist's inter-key interval.
-  const pending = useRef<number | undefined>(undefined);
-
-  const onEdit = (next: string) => {
-    setProgram(next);
-    if (phase === 'booting') return;
-    window.clearTimeout(pending.current);
-    pending.current = window.setTimeout(() => {
-      try {
-        setDiagnostics(checker.update(next));
-      } catch (cause) {
-        setError(String(cause));
-      }
-    }, 120);
-  };
+  // The language layer, built once. `CodeEditor` reconfigures its `Compartment` on the
+  // REFERENTIAL identity of `extensions`, so an inline array would rebuild the editor's
+  // language on every render — the empty dependency list is load-bearing, not tidiness.
+  //
+  // Nothing here debounces. `fossil()`'s linter waits out its own `delay` and then waits
+  // for the check to return before scheduling the next one, so the coalescing an LSP
+  // client does with `didChange` is in the library rather than in this file. It used to
+  // be here, as a `setTimeout` plus a `busy` flag in `check.ts`, guarding a wasm
+  // re-entrancy defect that poisoned the workspace permanently — see `check.ts` for
+  // where that went.
+  const extensions = useMemo(
+    () =>
+      fossil({
+        tokenize: checker.tokenize,
+        tokenKinds: checker.tokenKinds,
+        uri: PROGRAM_PATH,
+        check: checker.checkText,
+        // The panel below renders the same rows the squiggles do, from one check.
+        onDiagnostics: (rows) => setDiagnostics([...rows]),
+      }),
+    [],
+  );
 
   const onRun = async () => {
     setPhase('running');
@@ -150,7 +156,15 @@ export default function App() {
       <main>
         <section>
           <h2>program — {phase === 'booting' ? 'loading the checker…' : 'hello.fossil'}</h2>
-          <textarea value={program} onChange={(e) => onEdit(e.target.value)} spellCheck={false} />
+          <CodeEditor
+            value={program}
+            onChange={setProgram}
+            extensions={extensions}
+            lineNumbers
+            minHeight="24rem"
+            maxHeight="60vh"
+            invalid={checker.hasErrors(diagnostics)}
+          />
           <div>
             <button onClick={onRun} disabled={!runnable}>
               {phase === 'running' ? 'running…' : 'Run'}

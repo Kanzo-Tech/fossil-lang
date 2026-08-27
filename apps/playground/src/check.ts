@@ -28,6 +28,8 @@
 import {
   FossilPlayground,
   initFossilWasm,
+  tokenize,
+  tokenKinds,
   type CheckRow,
   type FileHandle,
   type InferredDescriptorJson,
@@ -37,6 +39,12 @@ import wasmUrl from '@fossil-lang/wasm/pkg/fossil_wasm_bg.wasm?url';
 import { PROGRAM_PATH, SHEX, SHEX_PATH } from './example.js';
 
 export type { CheckRow };
+
+/** The lexer and its legend, re-exported so `App` hands the editor one module.
+ *  `tokenKinds()` is what makes `TokenRow.kind` readable — see the legend note in
+ *  `@fossil-lang/codemirror-fossil`'s `tags.ts` for the nine-variant drift that
+ *  happened the last time a consumer wrote the numbers down. */
+export { tokenize, tokenKinds };
 
 /** What `load()` measured on the way in — the cost of the checker, reported not guessed. */
 export interface BundleCost {
@@ -86,31 +94,30 @@ export function registerDescriptor(descriptor: InferredDescriptorJson): void {
 /**
  * Re-check after an edit — the `textDocument/didChange` path, and the same Salsa setter.
  *
- * **The `busy` guard is load-bearing and it is covering a real defect.** Calling
- * `updateFile` again while a previous call is still on the stack makes wasm-bindgen throw
- * *"recursive use of an object detected which would lead to unsafe aliasing in rust"* — the
- * `RefCell` around the exported `FossilPlayground` refuses the second borrow — and once
- * that has happened the workspace stays poisoned for the rest of the session, so every
- * later keystroke fails too. Reproduced by typing sixteen characters into the textarea
- * faster than a human can; a single keystroke never trips it.
+ * **The guard that used to be here is gone, and both halves of why it was here are
+ * fixed.** `updateFile` could be re-entered while a previous call was still on the
+ * stack, and wasm-bindgen's exclusive borrow of the exported object does not fail
+ * gracefully — it panics, "recursive use of an object detected which would lead to
+ * unsafe aliasing in rust", and on wasm32 a panic is an abort, so the borrow flag
+ * it held is never cleared and every later call fails identically. The workspace
+ * stayed poisoned for the rest of the session. This module carried a `busy` flag
+ * and `App` a 120 ms `setTimeout` to stay clear of it.
  *
- * The guard plus `App`'s debounce means a re-entrant call cannot be issued from here. That
- * is the right shape for an editor regardless — an LSP client coalesces `didChange`
- * notifications rather than emitting one per character. But it is a mitigation, not the
- * fix: a host that calls the surface correctly should not be able to poison it, and the
- * one-line reproduction belongs on `crates/fossil-wasm` rather than in this app.
+ * `crates/fossil-wasm` no longer takes that borrow: the exported class holds the
+ * workspace in its own `RefCell` and every method takes `&self`, so re-entry
+ * RETURNS a catchable error naming the method rather than aborting, and the
+ * workspace still works afterwards.
+ *
+ * And the coalescing moved to where a host cannot forget it —
+ * `@fossil-lang/codemirror-fossil`'s linter waits out its `delay` AND waits for
+ * this promise before scheduling again, which is what an LSP client does with
+ * `didChange` anyway. This function is now what it always should have been: one
+ * edit, one check, no scheduling of its own.
  */
-let busy = false;
-
-export function update(program: string): CheckRow[] {
-  if (!playground || programHandle === null || busy) return [];
-  busy = true;
-  try {
-    playground.updateFile(programHandle, program);
-    return playground.check();
-  } finally {
-    busy = false;
-  }
+export function checkText(program: string): CheckRow[] {
+  if (!playground || programHandle === null) return [];
+  playground.updateFile(programHandle, program);
+  return playground.check();
 }
 
 /** Check without editing — used once after the descriptor lands. */

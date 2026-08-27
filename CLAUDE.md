@@ -180,6 +180,14 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   executor/                datafusion-wasm query executor
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
+  codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
+                           and not an editor: highlighting from `tokenize()` +
+                           `tokenKinds()`, squiggles from `check()` through
+                           `@codemirror/lint`. A package of this name was deleted in
+                           `873cbc0` and it is not restored — the old one hard-copied the
+                           lexer's DISCRIMINANTS into a TS enum, which was wrong in nine
+                           places by the time it went. This one keys on the NAMES the wasm
+                           legend ships, and the guard is on the Rust side
   introspect/              source-binding schema introspection (the one home; `fossil-introspect`
                            is the Rust sibling). Their agreement is ENFORCED, not asserted:
                            `packages/introspect/tests/rust-parity.test.ts` derives the regex, the
@@ -200,11 +208,20 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
   playground/              the architectural claim, clickable: check → run → query in one
                            browser tab, no server. It imports `examples/hello.fossil` rather
                            than copying it, and produces the same five subjects the walking
-                           skeleton asserts natively. It had ONE gap and no longer does:
-                           `fossil-df-wasm` runs the real layout pass over
-                           `fossil_layout::io::MemoryFs` after `execute_graph`, so the tab
-                           writes the tree `fossil run` writes and `src/corpus.ts` stages
-                           bytes instead of re-tiling them in SQL
+                           skeleton asserts natively. It runs the REAL layout pass — Louvain
+                           and Morton through `fossil-layout` over a `MemoryFs` — so the corpus
+                           the tab writes is byte-identical to the one `fossil run` writes. Its
+                           editor is `@kanzo-tech/ui`'s `CodeEditor` with
+                           `packages/codemirror-fossil` inside it, and it does NOT adopt
+                           `@kanzo-tech/graph`
+
+vendor/kanzo-tech/         two `pnpm pack` tarballs, committed, because `@kanzo-tech/ui` has
+                           never been published and every other route dies on a fresh clone:
+                           kanzo-ui gitignores `dist/` with no `prepare` script, and
+                           `@kanzo-tech/ui` depends on `@kanzo-tech/theme` at `workspace:*`.
+                           Only `pnpm pack` (never `npm pack`) rewrites that protocol. Its
+                           README is the argument; `refresh.sh` is how the blobs change and
+                           it writes the source SHA back
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
@@ -212,8 +229,10 @@ catalogue.bnf              which names exist — the `io.` rows and the stdlib r
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 
-The `ui/ viewer/ editor/ codemirror-fossil/` React family moved to `@kanzo-tech/*`; commit
-`873cbc0` deleted all four. They are gone — fossil ships no UI.
+The `ui/ viewer/ editor/` React family moved to `@kanzo-tech/*`; commit `873cbc0` deleted
+those three with `codemirror-fossil/`. **Fossil still ships no UI** — it ships a language
+layer, which is the part that was never a UI: `packages/codemirror-fossil` is extensions
+over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
 
 ## Style
 

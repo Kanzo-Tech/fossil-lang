@@ -21,6 +21,12 @@
     "happy-dom": "^15.0.0",
     "typescript": "^5.6.0"
   },
+  "//pnpm.overrides": "@kanzo-tech/ui is not on npm — vendor/kanzo-tech/README.md is the argument. pnpm pack rewrote its workspace:* dependency on @kanzo-tech/theme into the literal version 0.0.0, which npm has never heard of; this points that version at the sibling tarball. Delete both the override and the directory when @kanzo-tech/ui reaches npm.",
+  "pnpm": {
+    "overrides": {
+      "@kanzo-tech/theme": "file:./vendor/kanzo-tech/kanzo-tech-theme-0.0.0.tgz"
+    }
+  },
   "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=20"

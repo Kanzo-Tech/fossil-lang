@@ -64,20 +64,57 @@ editor rather than a build.
 - `src/example.ts` — why the program is rewritten on the way into `run` and not on the way
   into the checker.
 
-## Known defect
+## The editor
 
-Typing faster than the 120 ms debounce used to poison the checker for the rest of the
-session: `updateFile` re-entered while a previous call was live throws *"recursive use of
-an object detected which would lead to unsafe aliasing in rust"* out of wasm-bindgen's
-`RefCell`, and the workspace never recovers. `src/check.ts` debounces and guards, which is
-what an LSP client does anyway — but a host calling the surface correctly should not be
-able to poison it, and the fix belongs on `crates/fossil-wasm`.
+`@kanzo-tech/ui`'s `CodeEditor` is the host — CodeMirror 6, chrome, keymaps, search
+panel, theme — and `@fossil-lang/codemirror-fossil` is the language inside it:
+highlighting from `tokenize()` + `tokenKinds()`, squiggles from `check()`. Neither
+package knows about the other. `CodeEditor` takes `extensions` in a
+live-reconfigured `Compartment` and externalises every `@codemirror/*` as an
+optional peer; the language layer asks whichever `HighlightStyle` is installed for
+its classes, so fossil arrives in kanzo's palette without either side arranging it.
+
+`@kanzo-tech/ui` **is not on npm and this app does not wait for it.** The specifier
+is a tarball committed at `vendor/kanzo-tech/`, and `vendor/kanzo-tech/README.md`
+has the three routes that do not survive a fresh clone — a workspace spanning both
+repositories, `pnpm link`, and a `file:`/git URL at `kanzo-ui/packages/ui` — with
+the manifest facts that stop each one.
+
+What the editor does NOT have is hover, completion and goto-definition. All three
+exist in `crates/fossil-ide` and `crates/fossil-wasm`'s `lsp_worker.rs` dispatches
+them, but over `postMessage` from a Worker — an LSP client is the work, and it is
+its own piece.
+
+## The defect that used to be here
+
+Typing faster than the debounce poisoned the checker for the rest of the session:
+`updateFile` re-entered while a previous call was live threw *"recursive use of an
+object detected which would lead to unsafe aliasing in rust"* out of
+wasm-bindgen's exclusive borrow, and because a panic on wasm32 aborts without
+unwinding, the borrow flag was never cleared and every later keystroke failed the
+same way. This app carried a 120 ms `setTimeout` and a `busy` flag to stay clear
+of it.
+
+Both halves moved to where they belong. `crates/fossil-wasm` exports the workspace
+through a type holding it in its own `RefCell` with every method taking `&self`, so
+re-entry returns a catchable error naming the method and the workspace still works
+afterwards. And the coalescing is `@fossil-lang/codemirror-fossil`'s linter, which
+waits out its delay and then waits for the check to return before scheduling the
+next — an LSP client's `didChange` behaviour, in the library rather than in a
+convention this app had to remember.
 
 ## What it is not
 
-Not a design system. `src/styles.css` is three colours and a font stack, and it is meant to
-be deleted rather than extended — `@kanzo-tech/ui` is the intended one and is not on npm.
+Not a design system, and not one of its own any more. `src/styles.css` is three
+colours and a font stack layered over `@kanzo-tech/ui/styles.css` — which ships
+PREBUILT, a Tailwind v4 pass run in that repo over its own source plus
+`@kanzo-tech/theme`'s tokens. So Tailwind is its devDependency and not this app's:
+there is no Tailwind here, no PostCSS, no config, and one import in `main.tsx`.
 
-Not an editor. A textarea that genuinely runs beats a beautiful editor that cannot execute
-a program. `@fossil-lang/wasm` already exposes `tokenize` and `semanticLegend` for the
-editor half, and `crates/fossil-ide` carries hover, completion and goto-def behind them.
+Not a graph viewer. `@kanzo-tech/graph` is deliberately NOT adopted: it
+hard-requires `@cosmos.gl/graph`, three `@uwdata/*`, and
+`@duckdb/duckdb-wasm@^1.33.1-dev57.0` — a pre-release pin that does not match the
+`1.32.0` this app already loads. That is a separate decision needing its own
+argument. (`@kanzo-tech/ui` names the same duckdb pin, but as an OPTIONAL peer used
+only by its `/analytics` subpath, which nothing here imports; `pnpm install` warns
+about it and the warning is correct and inert.)
