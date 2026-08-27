@@ -87,7 +87,20 @@ pub async fn dispatch_graph(
     manifest_files: JsValue,
     query: js_sys::Function,
 ) -> Result<JsValue, JsError> {
-    let op: Operation = serde_wasm_bindgen::from_value(op).map_err(JsError::from)?;
+    // **This binding grants raw SQL, and it is one call that says so.**
+    //
+    // `Operation` has no `Deserialize`: `from_wire`'s second argument is the
+    // permission that `execute_sql`'s `sql` and `read`'s `where` share, so a
+    // binding cannot open one and close the other (`fossil_graph::raw_sql`).
+    // The browser grants it because there is nothing here to withhold it from:
+    // the engine is DuckDB-WASM inside the caller's own tab, over a corpus the
+    // caller already holds, and `/docs/format/reading/without-fossil`
+    // documents opening that corpus with any Parquet reader. A gate here would
+    // guard a door in a field. The binding with a policy worth having is
+    // `fossil-mcp`, where the operator holds the files and the caller does not.
+    let op: serde_json::Value = serde_wasm_bindgen::from_value(op).map_err(JsError::from)?;
+    let op = Operation::from_wire(&op, Some(fossil_graph::RawSqlAccess::granted()))
+        .map_err(|e| to_js_error(&e))?;
     let files: HashMap<String, String> =
         serde_wasm_bindgen::from_value(manifest_files).map_err(JsError::from)?;
     let manifest = Manifest::load(&MapSource(files)).map_err(|e| to_js_error(&e))?;

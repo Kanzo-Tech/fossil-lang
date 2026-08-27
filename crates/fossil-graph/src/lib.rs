@@ -90,4 +90,4 @@ pub mod operations;
 pub use address::{Container, Direction, ResolvedCorpus, resolve as resolve_corpus};
 pub use error::{GraphError, Result};
 pub use executor::{DuckExecutor, QueryResult, dispatch};
-pub use operations::Operation;
+pub use operations::{Operation, RawSql, RawSqlAccess, Verb};

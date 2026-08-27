@@ -16,6 +16,15 @@ pub enum GraphError {
     #[error("invalid params for verb `{verb}`: {detail}")]
     InvalidParams { verb: &'static str, detail: String },
 
+    /// The payload reached for raw SQL and the binding did not grant it.
+    ///
+    /// One variant for both fields on purpose: `execute_sql.sql` and
+    /// `read.where` are one permission, and a caller that can tell them apart
+    /// from the error text would be reading a distinction that does not exist.
+    /// See [`crate::operations::raw_sql`].
+    #[error("`{field}` is raw SQL, and this binding withholds it")]
+    RawSqlWithheld { field: &'static str },
+
     /// A vertex/edge type referenced by params is not in the manifest.
     #[error("unknown {kind} `{name}` — not in manifest")]
     UnknownEntity { kind: &'static str, name: String },

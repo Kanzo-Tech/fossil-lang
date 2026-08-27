@@ -10,18 +10,51 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::raw_sql::RawSql;
+
 // ──────────────────────────────────────────────────────────────────────────
 // read
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Rows of one vertex type, filtered, ordered and capped.
 ///
-/// **`where` is SQL and is trusted exactly as far as `execute_sql` is.** A
-/// binding that gates the escape hatch behind a permission MUST gate this field
-/// with it: the two carry the same authority over the same engine.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+/// **`where` is SQL and is trusted exactly as far as `execute_sql` is**, which
+/// is why its type is [`RawSql`] and why this struct is not `Deserialize`: the
+/// permission that opens the escape hatch is the same token that fills this
+/// field, and [`Operation::from_wire`](super::Operation::from_wire) is the one
+/// place either can be built from wire JSON. [`raw_sql`](super::raw_sql)
+/// carries the argument.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadParams {
+    pub vertex_type: String,
+    /// A `WHERE` predicate over the type's columns, without the keyword.
+    /// Reading one vertex is `subject = '…'`.
+    #[serde(default)]
+    pub r#where: Option<RawSql>,
+    /// Column to order by. Absent, the rows arrive in storage order, which is
+    /// the writer's Morton order and says nothing the caller asked about.
+    #[serde(default)]
+    pub order_by: Option<String>,
+    #[serde(default)]
+    pub descending: bool,
+    #[serde(default = "default_read_limit")]
+    pub limit: u32,
+}
+
+/// [`ReadParams`] as it arrives — the same fields with `where` still a bare
+/// `String`, because a permission has not been applied to it yet.
+///
+/// **The one risk this shape carries is drifting from the struct it mirrors**,
+/// and `crates/fossil-graph/tests/schemas.rs` is where that is caught: it
+/// derives both schemas and asserts they are the same document, down to the
+/// per-field prose. A field added above and not here fails there rather than
+/// silently becoming unreachable from the wire — and so does a field
+/// documented differently on the two, which matters because **this** is the
+/// schema an MCP tool publishes.
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct WireReadParams {
     pub vertex_type: String,
     /// A `WHERE` predicate over the type's columns, without the keyword.
     /// Reading one vertex is `subject = '…'`.

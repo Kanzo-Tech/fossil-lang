@@ -152,12 +152,40 @@ demonstration is a measurement. Not an argument.
 
 ### `read`'s `where` is SQL, and carries `execute_sql`'s authority
 
-This is the one thing here a binding can get wrong quietly. `read { vertex_type, where?, order_by?,
-descending, limit }` takes `where` as a **raw SQL fragment**, evaluated by the engine `execute_sql`
-reaches. It is not a parsed predicate language. So the permission travels with it: **a binding that
-gates `execute_sql` must gate `read`'s `where` with the same permission.** Gating the escape hatch
-and leaving `where` open is the same surface with a second door. The rule is written on the type in
-`crates/fossil-graph/src/operations/discovery.rs`, where a binding author reads it as they type.
+`read { vertex_type, where?, order_by?, descending, limit }` takes `where` as a **raw SQL fragment**,
+evaluated by the engine `execute_sql` reaches. It is not a parsed predicate language. So the
+permission travels with it: **a binding that gates `execute_sql` gates `read`'s `where` with the same
+permission.** Gating the escape hatch and leaving `where` open is the same surface with a second
+door.
+
+That sentence used to end *"the rule is written on the type, where a binding author reads it as they
+type"* — which is an obligation discharged by remembering, the same shape the
+[privacy bound](/docs/design/privacy) rejects an anonymisation operator for. It is enforced now, and
+the mechanism is one argument rather than a check:
+
+- The two fields are `RawSql`, a newtype whose only constructor takes a `RawSqlAccess` token.
+- `RawSql` has **no `Deserialize` impl**. That propagates: `ReadParams`, `ExecuteSqlParams` and
+  `Operation` itself cannot derive one either.
+- So the one door from wire JSON is `Operation::from_wire(value, sql: Option<RawSqlAccess>)`, and
+  that single argument answers for both fields. `None` refuses a `read` carrying a `where` **and**
+  refuses `execute_sql`; `Some` admits both. **There is no spelling that opens one and closes the
+  other**, which is exactly what the comment was asking for and had no way to get.
+
+`crates/fossil-graph/src/operations/raw_sql.rs` carries the argument, and
+`crates/fossil-graph/tests/schemas.rs` exercises all four combinations.
+
+Two things it does not claim. It does not stop a binding *granting* access — withholding SQL is a
+policy and a library cannot hold a policy for its consumers; what the type holds is the coupling,
+so whatever the policy is, it lands on both fields at once. And `RawSql` is not a sanitiser: it
+parses, validates and escapes nothing, because [there is no chokepoint to sanitise
+towards](/docs/design/privacy).
+
+<Callout title="It cost nothing on the wire">
+The published JSON Schemas are byte-identical across the change apart from prose — `where` and `sql`
+are still `{"type": "string"}`, because `RawSql` is `#[schemars(transparent)]`. Measured by the
+snapshot diff in `crates/fossil-graph/tests/snapshots/`: two files touched, and both diffs are a
+`description:` line. No binding that speaks the wire has anything to update.
+</Callout>
 
 <Callout type="warn" title="Six is enumerated; nothing says six is right">
 The operation envelope snapshot is the wire contract every binding consumes and it enumerates

@@ -27,6 +27,7 @@ use crate::operations::discovery::{
     ExpandMode, ExpandParams, ExpandResult, GraphEdge, GraphVertex, PathParams, PathResult,
     ReadParams, ReadResult,
 };
+use crate::operations::raw_sql::RawSql;
 use crate::operations::schema::{
     EdgeTypeSummary, FieldRole, FieldStat, SchemaParams, SchemaResult, VertexTypeSummary,
 };
@@ -423,7 +424,7 @@ impl<E: DuckExecutor> Context<'_, E> {
         // fetch one extra row to detect truncation. Rows are the only bound:
         // neither host can interrupt a running statement, so a query that is
         // slow rather than large runs to completion.
-        let wrapped = format!("SELECT * FROM ({}) AS _q LIMIT {}", p.sql, cap + 1);
+        let wrapped = format!("SELECT * FROM ({}) AS _q LIMIT {}", p.sql.as_str(), cap + 1);
         let QueryResult { columns, mut rows } = self.exec.query_columns(&wrapped).await?;
         let truncated = u64::try_from(rows.len()).unwrap_or(u64::MAX) > cap;
         rows.truncate(usize::try_from(cap).unwrap_or(usize::MAX));
@@ -480,7 +481,7 @@ impl<E: DuckExecutor> Context<'_, E> {
             cols.join(", "),
             quote_ident(&p.vertex_type)
         );
-        if let Some(predicate) = p.r#where.as_deref() {
+        if let Some(predicate) = p.r#where.as_ref().map(RawSql::as_str) {
             let _ = write!(sql, " WHERE {predicate}");
         }
         if let Some(order_by) = p.order_by.as_deref() {
@@ -979,6 +980,7 @@ fn is_numeric_datatype(datatype: &str) -> bool {
 mod tests {
     use super::*;
     use crate::manifest::{GRAPH_INFO_PATH, ManifestSource};
+    use crate::operations::raw_sql::RawSqlAccess;
     use fossil_sinks::manifest::{
         Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
     };
@@ -1211,7 +1213,7 @@ mod tests {
         let v = run(
             &Operation::Read(ReadParams {
                 vertex_type: "Person".into(),
-                r#where: Some("subject = 'urn:a'".into()),
+                r#where: Some(RawSql::new(RawSqlAccess::granted(), "subject = 'urn:a'")),
                 order_by: None,
                 descending: false,
                 limit: 1,
@@ -1232,7 +1234,7 @@ mod tests {
         let v = run(
             &Operation::Read(ReadParams {
                 vertex_type: "Person".into(),
-                r#where: Some("subject = 'urn:nope'".into()),
+                r#where: Some(RawSql::new(RawSqlAccess::granted(), "subject = 'urn:nope'")),
                 order_by: None,
                 descending: false,
                 limit: 1,
@@ -1607,7 +1609,7 @@ mod tests {
         });
         let v = run(
             &Operation::ExecuteSql(ExecuteSqlParams {
-                sql: "SELECT * FROM t".into(),
+                sql: RawSql::new(RawSqlAccess::granted(), "SELECT * FROM t"),
                 row_cap: 2,
             }),
             &m,

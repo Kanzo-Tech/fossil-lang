@@ -11,7 +11,7 @@ use fossil_graph::operations::discovery::{
     ExpandMode, ExpandParams, ExpandResult, PathParams, PathResult, ReadParams, ReadResult,
 };
 use fossil_graph::operations::schema::{FieldRole, SchemaParams, SchemaResult};
-use fossil_graph::{GraphError, Operation, Result, dispatch};
+use fossil_graph::{GraphError, Operation, RawSql, RawSqlAccess, Result, dispatch};
 use fossil_mcp::ConnectionExecutor;
 use fossil_sinks::manifest::{
     Container, DEFAULT_CHUNK_SIZE, EdgeInfo, GraphInfo, Property, PropertyGroup, VertexInfo,
@@ -271,7 +271,7 @@ fn read_by_subject_is_what_get_vertex_was() {
         &m,
         &Operation::Read(ReadParams {
             vertex_type: "Person".into(),
-            r#where: Some("subject = 'urn:a'".into()),
+            r#where: Some(RawSql::new(RawSqlAccess::granted(), "subject = 'urn:a'")),
             order_by: None,
             descending: false,
             limit: 1,
@@ -378,7 +378,10 @@ fn execute_sql_real_columns_and_cap() {
         &conn,
         &m,
         &Operation::ExecuteSql(ExecuteSqlParams {
-            sql: "SELECT name, age FROM \"Person\" ORDER BY age".into(),
+            sql: RawSql::new(
+                RawSqlAccess::granted(),
+                "SELECT name, age FROM \"Person\" ORDER BY age",
+            ),
             row_cap: 100,
         }),
     );
@@ -393,7 +396,7 @@ fn execute_sql_real_columns_and_cap() {
         &conn,
         &m,
         &Operation::ExecuteSql(ExecuteSqlParams {
-            sql: "SELECT * FROM \"Person\"".into(),
+            sql: RawSql::new(RawSqlAccess::granted(), "SELECT * FROM \"Person\""),
             row_cap: 2,
         }),
     );

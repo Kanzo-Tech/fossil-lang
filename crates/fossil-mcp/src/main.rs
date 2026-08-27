@@ -51,8 +51,14 @@ impl FossilMcp {
     ) -> Result<CallToolResult, McpError> {
         let dataset: fossil_mcp::Dataset = serde_json::from_value(p.dataset)
             .map_err(|e| McpError::invalid_params(format!("dataset: {e}"), None))?;
-        let operation: fossil_graph::Operation = serde_json::from_value(p.operation)
-            .map_err(|e| McpError::invalid_params(format!("operation: {e}"), None))?;
+        // The generic tool grants raw SQL, because the generic tool has no way
+        // not to: one tool cannot be half-registered. Making that a policy is
+        // what the six typed tools are for — `fossil_graph::raw_sql`.
+        let operation = fossil_graph::Operation::from_wire(
+            &p.operation,
+            Some(fossil_graph::RawSqlAccess::granted()),
+        )
+        .map_err(|e| McpError::invalid_params(format!("operation: {e}"), None))?;
         let result = fossil_mcp::dispatch_json(dataset, operation)
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
