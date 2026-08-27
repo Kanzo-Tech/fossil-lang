@@ -392,6 +392,141 @@ pub enum LayoutError {
     /// it. Checked while streaming, for one comparison per row.
     #[error("adjacency `{target}` is not ordered by `{column}`, which the manifest claims it is")]
     Disordered { target: String, column: String },
+    /// The run declared a memory budget smaller than what the pass will hold for
+    /// a corpus of this shape — see [`estimated_peak_bytes`].
+    ///
+    /// **A refusal and not a degradation**, and the two are not interchangeable.
+    /// This pass has no spill path: there is no disk manager under it and no
+    /// operator in it that can be told no and give something back, so the two
+    /// honest answers to "it does not fit" are *refuse* and *produce a different
+    /// corpus*. The second one is unavailable here for a reason that is
+    /// structural rather than squeamish — `fossil run` and the browser tab write
+    /// the same tree byte for byte, and only one of them has a `--memory-gib` to
+    /// declare, so a budget that changed the output would make the two paths
+    /// disagree exactly when a budget was declared.
+    ///
+    /// So the budget decides **whether the pass runs**, never what it writes.
+    #[error(
+        "the layout pass needs about {} GiB for {vertex_count} vertices and {adjacency_rows} \
+         adjacency rows, and the run declared {} GiB — raise `--memory-gib`, or omit it to run \
+         unbounded",
+        .needed_bytes / (1 << 30),
+        .declared_bytes / (1 << 30)
+    )]
+    OverBudget {
+        /// Rows across every vertex Parquet the pass was handed.
+        vertex_count: u64,
+        /// Rows across every adjacency Parquet, both orientations.
+        adjacency_rows: u64,
+        /// What [`estimated_peak_bytes`] says this corpus costs.
+        needed_bytes: u64,
+        /// The run's `--memory-gib`, in bytes.
+        declared_bytes: u64,
+    },
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// The budget, in bytes
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Bytes the pass holds per vertex, in the arrays it allocates.
+///
+/// Every array below is live at the pass's high-water mark, and the reason to
+/// **sum** them rather than take a maximum over the phases is not conservatism:
+/// it is what the instrument reports. Every delta `FOSSIL_MEM_PROBE` prints for
+/// this pass is positive and not one of them ever comes back — freeing a `Vec`
+/// returns pages to the allocator, not to the OS — so the pass's resident set is
+/// monotone and its peak is its total.
+///
+/// | array | bytes per vertex |
+/// | --- | --- |
+/// | `dense_of_row` | 4 |
+/// | two CSR `offsets` (`usize`) | 16 |
+/// | `self_loops`, `degrees` (`f64`) | 16 |
+/// | Louvain `community`, `totals`, `levels[0]` | 16 |
+/// | `clusters`, `placement`, `positions`, `morton`, `new_ids`, `order` | 28 |
+/// | `row_of_dense`, `gather`, `new_dense`, `xs`, `ys`, `cluster_ids` | 24 |
+///
+/// That is 104, and this is 128 — the remainder is the allocator's, and it is a
+/// term rather than a rounding. `vec![0u32; n]` asks for `4n` and the OS hands
+/// over whole pages of whichever size class holds them.
+const VERTEX_ARRAY_BYTES: u64 = 128;
+
+/// Bytes per adjacency row, counting each orientation's rows separately.
+///
+/// **The one constant here that is measured rather than derived, and it is the
+/// one that decides the answer.** Four bytes are the CSR `targets` entry the row
+/// becomes and about six more are the remap at the end of the pass — the one
+/// phase that holds a whole orientation as Arrow at once (`concat_batches` over
+/// two `u32` columns, `lexsort_to_indices`, and the `take` that applies it),
+/// billed +0.84 GiB over 139,874,560 rows. Ten bytes of the forty-eight.
+///
+/// The other thirty-eight are Louvain, and **nothing in this file explains
+/// them**. `community_hierarchy` holds `community` + `totals` + `levels[0]` and
+/// contracts a ten-million-vertex graph to some tens of thousands of communities
+/// at level zero, which is a hundred and sixty megabytes of arrays; it measures
+/// **+3.91 GiB** at ten million (`examples/enrich_memory 10000000 14`,
+/// 2026-08-27, and +0.39/+0.89/+1.79/+3.30 at one, two, four and eight million —
+/// linear). The residue is transient allocation the OS was asked for and never
+/// got back, and the obvious culprit was tested and refuted: see `local_moving`.
+///
+/// It is billed **per adjacency row and not per vertex** because the work is a
+/// scan of neighbourhoods, which is what makes the shape mechanistically
+/// defensible. What that shape is *not* is verified: every calibration point
+/// above is mean degree fourteen, where V and E are proportional and the two
+/// attributions are indistinguishable. **A second degree is owed**, and until it
+/// is measured a corpus much denser than fourteen is over-estimated by this term
+/// and a much sparser one under-estimated.
+const ADJACENCY_ROW_BYTES: u64 = 48;
+
+/// What one uncompressed byte of a vertex Parquet costs once it is Arrow, in
+/// thousandths.
+///
+/// The vertex file is the one input whose cost is **not** a function of the row
+/// count: a row is a subject IRI and every property the mapping emitted, and a
+/// corpus of four integer columns and a corpus of a dozen strings have the same
+/// V. So this term reads the footer's `total_byte_size` — the uncompressed size
+/// the file declares, free with the metadata — rather than pretending a row has
+/// a width.
+///
+/// 1.30: at ten million the fixture's vertex Parquet declares 1,006 MiB
+/// uncompressed and `read vertices` billed +1.28 GiB decoded.
+const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
+
+/// What [`enrich_layout_within`] will hold, in bytes, for a corpus of this
+/// shape — the three terms above, summed.
+///
+/// **Every input is a footer read.** `vertex_count` and `adjacency_rows` are
+/// `num_rows`, `vertex_payload_bytes` is the sum of the row groups'
+/// `total_byte_size`, and all three are in the metadata a Parquet reader parses
+/// before it decodes a single page. That is what makes a budget check something
+/// the pass can afford to do *first*, at second zero, rather than discovering at
+/// second two hundred that the machine cannot finish.
+///
+/// **Calibrated to over-estimate, on purpose.** An estimate that is a little too
+/// large refuses a run that would have fitted, and the person who declared the
+/// budget raises it and tries again; one that is a little too small accepts a
+/// run and lets it exceed the number they were promised, which is the defect
+/// this whole mechanism exists to remove. At the calibration point — ten million
+/// vertices, 139,874,560 adjacency rows, a 1,133 MiB vertex Parquet — it returns
+/// **8.95 GiB** against a measured process peak of **8.82 GiB**
+/// (`examples/enrich_memory 10000000 14`, 2026-08-27, Mac16,8 / 14 cores).
+///
+/// It is an estimate and it says so. It is a straight line through calibration
+/// points that all share one mean degree, and [`ADJACENCY_ROW_BYTES`] says which
+/// half of that line is the unverified one. What it is *not* is a guess about
+/// which phase dominates: that is measured, and it is Louvain, by more than
+/// every other phase of the pass put together.
+#[must_use]
+pub const fn estimated_peak_bytes(
+    vertex_count: u64,
+    adjacency_rows: u64,
+    vertex_payload_bytes: u64,
+) -> u64 {
+    VERTEX_ARRAY_BYTES
+        .saturating_mul(vertex_count)
+        .saturating_add(ADJACENCY_ROW_BYTES.saturating_mul(adjacency_rows))
+        .saturating_add(vertex_payload_bytes.saturating_mul(VERTEX_PAYLOAD_PERMILLE) / 1_000)
 }
 
 /// Replace the W0b placeholder `x`/`y`/`cluster_id` columns of each vertex
@@ -478,6 +613,78 @@ pub fn enrich_layout(
     adjacencies: &[AdjacencyTarget],
 ) -> Result<(), LayoutError> {
     enrich_layout_with(&LocalFs, targets, adjacencies)
+}
+
+/// [`enrich_layout_with`], under the run's declared memory budget.
+///
+/// `memory_bytes` is `fossil run --memory-gib`, in bytes, and `None` is
+/// unbounded — which is what every caller passed before this existed and what
+/// the browser passes still, because a tab has no flag to declare one with.
+///
+/// **The budget decides whether the pass runs, never what it writes.** It is
+/// checked once, before the first column chunk is decoded, against
+/// [`estimated_peak_bytes`] over three numbers that come out of the Parquet
+/// footers; over budget is [`LayoutError::OverBudget`] and the corpus is left
+/// exactly as the writer staged it. Under budget the pass proceeds and emits
+/// the tree it would have emitted unbounded, byte for byte — see
+/// [`LayoutError::OverBudget`] for why degrading was not on the table.
+///
+/// This is a *declaration* honoured by refusing, not a pool honoured by
+/// spilling. `fossil-df`'s half of the write path has a `FairSpillPool` and a
+/// disk manager under it and can be told no mid-plan; this pass holds Rust
+/// `Vec`s and has nowhere to put them. Told no, the only thing it can do that
+/// is not a lie is stop.
+///
+/// # Errors
+///
+/// As [`enrich_layout`], plus [`LayoutError::OverBudget`].
+pub fn enrich_layout_within(
+    io: &dyn LayoutIo,
+    targets: &[VertexLayoutTarget],
+    adjacencies: &[AdjacencyTarget],
+    memory_bytes: Option<u64>,
+) -> Result<(), LayoutError> {
+    if let Some(declared) = memory_bytes {
+        let mut vertex_count = 0u64;
+        let mut vertex_payload_bytes = 0u64;
+        for target in targets {
+            let (rows, bytes) = footprint(io, &target.vertex_parquet)?;
+            vertex_count = vertex_count.saturating_add(rows);
+            vertex_payload_bytes = vertex_payload_bytes.saturating_add(bytes);
+        }
+        let mut adjacency_rows = 0u64;
+        for adjacency in adjacencies {
+            let (rows, _) = footprint(io, &adjacency.parquet)?;
+            adjacency_rows = adjacency_rows.saturating_add(rows);
+        }
+        let needed_bytes = estimated_peak_bytes(vertex_count, adjacency_rows, vertex_payload_bytes);
+        if needed_bytes > declared {
+            return Err(LayoutError::OverBudget {
+                vertex_count,
+                adjacency_rows,
+                needed_bytes,
+                declared_bytes: declared,
+            });
+        }
+    }
+    enrich_layout_with(io, targets, adjacencies)
+}
+
+/// Row count and uncompressed byte size of a Parquet, **from its footer alone**.
+///
+/// Both are in the metadata the reader parses before it touches a page, which is
+/// what makes the budget check affordable at the top of the pass: a refusal
+/// costs one footer per file and not one column chunk.
+fn footprint(io: &dyn LayoutIo, url: &str) -> Result<(u64, u64), LayoutError> {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
+    let metadata = builder.metadata();
+    let rows = metadata.file_metadata().num_rows().max(0) as u64;
+    let bytes = metadata
+        .row_groups()
+        .iter()
+        .map(|group| group.total_byte_size().max(0) as u64)
+        .sum();
+    Ok((rows, bytes))
 }
 
 /// [`enrich_layout`], against a filesystem the caller chooses.
@@ -2224,6 +2431,23 @@ fn local_moving(graph: &Weighted) -> Vec<u32> {
             let own = community[v];
             let k_v = graph.degrees[v];
             // Weight from v into each neighbouring community.
+            //
+            // **A `HashMap` per vertex per sweep, and it is not what costs this
+            // pass its memory.** That was the obvious reading of the +3.91 GiB
+            // `community_hierarchy` bills at ten million against the ~160 MB the
+            // step demonstrably *holds*, and it is wrong. Replacing this map and
+            // the candidate `Vec` below with one sparse accumulator reused
+            // across every vertex — `Vec<f64>` of weights, `Vec<bool>` of
+            // occupancy, a `touched` list to clear them — was implemented, gave
+            // bit-identical output, and measured on the ten-million fixture:
+            // Louvain **225.7 s → 126.2 s** (1.78×), and the process peak
+            // **8.82 GiB → 9.20 GiB**, reproduced exactly across two runs.
+            //
+            // It costs 0.38 GiB of the one quantity `--memory-gib` exists to
+            // bound, to buy wall clock that was not the objective, so it is not
+            // here. `/docs/design/discarded` carries it with what would bring it
+            // back — chiefly the level-zero rewrite, after which the 4 GiB this
+            // step transiently reaches is gone and 90 MB of accumulator is free.
             let mut into: std::collections::HashMap<u32, f64> = std::collections::HashMap::new();
             for (u, w) in graph.neighbours(v) {
                 *into.entry(community[u as usize]).or_insert(0.0) += w;

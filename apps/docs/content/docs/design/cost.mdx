@@ -99,8 +99,13 @@ corpus whose `by_target` is not tiled, every window reports `dst: not-declared` 
 
 ## W1, W2 · The peak follows the corpus, and the budget does not reach it
 
-`--memory-gib` is a `FairSpillPool` around `execute_graph` and nothing after it. `enrich_layout`
-takes the run's `memory_bytes` and discards it, so three stages sit outside the pool.
+`--memory-gib` is a `FairSpillPool` around `execute_graph`, and for a long time it was nothing after
+it: `enrich_layout` took the run's `memory_bytes` and discarded it, so three stages sat outside the
+pool and a declared 4 GiB run peaked at 8.39 GiB. The number reaches the layout pass now, and is
+honoured there by **refusing** rather than spilling — `estimated_peak_bytes` over the staged Parquet
+footers, checked before the first column chunk is decoded. That closes the *declaration*; it does not
+close the shape below, and the two should not be confused. **The peak still grows with N, and a
+refusal is what happens when it grows past what was declared.**
 
 The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unbounded, 2026-08-25:
 
