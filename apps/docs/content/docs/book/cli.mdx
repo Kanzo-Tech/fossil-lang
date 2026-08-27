@@ -45,10 +45,21 @@ own to keep — the destination is the output.
 fossil run shop.fossil --dest s3://corpus/shop --memory-gib 4
 ```
 
-One number, and it bounds the whole run. Past it, work spills to disk rather than growing, so a
-corpus larger than the machine takes longer instead of failing. Leave it off and the run is
-unbounded, which is the right choice when you know the data fits and the wrong one when you are
-guessing.
+One number, and both halves of the write path are held to it — **differently, because only one of
+them can spill.**
+
+The executor reserves against a pool and spills to disk rather than growing past it, so a corpus
+larger than the machine takes longer instead of failing. The layout pass that follows it holds
+arrays with nowhere to put them, so it does the other honest thing: it works out what the staged
+corpus will cost, from the Parquet footers, before it decodes any of it — and if that is more than
+you declared it stops and says both numbers, leaving the staged corpus untouched. Raise the budget
+and run again, or leave the flag off.
+
+It never changes the corpus. A run that fits writes exactly what an unbounded run writes, byte for
+byte, which is what keeps `fossil run` and the browser producing the same tree.
+
+Leave it off and the run is unbounded, which is the right choice when you know the data fits and the
+wrong one when you are guessing.
 
 ### `--creds-stdin`
 

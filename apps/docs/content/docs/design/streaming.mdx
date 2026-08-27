@@ -13,7 +13,7 @@ transformed, is handed on and is dropped, so peak memory follows the working set
 A boundary that holds a whole value is memory the pool never sees, and the process dies with the
 budget honoured. One mechanism, two halves, one page.
 
-## The budget encloses the executor, and nothing after it
+## The budget encloses the executor, and the layout refuses
 
 ```mermaid
 graph LR
@@ -23,15 +23,36 @@ graph LR
   X --> G["<b>GraphArData</b><br/><i>seam 1 · still collects</i><br/>1.64 GiB of Arrow at ten million"]
   G --> F["<b>try_for_each_file</b><br/><i>seam 2 · refuted by measurement</i><br/>0.02 GB, inside the noise"]
   F --> W[("GraphAr tree on disk<br/>713 MB · 87 files")]
-  W --> E["<b>enrich_layout</b><br/><i>seam 3 · landed</i><br/>−1.71 GiB, reads the CSR it already is"]
+  W --> E["<b>enrich_layout_within</b><br/><i>the same number, honoured differently</i><br/>estimates from the footers, refuses"]
 ```
 
-The box is the finding. `enrich_written_layout` takes the run's `memory_bytes` and discards it —
-`let _ = memory_bytes;`, with a comment saying there is nothing left to cap and nothing enforcing the
-budget either. The run's peak is the pool's cap plus what the three stages outside the box add;
-[one engine](/docs/design/one-engine) tables the cost of the last of them. A probe settled that, not
-an argument: four explanations for seventeen gigabytes were each killed by a number, and **RSS was
-already 14.61 GiB when `enrich_layout` ran its first statement.**
+The box used to be the whole finding. `enrich_written_layout` took the run's `memory_bytes` and
+wrote `let _ = memory_bytes;`, with a comment saying there was nothing left to cap and nothing
+enforcing the budget either — and at ten million vertices a declared 4 GiB run peaked at 8.39 GiB.
+**A bound overshot by more than double is worse than no bound**, because the person who declared it
+stopped worrying. A probe settled where it went, not an argument: four explanations for seventeen
+gigabytes were each killed by a number, and **RSS was already 14.61 GiB when `enrich_layout` ran its
+first statement.**
+
+The number reaches the second half now, and the two halves honour it differently because only one of
+them can. The executor reserves against a pool and **spills**. The layout pass holds Rust `Vec`s
+with no disk manager under them, so it **refuses**: `estimated_peak_bytes` over three numbers out of
+the staged Parquet footers — rows, adjacency rows, uncompressed vertex bytes — checked before a
+single column chunk is decoded. Over budget is an error at second zero and a corpus left exactly as
+the writer staged it, instead of an out-of-memory at second two hundred.
+
+<Callout title="A refusal is not the same promise as a spill, and the page should not blur them">
+This is not larger-than-RAM for the layout pass. It is a declaration that has stopped being a lie:
+`--memory-gib 4` at ten million now *says so* rather than quietly using 8.39 GiB. What it buys is
+that the number means something; what it does not buy is the run.
+
+**The budget never changes what the pass writes**, only whether it runs, and that is structural
+rather than cautious. `fossil run` and the playground tab write the same tree byte for byte through
+one `LayoutIo`, and only one of them has a flag to declare a budget with — so a budget that degraded
+the output would make the two paths disagree exactly when somebody declared one.
+`crates/fossil-layout/tests/budget.rs` runs one staged corpus twice, once unbounded and once under a
+budget, and compares every byte of every file.
+</Callout>
 
 ## A budget is a protocol, not a flag
 
@@ -103,6 +124,53 @@ finer than that.** It is also why seam 2 below reads as no result at all.
 The wall clock moved the wrong way, 135 s to 168 s, and that is not clean either: the same previous
 binary measured 151 s on another pass. Walking two arrays per vertex instead of one has a locality
 cost that is structural, and it is owed a measurement on a quiet machine before anybody calls it free.
+</Callout>
+
+### Reproduced, and what the budget is calibrated on
+
+The layout pass on its own, `FOSSIL_MEM_PROBE=1 … --example enrich_memory -- <N> 14`, on a Mac16,8 —
+14 cores, 48 GiB, macOS 25.2.0 — 2026-08-27:
+
+| N | vertex Parquet | process peak | at `start` | **the pass** | `community_hierarchy` |
+| --- | --- | --- | --- | --- | --- |
+| 2,000,000 | 235.87 MB | 2.09 GiB | 0.50 GiB | 1.59 GiB | +0.83 GiB · 34.0 s |
+| 10,000,000 | 1,187.75 MB | 8.82 GiB | 1.33 GiB | 7.49 GiB | **+3.91 GiB · 225.7 s** |
+
+The ten-million row is the same measurement `examples/compaction_pass` records as 8.47 GiB, on a
+quieter machine and 0.35 GiB apart — which is a little outside the 0.2 GiB two runs of one build
+differ by, and not far outside. **Nothing on this page is finer than that spread.**
+
+What the reproduction settles is the shape rather than the digit. `community_hierarchy` is **+3.91
+GiB of the pass's 7.49**, more than every other phase put together, and 225.7 s of its 244.3 —
+Louvain rules, and the Morton half of the pass is `morton codes + ranks` at +0.07 GiB. So the budget
+is calibrated where the memory is: `ADJACENCY_ROW_BYTES` is 48, of which ten are the CSR entry and
+the final remap and **thirty-eight are Louvain and are not explained by anything in the file**.
+`community_hierarchy` holds `community`, `totals` and `levels[0]` — 160 MB at ten million — and
+transiently asks the OS for four gigabytes it never gives back.
+
+<Callout type="warn" title="One hypothesis about that residue, tested and refuted">
+`local_moving` allocates a `HashMap` and a candidate `Vec` **per vertex per sweep** — a few hundred
+million transient allocations at ten million — which is the obvious reading of a step that bills
+3.91 GiB while holding 160 MB. Replacing both with one sparse accumulator reused across every vertex
+(`Vec<f64>` of weights, `Vec<bool>` of occupancy, a `touched` list to clear them) was implemented and
+gives **bit-identical output**, by construction: the same accumulation order, the same ascending
+tie-break.
+
+It went the other way. Louvain **225.7 s → 126.2 s**, a 1.78× that the pass badly wants; process peak
+**8.82 → 9.20 GiB**, reproduced *exactly* across two runs, against 90 MB of arrays added. It costs
+0.38 GiB of the one quantity `--memory-gib` exists to bound, to buy wall clock that was not the
+objective, so it is not in the tree — it is in [discarded](/docs/design/discarded) with what would
+bring it back. **The residue is still unexplained**, and the cheapest next probe is a level-zero
+pass that keeps only `community[u]`, which [the cost model](/docs/design/cost) already argues for on
+different grounds.
+</Callout>
+
+<Callout type="warn" title="The composition is not closed, and this is the honest edge of the claim">
+One declared number is spent **twice** — once by the executor's pool, once by the layout pass — and
+neither half knows what the other took. `--memory-gib 4` therefore bounds a write path at something
+closer to eight than to four, and what has changed is that the second four is now *checked* rather
+than unbounded. Closing it means the layout being told what the executor left resident, which is a
+number nothing currently carries across the seam.
 </Callout>
 
 ## Three seams, named on the same reasoning
