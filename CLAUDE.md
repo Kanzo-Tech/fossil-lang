@@ -215,14 +215,6 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
                            `packages/codemirror-fossil` inside it, and it does NOT adopt
                            `@kanzo-tech/graph`
 
-vendor/kanzo-tech/         two `pnpm pack` tarballs, committed, because `@kanzo-tech/ui` has
-                           never been published and every other route dies on a fresh clone:
-                           kanzo-ui gitignores `dist/` with no `prepare` script, and
-                           `@kanzo-tech/ui` depends on `@kanzo-tech/theme` at `workspace:*`.
-                           Only `pnpm pack` (never `npm pack`) rewrites that protocol. Its
-                           README is the argument; `refresh.sh` is how the blobs change and
-                           it writes the source SHA back
-
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
                            source of six generated files; no Rust states a row twice

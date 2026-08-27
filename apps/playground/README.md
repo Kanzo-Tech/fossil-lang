@@ -74,11 +74,15 @@ live-reconfigured `Compartment` and externalises every `@codemirror/*` as an
 optional peer; the language layer asks whichever `HighlightStyle` is installed for
 its classes, so fossil arrives in kanzo's palette without either side arranging it.
 
-`@kanzo-tech/ui` **is not on npm and this app does not wait for it.** The specifier
-is a tarball committed at `vendor/kanzo-tech/`, and `vendor/kanzo-tech/README.md`
-has the three routes that do not survive a fresh clone — a workspace spanning both
-repositories, `pnpm link`, and a `file:`/git URL at `kanzo-ui/packages/ui` — with
-the manifest facts that stop each one.
+`@kanzo-tech/ui` is a **published dependency at an exact version**, `0.0.1-alpha`.
+It was a `pnpm pack` tarball committed at `vendor/kanzo-tech/` for as long as the
+package had never been published, because the three routes that stand in for
+publishing all die on a fresh clone — a workspace spanning both repositories,
+`pnpm link`, and a `file:`/git URL at `kanzo-ui/packages/ui`, the last of which
+cannot work at all while `@kanzo-tech/ui` names `@kanzo-tech/theme` at
+`workspace:*`. The published manifest names it at `0.0.1-alpha`, so the argument
+is spent and the directory is gone. The pin is exact rather than a caret because a
+prerelease is not a contract yet.
 
 What the editor does NOT have is hover, completion and goto-definition. All three
 exist in `crates/fossil-ide` and `crates/fossil-wasm`'s `lsp_worker.rs` dispatches

@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
-  "//kanzo-tech": "@kanzo-tech/ui is not on npm and this does not wait for it: the specifier is a tarball committed at vendor/kanzo-tech/, and the root package.json overrides the @kanzo-tech/theme@0.0.0 that pnpm pack rewrote inside it. vendor/kanzo-tech/README.md has the three routes that do not survive a fresh clone and why. The @codemirror/* set is here rather than there because they are all OPTIONAL peers of @kanzo-tech/ui — its CodeEditor externalises every one and resolves them from the consumer.",
+  "//kanzo-tech": "The version is exact, not a range: @kanzo-tech/ui is at 0.0.1-alpha and a prerelease is not a contract yet. The @codemirror/* set is here rather than there because they are all OPTIONAL peers of @kanzo-tech/ui — its CodeEditor externalises every one and resolves them from the consumer.",
   "dependencies": {
     "@codemirror/language": "^6.10.0",
     "@codemirror/lint": "^6.8.0",
@@ -29,7 +29,7 @@
     "@fossil-lang/executor": "workspace:*",
     "@fossil-lang/graph": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
-    "@kanzo-tech/ui": "file:../../vendor/kanzo-tech/kanzo-tech-ui-0.0.0.tgz",
+    "@kanzo-tech/ui": "0.0.1-alpha",
     "@lezer/highlight": "^1.2.0",
     "lucide-react": "^1.23.0",
     "react": "^19.0.0",
