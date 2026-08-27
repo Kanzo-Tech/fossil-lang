@@ -2176,7 +2176,6 @@ dependencies = [
  "fossil-resolver",
  "fossil-sinks",
  "rmcp",
- "schemars 1.2.1",
  "secrecy",
  "serde",
  "serde_json",

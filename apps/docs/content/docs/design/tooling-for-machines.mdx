@@ -46,6 +46,53 @@ question it has* rather than reconstructing it from the layout. The typing is th
 protocol carries the shape of each call, so a malformed request is rejected at the boundary rather
 than producing a plausible wrong answer.
 
+### Six tools, not one
+
+The typing is only the point if the protocol actually carries it, and for a while it did not.
+`fossil-mcp` registered **one** tool, `dispatch_verb`, taking `{ dataset, operation }` as opaque
+JSON — the minimal surface that was still the whole service, and a placeholder that said so. What it
+cost is paid entirely by the caller: one input schema that is a `oneOf` over six unrelated shapes, so
+every call is assembled by first choosing a discriminant and then rebuilding the params under it, and
+the six descriptions arrive as one paragraph whether the question was `schema` or `path`.
+
+There is now **one tool per verb**, and the difference is measurable rather than aesthetic. The
+envelope schema a caller had to read to make *any* call is **6,604 bytes**. A `path` call now reads
+**308**; the largest of the six, `aggregate`, is **1,536**. Between 4× and 21× less contract to build
+one call, and a malformed `read` is rejected against `read`'s schema at the protocol boundary instead
+of inside a handler. What does *not* change is the listing: all six schemas together are 5,743 bytes,
+about what the envelope was, so this buys a caller nothing at connect time and everything at call
+time.
+
+Nothing holds a second copy of the surface. The names, the prose and the params schemas all come off
+`fossil_graph::Verb` behind exhaustive matches, which is the same artefact the wire snapshots
+publish — so a seventh verb cannot be registered without the envelope changing, and the crate that
+speaks MCP does not derive a single JSON Schema of its own.
+
+<Callout title="Hiding the escape hatch became a thing a binding can do">
+`execute_sql` was always documented as a verb a binding **may** hide behind a permission, and with
+one generic tool that was not something a binding could actually do — a tool cannot be
+half-registered. With six it is literal: the tool is registered or it is not, and `--allow-raw-sql`
+is what decides. It is off by default, because five verbs cost a function of the answer and this one
+costs a function of whatever was typed.
+
+**It is one field with two consequences, and that is the design.** Withholding drops the
+`execute_sql` tool *and* refuses `read`'s `where`, because
+[that field carries the same authority](/docs/design/corpus#reads-where-is-sql-and-carries-executesqls-authority).
+There is no second knob to set inconsistently.
+</Callout>
+
+### The dataset is server configuration
+
+Six typed tools exist so that a tool's input schema **is** its verb's params. Threading a dataset
+blob through all six would put a field in every schema that no verb has and that the model has to
+reconstruct identically six times — which is most of what was wrong with the single tool, moved.
+
+So `fossil-mcp --dataset <path>` reads it once, from a JSON file holding `{ dest, secret?,
+manifest_files }`. **A path in argv is not a secret in argv**, which is the invariant below and the
+reason this is a file rather than a flag value: the file is opened by the server, and an argument
+vector visible to every process on the machine carries only its name. Standard input, the usual home
+for this, is not available here — it is the MCP transport.
+
 One invariant travels with it and is not negotiable:
 
 > **Credentials ride the protocol message. Never argv, never the environment.**

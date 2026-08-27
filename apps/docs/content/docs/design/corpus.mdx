@@ -21,6 +21,27 @@ works on a local filesystem and on an object store, and fails in a browser again
 which is the worst distribution of a failure a design can have. The lineage is explicit —
 **Cloud-Optimized GeoTIFF → GeoParquet → PMTiles** — and copying that schema beats inventing one.
 
+### Where a wildcard survives, counted
+
+The rule has one exception left in the tree, and it is bounded rather than argued.
+`fossil-mcp`'s `register_views_sql` composes every path a verb reads, and
+`crates/fossil-mcp/src/lib.rs` measures what is left over the conformance corpus in both containers:
+
+| container | globs registered | where |
+| --- | --- | --- |
+| `rowgroups` | **0** | every payload set is one file the manifest's `prefix` names |
+| `files` | **one per edge orientation**, none elsewhere | a vertex type's tiles come out of `vertex_count` and `chunk_size`; an edge orientation's cannot, because a tile whose vertices have no edges is a file that was never written and a run of them is a gap no arithmetic predicts |
+
+**What bounds it is which container fossil writes**, measured rather than reasoned: `fossil run
+examples/hello.fossil` emits `container: rowgroups`, and `crates/fossil-df/src/lib.rs` has the one
+call that decides it. So a corpus fossil wrote registers no wildcard at all, and the surviving one is
+reachable only through a corpus another writer produced — which the conformance corpus is, because it
+is written through DuckDB and DuckDB clamps a row group under its 2,048-row vector.
+
+It is not closed, and the reason is that closing it is a format change rather than a binding change:
+it needs a per-orientation tile census in the edge manifest, a field with its own argument about what
+a reader may derive. Until a `files` corpus is served, the cost is one nobody is paying.
+
 ## The artifact is the API
 
 The stance follows the table formats — Iceberg, Delta Lake, Lance — where a manifest plus a set of
@@ -109,7 +130,7 @@ over it. **It closed at six on 2026-08-05**, and the six are the variants of `Op
 | `path` | a route between two vertices |
 | `aggregate` | a grouped, bounded summary — over values or over ranges |
 | `schema` | what types, fields and relations exist, with field stats on request |
-| `execute_sql` | the escape hatch, which a binding may hide behind a permission |
+| `execute_sql` | the escape hatch, which a binding may hide behind a permission — and in `fossil-mcp` that is [literal](/docs/design/tooling-for-machines): the tool is registered or it is not |
 
 The algebra answers questions and **does not draw**, because drawing is addressing: the camera works
 out which level and which tiles it needs and asks for bytes, with no bbox in flight and no database

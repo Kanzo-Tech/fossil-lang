@@ -6,14 +6,16 @@
 //! [`fossil_graph::dispatch`] the operation via [`ConnectionExecutor`].
 //!
 //! The MCP transport (`main.rs`, `rmcp`) is a thin shell over [`dispatch_json`]:
-//! the host (keasy) spawns this binary, calls the verb tool with a
-//! [`Dataset`] + an [`fossil_graph::Operation`], and gets the verb's JSON
-//! result. Secrets ride the MCP message on stdin (never argv/env), honouring
-//! the same invariant as `fossil run --creds-stdin`.
+//! the host spawns this binary against one [`Dataset`], the six typed tools of
+//! [`tools`] turn a tool call into an [`fossil_graph::Operation`], and the
+//! caller gets the verb's JSON result. The dataset — including its secret —
+//! comes from the file `--dataset` names, never from argv or the environment,
+//! honouring the same invariant as `fossil run --creds-stdin`.
 
 use std::collections::HashMap;
 
 pub mod executor;
+pub mod tools;
 pub use executor::ConnectionExecutor;
 
 use duckdb::Connection;
@@ -468,6 +470,123 @@ mod tests {
         assert_eq!(
             edges, declared,
             "the edge view reads {edges} rows where the manifest declares {declared}",
+        );
+    }
+
+    /// **How much of this binding still hands the engine a wildcard, counted.**
+    ///
+    /// A glob is the one thing the addressing rule forbids — expanding a
+    /// wildcard IS listing a directory, and there is no listing over HTTP — and
+    /// this function is the last place in the read path that emits one. The
+    /// number is the claim, so it is measured here for both containers over the
+    /// same corpus rather than argued in a comment:
+    ///
+    /// - **`rowgroups`: zero.** Every payload set is one file named by the
+    ///   manifest's own prefix, so there is nothing to expand.
+    /// - **`files`: one per edge orientation, and none anywhere else.** A
+    ///   vertex type's tiles are composed from `vertex_count` and `chunk_size`.
+    ///   An edge orientation's are not, and cannot be: a tile whose vertices
+    ///   have no edges is a file that was never written, and a run of them is a
+    ///   gap no arithmetic predicts.
+    ///
+    /// **What bounds the exposure is which container fossil writes**, and that
+    /// was measured rather than read off a call site: `fossil run
+    /// examples/hello.fossil` emits `container: rowgroups`, and
+    /// `crates/fossil-df/src/lib.rs` has the one `GraphInfo::new` call that
+    /// decides it, passing [`Container::RowGroups`] unconditionally. So **a
+    /// corpus fossil wrote registers no wildcard at all.**
+    ///
+    /// The fixture below is the other one on purpose. `apps/corpus`'s
+    /// conformance corpus is `container: files` — it is written through `DuckDB`,
+    /// which clamps a row group under its 2,048-row vector, so a `chunk_size`
+    /// 64 corpus cannot be in the row-group container — which makes it the
+    /// corpus that actually HAS the glob, and therefore the honest fixture.
+    ///
+    /// What this does NOT claim is that the remaining glob is cheap. Left to
+    /// the engine, an edge view over a `files` corpus reads whatever the
+    /// expansion returns, and nothing here measures that. Closing it needs a
+    /// per-orientation tile census in the manifest — a format change, not a
+    /// binding change — and until somebody writes a `files` corpus that this
+    /// server is pointed at, the cost is a cost nobody is paying.
+    #[test]
+    fn the_only_wildcard_left_is_an_edge_orientation_in_the_container_fossil_does_not_write() {
+        use fossil_graph::manifest::GRAPH_INFO_PATH;
+        use fossil_sinks::manifest::Container;
+        use std::path::Path;
+
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/corpus/conformance/corpus")
+            .canonicalize()
+            .expect("the conformance corpus is on disk");
+
+        let read = |rel: &str| {
+            String::from_utf8(std::fs::read(corpus.join(rel)).expect("read a manifest"))
+                .expect("utf8")
+        };
+        let graph_yaml = read(GRAPH_INFO_PATH);
+        // The conformance corpus is the `files` one, and that is not an
+        // accident: it is written through DuckDB, which clamps a row group
+        // smaller than its 2,048-row vector, so a `chunk_size` 64 corpus cannot
+        // be in the other container (`crates/fossil-df/src/files.rs`). Which
+        // makes it the right fixture for this measurement — it is the corpus
+        // that HAS the glob.
+        assert!(
+            graph_yaml.contains("container: files"),
+            "the fixture is not the container this test is about: {graph_yaml}",
+        );
+
+        let load = |container: Container| {
+            let yaml = match container {
+                Container::Files => graph_yaml.clone(),
+                Container::RowGroups => {
+                    graph_yaml.replace("container: files", "container: rowgroups")
+                }
+            };
+            let mut map = HashMap::new();
+            map.insert(GRAPH_INFO_PATH.to_string(), yaml.into_bytes());
+            for rel in [
+                "vertex/Person.vertex.yml",
+                "edge/Person_knows_Person/Person_knows_Person.edge.yml",
+            ] {
+                map.insert(rel.to_string(), read(rel).into_bytes());
+            }
+            let manifest = Manifest::load(&MapSource(map)).expect("the manifest loads");
+            assert_eq!(manifest.graph().container, container);
+            register_views_sql(&manifest, corpus.to_str().unwrap())
+        };
+
+        // Count stars in the PATHS, not in the statement: every view projects
+        // `SELECT *`, which is a star this measurement is not about. What the
+        // engine expands is the argument of `read_parquet`.
+        let globbed = |sql: &str| -> Vec<String> {
+            sql.lines()
+                .filter_map(|line| {
+                    let open = line.find("read_parquet(")? + "read_parquet(".len();
+                    let close = line.rfind(')')?;
+                    line.get(open..close)
+                        .filter(|paths| paths.contains('*'))
+                        .map(|_| line.to_string())
+                })
+                .collect()
+        };
+
+        let rowgroups = load(Container::RowGroups);
+        assert!(
+            globbed(&rowgroups).is_empty(),
+            "the container fossil writes composes every path; got: {rowgroups}",
+        );
+
+        let files = load(Container::Files);
+        let globs = globbed(&files);
+        assert_eq!(
+            globs.len(),
+            1,
+            "the fixture has one source-ordered adjacency, so it bounds the count at one; got: {files}",
+        );
+        assert!(
+            globs[0].contains("Person_knows_Person") && globs[0].contains("tile*.parquet"),
+            "the surviving wildcard is not an edge orientation; got: {}",
+            globs[0],
         );
     }
 }
