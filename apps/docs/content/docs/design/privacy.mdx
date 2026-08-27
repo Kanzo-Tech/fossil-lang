@@ -17,7 +17,7 @@ a verb.
 
 The temptation is to answer this by withholding the escape hatch: gate `execute_sql` and the problem
 looks smaller. It is not smaller, it is hidden. [`read`'s `where` is a raw SQL
-fragment](/docs/design/corpus#reads-where-is-sql-and-carries-execute_sqls-authority) evaluated by
+fragment](/docs/design/corpus#reads-where-is-sql-and-carries-executesqls-authority) evaluated by
 the same engine, so gating one and not the other is the same surface with a second door — and even
 with both gated, the recipient has the Parquet.
 

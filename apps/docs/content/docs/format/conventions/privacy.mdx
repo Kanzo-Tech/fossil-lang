@@ -43,7 +43,7 @@ Snowflake's dynamic data masking and row access policies, BigQuery's column-leve
 row-level security, and Databricks' equivalent all apply **inside the query planner**, whatever SQL
 the caller wrote. A design that answered this by hiding `execute_sql` would have the same surface
 with a second door — and [`read`'s `where` is a raw SQL
-fragment](/docs/design/corpus#reads-where-is-sql-and-carries-execute_sqls-authority), which is that
+fragment](/docs/design/corpus#reads-where-is-sql-and-carries-executesqls-authority), which is that
 second door in one field.
 </Callout>
 
