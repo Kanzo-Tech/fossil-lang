@@ -368,7 +368,7 @@ manifest:
 
 ```ts
 const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
-const { vertexUrls, edgeUrls, complete, gaps } = corpus.window({ tiles, directions: ['src'] });
+const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({ tiles, directions: ['src'] });
 ```
 
 It is **synchronous, and that is the claim** — no `fetch`, no connection, no promise. Bytes, tile

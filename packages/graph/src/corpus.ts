@@ -45,7 +45,7 @@
  *   directory to list. Both are read; neither is globbed. See {@link openCorpus}.
  *
  * And one shape of corpus it refuses rather than guesses at: **an edge label incident twice to one
- * vertex type**, which the addressing's `Window` cannot name unambiguously. See {@link Corpus.window}.
+ * vertex type**, which the addressing's `tilesFor` cannot name unambiguously. See {@link Corpus.window}.
  */
 
 import {
@@ -183,7 +183,7 @@ export interface WindowParams extends Box {
   type?: string;
   /**
    * Which orientations to read. Defaults to **both**, which is the answer that is complete for
-   * incidence — `resolveCorpus.window` defaults to `['src']` instead, because that is the drawing
+   * incidence — `resolveCorpus`'s `tilesFor` defaults to `['src']` instead, because that is the drawing
    * read and a drawing read pays for nothing it cannot paint. The reference API's default is the
    * honest one and the drawing path opts down to it.
    */
@@ -541,7 +541,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
   /**
    * The adjacency this window reads for one edge label, or the reason it does not.
    *
-   * The addressing's `Window` names an orientation by edge *label*, so a corpus where two edge
+   * The addressing's `tilesFor` names an orientation by edge *label*, so a corpus where two edge
    * types incident to the same vertex type share one label has an answer that cannot be attributed.
    * Refused rather than guessed: the alternative is edges filed under the wrong relation, which
    * draws correctly and counts wrongly.
@@ -954,7 +954,7 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
 
       // The addressing decides which orientations apply and why one is missing; this only fetches.
       // Reproducing that rule here is how the two halves of a window drift apart.
-      const plan = addressing.window({ type: address.type, tiles, directions });
+      const plan = addressing.tilesFor({ type: address.type, tiles, directions });
       const edges =
         tiles.length === 0
           ? []
@@ -1101,14 +1101,14 @@ export async function openCorpus(url: string, options: OpenCorpusOptions): Promi
       let frontier = resolved.map((v) => v.denseId);
       // One `not-declared`/`not-requested` reading for the whole walk: the orientations are the
       // same at every hop, so the addressing is asked once, with no tiles, rather than per hop.
-      const orientations = addressing.window({ type, tiles: [], directions });
+      const orientations = addressing.tilesFor({ type, tiles: [], directions });
 
       for (let hop = 0; hop < depth && frontier.length > 0; hop += 1) {
         const tiles = [...new Set(frontier.map((id) => address.tileOf(id)))].sort(ascending);
         const inFrontier = frontier.join(', ');
         const found = await readEdges(
           type,
-          addressing.window({ type, tiles, directions }).edges,
+          addressing.tilesFor({ type, tiles, directions }).edges,
           (adjacency) => `${ident(adjacency.column)} IN (${inFrontier})`,
           emitted,
         );

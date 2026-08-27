@@ -301,7 +301,7 @@ export interface EdgeTiles {
  * `complete` is about incidence and `gaps` says which orientations are missing from it, separating
  * the caller not asking from the corpus not publishing.
  */
-export interface Window {
+export interface AddressedTiles {
   /** The vertex type the tile numbers are in the `dense_id` space of. */
   readonly type: string;
   readonly tiles: readonly number[];
@@ -349,15 +349,21 @@ export interface ResolvedCorpus {
    * The URLs a set of vertex tiles addresses.
    *
    * `directions` defaults to `['src']`, which is the drawing read: it fetches the out-edges of
-   * every vertex in the window and returns `complete: false` with a `not-requested` gap, because a
-   * window of drawn vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the
-   * incident set.
+   * every vertex in the set and returns `complete: false` with a `not-requested` gap, because a
+   * set of drawn vertices has in-edges it did not ask for. Pass `['src', 'dst']` for the incident
+   * set.
+   *
+   * **It was `window`, and that name belonged to the other layer.** {@link Corpus.window} takes a
+   * rectangle in the corpus's own coordinates and answers with vertices and edges; this takes tile
+   * numbers and answers with URLs. One noun for a camera and a URL builder is how a caller ends up
+   * passing a box to the one that wants tiles. This layer returns addresses, so it is named for
+   * what it addresses.
    */
-  window(params: {
+  tilesFor(params: {
     type?: string;
     tiles: Iterable<number | bigint>;
     directions?: readonly Direction[];
-  }): Window;
+  }): AddressedTiles;
 }
 
 const COLUMN: Record<Direction, 'src_dense' | 'dst_dense'> = {
@@ -595,7 +601,7 @@ function edgeAddress(
  * ```ts
  * const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
  * const person = corpus.vertexType();
- * const { edgeUrls, complete, gaps } = corpus.window({ tiles: [3, 4], directions: ['src', 'dst'] });
+ * const { edgeUrls, complete, gaps } = corpus.tilesFor({ tiles: [3, 4], directions: ['src', 'dst'] });
  * ```
  *
  * Throws {@link CorpusManifestError} when the manifest cannot address itself — a missing file, a
@@ -656,7 +662,7 @@ export function resolveCorpus(options: ResolveCorpusOptions): ResolvedCorpus {
     vertexType,
     incident,
 
-    window({ type, tiles, directions = ['src'] }) {
+    tilesFor({ type, tiles, directions = ['src'] }) {
       const vertex = vertexType(type);
       const wanted = new Set(directions);
       const numbers = [...tiles].map(Number);

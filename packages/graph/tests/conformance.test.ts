@@ -184,7 +184,7 @@ describe('the conformance corpus', () => {
 
       for (const [index, expectation] of (expected.windows ?? []).entries()) {
         it(`window ${index}: ${expectation.directions.join('+')} over ${expectation.tiles.length} tile(s)`, () => {
-          const got = corpus.window({
+          const got = corpus.tilesFor({
             type: expectation.type,
             tiles: expectation.tiles,
             directions: expectation.directions,

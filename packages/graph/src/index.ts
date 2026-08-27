@@ -23,7 +23,7 @@
  * the only published copy of the arithmetic a reader would otherwise re-derive:
  *
  *   const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
- *   const { vertexUrls, edgeUrls, complete } = corpus.window({ tiles, directions: ['src'] });
+ *   const { vertexUrls, edgeUrls, complete } = corpus.tilesFor({ tiles, directions: ['src'] });
  */
 
 export { initFossilGraphWasm } from './load.js';
@@ -67,7 +67,7 @@ export type {
   ResolveCorpusOptions,
   ResolvedCorpus,
   VertexAddress,
-  Window,
+  AddressedTiles,
 } from './address.js';
 
 // The reference API over that same addressing: `openCorpus(url, { query })` and the four members.

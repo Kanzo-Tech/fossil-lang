@@ -238,15 +238,15 @@ describe('resolveCorpus', () => {
 
   it('reports an unaddressable orientation as a gap rather than drawing nothing', () => {
     const corpus = resolveCorpus({ manifestFiles });
-    const window = corpus.window({ tiles: [0, 1], directions: ['src', 'dst'] });
+    const addressed = corpus.tilesFor({ tiles: [0, 1], directions: ['src', 'dst'] });
 
-    expect([...window.vertexUrls]).toEqual([
+    expect([...addressed.vertexUrls]).toEqual([
       'vertex/Person/chunk0.parquet',
       'vertex/Person/chunk1.parquet',
     ]);
-    expect([...window.edgeUrls]).toEqual([]);
-    expect(window.complete).toBe(false);
-    expect(window.gaps).toEqual([
+    expect([...addressed.edgeUrls]).toEqual([]);
+    expect(addressed.complete).toBe(false);
+    expect(addressed.gaps).toEqual([
       { edgeType: 'knows', direction: 'src', reason: 'not-declared' },
       { edgeType: 'knows', direction: 'dst', reason: 'not-declared' },
     ]);
@@ -279,6 +279,6 @@ describe('resolveCorpus', () => {
     // `viewport` verb this format deleted. `resolveCorpus` returns a corpus, not a promise.
     const corpus = resolveCorpus({ manifestFiles });
     expect(corpus).not.toBeInstanceOf(Promise);
-    expect(corpus.window({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/chunk7.parquet']);
+    expect(corpus.tilesFor({ tiles: [7] }).vertexUrls).toEqual(['vertex/Person/chunk7.parquet']);
   });
 });

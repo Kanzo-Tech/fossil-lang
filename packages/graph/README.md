@@ -143,7 +143,7 @@ const corpus = resolveCorpus({ manifestFiles, base: '/bench/1000000' });
 corpus.vertexType().tileUrl(10);
 // '/bench/1000000/vertex/Person/chunk10.parquet'
 
-const { vertexUrls, edgeUrls, complete, gaps } = corpus.window({
+const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({
   tiles: [10, 11],          // from the host's own footer read — see below
   directions: ['src'],      // the drawing read
 });
