@@ -96,11 +96,13 @@ describe('runJob', () => {
     const edge = report.edges.find((e) => e.edge_type === 'placedBy');
     expect(edge?.edge_count).toBe(4);
 
-    // Every GraphAr file was signed + uploaded.
+    // Every GraphAr file was signed + uploaded — under the tiled names the
+    // layout pass writes, payload and index alike.
     for (const need of [
-      'vertex/Person.parquet',
-      'vertex/Order.parquet',
-      'edge/Order_placedBy_Person/by_source.parquet',
+      'vertex/Person/tiles.parquet',
+      'vertex/Person/index/tiles.parquet',
+      'vertex/Order/tiles.parquet',
+      'edge/Order_placedBy_Person/by_source/tiles.parquet',
       'graph.graph.yml',
     ]) {
       expect(uploaded).toContain(need);

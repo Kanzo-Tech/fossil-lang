@@ -90,13 +90,20 @@ describe('FossilExecutor', () => {
       exec.free();
     }
 
+    // The names are the TILED ones, and that is the layout pass running rather
+    // than a rename: a payload is `<prefix>/tiles.parquet` and the addressing
+    // that opens it without a scan is `<prefix>/index/tiles.parquet`. These
+    // read `vertex/Person.parquet` until the pass moved into the browser, and
+    // nothing on the Rust side goes red when it changes — this file is the gate.
     const paths = result.files.map((f) => f.path).sort();
     for (const need of [
       'graph.graph.yml',
-      'vertex/Person.parquet',
-      'vertex/Order.parquet',
-      'edge/Order_placedBy_Person/by_source.parquet',
-      'edge/Order_placedBy_Person/by_target.parquet',
+      'vertex/Person/tiles.parquet',
+      'vertex/Person/index/tiles.parquet',
+      'vertex/Order/tiles.parquet',
+      'vertex/Order/index/tiles.parquet',
+      'edge/Order_placedBy_Person/by_source/tiles.parquet',
+      'edge/Order_placedBy_Person/by_target/tiles.parquet',
     ]) {
       expect(paths).toContain(need);
     }
