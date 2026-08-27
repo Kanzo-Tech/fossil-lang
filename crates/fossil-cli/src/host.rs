@@ -455,28 +455,21 @@ pub fn run(
 /// of any self-edge, and rewrite the placeholder `x/y/cluster_id` with a real
 /// layout. Local-filesystem paths (the `run_to_dir` dest is a local dir).
 ///
-/// `memory_bytes` is the run's budget again, applied to the second engine — the
-/// pass is measured at 0.13 GiB net today, but it is the half of the write path
-/// that reads back everything the first half wrote, and an unbounded `DuckDB`
-/// targets ~80% of the machine.
+/// `memory_bytes` is the run's budget again, and it now **reaches** this half of
+/// the write path. It did not, and the gap was not small: `let _ =
+/// memory_bytes;` stood here, and at ten million vertices a declared 4 GiB run
+/// peaked at 8.39 GiB — a bound overshot by more than double, which is worse
+/// than no bound because the person who declared it believed it.
+///
+/// What it buys is a refusal rather than a spill: the pass holds Rust `Vec`s and
+/// has nowhere to put them, so `fossil_layout::layout::enrich_layout_within`
+/// estimates from the Parquet footers before it decodes anything and stops if
+/// the corpus does not fit. See `LayoutError::OverBudget`.
 fn enrich_written_layout(
     graph: &fossil_df::GraphArData,
     dest_dir: &Path,
     memory_bytes: Option<u64>,
 ) -> miette::Result<()> {
-    // `memory_bytes` used to open a DuckDB connection here and cap it with
-    // `apply_memory_budget` before handing it to the layout pass. The layout
-    // reads and writes Parquet with `arrow-rs` now and holds no connection, so
-    // there is nothing to cap — and nothing enforcing the budget either.
-    //
-    // **Measured, and it is 2.00 G through a 2 GiB cap**: one million nodes and
-    // ten million edges, `--memory-gib 2`, the executor obeying at 2.21 G and
-    // the layout then ending at 4.80 G. What costs it is the VERTEX read and
-    // the gather, not the edge sort — the sort is +0.17 G of that, and this
-    // comment used to say it was the whole of it. `design/one-engine.mdx`
-    // carries the table.
-    let _ = memory_bytes;
-
     let path_str = |rel: String| dest_dir.join(rel).to_string_lossy().into_owned();
     let adjacency = |e: &fossil_df::EdgeTable, file: &str| {
         path_str(format!(
@@ -544,8 +537,13 @@ fn enrich_written_layout(
         })
         .collect();
 
-    fossil_layout::layout::enrich_layout(&targets, &adjacencies)
-        .map_err(|e| miette::miette!("layout: {e}"))?;
+    fossil_layout::layout::enrich_layout_within(
+        &fossil_layout::io::LocalFs,
+        &targets,
+        &adjacencies,
+        memory_bytes,
+    )
+    .map_err(|e| miette::miette!("layout: {e}"))?;
 
     // The single-file vertex Parquet was this pass's input and nothing reads it
     // afterwards: the manifest points at the chunk prefix, and leaving it would

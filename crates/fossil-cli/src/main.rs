@@ -77,10 +77,15 @@ enum Commands {
         #[arg(long)]
         creds_stdin: bool,
         /// Memory budget for the run, in gibibytes (`--memory-gib 4`, fractions
-        /// allowed). One number for both engines: the executor spills to disk
-        /// instead of growing past it, and the layout pass runs under the same
-        /// limit. Omit for unbounded — a corpus larger than the machine then
-        /// dies rather than slows down.
+        /// allowed). One number, spent by both halves of the write path — and
+        /// they honour it differently, because only one of them can. The
+        /// executor reserves against a pool and SPILLS to disk rather than grow
+        /// past it. The layout pass holds arrays with nowhere to spill, so it
+        /// REFUSES: it estimates from the staged Parquet footers before it
+        /// decodes anything, and stops rather than overshoot the number.
+        ///
+        /// Omit for unbounded — a corpus larger than the machine then dies
+        /// rather than slows down.
         #[arg(long, value_name = "GIB", value_parser = gib_to_bytes)]
         memory_gib: Option<u64>,
         /// Path to the privacy policy the release is verified against — an ODRL
