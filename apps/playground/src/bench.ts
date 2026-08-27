@@ -40,7 +40,20 @@ export interface BenchStamp {
 /** The corpus, opened for addressing. */
 export interface Bench {
   stamp: BenchStamp;
-  /** Dataset root, relative to this app's origin. Nothing else is ever fetched. */
+  /**
+   * Dataset root, as an **absolute** URL on this app's own origin. Nothing else is ever fetched.
+   *
+   * Absolute, and it used to be `bench/1000000` — dataset-relative, which is what the stamp
+   * records and what a manifest's own prefixes are written against. That worked for everything
+   * this module fetches, because `fetch` in a document resolves against the document. It does
+   * not work for the one consumer that is not in the document: **DuckDB-WASM resolves a
+   * registered URL inside its Worker**, where the base is the worker script rather than the
+   * page, so `bench/1000000/vertex/Person/tiles.parquet` resolved to a path under Vite's
+   * dependency-optimiser directory, came back as the SPA fallback's `index.html`, and the
+   * footer read died with `No magic bytes found at end of file`. Anchoring here rather than at
+   * each call site means every URL `resolveCorpus` produces is one a Worker can open, which is
+   * the property the addressing layer is supposed to be delivering.
+   */
   base: string;
   addressing: CorpusAddressing;
   /** The manifests, and what they weighed — the only bytes addressing costs. */
@@ -97,7 +110,9 @@ export async function openBench(): Promise<Bench | null> {
   if (!stampResponse.ok) return null;
   if (!(stampResponse.headers.get('content-type') ?? '').includes('json')) return null;
   const stamp = (await stampResponse.json()) as BenchStamp;
-  const base = stamp.dir;
+  // `document.baseURI` rather than `location.href`: the second carries the current path, so an
+  // app served from anything but the root would resolve the dataset against the wrong directory.
+  const base = new URL(stamp.dir, document.baseURI).href.replace(/\/+$/, '');
 
   const started = performance.now();
   const index = await fetch(`${base}/graph.graph.yml`);

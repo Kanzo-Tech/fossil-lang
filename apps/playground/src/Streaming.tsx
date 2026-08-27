@@ -45,6 +45,18 @@ const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(2)}%`;
 /** The name DuckDB knows the payload by. Registered as a URL, not as bytes. */
 const PAYLOAD = 'bench-tiles.parquet';
 
+/**
+ * Where the vertex payload is — **asked of the addressing rather than spelled here.**
+ *
+ * This panel used to compose `${bench.base}/vertex/Person/tiles.parquet` at two call sites, which
+ * is a second implementation of the one thing `resolveCorpus` exists to do: it reads the type's
+ * `prefix` out of the manifest and knows the container, so `vertex/Person/` and `tiles.parquet`
+ * are its answers and not this file's. A corpus whose manifest put the type somewhere else would
+ * have been addressed correctly by the URL list below and fetched from the wrong place by the two
+ * lines above it.
+ */
+const payloadUrl = (bench: Bench) => bench.addressing.vertexType().tileUrl(0);
+
 type State = 'opening' | 'addressed' | 'absent' | 'failed';
 
 export interface StreamingProps {
@@ -100,7 +112,7 @@ export default function Streaming({ ready }: StreamingProps) {
     setReading(true);
     setError(null);
     try {
-      await duck.registerUrl(PAYLOAD, `${bench.base}/vertex/Person/tiles.parquet`);
+      await duck.registerUrl(PAYLOAD, payloadUrl(bench));
       const started = performance.now();
       const rows = await duck.query(FOOTER_SQL(PAYLOAD));
       setFooterMs(performance.now() - started);
@@ -128,8 +140,7 @@ export default function Streaming({ ready }: StreamingProps) {
     setStreaming(true);
     setError(null);
     try {
-      const url = `${bench.base}/vertex/Person/tiles.parquet`;
-      setCost(await fetchRuns(url, runs, boxes.length, chosen.length));
+      setCost(await fetchRuns(payloadUrl(bench), runs, boxes.length, chosen.length));
     } catch (cause) {
       setError(String(cause));
     } finally {
