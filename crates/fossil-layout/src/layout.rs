@@ -187,8 +187,6 @@ pub fn cluster_layout(cluster_ids: &[u32]) -> Vec<(f32, f32)> {
 // W3.1b — integration: apply the pure layout to the written GraphAr vertices.
 // ──────────────────────────────────────────────────────────────────────────
 
-use std::fs::File;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrow::array::{
@@ -202,6 +200,8 @@ use arrow::datatypes::{DataType, SchemaRef};
 use arrow::error::ArrowError;
 use fossil_df::files::TileWriter;
 use fossil_mem_probe::Probe;
+
+use crate::io::{LayoutIo, LocalFs, Sink};
 use fossil_sinks::manifest::TILES_FILE;
 use parquet::arrow::ProjectionMask;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -477,6 +477,30 @@ pub fn enrich_layout(
     targets: &[VertexLayoutTarget],
     adjacencies: &[AdjacencyTarget],
 ) -> Result<(), LayoutError> {
+    enrich_layout_with(&LocalFs, targets, adjacencies)
+}
+
+/// [`enrich_layout`], against a filesystem the caller chooses.
+///
+/// The pass is arithmetic over Arrow and only eight functions of it were ever
+/// about files. This is that seam made a parameter, and the whole reason it
+/// exists is that **a browser has no filesystem**: `fossil-df-wasm` hands the
+/// corpus to JS as `{rel_path, bytes}` pairs, so the pass runs against
+/// [`MemoryFs`](crate::io::MemoryFs) with the staged Parquet already in it and
+/// the tiles coming back out the same way. `fossil run` and the tab then write
+/// the same tree, rather than the same manifest over two different ones.
+///
+/// [`enrich_layout`] is this with [`LocalFs`], and is what every native caller
+/// still calls.
+///
+/// # Errors
+///
+/// As [`enrich_layout`].
+pub fn enrich_layout_with(
+    io: &dyn LayoutIo,
+    targets: &[VertexLayoutTarget],
+    adjacencies: &[AdjacencyTarget],
+) -> Result<(), LayoutError> {
     // Where the next vertex type's grid starts, so the types do not stack. Each
     // is laid out independently and `cluster_layout` always begins at the
     // origin, so without this every type occupies the same coordinates and a
@@ -506,14 +530,14 @@ pub fn enrich_layout(
             vertex_type: target.type_name.clone(),
             rows: target.chunk_size,
         })?;
-        ensure_prefix(&target.chunk_prefix)?;
+        io.ensure_prefix(&target.chunk_prefix)?;
 
         // The `dense_id` column on its own, in file order, and two facts come
         // out of it that used to be two queries. The vertex count is `max + 1`
         // and not the row count — a corpus with a gap in its numbering must not
         // be told it has one fewer vertex than it numbers — and the position of
         // each id is what the join on `dense_id` was for.
-        let dense_of_row = read_u32_column(vurl, "dense_id")?;
+        let dense_of_row = read_u32_column(io, vurl, "dense_id")?;
         let vertex_count = dense_of_row
             .iter()
             .copied()
@@ -544,6 +568,7 @@ pub fn enrich_layout(
                     target: csr.clone(),
                 })?;
             sides.push(read_orientation(
+                io,
                 csr,
                 "src_dense",
                 "dst_dense",
@@ -551,6 +576,7 @@ pub fn enrich_layout(
                 &mut self_loops,
             )?);
             sides.push(read_orientation(
+                io,
                 csc,
                 "dst_dense",
                 "src_dense",
@@ -651,7 +677,7 @@ pub fn enrich_layout(
         // relation to be contiguous: what follows wants ONE TILE at a time, and
         // `interleave_record_batch` gathers across batches, so the copy that was
         // made to enable a gather can be the tile the gather produces.
-        let (_schema, batches) = read_parquet(vurl)?;
+        let (_schema, batches) = read_parquet(io, vurl)?;
         let batch_refs: Vec<&RecordBatch> = batches.iter().collect();
         // Where each batch starts in file-row space, so a global row index —
         // which is what `gather` holds — becomes the `(batch, offset)` pair
@@ -687,7 +713,7 @@ pub fn enrich_layout(
         let rows = gather.len();
         let tiles = (rows as u64).div_ceil(target.chunk_size);
         let payload = format!("{}{TILES_FILE}", target.chunk_prefix);
-        let mut writer = open_tiles(&payload, batch_refs[0].schema())?;
+        let mut writer = open_tiles(io, &payload, batch_refs[0].schema())?;
         for k in 0..tiles {
             let lo = (k << shift) as usize;
             let len = (rows - lo).min(target.chunk_size as usize);
@@ -737,7 +763,7 @@ pub fn enrich_layout(
         // Rewritten in full on every relayout, which is affordable for exactly
         // the reason it is necessary: this pass already rewrites every tile.
         if let Some(subjects) = subject_pairs(&batch_refs, &starts, &gather, &new_dense, vurl)? {
-            write_identity_index(&subjects, target)?;
+            write_identity_index(io, &subjects, target)?;
             probe.mark("write identity index");
         }
 
@@ -789,7 +815,7 @@ pub fn enrich_layout(
         let src_map = &maps[index_of(&adjacency.src_type, aurl)?];
         let dst_map = &maps[index_of(&adjacency.dst_type, aurl)?];
 
-        let (schema, batches) = read_parquet(aurl)?;
+        let (schema, batches) = read_parquet(io, aurl)?;
         let combined = concat_batches(&schema, &batches).map_err(arrow_err(aurl))?;
         drop(batches);
         let before = combined.num_rows();
@@ -884,7 +910,7 @@ pub fn enrich_layout(
             rows: endpoint.chunk_size,
         })?;
         let prefix = tile_prefix(aurl);
-        ensure_prefix(&prefix)?;
+        io.ensure_prefix(&prefix)?;
 
         // Which tiles exist, read off the order the relation is already in rather
         // than asked for with a `DISTINCT`: it was just sorted on this very
@@ -901,7 +927,7 @@ pub fn enrich_layout(
         let keys = u32_column(&sorted, aurl, key)?;
         let addresses = keys.values();
         let payload = format!("{prefix}{TILES_FILE}");
-        let mut writer = open_tiles(&payload, sorted.schema())?;
+        let mut writer = open_tiles(io, &payload, sorted.schema())?;
         let mut start = 0usize;
         while start < addresses.len() {
             let tile = u64::from(addresses[start]) >> tile_shift;
@@ -1004,15 +1030,16 @@ fn subject_pairs(
 /// separately for that reason, and this emits the same number because there is
 /// no reason yet for them to differ.
 fn write_identity_index(
+    io: &dyn LayoutIo,
     pairs: &[(String, u32)],
     target: &VertexLayoutTarget,
 ) -> Result<(), LayoutError> {
     let prefix = format!("{}index/", target.chunk_prefix);
-    ensure_prefix(&prefix)?;
+    io.ensure_prefix(&prefix)?;
 
     let tiles = (pairs.len() as u64).div_ceil(target.chunk_size);
     let payload = format!("{prefix}{TILES_FILE}");
-    let mut writer: Option<TileWriter<File>> = None;
+    let mut writer: Option<TileWriter<Sink>> = None;
     for k in 0..tiles {
         let lo = (k * target.chunk_size) as usize;
         let len = (pairs.len() - lo).min(target.chunk_size as usize);
@@ -1029,7 +1056,7 @@ fn write_identity_index(
         // second thing to keep in step.
         let writer = match &mut writer {
             Some(open) => open,
-            slot => slot.insert(open_tiles(&payload, batch.schema())?),
+            slot => slot.insert(open_tiles(io, &payload, batch.schema())?),
         };
         writer.tile(&batch).map_err(write_err(&payload))?;
     }
@@ -1037,24 +1064,6 @@ fn write_identity_index(
         writer.finish().map_err(write_err(&payload))?;
     }
     Ok(())
-}
-
-fn local_path(url: &str) -> Result<PathBuf, LayoutError> {
-    let path = url.strip_prefix("file://").unwrap_or(url);
-    if path.contains("://") {
-        return Err(LayoutError::Remote {
-            url: url.to_string(),
-        });
-    }
-    Ok(PathBuf::from(path))
-}
-
-/// Open a layout URL for reading.
-fn open(url: &str) -> Result<File, LayoutError> {
-    File::open(local_path(url)?).map_err(|source| LayoutError::Io {
-        target: url.to_string(),
-        source,
-    })
 }
 
 /// `parquet` errors from `url`, as a [`LayoutError::Read`].
@@ -1092,8 +1101,11 @@ fn locate(starts: &[u32], row: u32) -> (usize, usize) {
 }
 
 /// Every `RecordBatch` of a Parquet, plus the schema they share.
-fn read_parquet(url: &str) -> Result<(SchemaRef, Vec<RecordBatch>), LayoutError> {
-    let reader = ParquetRecordBatchReaderBuilder::try_new(open(url)?)
+fn read_parquet(
+    io: &dyn LayoutIo,
+    url: &str,
+) -> Result<(SchemaRef, Vec<RecordBatch>), LayoutError> {
+    let reader = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?)
         .map_err(read_err(url))?
         .with_batch_size(SCAN_BATCH_ROWS)
         .build()
@@ -1109,8 +1121,8 @@ fn read_parquet(url: &str) -> Result<(SchemaRef, Vec<RecordBatch>), LayoutError>
 ///
 /// Projected, so the other columns are never decoded: the vertex file carries
 /// the subject IRI and every property, and what this asks for is `dense_id`.
-fn read_u32_column(url: &str, name: &str) -> Result<Vec<u32>, LayoutError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(open(url)?).map_err(read_err(url))?;
+fn read_u32_column(io: &dyn LayoutIo, url: &str, name: &str) -> Result<Vec<u32>, LayoutError> {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
     // Reserved exactly, from the footer rather than by doubling.
     let rows = builder.metadata().file_metadata().num_rows().max(0) as usize;
     if builder.schema().index_of(name).is_err() {
@@ -1195,16 +1207,18 @@ fn replace_columns(
 /// Uncompressed, which is what that encoder does: the same encoder wrote the
 /// file being read here.
 ///
-/// The bytes go straight to the `File`. Encoding to a `Vec` first would put the
-/// whole encoded type beside the type — 75 MB at five million, for nothing —
-/// which is the same argument `try_for_each_file` makes on the sink side.
-fn open_tiles(url: &str, schema: SchemaRef) -> Result<TileWriter<File>, LayoutError> {
-    let path = local_path(url)?;
-    let file = File::create(&path).map_err(|source| LayoutError::Io {
-        target: url.to_string(),
-        source,
-    })?;
-    TileWriter::new(file, schema).map_err(write_err(url))
+/// The bytes go straight to the [`Sink`]. Encoding to a `Vec` first would put
+/// the whole encoded type beside the type — 75 MB at five million, for nothing —
+/// which is the same argument `try_for_each_file` makes on the sink side. On
+/// [`LocalFs`] that means the peak is one row group; on
+/// [`MemoryFs`](crate::io::MemoryFs) the `Vec` is unavoidable and is the sink
+/// itself, because a browser has nowhere else to put it.
+fn open_tiles(
+    io: &dyn LayoutIo,
+    url: &str,
+    schema: SchemaRef,
+) -> Result<TileWriter<Sink>, LayoutError> {
+    TileWriter::new(io.create(url)?, schema).map_err(write_err(url))
 }
 
 /// `parquet` errors encoding into `url`, as a [`LayoutError::Write`].
@@ -1239,21 +1253,6 @@ fn tile_prefix(adjacency: &str) -> String {
     )
 }
 
-/// Create the directory a prefix names, so a tile has somewhere to be put.
-///
-/// It used to be a no-op for a cloud URL, on the reasoning that an object store
-/// has no directories and the prefix is part of the key. That is still true of
-/// object stores and is no longer true of this pass, which writes through
-/// `std::fs` and would follow the no-op with a failure to open the file — so a
-/// prefix it cannot create is refused here, where the message says what is
-/// wrong. See [`local_path`].
-fn ensure_prefix(prefix: &str) -> Result<(), LayoutError> {
-    std::fs::create_dir_all(local_path(prefix)?).map_err(|source| LayoutError::Prefix {
-        prefix: prefix.to_string(),
-        source,
-    })
-}
-
 /// The target-ordered file sitting beside a source-ordered one — the same edge
 /// table's other orientation, where the reverse edges are already grouped by the
 /// endpoint the layout needs them under.
@@ -1285,13 +1284,14 @@ fn csc_beside<'a>(adjacencies: &'a [AdjacencyTarget], csr: &str) -> Option<&'a s
 /// not a reordering of them, so `by_target`, which asks for `dst_dense` first,
 /// gets `src_dense` first anyway.
 fn read_orientation(
+    io: &dyn LayoutIo,
     url: &str,
     key: &str,
     value: &str,
     vertex_count: u32,
     self_loops: &mut [f64],
 ) -> Result<Csr, LayoutError> {
-    let builder = ParquetRecordBatchReaderBuilder::try_new(open(url)?).map_err(read_err(url))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
     // Reserved exactly, from the Parquet footer rather than by doubling: the
     // targets array is the one large allocation left and growing into it would
     // put a copy of it beside itself. The count is a field of the footer now,

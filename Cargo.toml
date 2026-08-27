@@ -101,6 +101,15 @@ arrow-schema = "58"
 arrow-array = "58"
 arrow = "58"
 parquet = "58"
+# `bytes` for `fossil-layout`'s in-memory filesystem, which is how the layout
+# pass runs in a browser: `parquet`'s `ChunkReader` is defined in terms of
+# `Bytes`, so a reader over memory has to speak it, and slicing one is a
+# refcount rather than a copy — which is what keeps the browser path at one
+# resident copy per file instead of one per read. Not a new crate in the tree:
+# `parquet` already depends on it and `Cargo.lock` already resolves it, so this
+# line names a version rather than adding a dependency. Pure Rust, so it costs
+# the wasm32 gate nothing.
+bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
 # `fossil-introspect` is the one crate on a normal edge; `fossil-engine`,

@@ -2111,6 +2111,7 @@ name = "fossil-layout"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "bytes",
  "duckdb",
  "fossil-df",
  "fossil-hir",

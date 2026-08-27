@@ -50,6 +50,12 @@ workspace = true
 arrow = { workspace = true }
 parquet = { workspace = true }
 
+# `Bytes` is the currency of `parquet`'s `ChunkReader`, and `src/io.rs`'s
+# in-memory filesystem is a `ChunkReader` — the browser half of the seam that
+# lets this pass run without a disk under it. `parquet` already brings the crate
+# transitively; this makes the edge direct because a `pub` type in `io` is one.
+bytes = { workspace = true }
+
 # The single Arrow→Parquet encoder (`files::batches_to_parquet`), shared with
 # the native fs sink and the browser executor. The layout emits tiles through it
 # rather than through a second writer, so the row-group-per-tile property that

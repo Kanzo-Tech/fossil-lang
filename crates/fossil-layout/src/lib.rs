@@ -83,4 +83,12 @@
 // edge, and that edge ran backwards: the write path of the language depending
 // on the read path of the format. It is `fossil-mcp`'s now, which was its only
 // caller and already depended on `fossil-graph`.
+// Where the pass gets its bytes. It was eight `std::fs` functions at the bottom
+// of `layout.rs`, and being `std::fs` was the one reason a crate that COMPILES
+// for wasm32 could not RUN there — it had nothing to open. `LocalFs` is the
+// native host's, unchanged; `MemoryFs` is the browser's, and
+// `fossil-df-wasm` drives the pass through it after `execute_graph` so that the
+// tab and the CLI write the same tree rather than the same manifest over
+// different trees.
+pub mod io;
 pub mod layout;
