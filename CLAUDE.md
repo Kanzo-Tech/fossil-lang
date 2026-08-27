@@ -197,6 +197,12 @@ apps/                      NOT published, and no RECURSIVE CI step reaches them 
   corpus/                  NOT a site — it was one, and it is now `docs/content/docs/format/`.
                            What is left executes: the guards, the conformance corpus, and a
                            reader that shares no code with them
+  playground/              the architectural claim, clickable: check → run → query in one
+                           browser tab, no server. It imports `examples/hello.fossil` rather
+                           than copying it, and produces the same five subjects the walking
+                           skeleton asserts natively. `src/corpus.ts` documents the ONE gap —
+                           `fossil-df-wasm` does not run the layout pass, so the browser
+                           writes the staged tree and the app re-tiles it in SQL
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
 catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. The
