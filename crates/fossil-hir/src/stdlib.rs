@@ -457,6 +457,16 @@ pub enum SigTy {
     /// The receiver relation, with whatever rows it carries.
     Rows,
     /// A condition over the receiver's rows.
+    ///
+    /// **This is the wider of the two readings, and `join` takes the narrower
+    /// one.** A `where`'s predicate is any expression yielding `Bool`; a join's
+    /// `on` is a conjunction of equalities, each between a column of one side
+    /// and a column of the other, and that extra rule is
+    /// `crate::infer::check_join_condition` rather than a second variant here.
+    /// It is not a type: `on = Purchase.id == Purchase.user_id` has exactly the
+    /// type `on = Purchase.user_id == User.id` has, and what separates them is
+    /// which relations the columns came from — which the signature has no place
+    /// to say and the scope at the join does.
     Predicate,
     /// The NAME of a column of the receiver's rows, qualified by the binding
     /// that owns it — `select(User.id)`, `sort(User.name)`, `group_by(User.city)`.
