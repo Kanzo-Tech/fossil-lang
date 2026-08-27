@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as checker from './check.js';
 import * as corpus from './corpus.js';
 import * as duck from './duckdb.js';
-import { CSV_PATH, PROGRAM, SOURCE_BYTES } from './example.js';
+import { CSV_BYTES, CSV_PATH, PROGRAM } from './example.js';
 import { describeCsv } from './descriptor.js';
 import * as runner from './run.js';
 
@@ -57,7 +57,7 @@ export default function App() {
 
         // Introspect the CSV and tell the compiler what it found — the browser's version of
         // what `fossil-cli` does with `fossil-introspect` before every compile.
-        const descriptor = await describeCsv(CSV_PATH, SOURCE_BYTES[CSV_PATH]!);
+        const descriptor = await describeCsv(CSV_PATH, CSV_BYTES);
         checker.registerDescriptor(descriptor);
         say(`introspected ${CSV_PATH}: ${descriptor.columns.map((c) => `${c.name}:${c.primitive}`).join(', ')}`);
 
@@ -99,10 +99,22 @@ export default function App() {
       // one thing in the app that is not what the native pipeline does.
       await corpus.retile(result.report);
 
-      // The door: does the manifest address itself, and can the reader open it?
+      // The door: does the manifest address itself, and can the reader open it? This is the
+      // corpus half of the claim — `openCorpus` computes every tile URL by arithmetic before
+      // its first request, and it cannot tell that the tiles live in a worker's memory
+      // rather than behind HTTP. A refusal here is worth reading: it names the exact file it
+      // addressed and why, which is how the container mismatch above was found.
       try {
         const opened = await corpus.open();
-        say(`openCorpus: ${Object.keys(opened.types.vertices ?? {}).join(', ') || 'no vertex types'}`);
+        const described = opened.types.vertices
+          .map((v) => `${v.type} ×${v.count}${v.indexed ? ' (indexed)' : ''} [${v.fields.map((f) => f.name).join(' ')}]`)
+          .join('; ');
+        say(`openCorpus opened: ${described || 'no vertex types'}`);
+        const first = opened.types.vertices[0];
+        if (first?.identity) {
+          const one = await opened.node('https://example.org/user/3');
+          say(`corpus.node("…/user/3") → ${one ? JSON.stringify(one.fields) : 'null'}`);
+        }
       } catch (cause) {
         say(`openCorpus refused: ${String(cause)}`);
       }

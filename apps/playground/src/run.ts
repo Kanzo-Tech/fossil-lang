@@ -15,7 +15,7 @@
 import type { ExecutorResult, SourceInput } from '@fossil-lang/executor';
 
 import type { BundleCost } from './check.js';
-import { DEST, SHEX, SOURCE_BYTES } from './example.js';
+import { absolutise, DEST, SHEX, SOURCE_BYTES } from './example.js';
 
 let cost: BundleCost | null = null;
 
@@ -46,6 +46,10 @@ export async function run(program: string): Promise<ExecutorResult> {
   }
 
   const executor = new FossilExecutor();
+
+  // The one rewrite, and `example.ts` argues it: the executor's object store is keyed by a
+  // URI's scheme+authority, and a relative path has neither. The checker never sees this.
+  program = absolutise(program);
 
   // `sources()` is pure — it reads the program and says what to fetch, without fetching.
   // The shape document is passed alongside because a program's sources include the ShEx it

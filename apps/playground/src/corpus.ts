@@ -23,11 +23,12 @@
  * So natively, `fossil run` writes the staged tree and then re-tiles it into the
  * manifest-declared prefix. In the browser nothing does, and `openCorpus` — which
  * computes every tile URL before its first request, by arithmetic, exactly as designed —
- * asks for `corpus/vertex/Person/chunk0.parquet` and finds nothing there.
+ * asks for `corpus/vertex/Person/tiles.parquet` — the manifest declares the `rowgroups`
+ * container — and finds nothing there.
  *
- * {@link retile} is a stand-in for that pass, in SQL, and it is a STAND-IN: it slices by
- * `dense_id` into the declared `chunk_size` and orders the index by `subject`, and it does
- * NOT do what `fossil-layout` is actually for — Louvain communities and a Morton ordering,
+ * {@link retile} is a stand-in for that pass, in SQL, and it is a STAND-IN: it rewrites the
+ * payload into the declared prefix with the declared `chunk_size` as the row-group size and
+ * orders the index by `subject`, and it does NOT do what `fossil-layout` is actually for — Louvain communities and a Morton ordering,
  * which is what makes `x`/`y` mean anything and what makes a windowed read skip tiles.
  * The columns are all present and all zero (`fossil-df` writes `x=0, y=0, cluster_id=0` as
  * placeholders), so `extent()` returns a degenerate point and `window()` returns everything
@@ -48,6 +49,9 @@ import { query, register } from './duckdb.js';
 /** Where the corpus is addressed from. Any prefix works; it just has to be consistent. */
 export const CORPUS_URL = 'corpus';
 
+/** The payload file of a row-group container: one per set, its row groups the tiles. */
+const TILES = 'tiles.parquet';
+
 /** A single-quoted SQL string literal. Every path in this module reaches SQL through here. */
 const lit = (value: string) => `'${value.replace(/'/g, "''")}'`;
 
@@ -61,10 +65,11 @@ export async function stage(files: readonly GraphArFile[]): Promise<void> {
 /**
  * The stand-in for the layout pass. See the seam note at the top of this file.
  *
- * For each vertex type the manifest declares, slice the staged Parquet into
- * `<prefix>chunk{k}.parquet` by `dense_id` range, and write `index/tile{k}.parquet`
- * ordered by `subject`. Both land in DuckDB's virtual filesystem, so they are addressable
- * by the names `openCorpus` computes without anything being written to disk or fetched.
+ * For each vertex type the manifest declares, rewrite the staged Parquet into the
+ * manifest's own `prefix` with the row-group size the manifest's `chunk_size` names, and
+ * write the identity index beside it. Both land in DuckDB's virtual filesystem, so they
+ * are addressable by the exact names `openCorpus` computes — without anything being
+ * written to disk or fetched.
  *
  * Edges are not re-tiled. The walking skeleton has none, and doing it wrong for a demo
  * that cannot exercise it would be two stand-ins instead of one.
@@ -72,27 +77,29 @@ export async function stage(files: readonly GraphArFile[]): Promise<void> {
 export async function retile(report: RunReport): Promise<void> {
   for (const vertex of report.vertices) {
     const staged = `${CORPUS_URL}/vertex/${vertex.type}.parquet`;
-    const chunk = BigInt(vertex.chunk_size);
-    const count = BigInt(vertex.vertex_count);
-    const tiles = chunk === 0n ? 0n : (count + chunk - 1n) / chunk;
+    const chunk = vertex.chunk_size;
 
-    for (let k = 0n; k < tiles; k += 1n) {
-      const lo = k * chunk;
-      const hi = lo + chunk;
-      const target = `${CORPUS_URL}/${vertex.prefix}chunk${k}.parquet`;
-      await query(
-        `COPY (SELECT * FROM read_parquet(${lit(staged)}) ` +
-          `WHERE dense_id >= ${lo} AND dense_id < ${hi}) ` +
-          `TO ${lit(target)} (FORMAT PARQUET)`,
-      );
-      // The index is the same rows in `subject` order — a second copy of the type, which
-      // is what makes `corpus.node(iri)` one tile read instead of a scan.
-      const indexTarget = `${CORPUS_URL}/${vertex.prefix}index/tile${k}.parquet`;
-      await query(
-        `COPY (SELECT * FROM read_parquet(${lit(staged)}) ORDER BY subject ` +
-          `LIMIT ${chunk} OFFSET ${lo}) TO ${lit(indexTarget)} (FORMAT PARQUET)`,
-      );
-    }
+    // The ROW-GROUP container, because that is what the manifest declares — one file per
+    // payload set whose row groups ARE the tiles, addressed by `<prefix>tiles.parquet`.
+    // `openCorpus` reads `container` off `graph.graph.yml` and neither falls back to the
+    // other spelling nor globs, which is why guessing `chunk{k}.parquet` produced a very
+    // clear refusal rather than a silent half-read. `ROW_GROUP_SIZE` is the whole of the
+    // tiling: row group `k` holds `dense_id` in `[k·chunk, (k+1)·chunk)` because the rows
+    // are written in `dense_id` order.
+    await query(
+      `COPY (SELECT * FROM read_parquet(${lit(staged)}) ORDER BY dense_id) ` +
+        `TO ${lit(`${CORPUS_URL}/${vertex.prefix}${TILES}`)} ` +
+        `(FORMAT PARQUET, ROW_GROUP_SIZE ${chunk})`,
+    );
+
+    // The identity index — the same rows in `subject` order, which is what makes
+    // `corpus.node(iri)` one tile read instead of a scan. The manifest declares it beside
+    // the properties that make it possible; natively the layout pass fills it.
+    await query(
+      `COPY (SELECT * FROM read_parquet(${lit(staged)}) ORDER BY subject) ` +
+        `TO ${lit(`${CORPUS_URL}/${vertex.prefix}index/${TILES}`)} ` +
+        `(FORMAT PARQUET, ROW_GROUP_SIZE ${chunk})`,
+    );
   }
 }
 

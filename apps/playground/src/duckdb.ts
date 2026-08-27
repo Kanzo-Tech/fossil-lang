@@ -87,7 +87,14 @@ export async function register(path: string, bytes: Uint8Array): Promise<void> {
   } catch {
     // Not registered yet — the first run. Nothing to drop.
   }
-  await db.registerFileBuffer(path, bytes);
+  // `new Uint8Array(bytes)` is a COPY, and it is not defensive style — it is the fix for a
+  // real crash. `registerFileBuffer` posts the buffer to the DuckDB worker as a TRANSFER,
+  // which detaches it in this thread. `users.csv` is registered here for introspection and
+  // then handed to `FossilExecutor.run` afterwards, so without the copy the executor
+  // receives a detached view and dies inside wasm-bindgen's memcpy with
+  // "Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer".
+  // Copying costs one memcpy per file and keeps the caller's bytes usable.
+  await db.registerFileBuffer(path, new Uint8Array(bytes));
 }
 
 /**
