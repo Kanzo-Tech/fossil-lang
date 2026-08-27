@@ -34,6 +34,24 @@ use wasm_bindgen::prelude::*;
 ///
 /// `Copy + Clone + Eq + Hash` so it can be a `HashMap` key on the Rust
 /// side; `#[wasm_bindgen]` so JS can pass it back across the boundary.
+///
+/// # Every exported method takes `&FileHandle`, and it has to
+///
+/// wasm-bindgen CONSUMES an exported struct passed by value: the generated glue
+/// calls `__destroy_into_raw()` on the JS wrapper, which nulls its pointer. A
+/// handle passed by value is therefore good for exactly one call, and the second
+/// throws *"null pointer passed to rust"* — from inside a method that has nothing
+/// wrong with it, naming no handle and no file.
+///
+/// `Copy` does not save it. The derive is a Rust-side property; nothing about it
+/// reaches the JS boundary, where this is a class holding a pointer like any
+/// other. The three methods a host calls repeatedly with one handle
+/// (`update_file`, `close_file`, `diagnostics_for`) take `&FileHandle` so
+/// wasm-bindgen borrows instead, and the handle stays live across the whole
+/// lifetime `open_file`'s doc comment promises.
+///
+/// This was reachable from the FIRST loop an editor runs: `updateFile(h, text)` on
+/// every check, with the handle `openFile` returned once.
 #[wasm_bindgen]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FileHandle(pub(crate) u32);

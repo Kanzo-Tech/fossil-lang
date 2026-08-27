@@ -286,12 +286,12 @@ impl WasmPlayground {
     /// or if the workspace is already inside another call — see the type-level
     /// note on [`WasmPlayground`]. **Neither leaves the workspace unusable**,
     /// which is the whole reason this method takes `&self`.
-    pub fn update_file(&self, handle: FileHandle, contents: String) -> Result<(), JsError> {
+    pub fn update_file(&self, handle: &FileHandle, contents: String) -> Result<(), JsError> {
         let mut pg = self
             .inner
             .try_borrow_mut()
             .map_err(|_| busy_error("update_file"))?;
-        pg.update_file_native(handle, contents)
+        pg.update_file_native(*handle, contents)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
@@ -303,12 +303,12 @@ impl WasmPlayground {
     ///
     /// Returns a JS error if `handle` was never opened or was already closed,
     /// or if the workspace is busy.
-    pub fn close_file(&self, handle: FileHandle) -> Result<(), JsError> {
+    pub fn close_file(&self, handle: &FileHandle) -> Result<(), JsError> {
         let mut pg = self
             .inner
             .try_borrow_mut()
             .map_err(|_| busy_error("close_file"))?;
-        pg.close_file_native(handle)
+        pg.close_file_native(*handle)
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
@@ -354,13 +354,13 @@ impl WasmPlayground {
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
-    pub fn diagnostics_for(&self, handle: FileHandle) -> Result<JsValue, JsError> {
+    pub fn diagnostics_for(&self, handle: &FileHandle) -> Result<JsValue, JsError> {
         let pg = self
             .inner
             .try_borrow()
             .map_err(|_| busy_error("diagnostics_for"))?;
         let rows = pg
-            .diagnostics_for_rows(handle)
+            .diagnostics_for_rows(*handle)
             .ok_or_else(|| JsError::new(&WorkspaceError::UnknownHandle.to_string()))?;
         serde_wasm_bindgen::to_value(&rows).map_err(JsError::from)
     }
