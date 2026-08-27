@@ -115,6 +115,55 @@ fn policy(k: u64) -> String {
     )
 }
 
+/// The same policy, with a generalisation hierarchy on each quasi-identifier.
+///
+/// Both are pasted from `crates/fossil-kanon/hierarchies/` in shape — a
+/// `numeric` with declared buckets and `enclosing_bucket` presentation, and a
+/// `prefix` over ascending lengths. The buckets are in this fixture's units
+/// (`1950 + i % 6`) rather than the shipped age file's, because the column is a
+/// birth year and not an age; the shape of the declaration is the thing being
+/// exercised.
+fn generalising_policy(k: u64) -> String {
+    format!(
+        r#"{{
+  "@context": ["http://www.w3.org/ns/odrl.jsonld",
+               {{"fossil": "https://fossil-lang.org/ns/privacy#",
+                 "dpv": "https://w3id.org/dpv#"}}],
+  "@type": "Set",
+  "uid": "https://example.org/policies/people-v1",
+  "profile": "https://fossil-lang.org/ns/privacy/v1",
+  "permission": [{{
+    "target": "Person",
+    "action": "use",
+    "constraint": [
+      {{"leftOperand": "fossil:anonymityK", "operator": "gteq", "rightOperand": {k}}},
+      {{"leftOperand": "fossil:absentQuasiIdentifier", "operator": "eq", "rightOperand": "value"}},
+      {{"and": [
+        {{"leftOperand": "fossil:attribute", "operator": "eq",
+          "rightOperand": "https://example.org/birthYear"}},
+        {{"leftOperand": "fossil:classification", "operator": "eq",
+          "rightOperand": "fossil:QuasiIdentifier"}},
+        {{"leftOperand": "fossil:generalization", "operator": "eq",
+          "rightOperand": {{"kind": "numeric", "buckets": [1950, 1953, 1956],
+                            "presentation": "enclosing_bucket"}}}}]}},
+      {{"and": [
+        {{"leftOperand": "fossil:attribute", "operator": "eq",
+          "rightOperand": "https://example.org/postcode"}},
+        {{"leftOperand": "fossil:classification", "operator": "eq",
+          "rightOperand": "fossil:QuasiIdentifier"}},
+        {{"leftOperand": "fossil:generalization", "operator": "eq",
+          "rightOperand": {{"kind": "prefix", "lengths": [1, 2, 3]}}}}]}},
+      {{"and": [
+        {{"leftOperand": "fossil:attribute", "operator": "eq",
+          "rightOperand": "https://example.org/diagnosis"}},
+        {{"leftOperand": "fossil:classification", "operator": "eq",
+          "rightOperand": "dpv:SensitivePersonalData"}}]}}
+    ]
+  }}]
+}}"#
+    )
+}
+
 fn write_fixture(dir: &Path) {
     let mut users = String::from("id,birth_year,postcode,diagnosis\n");
     for i in 0..PEOPLE {
@@ -235,6 +284,119 @@ fn a_release_that_clears_the_bound_is_sealed_with_numbers_a_stranger_can_recompu
         )
         .expect("describe");
     assert_eq!(columns, 1);
+}
+
+/// **The bound becomes reachable, end to end.**
+///
+/// [`a_release_that_misses_the_bound_is_refused_and_writes_nothing`] is the same
+/// `k` over the same 600 people, and it refuses: 30 classes of 20 do not reach
+/// 25 and no amount of asking changes that. The only difference here is that the
+/// policy declares a hierarchy per quasi-identifier — so the writer *derives*
+/// the generalisation instead of measuring what it was handed, and the release
+/// happens.
+///
+/// Before this, that was not a thing the system could do. A declared bound could
+/// only ever refuse, because nothing anywhere could produce a generalised column
+/// and a corpus passed exactly when its source data was already k-anonymous.
+///
+/// Everything asserted below is read back from the bytes: the manifest by line
+/// scan, the payload by SQL. The number the manifest claims is recomputed from
+/// the Parquet by a `DuckDB` aggregate that has never heard of the deriver, which
+/// is the same independence the write path itself relies on.
+#[test]
+fn a_release_that_would_have_been_refused_is_derived_and_released() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_fixture(dir.path());
+    let dest = dir.path().join("out");
+    let policy = fossil_policy::parse(&generalising_policy(25)).expect("a valid policy");
+    run(dir.path(), &dest, Some(&policy)).expect("the derivation reaches the bound");
+
+    let block = privacy_block(&dest);
+    let has = |s: &str| block.iter().any(|l| l == s);
+    assert!(has("bound: k-anonymity"), "{block:?}");
+    assert!(has("k: 25"), "{block:?}");
+    assert!(has("population: 600"), "{block:?}");
+    // Not one row was dropped to get there. Generalisation is what reached the
+    // bound; suppression would have been a different claim and a charged budget.
+    assert!(has("suppressed: 0"), "{block:?}");
+
+    // The manifest says which columns were generalised, so a recipient reads it
+    // rather than inferring it from the values. `@bucket` because a numeric
+    // column publishes a declared bucket and never an observed range.
+    let generalization = block
+        .iter()
+        .find(|l| l.starts_with("generalization: "))
+        .unwrap_or_else(|| panic!("{block:?}"))
+        .trim_start_matches("generalization: ");
+    assert!(
+        generalization.contains("Person.birthYear@bucket"),
+        "{generalization}"
+    );
+    assert!(
+        generalization.contains("Person.postcode@"),
+        "{generalization}"
+    );
+
+    let reached: u64 = block
+        .iter()
+        .find_map(|l| l.strip_prefix("reached: "))
+        .unwrap_or_else(|| panic!("{block:?}"))
+        .parse()
+        .expect("a number");
+    assert!(reached >= 25, "{block:?}");
+
+    let conn = Connection::open_in_memory().expect("duckdb");
+    let tiles = dest.join("vertex/Person/tiles.parquet");
+
+    // The manifest and the bytes agree, recomputed by a third implementation.
+    let smallest: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT min(n) FROM (SELECT count(*) AS n FROM read_parquet('{}') \
+                 GROUP BY \"birthYear\", postcode)",
+                tiles.display()
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .expect("recompute k");
+    assert_eq!(
+        u64::try_from(smallest).expect("a class size is not negative"),
+        reached,
+        "the manifest and the bytes must agree"
+    );
+
+    // And the corpus really is generalised: no cell holds a source postcode any
+    // more. `PC0` is what the fixture wrote and a prefix hierarchy is what
+    // replaced it.
+    let raw: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT count(*) FROM read_parquet('{}') WHERE postcode = 'PC0'",
+                tiles.display()
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .expect("count raw postcodes");
+    assert_eq!(
+        raw, 0,
+        "a generalised column may not publish a source value"
+    );
+
+    // The sensitive column is untouched and was never part of any of it —
+    // neither the derivation nor the check ever read `diagnosis`.
+    let diagnoses: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT count(DISTINCT diagnosis) FROM read_parquet('{}')",
+                tiles.display()
+            ),
+            [],
+            |row| row.get(0),
+        )
+        .expect("count diagnoses");
+    assert_eq!(diagnoses, 3);
 }
 
 /// **The assertion the whole design rests on.**
