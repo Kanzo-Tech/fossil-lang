@@ -21,14 +21,14 @@ graph LR
 
   E -->|18| L
   E -->|1| M
-  M -->|23| L
+  M -->|24| L
   M -->|9| C
   C -->|1| M
   M -->|1| X
   C -->|1| X
 ```
 
-**54 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
+**55 cross-group edges**, and one pair still runs both ways — on a single edge. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -46,7 +46,7 @@ The mutual arrow is `engine ↔ corpus`, and one edge holds it:
 | engine → corpus | `fossil-df → fossil-sinks` | the manifest model, which **is** the format, and the writer is what builds it |
 | engine → corpus | `fossil-cli → fossil-sinks` | one constant, `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot disagree about a chunk — and `Privacy`, which the run summary prints |
 | engine → corpus | `fossil-df → fossil-policy` | the bound is verified where the release is still a value, before any of it is a file |
-| engine → corpus | `fossil-cli → fossil-policy` | reading the document is a host's job, the way reading a shape document is: `--policy` is a path, and a `PrivacyPolicy` by the time `host::run` is called |
+| engine → corpus | `fossil-cli → fossil-policy` | reading the document is a host's job, the way reading a shape document is: the program's `policy := "…"` and `--policy` are both a reference, and a `PrivacyPolicy` by the time the write path is handed one. Unlike a shape document it never enters the database — the compiler does not open a policy |
 | engine → corpus | `fossil-introspect → fossil-resolver` | `ResolvedPath::create_secret_sql` — the secret that authenticates a cloud source before the pre-compile `DESCRIBE` opens it |
 
 `fossil-sinks` and `fossil-resolver` are filed by subject and not by history, and that is the whole

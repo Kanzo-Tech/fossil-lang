@@ -38,6 +38,7 @@ own to keep — the destination is the output.
 | `--memory-gib <gib>` | the memory budget for the run. Fractions allowed. |
 | `--creds-stdin` | read a JSON credentials payload from standard input. |
 | `--output-json` | print the run's result as JSON instead of the summary line. |
+| `--policy <path>` | the privacy policy this release is verified against. An error if the program binds one. |
 
 ### `--memory-gib`
 
@@ -61,6 +62,34 @@ is inherited by every child. So credentials ride standard input, and there is no
 as a value. The payload is JSON, keyed by the destination or source it belongs to; omit the flag for
 local paths and public URLs.
 
+### `--policy`, and the line a program writes instead
+
+```bash
+fossil run shop.fossil --dest file:///tmp/shop --policy people.jsonld
+```
+
+The document states a bound — a `k`, a set of quasi-identifiers, a suppression allowance — and the
+run **refuses** rather than writing a corpus that misses it. Nothing partial is left behind: the
+verification happens while the release is still a value.
+
+A program can name its own instead, and this is the form to reach for:
+
+```
+policy := "people.jsonld"
+```
+
+Same document, same refusal, and the reference resolves the way every other one does — beside the
+program, or through an `@conn` alias, or as a URL. What it buys is that nobody has to remember it.
+A bound that lives in a flag lives in whatever invoked the run; a bound that lives in the program is
+reviewed with the program.
+
+**Giving both is an error.** They are not two spellings of one thing: the binding is how a producer
+carries the obligation, `--policy` is how a recipient imposes one on a program they did not write.
+Where they disagree there is no answer to prefer, so the run says so and stops.
+
+Name neither and the corpus is sealed `privacy: undeclared`, which the summary line says out loud.
+That is a claim on the artifact — *no bound was checked* — and not a claim that the data is public.
+
 ## `fossil refs`
 
 ```bash
@@ -80,6 +109,7 @@ needed. `refs` walks the source bindings, so what reaches the list is:
 | --- | --- |
 | `io.csv("data/users.csv")` and its siblings | yes, with the role `Data` |
 | `type { … } := io.shex("shop.shex")` | no — a type binding is not a source binding |
+| `policy := "people.jsonld"` | no — the policy is not read by the compiler, so it is not in the def-map `refs` walks |
 | a `schema =` argument to a source constructor | yes, with the role `Schema` |
 
 This is what to run when you want to know what data a program will touch before you let it touch

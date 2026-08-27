@@ -1,9 +1,6 @@
 ---
 title: A privacy bound with no chokepoint
-description: Why the classification is a document rather than a shape annotation, why the language names no anonymisation operator, and what four vocabularies leave to a six-term profile.
-direction:
-  summary: "The policy document is bound by the program, the way `type { Person } := io.shex(…)` binds a shape — not supplied as a host argument."
-  arguedIn: /docs/design/type-providers
+description: Why the classification is a document rather than a shape annotation, why the program binds it rather than a flag naming it, why the language names no anonymisation operator, and what four vocabularies leave to a six-term profile.
 ---
 
 A fossil corpus is files, handed over. The recipient reads every column with any Parquet reader.
@@ -87,6 +84,58 @@ annotations. That is how a vocabulary stops being shared.
 
 So it is a second document, bound the same way, and the two are joined by **the predicate IRI they
 both name**.
+
+## The program binds it, and a flag is a thing you forget
+
+`policy := "people.jsonld"` is a top-level form (`grammar.bnf, PolicyDef`). It is the same argument
+as the missing anonymisation operator, one level up: `fossil run --policy <path>` was the only way to
+name a bound for as long as the production sat in the grammar unparsed, and **an obligation
+discharged by remembering a flag is one that can be forgotten**. A binding lives in the file that
+gets reviewed, diffed and committed; a flag lives in whatever invoked the run, which is a CI job
+somebody edits under time pressure.
+
+Forgetting stays survivable rather than becoming impossible, and the mechanism is unchanged: a
+release nobody declared a bound for seals `privacy: undeclared` rather than omitting the field, so a
+corpus that was never checked never looks like one that was.
+
+### Both given is an error
+
+`--policy` is not deprecated by the binding, because the two answer different questions. A binding is
+how a **producer** carries the obligation in the artifact; the flag is how a **recipient**, or a CI
+gate, imposes a bound on a program they did not write and cannot edit. Where both are given the run
+refuses, and the two losing answers are the argument:
+
+- **If the flag won**, an operator could weaken a bound the program declares by passing a looser
+  document, and the corpus would seal with the looser number and no trace of the one the program
+  asked for. That is the failure this whole page exists to make impossible.
+- **If the program won**, `--policy` would be accepted and silently inert — worse than the first,
+  because the operator then holds evidence they were checked against a document nobody opened.
+
+Refusing costs one message and is repaired by deleting one of the two. It is the shape this design
+takes everywhere else: a type the policy is silent about is an error rather than an exemption,
+because silence is indistinguishable from a judgement that there was nothing to protect.
+
+### Not through `io`, and that is not a spelling preference
+
+Every other external document a program names arrives through the `io.` registry —
+`io.shex("persons.shex")` — so `io.policy("people.jsonld")` is the obvious form, and it is
+[discarded](/docs/design/discarded). `io` is the **type-provider** registry
+([type providers](/docs/design/type-providers)): a row there runs at *compile* time and its output is
+types. The compiler never opens a policy document. The **writer** does, after the check and
+immediately before it seals — so `io.policy` would join a registry whose defining property it lacks,
+and `fossil providers`, whose JSON populates a connector UI, would advertise a policy as a data
+source.
+
+What the analogy with a shape binding was ever about is **who supplies the document**: the program,
+not the host. That half is exactly what landed. The `io.` half was the accident of there having been
+only one kind of external document until there were two.
+
+The reference is a plain string and goes through the one resolution rule (`fossil-locator`: `@conn`,
+a scheme, an absolute path, else the program's directory), which is what a shape document's reference
+goes through too — the rule reads a string, and the `io.` call around it never contributed anything.
+The cost is one token of extra lookahead at the top level and nothing else: the token after `:=`
+decides, so `policy := io.csv("p.csv")` still binds a source and `policy` remains an ordinary
+identifier in every position (`grammar.bnf, § DISAMBIGUATION RULES`, rule 8).
 
 ## Three vocabularies, and the gaps that forced a fourth
 

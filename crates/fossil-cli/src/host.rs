@@ -166,7 +166,7 @@ pub fn check(path: &Path) -> miette::Result<CheckOutcome> {
 ///
 /// # Two ways, and neither may quietly win
 ///
-/// `policy := "people.jsonld"` in the program (grammar.bnf, `PolicyDef`) and
+/// `policy := "people.jsonld"` in the program (grammar.bnf, PolicyDef) and
 /// `fossil run --policy <path>` on the command line. Where both are given this
 /// **REFUSES**, and that is a decision rather than an omission:
 ///
@@ -214,7 +214,7 @@ fn resolve_policy(
     let Some(first) = bound.next() else {
         return Ok(None);
     };
-    // ONE binding, not one per type (grammar.bnf, `PolicyDef`). The bound is a
+    // ONE binding, not one per type (grammar.bnf, PolicyDef). The bound is a
     // property of the whole release — `graph.graph.yml` carries it beside
     // `container` — so two of them is a question with no answer rather than a
     // merge. Refused here because there is no def-map entry to refuse it in.
