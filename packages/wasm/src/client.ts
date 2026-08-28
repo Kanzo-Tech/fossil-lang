@@ -24,6 +24,9 @@ import {
 import type { TokenRow, TokenKindLegend, SemanticTokensLegend } from '@fossil-lang/types';
 import type {
   CheckRow,
+  CompletionRow,
+  DefinitionRow,
+  HoverRow,
   InferredDescriptorJson,
   SourceRefInfo,
   ProviderInfo,
@@ -197,6 +200,60 @@ export class FossilPlayground {
    */
   diagnosticsFor(handle: FileHandle): CheckRow[] {
     return this._inner.diagnostics_for(handle) as CheckRow[];
+  }
+
+  /**
+   * What is under the cursor — `{ markdown, range }`, or `null` when nothing
+   * there has a type.
+   *
+   * `line` / `character` are LSP: zero-based, `character` in UTF-16 code units.
+   * A CodeMirror or Monaco host already counts in those units, so a document
+   * offset converts with `doc.lineAt(pos)` and no byte arithmetic — unlike
+   * {@link tokenize}, whose offsets ARE bytes.
+   *
+   * ## Push the buffer before you ask
+   *
+   * This reads the text of the last {@link updateFile}. Hover fires on
+   * mouse-move and the checker is debounced, so a hover mid-debounce answers
+   * about text one keystroke old and its range lands one keystroke wrong. The
+   * three read-only methods take a SHARED borrow on the Rust side and cannot
+   * poison the workspace the way a re-entered `updateFile` once could — see the
+   * `ide` module in `crates/fossil-wasm` — but staleness is not a borrow
+   * problem and nothing here can fix it for you.
+   */
+  hover(handle: FileHandle, line: number, character: number): HoverRow | null {
+    // `serde_wasm_bindgen` writes `None` as `undefined`; a host reading this
+    // should have one falsy answer to check, not two.
+    return (this._inner.hover(handle, line, character) as HoverRow | null | undefined) ?? null;
+  }
+
+  /**
+   * The completion candidates at a position, already narrowed by the receiver:
+   * `str.` offers string members and no reader, a property-key position offers
+   * the target shape's predicates and no catalogue row at all.
+   *
+   * `kind` is the LSP `CompletionItemKind` **by name** (`"function"`,
+   * `"field"`) rather than by number. The numbers never cross this boundary —
+   * `packages/codemirror-fossil`'s deleted predecessor is what happens when
+   * they do.
+   *
+   * The same staleness note as {@link hover} applies, and harder: completion
+   * fires on nearly every keystroke.
+   */
+  completions(handle: FileHandle, line: number, character: number): CompletionRow[] {
+    return this._inner.completions(handle, line, character) as CompletionRow[];
+  }
+
+  /**
+   * Where the name under the cursor is defined. Empty when nothing there has a
+   * definition.
+   *
+   * `uri` is the key the buffer was opened under, verbatim — and two of the
+   * four positions this recognises resolve into the **shape document**, so a
+   * host with a single editor pane has to read `uri` before it moves a cursor.
+   */
+  gotoDefinition(handle: FileHandle, line: number, character: number): DefinitionRow[] {
+    return this._inner.gotoDefinition(handle, line, character) as DefinitionRow[];
   }
 
   /**
