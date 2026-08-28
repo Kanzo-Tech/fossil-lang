@@ -197,10 +197,13 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 /// column is the one asserted against. `enrich_memory` builds its fixture in the
 /// same process and the generator's pages are still resident when the pass
 /// starts; in a real `fossil run` that resident set belongs to `execute_graph`,
-/// which carries a `FairSpillPool` and a budget of its own. That composition is
-/// the gap this does not close and `/docs/design/streaming` names: one declared
-/// number is spent twice, once by each half of the write path, and neither half
-/// knows what the other took.
+/// which carries a `FairSpillPool` and a budget of its own.
+///
+/// **That composition is decided rather than open**: `--memory-gib` bounds each
+/// stage of the write path, not their sum, which is why this asserts the pass
+/// against the pass's own footprint and not against the process's. Splitting the
+/// number and sequencing it are both refused on `/docs/design/streaming`, with
+/// the measurements that refuse them.
 #[test]
 fn the_estimate_over_estimates_the_runs_it_is_calibrated_on() {
     // (vertices, adjacency rows over both orientations, vertex Parquet bytes,

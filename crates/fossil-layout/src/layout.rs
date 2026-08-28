@@ -422,9 +422,21 @@ pub enum LayoutError {
     /// disagree exactly when a budget was declared.
     ///
     /// So the budget decides **whether the pass runs**, never what it writes.
+    ///
+    /// # The message says *this stage*, because the number is per stage
+    ///
+    /// One declared `--memory-gib` is spent twice on a `fossil run` — once by the
+    /// executor's `FairSpillPool`, once here — and neither half knows what the
+    /// other took, so the write path is bounded at something closer to double the
+    /// number. That is decided rather than outstanding: the flag bounds **each
+    /// stage**, not their sum, and the two alternatives are refused on
+    /// `/docs/design/streaming` with the measurements that refuse them. A message
+    /// that said "the run declared" without saying which part of the run spends
+    /// it would be the same silence that let `let _ = memory_bytes;` stand.
     #[error(
         "the layout pass needs about {} GiB for {vertex_count} vertices and {adjacency_rows} \
-         adjacency rows, and the run declared {} GiB — raise `--memory-gib`, or omit it to run \
+         adjacency rows, and the run declared {} GiB — `--memory-gib` bounds each stage of the \
+         write path rather than their sum, and this is the layout's. Raise it, or omit it to run \
          unbounded",
         .needed_bytes / (1 << 30),
         .declared_bytes / (1 << 30)

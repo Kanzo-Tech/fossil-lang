@@ -330,13 +330,47 @@ now 3.11 GiB and 3.61 in the same run — half a gigabyte apart, where they were
 this is worth re-measuring rather than re-deciding, and it is measurable before anything is written.
 </Callout>
 
-<Callout type="warn" title="The composition is not closed, and this is the honest edge of the claim">
-One declared number is spent **twice** — once by the executor's pool, once by the layout pass — and
-neither half knows what the other took. `--memory-gib 4` therefore bounds a write path at something
-closer to eight than to four, and what has changed is that the second four is now *checked* rather
-than unbounded. Closing it means the layout being told what the executor left resident, which is a
-number nothing currently carries across the seam.
-</Callout>
+### One number, two stages: it is **per stage**, and that is a decision
+
+`--memory-gib 4` is spent twice — once by the executor's pool, once by the layout pass — and neither
+half knows what the other took, so the write path is bounded at something closer to eight than to
+four. That was written down as an open edge. It is decided now, and the decision is the weakest of
+the three available: **the number bounds each stage of the write path, not their sum.** Both halves
+already implement exactly that; what changes is that it is stated, and that the two alternatives are
+refused with reasons rather than left as work.
+
+**Splitting it is refused because the two numbers are not the same kind of number.** The executor's
+is a reservation ceiling on a `FairSpillPool` — the tracked operators inside it, which is why a
+declared 4 GiB has been measured with the process at 9.87 GiB. The layout's is an arithmetic
+estimate of its own `Vec`s. Four split into two and two makes the executor spill more and the layout
+refuse more, for a process peak that neither number was ever a bound on, and it gives the flag a
+meaning that depends on a ratio nobody can see.
+
+**Sequencing it — the layout told what the executor left resident — is the one that is right in
+principle, and it is refused for now on three grounds, in the order that decides it:**
+
+1. **What is resident at the seam is not the executor's transient.** It is `GraphArData`: the corpus
+   as a value, 1.64 GiB of Arrow at ten million, and it is held by the *caller* for the whole
+   duration of the layout pass — `fossil-cli`'s `run` keeps `graph` alive across
+   `enrich_written_layout` because `RunReport::of(&graph)` comes after it. Adding that to the
+   layout's bound would bill the layout for somebody else's live value. The fix is to stop holding
+   it, not to shrink the second number.
+2. **The layout has no reading of "what is resident" that means the same thing in both hosts.** RSS
+   is a `ps` call natively and there is no resident set at all on `wasm32`. A budget that consulted
+   it would admit different runs in the tab and on the CLI — and two paths through one `LayoutIo`
+   disagreeing about what they do is the single thing this design does not permit.
+3. **An RSS reading at entry over-counts by construction.** Pages the allocator has not returned are
+   pages the pass will reuse rather than add to. At ten million under a declared 4 GiB the pass
+   *enters* at 6.82 GiB, so a check of that shape would refuse every bounded run at this size,
+   including the ones that then fit.
+
+**What brings sequencing back is a value dropped, not an instrument added.** The day the caller
+builds its report before the pass rather than after, what crosses the seam stops being a resident
+set to sample and becomes a number to be handed over — `GraphArData::arrow_gib` is already that
+number — and `declared − carried` is arithmetic. Until then the honest sentence is the one the pass
+now prints when it refuses: **the number is this stage's.**
+
+
 
 ## The pass takes a filesystem it does not own
 
