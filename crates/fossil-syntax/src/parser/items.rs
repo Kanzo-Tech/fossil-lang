@@ -313,21 +313,15 @@ fn parse_multi_source_def(p: &mut Parser) {
 // (`io.*`) and ONE binder. The brace list is byte-for-byte the loop above; the
 // differences are the leading contextual `type` and the `RenameAttr*` prefix.
 //
-// `:=` and not `=`, and the argument that used to sit here is the one that
-// lost: «`:=` binds a value and this binds a type, so one spelling would be two
-// ideas wearing one glyph». The grammar answers it the other way round
-// (grammar.bnf, DEFINE) — `:=` BINDS A NAME and `=` ASSIGNS A
+// `:=` and not `=` (grammar.bnf, DEFINE): `:=` BINDS A NAME and `=` ASSIGNS A
 // VALUE, and what is being bound is read off the left-hand side, not off the
-// glyph. Every `=` in
-// the grammar is an assignment: a body property, `@subject`, a named argument.
-// Two binders was the thing that needed explaining twice.
+// glyph. Every `=` in the grammar is an assignment — a body property,
+// `@subject`, a named argument.
 //
 // TWO ENTRY POINTS, ONE FUNCTION. `parse_program` reaches this on `AT_ATTR` and
 // on the contextual `type` alike, and neither is allowed to assume the other's
 // lookahead — so the `type` and the `{` are CHECKED here rather than bumped on
-// the caller's word. They used to be bumped: the single caller had verified
-// both, and adding a second caller is exactly the change that turns «the caller
-// checked» into a bug nobody wrote.
+// the caller's word.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_type_def(p: &mut Parser) {
     p.start(SyntaxKind::TYPE_DEF);
@@ -881,17 +875,9 @@ mod disambiguation {
 
     // ── `{` claims nothing in a property, in either position ──────────
     //
-    // There used to be a rule 1 here: `prop = { … }` was a RECORD_LITERAL and
-    // `prop = expr { … }` was an ANNOTATION_BLOCK, and a pair of tests pinned
-    // that each was not the other. Both forms went — the record literal is a
-    // blank node the corpus has no row for, the annotation block a statement
-    // about a statement with no term to name one. With neither left, a rule
-    // that told them apart asserts nothing.
-    //
-    // What survives is the one answer that replaced the fork: in a property, a
-    // `{` opens nothing at all, in EITHER position. That is worth pinning,
-    // because a language where a brace has exactly zero readings is what makes
-    // deleting the rule safe.
+    // In a property a `{` opens nothing at all, in EITHER position. Worth
+    // pinning: a brace with exactly zero readings is what let the rule that
+    // told a record literal from an annotation block be deleted.
 
     #[test]
     fn brace_after_assign_is_an_error() {
@@ -1123,11 +1109,8 @@ mod disambiguation {
 
     // ── `<` is the only thing `<` can be ──────────────────────────────
     //
-    // There used to be a rule 4 here — `<<` was `TRIPLE_OPEN`, and a test
-    // pinned that a single `<` was not mistaken for it. The triple term went
-    // with the RDF-specific surface, so `<<` claims nothing and the
-    // disambiguation it needed is gone. What survives is the half worth
-    // keeping: `<` is a comparison operator.
+    // `<<` claims nothing since the triple term went, so the only reading left
+    // to pin is that `<` is a comparison operator.
 
     #[test]
     fn rule4_single_lt_is_comparison_operator() {

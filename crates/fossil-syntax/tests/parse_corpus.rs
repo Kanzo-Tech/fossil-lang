@@ -419,19 +419,15 @@ fn files_with_extension(root: &std::path::Path, ext: &str) -> Vec<std::path::Pat
 ///   proves that, and this crate has no checker to ask.
 /// - **That fossil written inside a Rust or TypeScript string literal is
 ///   live.** This is the real hole and it is deliberate, because a guard that
-///   read those literals could not be right. `fossil-ide/src/completion.rs`
-///   holds `"prefix ex: <…>\nUser : ex:Person from u\n    ex:name = .name\n"`
-///   as a LIVE fixture — a defect — and `fossil-syntax/src/lib.rs`'s
-///   `the_retired_spellings_each_report` holds the same five forms in order to
-///   assert that each one reports — correct, and the reason that test exists.
-///   Both are `&str` literals containing fossil; only intent separates them, and
-///   intent is not a thing a regex reads. A text-based guard therefore either
-///   goes permanently red on the deliberate negative fixtures or carries a
-///   hand-maintained allowlist that drifts — which is the disease this guard
-///   was written to treat. **16 files currently hold fossil in a retired
-///   spelling inside a string literal.** The fix is to move those fixtures onto
-///   disk as `.fossil` files, where this walk reads them; it is not a wider
-///   regex.
+///   read those literals could not be right: `fossil-syntax/src/lib.rs`'s
+///   `the_retired_spellings_each_report` holds the retired forms on purpose, to
+///   assert that each one reports, and only intent separates that `&str` from
+///   one holding a fixture someone forgot to rewrite. Intent is not a thing a
+///   regex reads, so a text-based guard either goes permanently red on the
+///   deliberate negatives or carries a hand-maintained allowlist that drifts —
+///   which is the disease this guard was written to treat. The fix is to move
+///   such fixtures onto disk as `.fossil` files, where this walk reads them; it
+///   is not a wider regex.
 #[test]
 fn no_fixture_spells_a_retired_form() {
     let root = repo_root();

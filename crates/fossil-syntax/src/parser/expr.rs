@@ -46,18 +46,15 @@
 //! the LHS was not already produced at the same level and bail with an
 //! ERROR otherwise.
 //!
-//! The primaries now match the grammar exactly: `PrimaryExpr` is a literal, an
-//! IDENT or a parenthesised expression. [`parse_primary`] used to read four
-//! more — the leading-dot `FieldRef`, the CURIE `ex:name`, the `<…>` absolute
-//! IRI and the backtick `TEMPLATE` — and each of the four now has a REFUSAL arm
-//! in its place rather than nothing at all, because the parser can still see
-//! what was written and a bare `unexpected token` throws that away.
+//! The primaries match the grammar exactly: `PrimaryExpr` is a literal, an IDENT
+//! or a parenthesised expression. The four retired forms — the leading-dot
+//! `FieldRef`, the CURIE `ex:name`, the `<…>` absolute IRI and the backtick
+//! `TEMPLATE` — each get a REFUSAL arm rather than nothing, because the parser
+//! can still see what was written and a bare `unexpected token` throws that away.
 //!
-//! `BOOL` was the one terminal still missing and is missing no longer: `true`
-//! and `false` are specified as tokens (grammar.bnf, BOOL) because a program
-//! writes `verified = true` and there is no binding for the name to resolve
-//! against. They arrived as `IDENT` until the lexer had a rule for them, which
-//! made `verified = true` report "unknown column `true`".
+//! `true` and `false` are tokens (grammar.bnf, BOOL) because a program writes
+//! `verified = true` and there is no binding for the name to resolve against.
+//! As `IDENT`s they made that line report "unknown column `true`".
 
 use crate::kind::SyntaxKind;
 

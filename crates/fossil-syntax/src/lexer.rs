@@ -56,18 +56,14 @@ pub enum Token {
     // below. Declared BEFORE the `Ident` regex so logos's tiebreaker selects
     // the dedicated keyword on equal-length matches.
     // ───────────────────────────────────────────────────────────────────
-    // `prefix` was a keyword here. It introduced the CURIE and the grammar
-    // retired both: a program writes full IRIs inside strings and bare names
-    // everywhere else, so there is no vocabulary declaration left to open.
-    // `prefix` is an ordinary identifier (grammar.bnf, § RESERVED KEYWORDS), and
-    // `items::parse_program` recognises the retired LINE by shape — `prefix
-    // IDENT :` — so the diagnostic can name what to write instead.
+    // grammar.bnf's RESERVED KEYWORDS section is the list, and
+    // `xtask/tests/grammar_tombstones.rs` holds it against these attributes in
+    // both directions. `prefix` is not here but IS still recognised by shape —
+    // `prefix IDENT :` — in `items::parse_program`, so the diagnostic can name
+    // what to write instead.
     #[token("from")]
     KwFrom,
 
-    // `in`, `use` and `as` were keywords here. The named-graph clause and the
-    // import went with the forms nothing below the parser read, and a reserved
-    // word with no production is a column name the language refuses for free.
     #[token("and")]
     KwAnd,
 
@@ -76,12 +72,6 @@ pub enum Token {
 
     #[token("not")]
     KwNot,
-
-    // `iri` was a keyword here. It named the argument of `@subject(iri = …)`,
-    // and the identity is an ASSIGNMENT now — so the word named an
-    // argument no production takes, and holding a plausible column name hostage
-    // for it bought nothing. `iri` is an ordinary identifier, which in a
-    // language whose corpus is RDF is the point.
 
     // ───────────────────────────────────────────────────────────────────
     // Attribute marker — `AT_ATTR := '@' IDENT`, and the sigil is decided.

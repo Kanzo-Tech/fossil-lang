@@ -130,12 +130,9 @@ Users : Person from User
 
     /// The AST view over a header's shape returns a NAME.
     ///
-    /// This test used to read `PrefixDecl::name()` and `PrefixDecl::iri()` off
-    /// `prefix ex: <https://example.org/>`. Both the view and the item are gone,
-    /// and what took their place is the thing the header actually needs: the
-    /// name `Person`, to be resolved against the `type { Person } := …` binding
-    /// above it. That resolution is `fossil_hir::lower`'s, and the reason it can
-    /// be done at all is that the header no longer carries an IRI of its own.
+    /// The name `Person`, to be resolved against the `type { Person } := …`
+    /// binding above it — which is `fossil_hir::lower`'s job, and possible only
+    /// because the header carries no IRI of its own.
     #[test]
     fn ast_view_extracts_the_shape_name() {
         use crate::ast::{Mapping, MappingHeader};
