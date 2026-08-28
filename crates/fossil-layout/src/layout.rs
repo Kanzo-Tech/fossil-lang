@@ -431,53 +431,93 @@ pub enum LayoutError {
 
 /// Bytes the pass holds per vertex, in the arrays it allocates.
 ///
-/// Every array below is live at the pass's high-water mark, and the reason to
-/// **sum** them rather than take a maximum over the phases is not conservatism:
-/// it is what the instrument reports. Every delta `FOSSIL_MEM_PROBE` prints for
-/// this pass is positive and not one of them ever comes back — freeing a `Vec`
-/// returns pages to the allocator, not to the OS — so the pass's resident set is
-/// monotone and its peak is its total.
-///
 /// | array | bytes per vertex |
 /// | --- | --- |
 /// | `dense_of_row` | 4 |
 /// | two CSR `offsets` (`usize`) | 16 |
 /// | `self_loops`, `degrees` (`f64`) | 16 |
 /// | Louvain `community`, `totals`, `levels[0]` | 16 |
+/// | [`Neighbourhood`], and [`Weighted::contract`]'s counting sort under it | 21 |
 /// | `clusters`, `placement`, `positions`, `morton`, `new_ids`, `order` | 28 |
 /// | `row_of_dense`, `gather`, `new_dense`, `xs`, `ys`, `cluster_ids` | 24 |
 ///
-/// That is 104, and this is 128 — the remainder is the allocator's, and it is a
+/// That is 125, and this is 128 — the remainder is the allocator's, and it is a
 /// term rather than a rounding. `vec![0u32; n]` asks for `4n` and the OS hands
 /// over whole pages of whichever size class holds them.
+///
+/// # Summed, and that is now an over-estimate rather than the reading
+///
+/// This used to say the sum **is** the peak, on the grounds that every delta
+/// `FOSSIL_MEM_PROBE` printed for the pass was positive and none ever came back.
+/// That was true of the code it described and is not true of this one: with the
+/// array of hash tables gone from [`Weighted::contract`], the ten-million run
+/// prints `flatten + order + place  −2.93G` — the level-zero quotient graph
+/// being dropped, in pages the allocator does hand back. The resident set rises,
+/// falls by three gigabytes, and rises again to its high-water mark in the last
+/// phase.
+///
+/// So the sum is kept, and kept deliberately: it is now a bound on the maximum
+/// rather than a reading of it, which is the direction
+/// [`estimated_peak_bytes`] is calibrated in.
 const VERTEX_ARRAY_BYTES: u64 = 128;
 
 /// Bytes per adjacency row, counting each orientation's rows separately.
 ///
 /// **The one constant here that is measured rather than derived, and it is the
-/// one that decides the answer.** Four bytes are the CSR `targets` entry the row
-/// becomes and about six more are the remap at the end of the pass — the one
-/// phase that holds a whole orientation as Arrow at once (`concat_batches` over
-/// two `u32` columns, `lexsort_to_indices`, and the `take` that applies it),
-/// billed +0.84 GiB over 139,874,560 rows. Ten bytes of the forty-eight.
+/// one that decides the answer.** It is the phase that now sets the pass's
+/// high-water mark: `remap adjacencies + write edge tiles`, the one step holding
+/// a whole orientation as Arrow at once — `concat_batches` over two `u32`
+/// columns, `lexsort_to_indices`, and the `take` that applies it. Its own delta,
+/// measured, is **13.2 B/row at two million, 14.5 at four and 15.0 at ten**, and
+/// 14.2 at four million and mean degree twenty-eight. Four of the fourteen are
+/// the CSR `targets` entry the row becomes, which Louvain holds while the remap
+/// does not; nothing here is a sum of two things that are live together, and
+/// that is why it can be smaller than the arithmetic below suggests.
 ///
-/// The other thirty-eight are Louvain, and **nothing in this file explains
-/// them**. `community_hierarchy` holds `community` + `totals` + `levels[0]` and
-/// contracts a ten-million-vertex graph to some tens of thousands of communities
-/// at level zero, which is a hundred and sixty megabytes of arrays; it measures
-/// **+3.91 GiB** at ten million (`examples/enrich_memory 10000000 14`,
-/// 2026-08-27, and +0.39/+0.89/+1.79/+3.30 at one, two, four and eight million —
-/// linear). The residue is transient allocation the OS was asked for and never
-/// got back, and the obvious culprit was tested and refuted: see `local_moving`.
+/// # It was 48, and thirty-eight of those were a residue nothing explained
 ///
-/// It is billed **per adjacency row and not per vertex** because the work is a
-/// scan of neighbourhoods, which is what makes the shape mechanistically
-/// defensible. What that shape is *not* is verified: every calibration point
-/// above is mean degree fourteen, where V and E are proportional and the two
-/// attributions are indistinguishable. **A second degree is owed**, and until it
-/// is measured a corpus much denser than fourteen is over-estimated by this term
-/// and a much sparser one under-estimated.
-const ADJACENCY_ROW_BYTES: u64 = 48;
+/// It is explained now, and the explanation is that it was never Louvain's
+/// *sweeps*. `local_moving`'s resident set is flat to three decimal places
+/// across all thirty-two of them, at two million and at ten. The residue was one
+/// line of [`Weighted::contract`] — `vec![HashMap::new(); k]`, one hash table per
+/// community, `k` = 3,757,900 at ten million — measured **+3.41 GiB of the
+/// +3.82 GiB** `community_hierarchy` billed. Those maps are gone, the process
+/// peak went **8.54 GiB → 5.08** and the pass 7.22 → 3.80, and this constant
+/// went with it.
+///
+/// # The attribution to rows is verified now, and it was not
+///
+/// Every calibration point behind the old 48 shared one mean degree, fourteen,
+/// where V and E are proportional and "per row" and "per vertex" fit the same
+/// line. So hold V at four million and move the degree — 6, 14, 28, which is
+/// 23,978,362 / 55,949,862 / 111,899,830 adjacency rows over an identical vertex
+/// file — and the pass costs **1.14 / 1.38 / 1.69 GiB**. A per-vertex term
+/// predicts a flat line; the measured slope is **6.7 bytes per adjacency row**
+/// with every vertex term held fixed. The attribution is to rows.
+///
+/// (`examples/enrich_memory <N> <degree>`, 2026-08-28, Mac16,8 — 14 cores,
+/// 48 GiB, macOS 26.2 / Darwin 25.2.0.)
+const ADJACENCY_ROW_BYTES: u64 = 14;
+
+/// What the pass holds whatever the corpus is.
+///
+/// The three terms below are all proportional to something the corpus has, and
+/// a corpus small enough makes all three of them small — while the Parquet
+/// reader's `SCAN_BATCH_ROWS` batches and the writer's row-group buffers are the
+/// size they are. Measured: a **ten-thousand**-vertex corpus holds 6.21 MB
+/// against 4.00 MB of linear terms, and a sixty-thousand-vertex one holds 25.89
+/// against 23.94, which puts the floor between two and five megabytes.
+///
+/// Sixteen mebibytes rather than five, and the reason is where the number is
+/// used rather than where it was measured. At the small end this term **is** the
+/// answer, and the run-to-run spread is a larger fraction of it than of anything
+/// else here: the same sixty-thousand-vertex corpus holds 25.89 MB in a release
+/// build and 30.10 in the debug build `cargo test` produces. A floor fitted to
+/// the optimised build is a floor that fails on the guard.
+///
+/// Nothing at the sizes the rest of this file is calibrated on notices: it is
+/// 0.4% of the ten-million estimate.
+const LAYOUT_BASE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// What one uncompressed byte of a vertex Parquet costs once it is Arrow, in
 /// thousandths.
@@ -496,6 +536,9 @@ const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 /// What [`enrich_layout_within`] will hold, in bytes, for a corpus of this
 /// shape — the three terms above, summed.
 ///
+/// Four terms: a floor the corpus does not change, one per vertex, one per
+/// adjacency row, and one per uncompressed byte of the vertex file.
+///
 /// **Every input is a footer read.** `vertex_count` and `adjacency_rows` are
 /// `num_rows`, `vertex_payload_bytes` is the sum of the row groups'
 /// `total_byte_size`, and all three are in the metadata a Parquet reader parses
@@ -507,24 +550,38 @@ const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 /// large refuses a run that would have fitted, and the person who declared the
 /// budget raises it and tries again; one that is a little too small accepts a
 /// run and lets it exceed the number they were promised, which is the defect
-/// this whole mechanism exists to remove. At the calibration point — ten million
-/// vertices, 139,874,560 adjacency rows, a 1,133 MiB vertex Parquet — it returns
-/// **8.95 GiB** against a measured process peak of **8.82 GiB**
-/// (`examples/enrich_memory 10000000 14`, 2026-08-27, Mac16,8 / 14 cores).
+/// this whole mechanism exists to remove. So it is fitted to the **largest** of
+/// two runs of one build at every point, and it clears all five by 18% to 50%:
 ///
-/// It is an estimate and it says so. It is a straight line through calibration
-/// points that all share one mean degree, and [`ADJACENCY_ROW_BYTES`] says which
-/// half of that line is the unverified one. What it is *not* is a guess about
-/// which phase dominates: that is measured, and it is Louvain, by more than
-/// every other phase of the pass put together.
+/// | fixture | adjacency rows | the pass | this returns |
+/// | --- | --- | --- | --- |
+/// | 2,000,000 · degree 14 | 27,974,508 | 0.62 GiB | 0.90 GiB |
+/// | 4,000,000 · degree 6 | 23,978,362 | 1.14 GiB | 1.38 GiB |
+/// | 4,000,000 · degree 14 | 55,949,862 | 1.38 GiB | 1.80 GiB |
+/// | 4,000,000 · degree 28 | 111,899,830 | 1.69 GiB | 2.53 GiB |
+/// | 10,000,000 · degree 14 | 139,874,560 | 3.80 GiB | 4.47 GiB |
+///
+/// (`FOSSIL_MEM_PROBE=1 … --example enrich_memory -- <N> <degree>`, 2026-08-28,
+/// Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0.)
+///
+/// It is an estimate and it says so; it is a straight line, and a corpus far off
+/// these five points is extrapolation. What it is *not* any more is a line
+/// through one mean degree: three of the five rows share a vertex file and
+/// differ only in how many edges hang off it, which is what
+/// [`ADJACENCY_ROW_BYTES`] is now fitted on.
+///
+/// **Nor is it a guess about which phase dominates.** That is measured, and it
+/// moved: it used to be Louvain by more than every other phase together, and
+/// since [`Weighted::contract`] stopped building one hash table per community it
+/// is `remap adjacencies + write edge tiles`, the last phase of the pass.
 #[must_use]
 pub const fn estimated_peak_bytes(
     vertex_count: u64,
     adjacency_rows: u64,
     vertex_payload_bytes: u64,
 ) -> u64 {
-    VERTEX_ARRAY_BYTES
-        .saturating_mul(vertex_count)
+    LAYOUT_BASE_BYTES
+        .saturating_add(VERTEX_ARRAY_BYTES.saturating_mul(vertex_count))
         .saturating_add(ADJACENCY_ROW_BYTES.saturating_mul(adjacency_rows))
         .saturating_add(vertex_payload_bytes.saturating_mul(VERTEX_PAYLOAD_PERMILLE) / 1_000)
 }
