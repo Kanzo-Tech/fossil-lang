@@ -10,10 +10,9 @@
 //!    line it is nothing, because `PropertyLhs := IDENT` and no catalogued row
 //!    is an `IDENT`; anywhere else with no dot to the left it is the catalogue
 //!    whole, spelled `str.trim`. See [`stdlib_completions`] for what the
-//!    narrowing does not cover. There is no auto-import edit and no
-//!    `(native-only)` tag:
-//!    the first named a `use <ns>` line no program writes, and the second named
-//!    `WasmClass::NativeUdfOnly`, a class that no longer exists.
+//!    narrowing does not cover. There is no auto-import edit — no `use` line a
+//!    program writes — and no `(native-only)` tag, because every catalogued row
+//!    runs everywhere.
 //! 2. **shape properties** — the output contract of the mapping the cursor is
 //!    in, offered in the ONE position a property key can be written: the left
 //!    of a property line ([`Scope::PropertyKey`]). Each is labelled
@@ -257,13 +256,8 @@ fn stdlib_completions(
         let detail = render_sig(namespace, entry);
         let tags: Option<Vec<CompletionItemTag>> = None;
 
-        // A gleam-lsp auto-import edit sat here: a top-of-file `use <ns>`
-        // insertion, offered when the file's `PrefixIndex` said the namespace
-        // was not declared. There is no `use` production — `use` is an ordinary
-        // identifier and there is no module system for a name to come from —
-        // and no prefix table to ask, and `io` / `str` / `clean` are resolved
-        // by the checker against a catalogue rather than imported at all — so
-        // the edit named a line no program writes.
+        // Never an auto-import edit: there is no `use` production and no module
+        // system, so a namespace has nowhere to be imported from.
         let additional_text_edits = None;
 
         items.push(CompletionItem {
@@ -708,10 +702,6 @@ fn scalar_name(s: fossil_hir::stdlib::ScalarTy) -> String {
     .to_string()
 }
 
-// `import_edit` and `prefix_import_edit` lived here, plus the `top_of_file`
-// zero-width range both inserted at. One wrote `use <namespace>`, the other
-// `prefix <p>: <iri>`; neither line is a production the language has.
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -778,13 +768,6 @@ mod tests {
     /// cursor — which is the position this fixture puts it in. After a dot the
     /// rows are the receiver's, and after an unknown one there are none.
     ///
-    /// Four tests stood here and all four asserted the opposite. Two wanted an
-    /// `additional_text_edits` inserting `use clean` — there is no `use`
-    /// production and no module system for a name to come from. One wanted a
-    /// `DEPRECATED` tag and a `(native-only)` detail on `clean.slug`, from a
-    /// `WasmClass::NativeUdfOnly` that no longer exists: every catalogued row
-    /// runs everywhere now, so nothing is grayed. Two more wanted `ex:` and
-    /// `xsd:` offered as prefix completions.
     #[test]
     fn stdlib_entries_are_offered_bare() {
         let db = db();

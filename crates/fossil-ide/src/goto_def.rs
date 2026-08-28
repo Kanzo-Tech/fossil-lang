@@ -507,11 +507,6 @@ fn push_unique(targets: &mut Vec<NavigationTarget>, target: NavigationTarget) {
     }
 }
 
-// `name_candidates` lived here, and so did `prefix_decl_range` under it. The
-// first climbed from a leaf token to the enclosing `IRI_EXPR` so a cursor on
-// `ex` or on `Person` both resolved `ex:Person`; the second found the byte range
-// of a `prefix <name>: <iri>` line. Neither has a node to walk any more.
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;

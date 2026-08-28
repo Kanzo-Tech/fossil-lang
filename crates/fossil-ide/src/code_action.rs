@@ -123,9 +123,6 @@ fn split_mapping_action(index: &LineIndex, uri: &Uri, diag: &Diagnostic) -> Opti
     ))
 }
 
-// `unknown_prefix_name` lived here: it read the prefix out of the «undeclared
-// prefix `ex:`» message that `lower.rs` used to emit. Nothing emits it.
-
 /// Build a `quick fix` [`CodeAction`] resolving `diag` with one document's
 /// worth of [`TextEdit`]s.
 //

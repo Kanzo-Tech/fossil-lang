@@ -140,12 +140,11 @@ impl LineIndex {
     /// wrong answer that reads like a right one — the caller gets the last
     /// token of the wrong row and nothing says so.
     ///
-    /// It clamped nothing at all until this was written, and this paragraph
-    /// claimed it did. `line_start + character` for a column past the end of a
-    /// blank line is an offset outside the text, which `rowan`'s
-    /// `token_at_offset` answers by panicking — see
+    /// Unclamped, `line_start + character` for a column past the end of a blank
+    /// line is an offset outside the text, which `rowan`'s `token_at_offset`
+    /// answers by panicking —
     /// `crate::position::token_at_position_past_the_end_of_a_line_does_not_panic`
-    /// for the reproducer and the abort it used to produce.
+    /// is the reproducer.
     #[must_use]
     pub fn offset(&self, pos: Utf16Position) -> Option<u32> {
         let line_start = *self.line_starts.get(pos.line as usize)?;

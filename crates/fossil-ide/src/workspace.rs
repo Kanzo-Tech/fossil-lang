@@ -59,11 +59,6 @@ impl WorkspaceIndex {
         hits
     }
 
-    // `resolve_prefix` lived here — `(file, iri)` for every declaration of a
-    // prefix across the open files. There are no prefix declarations
-    // and no CURIE for one to expand, so the third element of each tuple above
-    // went with it and this index is symbols only.
-
     /// The per-file [`SymbolIndex`] for one open file, if present.
     #[must_use]
     pub fn symbols_of(&self, file: SourceFile) -> Option<&SymbolIndex> {
@@ -114,11 +109,6 @@ mod tests {
         assert_eq!(org.len(), 1);
         assert_eq!(org[0].0, b);
     }
-
-    // `resolves_a_prefix_declared_in_one_file` lived here: a `prefix` line in
-    // file A, resolved from file B, proving open-files-as-workspace. Both the
-    // production and the form it indexed are gone; `resolves_a_mapping_across_two_files`
-    // above still proves the cross-file half.
 
     #[test]
     fn resolve_returns_all_matching_definitions() {

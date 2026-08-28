@@ -43,11 +43,9 @@
 //! for it, and both do it from the same three functions there. See that
 //! module's docs for why an editor needs this more than a batch compile does.
 //!
-//! They were `fossil-ide-db` until this crate absorbed them, on the strength of
-//! rust-analyzer's `ide-db`/`ide` split. That split carries ~20k lines shared
-//! by five crates; this one carried 592 lines with one consumer, no Salsa, no
-//! macro, no `tests/`, and a dependency set that was a strict subset of this
-//! crate's. A crate boundary that separates nothing is a file boundary.
+//! They were `fossil-ide-db`, split off on the strength of rust-analyzer's
+//! `ide-db`/`ide` split, until this crate absorbed them: a crate boundary that
+//! separates nothing is a file boundary.
 
 pub mod code_action;
 pub mod completion;
@@ -86,10 +84,5 @@ pub use shape_documents::register_missing_documents;
 pub use symbol_index::{SymbolEntry, SymbolIndex, SymbolKind};
 pub use workspace::WorkspaceIndex;
 
-// `Analysis` lived here: a zero-field struct whose one associated function
-// returned an empty `Vec` and whose docblock said «what it owes is the drain of
-// the Salsa `Diagnostic` accumulator … `fossil-lsp` does that drain itself
-// today». It owed it for as long as both hosts did it themselves, and the
-// [`diagnostics`] module is that debt paid. A namespace over one free function
-// would be the rust-analyzer shape without the reason for it — the db is passed
-// in directly here, so everything else in this crate is already a free function.
+// There is no `Analysis` namespace type: the db is passed in directly, so
+// everything in this crate is a free function.

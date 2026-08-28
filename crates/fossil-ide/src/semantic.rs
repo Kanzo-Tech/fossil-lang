@@ -291,9 +291,6 @@ fn prev_token_kind(tok: &SyntaxToken) -> Option<SyntaxKind> {
     None
 }
 
-// `has_ancestor` lived here. Its one caller climbed to an `IRI_EXPR` to paint
-// the prefix segment of `ex:Person` as a namespace, and there is no such node.
-
 /// Convert one token's byte range to UTF-16 `(line, start_char, length)` via the
 /// [`LineIndex`] and push an [`AbsToken`]. A token that spans multiple lines
 /// (only multi-line strings/comments in practice) is recorded on its start line
@@ -435,9 +432,8 @@ Users : Person from users
         assert!(!data.is_empty(), "a program should emit tokens");
     }
 
-    /// `prefix` was the keyword this asserted, at line 0 column 0. The reserved
-    /// set is `from`, `and`, `or`, `not` and the `@attr` sigils — `prefix` left
-    /// it, and painting an ordinary identifier as a keyword is the failure the
+    /// The reserved set is `from`, `and`, `or`, `not` and the `@attr` sigils;
+    /// painting an ordinary identifier as a keyword is the failure the
     /// classifier's own comment warns about.
     #[test]
     fn from_is_painted_as_a_keyword() {
