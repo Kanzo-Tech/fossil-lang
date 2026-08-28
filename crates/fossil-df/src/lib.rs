@@ -1863,7 +1863,7 @@ fn vertex_info(node: &NodeType, rows: u64) -> VertexInfo {
     // did: `apps/corpus/guards/guards.mjs`'s `identity-is-the-subject` says
     // "`dense_id` is an address and cannot also be an identity", the
     // conformance corpus's `vertex/Person.vertex.yml` marks `subject`, and
-    // `packages/graph`'s reader keys on the column name precisely because it
+    // `packages/corpus`'s reader keys on the column name precisely because it
     // could not trust the flag with two writers spelling it two ways. One
     // field, two answers, and the way that resolves in practice is that
     // nothing reads it — which is `RunStatus` again, in one boolean.

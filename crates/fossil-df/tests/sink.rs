@@ -87,7 +87,7 @@ async fn write_to_dir_lays_out_the_graphar_tree() {
     // is the test that holds the bytes a run wrote, and the flag is a claim
     // about the artefact.
     //
-    // Nothing in the tree READS it — `packages/graph`'s reader keys on the
+    // Nothing in the tree READS it — `packages/corpus`'s reader keys on the
     // column name, and it says why: it could not trust a field two writers
     // spelled two ways. So this is the only thing that goes red if `dense_id`
     // takes the flag back, and it is deliberately the artefact's own manifest
