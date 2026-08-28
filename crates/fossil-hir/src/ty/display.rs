@@ -7,11 +7,8 @@
 //!   - [`crate::check::compatible`]'s mismatch diagnostic messages,
 //!   - the LSP hover (which re-exports it from `fossil-ide::hover`).
 //!
-//! # `Unknown(InferenceId)` must never reach the surface
-//!
-//! The internal `TyKind::Unknown(InferenceId)`
-//! synthesis-state placeholder is normalised to `"?"` here — it never appears
-//! verbatim in a surface diagnostic or hover.
+//! Everything that renders a type renders it here, never through `{:?}`, which
+//! is what keeps a `Debug` spelling out of a diagnostic and a hover.
 
 use crate::ty::TyKind;
 use fossil_graph_schema::local_name;

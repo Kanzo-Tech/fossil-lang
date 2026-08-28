@@ -348,12 +348,9 @@ impl ParamSpec {
 ///
 /// # The repetition rule, stated precisely
 ///
-/// This doc used to say «at most one position repeats and it is the last», and
-/// point at a closing check in `stdlib_default` that **did not exist**. Both
-/// halves were wrong. `seq.group_by` has TWO [`Self::OneOrMore`] positions
-/// (`keys` and `aggregations`), so the rule as written was already violated by
-/// the catalogue it described, and a comment beside the `agg` helper explained
-/// the violation away rather than correcting the rule.
+/// It is NOT «at most one position repeats and it is the last»:
+/// `seq.group_by` has TWO [`Self::OneOrMore`] positions (`keys` and
+/// `aggregations`), and nothing in `stdlib_default` closes over such a rule.
 ///
 /// The real rule is about POSITIONAL arguments, which is where the ambiguity
 /// actually lives: a repetition in the middle cannot be told from the position
@@ -687,10 +684,8 @@ pub enum AggFn {
 /// nothing could enumerate the members of a relation and so nothing could count
 /// the difference.
 ///
-/// Three numbers described this one enum — **14** in the module doc, **13**
-/// here, and «12 relation operators» in this paragraph. The last two agreed all
-/// along (12 verbs plus [`Self::Source`]) and the first was simply stale, but
-/// three written counts is two too many, so none of them is written now.
+/// No count is written for this enum, in this paragraph or anywhere else: three
+/// were, they disagreed, and the variants are right below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanOp {
     /// `seq.where` → `FilterOp` (`WHERE`).

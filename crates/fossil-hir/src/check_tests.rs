@@ -504,7 +504,7 @@ fn a_column_ref_naming_the_relations_own_name_is_rejected() {
     assert_eq!(refusals.len(), 1, "exactly one refusal, got {refusals:?}");
 }
 
-// ── Subtyping rules (type-system.md §9) ────────────────────────────────────
+// ── Subtyping rules (/docs/design/typing) ────────────────────────────────
 
 #[test]
 fn compatible_integer_widens_to_float() {
@@ -1703,9 +1703,8 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
         "an unknown column is still refused: {unknown:#?}"
     );
 
-    // A condition that is not a condition. The catalogue is what says so —
-    // `seq.where` is `(Rows, Predicate) -> Rows` — where it used to say
-    // `p("rows", S::String)`.
+    // A condition that is not a condition. The catalogue is what says so:
+    // `seq.where` is `(Rows, Predicate) -> Rows`.
     let not_a_condition = diagnostics("Row.station");
     assert!(
         not_a_condition

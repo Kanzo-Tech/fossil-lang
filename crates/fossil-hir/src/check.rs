@@ -1943,7 +1943,7 @@ impl<'db> Expr<'db> {
         )
     }
 
-    /// T-Comp (`type-system.md` §4.7): `Γ ⊢ a : τ`, `Γ ⊢ b : τ`, τ comparable
+    /// T-Comp (`/docs/design/typing`): `Γ ⊢ a : τ`, `Γ ⊢ b : τ`, τ comparable
     /// ⟹ `Bool`. T-And/T-Or: both sides `Bool` ⟹ `Bool`.
     ///
     /// An operand the checker cannot type — a `.field` with no source
@@ -2173,7 +2173,7 @@ impl<'db> Expr<'db> {
         Some(ty)
     }
 
-    /// T-Tern (`type-system.md` §4.8): the condition is `Bool`, both branches
+    /// T-Tern (`/docs/design/typing`): the condition is `Bool`, both branches
     /// have the same type, and that type is the conditional's. **No implicit
     /// coercion** — two branches of different types is the error, not a widening
     /// nobody asked for, because a column whose type depends on the row is a

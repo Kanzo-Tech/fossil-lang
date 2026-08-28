@@ -416,9 +416,9 @@ fn forward_propagation_typo_with_did_you_mean() {
 // ===== Bucket 2: Backward Check (SC#2) — helper-proven ======================
 
 /// A required, unbounded `email` constrained to `String` against a source
-/// column typed `Optional<String>` — the cardinality blame. The docblock said
-/// `ex:email xsd:string {1,*}`; the constraint below carries the predicate IRI
-/// and a `Primitive`, and there is no CURIE in the vocabulary it is built in.
+/// column typed `Optional<String>` — the cardinality blame. The constraint
+/// below carries the predicate IRI and a `Primitive`; there is no CURIE in the
+/// vocabulary it is built in.
 #[test]
 fn backward_check_optional_for_required() {
     let document = shape(
@@ -696,9 +696,8 @@ fn the_harness_installs_a_decoder_and_registers_the_document() {
 
 #[test]
 fn resolved_constraints_never_leak_unknown_or_inferenceid() {
-    // The value-type rendering routes through render_ty_kind, which normalises
-    // TyKind::Unknown(InferenceId) to `?`. Assert no corpus rendering leaks the
-    // internal placeholder (Risk Register / STATE.md "Do NOT").
+    // The value-type rendering routes through render_ty_kind, so no corpus
+    // rendering can leak a `TyKind`'s Rust spelling.
     let documents = [
         shape(
             "https://example.org/Person",

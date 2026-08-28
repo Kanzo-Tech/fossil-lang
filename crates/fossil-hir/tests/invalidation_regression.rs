@@ -177,10 +177,6 @@ use salsa::Setter;
 /// single-char body edit in mapping #3 of a 10-mapping file. See the
 /// top-of-file "WHY THE THRESHOLD IS 18, NOT 4" comment for the breakdown.
 ///
-/// The eighteen are: 1 parse + 4 file-keyed structural queries (item_tree,
-/// ast_id_map, def_map, lower_to_hir) + 10 mapping_cst_node + the three that
-/// fan out for the edited mapping alone (body, typecheck_mapping, spans).
-///
 /// The LOAD-BEARING invariant is enforced by
 /// `keyset_of_reexecuted_queries_matches_expected_four` (per-mapping
 /// fan-out for body / typecheck_mapping / expr_types / spans is exactly

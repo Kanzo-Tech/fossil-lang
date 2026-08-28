@@ -478,7 +478,7 @@ pub enum HirExpr {
     /// `.age >= 18 ? "adult" : "minor"` — the conditional.
     ///
     /// Both branches must have the same type and there is no implicit coercion
-    /// (`type-system.md` §4.8), which is what makes it a total function of the
+    /// (`/docs/design/typing`), which is what makes it a total function of the
     /// row rather than a source of nullable columns.
     Ternary {
         cond: Box<HirExpr>,
@@ -2341,13 +2341,6 @@ fn lower_expr_inner(
                 None
             }
         }
-        // An `IRI_EXPR` arm lived here, 90 lines of it: the `<https://…>` form,
-        // the `ex:Local` CURIE, and `${ex:}` — a prefix with no local part,
-        // which only the parser's interpolation body admitted. All three
-        // spellings are gone — `<` and `>` have one reading each, a `:` that is
-        // not a mapping header or a ternary is an error, and a hole takes an
-        // expression and nothing else — and so is the node. `HirExpr::PrefixedName`
-        // outlived them as an unreachable variant and is gone too.
         other => {
             let range = inner.text_range();
             let span = Span::new(range.start().into(), range.end().into());

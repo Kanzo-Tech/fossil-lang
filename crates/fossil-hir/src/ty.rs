@@ -1,18 +1,8 @@
 //! Type ADT.
 //!
-//! Every kind here is a kind a PROGRAM can have. There is no
-//! checker-state kind: `Unknown(InferenceId)` was one, and «no type» has a
-//! spelling already — `synth_ty` returns `Option<Ty>` and every caller reads
-//! it. Worse, `Unknown` did the opposite of what it was for: `subtypes` has no
-//! arm for it, so it fell through to `_ => false` and REFUSED every check it
-//! reached, where its own comment asked it to stand aside and let the shape
-//! answer.
-//!
-//! There is no count to quote here, and there used to be: this said «all 11
-//! kinds», and three of them — `Optional`, `Fn` and `Unknown` — were
-//! constructed by nothing that a program could reach. `grammar.bnf` has no `T?`
-//! and declares `FunctionDecl` absent (the user declares no functions), so
-//! neither of the first two had a way into the language.
+//! Every kind here is a kind a PROGRAM can have, and there is no checker-state
+//! kind: «no type» has a spelling already — `synth_ty` returns `Option<Ty>` and
+//! every caller reads it. There is no count to quote either, deliberately.
 //!
 //! Interning strategy:
 //! - `Ty<'db>` itself is `#[salsa::interned]` so structural equality → pointer eq.

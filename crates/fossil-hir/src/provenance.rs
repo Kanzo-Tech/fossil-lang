@@ -101,11 +101,8 @@ pub enum ProvenanceKind {
     /// LSP hover renders this above the field type so the synthesis
     /// is NEVER hidden from the user.
     ///
-    /// CRITICAL: `rendering` MUST NEVER contain the substring
-    /// `Unknown` or `InferenceId` — it is built via [`crate::render_ty_kind`]
-    /// (the shared `TyDisplay`), never raw `{:?}` Debug. The internal
-    /// `TyKind::Unknown(InferenceId)` synthesis-state placeholder normalises to
-    /// `?` at the display boundary.
+    /// CRITICAL: it is built via [`crate::render_ty_kind`], never raw `{:?}`
+    /// Debug, so no `TyKind` variant reaches the user under its Rust spelling.
     SynthesizedClosureRendering { rendering: SmolStr },
 }
 
