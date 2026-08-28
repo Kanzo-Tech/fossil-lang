@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
-  "//kanzo-tech": "The version is exact, not a range: @kanzo-tech/ui is at 0.0.1-alpha and a prerelease is not a contract yet. The @codemirror/* set is here rather than there because they are all OPTIONAL peers of @kanzo-tech/ui — its CodeEditor externalises every one and resolves them from the consumer.",
+  "//kanzo-tech": "The version is exact, not a range: 0.1.0 is the first non-prerelease, and one exact pin is what a consumer of a young library owes it. It also drops the @duckdb/duckdb-wasm peer, so the inert 1.32.0-vs-1.33.1-dev57.0 warning `pnpm install` used to print is gone. What the bump did NOT fix is the tooltip surface: `CodeEditor`'s theme reads `var(--popover)` with no fallback and only kanzo's DARK palettes define that token — see the `--popover` block in src/styles.css, which is where every CodeMirror tooltip in this app got its background back. The @codemirror/* set is here rather than there because they are all OPTIONAL peers of @kanzo-tech/ui — its CodeEditor externalises every one and resolves them from the consumer.",
   "dependencies": {
     "@codemirror/language": "^6.10.0",
     "@codemirror/lint": "^6.8.0",
@@ -29,7 +29,7 @@
     "@fossil-lang/executor": "workspace:*",
     "@fossil-lang/graph": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
-    "@kanzo-tech/ui": "0.0.1-alpha",
+    "@kanzo-tech/ui": "0.1.0",
     "@lezer/highlight": "^1.2.0",
     "lucide-react": "^1.23.0",
     "react": "^19.0.0",
