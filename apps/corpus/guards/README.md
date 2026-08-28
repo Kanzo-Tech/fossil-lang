@@ -45,4 +45,5 @@ The price is stated where it is paid: **there is no type, so a guard checks what
 check and nothing more.** Every guard therefore carries a `cannotProve` field, `--explain` prints
 it, and a failure prints it beside the failure. Read that half.
 
-Full documentation of the conventions: `apps/corpus/content/docs/`.
+Full documentation of the conventions: `apps/docs/content/docs/format/`. It was `apps/corpus/content/docs/`,
+which was a second documentation site and is not one any more.

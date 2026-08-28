@@ -21,6 +21,11 @@
         "why": "2^31, where a port that took the shift as signed gives a negative tile"
       },
       {
+        "dense_id": "4294967295",
+        "tile": "1048575",
+        "why": "2^32 − 1, the largest id the declared uint32 column can carry. The arithmetic is 64-bit and the column is not, on purpose: a port checked here already agrees past the storage ceiling, so widening the column moves no reader"
+      },
+      {
         "dense_id": "9007199254740992",
         "tile": "2199023255552",
         "why": "2^53, where a port that ran the id through a JavaScript Number stops being exact"

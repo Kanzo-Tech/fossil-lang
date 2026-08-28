@@ -55,7 +55,7 @@ Five things define a corpus. Each is a measurement, and each is a guard below.
 
 | | the convention | what it buys |
 | --- | --- | --- |
-| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1`; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
+| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1` per vertex type, stored `uint32` and shifted as 64 bits; the identity is the subject IRI | a tile is a *range*, so its address is a shift |
 | [Addressing](/docs/format/conventions/addressing) | a tile is 4,096 rows of `dense_id`; `tile = dense_id >> 12` | no index to fetch, no directory to list |
 | [Order](/docs/format/conventions/addressing#the-order-that-makes-an-interval-mean-something) | `dense_id` ascends with the Morton code of the position | a rectangle in space is a few contiguous runs of ids |
 | [Adjacency](/docs/format/conventions/adjacency) | `by_source` is CSR, `by_target` is CSC, both tiled by the endpoint they are ordered by | every drawable edge is in a tile the window already fetched, and a hop is two addressed reads |

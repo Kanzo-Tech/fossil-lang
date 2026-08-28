@@ -52,6 +52,17 @@ function vectors() {
  */
 const MAX_MEAN_BOX_SHARE = 0.5;
 
+/**
+ * Every spelling DuckDB gives an unsigned integer, which is what an address has to be under a name.
+ *
+ * Written out rather than matched on a `U` prefix, because the set is closed and small and a prefix
+ * test is a rule about spelling rather than about types. It is deliberately *all five* widths and
+ * not the one fossil writes: the convention is that the address is unsigned, and the width is a
+ * separate commitment stated where the rule is — a corpus another writer produced at `uint64` is
+ * addressable by every reader here and is not a violation of anything.
+ */
+const UNSIGNED = new Set(["UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT"]);
+
 /** A guard's answer. `failures` are violations of a convention; `notes` are what it measured. */
 function result(failures = [], notes = []) {
   return { failures, notes };
@@ -263,8 +274,9 @@ export const GUARDS = [
       "`dst_dense` on an adjacency. A reader needs a Parquet reader and the column names, and " +
       "nothing else.",
     cannotProve:
-      "That the *types* of those columns are what a reader assumes. A `dense_id` stored as a " +
-      "string opens, describes and addresses — until the reader shifts it.",
+      "That a column carries what its *name* suggests. `x` and `y` are read as positions by the " +
+      "ordering guards and by nothing here; the types of the three columns the address is computed " +
+      "from are `addressing-is-unsigned`'s question, not this one's.",
     run(corpus) {
       const failures = [];
       for (const type of corpus.types) {
@@ -282,6 +294,55 @@ export const GUARDS = [
         }
       }
       return result(failures);
+    },
+  },
+
+  {
+    id: "addressing-is-unsigned",
+    title: "The columns the address is computed from are unsigned integers",
+    proves:
+      "`dense_id` on a vertex payload and on its identity index, and `src_dense` and `dst_dense` " +
+      "on each adjacency orientation, hold an unsigned integer. Those are the three names every " +
+      "convention here **shifts**, and a name says nothing about what a shift will do to the " +
+      "value under it: a `dense_id` stored as a string opens, describes and addresses until a " +
+      "reader shifts it. Signed is the quieter half — `>>` sign-extends on a signed type, so a " +
+      "negative value that should not exist addresses a tile that does not exist instead of " +
+      "failing to parse.",
+    cannotProve:
+      "The **width**. `uint32` and `uint64` both address correctly and neither says which ceiling " +
+      "the writer was working to; that a fossil corpus stores 32 bits and shifts 64 is stated on " +
+      "the identity convention and is not derivable from a column. Nor that the manifest's " +
+      "declared `data_type` is the spelling on disk: the manifest is read by a line scanner whose " +
+      "grammar is a flat mapping and one sequence of small mappings, and a property list is one " +
+      "level deeper than that goes.",
+    run(corpus) {
+      const failures = [];
+      const seen = new Set();
+      let checked = 0;
+      // An ABSENT column is `plain-parquet`'s finding and not this one. Two guards reporting one
+      // break is how a corpus comes back with the second-most-useful message at the top.
+      const shifted = (types, column, where) => {
+        const got = types?.get(column);
+        if (got === undefined) return;
+        checked += 1;
+        seen.add(got);
+        if (!UNSIGNED.has(got.toUpperCase())) {
+          failures.push(`${where} carries ${column} as ${got}, which is not an unsigned integer`);
+        }
+      };
+      for (const type of corpus.types) {
+        shifted(type.columnTypes, "dense_id", type.name);
+        if (type.index) shifted(type.index.columnTypes, "dense_id", `${type.name} ${type.index.prefix}/`);
+      }
+      for (const edge of corpus.edges) {
+        for (const side of [edge.bySource, edge.byTarget]) {
+          shifted(side.columnTypes, "src_dense", `${edge.rel} ${side.name}`);
+          shifted(side.columnTypes, "dst_dense", `${edge.rel} ${side.name}`);
+        }
+      }
+      return result(failures, [
+        `${checked} address column(s) read · ${[...seen].sort().join(", ") || "none"}`,
+      ]);
     },
   },
 

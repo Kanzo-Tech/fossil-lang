@@ -628,6 +628,14 @@ pub struct AdjList {
 /// truncates to 32 bits before shifting, so the same three characters mean
 /// three different things across the layers that have to agree. The border
 /// vectors a re-implementation is checked against are in this module's tests.
+///
+/// **Sixty-four here and thirty-two in the column, deliberately.** A vertex
+/// manifest declares `dense_id` as `uint32`, so the stored ceiling is
+/// 4,294,967,295 per vertex type — and the arithmetic every reader implements is
+/// wider than the column on purpose, so that widening the column later moves no
+/// reader. The published vectors carry 2³¹, 2³² − 1 and 2⁵³ for that reason:
+/// they are checked past a ceiling the storage has not reached. Which ceiling
+/// binds, and why it is not this one, is on `/docs/format/conventions/identity`.
 pub const TILE_SHIFT: u32 = 12;
 
 /// The tile a `dense_id` lives in — the whole of the addressing scheme.
@@ -790,18 +798,24 @@ impl GraphInfo {
 /// writes", and both halves of that were wrong.** `DuckDB` COPY is not the
 /// writer any more for a payload — the module header above says so: `fossil-df`'s
 /// `files.rs` encodes Arrow→Parquet, and COPY survives only in the layout
-/// post-pass. And "must match" was a `must` nothing enforces. Nothing in the
-/// tree compares a manifest's declared `data_type` against the type of the
-/// column the file actually holds: `fossil-cli/tests/conformance.rs` checks
-/// paths, counts, tiling and the adjacency joins, and
-/// `apps/corpus/guards/guards.mjs` records the same gap in its own
-/// `cannotProve` — a `dense_id` stored as a string opens, describes and
-/// addresses until a reader shifts it.
+/// post-pass. And "must match" was a `must` nothing enforces.
 ///
-/// It cannot be closed here. This crate declares the tiling and emits no bytes,
-/// and it holds `arrow-schema` ALONE on purpose (see `Cargo.toml`); comparing a
-/// declaration to a file needs a Parquet reader and a written artefact, so the
-/// guard belongs beside the one that already opens them.
+/// **Half of that gap is closed, and the half that is closed is the half the
+/// addressing rests on.** `apps/corpus/guards/guards.mjs`'s
+/// `addressing-is-unsigned` opens the payload and requires `dense_id`,
+/// `src_dense` and `dst_dense` to hold an unsigned integer, because those are
+/// the three names every convention *shifts* — a `dense_id` stored as a string
+/// opens, describes and addresses until a reader shifts it, and one stored
+/// signed shifts arithmetically instead of logically and reaches a tile that
+/// does not exist. What is still open is the *rest* of the property list: the
+/// checker reads the manifest with a line scanner whose grammar is a flat
+/// mapping and one sequence of small mappings, and a `property_groups` entry's
+/// properties are one level deeper than that goes.
+///
+/// Neither half could be closed here. This crate declares the tiling and emits
+/// no bytes, and it holds `arrow-schema` ALONE on purpose (see `Cargo.toml`);
+/// comparing a declaration to a file needs a Parquet reader and a written
+/// artefact, so the guard belongs beside the one that already opens them.
 #[must_use]
 pub fn data_type_name(dt: &DataType) -> String {
     match dt {
@@ -885,11 +899,16 @@ mod tests {
     /// A second implementation — the wasm reader, the `TypeScript`/`DuckDB` path,
     /// or a stranger's — is checked against this table and not against a
     /// sentence. Every value here is a border: the first id, the last id of tile
-    /// 0, the first of tile 1, and the three places where a 32-bit reading of the
-    /// shift diverges from a 64-bit one. `2^31` and `2^53` exceed the `u32` a
-    /// `dense_id` column holds *today*, and they are here precisely for that
-    /// reason: they are where a port that took the shift as signed, or that ran
-    /// it through a JavaScript `number`, gives a different answer.
+    /// 0, the first of tile 1, and the four places where a 32-bit reading of the
+    /// shift diverges from a 64-bit one. `2^31`, `2^32 − 1` and `2^53` exceed the
+    /// `u32` a `dense_id` column holds *today*, and they are here precisely for
+    /// that reason: they are where a port that took the shift as signed, or that
+    /// ran it through a JavaScript `number`, gives a different answer.
+    ///
+    /// `2^32 − 1` is the largest id the declared `uint32` can carry, and it is a
+    /// vector rather than a sentence because the arithmetic is 64-bit and the
+    /// column is not — so the day the column widens, every reader already agrees
+    /// about the values past this one and none of them has to be moved.
     #[test]
     fn tile_of_border_vectors() {
         for (dense_id, tile) in [
@@ -899,6 +918,7 @@ mod tests {
             (8_191, 1),
             (2_147_483_647, 524_287),                   // 2^31 − 1
             (2_147_483_648, 524_288),                   // 2^31
+            (4_294_967_295, 1_048_575),                 // 2^32 − 1, the last id a `uint32` holds
             (9_007_199_254_740_992, 2_199_023_255_552), // 2^53
         ] {
             assert_eq!(tile_of(dense_id), tile, "tile_of({dense_id})");
