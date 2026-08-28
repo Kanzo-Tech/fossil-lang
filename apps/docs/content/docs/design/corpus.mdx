@@ -42,6 +42,31 @@ It is not closed, and the reason is that closing it is a format change rather th
 it needs a per-orientation tile census in the edge manifest, a field with its own argument about what
 a reader may derive. Until a `files` corpus is served, the cost is one nobody is paying.
 
+### The reader prunes the identity index, because the engine declines to
+
+The [identity index](/docs/format/conventions/identity) is built so that footers name the one tile a
+key can be in. Nothing makes an engine use them. **DuckDB prunes no disjunction over a `VARCHAR`
+column**, so a batched lookup — `key IN (a, b)` — opened all 245 index tiles of a million-vertex
+corpus and read **44.1 MB**, where the single `key = a` opened one and read **3.98 MB**. The index
+was doing its job and the query was reading past it.
+
+So the pruning moves to the reader, out of the same statistics the engine declined to use: one
+`parquet_metadata` sweep over the index tiles, cached per type exactly as the payload's `x`/`y` boxes
+are, and the batch stays **one** query over only the files its keys can be in. Under the `rowgroups`
+container a row group has no URL and there is nothing to address, so the batched read over the whole
+index is what there is, and the cache records that with `null` rather than pretending it pruned.
+
+<Callout type="warn" title="Two hazards in the comparison, and neither is visible in a passing test">
+**The comparison is on bytes, not on strings.** Parquet orders a string column by unsigned UTF-8
+bytes and JavaScript compares UTF-16 code units. The two disagree above `U+E000`, and an IRI reaching
+there would be pruned out of the very tile holding it and reported **absent** — a wrong answer, not a
+slow one.
+
+**A truncated statistic must widen the range, never narrow it.** A writer may shorten a long min/max:
+parquet-rs increments a truncated max, but a writer that did not would store a prefix, so a key
+extending the stored max is **kept** rather than excluded.
+</Callout>
+
 ## The artifact is the API
 
 The stance follows the table formats — Iceberg, Delta Lake, Lance — where a manifest plus a set of
