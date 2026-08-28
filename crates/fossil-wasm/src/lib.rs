@@ -495,8 +495,8 @@ impl WasmPlayground {
 
 // ----- Pure-Rust core (test-reachable; no wasm-bindgen serialization) -----
 //
-// The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`,
-// `compile_file`) call `serde_wasm_bindgen::to_value` and construct
+// The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`)
+// call `serde_wasm_bindgen::to_value` and construct
 // `JsError`s, both of which call wasm-bindgen extern intrinsics that panic
 // on native targets ("cannot call wasm-bindgen imported functions on
 // non-wasm targets" — wasm-bindgen 0.2 lib.rs:101). Splitting the
@@ -518,10 +518,6 @@ impl WasmPlayground {
 pub enum WorkspaceError {
     /// The handle was never opened, or was already closed.
     UnknownHandle,
-    /// The file parsed to zero mappings — `compile_file` has nothing to
-    /// compile. The `check` path is fine with this case (it returns an
-    /// empty diagnostic stream).
-    NoMappingInFile,
     /// The `register_inferred_descriptor` JSON payload did not deserialise
     /// into an [`fossil_descriptors_input::InferredDescriptor`]. Carries the
     /// underlying `serde_json` error message.
@@ -532,7 +528,6 @@ impl std::fmt::Display for WorkspaceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownHandle => f.write_str("unknown file handle"),
-            Self::NoMappingInFile => f.write_str("no mapping found in file"),
             Self::MalformedDescriptor(msg) => {
                 write!(f, "malformed InferredDescriptor JSON: {msg}")
             }

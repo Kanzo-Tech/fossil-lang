@@ -9,7 +9,7 @@
 //! PR without needing the wasm-bindgen + node toolchain installed. Each test
 //! exercises the lifecycle through the pure-Rust `*_native` / `*_rows` /
 //! `*_result` helpers — the `#[wasm_bindgen]` wrappers (`open_file`,
-//! `update_file`, `close_file`, `check`, `diagnostics_for`, `compile_file`)
+//! `update_file`, `close_file`, `check`, `diagnostics_for`)
 //! merely translate to/from `JsError` + `JsValue` via wasm-bindgen, which
 //! panics on native targets ("cannot call wasm-bindgen
 //! imported functions on non-wasm targets" — wasm-bindgen 0.2 lib.rs:101).

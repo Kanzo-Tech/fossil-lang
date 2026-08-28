@@ -39,7 +39,7 @@ pub(crate) struct WasmSystem {
     /// Keyed by the source URI the program writes:
     /// the descriptors the playground introspected with DuckDB-WASM and
     /// pushed in via [`crate::FossilPlayground::register_inferred_descriptor`]
-    /// BEFORE invoking `compile()` / `compile_file()`. Consumed by
+    /// BEFORE invoking `check()`. Consumed by
     /// `fossil-hir::infer::resolve_source_scope` inside the typecheck query.
     descriptors: DescriptorCache,
 }
