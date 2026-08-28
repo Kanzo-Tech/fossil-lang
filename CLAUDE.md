@@ -181,9 +181,14 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   types/                   shared TS types (SourceRef, ConnectionResolver, FossilTheme — zero runtime)
   resolvers/               default + mock + public-HTTP ConnectionResolver impls
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
-                           and not an editor: highlighting from `tokenize()` +
-                           `tokenKinds()`, squiggles from `check()` through
-                           `@codemirror/lint`. A package of this name was deleted in
+                           and not an editor. FIVE of them, not two: highlighting from
+                           `tokenize()` + `tokenKinds()`, squiggles from `check()` through
+                           `@codemirror/lint`, and hover / completion / goto-definition
+                           over the three position queries `FossilPlayground` grew. The
+                           two that stay OUT are semantic tokens (they come back only
+                           over the Worker) and code actions (the two quick fixes hang
+                           off a structured diagnostic the `CheckRow` wire shape
+                           flattens); `src/index.ts` says so. A package of this name was deleted in
                            `873cbc0` and it is not restored — the old one hard-copied the
                            lexer's DISCRIMINANTS into a TS enum, which was wrong in nine
                            places by the time it went. This one keys on the NAMES the wasm
