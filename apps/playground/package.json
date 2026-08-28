@@ -16,6 +16,7 @@
     "lint": "tsc --noEmit"
   },
   "//kanzo-tech": "The version is exact, not a range: @kanzo-tech/ui is at 0.0.1-alpha and a prerelease is not a contract yet. The @codemirror/* set is here rather than there because they are all OPTIONAL peers of @kanzo-tech/ui — its CodeEditor externalises every one and resolves them from the consumer.",
+  "//kanzo-graph": "@kanzo-tech/graph is the renderer, and the duckdb pin that used to keep it out is GONE: 0.1.0 names @duckdb/duckdb-wasm nowhere at all, because the Mosaic half moved to @kanzo-tech/mosaic and the coordinator stopped arriving through @kanzo-tech/ui/analytics. Its required peers are @cosmos.gl/graph, react and @kanzo-tech/ui; @kanzo-tech/mosaic is OPTIONAL and lives entirely on the ./duckdb subpath, which this app does not import — src/tiles.ts implements BoundedSource directly over the app's own DuckDB connection, so no coordinator is created and no crossfilter exists to join. pnpm warns that @kanzo-tech/ui 0.0.1-alpha does not satisfy the 0.1.0 peer, and the warning is correct and inert: the only thing the renderer takes from ui is `cn`, exported by both, and bumping ui is the editor's decision and not this panel's.",
   "dependencies": {
     "@codemirror/language": "^6.10.0",
     "@codemirror/lint": "^6.8.0",
@@ -24,11 +25,13 @@
     "@codemirror/autocomplete": "^6.18.0",
     "@codemirror/commands": "^6.7.0",
     "@codemirror/search": "^6.5.0",
+    "@cosmos.gl/graph": "^3.4.0",
     "@duckdb/duckdb-wasm": "1.32.0",
     "@fossil-lang/codemirror-fossil": "workspace:*",
     "@fossil-lang/executor": "workspace:*",
     "@fossil-lang/graph": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
+    "@kanzo-tech/graph": "0.1.0",
     "@kanzo-tech/ui": "0.0.1-alpha",
     "@lezer/highlight": "^1.2.0",
     "lucide-react": "^1.23.0",

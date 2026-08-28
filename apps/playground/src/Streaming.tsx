@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { openBench, type Bench } from './bench.js';
+import Canvas from './Canvas.js';
 import * as duck from './duckdb.js';
 import {
   FOOTER_SQL,
@@ -350,6 +351,15 @@ export default function Streaming({ ready }: StreamingProps) {
         is what the {runs.length} requests above carry. The list is what a reader would GET
         under <code>container: files</code>, unchanged.
       </p>
+
+      {/*
+        The same footer, with a camera on it instead of a slider.
+        Below the ledger rather than above it because the ledger is the argument and this is the
+        argument being true: a reader should have seen the byte count before seeing the picture it
+        bought. It mounts only once the boxes exist, which is what keeps `Read the footer` the one
+        explicit step that costs an engine.
+      */}
+      <Canvas bench={bench} boxes={boxes} />
     </div>
   );
 }
