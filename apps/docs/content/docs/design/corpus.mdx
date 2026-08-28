@@ -182,6 +182,78 @@ and that it is tiled by the same shift as the vertices it addresses. There is st
 **store**, which is a different noun.
 </Callout>
 
+## The camera has a renderer, and it is not fossil's
+
+The verbs do not draw and the corpus is addressed rather than queried, which leaves one thing
+unstated: *something* has to put a million points on a screen, and fossil does not ship it. What
+fossil publishes is the address — `resolveCorpus`, synchronous, no engine — and what draws is
+`@kanzo-tech/graph`, a bounded WebGL canvas over cosmos.gl whose whole data contract is one method:
+
+```ts
+interface BoundedSource {
+  slice(request: { view, limit, fill?, pinned?, perPixel? }): Promise<Slice>;
+  total?(): Promise<number>;
+  extent?(): Promise<Viewport>;
+}
+```
+
+Both sides had already written the same sentence about the same deleted verb. `fossil-graph` says
+the camera is addressed and not queried; that package's own reader says *what replaces `viewport` is
+a tile brought by a computed URL, which is another source*. `apps/playground/src/tiles.ts` is that
+other source, and the seam between the two is a `WHERE` clause on `dense_id`: nothing in it knows
+how cosmos.gl holds a buffer, and nothing in the renderer knows what a corpus is.
+
+**The division is: the renderer owns the contract and the picture, fossil owns the address.** That
+package ships a fossil reader of its own — `openCorpus`, on its `duckdb` subpath — and the
+playground does not call it, for a reason that is a 404 rather than a preference: it composes
+`chunk{k}.parquet` and `by_source/tile{k}.parquet`, which is `container: files`, and fossil's writer
+emits `container: rowgroups`. It also re-derives the addressing from a line scan over six manifest
+keys, which is the arithmetic
+[`@fossil-lang/graph` exists to publish](/docs/format/conventions/addressing#the-address-is-published-not-described)
+so that nobody has to. What reverses this is that reader learning `rowgroups` — better, addressing
+through the published module — at which point the source here becomes a call to it.
+
+### What the adoption costs, measured
+
+A 10% window over a million vertices opens **17 of 245 tiles in 6 range requests and 1,466 kB** —
+2.56% of the corpus, 1.13× over-read at tile granularity — and the camera is asked again on every
+move. `extent()` and `total()` are answered off the footer and the manifest, so the *opening* frame
+issues no query at all. The panel is `apps/playground/src/Canvas.tsx`; the arithmetic is checked
+against bytes over a real HTTP server by `pnpm --filter @fossil-lang/playground verify-stream`, and
+the source itself — every array against the window it claims to describe — by `verify-canvas`.
+
+Two things that adoption does **not** buy, and one it must not cost:
+
+- **No crossfilter.** The renderer's Mosaic bindings are the way a graph joins the same crossfilter
+  as the charts beside it, through an `IdSetClient` that publishes `id IN (…)` precisely because a
+  position living in a GPU simulation is not a column anybody can filter on. It is the right adapter
+  and there are no charts beside this canvas: a coordinator with one client in it is a crossfilter
+  with nothing to cross.
+- **No second engine, and this is the constraint rather than the preference.** Those bindings are a
+  peer of `@uwdata/mosaic-core`, which hard-depends on a *different* DuckDB-WASM from the one the
+  playground pins. Two of them in one tab is not a size problem, it is two engines and therefore two
+  crossfilters that cannot hear each other — the exact failure the single re-export of `Coordinator`
+  exists to prevent. So the condition is a build artifact and not an intention: the playground
+  bundle emits **one** `duckdb-*.wasm` — 34,242.59 kB, the version the app pins — and the day it
+  emits two the adoption has gone wrong. That is checked by counting the assets of
+  `pnpm --filter @fossil-lang/playground... build`, which is also the only build that type-checks:
+  three workspace dependencies shell out to cargo, and without the recursive form a stale `dist/`
+  is what fails.
+- **No engine in `@fossil-lang/graph`.** The renderer needs bytes; the *host* reads them. The
+  addressing subpath stays synchronous, `fetch`-free and WASM-free, which
+  `packages/graph/tests/address-standalone.test.ts` holds by importing it from a package directory
+  with no `pkg/` in it.
+
+### A palette has a capacity, and a corpus does not know it
+
+`cluster_id` is what the layout pass writes and what colours the picture, and the two scales are not
+the same size. This demo corpus carries **128 communities**; the design system's categorical palette
+publishes its capacity as `--chart-capacity`, which is **8**, and an ordinal at or past it resolves
+to the muted token. Handed over unfolded, **937,496 of a million vertices came back one grey** — a
+picture that is not wrong about anything and shows nothing. Folded into the capacity by remainder,
+two communities can share a slot, which is what eight slots *means*; the fold is a function of the
+community alone, so a colour survives a pan, which a rank over the visible sample would not.
+
 ## Conformance is a round trip, and what it rests on is not a headcount
 
 Write with the writer, read back with every independent reader, diff the results. GraphAr ships a
