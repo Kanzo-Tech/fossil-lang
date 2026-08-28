@@ -148,6 +148,12 @@ the final remap and **thirty-eight are Louvain and are not explained by anything
 `community_hierarchy` holds `community`, `totals` and `levels[0]` — 160 MB at ten million — and
 transiently asks the OS for four gigabytes it never gives back.
 
+**The estimate is calibrated to come out high, and the direction is the decision.** Against the
+pass's own footprint `estimated_peak_bytes` is **+12% at two million and +19% at ten**. An estimate
+that reads too large refuses a run that would have fitted, and the caller raises the number; one that
+reads too small waves through a run that then exceeds what it was promised, which is the defect the
+budget exists to remove. Only one of those two failures is silent, so the bias points away from it.
+
 <Callout type="warn" title="One hypothesis about that residue, tested and refuted">
 `local_moving` allocates a `HashMap` and a candidate `Vec` **per vertex per sweep** — a few hundred
 million transient allocations at ten million — which is the obvious reading of a step that bills
