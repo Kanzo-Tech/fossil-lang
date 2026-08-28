@@ -176,34 +176,55 @@ measurement of 1.78× and +0.38 GiB almost exactly.
 
 That trade was refused once, on the grounds that it spent the one quantity `--memory-gib` bounds to
 buy wall clock that was not the objective. It is here now because the objection has been removed
-rather than overruled: with the contraction's maps gone the peak is 5.08 GiB, and 90 MB against
-3.4 GiB recovered is not a trade any more.
+rather than overruled: with the contraction's maps gone the peak was 5.08 GiB, and 90 MB against
+3.4 GiB recovered is not a trade any more. It is 3.94 with the remap's copies gone too.
 </Callout>
 
 ### What the budget is calibrated on now
 
 Four terms, three of them proportional and one a floor:
 
-| fixture | adjacency rows | the pass | `estimated_peak_bytes` |
-| --- | --- | --- | --- |
-| 2,000,000 · degree 14 | 27,974,508 | 0.62 GiB | 0.90 GiB |
-| 4,000,000 · degree 6 | 23,978,362 | 1.14 GiB | 1.38 GiB |
-| 4,000,000 · degree 14 | 55,949,862 | 1.38 GiB | 1.80 GiB |
-| 4,000,000 · degree 28 | 111,899,830 | 1.69 GiB | 2.53 GiB |
-| 10,000,000 · degree 14 | 139,874,560 | 3.80 GiB | 4.47 GiB |
+| fixture | adjacency rows | the pass | `read CSR + CSC` | `estimated_peak_bytes` | clears by |
+| --- | --- | --- | --- | --- | --- |
+| 2,000,000 · degree 14 | 27,974,508 | 0.60 GiB | +0.16 GiB | 0.74 GiB | +24% |
+| 4,000,000 · degree 6 | 23,978,362 | 1.07 GiB | +0.15 GiB | 1.25 GiB | +16% |
+| 4,000,000 · degree 14 | 55,949,862 | 1.23 GiB | +0.31 GiB | 1.49 GiB | +21% |
+| 4,000,000 · degree 28 | 111,899,830 | 1.17 GiB | +0.52 GiB | 1.90 GiB | +63% |
+| 10,000,000 · degree 14 | 139,874,560 | 2.71 GiB | +0.78 GiB | 3.69 GiB | +36% |
 
 **The three middle rows are a debt paid.** Every calibration point behind the old constant shared
 mean degree fourteen, where V and E are proportional and a per-row term and a per-vertex term fit
-the same line — so attributing Louvain's cost to adjacency rows was mechanically defensible and
-unverified. These three hold the vertex file byte-identical and move only the edges. The measured
-slope is **6.7 bytes per adjacency row**; a per-vertex attribution predicts a flat line. It is rows.
+the same line — so attributing the cost to adjacency rows was mechanically defensible and
+unverified. These three hold the vertex file byte-identical and move only the edges, and a
+per-vertex attribution predicts a flat line across them. `read CSR + CSC` moves **+0.15 → +0.31 →
++0.52 GiB** across them, a slope of **4.5 bytes per adjacency row**. It is rows.
 
-The constant is 14 rather than 6.7 because it has to bound a *peak* rather than fit a slope, and the
-phase that now sets the peak is the last one — `remap adjacencies + write edge tiles`, which holds a
-whole orientation as Arrow at once and measures 13.2 / 14.5 / 15.0 B/row at two, four and ten
-million and 14.2 at four million and degree twenty-eight. The ten-million row above is the **larger**
-of two runs of one build (5.08 and 4.97 GiB), because a bound fitted to the luckier of two runs is a
-bound that fails on the unluckier.
+**`ADJACENCY_ROW_BYTES` is 8 now, and the phase it is fitted on has moved for the third time.** It
+was 48 when Louvain's contraction built a hash table per community; it was 14 when the remap held a
+whole orientation as Arrow at 13–15 B/row. With the remap holding one `Vec<u64>` per orientation —
+four bytes for each row counted in the table above, and not live at the same time as the CSR — the
+phase that holds the most per adjacency row is `read CSR + CSC`, which is arithmetic rather than a
+guess: one `u32` of `targets` per row plus an offset per vertex, held by Louvain for the whole of
+its 127 s at ten million. Measured, that is 5.0 to 6.7 B/row across the five. Eight is the larger of
+the two terms, rounded up.
+
+<Callout type="warn" title="The pass's total has stopped being fittable, and the fixture is why">
+The constant is fitted on a **phase delta** and no longer on the pass's total, because that
+regression has started lying in the direction that matters. At four million vertices the pass
+measures 1.07 / 1.23 / **1.17** GiB at degree 6 / 14 / 28: it goes *down* at the densest point, and
+a slope through the three is 1.2 B/row — below what `read CSR + CSC` is measured to hold in the same
+runs.
+
+The confound is the fixture, not the pass. `examples/enrich_memory` builds the corpus in the process
+that then measures the pass, so the baseline already contains the generator's retained heap — 0.36,
+0.72 and 1.01 GiB at those three degrees — and the pass reuses those pages instead of asking the OS
+for more. **`peak − start` is biased low, and increasingly so with degree.** A delta taken from
+inside the pass is not.
+
+Which is why the constant was *not* lowered to what the regression suggests. What would let the
+total be fitted again is a measurement whose process did not build the fixture: a second binary
+handed a corpus already on disk. That is the next thing this calibration is owed.
+</Callout>
 
 There is also a floor now, `LAYOUT_BASE_BYTES`, 16 MiB. Three proportional terms make a small enough
 corpus cost nothing, and the reader's batches and the writer's row-group buffers are the size they
@@ -211,35 +232,147 @@ are: a ten-thousand-vertex corpus holds 6.21 MB against 4.00 MB of linear terms.
 guard that samples the bound was admitting a sixty-thousand-vertex run on 22.8 MB and watching it
 hold 30.1.
 
-<Callout type="warn" title="What is still not measured">
-The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run now
-prints `flatten + order + place  −2.93G` — the level-zero quotient graph being dropped, in pages the
-allocator hands back. `estimated_peak_bytes` still *sums* its terms, which is now a bound on the
-maximum rather than a reading of it, and it is the direction the calibration wants.
+### The ceiling is the remap, and the remap is the sort
 
-`community_hierarchy` still bills +1.92 GiB at ten million, and the level-zero graph is still fully
-resident — `read CSR + CSC` is +0.78 GiB and Louvain holds it for all 136 s. **A level-zero pass that
-streamed the CSR from disk instead of holding it was the named next step, and it is now worth
-nothing**, which is a result rather than a deferral.
+The last phase sets the peak, and *which line of it* was a guess until it was sampled from the
+inside. `Probe::sample` is that instrument — a reading taken within a phase, against the previous
+reading, that does not move the phase's own baseline, so instrumenting a phase cannot quietly
+rewrite the number the phase had been reporting. The phase billed **+1.95 GiB** at ten million;
+here is where it went (`examples/enrich_memory 10000000 14`, degree 14, 69,937,280 rows per
+orientation, Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0, 2026-08-28):
 
-Sampled through the hierarchy, the pass's high-water while Louvain runs is **3.55 GiB**, and the
-pass's peak is **4.72**, reached in the last phase after every byte of Louvain's has been given back.
-Taking the CSR's 0.78 out of the Louvain period lowers a number that is already **1.17 GiB below**
-the one the budget is fitted to. It changes `estimated_peak_bytes` by zero, it changes what
-`--memory-gib` admits by zero, and it costs a Parquet scan per sweep for it.
+| step, `by_source` | delta | of the phase |
+| --- | --- | --- |
+| `read` — every batch of the orientation | +0.39 GiB | 20% |
+| `concat` — `concat_batches` into one | +0.26 GiB | 13% |
+| `remap endpoints` — two `Vec<u32>` through the mapping | +0.52 GiB | 27% |
+| **`lexsort`** — `lexsort_to_indices` over the two columns | **+0.78 GiB** | **40%** |
+| `take` — the permutation applied | +0.00 GiB | — |
+| `write tiles` | +0.00 GiB | — |
+| the whole second orientation, `by_target` | +0.00 GiB | — |
 
-It comes back the day Louvain's high-water is the pass's high-water — a corpus whose level-zero
-contraction survives at a much higher ratio than the 79% measured here, or a remap that stops holding
-an orientation as Arrow. Both are measurable before anything is written.
+**`concat_batches` was the suspect and it is not the answer.** It is thirteen percent. The dominant
+term is the *sort*, and the reason is a detail of the kernel rather than of the data: `arrow`'s
+`lexsort_to_indices` over more than one column routes through a `RowConverter`, which encodes every
+row into a comparable byte string first — for two non-null `u32`s that is ten bytes per row plus an
+eight-byte offset, against the eight bytes the row actually is. Sorting a pair of `u32`s costs more
+than twice holding it.
+
+**And the second orientation is free**, which is the other half of the reading: every step of
+`by_target` bills +0.00 GiB. Nothing about it is cheaper — it does the identical work on the identical
+number of rows. It lands in the pages the first orientation's transients left behind. A phase-boundary
+delta over the loop would have reported one number for two orientations and attributed it to neither.
+
+**A pair of `u32` ordered lexicographically is a `u64` ordered by value**, so there is nothing to
+encode: pack the key endpoint into the high half and the other into the low, and `sort_unstable` is
+the same order for no bytes at all. That collapses the whole loop — the batches, the `concat`, the
+two remapped arrays, the permutation and the `take` are one `Vec<u64>` reserved exactly from the
+footer's row count, and the only Arrow the remap holds is the tile it is writing:
+
+| ten million, degree 14 | before | after |
+| --- | --- | --- |
+| `remap adjacencies + write edge tiles` | +1.95 GiB · 11.8 s | **+0.46 GiB · 6.5 s** |
+| the whole pass | 3.75 GiB | **2.71 GiB** |
+| process peak | 4.98 GiB | **3.94 GiB** |
+| the phase that sets the peak | the remap | `community_hierarchy` |
+
+Two runs of each build, and each column is the **larger**, because a number fitted to the luckier of
+two runs is a number that fails on the unluckier. The remap's own row is the one to read: +1.95 GiB
+in both before-runs and +0.46 in both after-runs, 11.7 / 11.8 s against 5.6 / 6.5. **The totals move
+less than the phase does**, and the wall clock does not move at all — 130.4 and 130.7 s before,
+129.4 and 140.2 after — because `community_hierarchy` is 113 to 127 s of every one of those four
+runs and its own spread swamps everything this change touched.
+
+**The output is bit-identical**, and that is checked rather than argued: the ordering is the same
+ordering, ties are pairs equal in both columns and therefore the whole row, and a 300,000-vertex
+corpus written by the two binaries is equal over all seven files and 136 MB.
+
+<Callout title="Three of four runs agree to 0.01 GiB, and the fourth says what the resolution depends on">
+Both before-runs report `community_hierarchy` at +1.92 and +1.93 GiB and a 4.98 GiB peak, to the
+digit. One of the two after-runs reports +1.93; the other reports **+1.02**, on code that is byte for
+byte the same and a fixture that is byte for byte the same.
+
+What separates the outlier is not the pass. It is the line above every phase: that run enters
+`enrich_layout` at **1.31 GiB** resident where the other three enter at 1.23. A delta is what the
+phase asked the OS for, not what it used, so a phase that starts with more freed pages in hand asks
+for less and bills less — and the whole difference is downstream of a `start` that differs by 0.08.
+
+That is the reading, and it is narrower than "identical runs vary by 0.9 GiB": **runs that enter the
+pass at the same resident set agree to 0.01 GiB, and runs that do not are not comparable phase by
+phase.** The totals are what to compare across builds; the sub-phase deltas are for attribution
+*within* one run. The outlier also moves the peak — it peaks in the remap at 3.61 GiB, where the
+run beside it peaks in the hierarchy at 3.94 and the remap never reaches it. **No single phase sets
+the peak any more**, which is what a sum of terms is for.
 </Callout>
 
-<Callout type="warn" title="The composition is not closed, and this is the honest edge of the claim">
-One declared number is spent **twice** — once by the executor's pool, once by the layout pass — and
-neither half knows what the other took. `--memory-gib 4` therefore bounds a write path at something
-closer to eight than to four, and what has changed is that the second four is now *checked* rather
-than unbounded. Closing it means the layout being told what the executor left resident, which is a
-number nothing currently carries across the seam.
+<Callout type="warn" title="The level-zero pass was worth nothing, and it is worth something again">
+The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run
+prints `flatten + order + place  −3.35G` — the level-zero quotient graph being dropped, in pages the
+allocator hands back. `estimated_peak_bytes` still *sums* its terms, which is a bound on the maximum
+rather than a reading of it, and it is the direction the calibration wants.
+
+**A level-zero pass that streamed the CSR from disk instead of holding it was closed here as worth
+nothing, on a measurement, and the measurement has expired.** What closed it was that Louvain's
+high-water sat 1.17 GiB below the pass's — 3.55 GiB while it ran against a 4.72 peak reached in the
+last phase, after every byte of Louvain's had been given back. The last phase was the adjacency
+remap, and it has stopped holding an orientation as Arrow.
+
+At phase granularity now, at ten million: `community_hierarchy` closes at **3.94 GiB and that is the
+pass's peak**, and the remap closes at 3.48 and never reaches it. **Louvain's high-water is the
+pass's high-water**, which is the exact condition this callout named for the argument coming back.
+
+What it would take off is `read CSR + CSC`'s **+0.78 GiB**, held for all 127 s of Louvain, and it no
+longer changes `estimated_peak_bytes` by zero either: `ADJACENCY_ROW_BYTES` is fitted on that CSR at
+8 B/row, and the next-largest per-row term is the remap's four. **It would roughly halve the term the
+budget charges per adjacency row**, which is what `--memory-gib` admits. What it costs is a Parquet
+scan per sweep, and that is the number nobody has: thirty-two sweeps against a CSR that is currently
+free to read.
+
+The other route is unchanged and still open — a corpus whose level-zero contraction survives at a
+much higher ratio than the 79% measured here. Both are measurable before anything is written.
 </Callout>
+
+### One number, two stages: it is **per stage**, and that is a decision
+
+`--memory-gib 4` is spent twice — once by the executor's pool, once by the layout pass — and neither
+half knows what the other took, so the write path is bounded at something closer to eight than to
+four. That was written down as an open edge. It is decided now, and the decision is the weakest of
+the three available: **the number bounds each stage of the write path, not their sum.** Both halves
+already implement exactly that; what changes is that it is stated, and that the two alternatives are
+refused with reasons rather than left as work.
+
+**Splitting it is refused because the two numbers are not the same kind of number.** The executor's
+is a reservation ceiling on a `FairSpillPool` — the tracked operators inside it, which is why a
+declared 4 GiB has been measured with the process at 9.87 GiB. The layout's is an arithmetic
+estimate of its own `Vec`s. Four split into two and two makes the executor spill more and the layout
+refuse more, for a process peak that neither number was ever a bound on, and it gives the flag a
+meaning that depends on a ratio nobody can see.
+
+**Sequencing it — the layout told what the executor left resident — is the one that is right in
+principle, and it is refused for now on three grounds, in the order that decides it:**
+
+1. **What is resident at the seam is not the executor's transient.** It is `GraphArData`: the corpus
+   as a value, 1.64 GiB of Arrow at ten million, and it is held by the *caller* for the whole
+   duration of the layout pass — `fossil-cli`'s `run` keeps `graph` alive across
+   `enrich_written_layout` because `RunReport::of(&graph)` comes after it. Adding that to the
+   layout's bound would bill the layout for somebody else's live value. The fix is to stop holding
+   it, not to shrink the second number.
+2. **The layout has no reading of "what is resident" that means the same thing in both hosts.** RSS
+   is a `ps` call natively and there is no resident set at all on `wasm32`. A budget that consulted
+   it would admit different runs in the tab and on the CLI — and two paths through one `LayoutIo`
+   disagreeing about what they do is the single thing this design does not permit.
+3. **An RSS reading at entry over-counts by construction.** Pages the allocator has not returned are
+   pages the pass will reuse rather than add to. At ten million under a declared 4 GiB the pass
+   *enters* at 6.82 GiB, so a check of that shape would refuse every bounded run at this size,
+   including the ones that then fit.
+
+**What brings sequencing back is a value dropped, not an instrument added.** The day the caller
+builds its report before the pass rather than after, what crosses the seam stops being a resident
+set to sample and becomes a number to be handed over — `GraphArData::arrow_gib` is already that
+number — and `declared − carried` is arithmetic. Until then the honest sentence is the one the pass
+now prints when it refuses: **the number is this stage's.**
+
+
 
 ## The pass takes a filesystem it does not own
 

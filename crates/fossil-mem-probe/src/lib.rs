@@ -53,10 +53,16 @@ pub struct Probe {
     enabled: bool,
     peak: u64,
     last: u64,
+    /// The baseline [`Probe::sample`] reports against — the resident set at the previous sample,
+    /// or at the start of the phase when there has been none. Distinct from `last` on purpose:
+    /// a sample must not move the phase's own baseline, or the mark that closes the phase would
+    /// report only its tail. See [`Probe::sample`].
+    within: u64,
     /// `None` exactly when the probe is off. An off probe must not read a clock — see the module
     /// docs for the platform where reading one is a panic.
     started: Option<std::time::Instant>,
     phase_started: Option<std::time::Instant>,
+    sample_started: Option<std::time::Instant>,
 }
 
 impl Probe {
@@ -83,8 +89,10 @@ impl Probe {
             enabled,
             peak: rss,
             last: rss,
+            within: rss,
             started: now,
             phase_started: now,
+            sample_started: now,
         }
     }
 
@@ -104,7 +112,44 @@ impl Probe {
             gib(rss) - gib(self.last)
         );
         self.last = rss;
-        self.phase_started = Some(std::time::Instant::now());
+        let now = Some(std::time::Instant::now());
+        self.phase_started = now;
+        self.sample_started = now;
+        self.within = rss;
+    }
+
+    /// Sample **inside** a phase, without closing it.
+    ///
+    /// A delta taken across a phase boundary cannot tell a long-lived allocation from one that is
+    /// made and recycled inside the phase, and that is not a subtlety: `local_moving` looked like
+    /// the layout pass's memory for two sessions on the strength of one boundary delta, and its
+    /// resident set is flat to three decimal places across all thirty-two of its sweeps. The
+    /// allocation that was actually there — one hash table per community in `Weighted::contract`,
+    /// +3.41 GiB of the +3.82 the phase billed — was only ever visible from *within*.
+    ///
+    /// So a sample reports against the previous sample rather than against the phase, and it does
+    /// not move the phase's baseline: the [`Self::mark`] that eventually closes the phase still
+    /// reports the whole of it. The peak does rise here, which is the other half of the point — a
+    /// step that takes two gigabytes and gives them back before the mark shows `+0.00G` on its
+    /// phase line and its true size on this one.
+    ///
+    /// Indented under the phase in the report, because it is not a phase and a reader adding the
+    /// column up should not find it counted twice.
+    pub fn sample(&mut self, step: &str) {
+        if !self.enabled {
+            return;
+        }
+        let rss = rss_bytes();
+        self.peak = self.peak.max(rss);
+        eprintln!(
+            "    {:<26} {:>9.1} {:>9.2}G {:>+9.2}G",
+            step,
+            elapsed(self.sample_started),
+            gib(rss),
+            gib(rss) - gib(self.within)
+        );
+        self.within = rss;
+        self.sample_started = Some(std::time::Instant::now());
     }
 
     /// Final line. Kept separate from [`Self::mark`] so the total is visible even when the last
@@ -182,8 +227,10 @@ mod tests {
             enabled: false,
             peak: 0,
             last: 0,
+            within: 0,
             started: None,
             phase_started: None,
+            sample_started: None,
         }
     }
 
@@ -230,6 +277,69 @@ mod tests {
         );
     }
 
+    /// A sample must be as silent as a mark when the probe is off — same claim as
+    /// `an_off_probe_samples_nothing`, and worth its own test because `sample` is a second entry
+    /// point that could have forgotten the early return.
+    #[test]
+    fn an_off_probe_samples_nothing_from_within_a_phase_either() {
+        let mut p = off();
+        p.sample("a step inside a phase that allocated something");
+        p.finish();
+        assert_eq!(p.peak, 0, "an off probe never asked the OS anything");
+        assert_eq!(p.within, 0);
+    }
+
+    /// **A sample does not move the phase's baseline**, which is the whole reason it is not a
+    /// mark. Sampling three times inside a phase and then closing it must report the phase's own
+    /// delta, not the tail after the last sample — otherwise instrumenting a phase would silently
+    /// rewrite the number the phase had been reporting all along.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_sample_leaves_the_phase_baseline_where_it_was() {
+        let now = Some(std::time::Instant::now());
+        let mut p = Probe {
+            enabled: true,
+            peak: 0,
+            last: 7,
+            within: 7,
+            started: now,
+            phase_started: now,
+            sample_started: now,
+        };
+        p.sample("one step");
+        p.sample("another");
+        assert_eq!(
+            p.last, 7,
+            "the phase baseline is the mark's, and a sample is not one"
+        );
+        assert!(p.within > 0, "and the sample baseline did move");
+        p.mark("the phase those two steps were inside");
+        assert_eq!(p.last, p.within, "closing a phase re-bases both");
+    }
+
+    /// The peak is what a sample is *for*: a step that takes memory and gives it back before the
+    /// phase closes shows nothing on the phase line and its size here. Asserted on the mechanism
+    /// — a sample raises the high-water mark exactly as a mark does.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_sample_raises_the_peak() {
+        let now = Some(std::time::Instant::now());
+        let mut p = Probe {
+            enabled: true,
+            peak: 0,
+            last: 0,
+            within: 0,
+            started: now,
+            phase_started: now,
+            sample_started: now,
+        };
+        p.sample("a step in the middle of a phase");
+        assert!(
+            p.peak > 0,
+            "a sample is a reading of the resident set, so the peak sees it"
+        );
+    }
+
     /// The number comes from the OS, and it comes back parseable. `ps -o rss= -p <pid>` is a
     /// string contract with a program outside this repo: if the flags or the output shape ever
     /// stop matching, `rss_bytes` silently returns 0 and every report reads `0.00G`.
@@ -256,8 +366,10 @@ mod tests {
             enabled: true,
             peak: u64::MAX,
             last: 0,
+            within: 0,
             started: now,
             phase_started: now,
+            sample_started: now,
         };
         p.mark("a phase smaller than the peak already seen");
         assert_eq!(p.peak, u64::MAX, "a smaller sample does not lower the peak");

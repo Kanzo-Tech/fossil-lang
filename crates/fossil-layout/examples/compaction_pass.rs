@@ -57,25 +57,33 @@
 //! With `--no-resort`: 8.9 s and 2.91 G.
 //!
 //! The vertex half is 1.9 s of it. Everything above that is the adjacency, and
-//! most of the adjacency is `concat_batches` over 142M rows — the same term
-//! `enrich_layout` pays, in the same place, for the same reason.
+//! most of the adjacency is `concat_batches` over 142M rows. **That sentence
+//! used to end «— the same term `enrich_layout` pays, in the same place, for the
+//! same reason», and it is no longer true of the other side.** The remap in
+//! `layout.rs` holds one packed `Vec<u64>` per orientation and sorts it in
+//! place; it calls neither `concat_batches` nor `lexsort_to_indices`, and its
+//! phase went +1.95 GiB → +0.46 and 11.8 s → 6.5 for it. This example still
+//! does, and that is now the largest difference between the two rather than
+//! their shared term — the compaction is the one place left in this crate where
+//! a whole orientation is materialised as Arrow before it is written.
 //!
 //! **Beside the pass it would be folded into**, `enrich_layout` over a
 //! ten-million fixture at mean degree 14, same machine, same probe
-//! (`examples/enrich_memory 10000000 14`, 2026-08-28): **159.1 s, peak 5.08
-//! GiB**, of which `community_hierarchy` alone is 136.1 s and +1.92 G. Its
-//! renumbering half — ranks, vertex read, gather, adjacency remap — is 22.4 s.
-//! So a compaction standing alone is **6.1% of the pass that already runs on
+//! (`examples/enrich_memory 10000000 14`, 2026-08-28): **140.2 s, peak 3.94
+//! GiB**, of which `community_hierarchy` alone is 126.8 s and +1.93 G. Its
+//! renumbering half — ranks, vertex read, gather, adjacency remap — is 12.4 s.
+//! So a compaction standing alone is **6.9% of the pass that already runs on
 //! every write**, and folded in it is a different value assigned in a loop that
-//! already runs. The adjacency remap there costs 16.6 s against 7.6 s here on
-//! the same number of rows, and the difference is the sort: Morton is not
-//! monotone and a compaction is, so `lexsort_to_indices` there is a real sort
-//! and here it is one pass over an array that is already in order.
+//! already runs. The adjacency remap there costs 6.5 s against 7.6 s here on
+//! the same number of rows — it used to cost 16.6, and the packed sort is where
+//! the ten seconds went.
 //!
-//! That comparison read **289.0 s, peak 8.47 GiB** and 3.3% until the Louvain
-//! contraction stopped building one hash table per community; the pass it is
-//! measured against got smaller, not the compaction. The compaction's own
-//! figures above are unchanged and were not re-run.
+//! That comparison has been re-read twice against a pass that keeps shrinking:
+//! **289.0 s, peak 8.47 GiB** and 3.3% before the Louvain contraction stopped
+//! building one hash table per community, **159.1 s, peak 5.08 GiB** and 6.1%
+//! before the remap stopped holding an orientation as Arrow. The pass it is
+//! measured against got smaller both times, not the compaction. The
+//! compaction's own figures above are unchanged and were not re-run.
 //!
 //! **Verified rather than asserted.** Compacting a numbering with holes injected
 //! into it produces output **byte-identical** to compacting the gapless one, at

@@ -192,10 +192,11 @@ use std::sync::Arc;
 use arrow::array::{
     Array, ArrayRef, Float32Array, RecordBatch, RecordBatchReader, StringArray, UInt32Array,
 };
-use arrow::compute::{
-    SortColumn, cast, concat_batches, interleave_record_batch, lexsort_to_indices,
-    take_record_batch,
-};
+// `concat_batches`, `lexsort_to_indices`, `SortColumn` and `take_record_batch`
+// stood here and are gone with the adjacency remap's five copies of an
+// orientation: the relation is a `Vec<u64>` now and `sort_unstable` orders it.
+// See `read_adjacency`.
+use arrow::compute::{cast, interleave_record_batch};
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::error::ArrowError;
 use fossil_df::files::TileWriter;
@@ -384,6 +385,21 @@ pub enum LayoutError {
         #[source]
         source: std::io::Error,
     },
+    /// An adjacency Parquet is not the two `u32` columns an adjacency is.
+    ///
+    /// The remap reads each orientation as one packed `u64` per row and never
+    /// materialises it as a `RecordBatch`, which is what took the phase from
+    /// +1.95 GiB to +0.55 at ten million — and a packed pair has nowhere to put
+    /// a third column. The writer emits exactly `src_dense` and `dst_dense`
+    /// (`fossil_df`'s `write_to_dir`) and the format says so, so this is a file
+    /// that came from somewhere else; refusing it is the honest answer, where
+    /// the alternative is dropping columns nobody declared and writing the
+    /// result as if it were the same relation.
+    #[error(
+        "adjacency `{target}` is `{columns}`; the remap reads an adjacency as two `u32` columns, \
+         `src_dense` and `dst_dense`"
+    )]
+    AdjacencyShape { target: String, columns: String },
     /// An adjacency the manifest declares `ordered: true` is not.
     ///
     /// Worth an error for the same reason as [`Self::DanglingEndpoint`]: the
@@ -406,9 +422,21 @@ pub enum LayoutError {
     /// disagree exactly when a budget was declared.
     ///
     /// So the budget decides **whether the pass runs**, never what it writes.
+    ///
+    /// # The message says *this stage*, because the number is per stage
+    ///
+    /// One declared `--memory-gib` is spent twice on a `fossil run` — once by the
+    /// executor's `FairSpillPool`, once here — and neither half knows what the
+    /// other took, so the write path is bounded at something closer to double the
+    /// number. That is decided rather than outstanding: the flag bounds **each
+    /// stage**, not their sum, and the two alternatives are refused on
+    /// `/docs/design/streaming` with the measurements that refuse them. A message
+    /// that said "the run declared" without saying which part of the run spends
+    /// it would be the same silence that let `let _ = memory_bytes;` stand.
     #[error(
         "the layout pass needs about {} GiB for {vertex_count} vertices and {adjacency_rows} \
-         adjacency rows, and the run declared {} GiB — raise `--memory-gib`, or omit it to run \
+         adjacency rows, and the run declared {} GiB — `--memory-gib` bounds each stage of the \
+         write path rather than their sum, and this is the layout's. Raise it, or omit it to run \
          unbounded",
         .needed_bytes / (1 << 30),
         .declared_bytes / (1 << 30)
@@ -464,40 +492,53 @@ const VERTEX_ARRAY_BYTES: u64 = 128;
 /// Bytes per adjacency row, counting each orientation's rows separately.
 ///
 /// **The one constant here that is measured rather than derived, and it is the
-/// one that decides the answer.** It is the phase that now sets the pass's
-/// high-water mark: `remap adjacencies + write edge tiles`, the one step holding
-/// a whole orientation as Arrow at once — `concat_batches` over two `u32`
-/// columns, `lexsort_to_indices`, and the `take` that applies it. Its own delta,
-/// measured, is **13.2 B/row at two million, 14.5 at four and 15.0 at ten**, and
-/// 14.2 at four million and mean degree twenty-eight. Four of the fourteen are
-/// the CSR `targets` entry the row becomes, which Louvain holds while the remap
-/// does not; nothing here is a sum of two things that are live together, and
-/// that is why it can be smaller than the arithmetic below suggests.
+/// one that decides the answer.** It bounds whichever phase holds the most per
+/// adjacency row, and that phase has now moved twice. It was
+/// `community_hierarchy` at 48, when one line of [`Weighted::contract`] built a
+/// hash table per community. It was `remap adjacencies + write edge tiles` at
+/// 14, the one step holding a whole orientation as Arrow — `concat_batches`,
+/// `lexsort_to_indices` and a `take` — measuring 13.2 / 14.5 / 15.0 B/row at
+/// two, four and ten million.
 ///
-/// # It was 48, and thirty-eight of those were a residue nothing explained
+/// It is **`read CSR + CSC`** now, and that step is arithmetic rather than a
+/// guess: one `u32` of `targets` per row plus one offset per vertex, and Louvain
+/// holds it for the whole of its 127 s at ten million. Measured across the five
+/// calibration fixtures it is **5.0 to 6.7 bytes per adjacency row**:
 ///
-/// It is explained now, and the explanation is that it was never Louvain's
-/// *sweeps*. `local_moving`'s resident set is flat to three decimal places
-/// across all thirty-two of them, at two million and at ten. The residue was one
-/// line of [`Weighted::contract`] — `vec![HashMap::new(); k]`, one hash table per
-/// community, `k` = 3,757,900 at ten million — measured **+3.41 GiB of the
-/// +3.82 GiB** `community_hierarchy` billed. Those maps are gone, the process
-/// peak went **8.54 GiB → 5.08** and the pass 7.22 → 3.80, and this constant
-/// went with it.
+/// | fixture | adjacency rows | `read CSR + CSC` | B/row |
+/// | --- | --- | --- | --- |
+/// | 2,000,000 · degree 14 | 27,974,508 | +0.16 GiB | 6.1 |
+/// | 4,000,000 · degree 6 | 23,978,362 | +0.15 GiB | 6.7 |
+/// | 4,000,000 · degree 14 | 55,949,862 | +0.31 GiB | 6.0 |
+/// | 4,000,000 · degree 28 | 111,899,830 | +0.52 GiB | 5.0 |
+/// | 10,000,000 · degree 14 | 139,874,560 | +0.78 GiB | 6.0 |
 ///
-/// # The attribution to rows is verified now, and it was not
+/// The remap's own term is now 4 B/row — one `Vec<u64>` per orientation, which
+/// is eight bytes for each of an orientation's rows and therefore four for each
+/// of the rows counted here — and it is not live at the same time as the CSR.
+/// Eight is the larger of the two, rounded up: the constant has to bound a peak,
+/// and the peak holds one of them.
 ///
-/// Every calibration point behind the old 48 shared one mean degree, fourteen,
-/// where V and E are proportional and "per row" and "per vertex" fit the same
-/// line. So hold V at four million and move the degree — 6, 14, 28, which is
-/// 23,978,362 / 55,949,862 / 111,899,830 adjacency rows over an identical vertex
-/// file — and the pass costs **1.14 / 1.38 / 1.69 GiB**. A per-vertex term
-/// predicts a flat line; the measured slope is **6.7 bytes per adjacency row**
-/// with every vertex term held fixed. The attribution is to rows.
+/// # Why it is not fitted on the pass's total any more
+///
+/// Because that regression has stopped being trustworthy in the direction that
+/// matters. Holding V at four million and moving the degree, the pass measures
+/// 1.07 / 1.23 / **1.17** GiB at degree 6 / 14 / 28 — it goes *down* at the
+/// densest point, and a slope through those three is 1.2 B/row, below what
+/// `read CSR + CSC` is measured to hold. The confound is in the fixture rather
+/// than in the pass: `examples/enrich_memory` builds the corpus in the same
+/// process, so the baseline the pass is measured from already contains the
+/// generator's retained heap — 0.36, 0.72 and 1.01 GiB at those three degrees —
+/// and the pass reuses those pages instead of asking for more. **`peak − start`
+/// is biased low, and increasingly so with degree.** A per-phase delta taken
+/// from inside the pass is not, which is why the constant is fitted on one.
+///
+/// What would let it be fitted on the total again is a measurement whose process
+/// did not build the fixture — a second binary handed a corpus already on disk.
 ///
 /// (`examples/enrich_memory <N> <degree>`, 2026-08-28, Mac16,8 — 14 cores,
 /// 48 GiB, macOS 26.2 / Darwin 25.2.0.)
-const ADJACENCY_ROW_BYTES: u64 = 14;
+const ADJACENCY_ROW_BYTES: u64 = 8;
 
 /// What the pass holds whatever the corpus is.
 ///
@@ -551,15 +592,15 @@ const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 /// budget raises it and tries again; one that is a little too small accepts a
 /// run and lets it exceed the number they were promised, which is the defect
 /// this whole mechanism exists to remove. So it is fitted to the **largest** of
-/// two runs of one build at every point, and it clears all five by 18% to 50%:
+/// two runs of one build at every point, and it clears all five by 16% to 63%:
 ///
-/// | fixture | adjacency rows | the pass | this returns |
-/// | --- | --- | --- | --- |
-/// | 2,000,000 · degree 14 | 27,974,508 | 0.62 GiB | 0.90 GiB |
-/// | 4,000,000 · degree 6 | 23,978,362 | 1.14 GiB | 1.38 GiB |
-/// | 4,000,000 · degree 14 | 55,949,862 | 1.38 GiB | 1.80 GiB |
-/// | 4,000,000 · degree 28 | 111,899,830 | 1.69 GiB | 2.53 GiB |
-/// | 10,000,000 · degree 14 | 139,874,560 | 3.80 GiB | 4.47 GiB |
+/// | fixture | adjacency rows | the pass | this returns | clears by |
+/// | --- | --- | --- | --- | --- |
+/// | 2,000,000 · degree 14 | 27,974,508 | 0.60 GiB | 0.74 GiB | +24% |
+/// | 4,000,000 · degree 6 | 23,978,362 | 1.07 GiB | 1.25 GiB | +16% |
+/// | 4,000,000 · degree 14 | 55,949,862 | 1.23 GiB | 1.49 GiB | +21% |
+/// | 4,000,000 · degree 28 | 111,899,830 | 1.17 GiB | 1.90 GiB | +63% |
+/// | 10,000,000 · degree 14 | 139,874,560 | 2.71 GiB | 3.69 GiB | +36% |
 ///
 /// (`FOSSIL_MEM_PROBE=1 … --example enrich_memory -- <N> <degree>`, 2026-08-28,
 /// Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0.)
@@ -571,9 +612,14 @@ const VERTEX_PAYLOAD_PERMILLE: u64 = 1_300;
 /// [`ADJACENCY_ROW_BYTES`] is now fitted on.
 ///
 /// **Nor is it a guess about which phase dominates.** That is measured, and it
-/// moved: it used to be Louvain by more than every other phase together, and
-/// since [`Weighted::contract`] stopped building one hash table per community it
-/// is `remap adjacencies + write edge tiles`, the last phase of the pass.
+/// has moved twice — Louvain by more than every other phase together, then
+/// `remap adjacencies + write edge tiles` once [`Weighted::contract`] stopped
+/// building one hash table per community, and now **no one phase**: the peak is
+/// `community_hierarchy`'s at ten million, `write identity index`'s at four
+/// million and degree twenty-eight, and `remap adjacencies` in one of two
+/// ten-million runs of one build. That is what a sum of terms is for. The
+/// per-row term is fitted on the phase that holds the most per adjacency row,
+/// which is `read CSR + CSC` — see [`ADJACENCY_ROW_BYTES`].
 #[must_use]
 pub const fn estimated_peak_bytes(
     vertex_count: u64,
@@ -1079,77 +1125,33 @@ pub fn enrich_layout_with(
         let src_map = &maps[index_of(&adjacency.src_type, aurl)?];
         let dst_map = &maps[index_of(&adjacency.dst_type, aurl)?];
 
-        let (schema, batches) = read_parquet(io, aurl)?;
-        let combined = concat_batches(&schema, &batches).map_err(arrow_err(aurl))?;
-        drop(batches);
-        let before = combined.num_rows();
+        // Sampled step by step, not at the phase boundary. This loop is the pass's
+        // high-water mark, and a single delta across the `for` cannot say which
+        // line of it is the peak — the last time that distinction was skipped the
+        // wrong phase was blamed for two sessions. See `Probe::sample`.
+        let step = short_name(aurl);
 
-        // The two joins, as the two array lookups they always were. An endpoint
-        // out of its type's range is a dangling one: the statement this replaces
-        // joined inner and therefore *deleted* the row, and the drop was found
-        // afterwards by counting. Found here before anything is written, which
-        // means the file it would have corrupted is still the file it was.
-        let src = u32_column(&combined, aurl, "src_dense")?;
-        let dst = u32_column(&combined, aurl, "dst_dense")?;
-        let mut new_src = Vec::with_capacity(before);
-        let mut new_dst = Vec::with_capacity(before);
-        let mut dropped = 0u64;
-        for (&s, &d) in src.values().iter().zip(dst.values()) {
-            if let (Some(&s), Some(&d)) = (src_map.get(s as usize), dst_map.get(d as usize)) {
-                new_src.push(s);
-                new_dst.push(d);
-            } else {
-                // Pushed anyway, so the two arrays stay the length the batch is
-                // and the count below is the only thing that decides. The values
-                // are never written: `dropped > 0` returns before the encode.
-                dropped += 1;
-                new_src.push(0);
-                new_dst.push(0);
-            }
-        }
-        drop(src);
-        drop(dst);
-        if dropped > 0 {
-            return Err(LayoutError::DanglingEndpoint {
-                target: aurl.to_string(),
-                before: before as u64,
-                dropped,
-            });
-        }
+        // **One `Vec<u64>`, and that is the whole orientation.** This used to be
+        // five allocations of it — the reader's batches, `concat_batches` into
+        // one, two remapped `Vec<u32>`, `lexsort_to_indices`'s permutation, and
+        // the `take` that applied it — and sampled from the inside at ten million
+        // it billed +0.39 / +0.26 / +0.52 / +0.78 / +0.00 GiB. The suspect was
+        // `concat_batches` and it was 13%; the SORT was 40%, because arrow's
+        // `lexsort_to_indices` over more than one column routes through a
+        // `RowConverter` and encodes every row into a comparable byte string
+        // first — ten bytes plus an eight-byte offset for a pair that is eight
+        // bytes wide.
+        //
+        // A pair of `u32` ordered lexicographically IS a `u64` ordered by value,
+        // so there is nothing to encode: pack the key endpoint into the high half
+        // and the other into the low, and `sort_unstable` is the same order for
+        // no bytes at all. Ties are pairs equal in both columns, which is the
+        // whole row, so an unstable sort is not an unstable result.
+        let (schema, mut keys) = read_adjacency(io, aurl, src_map, dst_map, adjacency.ordered_by)?;
+        probe.sample(&format!("{step}: read + remap"));
 
-        // The one genuine sort left in the pass. Ties are pairs that are equal in
-        // both columns, and an adjacency carries nothing else, so an unstable
-        // sort is not an unstable *result* — the rows it may swap are identical.
-        let src_array: ArrayRef = Arc::new(UInt32Array::from(new_src));
-        let dst_array: ArrayRef = Arc::new(UInt32Array::from(new_dst));
-        let (first, second) = match adjacency.ordered_by {
-            Endpoint::Src => (&src_array, &dst_array),
-            Endpoint::Dst => (&dst_array, &src_array),
-        };
-        let order = lexsort_to_indices(
-            &[
-                SortColumn {
-                    values: Arc::clone(first),
-                    options: None,
-                },
-                SortColumn {
-                    values: Arc::clone(second),
-                    options: None,
-                },
-            ],
-            None,
-        )
-        .map_err(arrow_err(aurl))?;
-
-        let remapped = replace_columns(
-            &combined,
-            aurl,
-            &[("src_dense", src_array), ("dst_dense", dst_array)],
-        )?;
-        drop(combined);
-        let sorted = take_record_batch(&remapped, &order).map_err(arrow_err(aurl))?;
-        drop(remapped);
-        drop(order);
+        keys.sort_unstable();
+        probe.sample(&format!("{step}: sort"));
 
         // The remapped relation is NOT written back over its input. It used to
         // be, and the corpus then shipped `by_source.parquet` beside
@@ -1164,9 +1166,9 @@ pub fn enrich_layout_with(
         // The tile space is that endpoint's type's, and the two are different
         // spaces on a cross-type edge: `by_target` of `Author authored Paper` is
         // cut on `Paper`'s ranges, not on `Author`'s.
-        let (key, endpoint_type) = match adjacency.ordered_by {
-            Endpoint::Src => ("src_dense", &adjacency.src_type),
-            Endpoint::Dst => ("dst_dense", &adjacency.dst_type),
+        let endpoint_type = match adjacency.ordered_by {
+            Endpoint::Src => &adjacency.src_type,
+            Endpoint::Dst => &adjacency.dst_type,
         };
         let endpoint = &targets[index_of(endpoint_type, aurl)?];
         let tile_shift = shift_for(endpoint.chunk_size).ok_or_else(|| LayoutError::TileSize {
@@ -1188,23 +1190,25 @@ pub fn enrich_layout_with(
         // on the key column, and the runs below are written in ascending order,
         // so the boxes ascend and do not overlap — which is the property
         // `apps/corpus`'s `tile-of` asks an adjacency for.
-        let keys = u32_column(&sorted, aurl, key)?;
-        let addresses = keys.values();
+        //
+        // A run is unpacked into two `u32` arrays as it is written, so the only
+        // Arrow this loop holds is one tile — tens of thousands of rows against
+        // the seventy million the relation is.
         let payload = format!("{prefix}{TILES_FILE}");
-        let mut writer = open_tiles(io, &payload, sorted.schema())?;
+        let mut writer = open_tiles(io, &payload, Arc::clone(&schema))?;
         let mut start = 0usize;
-        while start < addresses.len() {
-            let tile = u64::from(addresses[start]) >> tile_shift;
+        while start < keys.len() {
+            let tile = (keys[start] >> 32) >> tile_shift;
             let mut end = start + 1;
-            while end < addresses.len() && u64::from(addresses[end]) >> tile_shift == tile {
+            while end < keys.len() && (keys[end] >> 32) >> tile_shift == tile {
                 end += 1;
             }
-            writer
-                .tile(&sorted.slice(start, end - start))
-                .map_err(write_err(&payload))?;
+            let batch = unpack(&schema, aurl, &keys[start..end], adjacency.ordered_by)?;
+            writer.tile(&batch).map_err(write_err(&payload))?;
             start = end;
         }
         writer.finish().map_err(write_err(&payload))?;
+        probe.sample(&format!("{step}: write tiles"));
     }
     probe.mark("remap adjacencies + write edge tiles");
     probe.finish();
@@ -1500,6 +1504,166 @@ const fn shift_for(rows: u64) -> Option<u32> {
         return None;
     }
     Some(rows.trailing_zeros())
+}
+
+/// The two column indices of an adjacency Parquet, `(src_dense, dst_dense)`, or
+/// [`LayoutError::AdjacencyShape`] if it is not the two `u32` columns an
+/// adjacency is.
+///
+/// Checked once per file, from the schema, before a page is decoded. The
+/// strictness is the point rather than an omission: the remap holds a row as a
+/// packed `u64` and has nowhere to put a third column, so a file with one is a
+/// file this pass would silently narrow. It came from somewhere other than the
+/// writer, and saying so is better than writing a different relation under the
+/// same name.
+fn adjacency_columns(schema: &SchemaRef, url: &str) -> Result<(usize, usize), LayoutError> {
+    let shaped = schema.fields().len() == 2
+        && schema
+            .fields()
+            .iter()
+            .all(|f| f.data_type() == &DataType::UInt32);
+    let src = schema.index_of("src_dense").ok();
+    let dst = schema.index_of("dst_dense").ok();
+    match (shaped, src, dst) {
+        (true, Some(src), Some(dst)) => Ok((src, dst)),
+        _ => Err(LayoutError::AdjacencyShape {
+            target: url.to_string(),
+            columns: schema
+                .fields()
+                .iter()
+                .map(|f| format!("{}: {}", f.name(), f.data_type()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        }),
+    }
+}
+
+/// One orientation, read and remapped and packed, in a single streaming pass.
+///
+/// Returns the file's own [`SchemaRef`] — the one the tiles are written back
+/// under, so the output carries the field names, nullability and schema metadata
+/// the input had and the bytes do not move — and one `u64` per row: the endpoint
+/// the relation is **ordered by** in the high half, the other in the low.
+///
+/// # Why the pair is packed rather than kept as two arrays
+///
+/// Because the sort is then free. A pair of `u32` compared lexicographically is
+/// the packed `u64` compared by value, so ordering the relation is
+/// `sort_unstable` over a slice that is already the size of the data — against
+/// `lexsort_to_indices`, which for more than one column encodes every row
+/// through a `RowConverter` into ten bytes plus an eight-byte offset and then
+/// holds a permutation to apply. That sort was **40% of the phase that sets the
+/// pass's peak**, measured from inside it.
+///
+/// # And the reader's batches are never collected
+///
+/// The `Vec` is reserved exactly, from the footer's row count, and each batch is
+/// consumed into it and dropped. The phase used to hold the batches, the
+/// `concat_batches` of them, and two remapped `Vec<u32>` beside each other; this
+/// holds the batch it is decoding.
+///
+/// # Errors
+///
+/// [`LayoutError::AdjacencyShape`] if the file is not two `u32` columns,
+/// [`LayoutError::DanglingEndpoint`] if any row names a dense id outside its
+/// type's mapping — counted over the whole file and reported before anything is
+/// written, so the file it would have corrupted is still the file it was.
+fn read_adjacency(
+    io: &dyn LayoutIo,
+    url: &str,
+    src_map: &[u32],
+    dst_map: &[u32],
+    ordered_by: Endpoint,
+) -> Result<(SchemaRef, Vec<u64>), LayoutError> {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(io.open(url)?).map_err(read_err(url))?;
+    let rows = builder.metadata().file_metadata().num_rows().max(0) as usize;
+    let reader = builder
+        .with_batch_size(SCAN_BATCH_ROWS)
+        .build()
+        .map_err(read_err(url))?;
+    let schema = reader.schema();
+    adjacency_columns(&schema, url)?;
+
+    let mut keys = Vec::with_capacity(rows);
+    let mut before = 0u64;
+    let mut dropped = 0u64;
+    for batch in reader {
+        let batch = batch.map_err(arrow_err(url))?;
+        before += batch.num_rows() as u64;
+        let src = u32_column(&batch, url, "src_dense")?;
+        let dst = u32_column(&batch, url, "dst_dense")?;
+        for (&s, &d) in src.values().iter().zip(dst.values()) {
+            let (Some(&s), Some(&d)) = (src_map.get(s as usize), dst_map.get(d as usize)) else {
+                // Counted rather than returned on, so the message names how many
+                // of how many: a single dangling endpoint and a mapping that is
+                // wholesale wrong are the same error with very different numbers
+                // in it, and the count is what tells them apart.
+                dropped += 1;
+                continue;
+            };
+            let (high, low) = match ordered_by {
+                Endpoint::Src => (s, d),
+                Endpoint::Dst => (d, s),
+            };
+            keys.push((u64::from(high) << 32) | u64::from(low));
+        }
+    }
+    if dropped > 0 {
+        return Err(LayoutError::DanglingEndpoint {
+            target: url.to_string(),
+            before,
+            dropped,
+        });
+    }
+    Ok((schema, keys))
+}
+
+/// One tile's worth of packed rows, back as the `RecordBatch` the writer takes.
+///
+/// The inverse of the packing in [`read_adjacency`], and the only Arrow the
+/// remap holds: a run of the sorted slice, tens of thousands of rows against the
+/// seventy million the relation is at ten million vertices.
+///
+/// The columns go back in the schema's own order, which is why the indices are
+/// looked up rather than assumed — `by_target` is ordered by `dst_dense` and the
+/// file still declares `src_dense` first.
+///
+/// # Errors
+///
+/// [`LayoutError::AdjacencyShape`] as [`read_adjacency`], and
+/// [`LayoutError::Arrow`] if the batch does not match the schema it is built
+/// against.
+fn unpack(
+    schema: &SchemaRef,
+    url: &str,
+    keys: &[u64],
+    ordered_by: Endpoint,
+) -> Result<RecordBatch, LayoutError> {
+    let (src_index, dst_index) = adjacency_columns(schema, url)?;
+    let high: Vec<u32> = keys.iter().map(|k| (k >> 32) as u32).collect();
+    let low: Vec<u32> = keys.iter().map(|k| *k as u32).collect();
+    let (src, dst) = match ordered_by {
+        Endpoint::Src => (high, low),
+        Endpoint::Dst => (low, high),
+    };
+    let empty: ArrayRef = Arc::new(UInt32Array::from(Vec::<u32>::new()));
+    let mut columns: Vec<ArrayRef> = vec![Arc::clone(&empty), empty];
+    columns[src_index] = Arc::new(UInt32Array::from(src));
+    columns[dst_index] = Arc::new(UInt32Array::from(dst));
+    RecordBatch::try_new(Arc::clone(schema), columns).map_err(arrow_err(url))
+}
+
+/// The last path component of an adjacency URL, without its extension —
+/// `…/by_source.parquet` → `by_source`.
+///
+/// Only ever a label in a memory report, which is why it is total rather than
+/// fallible: a URL with no separator and no dot is its own short name. Two
+/// orientations of one edge type are two iterations of the same loop, and a
+/// report that labelled both of them `remap` would be a report that could not be
+/// read.
+fn short_name(url: &str) -> &str {
+    let tail = url.rsplit(['/', '\\']).next().unwrap_or(url);
+    tail.rsplit_once('.').map_or(tail, |(stem, _)| stem)
 }
 
 /// Where one adjacency's tiles go, from where the adjacency itself is:
@@ -2002,6 +2166,107 @@ mod tests {
         let codes = morton_codes(&[(0.0, 0.0), (1.0, 1.0), (100.0, 100.0)]);
         assert_eq!(codes.len(), 3);
         assert!(codes[0] < codes[2] && codes[1] < codes[2]);
+    }
+
+    /// **The packing IS the ordering**, which is the whole claim the remap rests
+    /// on: sorting one `u64` per row has to be the same relation `lexsort` over
+    /// two `u32` columns produced, or the corpus moves. Asserted against a sort
+    /// of the pairs themselves rather than against a recorded answer.
+    #[test]
+    fn a_packed_pair_sorts_lexicographically() {
+        let pairs: Vec<(u32, u32)> = vec![
+            (1, 7),
+            (0, u32::MAX),
+            (u32::MAX, 0),
+            (1, 0),
+            (0, 0),
+            (2, 3),
+            (1, 7),
+        ];
+        let mut packed: Vec<u64> = pairs
+            .iter()
+            .map(|&(a, b)| (u64::from(a) << 32) | u64::from(b))
+            .collect();
+        packed.sort_unstable();
+        let mut expected = pairs;
+        expected.sort_unstable();
+        let unpacked: Vec<(u32, u32)> = packed
+            .iter()
+            .map(|&k| ((k >> 32) as u32, k as u32))
+            .collect();
+        assert_eq!(unpacked, expected);
+    }
+
+    /// The shape check, and the reason it is strict: the remap holds a row as a
+    /// packed `u64` and has nowhere to put a third column, so a file with one is
+    /// refused rather than silently narrowed. The error names what it found,
+    /// because "this is not an adjacency" is unactionable without it.
+    #[test]
+    fn an_adjacency_is_two_u32_columns_and_says_so_when_it_is_not() {
+        let two: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+        ]));
+        assert_eq!(adjacency_columns(&two, "u").unwrap(), (0, 1));
+
+        // Ordered by the other endpoint, and the file still declares `src_dense`
+        // first — which is why the indices are looked up and not assumed.
+        let swapped: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+        ]));
+        assert_eq!(adjacency_columns(&swapped, "u").unwrap(), (1, 0));
+
+        let three: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("weight", DataType::Float32, false),
+        ]));
+        let message = adjacency_columns(&three, "u").unwrap_err().to_string();
+        assert!(
+            message.contains("weight: Float32"),
+            "the error has to name what it found: {message}"
+        );
+
+        let wide: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt64, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt64, false),
+        ]));
+        assert!(adjacency_columns(&wide, "u").is_err());
+    }
+
+    /// A tile goes back out under the file's own schema and in its own column
+    /// order, both endpoints where the file put them. `by_target` is the case
+    /// that would go unnoticed: it is ordered by `dst_dense`, so the packed high
+    /// half is the SECOND column of the file.
+    #[test]
+    fn unpacking_puts_each_endpoint_back_in_its_own_column() {
+        let schema: SchemaRef = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("src_dense", DataType::UInt32, false),
+            arrow::datatypes::Field::new("dst_dense", DataType::UInt32, false),
+        ]));
+        // key 5, other 9.
+        let keys = [(5u64 << 32) | 9u64];
+
+        let by_source = unpack(&schema, "u", &keys, Endpoint::Src).unwrap();
+        assert_eq!(
+            u32_column(&by_source, "u", "src_dense").unwrap().value(0),
+            5
+        );
+        assert_eq!(
+            u32_column(&by_source, "u", "dst_dense").unwrap().value(0),
+            9
+        );
+
+        let by_target = unpack(&schema, "u", &keys, Endpoint::Dst).unwrap();
+        assert_eq!(
+            u32_column(&by_target, "u", "src_dense").unwrap().value(0),
+            9
+        );
+        assert_eq!(
+            u32_column(&by_target, "u", "dst_dense").unwrap().value(0),
+            5
+        );
     }
 
     #[test]
@@ -2541,7 +2806,8 @@ impl Weighted {
 /// That trade was refused once and the refusal was correct at the time: it spent
 /// the one quantity `--memory-gib` bounds to buy wall clock that was not the
 /// objective. What removed the objection was [`Weighted::contract`], after which
-/// the peak is 5.08 GiB and 90 MB is not a trade.
+/// the peak was 5.08 GiB and 90 MB was not a trade; the adjacency remap has
+/// taken it to **3.94** since, and 90 MB is less of one still.
 ///
 /// (`examples/enrich_memory 10000000 14`, 2026-08-28, Mac16,8 — 14 cores,
 /// 48 GiB, macOS 26.2 / Darwin 25.2.0.)
