@@ -116,19 +116,39 @@ The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unboun
 | 5,000,000 | 11.91 GiB | 154.5 s |
 | 10,000,000 | **20.72 GiB** | 404.4 s |
 
-For 1.5 GB of corpus. The layout core measured on its own is linear to three digits — 0.280, 0.290,
-0.297, 0.299 and 0.290 GiB per million at one, two, four, eight and ten million — so the ceiling is
-arithmetic: about 0.9 GiB of resident set per million vertices for the whole pass, and a 48 GB
-machine walls between twenty and thirty million. There is no spill path in the pass, so exceeding the
-machine is a failed run rather than a slow one, which is the opposite of what
-[streaming](/docs/design/streaming) promises.
+For 1.5 GB of corpus. There is no spill path in the pass, so exceeding the machine is a failed run
+rather than a slow one, which is the opposite of what [streaming](/docs/design/streaming) promises.
 
-**And it is not intrinsic.** Louvain's levels collapse at the first one: ten million vertices become
-22,171 communities, then 2,736, then 1,365. Every level above zero fits anywhere. The whole cost is
-level zero — and level zero is the graph already on disk as a sorted CSR, which the pass already
-reads in a phase of its own for +0.51 GiB at eight million. A level-zero pass that scanned it and
-kept only `community[u]` would hold O(V) of `u32`: 40 MB at ten million, against 0.41 GiB per
-million today.
+**The line got shallower, and that row above predates it.** The layout pass on its own was 7.22 GiB
+at ten million — 0.72 per million — and is **3.80**, or 0.38 per million (0.31 at two million, 0.35
+at four), after the Louvain contraction stopped building one hash table per community. The
+`/usr/bin/time -l` table is the *whole* build, generator and executor included, and it has not been
+re-run against the smaller pass; what changed underneath it is a layout half that now asks for less
+than half of what it asked for. **Re-measuring the whole build is outstanding.**
+
+**And the shape was never intrinsic — but not for the reason this page gave.** It said Louvain's
+levels collapse at the first one, ten million vertices becoming 22,171 communities and then 2,736
+and 1,365, so that the whole cost is level zero and a level-zero pass keeping only `community[u]`
+would hold 40 MB against 0.41 GiB per million. Two corrections, both measured:
+
+- **The collapse is not at level zero on the fixture the budget is calibrated on.**
+  `examples/enrich_memory` at ten million and mean degree 14 goes 10,000,000 → **3,757,900** →
+  8,832 → 2,081 → 1,487. Level zero stops on the 32-sweep cap without converging; the planted
+  communities appear at level *one*. The 22,171 is `examples/layout_memory`, whose planted blocks are
+  128 wide rather than 1,000 — a different graph, and the conclusion does not carry across.
+- **The 0.41 GiB per million was not the graph.** It was `Weighted::contract`'s `vec![HashMap::new();
+  k]`, one hash table per community and `k` in the millions, measured at +3.41 GiB of the +3.82 the
+  step billed. That is gone and the step is 0.19 GiB per million.
+
+What is left of the level-zero argument is a measurement that closes it. The graph *is* still fully
+resident while Louvain runs — `read CSR + CSC` is +0.78 GiB at ten million and Louvain holds it for
+all 136 s — but the pass's high-water **while Louvain runs** is 3.55 GiB and the pass's peak is 4.72,
+reached in the last phase, after all of Louvain's has been handed back. A streaming level zero takes
+0.78 off a number that is already 1.17 below the one that binds. **It is worth zero on the peak**,
+and a Parquet scan per sweep to get it.
+
+That is the honest end of this thread: the ceiling is now the adjacency remap, which holds a whole
+orientation as Arrow at once, and it is the term to attack next.
 
 <Callout type="warn" title="One row of the streaming page does not reproduce">
 That page bills `community_hierarchy` at **+0.08 GiB** at ten million after the CSR landed, and
@@ -141,6 +161,10 @@ What reconciles them is the measurement rather than the code. An RSS *delta* onl
 makes the process ask the OS for more, and in the full run the pass starts at 6.82 GiB with
 gigabytes of freed pages in hand. In the example it starts at 0.24 G and every byte shows. **The
 peak falling to 8.39 GiB is real; the sentence drawn from that row is not.**
+
+Both figures are the old contraction's. On the current code the same example bills
+`community_hierarchy` **+1.92 GiB at ten million**, 0.19 per million, and it is no longer the largest
+phase of the pass — `remap adjacencies + write edge tiles` is.
 </Callout>
 
 ## How a claim on this page stays true

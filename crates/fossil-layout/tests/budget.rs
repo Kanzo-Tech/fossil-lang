@@ -159,14 +159,27 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 /// accepts a run and lets it exceed the number they were promised, which is the
 /// defect the budget exists to remove. So this is `>=` and never `abs() < eps`.
 ///
-/// The measurements, both `FOSSIL_MEM_PROBE=1 cargo run --release -p
-/// fossil-layout --example enrich_memory -- <N> 14` on a Mac16,8 — 14 cores, 48
-/// GiB, macOS 25.2.0 — on 2026-08-27:
+/// The measurements, all `FOSSIL_MEM_PROBE=1 cargo run --release -p
+/// fossil-layout --example enrich_memory -- <N> <degree>` on a Mac16,8 — 14
+/// cores, 48 GiB, macOS 26.2 / Darwin 25.2.0 — on 2026-08-28:
 ///
-/// | N | vertex Parquet | process peak | at `start` | **the pass** |
-/// | --- | --- | --- | --- | --- |
-/// | 2,000,000 | 235.87 MB | 2.09 GiB | 0.50 GiB | 1.59 GiB |
-/// | 10,000,000 | 1,187.75 MB | 8.82 GiB | 1.33 GiB | 7.49 GiB |
+/// | N | degree | vertex Parquet | process peak | at `start` | **the pass** |
+/// | --- | --- | --- | --- | --- | --- |
+/// | 2,000,000 | 14 | 235.87 MB | 1.02 GiB | 0.40 GiB | 0.62 GiB |
+/// | 4,000,000 | 6 | 473.84 MB | 1.51 GiB | 0.37 GiB | 1.14 GiB |
+/// | 4,000,000 | 14 | 473.84 MB | 1.99 GiB | 0.61 GiB | 1.38 GiB |
+/// | 4,000,000 | 28 | 473.84 MB | 2.70 GiB | 1.01 GiB | 1.69 GiB |
+/// | 10,000,000 | 14 | 1,187.75 MB | 5.08 GiB | 1.28 GiB | 3.80 GiB |
+///
+/// **The three middle rows are the ones that were owed.** Every point behind the
+/// previous calibration shared mean degree fourteen, where V and E are
+/// proportional and a per-row term and a per-vertex term fit the same line;
+/// these three hold the vertex file identical and move only the edges, so
+/// `ADJACENCY_ROW_BYTES` is now fitted on a slope rather than assumed onto one.
+///
+/// The ten-million row is the **larger** of two runs of the same build — 5.08
+/// and 4.97 GiB — because a bound fitted to the luckier of two runs is a bound
+/// that fails on the unluckier.
 ///
 /// **What is bounded is the pass, not the process**, which is why the fourth
 /// column is the one asserted against. `enrich_memory` builds its fixture in the
@@ -180,9 +193,12 @@ fn a_budget_it_fits_in_writes_the_corpus_an_unbounded_run_writes() {
 fn the_estimate_over_estimates_the_runs_it_is_calibrated_on() {
     // (vertices, adjacency rows over both orientations, vertex Parquet bytes,
     //  what the pass itself added)
-    const MEASURED: [(u64, u64, u64, u64); 2] = [
-        (2_000_000, 27_974_508, 235_870_000, 1_707_296_522), // 1.59 GiB
-        (10_000_000, 139_874_560, 1_187_750_000, 8_042_847_109), // 7.49 GiB
+    const MEASURED: [(u64, u64, u64, u64); 5] = [
+        (2_000_000, 27_974_508, 235_870_000, 665_719_767), // 0.62 GiB
+        (4_000_000, 23_978_362, 473_840_000, 1_224_065_679), // 1.14 GiB, degree 6
+        (4_000_000, 55_949_862, 473_840_000, 1_481_763_881), // 1.38 GiB, degree 14
+        (4_000_000, 111_899_830, 473_840_000, 1_814_623_846), // 1.69 GiB, degree 28
+        (10_000_000, 139_874_560, 1_187_750_000, 4_080_218_931), // 3.80 GiB
     ];
 
     for (vertices, rows, payload, measured) in MEASURED {
@@ -215,4 +231,12 @@ fn the_estimate_grows_with_every_term() {
     // Saturating rather than wrapping: an absurd corpus must estimate as
     // enormous, not as small.
     assert!(estimated_peak_bytes(u64::MAX, u64::MAX, u64::MAX) > base);
+    // And the floor is a term and not a rounding: a corpus of nothing still
+    // opens a Parquet reader and a writer, and at the small end that is the
+    // whole of the answer rather than a correction to it.
+    assert!(
+        estimated_peak_bytes(0, 0, 0) >= 8 * 1024 * 1024,
+        "an empty corpus estimates as free, which is the shape that let a \
+         sixty-thousand-vertex run be admitted on a budget it then exceeded"
+    );
 }

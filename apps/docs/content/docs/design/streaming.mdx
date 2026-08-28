@@ -126,27 +126,28 @@ binary measured 151 s on another pass. Walking two arrays per vertex instead of 
 cost that is structural, and it is owed a measurement on a quiet machine before anybody calls it free.
 </Callout>
 
-### Reproduced, and what the budget is calibrated on
+### The residue, found — and the pass costs 42% of what it did
 
-The layout pass on its own, `FOSSIL_MEM_PROBE=1 … --example enrich_memory -- <N> 14`, on a Mac16,8 —
-14 cores, 48 GiB, macOS 25.2.0 — 2026-08-27:
+The layout pass on its own, `FOSSIL_MEM_PROBE=1 … --example enrich_memory -- <N> <degree>`, on a
+Mac16,8 — 14 cores, 48 GiB, macOS 26.2 / Darwin 25.2.0 — 2026-08-28. **Before** is the same binary
+the row above describes, re-run on this machine rather than quoted:
 
-| N | vertex Parquet | process peak | at `start` | **the pass** | `community_hierarchy` |
-| --- | --- | --- | --- | --- | --- |
-| 2,000,000 | 235.87 MB | 2.09 GiB | 0.50 GiB | 1.59 GiB | +0.83 GiB · 34.0 s |
-| 10,000,000 | 1,187.75 MB | 8.82 GiB | 1.33 GiB | 7.49 GiB | **+3.91 GiB · 225.7 s** |
+| ten million, degree 14 | before | after |
+| --- | --- | --- |
+| `community_hierarchy` | +3.47 GiB · 228.2 s | **+1.92 GiB · 136.1 s** |
+| the whole pass | 7.22 GiB | **3.80 GiB** |
+| process peak | 8.54 GiB | **5.08 GiB** |
+| wall clock | 247.4 s | **159.1 s** |
+| `ADJACENCY_ROW_BYTES` | 48 | **14** |
 
-The ten-million row is the same measurement `examples/compaction_pass` records as 8.47 GiB, on a
-quieter machine and 0.35 GiB apart — which is a little outside the 0.2 GiB two runs of one build
-differ by, and not far outside. **Nothing on this page is finer than that spread.**
+`ADJACENCY_ROW_BYTES` was 48, of which ten were the CSR entry and the final remap and **thirty-eight
+were a residue nothing in the file explained**. The thirty-eight are found, and the way they were
+found is worth more than the number: sample the resident set *inside* the hierarchy, per level and
+per sweep, instead of at the phase boundary.
 
-What the reproduction settles is the shape rather than the digit. `community_hierarchy` is **+3.91
-GiB of the pass's 7.49**, more than every other phase put together, and 225.7 s of its 244.3 —
-Louvain rules, and the Morton half of the pass is `morton codes + ranks` at +0.07 GiB. So the budget
-is calibrated where the memory is: `ADJACENCY_ROW_BYTES` is 48, of which ten are the CSR entry and
-the final remap and **thirty-eight are Louvain and are not explained by anything in the file**.
-`community_hierarchy` holds `community`, `totals` and `levels[0]` — 160 MB at ten million — and
-transiently asks the OS for four gigabytes it never gives back.
+**`local_moving` costs no memory at all.** RSS is flat to three decimal places across all thirty-two
+of its sweeps, at two million and at ten. The hundreds of millions of transient `HashMap`s the
+previous reading blamed are recycled by the allocator and never reach the resident set.
 
 **The estimate is calibrated to come out high, and the direction is the decision.** Against the
 pass's own footprint `estimated_peak_bytes` is **+12% at two million and +19% at ten**. An estimate
@@ -154,21 +155,82 @@ that reads too large refuses a run that would have fitted, and the caller raises
 reads too small waves through a run that then exceeds what it was promised, which is the defect the
 budget exists to remove. Only one of those two failures is silent, so the bias points away from it.
 
-<Callout type="warn" title="One hypothesis about that residue, tested and refuted">
-`local_moving` allocates a `HashMap` and a candidate `Vec` **per vertex per sweep** — a few hundred
-million transient allocations at ten million — which is the obvious reading of a step that bills
-3.91 GiB while holding 160 MB. Replacing both with one sparse accumulator reused across every vertex
-(`Vec<f64>` of weights, `Vec<bool>` of occupancy, a `touched` list to clear them) was implemented and
-gives **bit-identical output**, by construction: the same accumulation order, the same ascending
-tie-break.
+**One line of `Weighted::contract` was the whole residue.** `vec![HashMap::new(); k]` — one hash
+table per community, and the *first* contraction is the one that barely contracts, so `k` is
+3,757,900 at ten million and those tables hold 110,070,012 entries between them. Measured directly:
+**+3.41 GiB of the +3.82** the step billed, at ~33 bytes per surviving inter-community half-edge.
+The quotient CSR built out of them is another +1.04.
 
-It went the other way. Louvain **225.7 s → 126.2 s**, a 1.78× that the pass badly wants; process peak
-**8.82 → 9.20 GiB**, reproduced *exactly* across two runs, against 90 MB of arrays added. It costs
-0.38 GiB of the one quantity `--memory-gib` exists to bound, to buy wall clock that was not the
-objective, so it is not in the tree — it is in [discarded](/docs/design/discarded) with what would
-bring it back. **The residue is still unexplained**, and the cheapest next probe is a level-zero
-pass that keeps only `community[u]`, which [the cost model](/docs/design/cost) already argues for on
-different grounds.
+The maps are gone. Group the nodes by community with a counting sort first, then build one row at a
+time into a sparse accumulator and emit it before the next row starts: `k` hash tables live at once
+becomes one dense array of `k`. The output is **bit-identical** — the counting sort is stable, so
+every `f64` is the same sequence of additions — and a 300,000-vertex corpus written both ways is
+equal over all seven files and 130 MB.
+
+<Callout title="The 1.78× was real, and it was the smaller half">
+`local_moving`'s `HashMap`-per-vertex-per-sweep was replaced by one reused sparse accumulator
+(`Vec<f64>` of weights, `Vec<bool>` of occupancy, a `touched` list to clear them), which is a wall
+clock change and nothing else. Measured alone, on this machine: Louvain **228.2 s → 132.8 s**, 1.72×,
+and the process peak **8.54 → 8.90 GiB** for 90 MB of arrays added — reproducing an earlier
+measurement of 1.78× and +0.38 GiB almost exactly.
+
+That trade was refused once, on the grounds that it spent the one quantity `--memory-gib` bounds to
+buy wall clock that was not the objective. It is here now because the objection has been removed
+rather than overruled: with the contraction's maps gone the peak is 5.08 GiB, and 90 MB against
+3.4 GiB recovered is not a trade any more.
+</Callout>
+
+### What the budget is calibrated on now
+
+Four terms, three of them proportional and one a floor:
+
+| fixture | adjacency rows | the pass | `estimated_peak_bytes` |
+| --- | --- | --- | --- |
+| 2,000,000 · degree 14 | 27,974,508 | 0.62 GiB | 0.90 GiB |
+| 4,000,000 · degree 6 | 23,978,362 | 1.14 GiB | 1.38 GiB |
+| 4,000,000 · degree 14 | 55,949,862 | 1.38 GiB | 1.80 GiB |
+| 4,000,000 · degree 28 | 111,899,830 | 1.69 GiB | 2.53 GiB |
+| 10,000,000 · degree 14 | 139,874,560 | 3.80 GiB | 4.47 GiB |
+
+**The three middle rows are a debt paid.** Every calibration point behind the old constant shared
+mean degree fourteen, where V and E are proportional and a per-row term and a per-vertex term fit
+the same line — so attributing Louvain's cost to adjacency rows was mechanically defensible and
+unverified. These three hold the vertex file byte-identical and move only the edges. The measured
+slope is **6.7 bytes per adjacency row**; a per-vertex attribution predicts a flat line. It is rows.
+
+The constant is 14 rather than 6.7 because it has to bound a *peak* rather than fit a slope, and the
+phase that now sets the peak is the last one — `remap adjacencies + write edge tiles`, which holds a
+whole orientation as Arrow at once and measures 13.2 / 14.5 / 15.0 B/row at two, four and ten
+million and 14.2 at four million and degree twenty-eight. The ten-million row above is the **larger**
+of two runs of one build (5.08 and 4.97 GiB), because a bound fitted to the luckier of two runs is a
+bound that fails on the unluckier.
+
+There is also a floor now, `LAYOUT_BASE_BYTES`, 16 MiB. Three proportional terms make a small enough
+corpus cost nothing, and the reader's batches and the writer's row-group buffers are the size they
+are: a ten-thousand-vertex corpus holds 6.21 MB against 4.00 MB of linear terms. Without it the
+guard that samples the bound was admitting a sixty-thousand-vertex run on 22.8 MB and watching it
+hold 30.1.
+
+<Callout type="warn" title="What is still not measured">
+The peak is **no longer monotone**, and one page's arithmetic assumed it was. The ten-million run now
+prints `flatten + order + place  −2.93G` — the level-zero quotient graph being dropped, in pages the
+allocator hands back. `estimated_peak_bytes` still *sums* its terms, which is now a bound on the
+maximum rather than a reading of it, and it is the direction the calibration wants.
+
+`community_hierarchy` still bills +1.92 GiB at ten million, and the level-zero graph is still fully
+resident — `read CSR + CSC` is +0.78 GiB and Louvain holds it for all 136 s. **A level-zero pass that
+streamed the CSR from disk instead of holding it was the named next step, and it is now worth
+nothing**, which is a result rather than a deferral.
+
+Sampled through the hierarchy, the pass's high-water while Louvain runs is **3.55 GiB**, and the
+pass's peak is **4.72**, reached in the last phase after every byte of Louvain's has been given back.
+Taking the CSR's 0.78 out of the Louvain period lowers a number that is already **1.17 GiB below**
+the one the budget is fitted to. It changes `estimated_peak_bytes` by zero, it changes what
+`--memory-gib` admits by zero, and it costs a Parquet scan per sweep for it.
+
+It comes back the day Louvain's high-water is the pass's high-water — a corpus whose level-zero
+contraction survives at a much higher ratio than the 79% measured here, or a remap that stops holding
+an orientation as Arrow. Both are measurable before anything is written.
 </Callout>
 
 <Callout type="warn" title="The composition is not closed, and this is the honest edge of the claim">
