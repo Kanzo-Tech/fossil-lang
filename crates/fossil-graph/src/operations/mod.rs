@@ -1,31 +1,18 @@
-//! The verbs of the fossil-graph surface. **Six**, down from seventeen.
-//!
+//! The verbs of the fossil-graph surface. **Six**, and the set is closed:
 //! `read` · `expand{into|all}` · `path` · `aggregate` · `schema` ·
-//! `execute_sql` — the set the surface is closed at, and a seventh enters only
-//! if it serves a case these six demonstrably cannot, with the demonstration
-//! being a measurement. Eleven left, and only four of them were deleted rather
-//! than absorbed:
+//! `execute_sql`. A seventh enters only if it serves a case these six
+//! demonstrably cannot, with the demonstration being a measurement.
 //!
-//! - Four never had an implementation. Three were never verbs:
-//!   `summarize_cluster` and `answer_with_communities` are a `read` over a
-//!   level, and `set_selection` always belonged to the client.
-//! - Four introspection verbs became `schema`; what used to separate the cheap
-//!   ones from the expensive one is now a parameter.
-//! - `histogram` became a parameter of `aggregate`, because binning is
-//!   grouping. `top_k` and `get_vertex` became `read`, because both were rows
-//!   of one type under a predicate, an order and a limit.
-//! - `viewport` and `materialize_graph` are gone with nowhere to go.
-//!   **The camera is addressed, not queried**: the LOD is not a filter, it is
-//!   a different relation, and a `WHERE` cannot change which table it reads.
-//!   The tiles answer that, and they are not a verb.
+//! **The camera is addressed, not queried** — the LOD is not a filter, it is a
+//! different relation, and a `WHERE` cannot change which table it reads. The
+//! tiles answer that, and they are not a verb. `/docs/design/corpus` argues it.
 //!
-//! Each verb is a unit-struct on the [`Operation`] tagged enum with paired
-//! `Params` and `Result` types in its own submodule. The enum is the closed
-//! set of operations every transport binding can dispatch — adding a verb
-//! means adding a variant + a `Params` / `Result` pair + a snapshot test.
-//! Removing one is a breaking change to every binding (
-//! enum over trait+registry for closed sets — the bindings benefit from
-//! exhaustiveness checks on the match).
+//! Each verb is a variant of the [`Operation`] tagged enum carrying a `Params`
+//! struct, with the paired `Result` type in the same submodule — a closed set
+//! every transport binding dispatches by exhaustive match, which is why it is
+//! an enum and not a trait plus a registry. Adding a verb means a variant, a
+//! `Params`/`Result` pair and a snapshot test; removing one breaks every
+//! binding.
 
 pub mod aggregate;
 pub mod discovery;

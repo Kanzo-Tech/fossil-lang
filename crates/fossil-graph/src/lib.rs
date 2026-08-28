@@ -62,9 +62,7 @@
 //! ever anything but `["fossil-sinks"]`. It carries no wasm32 tripwire, because
 //! the verb logic is WASM-safe.
 //!
-//! The `DuckExecutor` trait exists and dispatch is implemented — this paragraph
-//! said it "will gain" one "in W2" and that the impls were `todo!()` stubs. The
-//! native impl is `fossil-mcp`'s `ConnectionExecutor`
+//! The native `DuckExecutor` impl is `fossil-mcp`'s `ConnectionExecutor`
 //! (`crates/fossil-mcp/src/executor.rs`), NOT `fossil-layout`: that crate is the
 //! layout post-pass and links no engine at all. The browser impl is
 //! `fossil-graph-wasm`, not `fossil-wasm`.
