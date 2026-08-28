@@ -2357,38 +2357,101 @@ impl Weighted {
 
     /// The quotient graph: one node per community, intra-community weight
     /// folded into a self-loop, inter-community weight summed.
+    ///
+    /// # This is where the layout pass's memory was
+    ///
+    /// One row of the quotient was one `HashMap<u32, f64>`, and there is one row
+    /// per community — 748,647 of them at two million vertices and **3,757,900**
+    /// at ten, because the *first* contraction is the one that barely contracts:
+    /// level zero stops on the 32-sweep cap without converging, and the ten
+    /// thousand planted communities of the fixture are not found until level one.
+    ///
+    /// Sampled per step **inside** the hierarchy rather than at the phase
+    /// boundary, that array of maps is **+3.41 GiB of the +3.82 GiB**
+    /// `community_hierarchy` bills at ten million, and the quotient CSR built out
+    /// of it is another +1.04. It holds 110,070,012 entries between its 3,757,900
+    /// tables — about 33 bytes per surviving inter-community half-edge, which is
+    /// a `(u32, f64)` bucket plus its control byte plus what rounding a table up
+    /// to a power of two costs. Beside it, `local_moving`'s resident set is flat
+    /// to three decimal places across all thirty-two sweeps.
+    ///
+    /// So `community_hierarchy`'s bill was never the hundreds of millions of
+    /// transient maps it was read as. It was this one array of long-lived ones.
+    ///
+    /// (`examples/enrich_memory 10000000 14`, 2026-08-28, with a per-level probe
+    /// compiled in — which costs that run about 40 s and 0.3 GiB of its own, so
+    /// the +3.82 above is its `community_hierarchy` and not the 228.2 s / +3.47
+    /// GiB the same build measures without it.)
+    ///
+    /// So the maps are gone and nothing replaces them. **Group the nodes by
+    /// community first** — a counting sort, `n` `u32` and two arrays of `k` —
+    /// then build one row at a time into the same sparse accumulator
+    /// [`local_moving`] uses, emitting it into the CSR before the next row
+    /// starts. What was `k` hash tables live at once is now one dense array of
+    /// `k`, and the quotient's own `targets`/`weights` are the only thing that
+    /// scales with the surviving edges.
+    ///
+    /// # Why the output is bit-identical
+    ///
+    /// The counting sort is stable by construction — nodes are counted and
+    /// scattered in ascending order — so a community's members are visited in
+    /// exactly the order the `0..n` loop visited them. Every `f64` in
+    /// `self_loops` and in `weights` is therefore the same sequence of additions
+    /// as before, and the rows come out sorted by community id, which is what
+    /// the `entries.sort_unstable_by_key` it replaces was for.
     fn contract(&self, membership: &[u32], community_count: u32) -> Self {
         let k = community_count as usize;
-        let mut acc: Vec<std::collections::HashMap<u32, f64>> =
-            vec![std::collections::HashMap::new(); k];
-        let mut self_loops = vec![0.0f64; k];
-        for v in 0..self.node_count() {
-            let cv = membership[v];
-            // Each node's own self-loop carries over whole.
-            self_loops[cv as usize] += self.self_loops[v];
-            for (u, w) in self.neighbours(v) {
-                let cu = membership[u as usize];
-                if cu == cv {
-                    // Counted once per direction, so half lands here and half
-                    // when the other endpoint is visited.
-                    self_loops[cv as usize] += w / 2.0;
-                } else {
-                    *acc[cv as usize].entry(cu).or_insert(0.0) += w;
-                }
+        let n = self.node_count();
+
+        // Members of each community, ascending, as a counting sort: `starts` is
+        // the prefix sum of the community sizes and `members` the nodes laid out
+        // under it.
+        let mut starts = vec![0u32; k + 1];
+        for &c in &membership[..n] {
+            starts[c as usize + 1] += 1;
+        }
+        for c in 0..k {
+            starts[c + 1] += starts[c];
+        }
+        let mut members = vec![0u32; n];
+        {
+            let mut cursor = starts.clone();
+            for (v, &c) in membership[..n].iter().enumerate() {
+                let c = c as usize;
+                members[cursor[c] as usize] = v as u32;
+                cursor[c] += 1;
             }
         }
+
+        let mut self_loops = vec![0.0f64; k];
         let mut offsets = Vec::with_capacity(k + 1);
-        let mut targets = Vec::new();
-        let mut weights = Vec::new();
+        let mut targets: Vec<u32> = Vec::new();
+        let mut weights: Vec<f64> = Vec::new();
         offsets.push(0);
-        for row in &acc {
+        let mut row = Neighbourhood::new(k);
+        for c in 0..k {
+            row.clear();
+            for &v in &members[starts[c] as usize..starts[c + 1] as usize] {
+                let v = v as usize;
+                // Each node's own self-loop carries over whole.
+                self_loops[c] += self.self_loops[v];
+                for (u, w) in self.neighbours(v) {
+                    let cu = membership[u as usize];
+                    if cu as usize == c {
+                        // Counted once per direction, so half lands here and
+                        // half when the other endpoint is visited.
+                        self_loops[c] += w / 2.0;
+                    } else {
+                        row.add(cu, w);
+                    }
+                }
+            }
             // Sorted so the structure is a pure function of the input, not of
-            // hash iteration order.
-            let mut entries: Vec<(u32, f64)> = row.iter().map(|(c, w)| (*c, *w)).collect();
-            entries.sort_unstable_by_key(|(c, _)| *c);
-            for (c, w) in entries {
-                targets.push(c);
-                weights.push(w);
+            // the order the neighbours happened to arrive in.
+            row.sort();
+            for &cu in row.communities() {
+                targets.push(cu);
+                weights.push(row.weight_of(cu));
             }
             offsets.push(targets.len());
         }
@@ -2400,6 +2463,97 @@ impl Weighted {
             }],
             self_loops,
         )
+    }
+}
+
+/// The weight from one node into each of its neighbouring communities, as **one
+/// allocation reused by every node of every sweep**.
+///
+/// A `HashMap` built and dropped per node per sweep is what stood here, and at
+/// ten million vertices that is a few hundred million transient allocations —
+/// [`local_moving`] is 32 sweeps over ten million nodes, because level zero
+/// never converges and stops on the sweep cap. It cost **no resident memory at
+/// all**: measured per sweep, RSS is flat to three decimal places across all
+/// thirty-two. What it cost was time.
+///
+/// So this is a wall-clock change and it is honest about being one: three arrays
+/// of `n`, 90 MB at ten million, for **Louvain 228.2 s → 132.8 s** — 1.72×,
+/// measured with this change alone and nothing else in the tree, against a
+/// process peak that goes the wrong way by 0.36 GiB (8.54 → 8.90).
+///
+/// That trade was refused once and the refusal was correct at the time: it spent
+/// the one quantity `--memory-gib` bounds to buy wall clock that was not the
+/// objective. What removed the objection was [`Weighted::contract`], after which
+/// the peak is 5.08 GiB and 90 MB is not a trade.
+///
+/// (`examples/enrich_memory 10000000 14`, 2026-08-28, Mac16,8 — 14 cores,
+/// 48 GiB, macOS 26.2 / Darwin 25.2.0.)
+///
+/// # Why the output is bit-identical, and not merely equal
+///
+/// Two orders decide the answer and both are preserved. **The accumulation
+/// order** is the neighbour walk, unchanged, so every `f64` sum is the same
+/// sequence of additions and therefore the same bits. **The comparison order**
+/// is ascending community id — the `HashMap` version collected its entries into
+/// a `Vec` and sorted it for exactly this reason — so [`Self::sort`] sorts
+/// `touched` and the strictly-greater tie-break keeps the same winner.
+///
+/// [`Self::clear`] walks `touched` rather than the whole array, so a sweep is
+/// O(E) and not O(V·k): the cost of resetting a node's accumulator is its
+/// degree.
+struct Neighbourhood {
+    /// Accumulated weight per community id. Only the entries `touched` names are
+    /// meaningful; every other entry is `0.0` and [`Self::clear`] keeps it so.
+    weight: Vec<f64>,
+    /// Whether a community id is already in `touched`, so a second edge into it
+    /// does not list it twice.
+    listed: Vec<bool>,
+    /// The communities this node has an edge into. Cleared per node.
+    touched: Vec<u32>,
+}
+
+impl Neighbourhood {
+    /// Sized by the node count rather than by the community count, because a
+    /// community id **is** a node id: [`local_moving`] starts every node in its
+    /// own community and only ever moves it into one that already exists.
+    fn new(n: usize) -> Self {
+        Self {
+            weight: vec![0.0; n],
+            listed: vec![false; n],
+            touched: Vec::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        for &c in &self.touched {
+            self.weight[c as usize] = 0.0;
+            self.listed[c as usize] = false;
+        }
+        self.touched.clear();
+    }
+
+    fn add(&mut self, community: u32, weight: f64) {
+        let i = community as usize;
+        if !self.listed[i] {
+            self.listed[i] = true;
+            self.touched.push(community);
+        }
+        self.weight[i] += weight;
+    }
+
+    /// `0.0` for a community with no edge into it, which is what
+    /// `HashMap::get(..).unwrap_or(0.0)` said and what the gain formula wants:
+    /// the node's own community is compared whether or not it is a neighbour.
+    fn weight_of(&self, community: u32) -> f64 {
+        self.weight[community as usize]
+    }
+
+    fn sort(&mut self) {
+        self.touched.sort_unstable();
+    }
+
+    fn communities(&self) -> &[u32] {
+        &self.touched
     }
 }
 
@@ -2420,52 +2574,39 @@ fn local_moving(graph: &Weighted) -> Vec<u32> {
     let mut totals: Vec<f64> = graph.degrees.clone();
     let two_m = 2.0 * graph.total;
 
+    // One allocation for the whole call — see [`Neighbourhood`].
+    let mut into = Neighbourhood::new(n);
+
     let mut moved = true;
     let mut sweeps = 0;
-    // Bounded because a pathological tie could otherwise oscillate; Louvain
-    // converges in a handful of sweeps in practice.
+    // Bounded because a pathological tie could otherwise oscillate. It is not a
+    // safety net at level zero: on the ten-million fixture the first level runs
+    // all thirty-two and is still moving nodes when it stops.
     while moved && sweeps < 32 {
         moved = false;
         sweeps += 1;
         for v in 0..n {
             let own = community[v];
             let k_v = graph.degrees[v];
-            // Weight from v into each neighbouring community.
-            //
-            // **A `HashMap` per vertex per sweep, and it is not what costs this
-            // pass its memory.** That was the obvious reading of the +3.91 GiB
-            // `community_hierarchy` bills at ten million against the ~160 MB the
-            // step demonstrably *holds*, and it is wrong. Replacing this map and
-            // the candidate `Vec` below with one sparse accumulator reused
-            // across every vertex — `Vec<f64>` of weights, `Vec<bool>` of
-            // occupancy, a `touched` list to clear them — was implemented, gave
-            // bit-identical output, and measured on the ten-million fixture:
-            // Louvain **225.7 s → 126.2 s** (1.78×), and the process peak
-            // **8.82 GiB → 9.20 GiB**, reproduced exactly across two runs.
-            //
-            // It costs 0.38 GiB of the one quantity `--memory-gib` exists to
-            // bound, to buy wall clock that was not the objective, so it is not
-            // here. `/docs/design/discarded` carries it with what would bring it
-            // back — chiefly the level-zero rewrite, after which the 4 GiB this
-            // step transiently reaches is gone and 90 MB of accumulator is free.
-            let mut into: std::collections::HashMap<u32, f64> = std::collections::HashMap::new();
+            // Weight from v into each neighbouring community, into the one
+            // accumulator this whole call shares.
+            into.clear();
             for (u, w) in graph.neighbours(v) {
-                *into.entry(community[u as usize]).or_insert(0.0) += w;
+                into.add(community[u as usize], w);
             }
             // Remove v from its community before comparing, so staying put is
             // evaluated on the same footing as moving.
             totals[own as usize] -= k_v;
 
             let mut best = own;
-            let mut best_gain =
-                totals[own as usize].mul_add(-k_v / two_m, into.get(&own).copied().unwrap_or(0.0));
-            let mut candidates: Vec<(u32, f64)> = into.iter().map(|(c, w)| (*c, *w)).collect();
-            candidates.sort_unstable_by_key(|(c, _)| *c);
-            for (c, w_in) in candidates {
+            let mut best_gain = totals[own as usize].mul_add(-k_v / two_m, into.weight_of(own));
+            // Ascending community id, which is what decides ties below.
+            into.sort();
+            for &c in into.communities() {
                 if c == own {
                     continue;
                 }
-                let gain = totals[c as usize].mul_add(-k_v / two_m, w_in);
+                let gain = totals[c as usize].mul_add(-k_v / two_m, into.weight_of(c));
                 // Strictly greater keeps the lower community id on a tie, which
                 // is what makes the result reproducible.
                 if gain > best_gain {
