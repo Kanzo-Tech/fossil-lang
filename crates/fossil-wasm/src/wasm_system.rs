@@ -11,10 +11,7 @@
 //!
 //! The filesystem is a programmable in-memory map: hosts can stage source
 //! files via [`WasmSystem::write`] before invoking compiler queries that need
-//! to read them. [`crate::FossilPlayground::compile`] does NOT use this —
-//! `compile(source: &str)` ingests the source string directly via
-//! [`fossil_base::SourceFile::new`] — so the map stays empty for a single-shot
-//! compile. The setter exists so the `open_file`/`update_file`/`close_file`
+//! to read them. The setter exists so the `open_file`/`update_file`/`close_file`
 //! lifecycle has a place to land without reshaping the `System` trait.
 
 use std::collections::HashMap;
@@ -66,8 +63,8 @@ impl System for WasmSystem {
         Some(&self.descriptors)
     }
 
-    /// The playground COMPILES programs — it is the LSP server-side in the
-    /// browser — so it installs the same rows the native engine
+    /// The playground CHECKS programs — it is the LSP server-side in the
+    /// browser — so it installs the same rows the native host
     /// does. A host with no rows checks every program against no output
     /// contract, which would make the editor's target-side hover and
     /// completion silently empty for exactly the programs that declare a

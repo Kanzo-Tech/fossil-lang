@@ -1,6 +1,6 @@
 // WASM Workspace lifecycle smoke.
 //
-// Companion to test-wasm.js — verifies the ty_wasm-shaped lifecycle
+// Verifies the ty_wasm-shaped lifecycle
 // (open_file / update_file / close_file / check /
 // diagnostics_for) round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
@@ -18,10 +18,10 @@
 // Run:
 //   node crates/fossil-wasm/test-wasm-workspace.js
 //
-// NOTE: this is the same `--target nodejs` bindgen target as `test-wasm.js`
-// (CommonJS-friendly, `require('fs')`-based .wasm loading) — distinct from the
-// `--target web` artefact the browser packages consume. Both come from the same
-// .wasm binary; only the generated JS shim differs.
+// NOTE: this is the `--target nodejs` bindgen target (CommonJS-friendly,
+// `require('fs')`-based .wasm loading) — distinct from the `--target web`
+// artefact the browser packages consume. Both come from the same .wasm binary;
+// only the generated JS shim differs.
 
 'use strict';
 
