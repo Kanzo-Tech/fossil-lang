@@ -2,7 +2,7 @@
  * The addressing, derived from the manifest and from nothing else.
  *
  * This is one of the two implementations the conformance corpus exists to hold. The other is
- * `resolveCorpus` in `@fossil-lang/graph`, published and typed; this one is plain Node with no npm
+ * `resolveCorpus` in `@fossil-lang/corpus`, published and typed; this one is plain Node with no npm
  * and no build, and it shares no line with it. The YAML scan comes from `../guards/manifest.mjs`,
  * because there is one of those and it has its own self-test; the *addressing* — which prefix, which
  * shift, which orientation applies to which window — is written here from the conventions.

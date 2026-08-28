@@ -63,7 +63,7 @@ jobs:
       # wasm-bindgen-cli. Crate 0.116.1 == binaryen 116. NOT apt binaryen: ubuntu
       # ships 108, whose wasm-opt corrupts wasm-bindgen's externref table (binaryen
       # #4711) → "WebAssembly.Table.grow(): failed to grow table" at instantiation
-      # (the LSP/@fossil-lang/graph wasm). 116 fixes it. build-wasm.sh runs it `-Oz`
+      # (the LSP/@fossil-lang/corpus wasm). 116 fixes it. build-wasm.sh runs it `-Oz`
       # (executor) / `-O3` (graph). WITHOUT it the wasm ships unoptimised (~2-3×).
       - name: Install wasm-opt (binaryen 116 via the wasm-opt crate)
         run: cargo install wasm-opt --locked --version 0.116.1

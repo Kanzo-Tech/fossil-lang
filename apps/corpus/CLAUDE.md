@@ -21,8 +21,8 @@ build, which is the intended coupling: a page cannot drift from a table it does 
 ## Three readers, and the third one is not free
 
 `conformance/expected.json` is a table of addresses that none of its executors wrote. Three read it:
-`conformance/reader.mjs` (plain Node, from the conventions), `packages/graph/src/address.ts` (the
-published module, run from `packages/graph/tests/conformance.test.ts`), and `fossil_graph::address`
+`conformance/reader.mjs` (plain Node, from the conventions), `packages/corpus/src/address.ts` (the
+published module, run from `packages/corpus/tests/conformance.test.ts`), and `fossil_graph::address`
 — natively in `crates/fossil-graph/tests/conformance.rs`, and as wasm32 through
 `conformance/wasm-reader.mjs`.
 
@@ -32,7 +32,7 @@ that went through a `Number` — was invisible to a diff of the two, which is th
 
 The wasm leg is the one thing here that needs more than `node` and a `duckdb` binary, and it is
 therefore **refused explicitly rather than skipped**. `verify.mjs --without-wasm` is the opt-out and
-`corpus.yml` is where it is passed; without it a missing `packages/graph/pkg/` is a failure. Do not
+`corpus.yml` is where it is passed; without it a missing `packages/corpus/pkg/` is a failure. Do not
 change that default: a leg that vanishes with its dependency is how this stops being evidence
 without anybody noticing.
 
@@ -54,7 +54,7 @@ when every other README in `crates/` was deleted. Adding an npm dependency chang
 costs to check, which changes who can check it.
 
 The rule is on `guards/`. `conformance/wasm-reader.mjs` reaches out of this app into
-`packages/graph/pkg/`, and it is the only file here that does; nothing under `guards/` may.
+`packages/corpus/pkg/`, and it is the only file here that does; nothing under `guards/` may.
 
 `pnpm test` writes a conforming corpus in both containers, requires every guard to pass, and then
 requires every guard to **fire** against a corpus broken in exactly one way. A guard nobody has seen

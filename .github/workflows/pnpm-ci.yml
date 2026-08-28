@@ -93,7 +93,7 @@ jobs:
       # `apps/corpus/conformance/expected.json` is executed by three implementations and
       # written by none of them: plain Node (`conformance/reader.mjs`), the published
       # TypeScript (`resolveCorpus`, run by the `Test all packages` step above), and
-      # `fossil_graph::address` compiled to wasm32 — which needs `packages/graph/pkg/`,
+      # `fossil_graph::address` compiled to wasm32 — which needs `packages/corpus/pkg/`,
       # and this is the only job that has it, because `Build all packages` two steps up
       # is what wrote it.
       #

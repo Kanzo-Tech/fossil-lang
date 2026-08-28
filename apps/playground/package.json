@@ -30,7 +30,7 @@
     "@duckdb/duckdb-wasm": "1.32.0",
     "@fossil-lang/codemirror-fossil": "workspace:*",
     "@fossil-lang/executor": "workspace:*",
-    "@fossil-lang/graph": "workspace:*",
+    "@fossil-lang/corpus": "workspace:*",
     "@fossil-lang/wasm": "workspace:*",
     "@kanzo-tech/graph": "0.1.0",
     "@kanzo-tech/ui": "0.1.0",

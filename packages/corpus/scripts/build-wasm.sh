@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/graph/pkg/ from crates/fossil-graph-wasm/.
+# build-wasm.sh — Build packages/corpus/pkg/ from crates/fossil-graph-wasm/.
 #
 # Sibling of packages/wasm/scripts/build-wasm.sh (the same wasm-bindgen
 # `--target web` recipe). The only differences are the
@@ -9,7 +9,7 @@
 #   Rust toolchain: 1.90 (rust-toolchain.toml at repo root)
 #   wasm-bindgen-cli: 0.2.120 (matches the workspace-pinned lib)
 #
-# Output: packages/graph/pkg/
+# Output: packages/corpus/pkg/
 #   fossil_graph_wasm.js          — JS shim (wasm-bindgen `--target web`)
 #   fossil_graph_wasm.d.ts        — TS types for the JS shim
 #   fossil_graph_wasm_bg.wasm     — the WASM binary
@@ -66,7 +66,7 @@ fi
 # Same rationale as packages/wasm: --target bundler assumes the consumer's
 # bundler resolves .wasm ESM imports, which is fragile in a republished library.
 
-PKG_DIR="$REPO_ROOT/packages/graph/pkg"
+PKG_DIR="$REPO_ROOT/packages/corpus/pkg"
 mkdir -p "$PKG_DIR"
 
 echo "[build-wasm] wasm-bindgen --target web → $PKG_DIR"

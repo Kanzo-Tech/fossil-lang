@@ -6,7 +6,7 @@
 //! author didn't intend to publish surfaces as a snapshot diff and fails CI
 //! until reviewed (`cargo insta review` to accept).
 //!
-//! Downstream consumers (fossil-mcp, fossil-cli, @fossil-lang/graph
+//! Downstream consumers (fossil-mcp, fossil-cli, @fossil-lang/corpus
 //! codegen) treat the accepted `.snap` files as the source of truth. The
 //! TS bindings, in particular, regenerate their wrapper types from these
 //! schemas via openapi-typescript at the playground/keasy `pnpm openapi`

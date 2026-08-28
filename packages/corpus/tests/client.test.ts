@@ -9,7 +9,7 @@ import { createGraphClient } from '../src/client.js';
 import { initFossilGraphWasm } from '../src/load.js';
 import type { QueryRow } from '../src/query.js';
 
-// Smoke test for @fossil-lang/graph: exercises the REAL fossil-graph-wasm module
+// Smoke test for @fossil-lang/corpus: exercises the REAL fossil-graph-wasm module
 // (first runtime test of the W5 step-2 binding) end-to-end — manifest parse +
 // verb→SQL + the JS query callback round-trip — WITHOUT a real DuckDB. The
 // `query` mock mirrors the in-crate `FakeExec`: `count(*)` → `{ n: 3 }`. A full

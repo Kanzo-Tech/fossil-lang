@@ -2,7 +2,7 @@
 //!
 //! A tile is a fixed range of `dense_id` and its address is a shift, so a reader
 //! computes every URL it wants before it emits the first request. Two readers
-//! already do that: `packages/graph/src/address.ts` (the published module) and
+//! already do that: `packages/corpus/src/address.ts` (the published module) and
 //! `apps/corpus/conformance/reader.mjs` (written from the conventions and from
 //! nothing else). This is the third, and it is the one that reaches a browser
 //! through `fossil-graph-wasm`.
@@ -26,7 +26,7 @@
 //! **What pins it to the other two is `apps/corpus/conformance/expected.json`**,
 //! a table none of the three wrote. `crates/fossil-graph/tests/conformance.rs`
 //! executes it here, `apps/corpus/conformance/verify.mjs` executes it in plain
-//! Node, and `packages/graph/tests/conformance.test.ts` executes it against the
+//! Node, and `packages/corpus/tests/conformance.test.ts` executes it against the
 //! published module. An address that moves in one moves away from the other two.
 
 use std::collections::BTreeMap;

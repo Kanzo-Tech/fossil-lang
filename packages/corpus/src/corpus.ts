@@ -578,7 +578,7 @@ function text(row: QueryRow, column: string): string {
  * **Why step 3 is not read off the manifest.** `property_groups` carries names *and* types, so this
  * looked free. It is not: on the conformance corpus the manifest declares **one** property
  * (`subject`) against **five** columns on disk (`dense_id`, `subject`, `x`, `y`, `cluster_id`), and
- * `packages/graph`'s own test fixture declares three of which one is `dense_id`. The manifest's
+ * `packages/corpus`'s own test fixture declares three of which one is `dense_id`. The manifest's
  * property list is a promise; the payload is the artefact, and this reads the artefact. The cost is
  * one round trip per vertex type at open.
  *

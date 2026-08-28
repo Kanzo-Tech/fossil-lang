@@ -2,7 +2,7 @@
 /**
  * GENERATED — do not edit by hand.
  * Source: crates/fossil-graph JSON Schemas (schemars). Regenerate with
- *   pnpm --filter @fossil-lang/graph gen:types
+ *   pnpm --filter @fossil-lang/corpus gen:types
  */
 
 export type Aggregation = "count" | "sum" | "avg" | "min" | "max";

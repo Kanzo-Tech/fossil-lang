@@ -9,7 +9,7 @@
  * the `wasm` binding in one instance while these functions read `undefined` from
  * another (→ `Cannot read properties of undefined (reading '__wbindgen_malloc…')`,
  * seen when the codemirror tokenizer calls `tokenize` on the main thread).
- * Mirrors `@fossil-lang/graph`'s `client.ts` split, the known-good shape.
+ * Mirrors `@fossil-lang/corpus`'s `client.ts` split, the known-good shape.
  */
 import {
   FossilPlayground as RawFossilPlayground,

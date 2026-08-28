@@ -210,6 +210,37 @@ on that path. Level-of-detail is not a filter but a different relation — a lev
 super-nodes that do not exist at level 0. A `where` selects rows from a table; zoom changes the
 table. Once that is settled, every verb whose job was to make a picture stops having one.
 
+### The npm package is named for the corpus; the crates are named for the surface
+
+The published binding was `@fossil-lang/graph` and it is now **`@fossil-lang/corpus`**. The section
+title is the reason: none of the six draws, the package's door is `openCorpus`, and every type it
+exports is `Corpus*`. What forced the rename rather than merely recommending it is that the thing
+which *does* draw arrived and took the obvious name — `apps/playground/package.json` lists
+`@kanzo-tech/graph`, a GPU canvas, and listed `@fossil-lang/graph` beside it. Two dependencies
+called `graph`, one addressing files and one painting vertices, and no import statement said which.
+
+**The Rust crates keep their names.** `fossil-graph` and `fossil-graph-wasm` are unchanged, and the
+argument is that the collision is specific to a namespace they are not in. A cargo name resolves in
+a workspace that has no `@kanzo-tech/graph` and never will; nothing in `crates/` had an ambiguous
+import to disambiguate. And the crate is not misnamed the way the package was: `fossil-graph` is a
+verb surface over a **property graph**, which is what it says it is, whereas the package's whole
+public shape had already moved to the corpus. Renaming them would have spent a cross-language
+rename — every `fossil_graph::address` in the conformance tables, the `fossil_graph_wasm` artefact
+stem in `packages/corpus/pkg/`, and the `pkg/` filenames in the published `files` list — to fix an
+ambiguity that does not exist there.
+
+The name it took was held by `apps/corpus`, which is now `@fossil-lang/corpus-contract`. The
+published name won that collision because it is the one that appears in a stranger's import; the
+app's name was a pnpm resolution handle referenced from nowhere else in the tree. **Neither
+directory rename that would have been tidier happened**: `apps/corpus/` keeps its path because
+`apps/docs/components/{guard-index,vector-table}.tsx` read across into it at build time.
+
+<Callout type="info">
+  The three readers of `conformance/expected.json` are unchanged in number and in kind — the rename
+  moved `packages/graph/` to `packages/corpus/` and touched no arithmetic. `fossil_graph::address`
+  is still the third one, and still spelled that way.
+</Callout>
+
 ```mermaid
 graph LR
   LVT["list_vertex_types"] --> SCH["schema"]
@@ -330,7 +361,7 @@ playground does not call it, for a reason that is a 404 rather than a preference
 `chunk{k}.parquet` and `by_source/tile{k}.parquet`, which is `container: files`, and fossil's writer
 emits `container: rowgroups`. It also re-derives the addressing from a line scan over six manifest
 keys, which is the arithmetic
-[`@fossil-lang/graph` exists to publish](/docs/format/conventions/addressing#the-address-is-published-not-described)
+[`@fossil-lang/corpus` exists to publish](/docs/format/conventions/addressing#the-address-is-published-not-described)
 so that nobody has to. What reverses this is that reader learning `rowgroups` — better, addressing
 through the published module — at which point the source here becomes a call to it.
 
@@ -360,9 +391,9 @@ Two things that adoption does **not** buy, and one it must not cost:
   `pnpm --filter @fossil-lang/playground... build`, which is also the only build that type-checks:
   three workspace dependencies shell out to cargo, and without the recursive form a stale `dist/`
   is what fails.
-- **No engine in `@fossil-lang/graph`.** The renderer needs bytes; the *host* reads them. The
+- **No engine in `@fossil-lang/corpus`.** The renderer needs bytes; the *host* reads them. The
   addressing subpath stays synchronous, `fetch`-free and WASM-free, which
-  `packages/graph/tests/address-standalone.test.ts` holds by importing it from a package directory
+  `packages/corpus/tests/address-standalone.test.ts` holds by importing it from a package directory
   with no `pkg/` in it.
 
 ### A palette has a capacity, and a corpus does not know it
@@ -450,14 +481,14 @@ That obligation has been discharged once, and the shape of it is what to copy. T
 [row-group container](/docs/format/conventions/addressing#two-containers-one-address) is a change of
 format; both readers were moved to it and diffed **while the writer still emitted only the old one**,
 which is the only window in which two containers of one corpus exist at the same time to be compared.
-`apps/corpus/conformance/containers.mjs` and `packages/graph/tests/containers.test.ts` are that diff:
+`apps/corpus/conformance/containers.mjs` and `packages/corpus/tests/containers.test.ts` are that diff:
 the same graph written both ways, every answer required to match. After the writer moves there is
 one container and nothing left to compare against.
 
 What runs lives in `apps/corpus/conformance/` — `verify.mjs` (the table, against each reader in
 turn), `containers.mjs` (the same graph in both containers) and `provenance.mjs` (the corpus from its
 recipe) — plus `crates/fossil-graph/tests/conformance.rs` and
-`packages/graph/tests/conformance.test.ts`. The conventions they check are documented for reader
+`packages/corpus/tests/conformance.test.ts`. The conventions they check are documented for reader
 implementors on the corpus site rather than here.
 
 The wasm leg is the one part of that directory needing more than `node` and a `duckdb` binary, and it

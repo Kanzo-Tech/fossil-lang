@@ -80,7 +80,7 @@ beforeAll(async () => {
   const conn = db.connect();
   // DuckDB-WASM under NODE_RUNTIME pre-allocates its spill files the moment a query touches the
   // filesystem, and it puts them in `./.tmp` relative to the process — which is the package
-  // directory. Left alone this run writes 29 GB into `packages/graph/.tmp` and does not remove it.
+  // directory. Left alone this run writes 29 GB into `packages/corpus/.tmp` and does not remove it.
   const spill = mkdtempSync(join(tmpdir(), 'fossil-corpus-spill-'));
   scratch.push(spill);
   conn.query(`SET temp_directory = '${spill}'`);

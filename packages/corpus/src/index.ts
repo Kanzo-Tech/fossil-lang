@@ -1,5 +1,5 @@
 /**
- * @fossil-lang/graph — in-process TS binding for the fossil-graph verb surface.
+ * @fossil-lang/corpus — in-process TS binding for the fossil-graph verb surface.
  *
  * The query layer for whatever draws the graph — fossil ships no viewer.
  * Verb→SQL runs in WASM (`fossil-graph-wasm`, single-source with
@@ -11,8 +11,8 @@
  *
  * Consumer pattern:
  *
- *   import { initFossilGraphWasm, createGraphClient } from '@fossil-lang/graph';
- *   import wasmUrl from '@fossil-lang/graph/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
+ *   import { initFossilGraphWasm, createGraphClient } from '@fossil-lang/corpus';
+ *   import wasmUrl from '@fossil-lang/corpus/pkg/fossil_graph_wasm_bg.wasm?url'; // Vite
  *
  *   await initFossilGraphWasm({ wasmUrl });
  *   const graph = createGraphClient({ query, manifestFiles });
@@ -46,7 +46,7 @@ export type { QueryFn, QueryRow } from './query.js';
 // no WASM to initialise, no `query` callback, no promise. A notebook, a CLI or a server opens the
 // same corpus with this and a Parquet reader of its own choosing.
 //
-// Reached that way it is `@fossil-lang/graph/address`, NOT this barrel. Everything above this line
+// Reached that way it is `@fossil-lang/corpus/address`, NOT this barrel. Everything above this line
 // static-imports `../pkg/fossil_graph_wasm.js`, so the barrel cannot load without the wasm-bindgen
 // output — which is why the subpath exists and why `tests/address-standalone.test.ts` imports it
 // from a package directory with no `pkg/` in it. The re-export below is for consumers who are
@@ -75,7 +75,7 @@ export type {
   AddressedTiles,
 } from './address.js';
 
-// The door. It had a subpath of its own — `@fossil-lang/graph/corpus` — whose one justification
+// The door. It had a subpath of its own — `@fossil-lang/corpus/corpus` — whose one justification
 // was that its closure reached no WASM, and it reaches the verbs now, so the justification is gone
 // and so is the subpath. The objection that answered was never large: `openCorpus` runs a `DESCRIBE`
 // per vertex type before it returns, so a caller holding one is already in "I have an engine"

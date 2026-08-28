@@ -1,6 +1,6 @@
 ---
 title: Reading one without fossil
-description: A Parquet reader and the column names — the request sequence, the arithmetic between the requests, and the same read through @fossil-lang/graph for a caller who would rather not compose a URL.
+description: A Parquet reader and the column names — the request sequence, the arithmetic between the requests, and the same read through @fossil-lang/corpus for a caller who would rather not compose a URL.
 ---
 
 Reading a corpus needs a Parquet reader and the conventions below — no fossil crate, no
@@ -139,11 +139,11 @@ nothing.
 
 ## The same read through the package
 
-`@fossil-lang/graph` composes all of it, and none of the arithmetic reaches the caller: no tiles, no
+`@fossil-lang/corpus` composes all of it, and none of the arithmetic reaches the caller: no tiles, no
 `dense_id`, no Morton codes, no `by_source`, no prefixes, no footers.
 
 ```ts
-import { openCorpus } from '@fossil-lang/graph';
+import { openCorpus } from '@fossil-lang/corpus';
 const corpus = await openCorpus('https://cdn.example.org/kg/2026-08', { query });
 
 corpus.types                                   // what is inside

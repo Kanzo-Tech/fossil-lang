@@ -1,5 +1,5 @@
 {
-  "about": "The addresses a reader must compose from these manifests, and the ones it must refuse to compose. Every path is dataset-relative; a reader prepends wherever the corpus is served from. This file is the deliverable: two implementations execute it, `verify.mjs` here and `packages/graph/tests/conformance.test.ts` next door, and neither one wrote it.",
+  "about": "The addresses a reader must compose from these manifests, and the ones it must refuse to compose. Every path is dataset-relative; a reader prepends wherever the corpus is served from. This file is the deliverable: two implementations execute it, `verify.mjs` here and `packages/corpus/tests/conformance.test.ts` next door, and neither one wrote it.",
   "base_join": {
     "about": "The base is prepended and nothing else happens to it — no normalisation, no trailing slash, no encoding.",
     "case": "corpus",
@@ -362,7 +362,7 @@
     }
   ],
   "answers": {
-      "about": "What the four members of the reference API answer over the `corpus` case, and where these numbers come from: a FULL SCAN. Every tile of every type read with no addressing at all and filtered in SQL, which is a third thing neither implementation wrote. Both of them prune — `openCorpus` in `@fossil-lang/graph` and `conformance/answers.mjs` — and both must land on what an unpruned read sees. A wrong shift, a doubled orientation, a hard-coded 4,096 or an adjacency filtered by the wrong column moves one of them off a number that was never computed by either. The last of those is not hypothetical: it was written, and it read 153 edges where the scan says 152.",
+      "about": "What the four members of the reference API answer over the `corpus` case, and where these numbers come from: a FULL SCAN. Every tile of every type read with no addressing at all and filtered in SQL, which is a third thing neither implementation wrote. Both of them prune — `openCorpus` in `@fossil-lang/corpus` and `conformance/answers.mjs` — and both must land on what an unpruned read sees. A wrong shift, a doubled orientation, a hard-coded 4,096 or an adjacency filtered by the wrong column moves one of them off a number that was never computed by either. The last of those is not hypothetical: it was written, and it read 153 edges where the scan says 152.",
       "case": "corpus",
       "vertex_count": 300,
       "types": {

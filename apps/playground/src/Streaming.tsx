@@ -209,7 +209,7 @@ export default function Streaming({ ready }: StreamingProps) {
           Which tiles a <em>rectangle</em> touches is the one question the arithmetic above cannot
           answer: it comes from the per-tile <code>x</code>/<code>y</code> statistics in the Parquet
           footer, and reading a footer needs a Parquet reader.{' '}
-          <code>@fossil-lang/graph</code> deliberately carries none — the host has one. This is the
+          <code>@fossil-lang/corpus</code> deliberately carries none — the host has one. This is the
           only step on this panel that costs an engine, and it happens once per corpus.
         </p>
       </div>
@@ -328,7 +328,7 @@ export default function Streaming({ ready }: StreamingProps) {
         Which tiles a rectangle touches is not arithmetic: it comes from the per-tile{' '}
         <code>x</code>/<code>y</code> statistics in the Parquet footer, read once per corpus in{' '}
         <strong>{footerMs.toFixed(0)} ms</strong> and reused by every window above.{' '}
-        <code>@fossil-lang/graph</code> carries no Parquet reader on purpose — the host has one,
+        <code>@fossil-lang/corpus</code> carries no Parquet reader on purpose — the host has one,
         and here it is DuckDB. It is the one structure a reader holds that grows with N.
       </p>
 

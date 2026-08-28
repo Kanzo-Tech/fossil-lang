@@ -117,7 +117,7 @@ what a recipient holds, not what a producer started from.
 
 The manifest grammar is a flat mapping of scalars, one sequence of paths and one sequence of small
 mappings. Two of the four readers of `graph.graph.yml` are line scanners
-(`apps/corpus/guards/manifest.mjs`, `packages/graph/src/manifest.ts`) and both **skip** what they
+(`apps/corpus/guards/manifest.mjs`, `packages/corpus/src/manifest.ts`) and both **skip** what they
 cannot see rather than failing on it. A quasi-identifier set emitted as a YAML sequence scans as
 absent, which is indistinguishable from a corpus that declares none — so the set is one
 space-separated scalar and the crate that emits it asserts the shape.

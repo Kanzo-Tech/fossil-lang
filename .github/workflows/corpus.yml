@@ -7,7 +7,7 @@ name: corpus
 # in this repo — so `node guards/self-test.mjs` (the fifteen guards fired against a
 # corpus broken in exactly one way, each) and `node conformance/verify.mjs` ran only
 # when somebody typed them. The half of the conformance pair that DID run,
-# `packages/graph/tests/conformance.test.ts`, reads the same `expected.json`, so an
+# `packages/corpus/tests/conformance.test.ts`, reads the same `expected.json`, so an
 # addressing change and a table change made together drifted away from the second
 # implementation in silence. That is precisely the failure two implementations of one
 # table exist to prevent.
@@ -23,7 +23,7 @@ name: corpus
 # guards, not here.
 #
 # Which is why `verify.mjs` runs here with `--without-wasm`. Its third reader is
-# `fossil_graph::address` compiled to wasm32, and reaching it means `packages/graph/pkg/`,
+# `fossil_graph::address` compiled to wasm32, and reaching it means `packages/corpus/pkg/`,
 # a Rust toolchain and `wasm-bindgen-cli` — the third thing the paragraph above refuses.
 # The flag is the explicit refusal rather than a silent skip: without it the run fails,
 # because a leg that disappears when its dependency is missing is how a conformance suite
@@ -31,20 +31,20 @@ name: corpus
 # built that output by the time it gets there, and the native run of the same table is
 # `crates/fossil-graph/tests/conformance.rs` in `ci.yml`.
 #
-# `packages/graph/**` is in the path filter because `apps/corpus/conformance/expected.json`
+# `packages/corpus/**` is in the path filter because `apps/corpus/conformance/expected.json`
 # is the contract BOTH implementations execute: an addressing change in the package has
 # to run the reader that shares nothing with it.
 on:
   pull_request:
     paths:
       - 'apps/corpus/**'
-      - 'packages/graph/**'
+      - 'packages/corpus/**'
       - '.github/workflows/corpus.yml'
   push:
     branches: [main]
     paths:
       - 'apps/corpus/**'
-      - 'packages/graph/**'
+      - 'packages/corpus/**'
       - '.github/workflows/corpus.yml'
 
 jobs:

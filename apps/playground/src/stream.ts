@@ -15,7 +15,7 @@
  *    engine and no WASM. Costs the three small YAML manifests, and nothing else.
  * 2. **Read the footer, once.** Which tiles a *rectangle* touches is not arithmetic — it comes
  *    from the per-row-group `x`/`y` statistics in the Parquet footer, and reading a footer
- *    needs a Parquet reader. `@fossil-lang/graph` deliberately does not carry one; the host
+ *    needs a Parquet reader. `@fossil-lang/corpus` deliberately does not carry one; the host
  *    does. Here the host is DuckDB-WASM, and {@link FOOTER_SQL} is the one query. The footer
  *    is the one thing a reader holds that grows with N, and it is bought once per corpus.
  * 3. **Fetch the runs.** Under `container: rowgroups` the whole payload is ONE

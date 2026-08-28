@@ -12,7 +12,7 @@
 //!         │                 │
 //!   fossil-mcp        fossil-graph-wasm
 //!    (stdio            (wasm-bindgen; and
-//!     JSON-RPC          @fossil-lang/graph
+//!     JSON-RPC          @fossil-lang/corpus
 //!     for AI            on top of it —
 //!     agents)           in-process TS,
 //!                       DuckDB-WASM)

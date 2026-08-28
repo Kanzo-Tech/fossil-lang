@@ -5,7 +5,7 @@
  * `InferredDescriptor` per source binding" is a single fossil capability. It
  * was copied across the playground hook and ad-hoc host code; this package is
  * the canonical TS home, and the host injects only the DATA PLANE (URL
- * resolution + a DuckDB executor), the same shape as `@fossil-lang/graph`'s
+ * resolution + a DuckDB executor), the same shape as `@fossil-lang/corpus`'s
  * injected `DuckExecutor`.
  *
  * Framework-agnostic + zero @fossil-lang deps (a true leaf). The React glue
@@ -209,7 +209,7 @@ export function buildDescriptor(
  * Host-injected data plane. `resolve` turns a scraped ref into a readable URL
  * string (signed cloud URL, bundled example, server proxy — the host's call);
  * `query` runs a SQL string and returns the rows (a DuckDB-WASM connection, a
- * server round-trip — the host's call). This is the `@fossil-lang/graph`
+ * server round-trip — the host's call). This is the `@fossil-lang/corpus`
  * injection pattern applied to introspection.
  */
 export interface IntrospectIO {
