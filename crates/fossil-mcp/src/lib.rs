@@ -450,8 +450,8 @@ mod tests {
             )
             .expect("describe the vertex view");
         assert_eq!(
-            columns, 5,
-            "Person's payload is dense_id, subject, x, y, cluster_id"
+            columns, 7,
+            "Person's payload is dense_id, subject, birth_year, postcode, x, y, cluster_id"
         );
 
         // And the edge view, which is the half decision 12 was written about:
