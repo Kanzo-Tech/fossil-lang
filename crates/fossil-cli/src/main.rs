@@ -77,8 +77,15 @@ enum Commands {
         #[arg(long)]
         creds_stdin: bool,
         /// Memory budget for the run, in gibibytes (`--memory-gib 4`, fractions
-        /// allowed). One number, spent by both halves of the write path — and
-        /// they honour it differently, because only one of them can. The
+        /// allowed). It is a ceiling PER STAGE, not for their sum: both halves
+        /// of the write path are held to the same number, neither is charged
+        /// what the other took, and a run may therefore peak above it. Their
+        /// numbers are not commensurable — one is a pool reservation over
+        /// tracked operators, the other arithmetic over a pass's own arrays —
+        /// so halving it for each would make one spill more and the other
+        /// refuse more for a total that still bounds nothing.
+        ///
+        /// They honour it differently, because only one of them can. The
         /// executor reserves against a pool and SPILLS to disk rather than grow
         /// past it. The layout pass holds arrays with nowhere to spill, so it
         /// REFUSES: it estimates from the staged Parquet footers before it

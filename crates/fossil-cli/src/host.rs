@@ -425,11 +425,13 @@ fn local_dest_dir(url: &str) -> Option<PathBuf> {
 /// says `undeclared` on its face and `apps/corpus`'s `declared-privacy` repeats
 /// it to whoever receives the files.
 ///
-/// `memory_bytes` is the run's declared memory budget, and it is one number for
-/// the whole run: the `DataFusion` pool the write path executes under and the
-/// `DuckDB` `memory_limit` of the layout pass that follows it. Two engines spend
-/// memory here; a budget that governed only one of them would be a budget for
-/// half the run. `None` runs both unbounded.
+/// `memory_bytes` is the run's declared memory budget, and it is one number held
+/// against each STAGE rather than against their sum: the `DataFusion` pool the
+/// write path executes under, and then the layout pass, which has no engine at
+/// all — it holds `arrow` arrays and estimates against them from the staged
+/// Parquet footers. This said `DuckDB`'s `memory_limit`, and that engine left
+/// the layout pass; the pass is `arrow-rs` and `parquet-rs` throughout.
+/// `None` runs both unbounded.
 ///
 /// # Errors
 /// Returns a compile, read, or materialisation error.
