@@ -45,16 +45,14 @@ fossil-df           = { path = "../fossil-df" }
 # bound. `--policy` is a path on the command line and a `PrivacyPolicy` by the
 # time `host::run` is called, which is the same shape every other host job has.
 fossil-policy       = { path = "../fossil-policy" }
-# The CST, and it is a NORMAL dependency rather than the dev one it was: the
-# policy binding (`policy := "people.jsonld"`, grammar.bnf, PolicyDef) is the one
-# thing a program names that the compiler never opens, so it has no def-map entry
-# to read and `host::run` walks the tree for it. `tests/census` still uses this
-# for the `PROPERTY`-node count it always did.
+# The CST, and a NORMAL dependency: the policy binding (`policy :=
+# "people.jsonld"`, grammar.bnf, PolicyDef) is the one thing a program names that
+# the compiler never opens, so it has no def-map entry to read and `host::run`
+# walks the tree for it. `tests/census` counts `PROPERTY` nodes with it too.
 fossil-syntax       = { path = "../fossil-syntax" }
 # The layout post-pass — `enrich_layout`, called by `enrich_written_layout`
-# after the write. It links no DuckDB and it is not the «native runtime + secrets
-# + cloud-path resolver» this line used to call it: `materialize.rs` took the
-# resolver with it, and `install_secret` went with the `DuckDB` connection.
+# after the write. It links no DuckDB: it holds no connection, no secret and no
+# path resolver.
 fossil-layout       = { path = "../fossil-layout" }
 # `manifest::DEFAULT_CHUNK_SIZE`, so the files on disk and the manifest cannot
 # disagree about a chunk — and `Privacy`, because the run summary says what the

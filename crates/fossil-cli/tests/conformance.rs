@@ -763,9 +763,10 @@ fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     );
 
     // What none of 7–11 can prove: that the tile *size* is the right one. That is
-    // a measurement over an HTTP origin, it lives in `kanzo-ui/BENCHMARKS.md`, and
-    // it is the one thing here a passing test would happily agree with while the
-    // reader paid eighteen times the ideal payload — which is what it did.
+    // a measurement over an HTTP origin and it lives in
+    // `/docs/format/conventions/addressing`, whose table is the one thing here a
+    // passing test would happily agree with while the reader paid 18.3× the ideal
+    // payload — which is what it did.
     //
     // And check 9 is weaker than it reads, measured by inverting the emitter to
     // cut on `dst_dense`: it caught the mutation with **22 violations of 10,000**,

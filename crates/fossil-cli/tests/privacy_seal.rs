@@ -29,10 +29,8 @@ const PEOPLE: u32 = 600;
 /// fall into 30 classes of 20, which is comfortably over a `k` of 5 and
 /// comfortably under one of 25.
 ///
-/// The first draft of this comment said 60 and 10, which is what multiplying the
-/// two counts gives and is not what correlated keys do. The test caught it,
-/// which is the argument for asserting the reached number rather than only the
-/// pass.
+/// Multiplying the two counts gives 60 and is not what correlated keys do,
+/// which is the argument for asserting the reached `k` rather than only the pass.
 const PROGRAM: &str = "\
 type { Person } := io.shex(\"person.shex\")
 

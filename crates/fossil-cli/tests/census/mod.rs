@@ -1,43 +1,17 @@
 //! What the compiler UNDERSTOOD from a program — the reading, not the verdict.
 //!
 //! [`fossil_cli::check`] answers «is anything wrong», and a program can be
-//! entirely right about nothing. The hole this module was built to close: a
-//! property whose right-hand side the lowering cannot read is dropped in silence.
-//! [`fossil_hir::body::body`] walks the `PROPERTY` children of a mapping body
-//! and keeps the ones `lower_property` returns `Some` for; the `None` arm is a
-//! bare `if let`, with no `else`, so a mapping that wrote five properties and
-//! lowered two produces a graph missing three columns.
-//!
-//! # That premise is no longer true, and it is why this is a test module
-//!
-//! **Every `None` this module was built to catch now carries a diagnostic.**
-//! `lower_property`'s four refusal paths each `diagnose` before returning, and
-//! `lower_expr`'s catch-all — the one that actually caused it, measured on
-//! 2026-08-06 across three programs, two of them silently lossy — was turned
-//! from `_ => None` into a diagnostic then. `body.rs` is still a bare `if let`,
-//! but the `None` arriving there has already been announced. So `check` DOES
-//! now say what this module was written because it could not say, and since the
-//! drain moved to [`fossil_mir::program_diagnostics`] it says it in the editor
-//! and the browser too.
+//! entirely right about nothing. It was built for a hole `check` could not see —
+//! a property whose right-hand side the lowering cannot read, dropped in silence
+//! — and that hole is closed: every refusal path in `lower_property` and
+//! `lower_expr` diagnoses before returning `None`, and the drain in
+//! [`fossil_mir::program_diagnostics`] carries it to the editor and the browser.
 //!
 //! What is left is not a capability, it is a **cross-check**: proof, per
 //! program, that written == lowered, which would catch a FUTURE silent arm the
-//! way nothing caught the last one. That is conformance-harness machinery, and
-//! its only consumer is [`super`].
-//!
-//! **This is one of the two destinations its own docblock named**, and it is
-//! the one that was never in doubt: [`ProgramCensus::render`] is the harness's
-//! committed-artefact format and could live nowhere else. Until 2026-08-26 it
-//! was `crates/fossil-engine/src/census.rs` — 425 lines and 25 `pub` items in a
-//! production crate, behind a native tripwire, reachable from nothing a user
-//! can run. The move took `fossil-syntax` down to a dev-dependency with it: the
-//! engine's `Cargo.toml` said that dependency was «for `census`», and it was
-//! the whole of it.
-//!
-//! The counting half — the `PROPERTY` count against `HirBody::properties` — is
-//! a fact about `fossil-hir`'s own CST↔HIR relation and could still go there.
-//! That is a different change, it is not blocked by this one, and nothing is
-//! waiting on it: the invariant has a caller here either way.
+//! way nothing caught the last one. That is conformance-harness machinery, its
+//! only consumer is [`super`], and it is why this is a test module rather than
+//! a crate.
 //!
 //! So the census is two counts and their difference, per mapping: the
 //! properties the AUTHOR WROTE (`PROPERTY` nodes in the CST) against the

@@ -34,20 +34,11 @@ fn repo_root() -> PathBuf {
 
 /// The `fossil` binary this test drives — cargo's own path for it.
 ///
-/// **It used to shell out to `cargo build` and then hard-code
-/// `<repo>/target/debug/fossil`**, which is a test that can pass against a
-/// binary it did not build: with `CARGO_TARGET_DIR` set — which is how this
-/// repository's own instructions say to drive the suite — the build lands
-/// elsewhere and that path holds whatever was left there last. Measured on
-/// 2026-08-13: the file at the hard-coded path was **29 hours old**, older than
-/// the parser rewrite, the provider registry, `@rename` and the edge
-/// constructor. Everything this file reported that day was about a compiler
-/// nobody had edited.
-///
-/// `CARGO_BIN_EXE_<name>` is cargo's answer: it is set for an integration test
-/// and points at the binary of THIS build, which cargo has already built before
-/// the test runs. No path to guess, and no `cargo build` spawned from inside a
-/// test — the same fix `crates/fossil-lsp/tests/` took.
+/// Never a hard-coded `target/debug/fossil`: with `CARGO_TARGET_DIR` set the
+/// build lands elsewhere, so that path holds whatever was left there last and
+/// the test passes against a binary it did not build. `CARGO_BIN_EXE_<name>`
+/// is cargo's answer — the binary of THIS build, already built before the
+/// test runs, with no path to guess and no `cargo build` from inside a test.
 fn fossil_binary() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
     BIN.get_or_init(|| PathBuf::from(env!("CARGO_BIN_EXE_fossil")))
