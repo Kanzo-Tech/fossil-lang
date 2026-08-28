@@ -136,9 +136,8 @@ mod tests {
 
     /// A parsed secret renders the `CREATE SECRET` the resolver installs.
     ///
-    /// It used to be asserted over the `dest` secret, which nothing installs;
-    /// a connection's is the one the run actually reaches, via
-    /// `apply_source_creds`.
+    /// A connection's, not a `dest`'s — nothing installs one of those. This is
+    /// the secret the run actually reaches, via `apply_source_creds`.
     #[test]
     fn a_connection_secret_round_trips_into_create_secret() {
         let json = r#"{ "connections": { "sales": { "url": "s3://b",

@@ -196,7 +196,7 @@ fn freshness_token(resolved: &str) -> String {
 /// **This is the unit of work a host actually has**, and the reason it is here
 /// rather than repeated at each call site: `pre_introspect_and_register` takes
 /// text that has already been read and an anchor that has already been built,
-/// and every one of the eleven callers wanted the same three lines in front of
+/// and every caller wanted the same three lines in front of
 /// it. The `System` is the caller's because only the caller knows which host it
 /// is — `fossil_cli::host_system(path)` natively, and the browser does not
 /// come through here at all.
