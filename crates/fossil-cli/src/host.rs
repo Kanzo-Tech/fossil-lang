@@ -370,7 +370,7 @@ fn read_output_shape(
         .ok_or_else(|| miette::miette!("`{}` reads no types", row.constructor()))?;
 
     // The one resolution rule, and the same one the CHECKER went through to
-    // read this document (`fossil_hir::def_map::resolve_relative`). A run that
+    // read this document (`fossil_hir::documents::registry_key`). A run that
     // anchored differently would decode a different file from the one that
     // type-checked, which is the same class of bug as decoding it with a
     // different parser.

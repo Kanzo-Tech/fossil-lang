@@ -1058,17 +1058,12 @@ fn resolve_member_shape_iris(
         .collect()
 }
 
-// `shape_local_name` lived here and cut a shape IRI at the last `#` or `/` so a
-// member name could be matched against it. Positional binding retired it, and
-// the bug it carried with it: two shapes from different vocabularies sharing a
-// local name collapsed into one key of the lookup map, and one won in silence.
-
-// `resolve_relative` lived here — "resolve a path this program wrote against
-// the directory this program lives in" — and had one caller, `crate::shapes`,
-// which immediately rendered the `PathBuf` back to the string `file_at` is
-// keyed by. It is `crate::documents::registry_key` now, beside the loop the
-// HOSTS call to register the same documents: the key and the lookup are one
-// function, which is the only arrangement in which they cannot disagree.
+// Members bind POSITIONALLY, never by local name: two shapes from different
+// vocabularies can share one, and matching on it collapsed them into a single
+// key with no diagnostic. Path resolution is `crate::documents::registry_key`,
+// beside the loop the HOSTS call to register the same documents — the key and
+// the lookup are one function, which is the only arrangement in which they
+// cannot disagree.
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {

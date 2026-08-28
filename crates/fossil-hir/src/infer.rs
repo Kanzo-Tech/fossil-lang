@@ -1040,11 +1040,6 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
     Ty::new(db, TyKind::Record(Record::new(db, fields)))
 }
 
-// `resolve_relative` lived here as a byte-identical twin of `def_map`'s, with a
-// comment conceding the duplication to avoid a cross-module `pub`. It is now
-// `crate::def_map::resolve_relative`, imported above — a third reader made the
-// trade stop paying.
-
 /// Build a `Record` [`Ty`] from a host-provided [`InferredDescriptor`].
 ///
 /// There is no unknown-datatype branch here any more: a column carries a

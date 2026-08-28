@@ -19,23 +19,11 @@ use serde_json::{Map, Value};
 /// owns the connection (and registers the `GraphAr` vertex/edge views on it); this
 /// borrows it for the lifetime of a dispatch.
 ///
-/// # It was `DuckRuntime`, and the name was a fossil of where it used to live
-///
-/// Two things were wrong with it, and the second is the one that matters.
-///
-/// It is not a **runtime**. It was named for the crate it lived in, which was
-/// called `fossil-runtime` — and that crate is `fossil-layout` now, because it
-/// was not a runtime either: it is the WRITE path of the language, and this
-/// reads a corpus. The comment at `fossil_layout`'s module root records the
-/// move: *«`pub mod graph_exec;` lived here»*. The name pointed at a home it no
-/// longer had, and then at a crate that no longer exists under that name.
-///
-/// And **`Duck` distinguished nothing.** Every implementor of [`DuckExecutor`]
-/// is a `DuckDB` one — that is what the trait says, and `DuckDB` there is
-/// load-bearing because the verb SQL is `DuckDB`'s dialect. What separates the
-/// implementors is what BACKS them, which is the rule the other one already
-/// follows: `fossil_graph_wasm::JsExecutor` is named for the `js_sys::Function`
-/// it wraps. This wraps a [`Connection`].
+/// It is named for what BACKS it and not for `Duck`, which distinguishes
+/// nothing: every implementor of [`DuckExecutor`] is a `DuckDB` one — that is
+/// what the trait says, and `DuckDB` there is load-bearing because the verb SQL
+/// is `DuckDB`'s dialect. `fossil_graph_wasm::JsExecutor` is named for the
+/// `js_sys::Function` it wraps; this wraps a [`Connection`].
 #[derive(Debug)]
 pub struct ConnectionExecutor<'c> {
     conn: &'c Connection,

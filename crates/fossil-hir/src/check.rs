@@ -1125,20 +1125,12 @@ pub struct Declared {
     pub shape: SmolStr,
 }
 
-// `expr_contains_free_field_refs`, `rewrite_field_refs_to_row_dot` and
-// `render_leaf_expr_text` lived here, and all three existed for ONE caller:
-// the implicit-closure fast-path in `Checker::check`. They are named as dead in
-// `grammar.bnf`'s own tombstone for `FieldRef` — «existed ONLY because a
-// predicate did not name its row» — and the walk they performed answers a
-// question the language stopped asking: which sub-expressions read the
-// anonymous current row. Every reference is qualified now (`User.name`), so a
-// closure has nothing to capture implicitly.
-
-// `op_text` and `un_op_text` were here, spelling an operator for a diagnostic.
-// They are a fact about the operator and not about the checker, and the census
-// needs the same spelling for the same reason — so they live beside the enums,
-// in `crate::display`, and there is one table rather than two that agree until
-// one of them moves.
+// There is no implicit-closure machinery here: every reference is qualified
+// (`User.name`), so a closure has nothing to capture. `grammar.bnf`'s `FieldRef`
+// tombstone is where that is normative.
+//
+// Spelling an operator for a diagnostic is `crate::display`'s, beside the enums,
+// because the census needs the same table and two tables agree until one moves.
 
 /// Recursive subtyping — four rules: S-Refl, S-IntFlt, S-TmplIri, S-SeqCov,
 /// plus an error-taint escape so one mismatch does not cascade.
