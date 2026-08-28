@@ -80,6 +80,13 @@ on its own side of the wire.
 > implementation guarantees one *answer*, not one *wire* — so a capability offered to two hosts owes
 > a test that crosses each host's wire rather than each host's function.
 
+The browser turned out to need **two** wires rather than one, and the rule held for the second
+exactly as written. `postMessage` is a transport with a client on the other end of it, which a page
+that already calls the checker in-process has no reason to build in order to ask what type is under a
+cursor — so hover, completion and definition are also plain method calls on the wasm workspace. One
+implementation still, two projections of it, and a guard that sweeps every cursor of a program
+comparing what the two wires say rather than comparing either against a written-down answer.
+
 Where an implementation genuinely cannot be shared,
 `packages/introspect/tests/rust-parity.test.ts` is the shape of the guard: it derives its tables from
 the Rust rather than restating any value, so a rewritten crate fails it instead of quietly matching
