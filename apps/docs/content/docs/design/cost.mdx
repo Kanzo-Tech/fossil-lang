@@ -140,10 +140,15 @@ would hold 40 MB against 0.41 GiB per million. Two corrections, both measured:
   k]`, one hash table per community and `k` in the millions, measured at +3.41 GiB of the +3.82 the
   step billed. That is gone and the step is 0.19 GiB per million.
 
-What is left of the level-zero argument is real and much smaller. The graph *is* still fully
+What is left of the level-zero argument is a measurement that closes it. The graph *is* still fully
 resident while Louvain runs — `read CSR + CSC` is +0.78 GiB at ten million and Louvain holds it for
-all 136 s — so a pass that streamed the sorted CSR from disk instead would still save about 0.8 GiB.
-That is a 20% decision rather than the 50% one this paragraph used to describe, and it is unmeasured.
+all 136 s — but the pass's high-water **while Louvain runs** is 3.55 GiB and the pass's peak is 4.72,
+reached in the last phase, after all of Louvain's has been handed back. A streaming level zero takes
+0.78 off a number that is already 1.17 below the one that binds. **It is worth zero on the peak**,
+and a Parquet scan per sweep to get it.
+
+That is the honest end of this thread: the ceiling is now the adjacency remap, which holds a whole
+orientation as Arrow at once, and it is the term to attack next.
 
 <Callout type="warn" title="One row of the streaming page does not reproduce">
 That page bills `community_hierarchy` at **+0.08 GiB** at ten million after the CSR landed, and

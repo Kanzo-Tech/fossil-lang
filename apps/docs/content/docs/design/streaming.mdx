@@ -213,9 +213,18 @@ maximum rather than a reading of it, and it is the direction the calibration wan
 
 `community_hierarchy` still bills +1.92 GiB at ten million, and the level-zero graph is still fully
 resident — `read CSR + CSC` is +0.78 GiB and Louvain holds it for all 136 s. **A level-zero pass that
-streamed the CSR from disk instead of holding it is still open**, and it is now worth about 0.8 GiB
-rather than the 4 GiB the argument for it was written against. That is a different, smaller decision
-than it was, and it is unmeasured.
+streamed the CSR from disk instead of holding it was the named next step, and it is now worth
+nothing**, which is a result rather than a deferral.
+
+Sampled through the hierarchy, the pass's high-water while Louvain runs is **3.55 GiB**, and the
+pass's peak is **4.72**, reached in the last phase after every byte of Louvain's has been given back.
+Taking the CSR's 0.78 out of the Louvain period lowers a number that is already **1.17 GiB below**
+the one the budget is fitted to. It changes `estimated_peak_bytes` by zero, it changes what
+`--memory-gib` admits by zero, and it costs a Parquet scan per sweep for it.
+
+It comes back the day Louvain's high-water is the pass's high-water — a corpus whose level-zero
+contraction survives at a much higher ratio than the 79% measured here, or a remap that stops holding
+an orientation as Arrow. Both are measurable before anything is written.
 </Callout>
 
 <Callout type="warn" title="The composition is not closed, and this is the honest edge of the claim">
