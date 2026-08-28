@@ -56,7 +56,7 @@ pub enum Token {
     // below. Declared BEFORE the `Ident` regex so logos's tiebreaker selects
     // the dedicated keyword on equal-length matches.
     // ───────────────────────────────────────────────────────────────────
-    // grammar.bnf's RESERVED KEYWORDS section is the list, and
+    // The list is `grammar.bnf, § RESERVED KEYWORDS`, and
     // `xtask/tests/grammar_tombstones.rs` holds it against these attributes in
     // both directions. `prefix` is not here but IS still recognised by shape —
     // `prefix IDENT :` — in `items::parse_program`, so the diagnostic can name
